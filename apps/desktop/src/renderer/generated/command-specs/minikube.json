@@ -1,0 +1,1229 @@
+{
+  "name": "minikube",
+  "description": "Minikube provisions and manages local Kubernetes clusters optimized for development workflows",
+  "subcommands": [
+    {
+      "name": "start",
+      "description": "Starts a local Kubernetes cluster",
+      "options": [
+        {
+          "names": [
+            "--addons"
+          ],
+          "description": "Enable addons. see `minikube addons list` for a list of valid addon names"
+        },
+        {
+          "names": [
+            "--apiserver-ips"
+          ],
+          "description": "A set of apiserver IP Addresses which are used in the generated certificate for kubernetes"
+        },
+        {
+          "names": [
+            "--apiserver-name"
+          ],
+          "description": "The authoritative apiserver hostname for apiserver certificates and connectivity"
+        },
+        {
+          "names": [
+            "--apiserver-names"
+          ],
+          "description": "A set of apiserver names which are used in the generated certificate for kubernetes"
+        },
+        {
+          "names": [
+            "--apiserver-port"
+          ],
+          "description": "The apiserver listening port"
+        },
+        {
+          "names": [
+            "--auto-update-drivers"
+          ],
+          "description": "If set, automatically updates drivers to the latest version",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--base-image"
+          ],
+          "description": "The base image to use for docker/podman drivers. Intended for local development"
+        },
+        {
+          "names": [
+            "--cache-images"
+          ],
+          "description": "If true, cache docker images for the current bootstrapper and load them into the machine"
+        },
+        {
+          "names": [
+            "--cert-expiration"
+          ],
+          "description": "Duration until minikube certificate expiration"
+        },
+        {
+          "names": [
+            "--cni"
+          ],
+          "description": "CNI plug-in to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cni-plugin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--container-runtime"
+          ],
+          "description": "The container runtime to be used",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "container-runtime"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cpus"
+          ],
+          "description": "Number of CPUs allocated to Kubernetes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cpu number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cri-socket"
+          ],
+          "description": "The cri socket path to be used"
+        },
+        {
+          "names": [
+            "--delete-on-failure"
+          ],
+          "description": "If set, delete the current cluster if start fails and try again",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--disable-driver-mounts"
+          ],
+          "description": "Disables the filesystem mounts provided by the hypervisors"
+        },
+        {
+          "names": [
+            "--disk-size"
+          ],
+          "description": "Disk size allocated to the minikube VM"
+        },
+        {
+          "names": [
+            "--dns-domain"
+          ],
+          "description": "The cluster dns domain name used in the Kubernetes cluster"
+        },
+        {
+          "names": [
+            "--dns-proxy"
+          ],
+          "description": "Enable proxy for NAT DNS requests"
+        },
+        {
+          "names": [
+            "--docker-env"
+          ],
+          "description": "Environment variables to pass to the Docker daemon. (format: key=value)"
+        },
+        {
+          "names": [
+            "--docker-opt"
+          ],
+          "description": "Specify arbitrary flags to pass to the Docker daemon. (format: key=value)"
+        },
+        {
+          "names": [
+            "--download-only"
+          ],
+          "description": "If true, only download and cache files for later use - don't install or start anything"
+        },
+        {
+          "names": [
+            "--driver"
+          ],
+          "description": "Choose driver",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "driver"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Dry-run mode. Validates configuration, but does not mutate system state"
+        },
+        {
+          "names": [
+            "--embed-certs"
+          ],
+          "description": "If true, will embed the certs in kubeconfig",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--extra-config"
+          ],
+          "description": "A set of key=value pairs that describe configuration that may be passed to different components"
+        },
+        {
+          "names": [
+            "--extra-disks"
+          ],
+          "description": "Number of extra disks created and attached to the minikube VM"
+        },
+        {
+          "names": [
+            "--feature-gates"
+          ],
+          "description": "A set of key=value pairs that describe feature gates for alpha/experimental features"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force minikube to perform possibly dangerous operations"
+        },
+        {
+          "names": [
+            "--force-systemd"
+          ],
+          "description": "If set, force the container runtime to use systemd as cgroup manager",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--host-dns-resolver"
+          ],
+          "description": "Enable host resolver for NAT DNS requests"
+        },
+        {
+          "names": [
+            "--host-only-cidr"
+          ],
+          "description": "The CIDR to be used for the minikube VM"
+        },
+        {
+          "names": [
+            "--host-only-nic-type"
+          ],
+          "description": "NIC Type used for host only network",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nic type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--hyperkit-vpnkit-sock"
+          ],
+          "description": "Location of the VPNKit socket used for networking"
+        },
+        {
+          "names": [
+            "--hyperkit-vsock-ports"
+          ],
+          "description": "List of guest VSock ports that should be exposed as sockets on the host"
+        },
+        {
+          "names": [
+            "--hyperv-external-adapter"
+          ],
+          "description": "External Adapter on which external switch will be created if no external switch is found"
+        },
+        {
+          "names": [
+            "--hyperv-use-external-switch"
+          ],
+          "description": "Whether to use external switch over Default Switch if virtual switch not explicitly specified"
+        },
+        {
+          "names": [
+            "--hyperv-virtual-switch"
+          ],
+          "description": "The hyperv virtual switch name. Defaults to first found"
+        },
+        {
+          "names": [
+            "--image-mirror-country"
+          ],
+          "description": "Country code of the image mirror to be used"
+        },
+        {
+          "names": [
+            "--image-repository"
+          ],
+          "description": "Alternative image repository to pull docker images from"
+        },
+        {
+          "names": [
+            "--insecure-registry"
+          ],
+          "description": "Insecure Docker registries to pass to the Docker daemon"
+        },
+        {
+          "names": [
+            "--install-addons"
+          ],
+          "description": "If set, install addons. Defaults to true",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--interactive"
+          ],
+          "description": "Allow user prompts for more information"
+        },
+        {
+          "names": [
+            "--iso-url"
+          ],
+          "description": "Locations to fetch the minikube ISO from"
+        },
+        {
+          "names": [
+            "--keep-context"
+          ],
+          "description": "This will keep the existing kubectl context and will create a minikube context"
+        },
+        {
+          "names": [
+            "--kubernetes-version"
+          ],
+          "description": "The Kubernetes version that the minikube VM will use"
+        },
+        {
+          "names": [
+            "--kvm-gpu"
+          ],
+          "description": "Enable experimental NVIDIA GPU support in minikube"
+        },
+        {
+          "names": [
+            "--kvm-hidden"
+          ],
+          "description": "Hide the hypervisor signature from the guest in minikube"
+        },
+        {
+          "names": [
+            "--kvm-network"
+          ],
+          "description": "The KVM default network name"
+        },
+        {
+          "names": [
+            "--kvm-numa-count"
+          ],
+          "description": "Simulate numa node count in minikube, supported numa node count range is 1-8",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "numa count"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--kvm-qemu-uri"
+          ],
+          "description": "The KVM QEMU connection URI"
+        },
+        {
+          "names": [
+            "--listen-address"
+          ],
+          "description": "IP Address to use to expose ports"
+        },
+        {
+          "names": [
+            "--memory"
+          ],
+          "description": "Amount of RAM to allocate to Kubernetes"
+        },
+        {
+          "names": [
+            "--mount"
+          ],
+          "description": "This will start the mount daemon and automatically mount files into minikube"
+        },
+        {
+          "names": [
+            "--mount-string"
+          ],
+          "description": "The argument to pass the minikube mount command on start"
+        },
+        {
+          "names": [
+            "--namespace"
+          ],
+          "description": "The named space to activate after start"
+        },
+        {
+          "names": [
+            "--nat-nic-type"
+          ],
+          "description": "NIC Type used for nat network"
+        },
+        {
+          "names": [
+            "--native-ssh"
+          ],
+          "description": "Use native Golang SSH client"
+        },
+        {
+          "names": [
+            "--network"
+          ],
+          "description": "Network to run minikube with"
+        },
+        {
+          "names": [
+            "--network-plugin"
+          ],
+          "description": "Kubelet network plug-in to use"
+        },
+        {
+          "names": [
+            "--nfs-share"
+          ],
+          "description": "Local folders to share with Guest via NFS mounts"
+        },
+        {
+          "names": [
+            "--nfs-shares-root"
+          ],
+          "description": "Where to root the NFS Shares"
+        },
+        {
+          "names": [
+            "--no-kubernetes"
+          ],
+          "description": "If set, minikube VM/container will start without starting or configuring Kubernetes"
+        },
+        {
+          "names": [
+            "--no-vtx-check"
+          ],
+          "description": "Disable checking for the availability of hardware virtualization before the vm is started"
+        },
+        {
+          "names": [
+            "--nodes",
+            "-n"
+          ],
+          "description": "The number of nodes to spin up"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ports"
+          ],
+          "description": "List of ports that should be exposed"
+        },
+        {
+          "names": [
+            "--preload"
+          ],
+          "description": "If set, download tarball of preloaded images if available to improve start time",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--registry-mirror"
+          ],
+          "description": "Registry mirrors to pass to the Docker daemon"
+        },
+        {
+          "names": [
+            "--service-cluster-ip-range"
+          ],
+          "description": "The CIDR to be used for service cluster IPs"
+        },
+        {
+          "names": [
+            "--ssh-ip-address"
+          ],
+          "description": "IP address"
+        },
+        {
+          "names": [
+            "--ssh-key"
+          ],
+          "description": "SSH key"
+        },
+        {
+          "names": [
+            "--ssh-port"
+          ],
+          "description": "SSH port"
+        },
+        {
+          "names": [
+            "--ssh-user"
+          ],
+          "description": "SSH user"
+        },
+        {
+          "names": [
+            "--trace"
+          ],
+          "description": "Send trace events",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trace"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--uuid"
+          ],
+          "description": "Provide VM UUID to restore MAC address"
+        },
+        {
+          "names": [
+            "--vm"
+          ],
+          "description": "Filter to use only VM Drivers"
+        },
+        {
+          "names": [
+            "--wait"
+          ],
+          "description": "Comma separated list of Kubernetes components to verify and wait for after starting a cluster"
+        },
+        {
+          "names": [
+            "--wait-timeout"
+          ],
+          "description": "Max time to wait per Kubernetes or host to be healthy"
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Gets the status of a local Kubernetes cluster",
+      "options": [
+        {
+          "names": [
+            "--format",
+            "-f"
+          ],
+          "description": "Go template format string for the status output"
+        },
+        {
+          "names": [
+            "--layout",
+            "-l"
+          ],
+          "description": "Output layout"
+        },
+        {
+          "names": [
+            "--node",
+            "-n"
+          ],
+          "description": "The node to check status for"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--watch",
+            "-w"
+          ],
+          "description": "Continuously listing/getting the status with optional interval duration"
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "description": "Stops a running local Kubernetes cluster",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Set flag to stop all profiles (clusters)"
+        },
+        {
+          "names": [
+            "--cancel-scheduled"
+          ],
+          "description": "Output layout"
+        },
+        {
+          "names": [
+            "--keep-context-active"
+          ],
+          "description": "The node to check status for"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--schedule"
+          ],
+          "description": "Set flag to stop cluster after a set amount of time"
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Deletes a local Kubernetes cluster",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Set flag to delete all profiles"
+        },
+        {
+          "names": [
+            "--purge"
+          ],
+          "description": "Set this flag to delete the '.minikube' folder from your user directory"
+        }
+      ]
+    },
+    {
+      "name": "unpause",
+      "description": "Unpause Kubernetes",
+      "options": [
+        {
+          "names": [
+            "--all-namespaces",
+            "-A"
+          ],
+          "description": "If set, unpause all namespaces"
+        },
+        {
+          "names": [
+            "--namespaces",
+            "-n"
+          ],
+          "description": "Namespaces to unpause"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "docker-env",
+      "description": "Configure environment to use minikube's Docker daemon",
+      "options": [
+        {
+          "names": [
+            "--no-proxy",
+            "-A"
+          ],
+          "description": "If set, unpause all namespaces"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--shell"
+          ],
+          "description": "Force environment to be configured for a specified shell"
+        },
+        {
+          "names": [
+            "--ssh-host"
+          ],
+          "description": "Use SSH connection instead of HTTPS (port 2376)"
+        },
+        {
+          "names": [
+            "--unset",
+            "-u"
+          ],
+          "description": "Unset variables instead of setting them"
+        }
+      ]
+    },
+    {
+      "name": "podman-env",
+      "description": "Configure environment to use minikube's Podman service",
+      "options": [
+        {
+          "names": [
+            "--shell"
+          ],
+          "description": "Force environment to be configured for a specified shell"
+        },
+        {
+          "names": [
+            "--unset",
+            "-u"
+          ],
+          "description": "Unset variables instead of setting them"
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "description": "Add, delete, or push a local image into minikube",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add an image to local cache"
+        },
+        {
+          "name": "delete",
+          "description": "Delete an image from the local cache"
+        },
+        {
+          "name": "list",
+          "description": "List all available images from the local cache"
+        },
+        {
+          "name": "reload",
+          "description": "Reload cached images"
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "description": "Manage images",
+      "subcommands": [
+        {
+          "name": "build",
+          "description": "Build a container image in minikube"
+        },
+        {
+          "name": "load",
+          "description": "Load a image into minikube"
+        },
+        {
+          "name": "ls",
+          "description": "List images"
+        },
+        {
+          "name": "pull",
+          "description": "Pull images"
+        },
+        {
+          "name": "push",
+          "description": "Push images"
+        },
+        {
+          "name": "rm",
+          "description": "Remove one or more images"
+        },
+        {
+          "name": "save",
+          "description": "Save a image from minikube"
+        },
+        {
+          "name": "tag",
+          "description": "Tag images"
+        }
+      ]
+    },
+    {
+      "name": "addons",
+      "description": "Enable or disable a minikube addon",
+      "subcommands": [
+        {
+          "name": "configure",
+          "description": "Configures the addon w/ADDON_NAME within minikube"
+        },
+        {
+          "name": "disable",
+          "description": "Disables the addon w/ADDON_NAME within minikube"
+        },
+        {
+          "name": "enable",
+          "description": "Enables the addon w/ADDON_NAME within minikube"
+        },
+        {
+          "name": "images",
+          "description": "List image names the addon w/ADDON_NAME used"
+        },
+        {
+          "name": "list",
+          "description": "Lists all available minikube addons as well as their current statuses"
+        },
+        {
+          "name": "open",
+          "description": "Opens the addon w/ADDON_NAME within minikube"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Modify persistent configuration values",
+      "subcommands": [
+        {
+          "name": "defaults",
+          "description": "Lists all valid default values for PROPERTY_NAME"
+        },
+        {
+          "name": "get",
+          "description": "Gets the value of PROPERTY_NAME from the minikube config file"
+        },
+        {
+          "name": "set",
+          "description": "Sets an individual value in a minikube config file"
+        },
+        {
+          "name": "unset",
+          "description": "Unsets an individual value in a minikube config file"
+        },
+        {
+          "name": "view",
+          "description": "Display values currently set in the minikube config file"
+        }
+      ]
+    },
+    {
+      "name": "profile",
+      "description": "Get or list the current profiles (clusters)",
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "Lists all minikube profiles"
+        }
+      ]
+    },
+    {
+      "name": "update-context",
+      "description": "Update kubeconfig in case of an IP or port change"
+    },
+    {
+      "name": "service",
+      "description": "Returns a URL to connect to a service",
+      "options": [
+        {
+          "names": [
+            "--https"
+          ],
+          "description": "Open the service URL with https instead of http"
+        },
+        {
+          "names": [
+            "--interval"
+          ],
+          "description": "The initial time interval for each check that wait performs in seconds"
+        },
+        {
+          "names": [
+            "--namespace"
+          ],
+          "description": "The service namespace"
+        },
+        {
+          "names": [
+            "--url"
+          ],
+          "description": "Display the Kubernetes service URL in the CLI instead of opening it in the default browser"
+        },
+        {
+          "names": [
+            "--wait"
+          ],
+          "description": "Amount of time to wait for a service in seconds"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "Lists the URLs for the services in your local cluster",
+          "options": [
+            {
+              "names": [
+                "--namespace",
+                "-n"
+              ],
+              "description": "The services namespace"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tunnel",
+      "description": "Connect to LoadBalancer services",
+      "options": [
+        {
+          "names": [
+            "--cleanup",
+            "-c"
+          ],
+          "description": "Call with cleanup=true to remove old tunnels"
+        }
+      ]
+    },
+    {
+      "name": "mount",
+      "description": "Mounts the specified directory into minikube",
+      "options": [
+        {
+          "names": [
+            "--9p-version"
+          ],
+          "description": "Specify the 9p version that the mount should use"
+        },
+        {
+          "names": [
+            "--gid"
+          ],
+          "description": "Default group id used for the mount"
+        },
+        {
+          "names": [
+            "--ip"
+          ],
+          "description": "Specify the ip that the mount should be setup on"
+        },
+        {
+          "names": [
+            "--kill"
+          ],
+          "description": "Kill the mount process spawned by minikube start"
+        },
+        {
+          "names": [
+            "--mode"
+          ],
+          "description": "File permissions used for the mount"
+        },
+        {
+          "names": [
+            "--msize"
+          ],
+          "description": "The number of bytes to use for 9p packet payload"
+        },
+        {
+          "names": [
+            "--options"
+          ],
+          "description": "Additional mount options, such as cache=fscache"
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "Specify the port that the mount should be setup on"
+        },
+        {
+          "names": [
+            "--type"
+          ],
+          "description": "Specify the mount filesystem type (supported types: 9p)"
+        },
+        {
+          "names": [
+            "--uid"
+          ],
+          "description": "Default user id used for the mount"
+        }
+      ]
+    },
+    {
+      "name": "ssh",
+      "description": "Log into the minikube environment (for debugging)",
+      "options": [
+        {
+          "names": [
+            "--native-ssh"
+          ],
+          "description": "Use native Golang SSH client"
+        },
+        {
+          "names": [
+            "--node",
+            "-n"
+          ],
+          "description": "The node to ssh into"
+        }
+      ]
+    },
+    {
+      "name": "kubectl",
+      "description": "Run a kubectl binary matching the cluster version",
+      "options": [
+        {
+          "names": [
+            "--ssh"
+          ],
+          "description": "Use SSH for running kubernetes client on the node"
+        }
+      ]
+    },
+    {
+      "name": "node",
+      "description": "Add, remove, or list additional nodes",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Adds a node to the given cluster"
+        },
+        {
+          "name": "delete",
+          "description": "Deletes a node from a cluster"
+        },
+        {
+          "name": "list",
+          "description": "List nodes"
+        },
+        {
+          "name": "start",
+          "description": "Starts a node"
+        },
+        {
+          "name": "stop",
+          "description": "Stops a node in a cluster"
+        }
+      ]
+    },
+    {
+      "name": "cp",
+      "description": "Copy the specified file into minikube",
+      "args": [
+        {
+          "name": "[source] [target]"
+        }
+      ]
+    },
+    {
+      "name": "ssh-key",
+      "description": "Retrieve the ssh identity key path of the specified node",
+      "options": [
+        {
+          "names": [
+            "--node",
+            "-n"
+          ],
+          "description": "The node to get ssh-key path"
+        }
+      ]
+    },
+    {
+      "name": "ssh-host",
+      "description": "Retrieve the ssh host key of the specified node",
+      "options": [
+        {
+          "names": [
+            "--append-known"
+          ],
+          "description": "Add host key to SSH known_hosts file"
+        },
+        {
+          "names": [
+            "--node",
+            "-n"
+          ],
+          "description": "The node to ssh into"
+        }
+      ]
+    },
+    {
+      "name": "ip",
+      "description": "Retrieves the IP address of the specified node",
+      "options": [
+        {
+          "names": [
+            "--node",
+            "-n"
+          ],
+          "description": "The node to get IP"
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Returns logs to debug a local Kubernetes cluster",
+      "options": [
+        {
+          "names": [
+            "--file"
+          ],
+          "description": "If present, writes to the provided file instead of stdout"
+        },
+        {
+          "names": [
+            "--follow",
+            "-f"
+          ],
+          "description": "Show only the most recent journal entries"
+        },
+        {
+          "names": [
+            "--length",
+            "-n"
+          ],
+          "description": "Number of lines back to go within the log"
+        },
+        {
+          "names": [
+            "--node"
+          ],
+          "description": "The node to get logs from. Defaults to the primary control plane"
+        },
+        {
+          "names": [
+            "--problems"
+          ],
+          "description": "Show only log entries which point to known problems"
+        }
+      ]
+    },
+    {
+      "name": "update-check",
+      "description": "Print current and latest version number"
+    },
+    {
+      "name": "version",
+      "description": "Print the version of minikube",
+      "options": [
+        {
+          "names": [
+            "--components"
+          ],
+          "description": "List versions of all components included with minikube"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Format to print stdout in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--short"
+          ],
+          "description": "Print just the version number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "options",
+      "description": "Add, remove, or list additional nodes"
+    },
+    {
+      "name": "completion",
+      "description": "Generate command completion for a shell",
+      "subcommands": [
+        {
+          "name": "bash",
+          "description": "Bash completion"
+        },
+        {
+          "name": "fish",
+          "description": "Fish completion"
+        },
+        {
+          "name": "zsh",
+          "description": "Zsh completion"
+        }
+      ]
+    }
+  ]
+}

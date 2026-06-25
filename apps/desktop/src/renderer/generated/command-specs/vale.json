@@ -1,0 +1,119 @@
+{
+  "name": "vale",
+  "description": "A syntax-aware linter for prose built with speed and extensibility in mind",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for vale"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Print the current version"
+    },
+    {
+      "names": [
+        "--ignore-syntax"
+      ],
+      "description": "Lint all files line-by-line"
+    },
+    {
+      "names": [
+        "--no-exit"
+      ],
+      "description": "Don't return a nonzero exit code on errors"
+    },
+    {
+      "names": [
+        "--no-wrap"
+      ],
+      "description": "Don't wrap CLI output"
+    },
+    {
+      "names": [
+        "--ext"
+      ],
+      "description": "An extension to associate with stdin",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ext"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--glob"
+      ],
+      "description": "A glob pattern",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "glob"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--minAlertLevel"
+      ],
+      "description": "The minimum level to display",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output"
+      ],
+      "description": "The alert output style to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "A path to a .vale.ini file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "ls-config",
+      "description": "Print the current configuration to stdout"
+    },
+    {
+      "name": "ls-metrics",
+      "description": "Print the given file's internal metrics to stdout",
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

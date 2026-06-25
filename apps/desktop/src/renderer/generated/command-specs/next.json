@@ -1,0 +1,145 @@
+{
+  "name": "next",
+  "description": "Next.js CLI to start, build and export your application",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "build",
+      "description": "Create an optimized production build of your application",
+      "options": [
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Enable production profiling"
+        },
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Enable more verbose build output"
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "dev",
+      "description": "Start the application in development mode",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--port"
+          ],
+          "description": "A port number on which to start the application",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "-H",
+            "--hostname"
+          ],
+          "description": "Hostname on which to start the application",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "description": "Start the application in production mode",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--port"
+          ],
+          "description": "A port number on which to start the application",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "-H",
+            "--hostname"
+          ],
+          "description": "Hostname on which to start the application",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "description": "Exports the application for production deployment",
+      "options": [
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Do not print any messages to console"
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "telemetry",
+      "description": "Allows you to control Next.js' telemetry collection",
+      "args": [
+        {
+          "name": "status"
+        }
+      ]
+    }
+  ]
+}

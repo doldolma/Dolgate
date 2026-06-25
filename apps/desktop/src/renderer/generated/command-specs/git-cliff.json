@@ -1,0 +1,232 @@
+{
+  "name": "git-cliff",
+  "description": "A highly customizable changelog generator ⛰️",
+  "options": [
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Increases the logging verbosity"
+    },
+    {
+      "names": [
+        "--init",
+        "-i"
+      ],
+      "description": "Writes the default configuration file to cliff.toml"
+    },
+    {
+      "names": [
+        "--latest",
+        "-l"
+      ],
+      "description": "Processes the commits starting from the latest tag"
+    },
+    {
+      "names": [
+        "--current"
+      ],
+      "description": "Processes the commits that belong to the current tag"
+    },
+    {
+      "names": [
+        "--unreleased",
+        "-u"
+      ],
+      "description": "Processes the commits that do not belong to a tag"
+    },
+    {
+      "names": [
+        "--date-order"
+      ],
+      "description": "Sorts the tags chronologically"
+    },
+    {
+      "names": [
+        "--context"
+      ],
+      "description": "Prints changelog context as JSON"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Prints version information"
+    },
+    {
+      "names": [
+        "--config",
+        "-c"
+      ],
+      "description": "Sets the configuration file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--workdir",
+        "-w"
+      ],
+      "description": "Sets the working directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--repository",
+        "-r"
+      ],
+      "description": "Sets the git repository",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--include-path"
+      ],
+      "description": "Sets the path to include related commits",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--exclude-path"
+      ],
+      "description": "Sets the path to exclude related commits",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--with-commit"
+      ],
+      "description": "Sets custom commit messages to include in the changelog",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "msg",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--prepend",
+        "-p"
+      ],
+      "description": "Prepends entries to the given changelog file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output",
+        "-o"
+      ],
+      "description": "Writes output to the given file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tag",
+        "-t"
+      ],
+      "description": "Sets the tag for the latest version",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--body",
+        "-b"
+      ],
+      "description": "Sets the template for the changelog body",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "template"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--strip",
+        "-s"
+      ],
+      "description": "Strips the given parts from the changelog",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "part"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sort"
+      ],
+      "description": "Sets sorting of the commits inside sections",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "sort"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "range",
+      "hasGenerator": true
+    }
+  ]
+}

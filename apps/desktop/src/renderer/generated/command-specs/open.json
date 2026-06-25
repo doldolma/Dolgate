@@ -1,0 +1,202 @@
+{
+  "name": "open",
+  "description": "Open files, apps, or URLs using default application",
+  "options": [
+    {
+      "names": [
+        "-a"
+      ],
+      "description": "Specify the application to use for opening the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Application",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-b"
+      ],
+      "description": "Specify the bundle identifier of the app to use to open the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Bundle Identifier",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D"
+      ],
+      "description": "Reveals the enclosing folder in finder"
+    },
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Opens the file with /Applications/TextEdit"
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Open the file with the default text editor"
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Read input from standard input and open the results in the default text editor"
+    },
+    {
+      "names": [
+        "-F",
+        "--fresh"
+      ],
+      "description": "Opens the application without restoring windows"
+    },
+    {
+      "names": [
+        "-W",
+        "--wait-apps"
+      ],
+      "description": "Waits until the applications exit"
+    },
+    {
+      "names": [
+        "-R",
+        "--reveal"
+      ],
+      "description": "Reveals the file(s) in the Finder instead of opening them"
+    },
+    {
+      "names": [
+        "-n",
+        "--new"
+      ],
+      "description": "Open a new instance of the application(s) even if one is already running"
+    },
+    {
+      "names": [
+        "-j",
+        "--hide"
+      ],
+      "description": "Launches the app hidden"
+    },
+    {
+      "names": [
+        "-g",
+        "--background"
+      ],
+      "description": "Do not bring the application to the foreground"
+    },
+    {
+      "names": [
+        "-h",
+        "--header"
+      ],
+      "description": "Searches header locations for a header whose name matches the given string and then opens it"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "For -h, the SDK to use; if supplied, only SDKs whose names contain the argument value are searched",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "partial SDK name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "--url"
+      ],
+      "description": "Open this URL, even if it matches exactly a filepath",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--stdin"
+      ],
+      "description": "Launches the application with stdin connected to PATH; defaults to /dev/null",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--stdout"
+      ],
+      "description": "Launches the application with /dev/stdout connected to PATH",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--stderr"
+      ],
+      "description": "Launches the application with /dev/stderr connected to PATH",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--env"
+      ],
+      "description": "Add an enviroment variable to the launched process, where VAR is formatted AAA=foo",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "VAR"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--args"
+      ],
+      "description": "All remaining arguments are passed to the opened application in the argv parameter to main().  These arguments are not opened or interpreted by the open tool",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Arguments",
+          "variadic": true
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

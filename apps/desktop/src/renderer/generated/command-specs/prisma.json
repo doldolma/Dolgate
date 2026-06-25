@@ -1,0 +1,769 @@
+{
+  "name": "prisma",
+  "description": "Prisma is a modern DB toolkit to query, migrate and model your database",
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Setup Prisma for your app",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display this help message"
+        },
+        {
+          "names": [
+            "--datasource-provider"
+          ],
+          "description": "Define the datasource provider to use",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--url"
+          ],
+          "description": "Define a custom datasource url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "full url",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "generate",
+      "description": "Generate artifacts (e.g. Prisma Client)",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display this help message"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Custom path to your Prisma schema",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Schema path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--data-proxy"
+          ],
+          "description": "Enable the Data Proxy in the Prisma Client"
+        },
+        {
+          "names": [
+            "--no-hints"
+          ],
+          "description": "Hides the hint messages but still outputs errors and warnings"
+        },
+        {
+          "names": [
+            "--no-engine"
+          ],
+          "description": "Generate a client for use with Accelerate only"
+        },
+        {
+          "names": [
+            "--watch"
+          ],
+          "description": "Watch the Prisma schema and rerun after a change"
+        },
+        {
+          "names": [
+            "--allow-no-models"
+          ],
+          "description": "Allow generating a client without models"
+        }
+      ]
+    },
+    {
+      "name": "studio",
+      "description": "Open Prisma Studio",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display this help message"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Custom path to your Prisma schema",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Schema path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--port"
+          ],
+          "description": "Port to start Studio on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-b",
+            "--browser"
+          ],
+          "description": "Browser to open Studio in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Browser choice"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--hostname"
+          ],
+          "description": "Hostname to bind the Express server to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "format",
+      "description": "Format your schema",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display this help message"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Custom path to your Prisma schema",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Schema path",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "migrate",
+      "description": "Migrate your database",
+      "subcommands": [
+        {
+          "name": "dev",
+          "description": "The migrate dev command updates your database using migrations files during development",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-seed"
+              ],
+              "description": "Skip triggering seed"
+            },
+            {
+              "names": [
+                "--skip-generate"
+              ],
+              "description": "Skip triggering generators (e.g. Prisma Client)"
+            },
+            {
+              "names": [
+                "--create-only"
+              ],
+              "description": "Create a new migration but do not apply it. The migration will be empty if there are no changes in Prisma schema"
+            },
+            {
+              "names": [
+                "-n",
+                "--name"
+              ],
+              "description": "The name of the migration. If no name is provided, the CLI will prompt you",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filename",
+                  "optional": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset your database and apply all migrations, all data will be lost",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-seed"
+              ],
+              "description": "Skip triggering seed"
+            },
+            {
+              "names": [
+                "--skip-generate"
+              ],
+              "description": "Skip triggering generators (e.g. Prisma Client)"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Skip the confirmation prompt"
+            }
+          ]
+        },
+        {
+          "name": "deploy",
+          "description": "Apply pending migrations to update the database schema in production/staging",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resolve",
+          "description": "Resolve issues with database migrations in deployment databases",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--applied"
+              ],
+              "description": "Record a specific migration as applied",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "migration file path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--rolled-back"
+              ],
+              "description": "Record a specific migration as rolled back",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "migration file path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Check the status of your database migrations",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "diff",
+          "description": "Compares the database schema from two arbitrary sources, and outputs the differences either as a human-readable summary (by default) or an executable script",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--from-url"
+              ],
+              "description": "A datasource url",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "full url",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--to-url"
+              ],
+              "description": "A datasource url",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "full url",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--from-empty"
+              ],
+              "description": "Flag to assume from is an empty datamodel"
+            },
+            {
+              "names": [
+                "--to-empty"
+              ],
+              "description": "Flag to assume to is an empty datamodel"
+            },
+            {
+              "names": [
+                "--from-schema-datamodel"
+              ],
+              "description": "Path to a Prisma schema file, uses the 'datamodel' for the diff",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--to-schema-datamodel"
+              ],
+              "description": "Path to a Prisma schema file, uses the 'datamodel' for the diff",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--from-schema-datasource"
+              ],
+              "description": "Path to a Prisma schema file, uses the 'datasource url' for the diff",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--to-schema-datasource"
+              ],
+              "description": "Path to a Prisma schema file, uses the 'datasource url' for the diff",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--from-migrations"
+              ],
+              "description": "Path to the Prisma Migrate migrations directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "folder",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--to-migrations"
+              ],
+              "description": "Path to the Prisma Migrate migrations directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "folder",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--shadow-database-url"
+              ],
+              "description": "URL for the shadow database. Only required if using --from-migrations or --to-migrations",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "full url",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--script"
+              ],
+              "description": "Render a SQL script to stdout instead of the default human readable summary (not supported on MongoDB)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--exit-code"
+              ],
+              "description": "Change the exit code behavior to signal if the diff is empty or not (Empty: 0, Error: 1, Not empty: 2). Default behavior is Success: 0, Error: 1.`"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "description": "Manage your database schema and lifecycle (Preview)",
+      "subcommands": [
+        {
+          "name": "pull",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Ignore current Prisma schema file"
+            },
+            {
+              "names": [
+                "--print"
+              ],
+              "description": "Print the introspected Prisma schema to stdout"
+            },
+            {
+              "names": [
+                "--url"
+              ],
+              "description": "The datasource url",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "full url",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--composite-type-depth"
+              ],
+              "description": "Specify the depth for introspecting composite types (e.g. Embedded Documents in MongoDB). Number, default is -1 for infinite depth, 0 = off",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "number"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "push",
+          "description": "This command pushes the state of your Prisma schema file to the database without using migrations files",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-generate"
+              ],
+              "description": "Skip generation of artifacts such as Prisma Client"
+            },
+            {
+              "names": [
+                "--force-reset"
+              ],
+              "description": "Resets the database and then updates the schema - useful if you need to start from scratch due to unexecutable migrations"
+            },
+            {
+              "names": [
+                "--accept-data-loss"
+              ],
+              "description": "Ignore data loss warnings. This option is required if as a result of making the schema changes, data may be lost"
+            }
+          ]
+        },
+        {
+          "name": "seed",
+          "description": "Seed your database",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "execute",
+          "description": "Execute native commands to your database",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display this help message"
+            },
+            {
+              "names": [
+                "--schema"
+              ],
+              "description": "Custom path to your Prisma schema",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Schema path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--url"
+              ],
+              "description": "The datasource url",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "full url",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--file"
+              ],
+              "description": "Path to a file. The content will be sent as the script to be executed",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filepath",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--stdin"
+              ],
+              "description": "Use the terminal standard input as the script to be executed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print current version of Prisma components",
+      "subcommands": [
+        {
+          "name": "--json",
+          "description": "Output JSON"
+        }
+      ]
+    }
+  ]
+}

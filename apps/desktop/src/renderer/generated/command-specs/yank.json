@@ -1,0 +1,67 @@
+{
+  "name": "yank",
+  "description": "Yank terminal output to clipboard",
+  "options": [
+    {
+      "names": [
+        "-i"
+      ],
+      "description": "Ignore case differences between pattern and the input"
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "Use the default delimiters except for space"
+    },
+    {
+      "names": [
+        "-x"
+      ],
+      "description": "Use alternate screen"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Print the version"
+    },
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "All input characters not present in delim will be recognized as fields",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "delim"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-g"
+      ],
+      "description": "Use pattern to recognize fields",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--"
+      ],
+      "description": "Use a command as the yank command",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "command",
+          "variadic": true
+        }
+      ]
+    }
+  ]
+}

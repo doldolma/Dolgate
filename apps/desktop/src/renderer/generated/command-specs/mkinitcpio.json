@@ -1,0 +1,309 @@
+{
+  "name": "mkinitcpio",
+  "description": "Create an initial ramdisk environment",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for mkinitcpio"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Display version information"
+    },
+    {
+      "names": [
+        "--addhooks",
+        "-A"
+      ],
+      "description": "Add additional hooks to the image",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "hooks",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config",
+        "-c"
+      ],
+      "description": "Use config file to generate the ramdisk",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--generatedir",
+        "-d"
+      ],
+      "description": "Set directory as the location where the initramfs is built",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--hookdir",
+        "-D"
+      ],
+      "description": "Set directory as the location where hooks will be searched for when generating the image",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--generate",
+        "-g"
+      ],
+      "description": "Generate a CPIO image as filename",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--hookhelp",
+        "-H"
+      ],
+      "description": "Output help for hookname",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "hookname"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--kernel",
+        "-k"
+      ],
+      "description": "Use kernelversion, instead of the current running kernel",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "kernelversion"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--listhooks",
+        "-L"
+      ],
+      "description": "List all available hooks"
+    },
+    {
+      "names": [
+        "--automods",
+        "-M"
+      ],
+      "description": "Display modules found via autodetection"
+    },
+    {
+      "names": [
+        "--nocolor",
+        "-n"
+      ],
+      "description": "Disable color output"
+    },
+    {
+      "names": [
+        "--uefi",
+        "-U"
+      ],
+      "description": "Generate a UEFI executable as filename",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--allpresets",
+        "-P"
+      ],
+      "description": "Process all presets contained in /etc/mkinitcpio.d"
+    },
+    {
+      "names": [
+        "--preset",
+        "-p"
+      ],
+      "description": "Build initramfs image(s) according to specified preset",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "preset",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--moduleroot",
+        "-r"
+      ],
+      "description": "Specifies the root directory to find modules in",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "root"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--skiphooks",
+        "-S"
+      ],
+      "description": "Skip hooks when generating the image",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "hooks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--save",
+        "-s"
+      ],
+      "description": "Saves the build directory for the initial ramdisk"
+    },
+    {
+      "names": [
+        "--builddir",
+        "-t"
+      ],
+      "description": "Use tmpdir as the temporary build directory instead of /tmp",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tmpdir",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Verbose output"
+    },
+    {
+      "names": [
+        "--compress",
+        "-z"
+      ],
+      "description": "Override the compression method with the compress program",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "compress"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cmdline"
+      ],
+      "description": "Use kernel command line with UEFI executable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--splash"
+      ],
+      "description": "UEFI executables can show a bitmap file on boot",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--uefistub"
+      ],
+      "description": "UEFI stub image used for UEFI executable generation",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--kernelimage"
+      ],
+      "description": "Include a kernel image for the UEFI executable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--microcode"
+      ],
+      "description": "Include microcode into the UEFI executable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--osrelease"
+      ],
+      "description": "Include a os-release file for the UEFI executable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    }
+  ]
+}

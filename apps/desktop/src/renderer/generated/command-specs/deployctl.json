@@ -1,0 +1,106 @@
+{
+  "name": "deployctl",
+  "description": "Command line tool for Deno Deploy",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Show the version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "deploy",
+      "description": "Deploy a script with static files to Deno Deploy",
+      "options": [
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude files that match this pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "pattern"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--include"
+          ],
+          "description": "Only upload files that match this pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "pattern"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-static"
+          ],
+          "description": "Don't include the files in the CWD as static files"
+        },
+        {
+          "names": [
+            "--prod"
+          ],
+          "description": "Create a production deployment (default is preview deployment)"
+        },
+        {
+          "names": [
+            "-p",
+            "--project"
+          ],
+          "description": "The project to deploy to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--token"
+          ],
+          "description": "The API token to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "entrypoint",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade deployctl",
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "mknod",
+  "description": "Create device special file",
+  "options": [
+    {
+      "names": [
+        "-F"
+      ],
+      "description": "Format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FORMAT"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "c",
+      "description": "Create (c)haracter device"
+    },
+    {
+      "name": "b",
+      "description": "Create (b)lock device"
+    }
+  ],
+  "args": [
+    {
+      "name": "FILE"
+    },
+    {
+      "name": "major"
+    },
+    {
+      "name": "minor | unit subunit"
+    }
+  ]
+}

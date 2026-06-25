@@ -1,0 +1,170 @@
+{
+  "name": "ng",
+  "description": "CLI interface for Angular",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "View your Angular CLI version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "new",
+      "description": "Create a new Angular app",
+      "options": [
+        {
+          "names": [
+            "--create-application"
+          ],
+          "description": "Create a default application?",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "project"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "generate",
+      "description": "Generate new files",
+      "subcommands": [
+        {
+          "name": "application",
+          "description": "Generates a new application",
+          "options": [
+            {
+              "names": [
+                "--style"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "extension"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "name": "component",
+          "description": "Generate a new component",
+          "options": [
+            {
+              "names": [
+                "--project"
+              ],
+              "description": "Project name",
+              "takesArg": true,
+              "args": [
+                {
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--change-detection",
+                "-c"
+              ],
+              "description": "The change detection strategy to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "strategy"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--display-block",
+                "-b"
+              ],
+              "description": "Add :host block to styles",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "boolean"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--flat"
+              ],
+              "description": "Create at the top level",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "boolean"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "name",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "library",
+          "description": "Generates a new library",
+          "args": [
+            {
+              "name": "name",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "class",
+          "description": "Generates a class",
+          "options": [
+            {
+              "names": [
+                "--project"
+              ],
+              "description": "Project name",
+              "takesArg": true,
+              "args": [
+                {
+                  "hasGenerator": true
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "name",
+              "optional": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "schematic"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "View your Angular CLI version (update for Angular 14+)"
+    }
+  ]
+}

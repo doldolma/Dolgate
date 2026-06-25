@@ -1,0 +1,10 @@
+{
+  "name": "defaultbrowser",
+  "description": "Change your default browser from the CLI",
+  "args": [
+    {
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

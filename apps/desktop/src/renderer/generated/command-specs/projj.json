@@ -1,0 +1,99 @@
+{
+  "name": "projj",
+  "description": "Manage repository easily",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for projj"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Show version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "completion",
+      "description": "Generate completion script"
+    },
+    {
+      "name": "add",
+      "description": "Add repository",
+      "args": [
+        {
+          "name": "repository url"
+        }
+      ]
+    },
+    {
+      "name": "find",
+      "description": "Find repository",
+      "args": [
+        {
+          "name": "repository name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "import",
+      "description": "Import repositories from existing directory",
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initialize configuration"
+    },
+    {
+      "name": "remove",
+      "description": "Remove repository",
+      "args": [
+        {
+          "name": "repository name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run hook in current directory",
+      "args": [
+        {
+          "name": "hook name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "runall",
+      "description": "Run hook in every repository",
+      "args": [
+        {
+          "name": "hook name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "sync",
+      "description": "Sync data from directory",
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    }
+  ]
+}

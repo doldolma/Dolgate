@@ -1,0 +1,342 @@
+{
+  "name": "rustc",
+  "description": "CLI for rustc",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Prints out help info"
+    },
+    {
+      "names": [
+        "--cfg"
+      ],
+      "description": "Configures compilation settings",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Spec"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-L"
+      ],
+      "description": "Adds a directory to the library search path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "kind",
+          "optional": true
+        },
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--l"
+      ],
+      "description": "Links the generated crate to a native library",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "kind",
+          "optional": true
+        },
+        {
+          "name": "Name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--crate-type"
+      ],
+      "description": "Specify types of crates for the compiler to emit",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--crate-name"
+      ],
+      "description": "Specify the name of the crate being built",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--edition"
+      ],
+      "description": "Specify the edition to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "edition"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--emit"
+      ],
+      "description": "Specify the types of output files to generate",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--print"
+      ],
+      "description": "Prints compiler info",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-g"
+      ],
+      "description": "Synonym for -C debuginfo=2"
+    },
+    {
+      "names": [
+        "-O"
+      ],
+      "description": "Synonym for -C opt-level=2"
+    },
+    {
+      "names": [
+        "-o"
+      ],
+      "description": "Specify the filename to write output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--out-dir"
+      ],
+      "description": "Specify directory to write output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dir"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--explain"
+      ],
+      "description": "Provides a detailed explanation of an error message",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Error Code"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--test"
+      ],
+      "description": "Builds a test harness"
+    },
+    {
+      "names": [
+        "--target"
+      ],
+      "description": "Selects a target triple to build",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Target"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-W",
+        "--warn"
+      ],
+      "description": "Sets lint warnings",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "OPT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-A",
+        "--allow"
+      ],
+      "description": "Set lint allowed",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "OPT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D",
+        "--deny"
+      ],
+      "description": "Set lint denied",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "OPT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-F",
+        "--forbid"
+      ],
+      "description": "Set lint forbid",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Opt"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cap-lints"
+      ],
+      "description": "Set the most restrictive lint level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C",
+        "--codegen"
+      ],
+      "description": "Set a codegen option",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Z"
+      ],
+      "description": "Set unstable options",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Prints version"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Use verbose output"
+    },
+    {
+      "names": [
+        "--extern"
+      ],
+      "description": "Specify where an external library is located",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sysroot"
+      ],
+      "description": "Overrides the system root",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--error-format"
+      ],
+      "description": "Controls how errors are produced",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Configures coloring of output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "color"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "filepath",
+      "template": "filepaths"
+    }
+  ]
+}

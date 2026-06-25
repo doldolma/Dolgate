@@ -1,0 +1,151 @@
+{
+  "name": "spotify",
+  "description": "CLI to use Spotify from the terminal",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for spotify"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "play",
+      "description": "Resume playback where Spotify last left off",
+      "subcommands": [
+        {
+          "name": "album",
+          "description": "Find an album by name and play it",
+          "args": [
+            {
+              "name": "album name"
+            }
+          ]
+        },
+        {
+          "name": "artist",
+          "description": "Find an artist by name and play it",
+          "args": [
+            {
+              "name": "artist name"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "Find a playlist by name and plays it",
+          "args": [
+            {
+              "name": "playlist name"
+            }
+          ]
+        },
+        {
+          "name": "uri",
+          "description": "Play songs from specific uri",
+          "args": [
+            {
+              "name": "uri"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "song name",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "next",
+      "description": "Skip to the next song in a playlist"
+    },
+    {
+      "name": "prev",
+      "description": "Return to the previous song in a playlist"
+    },
+    {
+      "name": "replay",
+      "description": "Replay the current track from the beginning"
+    },
+    {
+      "name": "pos",
+      "description": "Jump to a time (in secs) in the current song",
+      "args": [
+        {
+          "name": "time"
+        }
+      ]
+    },
+    {
+      "name": "pause",
+      "description": "Pause (or resume) Spotify playback"
+    },
+    {
+      "name": "stop",
+      "description": "Stop playback"
+    },
+    {
+      "name": "quit",
+      "description": "Stop playback and quit Spotify"
+    },
+    {
+      "name": "vol",
+      "description": "Show the current Spotify volume",
+      "args": [
+        {
+          "name": "amount",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Show the current player status",
+      "subcommands": [
+        {
+          "name": "artist",
+          "description": "Show the currently playing artist"
+        },
+        {
+          "name": "album",
+          "description": "Show the currently playing album"
+        },
+        {
+          "name": "track",
+          "description": "Show the currently playing track"
+        }
+      ]
+    },
+    {
+      "name": "share",
+      "description": "Display the current song's Spotify URL and URI",
+      "subcommands": [
+        {
+          "name": "url",
+          "description": "Display the current song's Spotify URL and copies it to the clipboard"
+        },
+        {
+          "name": "uri",
+          "description": "Display the current song's Spotify URI and copies it to the clipboard"
+        }
+      ]
+    },
+    {
+      "name": "toggle",
+      "subcommands": [
+        {
+          "name": "shuffle",
+          "description": "Toggle shuffle playback mode"
+        },
+        {
+          "name": "repeat",
+          "description": "Toggle repeat playback mode"
+        }
+      ]
+    }
+  ]
+}

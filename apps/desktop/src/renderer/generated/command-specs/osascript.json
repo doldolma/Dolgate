@@ -1,0 +1,56 @@
+{
+  "name": "osascript",
+  "description": "Execute OSA scripts (AppleScript, JavaScript, etc.)",
+  "options": [
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Enter one line of a script",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "statement"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i"
+      ],
+      "description": "Interactive mode"
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "Override the language for any plain text files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "language"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Modify the output style",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "flags",
+          "variadic": true
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "script",
+      "optional": true,
+      "template": "filepaths"
+    }
+  ]
+}

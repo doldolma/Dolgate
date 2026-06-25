@@ -1,0 +1,242 @@
+{
+  "name": "ts-node",
+  "description": "Run the TypeScript interpreter for Node.JS",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for ts-node"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version information of the ts-node module"
+    },
+    {
+      "names": [
+        "-e",
+        "--eval"
+      ],
+      "description": "Evaluate script",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "script"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--print"
+      ],
+      "description": "Evaluate script and print result"
+    },
+    {
+      "names": [
+        "-r",
+        "--require"
+      ],
+      "description": "Require module before executing",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "module",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--interactive"
+      ],
+      "description": "Always open interactive REPL"
+    },
+    {
+      "names": [
+        "--show-config"
+      ],
+      "description": "Print resolved Typescript config to the terminal"
+    },
+    {
+      "names": [
+        "--cwd-mode"
+      ],
+      "description": "Resolve Typescript config based on the current working directory"
+    },
+    {
+      "names": [
+        "-T",
+        "--transpile-only"
+      ],
+      "description": "Use the Typescript transpile module mode"
+    },
+    {
+      "names": [
+        "-H",
+        "--compiler-host"
+      ],
+      "description": "Use the Typescript compiler host API"
+    },
+    {
+      "names": [
+        "-I",
+        "--ignore"
+      ],
+      "description": "Ignore patterns from Typescript compilation",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--project"
+      ],
+      "description": "Specify TypeScript project location",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "project"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C",
+        "--compiler"
+      ],
+      "description": "Use a custom compiler",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "compiler"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--transpiler"
+      ],
+      "description": "Use a custom transpiler",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "transpiler"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D",
+        "--ignore-diagnostics"
+      ],
+      "description": "Specify Typescript diagnostic code to ignore",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "code"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-O",
+        "--compiler-options"
+      ],
+      "description": "JSON object that will be merged with the compiler options",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "options"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cwd"
+      ],
+      "description": "Specify working directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cwd"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--files"
+      ],
+      "description": "Load files, include and exclude from Typescript config on startup"
+    },
+    {
+      "names": [
+        "--pretty"
+      ],
+      "description": "Use the pretty formatter for diagnostic errors"
+    },
+    {
+      "names": [
+        "--skip-project"
+      ],
+      "description": "Skip reading Typescript config"
+    },
+    {
+      "names": [
+        "--scope"
+      ],
+      "description": "Scope compilation to scope directory specified"
+    },
+    {
+      "names": [
+        "--scope-dir"
+      ],
+      "description": "Directory for scope parameter",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--skip-ignore"
+      ],
+      "description": "Skip --ignore checks"
+    },
+    {
+      "names": [
+        "--prefer-ts-exts"
+      ],
+      "description": "Prefer Typescript files over JavaScript files when importing files"
+    },
+    {
+      "names": [
+        "--log-error"
+      ],
+      "description": "Pipe Typescript errors to stderr instead of throwing exceptions"
+    },
+    {
+      "names": [
+        "--no-experimental-repl-await"
+      ],
+      "description": "Disable the top-level await function in REPL"
+    }
+  ],
+  "args": [
+    {
+      "name": "script",
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (git-profile), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var o={script:["git-profile","list"],postProcess:i=>Array.from(i.matchAll(/^\[(.+?)\]$/gm)).map(e=>({name:e[1],description:`Use profile "${e[1]}"`}))},r={name:"git-profile",description:"Switch profiles",subcommands:[{name:"use",description:"Use a profile",args:{name:"profile",description:"Profile you want to apply in this repository",generators:o}}],options:[{name:["--help","-h"],description:"Help for git-profile script"},{name:["--config","-c"],description:'Config file (default "~/.gitprofile")'}]},p=r;export{p as default};

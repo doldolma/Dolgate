@@ -1,0 +1,48 @@
+{
+  "name": "chsh",
+  "description": "Change your login shell",
+  "options": [
+    {
+      "names": [
+        "-s",
+        "--shell"
+      ],
+      "description": "Specify login shell",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "shell",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--list-shells"
+      ],
+      "description": "Print list of shells and exit"
+    },
+    {
+      "names": [
+        "-u",
+        "-h",
+        "--help"
+      ],
+      "description": "Print help message and exit"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version and exit"
+    }
+  ],
+  "args": [
+    {
+      "name": "username",
+      "optional": true
+    }
+  ]
+}

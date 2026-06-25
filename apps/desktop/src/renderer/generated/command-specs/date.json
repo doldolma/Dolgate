@@ -1,0 +1,99 @@
+{
+  "name": "date",
+  "description": "Display or set date and time",
+  "options": [
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Set the kernel's value for daylight saving time",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dst"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Use specified format for input instead of the default [[[mm]dd]HH]MM[[cc]yy][.ss] format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "input_fmt"
+        },
+        {
+          "name": "new_date"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-j"
+      ],
+      "description": "Don't try to set the date"
+    },
+    {
+      "names": [
+        "-n"
+      ],
+      "description": "Only set time on the current machine, instead of all machines in the local group"
+    },
+    {
+      "names": [
+        "-R"
+      ],
+      "description": "Use RFC 2822 date and time output format"
+    },
+    {
+      "names": [
+        "-r"
+      ],
+      "description": "Print the date and time represented by the specified number of seconds since the Epoch",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "seconds"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Set the system's value for minutes west of GMT",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "minutes_west"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u"
+      ],
+      "description": "Display or set the date in UTC (Coordinated Universal) time"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Adjust and print (but don't set) the second, minute, hour, month day, week day, month, or year according to val",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "val"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "new_time OR output_fmt",
+      "optional": true
+    }
+  ]
+}

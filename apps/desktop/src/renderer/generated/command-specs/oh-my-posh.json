@@ -1,0 +1,303 @@
+{
+  "name": "oh-my-posh",
+  "description": "",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for oh-my-posh"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Initialize oh-my-posh for your shell",
+      "options": [
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "The config file to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CONFIG",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--print",
+            "-p"
+          ],
+          "description": "Print the init script"
+        }
+      ],
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "get",
+      "description": "Get oh-my-posh values",
+      "args": [
+        {
+          "name": "VALUE"
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "Debug oh-my-posh, example usage: 'oh-my-posh debug'",
+      "options": [
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "The config file to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CONFIG",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Interact with the oh-my-posh configuration",
+      "options": [
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "The config file to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CONFIG",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "edit",
+          "description": "Edit the config file, example usage: 'oh-my-posh config edit'"
+        },
+        {
+          "name": "migrate",
+          "description": "Migrate the config file, example usage: 'oh-my-posh config migrate --config ~/.config.omp.json'",
+          "options": [
+            {
+              "names": [
+                "--write",
+                "-w"
+              ],
+              "description": "Write the migrated config to the configuration file, example usage: 'oh-my-posh config migrate --write'"
+            },
+            {
+              "names": [
+                "--format",
+                "-f"
+              ],
+              "description": "The file format to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "FORMAT"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "export",
+          "description": "Export the config file, example usage: 'oh-my-posh config export --config ~/.config.omp.toml'",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "The file to output the migrated config to, example usage: 'oh-my-posh config export --output ~/.config.omp.json'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "OUTPUT",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--format",
+                "-f"
+              ],
+              "description": "The file format to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "FORMAT"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "print",
+      "description": "Print a prompt",
+      "options": [
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "The config file to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CONFIG",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--terminal-width",
+            "-w"
+          ],
+          "description": "The terminal width, example usage: 'oh-my-posh print primary --terminal-width 200'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "WIDTH"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--command"
+          ],
+          "description": "The current command for tooltips, example usage: 'oh-my-posh print tooltip --command az'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "COMMAND"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--error",
+            "-e"
+          ],
+          "description": "The last exit code, example usage: 'oh-my-posh print primary --error 127'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ERROR CODE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--eval"
+          ],
+          "description": "Use eval to render the prompt, example usage: 'oh-my-posh print primary --eval'"
+        },
+        {
+          "names": [
+            "--execution-time"
+          ],
+          "description": "Use last command execution time in millis, example usage: 'oh-my-posh print primary --execution-time 200'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "EXECUTION TIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--plain",
+            "-p"
+          ],
+          "description": "Print a prompt without ASNI codes, example usage: 'oh-my-posh print primary --plain'"
+        },
+        {
+          "names": [
+            "--pswd"
+          ],
+          "description": "The current working directory according to PowerShell, example usage: 'oh-my-posh print primary --pswd C:\\Users\\user\\Documents'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "POWERSHELL WORKING DIRECTORY",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--pwd"
+          ],
+          "description": "The current working directory, example usage: 'oh-my-posh print primary --pwd /home/user/Documents'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "WORKING DIRECTORY",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--shell"
+          ],
+          "description": "The current shell, example usage: 'oh-my-posh print primary --shell fish'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SHELL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--stack-count"
+          ],
+          "description": "The directory stack count, example usage: 'oh-my-posh print primary --stack-count 1'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUM"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "PROMPT"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Display the oh-my-posh version, example usage: 'oh-my-posh version'"
+    }
+  ]
+}

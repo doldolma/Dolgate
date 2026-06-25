@@ -1,0 +1,49 @@
+{
+  "name": "zed",
+  "description": "A lightning-fast, collaborative code editor written in Rust",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help information"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print Zed's version and the app path"
+    },
+    {
+      "names": [
+        "-w",
+        "--wait"
+      ],
+      "description": "Wait for all of the given paths to be closed before exiting"
+    },
+    {
+      "names": [
+        "-b",
+        "--bundle-path"
+      ],
+      "description": "Custom Zed.app path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "bundle_path",
+          "template": "folders"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "path",
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "name": "iex",
+  "description": "Elixir Interactive Shell",
+  "options": [
+    {
+      "names": [
+        "-e",
+        "--eval"
+      ],
+      "description": "Evaluates the given command",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "EXPRESSION"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Prints this message and exits"
+    },
+    {
+      "names": [
+        "-r"
+      ],
+      "description": "Requires the given files/patterns",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S"
+      ],
+      "description": "Finds and executes the given script in $PATH",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SCRIPT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-pr"
+      ],
+      "description": "Requires the given files/patterns in parallel",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-pa"
+      ],
+      "description": "Prepends the given path to Erlang code path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-pz"
+      ],
+      "description": "Appends the given path to Erlang code path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Prints Elixir version and exits"
+    },
+    {
+      "names": [
+        "--app"
+      ],
+      "description": "Starts the given app and its dependencies",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "APP"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--erl"
+      ],
+      "description": "Switches to be passed down to Erlang",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SWITCHES"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--logger-otp-reports"
+      ],
+      "description": "Enables or disables OTP reporting",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "BOOL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--logger-sasl-reports"
+      ],
+      "description": "Enables or disables SASL reporting",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "BOOL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-halt"
+      ],
+      "description": "Does not halt the Erlang VM after execution"
+    },
+    {
+      "names": [
+        "--werl"
+      ],
+      "description": "Uses Erlang's Windows shell GUI (Windows only)"
+    },
+    {
+      "names": [
+        "--cookie"
+      ],
+      "description": "Sets a cookie for this distributed node",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "COOKIE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--hidden"
+      ],
+      "description": "Makes a hidden node"
+    },
+    {
+      "names": [
+        "--name"
+      ],
+      "description": "Makes and assigns a name to the distributed node",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NAME"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--rpc-eval"
+      ],
+      "description": "Evaluates the given command on the given remote node",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NODE"
+        },
+        {
+          "name": "COMMAND"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sname"
+      ],
+      "description": "Makes and assigns a short name to the distributed node",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NAME"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--boot"
+      ],
+      "description": "Uses the given FILE.boot to start the system",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--boot-var"
+      ],
+      "description": "Makes $VAR available as VALUE to FILE.boot",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "VAR"
+        },
+        {
+          "name": "VALUE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--erl-config"
+      ],
+      "description": "Loads configuration in FILE.config written in Erlang",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pipe-to"
+      ],
+      "description": "Starts the Erlang VM as a named PIPEDIR and LOGDIR",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PIPEDIR"
+        },
+        {
+          "name": "LOGDIR"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--vm-args"
+      ],
+      "description": "Passes the contents in file as arguments to the VM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--dot-iex"
+      ],
+      "description": "Overrides default .iex.exs file and uses path instead; path can be empty, then no file will be loaded",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--remsh"
+      ],
+      "description": "Connects to a node using a remote shell",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NAME"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "template": "filepaths"
+    },
+    {
+      "name": "data",
+      "optional": true
+    }
+  ]
+}

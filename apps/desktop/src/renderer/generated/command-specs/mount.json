@@ -1,0 +1,299 @@
+{
+  "name": "mount",
+  "description": "Mount disks and manage subtrees",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Help for abc"
+    },
+    {
+      "names": [
+        "-a",
+        "--all"
+      ],
+      "description": "Mount all filesystems in fstab"
+    },
+    {
+      "names": [
+        "-c",
+        "--no-canonicalize"
+      ],
+      "description": "Don't canonicalize paths"
+    },
+    {
+      "names": [
+        "-f",
+        "--fake"
+      ],
+      "description": "Dry run; skip the mount(2) syscall"
+    },
+    {
+      "names": [
+        "-F",
+        "--fork"
+      ],
+      "description": "Fork off for each device (use with -a)"
+    },
+    {
+      "names": [
+        "-T",
+        "--fstab"
+      ],
+      "description": "Alternative file to /etc/fstab",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "fstab",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--internal-only"
+      ],
+      "description": "Don't call the mount.<type> helpers"
+    },
+    {
+      "names": [
+        "-l",
+        "--show-labels"
+      ],
+      "description": "Show also filesystem labels"
+    },
+    {
+      "names": [
+        "-m",
+        "--mkdir"
+      ],
+      "description": "Alias to '-o X-mount.mkdir"
+    },
+    {
+      "names": [
+        "-n",
+        "--no-mtab"
+      ],
+      "description": "Don't write to /etc/mtab"
+    },
+    {
+      "names": [
+        "--options-mode"
+      ],
+      "description": "What to do with options loaded from fstab",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--options-source"
+      ],
+      "description": "Mount options source",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "source",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--options-source-force"
+      ],
+      "description": "Force use of options from fstab/mtab"
+    },
+    {
+      "names": [
+        "-o",
+        "--options"
+      ],
+      "description": "Comma-separated list of mount options",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-O",
+        "--test-opts"
+      ],
+      "description": "Limit the set of filesystems (use with -a)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--read-only"
+      ],
+      "description": "Mount the filesystem read-only (same as -o ro)"
+    },
+    {
+      "names": [
+        "-t",
+        "--types"
+      ],
+      "description": "Limit the set of filesystem types",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--source"
+      ],
+      "description": "Explicitly specifies source",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "source"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--target"
+      ],
+      "description": "Explicitly specifies mountpoint",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mountpoint",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--target-prefix"
+      ],
+      "description": "Specifies path used for all mountpoints",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Say what is being done"
+    },
+    {
+      "names": [
+        "-w",
+        "--rw",
+        "--read-write"
+      ],
+      "description": "Mount the filesystem read-write (default)"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Display version"
+    },
+    {
+      "names": [
+        "-B",
+        "--bind"
+      ],
+      "description": "Mount a subtree somewhere else (same as -o bind)"
+    },
+    {
+      "names": [
+        "-M",
+        "--move"
+      ],
+      "description": "Move a subtree to some other place"
+    },
+    {
+      "names": [
+        "-R",
+        "-rbind"
+      ],
+      "description": "Mount a subtree and all submounts somewhere else"
+    },
+    {
+      "names": [
+        "--make-shared"
+      ],
+      "description": "Mark a subtree as shared"
+    },
+    {
+      "names": [
+        "--make-slave"
+      ],
+      "description": "Mark a subtree as slave"
+    },
+    {
+      "names": [
+        "--make-private"
+      ],
+      "description": "Mark a subtree as private"
+    },
+    {
+      "names": [
+        "--make-unbindable"
+      ],
+      "description": "Mark a subtree as unbindable"
+    },
+    {
+      "names": [
+        "--make-rshared"
+      ],
+      "description": "Recursively mark a whole subtree as shared"
+    },
+    {
+      "names": [
+        "--make-rslave"
+      ],
+      "description": "Recursively mark a whole subtree as slave"
+    },
+    {
+      "names": [
+        "--make-rprivate"
+      ],
+      "description": "Recursively mark a whole subtree as private"
+    },
+    {
+      "names": [
+        "--make-runbindable"
+      ],
+      "description": "Recursively mark a whole subtree as unbindable"
+    }
+  ],
+  "args": [
+    {
+      "name": "Disk/loopfile",
+      "template": "filepaths"
+    },
+    {
+      "name": "mountpoint",
+      "template": "folders"
+    }
+  ]
+}

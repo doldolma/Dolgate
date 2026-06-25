@@ -1,0 +1,109 @@
+{
+  "name": "nginx",
+  "description": "Nginx (pronounced ``engine x'') is an HTTP and reverse proxy server, a mail proxy server, and a generic TCP/UDP proxy server.  It is known for its high performance, stability, rich feature set, simple configuration, and low resource consumption",
+  "options": [
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Use an alternative configuration file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Use an alternative error log file.  Special value stderr indicates that the standard error output should be used",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-g"
+      ],
+      "description": "Set global configuration directives",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directives"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Set the prefix path.  The default value is %%PREFIX%%",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "prefix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q"
+      ],
+      "description": "Suppress non-error messages during configuration testing"
+    },
+    {
+      "names": [
+        "-T"
+      ],
+      "description": "Same as -t, but additionally dump configuration files to standard output"
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Do not run, just test the configuration file.  nginx checks the configuration file syntax and then tries to open files referenced in the configuration file"
+    },
+    {
+      "names": [
+        "-V"
+      ],
+      "description": "Print the nginx version, compiler version, and configure script parameters"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Print the nginx version"
+    },
+    {
+      "names": [
+        "-?",
+        "-h"
+      ],
+      "description": "Print help"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Send a signal to the master process.  The argument signal can be one of: stop, quit, reopen, reload",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "signal"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "variadic": true
+    }
+  ]
+}

@@ -1,0 +1,1282 @@
+{
+  "name": "rugby",
+  "description": "Cache Cocoa 🌱 pods for faster rebuild and indexing Xcode project. https://github.com/swiftyfinch/Rugby",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the version"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help information"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "cache",
+      "description": "Run the build and use commands",
+      "options": [
+        {
+          "names": [
+            "--ignore-cache"
+          ],
+          "description": "Ignore shared cache"
+        },
+        {
+          "names": [
+            "--delete-sources"
+          ],
+          "description": "Delete target groups from project"
+        },
+        {
+          "names": [
+            "--rollback",
+            "-r"
+          ],
+          "description": "Restore projects state before the last Rugby usage"
+        },
+        {
+          "names": [
+            "--sdk",
+            "-s"
+          ],
+          "description": "Build SDK: sim or ios",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sdk"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--arch",
+            "-a"
+          ],
+          "description": "Build architecture: auto, x86_64 or arm64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "Build configuration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strip"
+          ],
+          "description": "Build without debug symbols"
+        },
+        {
+          "names": [
+            "--targets",
+            "-t"
+          ],
+          "description": "Targets for building. Empty means all targets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--targets-as-regex",
+            "-g"
+          ],
+          "description": "Targets for building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except",
+            "-e"
+          ],
+          "description": "Exclude targets from building",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except-as-regex",
+            "-x"
+          ],
+          "description": "Exclude targets from building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--warmup"
+          ],
+          "description": "Warmup cache with this endpoint",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "warmup"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "shortcuts",
+      "description": "Set of base commands combinations",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "umbrella",
+          "description": "Run the plan command if plans file exists or run the cache command",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Show help information"
+            }
+          ],
+          "args": [
+            {
+              "name": "arguments",
+              "optional": true,
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "cache",
+          "description": "Run the build and use commands",
+          "options": [
+            {
+              "names": [
+                "--ignore-cache"
+              ],
+              "description": "Ignore shared cache"
+            },
+            {
+              "names": [
+                "--delete-sources"
+              ],
+              "description": "Delete target groups from project"
+            },
+            {
+              "names": [
+                "--rollback",
+                "-r"
+              ],
+              "description": "Restore projects state before the last Rugby usage"
+            },
+            {
+              "names": [
+                "--sdk",
+                "-s"
+              ],
+              "description": "Build SDK: sim or ios",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "sdk"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--arch",
+                "-a"
+              ],
+              "description": "Build architecture: auto, x86_64 or arm64",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "arch"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--config",
+                "-c"
+              ],
+              "description": "Build configuration",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "config"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strip"
+              ],
+              "description": "Build without debug symbols"
+            },
+            {
+              "names": [
+                "--targets",
+                "-t"
+              ],
+              "description": "Targets for building. Empty means all targets",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "targets"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--targets-as-regex",
+                "-g"
+              ],
+              "description": "Targets for building as a RegEx pattern",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "targets-as-regex"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--except",
+                "-e"
+              ],
+              "description": "Exclude targets from building",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "except"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--except-as-regex",
+                "-x"
+              ],
+              "description": "Exclude targets from building as a RegEx pattern",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "except-as-regex"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output mode: fold, multiline, quiet",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbose",
+                "-v"
+              ],
+              "description": "Log level"
+            },
+            {
+              "names": [
+                "--warmup"
+              ],
+              "description": "Warmup cache with this endpoint",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "warmup"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Show help information"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Build targets from Pods project",
+      "options": [
+        {
+          "names": [
+            "--ignore-cache"
+          ],
+          "description": "Ignore shared cache"
+        },
+        {
+          "names": [
+            "--sdk",
+            "-s"
+          ],
+          "description": "Build SDK: sim or ios",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sdk"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--arch",
+            "-a"
+          ],
+          "description": "Build architecture: auto, x86_64 or arm64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "Build configuration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strip"
+          ],
+          "description": "Build without debug symbols"
+        },
+        {
+          "names": [
+            "--targets",
+            "-t"
+          ],
+          "description": "Targets for building. Empty means all targets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--targets-as-regex",
+            "-g"
+          ],
+          "description": "Targets for building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except",
+            "-e"
+          ],
+          "description": "Exclude targets from building",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except-as-regex",
+            "-x"
+          ],
+          "description": "Exclude targets from building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "use",
+      "description": "Use already built binaries instead of sources",
+      "options": [
+        {
+          "names": [
+            "--delete-sources"
+          ],
+          "description": "Delete target groups from project"
+        },
+        {
+          "names": [
+            "--targets",
+            "-t"
+          ],
+          "description": "Targets for building. Empty means all targets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--targets-as-regex",
+            "-g"
+          ],
+          "description": "Targets for building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except",
+            "-e"
+          ],
+          "description": "Exclude targets from building",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except-as-regex",
+            "-x"
+          ],
+          "description": "Exclude targets from building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strip"
+          ],
+          "description": "Build without debug symbols"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete targets from the project",
+      "options": [
+        {
+          "names": [
+            "--path",
+            "-p"
+          ],
+          "description": "Project location",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--safe"
+          ],
+          "description": "Keep dependencies of excepted targets"
+        },
+        {
+          "names": [
+            "--delete-sources"
+          ],
+          "description": "Delete target groups from project"
+        },
+        {
+          "names": [
+            "--targets",
+            "-t"
+          ],
+          "description": "Targets for building. Empty means all targets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--targets-as-regex",
+            "-g"
+          ],
+          "description": "Targets for building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except",
+            "-e"
+          ],
+          "description": "Exclude targets from building",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except-as-regex",
+            "-x"
+          ],
+          "description": "Exclude targets from building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "warmup",
+      "description": "Download remote binaries for targets from Pods project",
+      "options": [
+        {
+          "names": [
+            "--analyse"
+          ],
+          "description": "Run only in analyse mode without downloading. The endpoint is optional"
+        },
+        {
+          "names": [
+            "--sdk",
+            "-s"
+          ],
+          "description": "Build SDK: sim or ios",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sdk"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--arch",
+            "-a"
+          ],
+          "description": "Build architecture: auto, x86_64 or arm64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config",
+            "-c"
+          ],
+          "description": "Build configuration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strip"
+          ],
+          "description": "Build without debug symbols"
+        },
+        {
+          "names": [
+            "--targets",
+            "-t"
+          ],
+          "description": "Targets for building. Empty means all targets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--targets-as-regex",
+            "-g"
+          ],
+          "description": "Targets for building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "targets-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except",
+            "-e"
+          ],
+          "description": "Exclude targets from building",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--except-as-regex",
+            "-x"
+          ],
+          "description": "Exclude targets from building as a RegEx pattern",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "except-as-regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--timeout"
+          ],
+          "description": "Timeout for requests in seconds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "timeout"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--max-connections"
+          ],
+          "description": "The maximum number of simultaneous connections",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "max-connections"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "args": [
+        {
+          "name": "endpoint",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "rollback",
+      "description": "Restore projects state before the last Rugby usage",
+      "options": [
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "plan",
+      "description": "Run sequence of Rugby commands",
+      "options": [
+        {
+          "names": [
+            "--path",
+            "-p"
+          ],
+          "description": "Path to plans yaml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rollback",
+            "-r"
+          ],
+          "description": "Restore projects state before the last Rugby usage"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "clear",
+      "description": "Clear modules cache",
+      "options": [
+        {
+          "names": [
+            "--modules",
+            "-m"
+          ],
+          "description": "List of modules for deletion",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "modules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "build",
+          "description": "Delete .rugby/build folder",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output mode: fold, multiline, quiet",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbose",
+                "-v"
+              ],
+              "description": "Log level"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Show help information"
+            }
+          ]
+        },
+        {
+          "name": "shared",
+          "description": "Delete .rugby/bin folder",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output mode: fold, multiline, quiet",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbose",
+                "-v"
+              ],
+              "description": "Log level"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Show help information"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update Rugby version",
+      "options": [
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Version, like 2.0.0",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--arch",
+            "-a"
+          ],
+          "description": "Binary architecture: x86_64 or arm64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Allow install the latest pre-release version"
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Force an install even if Rugby is already installed"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "List of available versions",
+          "options": [
+            {
+              "names": [
+                "--count"
+              ],
+              "description": "Maximum versions count",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "count"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output mode: fold, multiline, quiet",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbose",
+                "-v"
+              ],
+              "description": "Log level"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Show help information"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "doctor",
+      "description": "Heal your wounds after using Rugby (or not)",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Run shell command from Rugby",
+      "options": [
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output mode: fold, multiline, quiet",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Log level"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ],
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Print Rugby environment",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help information"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "name",
+      "optional": true
+    }
+  ]
+}

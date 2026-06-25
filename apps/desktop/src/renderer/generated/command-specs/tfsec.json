@@ -1,0 +1,284 @@
+{
+  "name": "tfsec",
+  "description": "Tfsec is a simple tool to detect potential security vulnerabilities in your terraformed infrastructure",
+  "options": [
+    {
+      "names": [
+        "--concise-output"
+      ],
+      "description": "Reduce the amount of output and no statistics"
+    },
+    {
+      "names": [
+        "--config-file"
+      ],
+      "description": "Config file to use during run",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config-file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--custom-check-dir"
+      ],
+      "description": "Explicitly the custom checks dir location",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "custom-check-dir"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Enable debug logging (same as verbose)"
+    },
+    {
+      "names": [
+        "-G",
+        "--disable-grouping"
+      ],
+      "description": "Disable grouping of similar results"
+    },
+    {
+      "names": [
+        "-e",
+        "--exclude"
+      ],
+      "description": "Provide comma-separated list of rule IDs to exclude from run",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "excludeList"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--exclude-downloaded-modules"
+      ],
+      "description": "Remove results for downloaded modules in .terraform folder"
+    },
+    {
+      "names": [
+        "--exclude-path"
+      ],
+      "description": "Folder path to exclude, can be used multiple times and evaluated in order of specification",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "excludePath",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--filter-results"
+      ],
+      "description": "Filter results to return specific checks only (supports comma-delimited input)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filterResults"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--force-all-dirs"
+      ],
+      "description": "Don't search for tf files, include everything below provided directory"
+    },
+    {
+      "names": [
+        "-f",
+        "--format"
+      ],
+      "description": "Select output format: default, json, csv, checkstyle, junit, sarif. To use multiple formats, separate with a comma and specify a base output filename with --out. A file will be written for each type. The first format will additionally be written stdout",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Help for tfsec"
+    },
+    {
+      "names": [
+        "--ignore-hcl-errors"
+      ],
+      "description": "Stop and report an error if an HCL parse error is encountered"
+    },
+    {
+      "names": [
+        "--include-ignored"
+      ],
+      "description": "Include ignored checks in the result output"
+    },
+    {
+      "names": [
+        "--include-passed"
+      ],
+      "description": "Include passed checks in the result output"
+    },
+    {
+      "names": [
+        "--migrate-ignores"
+      ],
+      "description": "Migrate ignore codes to the new ID structure"
+    },
+    {
+      "names": [
+        "-m",
+        "--minimum-severity"
+      ],
+      "description": "The minimum severity to report. One of CRITICAL, HIGH, MEDIUM, LOW",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "minimumSeverity"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Disable colored output (American style!)"
+    },
+    {
+      "names": [
+        "--no-colour"
+      ],
+      "description": "Disable coloured output"
+    },
+    {
+      "names": [
+        "--no-ignores"
+      ],
+      "description": "Do not apply any ignore rules - normally ignored checks will fail"
+    },
+    {
+      "names": [
+        "--no-module-downloads"
+      ],
+      "description": "Do not download remote modules"
+    },
+    {
+      "names": [
+        "-O",
+        "--out"
+      ],
+      "description": "Set output file. This filename will have a format descriptor appended if multiple formats are specified with --format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "outputFile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--print-rego-input"
+      ],
+      "description": "Print a JSON representation of the input supplied to rego policies"
+    },
+    {
+      "names": [
+        "--rego-policy-dir"
+      ],
+      "description": "Directory to load rego policies from (recursively)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "regoPolicyDir"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--run-statistics"
+      ],
+      "description": "View statistics table of current findings"
+    },
+    {
+      "names": [
+        "--single-thread"
+      ],
+      "description": "Run checks using a single thread"
+    },
+    {
+      "names": [
+        "-s",
+        "--soft-fail"
+      ],
+      "description": "Runs checks but suppresses error code"
+    },
+    {
+      "names": [
+        "--tfvars-file"
+      ],
+      "description": "Path to .tfvars file, can be used multiple times and evaluated in order of specification",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tfvarsFilePath",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--update"
+      ],
+      "description": "Update to latest version"
+    },
+    {
+      "names": [
+        "--verbose"
+      ],
+      "description": "Enable verbose logging (same as debug)"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version information and exit"
+    },
+    {
+      "names": [
+        "-W",
+        "--workspace"
+      ],
+      "description": "Specify a workspace for ignore limits (default \"default\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "workspace",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "directory",
+      "template": "folders"
+    }
+  ]
+}

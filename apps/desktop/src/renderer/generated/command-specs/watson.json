@@ -1,0 +1,796 @@
+{
+  "name": "watson",
+  "description": "A wonderful CLI to track your time",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help for watson"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the version for watson"
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Color output"
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "No color output"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add time to a project with tag(s) that was not tracked live",
+      "options": [
+        {
+          "names": [
+            "--from",
+            "-f"
+          ],
+          "description": "Date and time of start of tracked activity",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--to",
+            "-t"
+          ],
+          "description": "Date and time of end of tracked activity",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--confirm-new-project",
+            "-c"
+          ],
+          "description": "Confirm creation of new tag"
+        }
+      ],
+      "args": [
+        {
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "aggregate",
+      "description": "Display a report of the time spent on each project aggregated by day",
+      "options": [
+        {
+          "names": [
+            "--current",
+            "-c"
+          ],
+          "description": "Include currently running frame in report"
+        },
+        {
+          "names": [
+            "--no-current",
+            "-C"
+          ],
+          "description": "Don't include currently running frame in report"
+        },
+        {
+          "names": [
+            "--from",
+            "-f"
+          ],
+          "description": "The date from when the reports should start. Defaults to seven days ago",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--to",
+            "-t"
+          ],
+          "description": "The date at which the report should stop (inclusive). Defaults to tomorrow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--project",
+            "-p"
+          ],
+          "description": "Reports activity only for the given project. You can add other projects by using this option several times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PROJECT",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag",
+            "-T"
+          ],
+          "description": "Reports activity only for frames containing the given tag. You can add several tags by using this option multiple times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--json",
+            "-j"
+          ],
+          "description": "Format output in JSON instead of plain text"
+        },
+        {
+          "names": [
+            "--csv",
+            "-s"
+          ],
+          "description": "Format output in CSV instead of plain text"
+        },
+        {
+          "names": [
+            "--pager",
+            "-g"
+          ],
+          "description": "View output through a pager"
+        },
+        {
+          "names": [
+            "--no-pager",
+            "-G"
+          ],
+          "description": "Don't view output through a pager"
+        }
+      ]
+    },
+    {
+      "name": "cancel",
+      "description": "Cancel the last call to the start command. The time will not be recorded"
+    },
+    {
+      "name": "config",
+      "description": "Get and set configuration options",
+      "options": [
+        {
+          "names": [
+            "--edit",
+            "-e"
+          ],
+          "description": "Edit the configuration file with an editor"
+        }
+      ],
+      "args": [
+        {
+          "name": "SECTION.OPTION"
+        },
+        {
+          "name": "VALUE",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "edit",
+      "description": "Edit a frame",
+      "options": [
+        {
+          "names": [
+            "--confirm-new-project",
+            "-c"
+          ],
+          "description": "Confirm addition of new project"
+        },
+        {
+          "names": [
+            "--confirm-new-tag",
+            "-b"
+          ],
+          "description": "Confirm creation of new tag"
+        }
+      ],
+      "args": [
+        {
+          "name": "FRAME ID",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "frames",
+      "description": "Display the list of all frame IDs"
+    },
+    {
+      "name": "help",
+      "description": "Display help information",
+      "args": [
+        {
+          "name": "COMMAND"
+        }
+      ]
+    },
+    {
+      "name": "log",
+      "description": "Display each recorded session during the given timespan",
+      "options": [
+        {
+          "names": [
+            "--current",
+            "-c"
+          ],
+          "description": "Include currently running frame in report"
+        },
+        {
+          "names": [
+            "--no-current",
+            "-C"
+          ],
+          "description": "Don't include currently running frame in report"
+        },
+        {
+          "names": [
+            "--reverse",
+            "-r"
+          ],
+          "description": "Reverse the order of the days in output"
+        },
+        {
+          "names": [
+            "--no-reverse",
+            "-R"
+          ],
+          "description": "Don't Reverse the order of the days in output"
+        },
+        {
+          "names": [
+            "--from",
+            "-f"
+          ],
+          "description": "The date from when the log should start. Defaults to seven days ago",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--to",
+            "-t"
+          ],
+          "description": "The date at which the log should stop (inclusive). Defaults to tomorrow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--year",
+            "-y"
+          ],
+          "description": "Reports activity for the current year"
+        },
+        {
+          "names": [
+            "--month",
+            "-m"
+          ],
+          "description": "Reports activity for the current month"
+        },
+        {
+          "names": [
+            "--luna",
+            "-l"
+          ],
+          "description": "Reports activity for the current moon cycle"
+        },
+        {
+          "names": [
+            "--week",
+            "-w"
+          ],
+          "description": "Reports activity for the current week"
+        },
+        {
+          "names": [
+            "--day",
+            "-d"
+          ],
+          "description": "Reports activity for the current day"
+        },
+        {
+          "names": [
+            "--all",
+            "-a"
+          ],
+          "description": "Reports all activities"
+        },
+        {
+          "names": [
+            "--project",
+            "-p"
+          ],
+          "description": "Logs activity only for the given project. You can add other projects by using this option several times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PROJECT",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag",
+            "-T"
+          ],
+          "description": "Logs activity only for frames containing the given tag. You can add several tags by using this option multiple times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-project"
+          ],
+          "description": "Logs activity for all projects but the given ones. You can ignore several projects by using the option multiple times. Any given project will be ignored",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PROJECT",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-tag"
+          ],
+          "description": "Logs activity for all tags but the given ones. You can ignore several tags by using the option multiple times. Any given tag will be ignored",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--json",
+            "-j"
+          ],
+          "description": "Format output in JSON instead of plain text"
+        },
+        {
+          "names": [
+            "--csv",
+            "-s"
+          ],
+          "description": "Format output in CSV instead of plain text"
+        },
+        {
+          "names": [
+            "--pager",
+            "-g"
+          ],
+          "description": "View output through a pager"
+        },
+        {
+          "names": [
+            "--no-pager",
+            "-G"
+          ],
+          "description": "Don't view output through a pager"
+        }
+      ]
+    },
+    {
+      "name": "merge",
+      "description": "Perform a merge of the existing frames with a conflicting frames file.  When storing the frames on a file hosting service, there is the possibility that the frame file goes out-of-sync due to one or more of the connected clients going offline. This can cause the frames to diverge",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "If specified, then the merge will automatically be performed"
+        }
+      ],
+      "args": [
+        {
+          "name": "FRAMES_WITH_CONFLICT"
+        }
+      ]
+    },
+    {
+      "name": "projects",
+      "description": "Display the list of all the existing projects"
+    },
+    {
+      "name": "remove",
+      "description": "Remove a frame. You can specify the frame either by id or by position (ex: -1 for the last frame)",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Don’t ask for confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "ID",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rename",
+      "description": "Rename a project or tag",
+      "args": [
+        {
+          "name": "type"
+        },
+        {
+          "name": "OLD_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "NEW_NAME"
+        }
+      ]
+    },
+    {
+      "name": "report",
+      "description": "Display a report of the time spent on each project",
+      "options": [
+        {
+          "names": [
+            "--current",
+            "-c"
+          ],
+          "description": "Include currently running frame in report"
+        },
+        {
+          "names": [
+            "--no-current",
+            "-C"
+          ],
+          "description": "Don't include currently running frame in report"
+        },
+        {
+          "names": [
+            "--from",
+            "-f"
+          ],
+          "description": "The date from when the report should start. Defaults to seven days ago",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--to",
+            "-t"
+          ],
+          "description": "The date at which the report should stop (inclusive). Defaults to tomorrow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--year",
+            "-y"
+          ],
+          "description": "Reports activity for the current year"
+        },
+        {
+          "names": [
+            "--month",
+            "-m"
+          ],
+          "description": "Reports activity for the current month"
+        },
+        {
+          "names": [
+            "--luna",
+            "-l"
+          ],
+          "description": "Reports activity for the current moon cycle"
+        },
+        {
+          "names": [
+            "--week",
+            "-w"
+          ],
+          "description": "Reports activity for the current week"
+        },
+        {
+          "names": [
+            "--day",
+            "-d"
+          ],
+          "description": "Reports activity for the current day"
+        },
+        {
+          "names": [
+            "--project",
+            "-p"
+          ],
+          "description": "Reports activity only for the given project. You can add other projects by using this option several times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PROJECT",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag",
+            "-T"
+          ],
+          "description": "Reports activity only for frames containing the given tag. You can add several tags by using this option multiple times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-project"
+          ],
+          "description": "Reports activity for all projects but the given ones. You can ignore several projects by using the option multiple times. Any given project will be ignored",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PROJECT",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-tag"
+          ],
+          "description": "Reports activity for all tags but the given ones. You can ignore several tags by using the option multiple times. Any given tag will be ignored",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--json",
+            "-j"
+          ],
+          "description": "Format output in JSON instead of plain text"
+        },
+        {
+          "names": [
+            "--csv",
+            "-s"
+          ],
+          "description": "Format output in CSV instead of plain text"
+        },
+        {
+          "names": [
+            "--pager",
+            "-g"
+          ],
+          "description": "View output through a pager"
+        },
+        {
+          "names": [
+            "--no-pager",
+            "-G"
+          ],
+          "description": "Don't view output through a pager"
+        }
+      ]
+    },
+    {
+      "name": "restart",
+      "description": "Restart monitoring time for a previously stopped project",
+      "options": [
+        {
+          "names": [
+            "--at"
+          ],
+          "description": "Start frame at this time. Must be in (YYYY-MM-DDT)?HH:MM(:SS)? format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--stop",
+            "-s"
+          ],
+          "description": "Stop an already running project"
+        },
+        {
+          "names": [
+            "--no-stop",
+            "-S"
+          ],
+          "description": "Don't stop an already running project"
+        }
+      ],
+      "args": [
+        {
+          "name": "FRAME",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "description": "Start monitoring time for the given project. You can add tags indicating more specifically what you are working on with +tag",
+      "options": [
+        {
+          "names": [
+            "--at"
+          ],
+          "description": "Start frame at this time. Must be in (YYYY-MM-DDT)?HH:MM(:SS)? format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--gap",
+            "-g"
+          ],
+          "description": "Leave gap between end time of previous project and start time of the current"
+        },
+        {
+          "names": [
+            "--no-gap",
+            "-G"
+          ],
+          "description": "Don't leave gap between end time of previous project and start time of the current"
+        },
+        {
+          "names": [
+            "--confirm-new-project",
+            "-c"
+          ],
+          "description": "Confirm addition of new project"
+        },
+        {
+          "names": [
+            "--confirm-new-tag",
+            "-b"
+          ],
+          "description": "Confirm creation of new tag"
+        }
+      ],
+      "args": [
+        {
+          "name": "ARGS",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Display when the current project was started and the time spent since",
+      "options": [
+        {
+          "names": [
+            "--project",
+            "-p"
+          ],
+          "description": "Only output project"
+        },
+        {
+          "names": [
+            "--tags",
+            "-t"
+          ],
+          "description": "Only show tags"
+        },
+        {
+          "names": [
+            "--elapsed",
+            "-e"
+          ],
+          "description": "Only show time elapsed"
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "description": "Stop monitoring time for the current project",
+      "options": [
+        {
+          "names": [
+            "--at"
+          ],
+          "description": "Stop frame at this time. Must be in (YYYY-MM-DDT)?HH:MM(:SS)? format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DATETIME"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sync",
+      "description": "Get the frames from the server and push the new ones"
+    },
+    {
+      "name": "tags",
+      "description": "Display the list of all the tags"
+    }
+  ]
+}

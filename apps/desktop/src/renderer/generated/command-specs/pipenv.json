@@ -1,0 +1,1210 @@
+{
+  "name": "pipenv",
+  "description": "Python package manager",
+  "options": [
+    {
+      "names": [
+        "--where"
+      ],
+      "description": "View project home information"
+    },
+    {
+      "names": [
+        "--venv"
+      ],
+      "description": "View virtualenv information"
+    },
+    {
+      "names": [
+        "--py"
+      ],
+      "description": "View python interpreter information"
+    },
+    {
+      "names": [
+        "--envs"
+      ],
+      "description": "View environment variable options"
+    },
+    {
+      "names": [
+        "--rm"
+      ],
+      "description": "Remove the virtualenv"
+    },
+    {
+      "names": [
+        "--bare"
+      ],
+      "description": "Minimal output"
+    },
+    {
+      "names": [
+        "--completion"
+      ],
+      "description": "Output completion (to be executed by shell)"
+    },
+    {
+      "names": [
+        "--man"
+      ],
+      "description": "Display manpage"
+    },
+    {
+      "names": [
+        "--support"
+      ],
+      "description": "View diagnostic information for use in GitHub issues"
+    },
+    {
+      "names": [
+        "--site-packages"
+      ],
+      "description": "Enable site-packages for the virtualenv [env var: PIPENV_SITE_PACKAGES]"
+    },
+    {
+      "names": [
+        "--no-site-packages"
+      ],
+      "description": "Enable site-packages for the virtualenv [env var: PIPENV_SITE_PACKAGES]"
+    },
+    {
+      "names": [
+        "--python"
+      ],
+      "description": "Specify which version of Python virtualenv should use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--three"
+      ],
+      "description": "Use python 3 when creating virtualenv"
+    },
+    {
+      "names": [
+        "--two"
+      ],
+      "description": "Use python 2 when creating virtualenv"
+    },
+    {
+      "names": [
+        "--clear"
+      ],
+      "description": "Clears caches (pipenv, pip, and pip-tools). [env var: PIPENV_CLEAR]"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Verbose mode"
+    },
+    {
+      "names": [
+        "--pypi-mirror"
+      ],
+      "description": "Specify a PyPi mirror",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mirror"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "View your current pipenv version"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "List commands"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "check",
+      "description": "Checks for PyUp Safety security vulnerabilities and against PEP 508 markers provided in Pipfile",
+      "options": [
+        {
+          "names": [
+            "--unused"
+          ],
+          "description": "Given a code path, show potentially unused dependencies",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "code path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--db"
+          ],
+          "description": "Path to a local PyUp Safety vulnerabilities database. Default: ENV PIPENV_SAFETY_DB or None",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Database"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i",
+            "--ignore"
+          ],
+          "description": "Ignore specified vulnerability during PyUp Safety checks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Vulnerability ID"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output"
+          ],
+          "description": "Translates to –json, –full-report or –bare from PyUp Safety check"
+        },
+        {
+          "names": [
+            "--key"
+          ],
+          "description": "Safety API key from PyUp.io for scanning dependencies against a live vulnerabilities database. Leave blank for scanning against a database that only updates once a month",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "API key"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--quiet"
+          ],
+          "description": "Quiet standard output, except vulnerability report"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "Specify a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--system"
+          ],
+          "description": "System pip management"
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Uninstalls all packages not specified in Pipfile.lock",
+      "options": [
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Minimal output"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Just output unneeded packages"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        }
+      ]
+    },
+    {
+      "name": "graph",
+      "description": "Displays currently-installed dependency graph information",
+      "options": [
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Minimal output"
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output JSON"
+        },
+        {
+          "names": [
+            "--json-tree"
+          ],
+          "description": "Output JSON in nested tree"
+        },
+        {
+          "names": [
+            "--reverse"
+          ],
+          "description": "Reversed dependency graph"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Initializes a package manager or installs all packages from Pipfile",
+      "options": [
+        {
+          "names": [
+            "--system"
+          ],
+          "description": "Install a Pipfile’s contents into its parent system"
+        },
+        {
+          "names": [
+            "-c",
+            "--code"
+          ],
+          "description": "Install packages automatically discovered from import statements"
+        },
+        {
+          "names": [
+            "--deploy"
+          ],
+          "description": "Enforce that your Pipfile.lock is up to date in deployment"
+        },
+        {
+          "names": [
+            "--site-packages"
+          ],
+          "description": "Enable site-packages for the virtualenv [env var: PIPENV_SITE_PACKAGES]"
+        },
+        {
+          "names": [
+            "--no-site-packages"
+          ],
+          "description": "Enable site-packages for the virtualenv [env var: PIPENV_SITE_PACKAGES]"
+        },
+        {
+          "names": [
+            "--skip-lock"
+          ],
+          "description": "Skip locking mechanisms and use the Pipfile instead during operation"
+        },
+        {
+          "names": [
+            "-e",
+            "--editable"
+          ],
+          "description": "An editable Python package URL or path, often to a VCS repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Package URL | path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-pipfile"
+          ],
+          "description": "Ignore Pipfile when installing, using the Pipfile.lock"
+        },
+        {
+          "names": [
+            "--selective-upgrade"
+          ],
+          "description": "Update specified packages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r",
+            "--requirements"
+          ],
+          "description": "Import a requirements.txt file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--extra-index-url"
+          ],
+          "description": "URLs to the extra PyPI compatible indexes to query for package look-ups",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i",
+            "--index"
+          ],
+          "description": "Target PyPI-compatible package index url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sequential"
+          ],
+          "description": "Install dependencies one-at-a-time, instead of concurrently"
+        },
+        {
+          "names": [
+            "-d",
+            "--dev"
+          ],
+          "description": "Install both develop and default packages"
+        },
+        {
+          "names": [
+            "--keep-outdated"
+          ],
+          "description": "Keep out-dated dependencies from being updated in Pipfile.lock"
+        },
+        {
+          "names": [
+            "--pre"
+          ],
+          "description": "Allow pre-releases"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "lock",
+      "description": "Generates Pipfile.lock",
+      "options": [
+        {
+          "names": [
+            "--dev-only"
+          ],
+          "description": "Generate a requirements file with only the development requirements"
+        },
+        {
+          "names": [
+            "--header"
+          ],
+          "description": "Add header to generated requirements"
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Generate requirements with no header"
+        },
+        {
+          "names": [
+            "-r",
+            "--requirements"
+          ],
+          "description": "Import a requirements.txt file"
+        },
+        {
+          "names": [
+            "-d",
+            "--dev"
+          ],
+          "description": "Passing --dev will include both the default and development dependencies"
+        },
+        {
+          "names": [
+            "--keep-outdated"
+          ],
+          "description": "Keep out-dated dependencies from being updated in Pipfile.lock"
+        },
+        {
+          "names": [
+            "--pre"
+          ],
+          "description": "Allow pre-releases"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use"
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror"
+        }
+      ],
+      "args": [
+        {
+          "name": "> requirements.txt",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "description": "View a given module in your editor",
+      "options": [
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use"
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror"
+        }
+      ],
+      "args": [
+        {
+          "name": "module"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Spawns a command installed into the virtualenv",
+      "options": [
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "scripts",
+      "description": "Lists scripts in current environment config",
+      "options": [
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Start a shell within the environment",
+      "options": [
+        {
+          "names": [
+            "--fancy"
+          ],
+          "description": "Run in shell in fancy mode. Make sure the shell have no path manipulating scripts. Run $pipenv shell for issues with compatibility mode"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--anyway"
+          ],
+          "description": "Always spawn a sub-shell, even if one is already spawned"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sync",
+      "description": "Installs all packages specified in Pipfile.lock",
+      "options": [
+        {
+          "names": [
+            "--system"
+          ],
+          "description": "Install a Pipfile’s contents into its parent system"
+        },
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Minimal output"
+        },
+        {
+          "names": [
+            "--sequential"
+          ],
+          "description": "Install dependencies one-at-a-time, instead of concurrently"
+        },
+        {
+          "names": [
+            "-d",
+            "--dev"
+          ],
+          "description": "Install both develop and default packages"
+        },
+        {
+          "names": [
+            "--keep-outdated"
+          ],
+          "description": "Keep out-dated dependencies from being updated in Pipfile.lock"
+        },
+        {
+          "names": [
+            "--pre"
+          ],
+          "description": "Allow pre-releases"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstalls a provided package and removes it from Pipfile",
+      "options": [
+        {
+          "names": [
+            "--all-dev"
+          ],
+          "description": "Uninstall all package from [dev-packages]"
+        },
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Purge all package(s) from virtualenv. Does not edit Pipfile"
+        },
+        {
+          "names": [
+            "-e",
+            "--editable"
+          ],
+          "description": "An editable Python package URL or path, often to a VCS repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--skip-lock"
+          ],
+          "description": "Skip locking mechanisms and use the Pipfile instead during operation"
+        },
+        {
+          "names": [
+            "-d",
+            "--dev"
+          ],
+          "description": "Install both develop and default packages"
+        },
+        {
+          "names": [
+            "--keep-outdated"
+          ],
+          "description": "Keep out-dated dependencies from being updated in Pipfile.lock"
+        },
+        {
+          "names": [
+            "--pre"
+          ],
+          "description": "Allow pre-releases"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Runs lock, then sync",
+      "options": [
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Minimal output"
+        },
+        {
+          "names": [
+            "--outdated"
+          ],
+          "description": "List out-of-date dependencies"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Just output unneeded packages"
+        },
+        {
+          "names": [
+            "-e",
+            "--editable"
+          ],
+          "description": "An editable Python package URL or path, often to a VCS repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-pipfile"
+          ],
+          "description": "Ignore Pipfile when installing, using the Pipfile.lock"
+        },
+        {
+          "names": [
+            "--selective-upgrade"
+          ],
+          "description": "Update specified packages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r",
+            "--requirements"
+          ],
+          "description": "Import a requirements.txt file"
+        },
+        {
+          "names": [
+            "--extra-index-url"
+          ],
+          "description": "URLs to the extra PyPI compatible indexes to query for package look-ups",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i",
+            "--index"
+          ],
+          "description": "Target PyPI-compatible package index url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "index"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sequential"
+          ],
+          "description": "Install dependencies one-at-a-time, instead of concurrently"
+        },
+        {
+          "names": [
+            "-d",
+            "--dev"
+          ],
+          "description": "Install both develop and default packages"
+        },
+        {
+          "names": [
+            "--keep-outdated"
+          ],
+          "description": "Keep out-dated dependencies from being updated in Pipfile.lock"
+        },
+        {
+          "names": [
+            "--pre"
+          ],
+          "description": "Allow pre-releases"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Specify which version of Python virtualenv should use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "py_version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--three"
+          ],
+          "description": "Use Python 3 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--two"
+          ],
+          "description": "Use Python 2 when creating virtualenv"
+        },
+        {
+          "names": [
+            "--clear"
+          ],
+          "description": "Clears caches (pipenv, pip, and pip-tools)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Verbose mode"
+        },
+        {
+          "names": [
+            "--pypi-mirror"
+          ],
+          "description": "If you would like to override the default PyPI index URLs with the URL for a PyPI mirror",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mirror url"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

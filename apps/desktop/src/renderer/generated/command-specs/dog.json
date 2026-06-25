@@ -1,0 +1,1672 @@
+{
+  "name": "dog",
+  "description": "A command-line DNS client",
+  "options": [
+    {
+      "names": [
+        "-q",
+        "--query"
+      ],
+      "description": "Host name or IP address to query",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "HOST"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--type"
+      ],
+      "description": "Type of the DNS record being queried (A, MX, NS...)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "TYPE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--nameserver"
+      ],
+      "description": "Address of the nameserver to send packets to",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ADDR"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-class"
+      ],
+      "description": "Network class of the DNS record being queried (IN, CH, HS)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "CLASS"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--edns"
+      ],
+      "description": "Whether to OPT in to EDNS (disable, hide, show)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUMBER"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--txid"
+      ],
+      "description": "Set the transaction ID to a specific value",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "CLASS"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Z"
+      ],
+      "description": "Set uncommon protocol-level tweaks",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "TWEAKS"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-U",
+        "--udp"
+      ],
+      "description": "Use the DNS protocol over UDP"
+    },
+    {
+      "names": [
+        "-T",
+        "--tcp"
+      ],
+      "description": "Use the DNS protocol over TCP"
+    },
+    {
+      "names": [
+        "-S",
+        "--tls"
+      ],
+      "description": "Use the DNS-over-TLS protocol"
+    },
+    {
+      "names": [
+        "-H",
+        "--https"
+      ],
+      "description": "Use the DNS-over-HTTPS protocol"
+    },
+    {
+      "names": [
+        "-1",
+        "--short"
+      ],
+      "description": "Short mode: display nothing but the first result"
+    },
+    {
+      "names": [
+        "-J",
+        "--json"
+      ],
+      "description": "Display the output as JSON"
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "When to colourise the output (always, automatic, never)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "arguments"
+        },
+        {
+          "name": "WHEN"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--seconds"
+      ],
+      "description": "Do not format durations, display them as seconds"
+    },
+    {
+      "names": [
+        "--time"
+      ],
+      "description": "Print how long the response took to arrive"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "A",
+      "description": "Query Domain A Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "MX",
+      "description": "Query Domain MX Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "CNAME",
+      "description": "Query Domain CNAME Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "TXT",
+      "description": "Query Domain TXT Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "NS",
+      "description": "Query NS Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "SOA",
+      "description": "Query SOA Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "TTL",
+      "description": "Query TTL Record",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "ANY +noall +answer",
+      "description": "Query ALL DNS Records",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    },
+    {
+      "name": "+nocomments +noquestion +noauthority +noadditional +nostats",
+      "description": "Query only answer section",
+      "options": [
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Host name or IP address to query",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Type of the DNS record being queried (A, MX, NS...)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TYPE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nameserver"
+          ],
+          "description": "Address of the nameserver to send packets to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ADDR"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-class"
+          ],
+          "description": "Network class of the DNS record being queried (IN, CH, HS)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--edns"
+          ],
+          "description": "Whether to OPT in to EDNS (disable, hide, show)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NUMBER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--txid"
+          ],
+          "description": "Set the transaction ID to a specific value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CLASS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Z"
+          ],
+          "description": "Set uncommon protocol-level tweaks",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TWEAKS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-U",
+            "--udp"
+          ],
+          "description": "Use the DNS protocol over UDP"
+        },
+        {
+          "names": [
+            "-T",
+            "--tcp"
+          ],
+          "description": "Use the DNS protocol over TCP"
+        },
+        {
+          "names": [
+            "-S",
+            "--tls"
+          ],
+          "description": "Use the DNS-over-TLS protocol"
+        },
+        {
+          "names": [
+            "-H",
+            "--https"
+          ],
+          "description": "Use the DNS-over-HTTPS protocol"
+        },
+        {
+          "names": [
+            "-1",
+            "--short"
+          ],
+          "description": "Short mode: display nothing but the first result"
+        },
+        {
+          "names": [
+            "-J",
+            "--json"
+          ],
+          "description": "Display the output as JSON"
+        },
+        {
+          "names": [
+            "--color"
+          ],
+          "description": "When to colourise the output (always, automatic, never)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arguments"
+            },
+            {
+              "name": "WHEN"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seconds"
+          ],
+          "description": "Do not format durations, display them as seconds"
+        },
+        {
+          "names": [
+            "--time"
+          ],
+          "description": "Print how long the response took to arrive"
+        }
+      ],
+      "args": [
+        {
+          "name": "arguments"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "arguments"
+    }
+  ]
+}

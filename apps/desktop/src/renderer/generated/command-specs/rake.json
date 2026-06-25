@@ -1,0 +1,133 @@
+{
+  "name": "rake",
+  "description": "A ruby build program with capabilities similar to make",
+  "options": [
+    {
+      "names": [
+        "-n",
+        "--dry-run"
+      ],
+      "description": "Do a dry run without executing actions"
+    },
+    {
+      "names": [
+        "-h",
+        "-H",
+        "--help"
+      ],
+      "description": "Display this help message"
+    },
+    {
+      "names": [
+        "-I",
+        "--libdir"
+      ],
+      "description": "Include LIBDIR in the search path for required modules",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LIBDIR",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--prereqs"
+      ],
+      "description": "Display the tasks and dependencies, then exit"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Do not log messages to standard output"
+    },
+    {
+      "names": [
+        "-f",
+        "--rakefile"
+      ],
+      "description": "Use FILE as the rakefile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--require"
+      ],
+      "description": "Require MODULE before executing rakefile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "MODULE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--silent"
+      ],
+      "description": "Like --quiet, but also suppresses the 'in directory' announcement"
+    },
+    {
+      "names": [
+        "-T",
+        "--tasks"
+      ],
+      "description": "Display the tasks and dependencies, then exit",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--trace"
+      ],
+      "description": "Turn on invoke/execute tracing, enable full backtrace",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Log message to standard output (default)"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Display the program version"
+    }
+  ],
+  "args": [
+    {
+      "name": "targets",
+      "optional": true,
+      "variadic": true,
+      "hasGenerator": true
+    }
+  ]
+}

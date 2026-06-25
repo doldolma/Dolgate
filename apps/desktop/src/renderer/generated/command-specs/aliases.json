@@ -1,0 +1,220 @@
+{
+  "name": "aliases",
+  "description": "Bash aliases on steroids, dynamic alias functions for bash",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Prints version information"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add an alias via the cli",
+      "args": [
+        {
+          "name": "name"
+        },
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "clone",
+      "description": "Clone external aliases",
+      "options": [
+        {
+          "names": [
+            "-E",
+            "--enable"
+          ],
+          "description": "Whether to enable the user if they are not currently enabled"
+        }
+      ],
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "repo_url"
+        }
+      ]
+    },
+    {
+      "name": "directories",
+      "description": "List all directories initialized with aliases"
+    },
+    {
+      "name": "exec",
+      "description": "Execute an alias for a given directory",
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        },
+        {
+          "name": "name",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Prints help information"
+    },
+    {
+      "name": "init",
+      "description": "Initialize a directory for aliases",
+      "options": [
+        {
+          "names": [
+            "-g",
+            "--global"
+          ],
+          "description": "Returns the global initialization for the app"
+        },
+        {
+          "names": [
+            "-u",
+            "--user"
+          ],
+          "description": "Initialize aliases for a specific user",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "user"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List the aliases available",
+      "options": [
+        {
+          "names": [
+            "-g",
+            "--global"
+          ],
+          "description": "List only global aliases"
+        },
+        {
+          "names": [
+            "-l",
+            "--local"
+          ],
+          "description": "List only local aliases"
+        },
+        {
+          "names": [
+            "-d",
+            "--directory"
+          ],
+          "description": "List aliases for a specific directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "name"
+          ],
+          "description": "List aliases for with a specific name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pull",
+      "description": "Pull a cloned user's aliases",
+      "args": [
+        {
+          "name": "username"
+        }
+      ]
+    },
+    {
+      "name": "rehash",
+      "description": "Update the aliases"
+    },
+    {
+      "name": "remove",
+      "description": "Remove an alias via the cli",
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "description": "List the users",
+      "subcommands": [
+        {
+          "name": "disable",
+          "description": "Disable a user's aliases",
+          "args": [
+            {
+              "name": "username"
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "description": "Enable a user's aliases",
+          "args": [
+            {
+              "name": "username"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Prints this message or the help of the given subcommand(s)"
+        },
+        {
+          "name": "move",
+          "description": "Move a user up or down the prioritization list",
+          "args": [
+            {
+              "name": "username"
+            },
+            {
+              "name": "prioritization"
+            }
+          ]
+        },
+        {
+          "name": "use",
+          "description": "Assign a user to the top of the priority list",
+          "args": [
+            {
+              "name": "username"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

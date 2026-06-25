@@ -1,0 +1,1016 @@
+{
+  "name": "dbt",
+  "description": "CLI for dbt - Data Build Tool",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Currently installed version"
+    },
+    {
+      "names": [
+        "-r",
+        "--record-timing-info"
+      ],
+      "description": "Create a new file to record timing info",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--debug"
+      ],
+      "description": "Redirect debug logs to standard out"
+    },
+    {
+      "names": [
+        "--log-format"
+      ],
+      "description": "Specify how dbt's logs should be formatted",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "log format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-write-json"
+      ],
+      "description": "Prevent dbt from writing JSOn artifacts to the 'target/' directory"
+    },
+    {
+      "names": [
+        "-S",
+        "--strict"
+      ],
+      "description": "Perform extra validation of dbt objects and internal consistency checks during compilation. Use only during development"
+    },
+    {
+      "names": [
+        "--warn-error"
+      ],
+      "description": "Convert dbt warnings into errors"
+    },
+    {
+      "names": [
+        "--partial-parse"
+      ],
+      "description": "Configure partial parsing for your project"
+    },
+    {
+      "names": [
+        "--no-partial-parse"
+      ],
+      "description": "Turn off partial parsing for your project"
+    },
+    {
+      "names": [
+        "--use-colors"
+      ],
+      "description": "Default value -- colorize run logs"
+    },
+    {
+      "names": [
+        "--no-use-colors"
+      ],
+      "description": "Disable log colorizing"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "build",
+      "description": "Run models, test tests, snapshot snapshots, and seed seeds",
+      "options": [
+        {
+          "names": [
+            "--full-refresh"
+          ],
+          "description": "Treat incremental models as table models"
+        },
+        {
+          "names": [
+            "-x",
+            "--fail-fast"
+          ],
+          "description": "Exit immediately if a single model fails to build"
+        },
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Use the selected profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "Target profile configuration i.e. prod/dev",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--vars"
+          ],
+          "description": "Variable values to override dbt_project.yml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "variables"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--threads"
+          ],
+          "description": "Number of concurrent database jobs",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "THREADS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--select"
+          ],
+          "description": "Select subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Runs the models in a project",
+      "options": [
+        {
+          "names": [
+            "--full-refresh"
+          ],
+          "description": "Treat incremental models as table models"
+        },
+        {
+          "names": [
+            "-x",
+            "--fail-fast"
+          ],
+          "description": "Exit immediately if a single model fails to build"
+        },
+        {
+          "names": [
+            "--use-colors"
+          ],
+          "description": "Default value -- colorize run logs"
+        },
+        {
+          "names": [
+            "--no-use-colors"
+          ],
+          "description": "Disable log colorizing"
+        },
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Select the profile to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "The target profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Target profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--vars"
+          ],
+          "description": "Variable values to override dbt_project.yml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "variables"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--threads"
+          ],
+          "description": "Number of concurrent database jobs",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "threads"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--select"
+          ],
+          "description": "Select subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "Debugs dbt connections and projects",
+      "options": [
+        {
+          "names": [
+            "--config-dir"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initializes a new dbt project",
+      "options": [
+        {
+          "names": [
+            "--adapter"
+          ],
+          "description": "Add an adapter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "adapter"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "compile",
+      "description": "Compiles (but does not run) the models in a project",
+      "options": [
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Select the profile to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "The target profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Target profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--vars"
+          ],
+          "description": "Variable values to override dbt_project.yml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Variable values"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--threads"
+          ],
+          "description": "Number of concurrent database jobs",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "THREADS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--select"
+          ],
+          "description": "Select subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Select subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Exclude subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        },
+        {
+          "names": [
+            "--selector"
+          ],
+          "description": "This flag specifies one or more named selectors, defined in a <selector name>.yml file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "YAML selector file name",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--defer"
+          ],
+          "description": "Defer"
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Executes tests defined in a project",
+      "options": [
+        {
+          "names": [
+            "-x",
+            "--fail-fast"
+          ],
+          "description": "Exit immediately if a single model fails to build"
+        },
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Select the profile to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--data"
+          ],
+          "description": "Run only custom data tests"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Run only schema tests"
+        },
+        {
+          "names": [
+            "-s",
+            "--select"
+          ],
+          "description": "Select subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        },
+        {
+          "names": [
+            "--selector"
+          ],
+          "description": "This flag specifies one or more named selectors, defined in a <selector name>.yml file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "YAML selector file name",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--defer"
+          ],
+          "description": "Defer"
+        }
+      ]
+    },
+    {
+      "name": "deps",
+      "description": "Downloads dependencies for a project"
+    },
+    {
+      "name": "snapshot",
+      "description": "Executes 'snapshot' jobs defined in a project",
+      "options": [
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profiles directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-x",
+            "--fail-fast"
+          ],
+          "description": "Exit immediately if a single model fails to build"
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Select the profile to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Profile name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "The target profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Target profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--vars"
+          ],
+          "description": "Variable values to override dbt_project.yml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Variable values"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--threads"
+          ],
+          "description": "Number of concurrent database jobs",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "thread"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--select"
+          ],
+          "description": "Select subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Exclude subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Deletes artifacts present in the dbt project"
+    },
+    {
+      "name": "seed",
+      "description": "Loads CSV files into the database",
+      "options": [
+        {
+          "names": [
+            "--profiles-dir"
+          ],
+          "description": "Set the profiles directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profiles directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Select the profile to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Profile name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-x",
+            "--fail-fast"
+          ],
+          "description": "Exit immediately if a single model fails to build"
+        },
+        {
+          "names": [
+            "--select"
+          ],
+          "description": "Run specific seeds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Select subset"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Exclude subset of models",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Exclude subset",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bypass-cache"
+          ],
+          "description": "Bypass the cache"
+        },
+        {
+          "names": [
+            "--selector"
+          ],
+          "description": "This flag specifies one or more named selectors, defined in a <selector name>.yml file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "YAML selector file name",
+              "variadic": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "docs",
+      "description": "Generates documentation for a project",
+      "subcommands": [
+        {
+          "name": "generate",
+          "description": "Generate your project's documentation website",
+          "options": [
+            {
+              "names": [
+                "--no-compile"
+              ],
+              "description": "Skip re-compilation"
+            }
+          ]
+        },
+        {
+          "name": "serve",
+          "description": "Serve your documentation on a local webserver (default prot 8000)",
+          "options": [
+            {
+              "names": [
+                "--profiles-dir"
+              ],
+              "description": "Skip re-compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "PROFILES_DIR",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--profile"
+              ],
+              "description": "Choose a profile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "PROFILE NAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--target"
+              ],
+              "description": "The target profile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Target profile"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--port"
+              ],
+              "description": "Choose a port",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "port number"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "description": "Provides tools for working with source data (including validating that sources are 'fresh')",
+      "subcommands": [
+        {
+          "name": "snapshot-freshness",
+          "options": [
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Override the destination for sources.json",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "FILEPATH",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--select"
+              ],
+              "description": "This flag specifies one or more selection-type arguments used to filter the nodes returned by the dbt ls command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Select subset",
+                  "variadic": true
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run-operation",
+      "description": "Runs arbitrary maintenance SQL against the database",
+      "options": [
+        {
+          "names": [
+            "--args"
+          ],
+          "description": "Supply arguments to the macro",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ARGS"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "MACRO"
+        }
+      ]
+    },
+    {
+      "name": "rpc",
+      "description": "Runs an RPC server that clients can submit queries to",
+      "options": [
+        {
+          "names": [
+            "--host"
+          ],
+          "description": "Specify the host to listen on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HOST"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "The port to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PORT"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ls",
+      "description": "Lists resources defined in a dbt project",
+      "options": [
+        {
+          "names": [
+            "--resource-type"
+          ],
+          "description": "This flag limits the 'resource types' that dbt will return in the dbt ls command. By default, the following resources are included in the results of dbt ls: models, snapshots, seeds, tests, and sources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "resource-type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--select"
+          ],
+          "description": "This flag specifies one or more selection-type arguments used to filter the nodes returned by the dbt ls command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SELECTION_ARG",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Specify selectors that should be excluded from the list of returned nodes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SELECTOR",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selector"
+          ],
+          "description": "This flag specifies one or more named selectors, defined in a <selector name>.yml file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "YAML selector file name",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output"
+          ],
+          "description": "This flag controls the format of output from the dbt ls command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output",
+              "variadic": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "parse",
+      "description": "Parse dbt project and write detailed timing information"
+    }
+  ]
+}

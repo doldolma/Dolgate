@@ -1,0 +1,598 @@
+{
+  "name": "cordova",
+  "description": "Manage your Cordova application",
+  "options": [
+    {
+      "names": [
+        "-d",
+        "--verbose"
+      ],
+      "description": "Pipe out more verbose output to your shell. You can also subscribe to log and warn events if you are consuming cordova-cli as a node module by calling cordova.on('log', function() {}) or cordova.on('warn', function() {})"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print out the version of your cordova-cli install"
+    },
+    {
+      "names": [
+        "--no-update-notifier"
+      ],
+      "description": "Will disable updates check"
+    },
+    {
+      "names": [
+        "--nohooks"
+      ],
+      "description": "Suppress executing hooks (taking RegExp hook patterns as parameters)"
+    },
+    {
+      "names": [
+        "--no-telemetry"
+      ],
+      "description": "Disable telemetry collection for the current command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "create",
+      "description": "Create a project",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--verbose"
+          ],
+          "description": "Pipe out more verbose output to your shell. You can also subscribe to log and warn events if you are consuming cordova-cli as a node module by calling cordova.on('log', function() {}) or cordova.on('warn', function() {})"
+        },
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Print out the version of your cordova-cli install"
+        },
+        {
+          "names": [
+            "--no-update-notifier"
+          ],
+          "description": "Will disable updates check"
+        },
+        {
+          "names": [
+            "--nohooks"
+          ],
+          "description": "Suppress executing hooks (taking RegExp hook patterns as parameters)"
+        },
+        {
+          "names": [
+            "--no-telemetry"
+          ],
+          "description": "Disable telemetry collection for the current command"
+        },
+        {
+          "names": [
+            "--template"
+          ],
+          "description": "Use a custom template located locally, in NPM, or GitHub"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        },
+        {
+          "name": "id",
+          "optional": true
+        },
+        {
+          "name": "name",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Get help for a command",
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "telemetry",
+      "description": "Turn telemetry collection on or off",
+      "args": [
+        {
+          "name": "on"
+        },
+        {
+          "name": "off"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Set, get, delete, edit, and list global cordova options",
+      "subcommands": [
+        {
+          "name": "ls",
+          "description": "Lists contents of config file"
+        },
+        {
+          "name": "edit",
+          "description": "Opens the config file in an editor"
+        },
+        {
+          "name": "set",
+          "description": "Sets the config key to the value. If value is omitted, then it sets it to \"true\"",
+          "args": [
+            {
+              "name": "key"
+            },
+            {
+              "name": "value"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Echo the config value to stdout",
+          "args": [
+            {
+              "name": "key"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes the key from all configuration files",
+          "args": [
+            {
+              "name": "key"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "info",
+      "description": "Generate project information"
+    },
+    {
+      "name": "requirements",
+      "description": "Checks and print out all the installation requirements for platforms specified",
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "platform",
+      "description": "Manage project platforms",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add specified platforms",
+          "options": [
+            {
+              "names": [
+                "--nosave"
+              ],
+              "description": "Do not save"
+            },
+            {
+              "names": [
+                "--link"
+              ],
+              "description": "When platform-spec is a local path, link the platform library directly instead of making a copy of it",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path",
+                  "template": "folders"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "platform",
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove specified platforms",
+          "options": [
+            {
+              "names": [
+                "--nosave"
+              ],
+              "description": "Do not delete specified platforms from"
+            }
+          ],
+          "args": [
+            {
+              "name": "platform",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Update specified platforms",
+          "options": [
+            {
+              "names": [
+                "--save"
+              ],
+              "description": "Updates the version specified in **config.xml**"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List all installed and available platforms"
+        }
+      ]
+    },
+    {
+      "name": "plugin",
+      "description": "Manage project plugins",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add specified plugins",
+          "options": [
+            {
+              "names": [
+                "--searchpath"
+              ],
+              "description": "When looking up plugins by ID, look in this directory and each of its subdirectories before hitting the registry. Multiple search paths can be specified. Use ':' as a separator in *nix based systems and ';' for Windows",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--noregistry"
+              ],
+              "description": "Don't search the registry for plugins"
+            },
+            {
+              "names": [
+                "--link"
+              ],
+              "description": "When installing from a local path, creates a symbolic link instead of copying files. The extent to which files are linked varies by platform. Useful for plugin development"
+            },
+            {
+              "names": [
+                "--nosave"
+              ],
+              "description": "Do NOT save the <plugin-spec> as part of the plugin element into config.xml or package.json"
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Forces copying source files from the plugin even if the same file already exists in the target directory"
+            }
+          ],
+          "args": [
+            {
+              "name": "plugin",
+              "variadic": true,
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove plugins with the given IDs/name",
+          "options": [
+            {
+              "names": [
+                "--nosave"
+              ],
+              "description": "Do NOT remove the specified plugin from config.xml or package.json"
+            }
+          ],
+          "args": [
+            {
+              "name": "plugin",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List currently installed plugins"
+        }
+      ]
+    },
+    {
+      "name": "prepare",
+      "description": "Copy files into platform(s) for building",
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "compile",
+      "description": "Compile project for platform(s)",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--verbose"
+          ],
+          "description": "Pipe out more verbose output to your shell. You can also subscribe to log and warn events if you are consuming cordova-cli as a node module by calling cordova.on('log', function() {}) or cordova.on('warn', function() {})"
+        },
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Print out the version of your cordova-cli install"
+        },
+        {
+          "names": [
+            "--no-update-notifier"
+          ],
+          "description": "Will disable updates check"
+        },
+        {
+          "names": [
+            "--nohooks"
+          ],
+          "description": "Suppress executing hooks (taking RegExp hook patterns as parameters)"
+        },
+        {
+          "names": [
+            "--no-telemetry"
+          ],
+          "description": "Disable telemetry collection for the current command"
+        },
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Perform a debug build. This typically translates to debug mode for the underlying platform being built"
+        },
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Perform a release build. This typically translates to release mode for the underlying platform being built"
+        },
+        {
+          "names": [
+            "--device"
+          ],
+          "description": "Build it for a device"
+        },
+        {
+          "names": [
+            "--emulator"
+          ],
+          "description": "Build it for an emulator. In particular, the platform architecture might be different for a device vs. emulator"
+        },
+        {
+          "names": [
+            "--buildConfig"
+          ],
+          "description": "Use the specified build configuration file. build.json file is used to specify parameters to customize the app build process especially related to signing the package",
+          "takesArg": true,
+          "args": [
+            {
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Build project for platform(s) (prepare + compile)",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--verbose"
+          ],
+          "description": "Pipe out more verbose output to your shell. You can also subscribe to log and warn events if you are consuming cordova-cli as a node module by calling cordova.on('log', function() {}) or cordova.on('warn', function() {})"
+        },
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Print out the version of your cordova-cli install"
+        },
+        {
+          "names": [
+            "--no-update-notifier"
+          ],
+          "description": "Will disable updates check"
+        },
+        {
+          "names": [
+            "--nohooks"
+          ],
+          "description": "Suppress executing hooks (taking RegExp hook patterns as parameters)"
+        },
+        {
+          "names": [
+            "--no-telemetry"
+          ],
+          "description": "Disable telemetry collection for the current command"
+        },
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Perform a debug build. This typically translates to debug mode for the underlying platform being built"
+        },
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Perform a release build. This typically translates to release mode for the underlying platform being built"
+        },
+        {
+          "names": [
+            "--device"
+          ],
+          "description": "Build it for a device"
+        },
+        {
+          "names": [
+            "--emulator"
+          ],
+          "description": "Build it for an emulator. In particular, the platform architecture might be different for a device vs. emulator"
+        },
+        {
+          "names": [
+            "--buildConfig"
+          ],
+          "description": "Use the specified build configuration file. build.json file is used to specify parameters to customize the app build process especially related to signing the package",
+          "takesArg": true,
+          "args": [
+            {
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Cleanup project from build artifacts",
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run project (including prepare && compile)",
+      "options": [
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "Lists available targets. Displays both device and emulator deployment targets unless specified"
+        },
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Deploy a debug build. This is the default behavior unless --release is specified"
+        },
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Deploy a release build"
+        },
+        {
+          "names": [
+            "--noprepare"
+          ],
+          "description": "Skip preparing (available in Cordova v6.2 or later)"
+        },
+        {
+          "names": [
+            "--nobuild"
+          ],
+          "description": "Skip building"
+        },
+        {
+          "names": [
+            "--device"
+          ],
+          "description": "Deploy to a device"
+        },
+        {
+          "names": [
+            "--emulator"
+          ],
+          "description": "Deploy to an emulator"
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "Deploy to a specific target emulator/device. Use --list to display target options",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--buildConfig"
+          ],
+          "description": "Use the specified build configuration file. build.json file is used to specify parameters to customize the app build process especially related to signing the package",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "configFile",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "serve",
+      "description": "Run project with a local webserver (including prepare)",
+      "args": [
+        {
+          "name": "port"
+        }
+      ]
+    }
+  ]
+}

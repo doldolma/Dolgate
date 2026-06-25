@@ -1,0 +1,270 @@
+{
+  "name": "spring",
+  "description": "The Spring Boot CLI is a command line tool that you can use to bootstrap a new project from start.spring.io or encode a password",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help for spring"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Get spring CLI version"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Print additional status information for the command you are running"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Initialize a new project using Spring Initializr",
+      "options": [
+        {
+          "names": [
+            "-a",
+            "---artifact-id"
+          ],
+          "description": "Project coordinates",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-b",
+            "--boot-version"
+          ],
+          "description": "Spring Boot version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Version",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--build"
+          ],
+          "description": "Build system to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "System"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--dependencies"
+          ],
+          "description": "Comma-separated list of dependency identifiers to include in the generated project",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Dependencies",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--description"
+          ],
+          "description": "Project description",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "description"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force overwrite of existing files"
+        },
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "Format of the generated content",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-g",
+            "--group-id"
+          ],
+          "description": "Project coordinates",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Group ID"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-j",
+            "--java-version"
+          ],
+          "description": "Language level",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Version",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "List the capabilities of the service"
+        },
+        {
+          "names": [
+            "-n",
+            "--name"
+          ],
+          "description": "Project name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--packaging"
+          ],
+          "description": "Project packaging",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Packaging"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--package-name"
+          ],
+          "description": "Package name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "Project type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "URL of the service to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Project version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-x",
+            "--extract"
+          ],
+          "description": "Extract the project archive. Inferred if a location is specified without an extension"
+        }
+      ]
+    },
+    {
+      "name": "encodepassword",
+      "description": "Encode a password for use with Spring Security",
+      "options": [
+        {
+          "names": [
+            "-a",
+            "--algorithm"
+          ],
+          "description": "The algorithm to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Algorithm"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "Password"
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Start a nested shell"
+    },
+    {
+      "name": "help",
+      "description": "Show help for other commands",
+      "args": [
+        {
+          "name": "Command"
+        }
+      ]
+    }
+  ]
+}

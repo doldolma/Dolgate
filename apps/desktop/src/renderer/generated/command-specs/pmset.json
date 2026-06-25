@@ -1,0 +1,125 @@
+{
+  "name": "pmset",
+  "description": "Power management settings",
+  "options": [
+    {
+      "names": [
+        "-a"
+      ],
+      "description": "Settings for all",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "setting"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-b"
+      ],
+      "description": "Settings for battery",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "setting"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Settings for charger",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "setting"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u"
+      ],
+      "description": "Settings for UPS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "setting"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "-g",
+      "description": "GETTING",
+      "args": [
+        {
+          "optional": true
+        },
+        {
+          "name": "UUID",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "schedule",
+      "description": "For setting up one-time power events",
+      "options": [
+        {
+          "names": [
+            "cancel"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "type"
+        },
+        {
+          "name": "date/time"
+        }
+      ]
+    },
+    {
+      "name": "repeat",
+      "description": "For setting up daily/weekly power on and power off events",
+      "subcommands": [
+        {
+          "name": "cancel"
+        }
+      ],
+      "args": [
+        {
+          "name": "type"
+        },
+        {
+          "name": "weekdays"
+        },
+        {
+          "name": "date/time"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "optional": true
+    }
+  ]
+}

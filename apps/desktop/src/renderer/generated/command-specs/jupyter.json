@@ -1,0 +1,657 @@
+{
+  "name": "jupyter",
+  "description": "An interactive computing environment for notebook programming",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for jupyter"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the jupyter command's version and exit"
+    },
+    {
+      "names": [
+        "--config-dir"
+      ],
+      "description": "Show Jupyter config dir"
+    },
+    {
+      "names": [
+        "--data-dir"
+      ],
+      "description": "Show Jupyter data dir"
+    },
+    {
+      "names": [
+        "--runtime-dir"
+      ],
+      "description": "Show Jupyter runtime dir"
+    },
+    {
+      "names": [
+        "--paths"
+      ],
+      "description": "Show all Jupyter paths. Add --json for machine-readable format"
+    },
+    {
+      "names": [
+        "--json"
+      ],
+      "description": "Output paths as machine-readable json"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Output debug information about paths"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "bundlerextension",
+      "description": "Work with Jupyter bundler extensions",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--user"
+          ],
+          "description": "Apply the operation only for the given user",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "user"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--system"
+          ],
+          "description": "Apply the operation system-wide"
+        },
+        {
+          "names": [
+            "--sys-prefix"
+          ],
+          "description": "Use sys.prefix as the prefix for installing nbextensions (for environments, packaging)"
+        },
+        {
+          "names": [
+            "--py",
+            "--python"
+          ],
+          "description": "Install from a Python package"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "enable",
+          "description": "Enable a bundler extension"
+        },
+        {
+          "name": "disable",
+          "description": "Disable a bundler extension"
+        },
+        {
+          "name": "list",
+          "description": "List bundler extensions"
+        }
+      ]
+    },
+    {
+      "name": "kernel",
+      "description": "Run a kernel locally in a subprocess",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--kernel"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "KernelApp.kernel_name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ip"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "KernelManager.ip"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "kernelspec",
+      "description": "Manage Jupyter kernel specifications",
+      "subcommands": [
+        {
+          "name": "list",
+          "options": [
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Output spec name and location as json"
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "description": "Install a kernel specification directory",
+          "options": [
+            {
+              "names": [
+                "--log-level"
+              ],
+              "description": "Set the log level by value or name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "level"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--config"
+              ],
+              "description": "Choose a config file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "config",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--debug"
+              ],
+              "description": "Set log level to logging.DEBUG (maximize logging output)"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show this message"
+            }
+          ],
+          "args": [
+            {
+              "name": "kernel"
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "description": "Alias for remove",
+          "args": [
+            {
+              "name": "kernel"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove one or more Jupyter kernelspecs by name",
+          "args": [
+            {
+              "name": "kernel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "migrate",
+      "description": "Migrate configuration and data from .ipython prior to 4.0 to Jupyter locations",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--generate-config"
+          ],
+          "description": "Generate default config file"
+        },
+        {
+          "names": [
+            "-y"
+          ],
+          "description": "Answer yes to any questions instead of prompting"
+        }
+      ]
+    },
+    {
+      "name": "nbconvert",
+      "description": "This application is used to convert notebook files (*.ipynb) to various other formats",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "nbextension",
+      "description": "",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "install",
+          "description": "Install an nbextension",
+          "args": [
+            {
+              "name": "extension"
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "description": "Uninstall an nbextension",
+          "args": [
+            {
+              "name": "extension"
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "description": "Enable an nbextension",
+          "args": [
+            {
+              "name": "extension"
+            }
+          ]
+        },
+        {
+          "name": "disable",
+          "description": "Disable an nbextension",
+          "args": [
+            {
+              "name": "extension"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List nbextensions"
+        }
+      ]
+    },
+    {
+      "name": "notebook",
+      "description": "Run the Jupyter notebook server",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "List currently running notebook servers"
+        },
+        {
+          "name": "stop",
+          "description": "Stop currently running notebook server"
+        },
+        {
+          "name": "password",
+          "description": "Set a password for the notebook server"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a notebook",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "serverextension",
+      "description": "Manage server extensions",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "troubleshoot",
+      "description": "Log for troubleshooting"
+    },
+    {
+      "name": "trust",
+      "description": "Manage trust",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Set log level to logging.DEBUG (maximize logging output)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show this message"
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "Set the log level by value or name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Choose a config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

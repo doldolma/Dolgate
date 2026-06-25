@@ -1,0 +1,27 @@
+{
+  "name": "kubens",
+  "description": "Switch between Kubernetes-namespaces",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for kubens"
+    },
+    {
+      "names": [
+        "--current",
+        "-c"
+      ],
+      "description": "Show current namespace"
+    }
+  ],
+  "args": [
+    {
+      "name": "namespace",
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

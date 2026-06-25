@@ -1,0 +1,50 @@
+{
+  "name": "nrm",
+  "description": "Use the right package manage - remove",
+  "options": [
+    {
+      "names": [
+        "-g"
+      ],
+      "description": "Operates in 'global' mode, so that packages are removed from the prefix folder instead of the current working directory"
+    },
+    {
+      "names": [
+        "-D"
+      ],
+      "description": "Package will be removed from your `devDependencies`"
+    },
+    {
+      "names": [
+        "-P"
+      ],
+      "description": "Remove package from your `peerDependencies`"
+    },
+    {
+      "names": [
+        "-O"
+      ],
+      "description": "Remove package from your `optionalDependencies`"
+    },
+    {
+      "names": [
+        "--frozen"
+      ],
+      "description": "Don't generate a lockfile and fail if an update is needed"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    }
+  ],
+  "args": [
+    {
+      "name": "package",
+      "variadic": true,
+      "hasGenerator": true
+    }
+  ]
+}

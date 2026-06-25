@@ -1,0 +1,287 @@
+{
+  "name": "quasar",
+  "description": "Quasar Framework CLI",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "create",
+      "description": "Create a new Quasar project",
+      "options": [
+        {
+          "names": [
+            "--kit",
+            "-k"
+          ],
+          "description": "Use specific starter kit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "kit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--branch",
+            "-b"
+          ],
+          "description": "Use specific branch of the starter kit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--clone",
+            "-c"
+          ],
+          "description": "Use git clone"
+        },
+        {
+          "names": [
+            "--offline",
+            "-o"
+          ],
+          "description": "Use a cached starter kit"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Output usage information"
+        }
+      ],
+      "args": [
+        {
+          "name": "project-name"
+        }
+      ]
+    },
+    {
+      "name": "info",
+      "description": "Gather environment information for issue reporting",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Output usage information"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade Quasar Framework packages",
+      "options": [
+        {
+          "names": [
+            "--install",
+            "-i"
+          ],
+          "description": "Also perform package upgrades"
+        },
+        {
+          "names": [
+            "--prerelease",
+            "-p"
+          ],
+          "description": "Allow pre-release versions (alpha/beta)"
+        },
+        {
+          "names": [
+            "--major",
+            "-m"
+          ],
+          "description": "Allow newer major versions (breaking changes)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Output usage information"
+        }
+      ]
+    },
+    {
+      "name": "serve",
+      "description": "Start development server",
+      "options": [
+        {
+          "names": [
+            "--port",
+            "-p"
+          ],
+          "description": "Port to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--hostname",
+            "-H"
+          ],
+          "description": "Address to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--gzip",
+            "-g"
+          ],
+          "description": "Compress content"
+        },
+        {
+          "names": [
+            "--silent",
+            "-s"
+          ],
+          "description": "Suppress log message"
+        },
+        {
+          "names": [
+            "--colors"
+          ],
+          "description": "Log messages with colors"
+        },
+        {
+          "names": [
+            "--open",
+            "-o"
+          ],
+          "description": "Open browser window after starting"
+        },
+        {
+          "names": [
+            "--cache",
+            "-c"
+          ],
+          "description": "Cache time (max-age) in seconds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cache"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--micro",
+            "-m"
+          ],
+          "description": "Use micro-cache",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "micro"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--history"
+          ],
+          "description": "Use history api fallback"
+        },
+        {
+          "names": [
+            "--index",
+            "-i"
+          ],
+          "description": "History mode (only!) index url path",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "index"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--https"
+          ],
+          "description": "Enable HTTPS"
+        },
+        {
+          "names": [
+            "--cert",
+            "-C"
+          ],
+          "description": "Path to SSL cert file (Optional)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cert"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key",
+            "-K"
+          ],
+          "description": "Path to SSL key file (Optional)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--proxy"
+          ],
+          "description": "Proxy specific requests defined in file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "proxy"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cors"
+          ],
+          "description": "Enable CORS for all requests"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Output usage information"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    }
+  ]
+}

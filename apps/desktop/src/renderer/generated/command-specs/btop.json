@@ -1,0 +1,66 @@
+{
+  "name": "btop",
+  "description": "Beautifuler htop (interactive process viewer)",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Shows help for btop"
+    },
+    {
+      "names": [
+        "--low-color",
+        "-lc"
+      ],
+      "description": "Disables truecolor, converts 24-bit colors to 256-color"
+    },
+    {
+      "names": [
+        "--tty_on",
+        "-t"
+      ],
+      "description": "Forces ON tty mode, max 16 colors and tty friendly graph symbol"
+    },
+    {
+      "names": [
+        "--tty_off",
+        "+t"
+      ],
+      "description": "Forces OFF tty mode"
+    },
+    {
+      "names": [
+        "--preset",
+        "-p"
+      ],
+      "description": "Start with preset",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "id"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--utf-force"
+      ],
+      "description": "Force start even if no UTF-8 locale was detected"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Starts in DEBUG mode: shows microsecond timer for information collect and screen draw functions and sets loglevel to DEBUG"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Shows the version of btop"
+    }
+  ]
+}

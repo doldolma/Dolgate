@@ -1,0 +1,120 @@
+{
+  "name": "graphcdn",
+  "description": "GraphCDN CLI",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "login",
+      "description": "Authenticate the CLI",
+      "options": [
+        {
+          "names": [
+            "--token"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Create a new GraphCDN service",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Skip all the questions and just init"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pull",
+      "description": "Pull the latest service configuration",
+      "options": [
+        {
+          "names": [
+            "--service"
+          ],
+          "description": "Name of the service to pull from (only required without graphcdn.yml)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--env"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "env"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "push",
+      "description": "Push and deploy the latest app configuration",
+      "options": [
+        {
+          "names": [
+            "--env"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "env"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "field",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

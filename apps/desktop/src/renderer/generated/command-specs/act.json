@@ -1,0 +1,469 @@
+{
+  "name": "act",
+  "description": "Run GitHub actions locally by specifying the event name (e.g. `push`) or an action name directly",
+  "options": [
+    {
+      "names": [
+        "--bind",
+        "-b"
+      ],
+      "description": "Bind working directory to container, rather than copy"
+    },
+    {
+      "names": [
+        "--bug-report"
+      ],
+      "description": "Display system information for bug report"
+    },
+    {
+      "names": [
+        "--container-cap-add"
+      ],
+      "description": "Kernel capabilities to add to the workflow containers (e.g. --container-cap-add SYS_PTRACE)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "container-cap-add"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--container-cap-drop"
+      ],
+      "description": "Kernel capabilities to remove from the workflow containers (e.g. --container-cap-drop SYS_PTRACE)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "container-cap-drop"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--defaultbranch"
+      ],
+      "description": "The name of the main branch",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "defaultbranch"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--detect-event"
+      ],
+      "description": "Use first event type from workflow as event that triggered the workflow"
+    },
+    {
+      "names": [
+        "--env"
+      ],
+      "description": "Env to make available to actions with optional value (e.g. --env myenv=foo or --env myenv)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "env"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--eventpath",
+        "-e"
+      ],
+      "description": "Path to event JSON file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "eventpath"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--graph",
+        "-g"
+      ],
+      "description": "Draw workflows"
+    },
+    {
+      "names": [
+        "--job",
+        "-j"
+      ],
+      "description": "Run job",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "job"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--list",
+        "-l"
+      ],
+      "description": "List workflows"
+    },
+    {
+      "names": [
+        "--platform",
+        "-P"
+      ],
+      "description": "Custom image to use per platform (e.g. -P ubuntu-18.04=nektos/act-environments-ubuntu:18.04)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "platform"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--privileged"
+      ],
+      "description": "Use privileged mode"
+    },
+    {
+      "names": [
+        "--pull",
+        "-p"
+      ],
+      "description": "Pull docker image(s) even if already present"
+    },
+    {
+      "names": [
+        "--rebuild"
+      ],
+      "description": "Rebuild local action docker image(s) even if already present"
+    },
+    {
+      "names": [
+        "--remote-name"
+      ],
+      "description": "Git remote name that will be used to retrieve url of git repo",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "remote-name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--reuse",
+        "-r"
+      ],
+      "description": "Don't remove container(s) on successfully completed workflow(s) to maintain state between runs"
+    },
+    {
+      "names": [
+        "--rm"
+      ],
+      "description": "Automatically remove container(s)/volume(s) after a workflow(s) failure"
+    },
+    {
+      "names": [
+        "--secret",
+        "-s"
+      ],
+      "description": "Secret to make available to actions with optional value (e.g. -s mysecret=foo or -s mysecret)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "secret"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--use-gitignore"
+      ],
+      "description": "Controls whether paths specified in .gitignore should be copied into container"
+    },
+    {
+      "names": [
+        "--userns"
+      ],
+      "description": "User namespace to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "userns"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--watch",
+        "-w"
+      ],
+      "description": "Watch the contents of the local repo and run when files change"
+    },
+    {
+      "names": [
+        "--actor",
+        "-a"
+      ],
+      "description": "User that triggered the event",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "actor"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--artifact-server-path"
+      ],
+      "description": "Defines the path where the artifact server stores uploads and retrieves downloads from. If not specified the artifact server will not start",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "artifact-server-path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--artifact-server-port"
+      ],
+      "description": "Defines the port where the artifact server listens (will only bind to localhost)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "artifact-server-port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--container-architecture"
+      ],
+      "description": "Architecture which should be used to run containers, e.g.: linux/amd64. If not specified, will use host default architecture. Requires Docker server API Version 1.41+. Ignored on earlier Docker server platforms",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "container-architecture"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--container-daemon-socket"
+      ],
+      "description": "Path to Docker daemon socket which will be mounted to containers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "container-daemon-socket"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--directory",
+        "-C"
+      ],
+      "description": "Working directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--dryrun",
+        "-n"
+      ],
+      "description": "Dryrun mode"
+    },
+    {
+      "names": [
+        "--env-file"
+      ],
+      "description": "Environment file to read and use as env in the containers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "env-file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--github-instance"
+      ],
+      "description": "GitHub instance to use. Don't use this if you are not using GitHub Enterprise Server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "github-instance"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--insecure-secrets"
+      ],
+      "description": "NOT RECOMMENDED! Doesn't hide secrets while printing logs"
+    },
+    {
+      "names": [
+        "--json"
+      ],
+      "description": "Output logs in json format"
+    },
+    {
+      "names": [
+        "--no-recurse"
+      ],
+      "description": "Flag to disable running workflows from subdirectories of specified path in '--workflows'/'-W' flag"
+    },
+    {
+      "names": [
+        "--no-skip-checkout"
+      ],
+      "description": "Do not skip actions/checkout"
+    },
+    {
+      "names": [
+        "--quiet",
+        "-q"
+      ],
+      "description": "Disable logging of output from steps"
+    },
+    {
+      "names": [
+        "--secret-file"
+      ],
+      "description": "File with list of secrets to read from (e.g. --secret-file .secrets)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "secret-file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Verbose output"
+    },
+    {
+      "names": [
+        "--workflows",
+        "-W"
+      ],
+      "description": "Path to workflow file(s)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "workflows",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "completion",
+      "description": "Generate the autocompletion script for the specified shell",
+      "subcommands": [
+        {
+          "name": "bash",
+          "description": "Generate the autocompletion script for bash",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "fish",
+          "description": "Generate the autocompletion script for fish",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "powershell",
+          "description": "Generate the autocompletion script for powershell",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "zsh",
+          "description": "Generate the autocompletion script for zsh",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "completion",
+          "description": "Generate the autocompletion script for the specified shell",
+          "subcommands": [
+            {
+              "name": "bash",
+              "description": "Generate the autocompletion script for bash"
+            },
+            {
+              "name": "fish",
+              "description": "Generate the autocompletion script for fish"
+            },
+            {
+              "name": "powershell",
+              "description": "Generate the autocompletion script for powershell"
+            },
+            {
+              "name": "zsh",
+              "description": "Generate the autocompletion script for zsh"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

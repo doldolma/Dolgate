@@ -1,0 +1,363 @@
+{
+  "name": "maigret",
+  "description": "Maigret is an easy-to-use and powerful OSINT tool for collecting a dossier on a person by username only",
+  "options": [
+    {
+      "names": [
+        "-a",
+        "--all-sites"
+      ],
+      "description": "Use all sites for scan"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Display version information and dependencies"
+    },
+    {
+      "names": [
+        "--timeout"
+      ],
+      "description": "Time in seconds to wait for response to requests (default {settings.timeout}s). A longer timeout will be more likely to get results from slow sites. On the other hand, this may cause a long delay to gather all results",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Timeout"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--retries"
+      ],
+      "description": "Attempts to restart temporarily failed requests",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Retries"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--max-connections"
+      ],
+      "description": "Allowed number of concurrent connections (default {settings.max_connections})",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Connections"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-recursion"
+      ],
+      "description": "Disable recursive search by additional data extracted from pages"
+    },
+    {
+      "names": [
+        "--no-extracting"
+      ],
+      "description": "Disable parsing pages for additional data and other usernames"
+    },
+    {
+      "names": [
+        "--id-type"
+      ],
+      "description": "Specify identifier(s) type (default: username)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--db"
+      ],
+      "description": "Load Maigret database from a JSON file or HTTP web resource",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "DB path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cookies-jar-file"
+      ],
+      "description": "File with cookies",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Cookie file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ignore-ids"
+      ],
+      "description": "Do not make search by the specified username or other ids",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Ignored ids",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-fo",
+        "--folderoutput"
+      ],
+      "description": "If using multiple usernames, the output of the results will be saved to this folder",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Reports path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--proxy"
+      ],
+      "description": "Make requests over a proxy. e.g. socks5://127.0.0.1:1080",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Proxy URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tor-proxy"
+      ],
+      "description": "Specify URL of your Tor gateway. Default is socks5://127.0.0.1:9050",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Tor Proxy URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--i2p-proxy"
+      ],
+      "description": "Specify URL of your I2P gateway. Default is http://127.0.0.1:4444",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "I2P URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--with-domains"
+      ],
+      "description": "Enable (experimental) feature of checking domains on usernames"
+    },
+    {
+      "names": [
+        "--tags"
+      ],
+      "description": "Specify tags of sites (see `--stats`)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Tags",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--site"
+      ],
+      "description": "Limit analysis to just the specified sites (multiple option)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Site name",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--use-disabled-sites"
+      ],
+      "description": "Use disabled sites to search (may cause many false positives)"
+    },
+    {
+      "names": [
+        "--parse"
+      ],
+      "description": "Parse page by URL and extract username and IDs to use for search",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Parse URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--submit"
+      ],
+      "description": "URL of existing profile in new site to submit",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Site URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--self-check"
+      ],
+      "description": "Do self check for sites and database and disable non-working ones"
+    },
+    {
+      "names": [
+        "--stats"
+      ],
+      "description": "Show database statistics (most frequent sites engines and tags)"
+    },
+    {
+      "names": [
+        "--print-not-found"
+      ],
+      "description": "Print sites where the username was not found"
+    },
+    {
+      "names": [
+        "--print-errors"
+      ],
+      "description": "Print errors messages: connection, captcha, site country ban, etc"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Display extra information and metrics"
+    },
+    {
+      "names": [
+        "-info",
+        "--vv"
+      ],
+      "description": "Display extra/service information and metrics"
+    },
+    {
+      "names": [
+        "--debug",
+        "-vvv",
+        "-d"
+      ],
+      "description": "Display extra/service/debug information and metrics, save responses in debug.log"
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Don't color terminal output"
+    },
+    {
+      "names": [
+        "--no-progressbar"
+      ],
+      "description": "Don't show progressbar"
+    },
+    {
+      "names": [
+        "-T",
+        "--txt"
+      ],
+      "description": "Create a TXT report (one report per username)"
+    },
+    {
+      "names": [
+        "-C",
+        "--csv"
+      ],
+      "description": "Create a CSV report (one report per username)"
+    },
+    {
+      "names": [
+        "-H",
+        "--html"
+      ],
+      "description": "Create an HTML report (one report per username)"
+    },
+    {
+      "names": [
+        "-X",
+        "--xmind"
+      ],
+      "description": "Create a XMind 8 mindmap report (one report per username)"
+    },
+    {
+      "names": [
+        "-P",
+        "--pdf"
+      ],
+      "description": "Create a PDF report (one report per username)"
+    },
+    {
+      "names": [
+        "-G",
+        "--graph"
+      ],
+      "description": "Create a graph report (one report per username)"
+    },
+    {
+      "names": [
+        "-J",
+        "--json"
+      ],
+      "description": "Generate a JSON report of specific type: simple, ndjson (one report per username)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--reports-sorting"
+      ],
+      "description": "Method of results sorting in reports (default: in order of getting the result)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Type"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "user",
+      "variadic": true
+    }
+  ]
+}

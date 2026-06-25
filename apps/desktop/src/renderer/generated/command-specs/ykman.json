@@ -1,0 +1,3319 @@
+{
+  "name": "ykman",
+  "description": "Configure your YubiKey via the command line",
+  "options": [
+    {
+      "names": [
+        "-d",
+        "--device"
+      ],
+      "description": "Specify which YubiKey to interact with by serial number",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SERIAL",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--reader"
+      ],
+      "description": "Use an exteral smart card reader. Conflicts with --device and list",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--log-level"
+      ],
+      "description": "Enable logging at given verbosity level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "log level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-file"
+      ],
+      "description": "Write logs to the given FILE instead of standard error; ignore unless --log-level is also set",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--diagnose"
+      ],
+      "description": "Show diagnostics information useful for troubleshooting"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version information about the app"
+    },
+    {
+      "names": [
+        "--full-help"
+      ],
+      "description": "Show --help, including hidden commands, and exit"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show usage information"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "info",
+      "description": "Displays information about the attached YubiKey such as serial number, firmware version, capabilities, etc",
+      "options": [
+        {
+          "names": [
+            "-c",
+            "--check-fips"
+          ],
+          "description": "Check if YubiKey is in FIPS Approved mode (available on YubiKey 4 FIPS only)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show info usage information"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List connected YubiKeys",
+      "options": [
+        {
+          "names": [
+            "-s",
+            "--serials"
+          ],
+          "description": "Output only serial numbers, one per line (devices without serial will be omitted)"
+        },
+        {
+          "names": [
+            "-r",
+            "--readers"
+          ],
+          "description": "List available smart card readers"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show list usage information"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Enable or disable applications",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show config usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "mode",
+          "description": "Manage connection modes (USB Interfaces)",
+          "options": [
+            {
+              "names": [
+                "--touch-eject"
+              ],
+              "description": "When set, the button toggles the state of the smartcard between ejected and inserted (CCID mode only)"
+            },
+            {
+              "names": [
+                "--autoeject-timeout"
+              ],
+              "description": "When set, the button toggles the state of the smartcard between ejected and inserted (CCID mode only)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "SECONDS"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--chalresp-timeout"
+              ],
+              "description": "When set, the smartcard will automatically eject after the given time. Implies --touch-eject (CCID mode only)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "SECONDS"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show config mode usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "MODE",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "nfc",
+          "description": "Enable or disable applications over NFC",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-e",
+                "--enable"
+              ],
+              "description": "Enable applications",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "application"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-d",
+                "--disable"
+              ],
+              "description": "Disable applications",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "application"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-a",
+                "--enable-all"
+              ],
+              "description": "Enable all applications"
+            },
+            {
+              "names": [
+                "-D",
+                "--disable-all"
+              ],
+              "description": "Disable all applications"
+            },
+            {
+              "names": [
+                "-l",
+                "--list"
+              ],
+              "description": "List enabled applications"
+            },
+            {
+              "names": [
+                "-L",
+                "--lock-code"
+              ],
+              "description": "Current application configuration lock code",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show config nfc usage information"
+            }
+          ]
+        },
+        {
+          "name": "set-lock-code",
+          "description": "Set or change the configuration lock code",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-L",
+                "--lock-code"
+              ],
+              "description": "Current lock code",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-n",
+                "--new-lock-code"
+              ],
+              "description": "New lock code. Conflicts with --generate",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-c",
+                "--clear"
+              ],
+              "description": "Clear the lock code"
+            },
+            {
+              "names": [
+                "-g",
+                "--generate"
+              ],
+              "description": "Generate a random lock code. Conflicts with --new-lock-code"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show config set-lock-code usage information"
+            }
+          ]
+        },
+        {
+          "name": "usb",
+          "description": "Enable or disable applications over USB",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-e",
+                "--enable"
+              ],
+              "description": "Enable applications",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "applications"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-d",
+                "--disable"
+              ],
+              "description": "Disable applications",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "application"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-l",
+                "--list"
+              ],
+              "description": "List enabled applications"
+            },
+            {
+              "names": [
+                "-a",
+                "--enable-all"
+              ],
+              "description": "Enable all applications"
+            },
+            {
+              "names": [
+                "-D",
+                "--disable-all"
+              ],
+              "description": "Disable all applications"
+            },
+            {
+              "names": [
+                "-L",
+                "--lock-code"
+              ],
+              "description": "Current application configuration lock code",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--touch-eject"
+              ],
+              "description": "When set, the button toggles the state of the smartcard between ejected and inserted (CCID mode only)"
+            },
+            {
+              "names": [
+                "--no-touch-eject"
+              ],
+              "description": "Disable touch eject (CCID only)"
+            },
+            {
+              "names": [
+                "--autoeject-timeout"
+              ],
+              "description": "When set, the smartcard will automatically eject after the given time. Implies --touch-eject",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "SECONDS"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--chalresp-timeout"
+              ],
+              "description": "Sets the timeout when waiting for touch for challenge-response in the OTP application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "SECONDS"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show config usb usage information"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fido",
+      "description": "Manage the FIDO applications",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show fido usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Display general status of the FIDO2 application",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show fido info usage information"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset all FIDO applications. This action will wipe all FIDO credentials, including FIDO U2F credentials, on the YubiKey and remove the PIN code",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show fido reset usage information"
+            }
+          ]
+        },
+        {
+          "name": "access",
+          "description": "Manage the PIN for FIDO",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show fido access usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "change-pin",
+              "description": "Set or change PIN code",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "Current PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-pin"
+                  ],
+                  "description": "Current PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-u",
+                    "--u2f"
+                  ],
+                  "description": "Set FIDO U2F pin instead of FIDO2 PIN"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido access change-pin usage information"
+                }
+              ]
+            },
+            {
+              "name": "verify-pin",
+              "description": "Verify the PIN against a YubiKey",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "Current PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido access verify-pin usage information"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "credentials",
+          "description": "Manage discoverable (resident) credentials. This command lets you manage credentials stored on your YubiKey. Credential management is only available when a FIDO PIN is set on the YubiKey",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show fido credentials usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a credential",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm deletion without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido credentials delete usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "QUERY"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "List credentials",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido credentials list usage information"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "fingerprints",
+          "description": "Manage fingerprints",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show fido fingerprints usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "add",
+              "description": "Add a new fingerprint",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido fingerprints add usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "NAME"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Delete a fingerprint. Delete a fingerprint from the YubiKey by its ID, which can be seen by running the \"list\" subcommand",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm deletion without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido fingerprints delete usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "ID"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "List registered fingerprint. Lists fingerprints by ID and (if available) label",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido fingerprints list usage information"
+                }
+              ]
+            },
+            {
+              "name": "rename",
+              "description": "Set the label for a fingerprint",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show fido rename usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "ID"
+                },
+                {
+                  "name": "NAME"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "oath",
+      "description": "Manage the OATH applications",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show oath usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Display general status of OATH application",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show oath info usage information"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset all OATH data. This action will delete all accounts and restore factory settings for the OATH application on the YubiKey",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show oath reset usage information"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            }
+          ]
+        },
+        {
+          "name": "access",
+          "description": "Manage password protection for OATH",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show oath access usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "change",
+              "description": "Change the password used to protect OATH accounts. Alows you to set or change a password that will be required to access the OATH accounts stored on the YubiKey",
+              "options": [
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-c",
+                    "--clear"
+                  ],
+                  "description": "Clear the current password"
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-password"
+                  ],
+                  "description": "Provide a new password as an argument",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath access change usage information"
+                }
+              ]
+            },
+            {
+              "name": "forget",
+              "description": "Remove a stored password from this computer",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--all"
+                  ],
+                  "description": "Remove all stored passwords"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath forget usage information"
+                }
+              ]
+            },
+            {
+              "name": "remember",
+              "description": "Store the YubiKeys password on this computer to avoid having to enter it on each use",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath remember usage information"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "accounts",
+          "description": "Manage and use OATH accounts",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show oath accounts usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "add",
+              "description": "Add a new account",
+              "options": [
+                {
+                  "names": [
+                    "-o",
+                    "--oath-type"
+                  ],
+                  "description": "Time-based (TOTP) or counter-based (HOTP) account",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "oath type"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-d",
+                    "--digits"
+                  ],
+                  "description": "Number of digits in generated code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "number of digits"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-a",
+                    "--algorithm"
+                  ],
+                  "description": "Algorithm to use for code generation",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "algorithm"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-c",
+                    "--counter"
+                  ],
+                  "description": "Initial counter value for HOTP accounts",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "INTEGER"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-i",
+                    "--issuer"
+                  ],
+                  "description": "Issuer of the account",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--period"
+                  ],
+                  "description": "Number of seconds a TOTP code is valid",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "INTEGER"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-t",
+                    "--touch"
+                  ],
+                  "description": "Require touch on YubiKey to generate code"
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts add usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "NAME"
+                },
+                {
+                  "name": "SECRET",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "code",
+              "description": "Generate codes",
+              "options": [
+                {
+                  "names": [
+                    "-H",
+                    "--show-hidden"
+                  ],
+                  "description": "Include hidden accounts"
+                },
+                {
+                  "names": [
+                    "-s",
+                    "--single"
+                  ],
+                  "description": "Ensure only a single match, and output only the code"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts code usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "QUERY",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Delete an account",
+              "options": [
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm deletion without prompting"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts delete usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "QUERY"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "List all accounts",
+              "options": [
+                {
+                  "names": [
+                    "-H",
+                    "--show-hidden"
+                  ],
+                  "description": "Include hidden accounts"
+                },
+                {
+                  "names": [
+                    "-o",
+                    "--oath-type"
+                  ],
+                  "description": "Display the OATH type"
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--period"
+                  ],
+                  "description": "Display the period"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts list usage information"
+                }
+              ]
+            },
+            {
+              "name": "rename",
+              "description": "Rename an account (Requires YubiKey 5.3 or later)",
+              "options": [
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm rename without prompting"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts rename usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "QUERY"
+                },
+                {
+                  "name": "NAME"
+                }
+              ]
+            },
+            {
+              "name": "uri",
+              "description": "Add a new account from an otpauth:// URI",
+              "options": [
+                {
+                  "names": [
+                    "-t",
+                    "--touch"
+                  ],
+                  "description": "Require touch on YubiKey to generate code"
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Provide a password to unlock the YubiKey",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-r",
+                    "--remember"
+                  ],
+                  "description": "Remember the password on this machine"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show oath accounts uri usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "URI"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "openpgp",
+      "description": "Manage the OpenPGP applications",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show openpgp usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Display general status of the OpenPGP application",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show openpgp info usage information"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset all the OpenPGP data",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show openpgp reset usage information"
+            }
+          ]
+        },
+        {
+          "name": "access",
+          "description": "Manage PIN, Reset Code, and Admin PIN",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show openpgp access usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "set-retries",
+              "description": "Set PIN, Reset Code and Admin PIN retries",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--admin-pin"
+                  ],
+                  "description": "Admin PIN for OpenPGP",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp access set-retries usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "PIN-RETRIES"
+                },
+                {
+                  "name": "RESET-CODE-RETRIES"
+                },
+                {
+                  "name": "ADMIN-PIN-RETRIES"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "certificates",
+          "description": "Manage certificates",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show openpgp certificates usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete an OpenPGP certificate",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--admin-pin"
+                  ],
+                  "description": "Admin PIN for OpenPGP",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp certificates delete usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                }
+              ]
+            },
+            {
+              "name": "export",
+              "description": "Export an OpenPGP certificate",
+              "options": [
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp certificates export usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                },
+                {
+                  "name": "CERTIFICATE",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "import",
+              "description": "Import an OpenPGP certificate",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--admin-pin"
+                  ],
+                  "description": "Admin PIN for OpenPGP",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp certificates export usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                },
+                {
+                  "name": "CERTIFICATE",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "keys",
+          "description": "Manage private keys",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show openpgp keys usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "attest",
+              "description": "Generate a attestation certificate for a key. Attestation is used to show that an asymmetric key was generated on the YubiKey and therefore doesn't exist outside the device",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp keys attest usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                },
+                {
+                  "name": "CERTIFICATE",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "import",
+              "description": "Import a private key (ONLY SUPPORTS ATTESTATION KEY)",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--admin-pin"
+                  ],
+                  "description": "Admin PIN for OpenPGP",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp keys import usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                },
+                {
+                  "name": "PRIVATE-KEY"
+                }
+              ]
+            },
+            {
+              "name": "set-touch",
+              "description": "Set touch policy for OpenPGP key",
+              "options": [
+                {
+                  "names": [
+                    "-a",
+                    "--admin-pin"
+                  ],
+                  "description": "Admin PIN for OpenPGP",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show openpgp set-touch usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "KEY"
+                },
+                {
+                  "name": "POLICY"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "otp",
+      "description": "Manage the YubiOTP applications",
+      "options": [
+        {
+          "names": [
+            "--access-code"
+          ],
+          "description": "A 6 byte access code. Use \"-\" as a value to prompt for input",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HEX"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show otp usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "calculate",
+          "description": "Perform a challenge-response operation. Send a challenge (in hex) to a YubiKey slot with a challenge-response credential, and read the response. Supports output as a OATH-TOTP code",
+          "options": [
+            {
+              "names": [
+                "-T",
+                "--totp"
+              ],
+              "description": "Generate a TOTP code, use the current time if challenge is omitted"
+            },
+            {
+              "names": [
+                "-d",
+                "--digits"
+              ],
+              "description": "Number of digits in generated TOTP code",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "number of digits"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp calculate usage information"
+            }
+          ]
+        },
+        {
+          "name": "chalresp",
+          "description": "Program a challenge-response operation",
+          "options": [
+            {
+              "names": [
+                "-t",
+                "--touch"
+              ],
+              "description": "Require touch on the YubiKey to generate a response"
+            },
+            {
+              "names": [
+                "-T",
+                "--totp"
+              ],
+              "description": "Use a base32 encoded key (optionally padded) for TOTP credentials"
+            },
+            {
+              "names": [
+                "-g",
+                "--generate"
+              ],
+              "description": "Generate a random secret key. Conflicts with KEY argument"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp chalresp usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            },
+            {
+              "name": "KEY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes the configuration stored in a slot",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp delete usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            }
+          ]
+        },
+        {
+          "name": "hotp",
+          "description": "Program an HMAC-SHA1 OATH-HOTP credential",
+          "options": [
+            {
+              "names": [
+                "-d",
+                "--digits"
+              ],
+              "description": "Number of digits in generated code",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "number of digits"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-c",
+                "--counter"
+              ],
+              "description": "Initial counter value",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "INTEGER"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-i",
+                "--identifier"
+              ],
+              "description": "Token identifier",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "TEXT"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-enter"
+              ],
+              "description": "Don't send an Enter keystroke after outputting the code"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp hotp usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            },
+            {
+              "name": "KEY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "info",
+          "description": "Display general status of the YubiKey OTP slots",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp info usage information"
+            }
+          ]
+        },
+        {
+          "name": "ndef",
+          "description": "Configure a slot to be used over NDEF (NFC)",
+          "options": [
+            {
+              "names": [
+                "--prefix"
+              ],
+              "description": "Added before the NDEF payload. Typically a URI",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "TEXT"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-t",
+                "--ndef-type"
+              ],
+              "description": "NDEF payload type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "NDEF type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp ndef usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            }
+          ]
+        },
+        {
+          "name": "settings",
+          "description": "Update the settings for a slot",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-A",
+                "--new-access-code"
+              ],
+              "description": "Set a new 6 byte access code for the slot. Use \"-\" as a value to prompt for input",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--delete-access-code"
+              ],
+              "description": "Remove access code from the slot"
+            },
+            {
+              "names": [
+                "--enter",
+                "--no-enter"
+              ],
+              "description": "Should send 'Enter' keystroke after slot output. (default: enter)"
+            },
+            {
+              "names": [
+                "-p",
+                "--pacing"
+              ],
+              "description": "Throttle output speed by adding a delay (in ms) between characters emitted",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "milliseconds"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--use-numeric-keypad"
+              ],
+              "description": "Use scancodes for numeric keypad when sending digits. Helps with some keyboard layouts"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp settings usage information"
+            }
+          ]
+        },
+        {
+          "name": "static",
+          "description": "Configure a static password",
+          "options": [
+            {
+              "names": [
+                "-g",
+                "--generate"
+              ],
+              "description": "Generate a random password"
+            },
+            {
+              "names": [
+                "-l",
+                "--length"
+              ],
+              "description": "Length of generated password",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "LENGTH"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-k",
+                "--keyboard-layout"
+              ],
+              "description": "Keyboard layout to use for the static password",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "layout"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-enter"
+              ],
+              "description": "Don't send an Enter keystroke after outputting the password"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp chalresp usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            },
+            {
+              "name": "PASSWORD",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "swap",
+          "description": "Swaps the two slot configurations",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp swap usage information"
+            }
+          ]
+        },
+        {
+          "name": "yubiotp",
+          "description": "Program a Yubico OTP credential",
+          "options": [
+            {
+              "names": [
+                "-P",
+                "--public-id"
+              ],
+              "description": "Public identifier prefix",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "MODHEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-p",
+                "--private-id"
+              ],
+              "description": "6 byte private identifier",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-k",
+                "--key"
+              ],
+              "description": "16 byte secret key",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HEX"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-enter"
+              ],
+              "description": "Don't send an Enter keystroke after emitting the OTP"
+            },
+            {
+              "names": [
+                "-S",
+                "--serial-public-id"
+              ],
+              "description": "Use YubiKey serial number as public ID. Conflicts with --public-id"
+            },
+            {
+              "names": [
+                "-g",
+                "--generate-private-id"
+              ],
+              "description": "Generate a random private ID. Conflicts with --private-id"
+            },
+            {
+              "names": [
+                "-G",
+                "--generate-key"
+              ],
+              "description": "Generate a random secret key. Conflicts with --key"
+            },
+            {
+              "names": [
+                "-u",
+                "--upload"
+              ],
+              "description": "Upload credential to YubiCloud (opens in browser). Conflicts with --force"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show otp yubiotp usage information"
+            }
+          ],
+          "args": [
+            {
+              "name": "slot"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "piv",
+      "description": "Manage the PIV applications",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show piv usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Display general status of the PIV application",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv info usage information"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset all PIV data",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Confirm the action without prompting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv reset usage information"
+            }
+          ]
+        },
+        {
+          "name": "access",
+          "description": "Manage PIN, PUK, and Management Key",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv access usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "change-management-key",
+              "description": "Change the management key",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-t",
+                    "--touch"
+                  ],
+                  "description": "Require touch on YubiKey to generate code"
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-management-key"
+                  ],
+                  "description": "A new management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEX"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "Current management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEX"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-a",
+                    "--algorithm"
+                  ],
+                  "description": "Management key algorithm",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "algorithm"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--protect"
+                  ],
+                  "description": "Store new management key on the YubiKey, protected by PIN. A random key will be used if no key is provided"
+                },
+                {
+                  "names": [
+                    "-g",
+                    "--generate"
+                  ],
+                  "description": "Generate a random management key. Implied by --protect unless --new-management-key is also given. Conflicts with --new-management-key"
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv access change-management-key usage information"
+                }
+              ]
+            },
+            {
+              "name": "change-pin",
+              "description": "Change the PIN code",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "Current PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-pin"
+                  ],
+                  "description": "A new PIN",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv access change-pin usage information"
+                }
+              ]
+            },
+            {
+              "name": "change-puk",
+              "description": "Change the PUK code",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--puk"
+                  ],
+                  "description": "Current PUK code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-puk"
+                  ],
+                  "description": "A new PUK",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv access change-puk usage information"
+                }
+              ]
+            },
+            {
+              "name": "set-retries",
+              "description": "Set the number of PIN and PUK retry attempts",
+              "options": [
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-f",
+                    "--force"
+                  ],
+                  "description": "Confirm the action without prompting"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv access set-retries usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "PIN-RETRIES"
+                },
+                {
+                  "name": "PUK-RETRIES"
+                }
+              ]
+            },
+            {
+              "name": "unblock-pin",
+              "description": "Unblock the PIN (using PUK)",
+              "options": [
+                {
+                  "names": [
+                    "-p",
+                    "--puk"
+                  ],
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-n",
+                    "--new-pin"
+                  ],
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "NEW-PIN"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv access unblock-pin usage information"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "certificates",
+          "description": "Manage certificates",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv certificates usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a certificate",
+              "options": [
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv certificates delete usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                }
+              ]
+            },
+            {
+              "name": "export",
+              "description": "Export an X.509 certificate",
+              "options": [
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv certificates export usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "CERTIFICATE",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "generate",
+              "description": "Generate a self-signed X.509 certificate",
+              "options": [
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-s",
+                    "--subject"
+                  ],
+                  "description": "Subject for the certificate, as an RFC 4514 string",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-d",
+                    "--valid-days"
+                  ],
+                  "description": "Number of days until the certificate expires",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "INTEGER"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-a",
+                    "--hash-algorithm"
+                  ],
+                  "description": "Hash algorithm",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "hash algorithm"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv certificates generate usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "PUBLIC-KEY"
+                }
+              ]
+            },
+            {
+              "name": "import",
+              "description": "Import an X.509 certificate",
+              "options": [
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "A password may be needed to decrypt the data",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-v",
+                    "--verify"
+                  ],
+                  "description": "Verify that the certificate matches the private key in the slot"
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv certificates import usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "CERTIFICATE"
+                }
+              ]
+            },
+            {
+              "name": "request",
+              "description": "Generate a Certificate Signing Request (CSR)",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-s",
+                    "--subject"
+                  ],
+                  "description": "Subject for the certificate, as an RFC 4514 string",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-a",
+                    "--hash-algorithm"
+                  ],
+                  "description": "Hash algorithm",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "hash algorithm"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv certificates request usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "PUBLIC-KEY",
+                  "template": "filepaths"
+                },
+                {
+                  "name": "CSR",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "keys",
+          "description": "Manage private keys",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv keys usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "attest",
+              "description": "Generate an attestation certificate for a key pair",
+              "options": [
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv keys attest usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "CERTIFICATE",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "export",
+              "description": "Export a public key corresponding to a stored private key",
+              "options": [
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-v",
+                    "--verify"
+                  ],
+                  "description": "Verify that the public key matches the private key in the slot"
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code (used for --verify)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv keys attest usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "PUBLIC-KEY",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "generate",
+              "description": "Generate an asymmetric key pair",
+              "options": [
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-a",
+                    "--algorithm"
+                  ],
+                  "description": "Algorithm to use in key generation",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "algorithm"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-F",
+                    "--format"
+                  ],
+                  "description": "Encoding format",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--pin-policy"
+                  ],
+                  "description": "PIN policy for slot",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "policy"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--touch-policy"
+                  ],
+                  "description": "Touch policy for slot",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "policy"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv keys generate usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "PUBLIC-KEY",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "import",
+              "description": "Import a private key from file",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--pin-policy"
+                  ],
+                  "description": "PIN policy for slot",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "policy"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--touch-policy"
+                  ],
+                  "description": "Touch policy for slot",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "policy"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-p",
+                    "--password"
+                  ],
+                  "description": "Password used to decrypt the private key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv keys import usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "SLOT"
+                },
+                {
+                  "name": "PRIVATE-KEY",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "objects",
+          "description": "Manage PIV data objects",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Show piv objects usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "export",
+              "description": "Export an arbitrary PIV data object",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv objects export usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "OBJECT"
+                },
+                {
+                  "name": "OUTPUT",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "generate",
+              "description": "Generate and write data for a supported data object",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv objects generate usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "OBJECT"
+                }
+              ]
+            },
+            {
+              "name": "import",
+              "description": "Write an arbitrary PIV object",
+              "options": [
+                {
+                  "names": [
+                    "-P",
+                    "--pin"
+                  ],
+                  "description": "PIN code",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-m",
+                    "--management-key"
+                  ],
+                  "description": "The management key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "TEXT"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Show piv objects import usage information"
+                }
+              ],
+              "args": [
+                {
+                  "name": "OBJECT"
+                },
+                {
+                  "name": "DATA"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

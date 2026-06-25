@@ -1,0 +1,740 @@
+{
+  "name": "vercel",
+  "description": "CLI Interface for Vercel.com",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output the version number"
+    },
+    {
+      "names": [
+        "-V",
+        "--platform-version"
+      ],
+      "description": "Set the platform version to deploy to"
+    },
+    {
+      "names": [
+        "-A",
+        "--local-config"
+      ],
+      "description": "Path to the local 'vercel.json' file",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Q",
+        "--global-config"
+      ],
+      "description": "Path to the global '.vercel' directory",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--debug"
+      ],
+      "description": "Provides more verbose output"
+    },
+    {
+      "names": [
+        "-f",
+        "--force"
+      ],
+      "description": "Force a new deployment even if nothing has changed"
+    },
+    {
+      "names": [
+        "-with-cache"
+      ],
+      "description": "Retain build cache when using --force"
+    },
+    {
+      "names": [
+        "-t",
+        "--token"
+      ],
+      "description": "Execute command with an auth token",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "auth token"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--public"
+      ],
+      "description": "Deployment is public ('/_src' is exposed)"
+    },
+    {
+      "names": [
+        "-e",
+        "--env"
+      ],
+      "description": "Include an env var during run time (e.g.: '-e KEY=value'). Can appear many times"
+    },
+    {
+      "names": [
+        "-b",
+        "--build-env"
+      ],
+      "description": "Similar to `--env` but for build time only"
+    },
+    {
+      "names": [
+        "-m",
+        "--meta"
+      ],
+      "description": "Add metadata for the deployment (e.g.: `-m KEY=value`). Can appear many times"
+    },
+    {
+      "names": [
+        "-C",
+        "--no-clipboard"
+      ],
+      "description": "Do not attempt to copy URL to clipboard"
+    },
+    {
+      "names": [
+        "-S",
+        "--scope"
+      ],
+      "description": "Set a custom scope",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "team name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--regions"
+      ],
+      "description": "Set default regions to enable the deployment on"
+    },
+    {
+      "names": [
+        "--prod"
+      ],
+      "description": "Create a production deployment"
+    },
+    {
+      "names": [
+        "-c",
+        "--confirm"
+      ],
+      "description": "Confirm default options and skip questions"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "deploy",
+      "description": "Performs a deployment (default)",
+      "args": [
+        {
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "dev",
+      "description": "Start a local development server",
+      "options": [
+        {
+          "names": [
+            "--listen"
+          ],
+          "description": "Specifies which port to run on"
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Manages the Environment Variables for your current Project",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add an environment variable",
+          "args": [
+            {
+              "name": "name"
+            },
+            {
+              "name": "environment"
+            }
+          ]
+        },
+        {
+          "name": "rm",
+          "description": "Remove an environment variable",
+          "args": [
+            {
+              "name": "name"
+            },
+            {
+              "name": "environment"
+            }
+          ]
+        },
+        {
+          "name": "pull",
+          "description": "Download dev env variables from cloud and write to .env",
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "List environment variables for a specific environment",
+          "args": [
+            {
+              "name": "environment"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initialize an example project",
+      "args": [
+        {
+          "name": "project name"
+        },
+        {
+          "name": "new project name"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "Lists deployments",
+      "options": [
+        {
+          "names": [
+            "-m",
+            "--meta"
+          ],
+          "description": "Filters results based on project metadata",
+          "takesArg": true,
+          "args": [
+            {
+              "variadic": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "project name"
+        }
+      ]
+    },
+    {
+      "name": "ls",
+      "description": "Lists deployments",
+      "args": [
+        {
+          "name": "project name"
+        }
+      ]
+    },
+    {
+      "name": "inspect",
+      "description": "Displays information related to a deployment",
+      "args": [
+        {
+          "name": "url"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Logs into your account or creates a new one"
+    },
+    {
+      "name": "logout",
+      "description": "Logs out of your account"
+    },
+    {
+      "name": "switch",
+      "description": "Switches between teams and your personal account",
+      "args": [
+        {
+          "name": "team name"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Displays complete help for [cmd]",
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "rm",
+      "description": "Removes a deployment",
+      "options": [
+        {
+          "names": [
+            "-s",
+            "--safe"
+          ],
+          "description": "Skip removal of deployments with an active preview URL or production domain"
+        },
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Skip confirmation step for a deployment or project removal"
+        }
+      ],
+      "args": [
+        {
+          "name": "deployment url"
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Removes a deployment",
+      "args": [
+        {
+          "name": "deployment url"
+        }
+      ]
+    },
+    {
+      "name": "domains",
+      "description": "Manages your domain names",
+      "subcommands": [
+        {
+          "name": "ls",
+          "description": "List all domains under an account"
+        },
+        {
+          "name": "inspect",
+          "description": "Retrieves information about a domain",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "add",
+          "description": "Add a domain to an account",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "rm",
+          "description": "Removes a domain from an account",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "buy",
+          "description": "Buy a domain for an account",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "move",
+          "description": "Removes a domain from an account",
+          "args": [
+            {
+              "name": "domain"
+            },
+            {
+              "name": "account name"
+            }
+          ]
+        },
+        {
+          "name": "transfer-in",
+          "description": "Transfers in a domain to an account",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "verify",
+          "description": "Verifies a domain for an account",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dns",
+      "description": "Manages your DNS records",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add DNS record for a domain",
+          "args": [
+            {
+              "name": "domain"
+            },
+            {
+              "name": "subdomain"
+            },
+            {
+              "name": "record type"
+            },
+            {
+              "name": "value"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "certs",
+      "description": "Manages your SSL certificates",
+      "options": [
+        {
+          "names": [
+            "--challenge-only"
+          ],
+          "description": "Show challenges needed to issue a certificate"
+        },
+        {
+          "names": [
+            "--crt"
+          ],
+          "description": "Include path to .crt",
+          "takesArg": true,
+          "args": [
+            {
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key"
+          ],
+          "description": "Include path to .key",
+          "takesArg": true,
+          "args": [
+            {
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ca"
+          ],
+          "description": "Include path to .ca",
+          "takesArg": true,
+          "args": [
+            {
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "ls",
+          "description": "List all certificates under an account"
+        },
+        {
+          "name": "issue",
+          "description": "Issue certificates for multiple domains",
+          "args": [
+            {
+              "name": "Domains",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "rm",
+          "description": "Remove a certificate by id",
+          "args": [
+            {
+              "name": "certificate id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "secrets",
+      "description": "Manages your global Secrets, for use in Environment Variables",
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "List all secrets"
+        },
+        {
+          "name": "add",
+          "description": "Add a new secret",
+          "args": [
+            {
+              "name": "secret name"
+            },
+            {
+              "name": "secret value"
+            }
+          ]
+        },
+        {
+          "name": "rename",
+          "description": "Rename a secret",
+          "args": [
+            {
+              "name": "old name"
+            },
+            {
+              "name": "new name"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove a secret",
+          "args": [
+            {
+              "name": "secret name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Displays the logs for a deployment",
+      "options": [
+        {
+          "names": [
+            "-a",
+            "--all"
+          ],
+          "description": "Receive access logs in addition to regular logs"
+        },
+        {
+          "names": [
+            "-f",
+            "--follow"
+          ],
+          "description": "Watch for additional logs output"
+        },
+        {
+          "names": [
+            "-n",
+            "--number"
+          ],
+          "description": "Specify number of log lines to output",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "Specifies format of logs output as 'short' or 'raw'",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--since"
+          ],
+          "description": "Return logs after a specific ISO 8601 date",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--query"
+          ],
+          "description": "Return logs against a search query",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--until"
+          ],
+          "description": "Return logs up to a specific ISO 8601 date",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "deployment url"
+        }
+      ]
+    },
+    {
+      "name": "teams",
+      "description": "Manages your teams",
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "List all teams under an account"
+        },
+        {
+          "name": "add",
+          "description": "Create a new team"
+        },
+        {
+          "name": "invite",
+          "description": "Invite a new member to the team",
+          "args": [
+            {
+              "name": "email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "whoami",
+      "description": "Shows the username of the currently logged in user"
+    },
+    {
+      "name": "alias",
+      "description": "Apply custom domains based on git branches, or other heuristics",
+      "subcommands": [
+        {
+          "name": "set",
+          "description": "Assign a custom domain to a deployment",
+          "args": [
+            {
+              "name": "url"
+            },
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "rm",
+          "description": "Remove a custom domain from a deployment",
+          "args": [
+            {
+              "name": "domain"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "List custom domains that were assigned to deployments"
+        }
+      ]
+    },
+    {
+      "name": "link",
+      "description": "Links your local directory to a Project",
+      "args": [
+        {
+          "name": "directory",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "billing",
+      "description": "Manage payment methods",
+      "subcommands": [
+        {
+          "name": "ls",
+          "description": "List all the payment methods of the active account"
+        },
+        {
+          "name": "add",
+          "description": "Interactively add a new credit card"
+        },
+        {
+          "name": "rm",
+          "description": "Remove a credit card by ID",
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        },
+        {
+          "name": "set-default",
+          "description": "Select which credit card should be default",
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "path to project",
+      "template": "folders"
+    }
+  ]
+}

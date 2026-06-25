@@ -1,0 +1,178 @@
+{
+  "name": "wasm-bindgen",
+  "description": "Generate bindings between WebAssembly and JavaScript",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for wasm-bindgen"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Show version for wasm-bindgen"
+    },
+    {
+      "names": [
+        "--out-dir"
+      ],
+      "description": "Output directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--out-name"
+      ],
+      "description": "Set a custom output filename (Without extension. Defaults to crate name)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--target"
+      ],
+      "description": "What type of output to generate",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "target"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-modules-global"
+      ],
+      "description": "Name of global to assign generated bindings to",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--browser"
+      ],
+      "description": "Hint that JS should only be compatible with a browser"
+    },
+    {
+      "names": [
+        "--typescript"
+      ],
+      "description": "Output a TypeScript definition file (on by default)"
+    },
+    {
+      "names": [
+        "--no-typescript"
+      ],
+      "description": "Don't emit a *.d.ts file"
+    },
+    {
+      "names": [
+        "--omit-imports"
+      ],
+      "description": "Don't emit imports in generated JavaScript"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Include otherwise-extraneous debug checks in output"
+    },
+    {
+      "names": [
+        "--no-demangle"
+      ],
+      "description": "Don't demangle Rust symbol names"
+    },
+    {
+      "names": [
+        "--keep-debug"
+      ],
+      "description": "Keep debug sections in wasm files"
+    },
+    {
+      "names": [
+        "--remove-name-section"
+      ],
+      "description": "Remove the debugging `name` section of the file"
+    },
+    {
+      "names": [
+        "--remove-producers-section"
+      ],
+      "description": "Remove the telemetry `producers` section"
+    },
+    {
+      "names": [
+        "--omit-default-module-path"
+      ],
+      "description": "Don't add WebAssembly fallback imports in generated JavaScript"
+    },
+    {
+      "names": [
+        "--encode-into"
+      ],
+      "description": "Whether or not to use TextEncoder#encodeInto()",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--nodejs"
+      ],
+      "description": "Deprecated, use `--target nodejs`"
+    },
+    {
+      "names": [
+        "--web"
+      ],
+      "description": "Deprecated, use `--target web`"
+    },
+    {
+      "names": [
+        "--no-modules"
+      ],
+      "description": "Deprecated, use `--target no-modules`"
+    },
+    {
+      "names": [
+        "--weak-refs"
+      ],
+      "description": "Enable usage of the JS weak references proposal"
+    },
+    {
+      "names": [
+        "--reference-types"
+      ],
+      "description": "Enable usage of WebAssembly reference types"
+    }
+  ],
+  "args": [
+    {
+      "name": "input",
+      "template": "filepaths"
+    }
+  ]
+}

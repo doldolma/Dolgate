@@ -1,0 +1,271 @@
+{
+  "name": "turbo",
+  "description": "Turborepo is a high-performance build system for JavaScript and TypeScript codebases",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print the version"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Print a help message"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "bin",
+      "description": "Get the path to the turbo binary"
+    },
+    {
+      "name": "link",
+      "description": "Link your local directory to a Vercel organization and enable remote caching",
+      "options": [
+        {
+          "names": [
+            "--no-gitignore"
+          ],
+          "description": "Do not create or modify .gitignore"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Login to your Vercel account",
+      "options": [
+        {
+          "names": [
+            "--sso-team"
+          ],
+          "description": "Attempt to authenticate to the specified team using SSO"
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Logout of your Vercel account"
+    },
+    {
+      "name": "prune",
+      "description": "Prepare a subset of your monorepo",
+      "options": [
+        {
+          "names": [
+            "--scope"
+          ],
+          "description": "Specify package to act as entry point for pruned monorepo",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--docker"
+          ],
+          "description": "Output pruned workspace into 'fill' and 'json' directories optimized for Docker layer caching"
+        }
+      ]
+    },
+    {
+      "name": "unlink",
+      "description": "Unlink the current directory from your Vercel organization and disable remote caching"
+    },
+    {
+      "name": "run",
+      "description": "Run tasks in your monorepo",
+      "options": [
+        {
+          "names": [
+            "--scope"
+          ],
+          "description": "Specify packages to act as entry points for task execution",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cache-dir"
+          ],
+          "description": "Specify local filesystem cache directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--concurrency"
+          ],
+          "description": "Limit the concurrency of task execution (use `1` for serial)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--continue"
+          ],
+          "description": "Continue execution even if a task exits with an error"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Ignore the existing cache"
+        },
+        {
+          "names": [
+            "--graph"
+          ],
+          "description": "Generate a Dot graph of the task execution"
+        },
+        {
+          "names": [
+            "--global-deps"
+          ],
+          "description": "Specify glob of global filesystem dependencies to be hashed (useful for .env and files in the root directory)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "glob"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--since"
+          ],
+          "description": "Limit/set scope to changed packages since a mergebase",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--team"
+          ],
+          "description": "The slug of a turborepo.com team",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "slug"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--token"
+          ],
+          "description": "A turborepo.com access token",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore"
+          ],
+          "description": "Files to ignore when calculating changed files (supports globs)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "files"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "File to write turbo's performance profile into",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--parallel"
+          ],
+          "description": "Execute all tasks in parallel"
+        },
+        {
+          "names": [
+            "--include-dependencies"
+          ],
+          "description": "Include the dependencies of tasks in execution"
+        },
+        {
+          "names": [
+            "--no-deps"
+          ],
+          "description": "Exclude dependent task consumers from execution"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Avoid saving task results to the cache (useful for development/watch tasks)"
+        },
+        {
+          "names": [
+            "--output-logs"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dry",
+            "--dry-run"
+          ],
+          "description": "List the packages in scope and the tasks that would be run",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format",
+              "optional": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "tasks",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

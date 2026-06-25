@@ -1,0 +1,540 @@
+{
+  "name": "deta",
+  "description": "Deta CLI for managing Deta Micros",
+  "options": [
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Show help for deta"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "login",
+      "description": "Trigger the login process for the Deta CLI",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for login"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print the Deta version",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for version"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "upgrade",
+          "description": "Upgrade Deta CLI version",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for upgrade"
+            },
+            {
+              "names": [
+                "-v"
+              ],
+              "description": "Upgrade CLI to specific version",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "Version number"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "projects",
+      "description": "List Deta projects",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for projects"
+        }
+      ]
+    },
+    {
+      "name": "new",
+      "description": "Create a new Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for new"
+        },
+        {
+          "names": [
+            "-n"
+          ],
+          "description": "Create a micro with Node (node14.x) runtime"
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Create a micro with Python (python 3.9) runtime"
+        },
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Set the name of the new micro",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--project"
+          ],
+          "description": "Set the project under which the micro is created",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "project"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--runtime"
+          ],
+          "description": "Create a micro with a specified runtime",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "runtime"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "deploy",
+      "description": "Deploy new code to a Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for deploy"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "details",
+      "description": "Get detailed information about a specific Deta micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for details"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "description": "Auto-deploy locally saved changes in real time to your Deta micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for watch"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Change auth settings for a Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for auth"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "disable",
+          "description": "Disable HTTP Auth for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for auth disable"
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "description": "Enable HTTP Auth for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for auth enable"
+            }
+          ]
+        },
+        {
+          "name": "create-api-key",
+          "description": "Create an API key for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for auth create-api-key"
+            },
+            {
+              "names": [
+                "-d"
+              ],
+              "description": "Set the api-key description",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "description"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-n"
+              ],
+              "description": "Set the api-key name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-o"
+              ],
+              "description": "Set the api-key output file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "outfile",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "delete-api-key",
+          "description": "Delete an API key for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for auth delete-api-key"
+            },
+            {
+              "names": [
+                "-n"
+              ],
+              "description": "Set the api-key name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pull",
+      "description": "Pull the latest deployed code of a Deta Micro to your local machine",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for pull"
+        },
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force the overwrite of existing files"
+        }
+      ]
+    },
+    {
+      "name": "clone",
+      "description": "Clone a Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for clone"
+        },
+        {
+          "names": [
+            "-n"
+          ],
+          "description": "The name of the micro to be cloned",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "The name of the project with the micro to be cloned",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "project"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update a Deta Micro's name or environment variables",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for pull"
+        },
+        {
+          "names": [
+            "-n"
+          ],
+          "description": "The new name of the micro",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "The new runtime of the micro",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "runtime"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-e"
+          ],
+          "description": "The new env file of the micro",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "env",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "visor",
+      "description": "Change the Visor settings for a Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for visor"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "open",
+          "description": "Open Micro's visor page in the browser",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for visor open"
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "description": "Enable Visor for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for visor enable"
+            }
+          ]
+        },
+        {
+          "name": "disable",
+          "description": "Disable Visor for a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for visor disable"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a Deta Micro from the CLI",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for run"
+        },
+        {
+          "names": [
+            "-l"
+          ],
+          "description": "Show the micro logs"
+        }
+      ],
+      "args": [
+        {
+          "name": "action"
+        }
+      ]
+    },
+    {
+      "name": "cron",
+      "description": "Change cron settings for a Deta Micro",
+      "options": [
+        {
+          "names": [
+            "-h"
+          ],
+          "description": "Show help for cron"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "set",
+          "description": "Set Deta Micro to run on a schedule",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for cron set"
+            }
+          ],
+          "args": [
+            {
+              "name": "expression"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove a schedule from a Deta Micro",
+          "options": [
+            {
+              "names": [
+                "-h"
+              ],
+              "description": "Show help for cron remove"
+            }
+          ],
+          "args": [
+            {
+              "name": "expression"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

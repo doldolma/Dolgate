@@ -1,0 +1,1687 @@
+{
+  "name": "dart",
+  "description": "A command-line utility for Dart development",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print this usage information"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Print verbose output"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Current Dart version"
+    },
+    {
+      "names": [
+        "--enable-analytics"
+      ],
+      "description": "Enables analytics"
+    },
+    {
+      "names": [
+        "--disable-analytics"
+      ],
+      "description": "Disables analytics"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "analyze",
+      "description": "Analyze Dart code in a directory",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "--fatal-infos"
+          ],
+          "description": "Treat info level issues as fatal"
+        },
+        {
+          "names": [
+            "--fatal-warnings"
+          ],
+          "description": "Treat warning level issues as fatal (defaults to on)"
+        },
+        {
+          "names": [
+            "--no-fatal-warnings"
+          ],
+          "description": "Do not treat warning level issues as fatal (defaults to on)"
+        }
+      ],
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "compile",
+      "description": "Compile Dart to various formats",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "aot-snapshot",
+          "description": "Compile Dart to an AOT snapshot",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Write the output to <file-name>",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dart-entry-point",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbosity"
+              ],
+              "description": "Sets the verbosity level of the compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "verbosity-level"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-D",
+                "--define"
+              ],
+              "description": "Define an environment declaration. To specify multiple declarations, use multiple options or use commas to separate key-value pairs. For example: dart compile aot-snapshot -D a=1,b=2 main.dart",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "key-value-pairs",
+                  "variadic": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--enable-asserts"
+              ],
+              "description": "Enable assert statements"
+            },
+            {
+              "names": [
+                "-p",
+                "--packages"
+              ],
+              "description": "Get package locations from the specified file instead of .packages. <path> can be relative or absolute",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "args-path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-sound-null-safety",
+                "--sound-null-safety"
+              ],
+              "description": "Respect the nullability of types at runtime"
+            },
+            {
+              "names": [
+                "-S",
+                "--save-debugging-info"
+              ],
+              "description": "Remove debugging information from the output and save it separately to the specified file.. <path> can be relative or absolute",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "debug-info-path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "dart-entry-point"
+            }
+          ]
+        },
+        {
+          "name": "exe",
+          "description": "Compile Dart to a self-contained executable",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Write the output to <file-name>",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dart-entry-point",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbosity"
+              ],
+              "description": "Sets the verbosity level of the compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "verbosity-level"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-D",
+                "--define"
+              ],
+              "description": "Define an environment declaration. To specify multiple declarations, use multiple options or use commas to separate key-value pairs. For example: dart compile aot-snapshot -D a=1,b=2 main.dart",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "key-value-pairs",
+                  "variadic": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--enable-asserts"
+              ],
+              "description": "Enable assert statements"
+            },
+            {
+              "names": [
+                "-p",
+                "--packages"
+              ],
+              "description": "Get package locations from the specified file instead of .packages. <path> can be relative or absolute",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "args-path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-sound-null-safety",
+                "--sound-null-safety"
+              ],
+              "description": "Respect the nullability of types at runtime"
+            },
+            {
+              "names": [
+                "-S",
+                "--save-debugging-info"
+              ],
+              "description": "Remove debugging information from the output and save it separately to the specified file.. <path> can be relative or absolute",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "debug-info-path",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "dart-entry-point"
+            }
+          ]
+        },
+        {
+          "name": "jit-snapshot",
+          "description": "Compile Dart to a JIT snapshot",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Write the output to <file-name>",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dart-entry-point",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbosity"
+              ],
+              "description": "Sets the verbosity level of the compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "verbosity-level"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "dart-entry-point"
+            }
+          ]
+        },
+        {
+          "name": "js",
+          "description": "Compile Dart to JavaScript",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Write the output to <file-name>",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dart-entry-point",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbosity"
+              ],
+              "description": "Sets the verbosity level of the compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "verbosity-level"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-m",
+                "--minified"
+              ],
+              "description": "Generate minified output"
+            },
+            {
+              "names": [
+                "-D",
+                "--define"
+              ],
+              "description": "Define an environment declaration. To specify multiple declarations, use multiple options or use commas to separate key-value pairs. For example: dart compile aot-snapshot -D a=1,b=2 main.dart",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "key-value-pairs",
+                  "variadic": true
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "dart-entry-point"
+            }
+          ]
+        },
+        {
+          "name": "kernel",
+          "description": "Compile Dart to a kernel snapshot",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Write the output to <file-name>",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dart-entry-point",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--verbosity"
+              ],
+              "description": "Sets the verbosity level of the compilation",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "verbosity-level"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "dart-entry-point"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "create",
+      "description": "Create a new Dart project",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "-t",
+            "--template"
+          ],
+          "description": "The project template to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "template-type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--pub"
+          ],
+          "description": "Run 'pub get' after the project has been created. Default to on"
+        },
+        {
+          "names": [
+            "--no-pub"
+          ],
+          "description": "Do not run 'pub get' after the project has been created. Default to on"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force project generation, even if the target directory already exists"
+        }
+      ]
+    },
+    {
+      "name": "fix",
+      "description": "Apply automated fixes to Dart source code",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "-n",
+            "--dry-run"
+          ],
+          "description": "Preview the proposed changes but make no changes"
+        },
+        {
+          "names": [
+            "--apply"
+          ],
+          "description": "Apply the proposed changes"
+        }
+      ]
+    },
+    {
+      "name": "format",
+      "description": "Idiomatically format Dart source code",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Show all options and flags with --help"
+        },
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "Set where to write formatted output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "json"
+            },
+            {
+              "name": "none"
+            },
+            {
+              "name": "show"
+            },
+            {
+              "name": "write"
+            },
+            {
+              "name": "--show"
+            },
+            {
+              "name": "--summary"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--set-exit-if-changed"
+          ],
+          "description": "Return exist code 1 if there are any formatting changes"
+        },
+        {
+          "names": [
+            "--fix"
+          ],
+          "description": "Apply all style fixes"
+        },
+        {
+          "names": [
+            "--fix-doc-comments"
+          ],
+          "description": "Use triple slash for documentation comments"
+        },
+        {
+          "names": [
+            "--fix-function-typedefs"
+          ],
+          "description": "Use new syntax for function type typedefs"
+        },
+        {
+          "names": [
+            "--fix-named-default-separator"
+          ],
+          "description": "Use '=' as the separator before named parameter default values"
+        },
+        {
+          "names": [
+            "--fix-optional-const"
+          ],
+          "description": "Remove 'const' keyword inside constant context"
+        },
+        {
+          "names": [
+            "--fix-optional-new"
+          ],
+          "description": "Remove 'new' keyword"
+        },
+        {
+          "names": [
+            "--fix-single-cascade-statements"
+          ],
+          "description": "Remove unnecessary single cascades from expression statements"
+        },
+        {
+          "names": [
+            "-l",
+            "--line-length"
+          ],
+          "description": "Wrap lines longer than this. Defaults to 80",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "line-length"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i",
+            "--indent"
+          ],
+          "description": "Add this many spaces of leading indentation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number-of-spaces"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--follow-links"
+          ],
+          "description": "Follow links to files and directories. If unset, links will be ignored"
+        },
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Show dart_style version"
+        },
+        {
+          "names": [
+            "--selection"
+          ],
+          "description": "Track selection (given as 'start:length') through formatting"
+        },
+        {
+          "names": [
+            "--stdin-name"
+          ],
+          "description": "Use this path in error messages when input is read from stdin. (defaults to 'stdin')",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "files-or-directory",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "migrate",
+      "description": "Perform null safety migration on a project",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Show additional command output"
+        },
+        {
+          "names": [
+            "--apply-changes"
+          ],
+          "description": "Apply the proposed null safety changes to the files on disk"
+        },
+        {
+          "names": [
+            "--ignore-errors"
+          ],
+          "description": "Attempt to perform null safety analysis even if the project has analysis errors"
+        },
+        {
+          "names": [
+            "--skip-import-check"
+          ],
+          "description": "Go ahead with migration even if some imported files have not yet been migrated"
+        },
+        {
+          "names": [
+            "--web-preview"
+          ],
+          "description": "Show and interactive preview of the proposed null safety changes in a browser window. (defaults to on)"
+        },
+        {
+          "names": [
+            "--no-web-preview"
+          ],
+          "description": "Do not show and interactive preview of the proposed null safety changes in a browser window. (defaults to off)"
+        },
+        {
+          "names": [
+            "--preview-hostname"
+          ],
+          "description": "Run the preview server on the specified hostname. If not specified, 'localhost' is used. Use 'any' to specify IPv6.any or IPv4.any. (defaults to the 'localhost')",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "host"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--preview-port"
+          ],
+          "description": "Run the preview server on the specified port. If not specified, dynamically allocate a port",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--summary"
+          ],
+          "description": "Output a machine-readable summary of migration changes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-exceptions"
+          ],
+          "description": "Attempt to perform null safety analysis even if exceptions occur"
+        },
+        {
+          "names": [
+            "--sdk-path"
+          ],
+          "description": "The path to the Dart SDK",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sdk-path"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pub",
+      "description": "Work with packages",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "--trace"
+          ],
+          "description": "Print debugging information when an error occurs"
+        },
+        {
+          "names": [
+            "--no-trace"
+          ],
+          "description": "Do not print debugging information when an error occurs"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Shortcut for '--verbose=all"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add a dependency to pubspec.yaml",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-d",
+                "--dev"
+              ],
+              "description": "Adds package to the development dependencies instead"
+            },
+            {
+              "names": [
+                "--git-url"
+              ],
+              "description": "Git URL of the package"
+            },
+            {
+              "names": [
+                "--git-ref"
+              ],
+              "description": "Git branch or commit to be retrieved"
+            },
+            {
+              "names": [
+                "--git-path"
+              ],
+              "description": "Path of git package in repository"
+            },
+            {
+              "names": [
+                "--hosted-url"
+              ],
+              "description": "URL of package host server"
+            },
+            {
+              "names": [
+                "--path"
+              ],
+              "description": "Local path"
+            },
+            {
+              "names": [
+                "--sdk"
+              ],
+              "description": "SDK source for package"
+            },
+            {
+              "names": [
+                "--offline"
+              ],
+              "description": "Use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "--no-offline"
+              ],
+              "description": "Do not use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            },
+            {
+              "names": [
+                "--precompile"
+              ],
+              "description": "Precompile executables in immediate dependencies"
+            },
+            {
+              "names": [
+                "--no-precompile"
+              ],
+              "description": "Do not precompile executables in immediate dependencies"
+            }
+          ],
+          "args": [
+            {
+              "name": "package"
+            }
+          ]
+        },
+        {
+          "name": "cache",
+          "description": "Work with the Pub system cache",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "add",
+              "description": "Install a package",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                },
+                {
+                  "names": [
+                    "--all"
+                  ],
+                  "description": "Install all matching versions"
+                },
+                {
+                  "names": [
+                    "-v",
+                    "--version"
+                  ],
+                  "description": "Version constraint"
+                }
+              ],
+              "args": [
+                {
+                  "name": "package"
+                }
+              ]
+            },
+            {
+              "name": "repair",
+              "description": "Reinstall a cached package",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "deps",
+          "description": "Print package dependencies",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-s",
+                "--style"
+              ],
+              "description": "How output should be displayed",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "style"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--dev"
+              ],
+              "description": "Include dev dependencies. (defaults to on)"
+            },
+            {
+              "names": [
+                "--no-dev"
+              ],
+              "description": "Do not include dev dependencies. (defaults to off)"
+            },
+            {
+              "names": [
+                "--executables"
+              ],
+              "description": "List all available executables"
+            }
+          ]
+        },
+        {
+          "name": "downgrade",
+          "description": "Downgrade packages in a Flutter project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--offline"
+              ],
+              "description": "Use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "--no-offline"
+              ],
+              "description": "Do not use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Get packages in a Flutter project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--offline"
+              ],
+              "description": "Use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "--no-offline"
+              ],
+              "description": "Do not use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            },
+            {
+              "names": [
+                "--precompile"
+              ],
+              "description": "Precompile executables in immediate dependencies"
+            },
+            {
+              "names": [
+                "--no-precompile"
+              ],
+              "description": "Do not precompile executables in immediate dependencies"
+            }
+          ]
+        },
+        {
+          "name": "global",
+          "description": "Work with Pub global packages",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "activate",
+              "description": "Make a package's executables globally available",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                },
+                {
+                  "names": [
+                    "-s",
+                    "--source"
+                  ],
+                  "description": "The source used to find the package",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "source"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--no-executables"
+                  ],
+                  "description": "Do not put executables on PATH"
+                },
+                {
+                  "names": [
+                    "-x",
+                    "--executable"
+                  ],
+                  "description": "Executable(s) to place on PATH"
+                },
+                {
+                  "names": [
+                    "--overwrite"
+                  ],
+                  "description": "Overwrite executables from other packages with the same name"
+                },
+                {
+                  "names": [
+                    "-u",
+                    "--hosted-url"
+                  ],
+                  "description": "A custom pub server URL for the package. Only applies when using the 'hosted' source",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "url"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "deactivate",
+              "description": "Remove a previously activated package",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "List globally activated packages",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                }
+              ]
+            },
+            {
+              "name": "run",
+              "description": "Run an executable from a globally activated package",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print this usage information"
+                },
+                {
+                  "names": [
+                    "--enable-asserts"
+                  ],
+                  "description": "Enable assert statements"
+                },
+                {
+                  "names": [
+                    "--no-enable-asserts"
+                  ],
+                  "description": "Do not enable assert statements"
+                },
+                {
+                  "names": [
+                    "--enable-experiment"
+                  ],
+                  "description": "Runs the executable in a VM with the given experiments enabled. (Will disable snapshotting, resulting in slower startup)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "experiment"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--sound-null-safety"
+                  ],
+                  "description": "Override the default null safety execution mode"
+                },
+                {
+                  "names": [
+                    "--no-sound-null-safety"
+                  ],
+                  "description": "Do not override the default null safety execution mode"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "login",
+          "description": "Log into pub.dev",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            }
+          ]
+        },
+        {
+          "name": "logout",
+          "description": "Log out of pub.dev",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            }
+          ]
+        },
+        {
+          "name": "outdated",
+          "description": "Analyze dependencies to find which ones can be upgraded",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--color"
+              ],
+              "description": "Color the the output. Defaults to color when connected to a terminal, and no-color otherwise"
+            },
+            {
+              "names": [
+                "--no-color"
+              ],
+              "description": "Do not color the output. Defaults to color when connected to a terminal, and no-color otherwise"
+            },
+            {
+              "names": [
+                "--dependency-overrides"
+              ],
+              "description": "Show resolutions with 'dependency_overrides'. (defaults to on)"
+            },
+            {
+              "names": [
+                "--no-dependency-overrides"
+              ],
+              "description": "Do not show resolutions with 'dependency_overrides'. (defaults to on)"
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Output the results sing a JSON format"
+            },
+            {
+              "names": [
+                "--mode"
+              ],
+              "description": "Highlight versions with PROPERTY. Only packages missing the PROPERTY will be included unless --show-all",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "property"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--prereleases"
+              ],
+              "description": "Include prereleases in latest version. (defaults to on in --mode=null-safety)"
+            },
+            {
+              "names": [
+                "--no-prereleases"
+              ],
+              "description": "Do not include prereleases in latest version. (defaults to off in --mode=null-safety)"
+            },
+            {
+              "names": [
+                "--show-all"
+              ],
+              "description": "Include dependencies that are already fulfilling --mode"
+            },
+            {
+              "names": [
+                "--no-show-all"
+              ],
+              "description": "Do not include dependencies that are already fulfilling --mode"
+            },
+            {
+              "names": [
+                "--transitive",
+                "--no-transitive"
+              ],
+              "description": "Show transitive dependencies. (defaults to off in --mode=null-safety"
+            }
+          ]
+        },
+        {
+          "name": "publish",
+          "description": "Publish the current package to pub.dartlang.org",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Publish without confirmation if there are no errors"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Removes a dependency from the current package",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--offline"
+              ],
+              "description": "Use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "--no-offline"
+              ],
+              "description": "Do not use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            },
+            {
+              "names": [
+                "--precompile"
+              ],
+              "description": "Precompile executables in immediate dependencies"
+            },
+            {
+              "names": [
+                "--no-precompile"
+              ],
+              "description": "Do not precompile executables in immediate dependencies"
+            }
+          ]
+        },
+        {
+          "name": "upgrade",
+          "description": "Upgrade the current package's dependencies to latest versions",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--offline"
+              ],
+              "description": "Use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "--no-offline"
+              ],
+              "description": "Do not use cached packages instead of accessing the network"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Report what dependencies would change but don't change any"
+            },
+            {
+              "names": [
+                "--precompile"
+              ],
+              "description": "Precompile executables in immediate dependencies"
+            },
+            {
+              "names": [
+                "--no-precompile"
+              ],
+              "description": "Do not precompile executables in immediate dependencies"
+            },
+            {
+              "names": [
+                "--null-safety"
+              ],
+              "description": "Upgrade constraints in pubspec.yaml to null-safety versions"
+            },
+            {
+              "names": [
+                "--major-versions"
+              ],
+              "description": "Upgrades packages to their latest resolvable versions, and updates pubspec.yaml"
+            }
+          ]
+        },
+        {
+          "name": "uploader",
+          "description": "Manage uploaders for a package on pub.dev",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print this usage information"
+            },
+            {
+              "names": [
+                "--package"
+              ],
+              "description": "The package whose uploaders will be modified. (defaults to the current package)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a Dart program",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        },
+        {
+          "names": [
+            "--observe"
+          ],
+          "description": "The observe flag is a convenience flag used to run a program with a set of common options. Useful for debugging",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port-or-address"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--enable-vm-service"
+          ],
+          "description": "Enables the VM service and listens on the specified port for connections (default port number is 8181, default dind address is localhost)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port-or-address"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--pause-isolates-on-exit",
+            "--no-pause-isolates-on-exit"
+          ],
+          "description": "Pause isolates on exit when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--pause-isolates-on-unhandled-exceptions"
+          ],
+          "description": "Pause isolates when an unhandled exception is encountered when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--no-pause-isolates-on-unhandled-exceptions"
+          ],
+          "description": "Do not pause isolates when an unhandled exception is encountered when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--warn-on-pause-with-no-debugger"
+          ],
+          "description": "Print a warning when an isolate pauses with no attahed debugger when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--no-warn-on-pause-with-no-debugger"
+          ],
+          "description": "Do not print a warning when an isolate pauses with no attahed debugger when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--pause-isolates-on-start"
+          ],
+          "description": "Pause isolates on start when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--no-pause-isolates-on-start"
+          ],
+          "description": "Do not pause isolates on start when running with --enable-vm-service"
+        },
+        {
+          "names": [
+            "--enable-asserts"
+          ],
+          "description": "Enable assert statements"
+        },
+        {
+          "names": [
+            "--no-enable-asserts"
+          ],
+          "description": "Do not enable assert statements"
+        },
+        {
+          "names": [
+            "--verbosity"
+          ],
+          "description": "Sets the verbosity level of the compilation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "verbosity-level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-D",
+            "--define"
+          ],
+          "description": "Define an environment declaration. To specify multiple declarations, use multiple options or use commas to separate key-value pairs. For example: dart compile aot-snapshot -D a=1,b=2 main.dart",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-value-pairs",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disable-service-auth-codes"
+          ],
+          "description": "Disables the requirement for an authentication code to communicate with the VM service. Authentication codes help protect against CSRF attacks, so it is not recommended to disable them unless behind a firewall on a secure device"
+        },
+        {
+          "names": [
+            "--enable-service-port-fallback"
+          ],
+          "description": "When the VM service is told to bind to a particular port, fallback to 0 if it fails to bind instead of failing to start"
+        },
+        {
+          "names": [
+            "--namespace"
+          ],
+          "description": "The path to a directory that dart:io calls will treat as the root of the filesystem",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--root-certs-file"
+          ],
+          "description": "The The path to a file containing the trusted root certificates to use for secure socket connections",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--root-certs-cache"
+          ],
+          "description": "The path to a cache directory containing the trusted root certificates to use for secure socket connections",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trace-loading"
+          ],
+          "description": "Enables tracing of library and script loading"
+        },
+        {
+          "names": [
+            "--enable-experiment"
+          ],
+          "description": "Enable one or more experimental features (see dart.dev/go/experiments",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "experiment"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Run tests for a project",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print this usage information"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "name": "cot",
+  "description": "Command-line utility for CotEditor",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help message and exit"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show program's version number and exit"
+    },
+    {
+      "names": [
+        "-w",
+        "--wait"
+      ],
+      "description": "Wait for opened file to be closed"
+    },
+    {
+      "names": [
+        "-g",
+        "--background"
+      ],
+      "description": "Do not bring the application to the foreground"
+    },
+    {
+      "names": [
+        "-n",
+        "--new"
+      ],
+      "description": "Create a new blank document"
+    },
+    {
+      "names": [
+        "-l",
+        "--line"
+      ],
+      "description": "Jump to specific line in opened document",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "line"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c",
+        "--column"
+      ],
+      "description": "Jump to specific column in opened document",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "column"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "name": "xc",
+  "description": "List tasks from an xc-compatible markdown file",
+  "options": [
+    {
+      "names": [
+        "-s",
+        "-short"
+      ],
+      "description": "List task names in a short format"
+    },
+    {
+      "names": [
+        "-h",
+        "-help"
+      ],
+      "description": "Print this help text"
+    },
+    {
+      "names": [
+        "-f",
+        "-file"
+      ],
+      "description": "Specify a markdown file that contains tasks (default: \"README.md\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-H",
+        "-heading"
+      ],
+      "description": "Specify the heading for xc tasks (default: \"Tasks\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "heading"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-V",
+        "-version"
+      ],
+      "description": "Show xc version"
+    },
+    {
+      "names": [
+        "-complete"
+      ],
+      "description": "Install shell completion for xc"
+    },
+    {
+      "names": [
+        "-uncomplete"
+      ],
+      "description": "Uninstall shell completion for xc"
+    }
+  ]
+}

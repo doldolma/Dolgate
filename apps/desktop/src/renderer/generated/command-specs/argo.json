@@ -1,0 +1,2985 @@
+{
+  "name": "argo",
+  "description": "",
+  "options": [
+    {
+      "names": [
+        "--argo-base-href"
+      ],
+      "description": "An path to use with HTTP client (e.g. due to BASE_HREF). Defaults to the ARGO_BASE_HREF environment variable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--argo-http1"
+      ],
+      "description": "If True, Use the HTTP client. Defaults to the ARGO_HTTP1 environment variable"
+    },
+    {
+      "names": [
+        "--argo-server",
+        "-s"
+      ],
+      "description": "API server host:port. e.g. localhost:2746. Defaults to the ARGO_SERVER environment variable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "host:port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--as"
+      ],
+      "description": "Username to impersonate for the operation",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--as-group"
+      ],
+      "description": "Group to impersonate for the operation, This flag can be repeated to specify multiple groups",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "stringArray"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--as-uid"
+      ],
+      "description": "UID to impersonate for the operation",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--certificate-authorityk"
+      ],
+      "description": "Path to a cert file for the certificate authority",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--client-certificate"
+      ],
+      "description": "Path to a client certificate file for TLS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--client-key"
+      ],
+      "description": "Path to a client key file for TLS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cluster"
+      ],
+      "description": "The name of the kubeconfig cluster to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--context"
+      ],
+      "description": "The name of the kubeconfig context to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--gloglevel"
+      ],
+      "description": "Set the glog logging level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--header",
+        "-H"
+      ],
+      "description": "Sets additional header to all requests made by Argo CLI. (Can be repeated multiple times to add multiple headers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Help for argo"
+    },
+    {
+      "names": [
+        "--insecure-skip-tls-verify"
+      ],
+      "description": "If True, The server's certificate will not be checked for validity. This will make your HTTPS connections insecure"
+    },
+    {
+      "names": [
+        "--insecure-skip-verify",
+        "-k"
+      ],
+      "description": "If true the Argo Server's certificate will not be checked for validity. This will make your HTTPS connections insecure. Defaults to the ARGO_INSECURE_SKIP_VERIFY environment variable"
+    },
+    {
+      "names": [
+        "--instanceid"
+      ],
+      "description": "Submit with a specific controller's instance id label. Default to the ARGO_INSTANCEID environment variable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--kubeconfig"
+      ],
+      "description": "Path to a kube config. Only required if out-of-cluster",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--loglevel"
+      ],
+      "description": "Set the logging level. One of: debug|info|warn|error (default \"info\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--namespace",
+        "-n"
+      ],
+      "description": "If present the namespace scope for this CLI request",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--password"
+      ],
+      "description": "Password for basic authentication to the API server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--proxy-url"
+      ],
+      "description": "This URL will be used to connect via proxy",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--request-timeout"
+      ],
+      "description": "The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--secure",
+        "-e"
+      ],
+      "description": "Whether or not the server is using TLS with the Argo Server. Defaults to the ARGO_SECURE environment variable. (default true)"
+    },
+    {
+      "names": [
+        "--server"
+      ],
+      "description": "The address and port of the Kubernetes API server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tls-server-name"
+      ],
+      "description": "If Provided, This name will be used to validate server certificate. If this is not provided",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--token"
+      ],
+      "description": "Bearer token for authentication to the API server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--user"
+      ],
+      "description": "The name of the kubeconfig user to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--username"
+      ],
+      "description": "Username for basic authentication to the API server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Enabled verbose logging i.e. --loglevel debug"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "archive",
+      "description": "Manage the workflow archive",
+      "subcommands": [
+        {
+          "name": "delete",
+          "description": "Delete a workflow in the archive",
+          "args": [
+            {
+              "name": "UID"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Get a workflow in the archive",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide (default \"wide\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "UID"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List workflows in the archive",
+          "options": [
+            {
+              "names": [
+                "--chunk-size"
+              ],
+              "description": "Return large lists in chunks rather than all at once. Pass 0 to disable",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "int"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for list"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide (default \"wide\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--selector",
+                "-l"
+              ],
+              "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1,key2=value2)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "list-label-keys",
+          "description": "List workflows label keys in the archive"
+        },
+        {
+          "name": "list-label-values",
+          "description": "Get workflow label values in the archive",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for list-label-values"
+            },
+            {
+              "names": [
+                "--selector",
+                "-l"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resubmit",
+          "description": "Resubmit one or more workflows",
+          "options": [
+            {
+              "names": [
+                "--field-selector"
+              ],
+              "description": "Selector (field query) to filter on supports '=' '==' and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for resubmit"
+            },
+            {
+              "names": [
+                "--log"
+              ],
+              "description": "Log the workflow until it completes"
+            },
+            {
+              "names": [
+                "--memoized"
+              ],
+              "description": "Re-use successful steps & outputs from the previous run"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--parameter",
+                "-p"
+              ],
+              "description": "Input parameter to override on the original workflow spec",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "stringArray"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--priority"
+              ],
+              "description": "Workflow priority",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "int32"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--selector",
+                "-l"
+              ],
+              "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1,key2=value2)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--wait",
+                "-w"
+              ],
+              "description": "Wait for the workflow to complete only works when a single workflow is resubmitted"
+            },
+            {
+              "names": [
+                "--watch"
+              ],
+              "description": "Watch the workflow until it completes only works when a single workflow is resubmitted"
+            }
+          ],
+          "args": [
+            {
+              "name": "UID"
+            }
+          ]
+        },
+        {
+          "name": "retry",
+          "description": "Retry zero or more workflows",
+          "options": [
+            {
+              "names": [
+                "--field-selector"
+              ],
+              "description": "Selector (field query) to filter on, supports '='",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for retry"
+            },
+            {
+              "names": [
+                "--log"
+              ],
+              "description": "Log the workflow until it completes"
+            },
+            {
+              "names": [
+                "--node-field-selector"
+              ],
+              "description": "Selector of nodes to reset eg: --node-field-selector inputs.paramaters.myparam.value=abc",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--parameter",
+                "-p"
+              ],
+              "description": "Input parameter to override on the original workflow spec",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "stringArray"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--restart-successful"
+              ],
+              "description": "Indicates to restart successful nodes matching the --node-field-selector"
+            },
+            {
+              "names": [
+                "--selector",
+                "-l"
+              ],
+              "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '=='",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--wait",
+                "-w"
+              ],
+              "description": "Wait for the workflow to complete only works when a single workflow is retried"
+            },
+            {
+              "names": [
+                "--watch"
+              ],
+              "description": "Watch the workflow until it completes only works when a single workflow is retried"
+            }
+          ],
+          "args": [
+            {
+              "name": "UID"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Manage authentication settings",
+      "subcommands": [
+        {
+          "name": "token",
+          "description": "Print the auth token"
+        }
+      ]
+    },
+    {
+      "name": "cluster-template",
+      "description": "Manipulate cluster workflow templates",
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a cluster workflow template",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for create"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict workflow validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "files"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete a cluster workflow template",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Delete all cluster workflow templates"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for delete"
+            }
+          ],
+          "args": [
+            {
+              "name": "WORKFLOW_TEMPLATE"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Display details about a cluster workflow template",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for get"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "CLUSTER"
+            },
+            {
+              "name": "WORKFLOW_TEMPLATE"
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validate files or directories of cluster workflow template manifests",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for lint"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Linting results output format. One of: pretty|simple (default \"pretty\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict workflow validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "FILE"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List cluster workflow templates",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for list"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: wide|name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Output shell completion code for the specified shell (bash or zsh)",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for completion"
+        }
+      ],
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "cp",
+      "description": "Copy artifacts from workflow",
+      "options": [
+        {
+          "names": [
+            "--artifact-name"
+          ],
+          "description": "Name of output artifact in workflow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for cp"
+        },
+        {
+          "names": [
+            "--node-id"
+          ],
+          "description": "Id of node in workflow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Use variables {workflowName} {nodeId} {templateName} {artifactName} and {namespace} to create a customized path to store the artifacts; example: {workflowName}/{templateName}/{artifactName} (default \"{namespace}/{workflowName}/{nodeId}/outputs/{artifactName}\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--template-name"
+          ],
+          "description": "Name of template in workflow",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "my-wf"
+        },
+        {
+          "name": "output-directory"
+        }
+      ]
+    },
+    {
+      "name": "cron",
+      "description": "Manage cron workflows",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Help for cron"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a cron workflow",
+          "options": [
+            {
+              "names": [
+                "--entrypoint"
+              ],
+              "description": "Override entrypoint",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--generate-name"
+              ],
+              "description": "Override metadata.generateName",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for create"
+            },
+            {
+              "names": [
+                "--labels",
+                "-l"
+              ],
+              "description": "Comma separated labels to apply to the workflow. Will override previous values",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name"
+              ],
+              "description": "Override metadata.name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--parameter",
+                "-p"
+              ],
+              "description": "Pass an input parameter",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "stringArray"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--parameter-file",
+                "-f"
+              ],
+              "description": "Pass a file containing all input parameters",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--schedule"
+              ],
+              "description": "Override cron workflow schedule",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--serviceaccount"
+              ],
+              "description": "Run all pods in the workflow using specified serviceaccount",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict workflow validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "FILE1 FILE2..."
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete a cron workflow",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Delete all cron workflows"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for delete"
+            }
+          ],
+          "args": [
+            {
+              "name": "[CRON_WORKFLOW... | --all]"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Display details about a cron workflow",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for get"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "CRON_WORKFLOW"
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validate files or directories of cron workflow manifests",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for lint"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Linting results output format. One of: pretty|simple (default \"pretty\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "FILE"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List cron workflows",
+          "options": [
+            {
+              "names": [
+                "--all-namespaces",
+                "-A"
+              ],
+              "description": "Show workflows from all namespaces"
+            },
+            {
+              "names": [
+                "--chunk-size"
+              ],
+              "description": "Return large lists in chunks rather than all at once. Pass 0 to disable",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "int"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--completed"
+              ],
+              "description": "Show completed workflows. Mutually exclusive with --running"
+            },
+            {
+              "names": [
+                "--field-selector"
+              ],
+              "description": "Selector (field query) to filter on. Supports '=' '==' and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for list"
+            },
+            {
+              "names": [
+                "--no-headers"
+              ],
+              "description": "Don't print headers (default print headers)"
+            },
+            {
+              "names": [
+                "--older"
+              ],
+              "description": "List completed workflows finished before the specified duration (e.g. 10m 3h 1d)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|wide|yaml|json",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--prefix"
+              ],
+              "description": "Filter workflows by prefix",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resubmitted"
+              ],
+              "description": "Show resubmitted workflows"
+            },
+            {
+              "names": [
+                "--running"
+              ],
+              "description": "Show running workflows. Mutually exclusive with --completed"
+            },
+            {
+              "names": [
+                "--selector",
+                "-l"
+              ],
+              "description": "Selector (label query) to filter on",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--since"
+              ],
+              "description": "Show only workflows created after than a relative duration",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--status"
+              ],
+              "description": "Filter by status (comma separated)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "strings"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resume",
+          "description": "Resume zero or more cron workflows",
+          "args": [
+            {
+              "name": "CRON_WORKFLOW"
+            }
+          ]
+        },
+        {
+          "name": "suspend",
+          "description": "Suspend zero or more cron workflows",
+          "args": [
+            {
+              "name": "CRON_WORKFLOW"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete workflows",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Delete all workflows"
+        },
+        {
+          "names": [
+            "--all-namespaces",
+            "-A"
+          ],
+          "description": "Delete workflows from all namespaces"
+        },
+        {
+          "names": [
+            "--completed"
+          ],
+          "description": "Delete completed workflows"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Do not delete the workflow only print what would happen"
+        },
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on supports '=' '==' and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force delete workflows by removing finalizers"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for delete"
+        },
+        {
+          "names": [
+            "--older"
+          ],
+          "description": "Delete completed workflows finished before the specified duration (e.g. 10m 3h 1d)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prefix"
+          ],
+          "description": "Delete workflows by prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--resubmitted"
+          ],
+          "description": "Delete resubmitted workflows"
+        },
+        {
+          "names": [
+            "--selector",
+            "-l"
+          ],
+          "description": "Selector (label query) to filter on not including uninitialized ones supports '=''=='and '!='.(e.g. -l key1=value1,key2=value2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW"
+        }
+      ]
+    },
+    {
+      "name": "executor-plugin",
+      "description": "Manage executor plugins",
+      "subcommands": [
+        {
+          "name": "build",
+          "description": "Build an executor plugin",
+          "args": [
+            {
+              "name": "DIR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "get",
+      "description": "Display details about a workflow",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for get"
+        },
+        {
+          "names": [
+            "--no-color"
+          ],
+          "description": "Disable colorized output"
+        },
+        {
+          "names": [
+            "--no-utf8"
+          ],
+          "description": "Use plain 7-bits ascii characters"
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to display, Eg: --node-field-selector phase=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output format. One of: json|yaml|short|wide",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status"
+          ],
+          "description": "Filter by status (Pending, Running, Succeeded, Skipped, Failed, Error)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command"
+    },
+    {
+      "name": "lint",
+      "description": "Validate files or directories of manifests",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for lint"
+        },
+        {
+          "names": [
+            "--kinds"
+          ],
+          "description": "Which kinds will be linted. Can be: workflows|workflowtemplates|cronworkflows|clusterworkflowtemplates (default [all])",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strings"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--offline"
+          ],
+          "description": "Perform offline linting"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Linting results output format. One of: pretty|simple (default \"pretty\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strict"
+          ],
+          "description": "Perform strict workflow validation (default true)"
+        }
+      ],
+      "args": [
+        {
+          "name": "FILE"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List workflows",
+      "options": [
+        {
+          "names": [
+            "--all-namespaces",
+            "-A"
+          ],
+          "description": "Show workflows from all namespaces"
+        },
+        {
+          "names": [
+            "--chunk-size"
+          ],
+          "description": "Return large lists in chunks rather than all at once. Pass 0 to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--completed"
+          ],
+          "description": "Show completed workflows. Mutually exclusive with --running"
+        },
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on supports '=' '==' and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for list"
+        },
+        {
+          "names": [
+            "--no-headers"
+          ],
+          "description": "Don't print headers (default print headers)"
+        },
+        {
+          "names": [
+            "--older"
+          ],
+          "description": "List completed workflows finished before the specified duration (e.g. 10m 3h 1d)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output format. One of: name|wide|yaml|json",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prefix"
+          ],
+          "description": "Filter workflows by prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--resubmitted"
+          ],
+          "description": "Show resubmitted workflows"
+        },
+        {
+          "names": [
+            "--running"
+          ],
+          "description": "Show running workflows. Mutually exclusive with --completed"
+        },
+        {
+          "names": [
+            "--selector",
+            "-l"
+          ],
+          "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1,key2=value2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--since"
+          ],
+          "description": "Show only workflows created after than a relative duration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status"
+          ],
+          "description": "Filter by status (comma separated)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strings"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "View logs of a pod or workflow",
+      "options": [
+        {
+          "names": [
+            "--container",
+            "-c"
+          ],
+          "description": "Print the logs of this container (default \"main\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--follow",
+            "-f"
+          ],
+          "description": "Specify if the logs should be streamed"
+        },
+        {
+          "names": [
+            "--grep"
+          ],
+          "description": "Grep for lines",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for logs"
+        },
+        {
+          "names": [
+            "--no-color"
+          ],
+          "description": "Disable colorized output"
+        },
+        {
+          "names": [
+            "--previous",
+            "-p"
+          ],
+          "description": "Specify if the previously terminated container logs should be returned"
+        },
+        {
+          "names": [
+            "--selector",
+            "-l"
+          ],
+          "description": "Log selector for some pod",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--since"
+          ],
+          "description": "Only return logs newer than a relative duration like 5s 2m or 3h. Defaults to all logs. Only one of since-time / since may be used",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "duration"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--since-time"
+          ],
+          "description": "Only return logs after a specific date (RFC3339). Defaults to all logs. Only one of since-time / since may be used",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tail"
+          ],
+          "description": "If set the number of lines from the end of the logs to show. If not specified logs are shown from the creation of the container or sinceSeconds or sinceTime (default -1)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--timestamps"
+          ],
+          "description": "Include timestamps on each line in the log output"
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFOW"
+        },
+        {
+          "name": "POD",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "node",
+      "description": "Perform action on a node in a workflow",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for node"
+        },
+        {
+          "names": [
+            "--message",
+            "-m"
+          ],
+          "description": "Set the message of a node eg: --message \"Hello World\"",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to set eg: --node-field-selector inputs.paramaters.myparam.value=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output-parameter",
+            "-p"
+          ],
+          "description": "Set a \"supplied\" output parameter of node eg: --output-parameter parameter-name=\"Hello world!\"",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--phase"
+          ],
+          "description": "Phase to set the node to eg: --phase Succeeded",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "ACTION"
+        },
+        {
+          "name": "WORKFLOW"
+        },
+        {
+          "name": "FLAGS"
+        }
+      ]
+    },
+    {
+      "name": "resubmit",
+      "description": "Resubmit one or more workflows",
+      "options": [
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on: supports '=' '==' and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for resubmit"
+        },
+        {
+          "names": [
+            "--log"
+          ],
+          "description": "Log the workflow until it completes"
+        },
+        {
+          "names": [
+            "--memoized"
+          ],
+          "description": "Re-use successful steps & outputs from the previous run"
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output format. One of: name|json|yaml|wide",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--parameter",
+            "-p"
+          ],
+          "description": "Input parameter to override on the original workflow spec",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--priority"
+          ],
+          "description": "Workflow priority",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int32"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selector",
+            "-l"
+          ],
+          "description": "Selector (label query) to filter on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--wait",
+            "-w"
+          ],
+          "description": "Wait for the workflow to complete - only works when a single workflow is resubmitted"
+        },
+        {
+          "names": [
+            "--watch"
+          ],
+          "description": "Watch the workflow until it completes - only works when a single workflow is resubmitted"
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW..."
+        }
+      ]
+    },
+    {
+      "name": "resume",
+      "description": "Resume zero or more workflows",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for resume"
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to resume, Eg: --node-field-selector inputs.paramaters.myparam.value=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW1"
+        },
+        {
+          "name": "WORKFLOW2..."
+        }
+      ]
+    },
+    {
+      "name": "retry",
+      "description": "Retry zero or more workflows",
+      "options": [
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on, Supports '='; '=='; and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for retry"
+        },
+        {
+          "names": [
+            "--log"
+          ],
+          "description": "Log the workflow until it completes"
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of nodes to reset; eg: --node-field-selector inputs.paramaters.myparam.value=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output format. One of: name|json|yaml|wide",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--parameter",
+            "-p"
+          ],
+          "description": "Input parameter to override on the original workflow spec",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--restart-successful"
+          ],
+          "description": "Indicates to restart successful nodes matching the --node-field-selector"
+        },
+        {
+          "names": [
+            "--selector",
+            "-l"
+          ],
+          "description": "Selector (label query) to filter on; not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1,key2=value2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--wait",
+            "-w"
+          ],
+          "description": "Wait for the workflow to complete only works when a single workflow is retried"
+        },
+        {
+          "names": [
+            "--watch"
+          ],
+          "description": "Watch the workflow until it completes only works when a single workflow is retried"
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW..."
+        }
+      ]
+    },
+    {
+      "name": "server",
+      "description": "Start the Argo Server",
+      "options": [
+        {
+          "names": [
+            "--access-control-allow-origin"
+          ],
+          "description": "Set Access-Control-Allow-Origin header in HTTP responses",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allowed-link-protocol"
+          ],
+          "description": "Allowed link protocol in configMap. Used if the allowed configMap links protocol are different from http https. Defaults to the environment variable ALLOWED_LINK_PROTOCOL (default [http https])",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-rate-limit"
+          ],
+          "description": "Set limit per IP for api ratelimiter (default 1000)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "uint"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--auth-mode"
+          ],
+          "description": "API server authentication mode. Any 1 or more length permutation of: client server sso (default [client])",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--basehref"
+          ],
+          "description": "Value for base href in index.html. Used if the server is running behind reverse proxy under subpath different from /. Defaults to the environment variable BASE_HREF. (default \" /\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-b",
+            "--browser"
+          ],
+          "description": "Enable automatic launching of the browser [local mode]"
+        },
+        {
+          "names": [
+            "--configmap"
+          ],
+          "description": "Name of K8s configmap to retrieve workflow controller configuration (default \"workflow-controller-configmap\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--event-async-dispatch"
+          ],
+          "description": "Dispatch event async"
+        },
+        {
+          "names": [
+            "--event-operation-queue-size"
+          ],
+          "description": "How many events operations that can be queued at once (default 16)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--event-worker-count"
+          ],
+          "description": "How many event workers to run (default 4)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for server"
+        },
+        {
+          "names": [
+            "--hsts"
+          ],
+          "description": "Whether or not we should add a HTTP Secure Transport Security header. This only has effect if secure is enabled. (default true)"
+        },
+        {
+          "names": [
+            "--log-format"
+          ],
+          "description": "The formatter to use for logs. One of: text|json (default \"text\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--managed-namespace"
+          ],
+          "description": "Namespace that watches default to the installation namespace",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--namespaced"
+          ],
+          "description": "Run as namespaced mode"
+        },
+        {
+          "names": [
+            "-p",
+            "--port"
+          ],
+          "description": "Port to listen on (default 2746)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tls-certificate-secret-name"
+          ],
+          "description": "The name of a Kubernetes secret that contains the server certificates",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--x-frame-options"
+          ],
+          "description": "Set X-Frame-Options header in HTTP responses. (default \"DENY\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "description": "Stop zero or more workflows allowing all exit handlers to run",
+      "options": [
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "If true, only stop the workflows that would be stopped, without stopping them"
+        },
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on  supports '='  '=='  and '!='.(e.g. --field-selector key1=value1,key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for stop"
+        },
+        {
+          "names": [
+            "--message"
+          ],
+          "description": "Message to add to previously running nodes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to stop eg: --node-field-selector inputs.paramaters.myparam.value=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-l",
+            "--selector"
+          ],
+          "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1, key2=value2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW1"
+        },
+        {
+          "name": "WORKFLOW2..."
+        }
+      ]
+    },
+    {
+      "name": "submit",
+      "description": "Submit a workflow",
+      "options": [
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Modify the workflow on the client-side without creating it"
+        },
+        {
+          "names": [
+            "--entrypoint"
+          ],
+          "description": "Override entrypoint",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--from"
+          ],
+          "description": "Submit from an existing kind/name E.g. --from=cronwf/hello-world-cwf",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "kind/name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--generate-name"
+          ],
+          "description": "Override metadata.generateName",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for submit"
+        },
+        {
+          "names": [
+            "-l",
+            "--labels"
+          ],
+          "description": "Comma separated labels to apply to the workflow. Will override previous values",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log"
+          ],
+          "description": "Log the workflow until it completes"
+        },
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Override metadata.name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to display eg: --node-field-selector phase=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "Output format. One of: name|json|yaml|wide",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--parameter"
+          ],
+          "description": "Pass an input parameter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stringArray"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--parameter-file"
+          ],
+          "description": "Pass a file containing all input parameters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--priority"
+          ],
+          "description": "Workflow priority",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "int32"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--scheduled-time"
+          ],
+          "description": "Override the workflow's scheduledTime parameter (useful for backfilling). The time must be RFC3339",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--server-dry-run"
+          ],
+          "description": "Send request to server with dry-run flag which will modify the workflow without creating it"
+        },
+        {
+          "names": [
+            "--serviceaccount"
+          ],
+          "description": "Run all pods in the workflow using specified serviceaccount",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status"
+          ],
+          "description": "Filter by status (Pending Running Succeeded Skipped Failed Error). Should only be used with --watch",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--strict"
+          ],
+          "description": "Perform strict workflow validation (default true)"
+        },
+        {
+          "names": [
+            "-w",
+            "--wait"
+          ],
+          "description": "Wait for the workflow to complete"
+        },
+        {
+          "names": [
+            "--watch"
+          ],
+          "description": "Watch the workflow until it completes"
+        }
+      ],
+      "args": [
+        {
+          "name": "FILE..."
+        }
+      ]
+    },
+    {
+      "name": "suspend",
+      "description": "Suspend zero or more workflow",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for suspend"
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW1"
+        },
+        {
+          "name": "WORKFLOW2..."
+        }
+      ]
+    },
+    {
+      "name": "template",
+      "description": "Manipulate workflow templates",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for template"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a workflow template",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for create"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: name|json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict workflow validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "FILE1"
+            },
+            {
+              "name": "FILE2..."
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete a workflow template",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Delete all workflow templates"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Help for delete"
+            }
+          ],
+          "args": [
+            {
+              "name": "WORKFLOW_TEMPLATE"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Display details about a workflow template",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Help for get"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "WORKFLOW_TEMPLATE"
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validate a file or directory of workflow template manifests",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for lint"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Linting results output format. One of: pretty|simple (default \"pretty\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--strict"
+              ],
+              "description": "Perform strict workflow validation (default true)"
+            }
+          ],
+          "args": [
+            {
+              "name": "DIRECTORY"
+            },
+            {
+              "name": "FILE1 FILE2 FILE3..."
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List workflow templates",
+          "options": [
+            {
+              "names": [
+                "--all-namespaces",
+                "-A"
+              ],
+              "description": "Show workflows from all namespaces"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for list"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: wide|name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "terminate",
+      "description": "Terminate zero or more workflows immediately",
+      "options": [
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Do not terminate the workflow only print what would happen"
+        },
+        {
+          "names": [
+            "--field-selector"
+          ],
+          "description": "Selector (field query) to filter on supports '=' '==' and '!='.(e.g. --field-selector key1=value1key2=value2). The server only supports a limited number of field queries per type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for terminate"
+        },
+        {
+          "names": [
+            "-l",
+            "--selector"
+          ],
+          "description": "Selector (label query) to filter on not including uninitialized ones supports '=' '==' and '!='.(e.g. -l key1=value1key2=value2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOOW WORKFLOW2..."
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print version information",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for version"
+        },
+        {
+          "names": [
+            "--short"
+          ],
+          "description": "Print just the version number"
+        }
+      ]
+    },
+    {
+      "name": "wait",
+      "description": "Waits for workflows to complete",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for wait"
+        },
+        {
+          "names": [
+            "--ignore-not-found"
+          ],
+          "description": "Ignore the wait if the workflow is not found"
+        }
+      ],
+      "args": [
+        {
+          "name": "[WORKFLOW...]"
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "description": "Watch a workflow until it completes",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for watch"
+        },
+        {
+          "names": [
+            "--node-field-selector"
+          ],
+          "description": "Selector of node to display eg: --node-field-selector phase=abc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status"
+          ],
+          "description": "Filter by status (Pending, Running, Succeeded, Skipped, Failed, Error)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "string"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "WORKFLOW"
+        }
+      ]
+    }
+  ]
+}

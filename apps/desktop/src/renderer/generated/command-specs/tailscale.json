@@ -1,0 +1,570 @@
+{
+  "name": "tailscale",
+  "options": [
+    {
+      "names": [
+        "--socket"
+      ],
+      "description": "Path to tailscaled's unix socket",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "socket"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "up",
+      "description": "Connect to Tailscale, logging in if needed",
+      "options": [
+        {
+          "names": [
+            "--accept-dns"
+          ],
+          "description": "Accept DNS configuration from the admin panel"
+        },
+        {
+          "names": [
+            "--accept-routes"
+          ],
+          "description": "Accept routes advertised by other Tailscale nodes"
+        },
+        {
+          "names": [
+            "--advertise-exit-node"
+          ],
+          "description": "Offer to be an exit node for internet traffic for the tailnet"
+        },
+        {
+          "names": [
+            "--advertise-routes"
+          ],
+          "description": "Routes to advertise to other nodes (comma-separated, e.g. \"10.0.0.0/8,192.168.0.0/24\") or empty string to not advertise routes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "routes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--advertise-tags"
+          ],
+          "description": "Comma-separated ACL tags to request; each must start with \"tag:\" (e.g. \"tag:eng,tag:montreal,tag:ssh\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tags"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--auth-key"
+          ],
+          "description": "Node authorization key; if it begins with \"file:\", then it's a path to a file containing the authkey",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "authkey"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exit-node"
+          ],
+          "description": "Tailscale exit node (IP or base name) for internet traffic, or empty string to not use an exit node",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exitnode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exit-node-allow-lan-access"
+          ],
+          "description": "Allow direct access to the local network when routing traffic via an exit node"
+        },
+        {
+          "names": [
+            "--force-reauth"
+          ],
+          "description": "Force reauthentication"
+        },
+        {
+          "names": [
+            "--host-routes"
+          ],
+          "description": "Install host routes to other Tailscale nodes"
+        },
+        {
+          "names": [
+            "--hostname"
+          ],
+          "description": "Hostname to use instead of the one provided by the OS"
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output in JSON format"
+        },
+        {
+          "names": [
+            "--login-server"
+          ],
+          "description": "Login server to use"
+        },
+        {
+          "names": [
+            "--operator"
+          ],
+          "description": "Unix username to allow to operate on tailscaled without sudo",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "username"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--qr"
+          ],
+          "description": "Show QR code for login URLs"
+        },
+        {
+          "names": [
+            "--reset"
+          ],
+          "description": "Reset unspecified settings to their default values"
+        },
+        {
+          "names": [
+            "--shields-up"
+          ],
+          "description": "Don't allow incoming connections"
+        },
+        {
+          "names": [
+            "--ssh"
+          ],
+          "description": "Run an SSH server, permitting access per tailnet admin's declared policy"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "down",
+      "description": "Disconnect from Tailscale",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Disconnect from Tailscale and expire current node key",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "netcheck",
+      "description": "Print an analysis of local network conditions",
+      "options": [
+        {
+          "names": [
+            "--every"
+          ],
+          "description": "If non-zero, do an incremental report with the given frequency"
+        },
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "Output format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Verbose logs"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "ip",
+      "description": "Show Tailscale IP addresses",
+      "options": [
+        {
+          "names": [
+            "--1"
+          ],
+          "description": "Only print one IP address"
+        },
+        {
+          "names": [
+            "--4"
+          ],
+          "description": "Only print IPv4 address"
+        },
+        {
+          "names": [
+            "--6"
+          ],
+          "description": "Only print IPv6 address"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ],
+      "args": [
+        {
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Show state of tailscaled and its connections",
+      "options": [
+        {
+          "names": [
+            "--active"
+          ],
+          "description": "Filter output to only peers with active sessions"
+        },
+        {
+          "names": [
+            "--browser"
+          ],
+          "description": "Open a browser in web mode"
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output in JSON format"
+        },
+        {
+          "names": [
+            "--listen"
+          ],
+          "description": "Listen address for web mode; use port 0 for automatic (default 127.0.0.1:8384)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--peers"
+          ],
+          "description": "Show status of peers"
+        },
+        {
+          "names": [
+            "--self"
+          ],
+          "description": "Show status of local machine"
+        },
+        {
+          "names": [
+            "--web"
+          ],
+          "description": "Run webserver with HTML showing status"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "ping",
+      "description": "Ping a host at the Tailscale layer, see how it routed",
+      "options": [
+        {
+          "names": [
+            "--c"
+          ],
+          "description": "Max number of pings to send",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "count"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--timeout"
+          ],
+          "description": "Timeout before giving up on a ping",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "timeout"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tsmp"
+          ],
+          "description": "Do a TSMP-level ping (through IP + wireguard, but not involving host OS stack)"
+        },
+        {
+          "names": [
+            "--until-direct"
+          ],
+          "description": "Stop once a direct path is established"
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Verbose logs"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "nc",
+      "description": "Connect to a port on a host, connected to stdin/stdout",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ],
+      "args": [
+        {
+          "name": "hosname-or-ip"
+        },
+        {
+          "name": "port"
+        }
+      ]
+    },
+    {
+      "name": "ssh",
+      "description": "SSH to a Tailscale machine",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ],
+      "args": [
+        {
+          "name": "[user@]<host>"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print Tailscale version",
+      "options": [
+        {
+          "names": [
+            "--daemon"
+          ],
+          "description": "Also print local node's daemon version"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "description": "Run a web server for controlling Tailscale",
+      "options": [
+        {
+          "names": [
+            "--cgi"
+          ],
+          "description": "Run as CGI script"
+        },
+        {
+          "names": [
+            "--listen"
+          ],
+          "description": "Listen address; use port 0 for automatic (default localhost:8088)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "file",
+      "description": "Send or receive files",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "cp",
+          "description": "Copy file(s) to a host",
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            },
+            {
+              "name": "file or host",
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Move files out of the Tailscale file inbox",
+          "args": [
+            {
+              "name": "target-directory",
+              "template": "folders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bugreport",
+      "description": "Print a shareable identifier to help diagnose issues",
+      "options": [
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ],
+      "args": [
+        {
+          "name": "note",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "cert",
+      "description": "Get TLS certs",
+      "options": [
+        {
+          "names": [
+            "--cert-file"
+          ],
+          "description": "Output cert file or \"-\" for stdout",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-file"
+          ],
+          "description": "Output cert file or \"-\" for stdout",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--serve-demo"
+          ],
+          "description": "Serve on port :443 using the cert as a demo, instead of writing out the files to disk"
+        },
+        {
+          "names": [
+            "--help"
+          ],
+          "description": "Show help message"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Print help message"
+    }
+  ]
+}

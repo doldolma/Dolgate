@@ -1,0 +1,26 @@
+{
+  "name": "pdfunite",
+  "description": "Combine multiple pdfs",
+  "options": [
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Print copyright and version info"
+    },
+    {
+      "names": [
+        "-h",
+        "--help",
+        "-?"
+      ],
+      "description": "Print usage information"
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

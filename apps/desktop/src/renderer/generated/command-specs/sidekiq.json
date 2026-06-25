@@ -1,0 +1,124 @@
+{
+  "name": "sidekiq",
+  "description": "Background job framework for Ruby",
+  "options": [
+    {
+      "names": [
+        "--concurrency",
+        "-c"
+      ],
+      "description": "Processor threads to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "INT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--environment",
+        "-e"
+      ],
+      "description": "Application environment",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ENV"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tag",
+        "-g"
+      ],
+      "description": "Process tag for procline",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "TAG"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--queue",
+        "-q"
+      ],
+      "description": "Queues to process with optional weights",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "QUEUE"
+        },
+        {
+          "name": "WEIGHT",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--require",
+        "-r"
+      ],
+      "description": "Location of Rails application with jobs or file to require",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH|DIR",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--timeout",
+        "-t"
+      ],
+      "description": "Shutdown timeout",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Print more verbose output"
+    },
+    {
+      "names": [
+        "--config",
+        "-C"
+      ],
+      "description": "Path to YAML config file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for sidekiq run"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Print version and exit"
+    }
+  ]
+}

@@ -1,0 +1,780 @@
+{
+  "name": "k6",
+  "description": "Grafana k6 is an open-source load testing tool that makes performance testing easy",
+  "options": [
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Enable verbose logging"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Disable progress updates"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Help for k6"
+    },
+    {
+      "names": [
+        "-a",
+        "--address"
+      ],
+      "description": "Address for the REST API server (default \"localhost:6565\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "address"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config",
+        "-c"
+      ],
+      "description": "JSON config file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-format"
+      ],
+      "description": "Log output format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "log-format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-output"
+      ],
+      "description": "Change the output for k6 logs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "log-output"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Disable colored output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "no-color"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "archive",
+      "description": "Create an archive",
+      "args": [
+        {
+          "name": "archive"
+        }
+      ]
+    },
+    {
+      "name": "cloud",
+      "description": "Run a test on the cloud",
+      "args": [
+        {
+          "name": "cloud"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Generate the autocompletion script for the specified shell",
+      "subcommands": [
+        {
+          "name": "bash",
+          "description": "Generate the autocompletion script for bash"
+        },
+        {
+          "name": "fish",
+          "description": "Generate the autocompletion script for fish"
+        },
+        {
+          "name": "powershell",
+          "description": "Generate the autocompletion script for powershell"
+        },
+        {
+          "name": "zsh",
+          "description": "Generate the autocompletion script for zsh"
+        }
+      ],
+      "args": [
+        {
+          "name": "completion"
+        }
+      ]
+    },
+    {
+      "name": "convert",
+      "description": "Convert a HAR file to a k6 script",
+      "args": [
+        {
+          "name": "convert"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "args": [
+        {
+          "name": "help"
+        }
+      ]
+    },
+    {
+      "name": "inspect",
+      "description": "Inspect a script or archive",
+      "args": [
+        {
+          "name": "inspect"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Inspect a script or archive",
+      "subcommands": [
+        {
+          "name": "cloud",
+          "description": "Authenticate with Load Impact"
+        },
+        {
+          "name": "influxdb",
+          "description": "Authenticate with InfluxDB"
+        }
+      ],
+      "args": [
+        {
+          "name": "login"
+        }
+      ]
+    },
+    {
+      "name": "pause",
+      "description": "Pause a running test"
+    },
+    {
+      "name": "resume",
+      "description": "Resume a running test"
+    },
+    {
+      "name": "run",
+      "description": "Start a load test",
+      "options": [
+        {
+          "names": [
+            "--address"
+          ],
+          "description": "Address of the API server",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--batch"
+          ],
+          "description": "Max parallel batch reqs (default 20)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "batch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--batch-per-host"
+          ],
+          "description": "Max parallel batch reqs per host (default 6)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "batch-per-host"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--vus",
+            "-u"
+          ],
+          "description": "Number of virtual users (default 1)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "vus"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--duration",
+            "-d"
+          ],
+          "description": "Test duration limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "duration"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--iterations",
+            "-i"
+          ],
+          "description": "Script total iteration limit (among all VUs)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "iterations"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--stage",
+            "-s"
+          ],
+          "description": "Add a stage, as `[duration]:[target]`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stage"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--execution-segment"
+          ],
+          "description": "Add a stage, as `[duration]:[target]`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "execution-segment"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--execution-segment-sequence"
+          ],
+          "description": "The execution segment sequence",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "execution-segment-sequence"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--paused",
+            "-p"
+          ],
+          "description": "Start the test in a paused state",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "paused"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-setup"
+          ],
+          "description": "Don't run setup()",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-setup"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-teardown"
+          ],
+          "description": "Don't run teardown()",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-teardown"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--max-redirects"
+          ],
+          "description": "Follow at most n redirects (default 10)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "max-redirects"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rps"
+          ],
+          "description": "Limit requests per second",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rps"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--user-agent"
+          ],
+          "description": "User agent for http requests (default \"k6/0.39.0 (https://k6.io/)\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "user-agent"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--http-debug"
+          ],
+          "description": "Log all HTTP requests and responses. Excludes body by default. To include body use '--http-debug=full'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "http-debug"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--insecure-skip-tls-verify"
+          ],
+          "description": "Skip verification of TLS certificates",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "insecure-skip-tls-verify"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-connection-reuse"
+          ],
+          "description": "Disable keep-alive connections",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-connection-reuse"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-vu-connection-reuse"
+          ],
+          "description": "Don't reuse connections between iterations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-vu-connection-reuse"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--min-iteration-duration"
+          ],
+          "description": "Minimum amount of time k6 will take executing a single iteration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "min-iteration-duration"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--throw"
+          ],
+          "description": "Throw warnings (like failed http requests) as errors",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "throw"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--blacklist-ip"
+          ],
+          "description": "Blacklist an ip range from being called",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "blacklist-ip"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--block-hostnames"
+          ],
+          "description": "Block a case-insensitive hostname pattern, with optional leading wildcard, from being called",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "block-hostnames"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--summary-trend-stats"
+          ],
+          "description": "Define stats for trend metrics (response times), one or more as 'avg,p(95),...' (default 'avg,min,med,max,p(90),p(95)')",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "summary-trend-stats"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--summary-time-unit"
+          ],
+          "description": "Define the time unit used to display the trend stats. Possible units are: 's', 'ms' and 'us'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "summary-time-unit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--system-tags"
+          ],
+          "description": "Only include these system tags in metrics (default \"proto,subproto,status,method,url,name,group,check,error,error_code,tls_version,scenario,service,expected_response\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "system-tags"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag"
+          ],
+          "description": "Add a tag to be applied to all samples, as `[name]=[value]`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--console-output"
+          ],
+          "description": "Redirects the console logging to the provided output file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "console-output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--discard-response-bodies"
+          ],
+          "description": "Read but don't process or save HTTP response bodies",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "discard-response-bodies"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--local-ips"
+          ],
+          "description": "Client IP Ranges and/or CIDRs from which each VU will be making requests, e.g. '192.168.220.1,192.168.0.10-192.168.0.25', 'fd:1::0/120', etc",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "local-ips"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dns"
+          ],
+          "description": "DNS resolver configuration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dns"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--include-system-env-vars"
+          ],
+          "description": "Pass the real system environment variables to the runtime (default true)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "include-system-env-vars"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--compatibility-mode"
+          ],
+          "description": "JavaScript compiler compatibility mode, \"extended\" or \"base\"",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "compatibility-mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--type",
+            "-t"
+          ],
+          "description": "Override test type, \"js\" or \"archive\"",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--env",
+            "-e"
+          ],
+          "description": "Add/override environment variable with VAR=value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "env"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-thresholds"
+          ],
+          "description": "Don't run thresholds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-thresholds"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-summary"
+          ],
+          "description": "Don't show the summary at the end of the test",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-summary"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--summary-export"
+          ],
+          "description": "Output the end-of-test summary report to JSON file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "summary-export"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--out",
+            "-o"
+          ],
+          "description": "Uri for an external metrics database",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "out"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--linger",
+            "-l"
+          ],
+          "description": "Keep the API server alive past test end",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "linger"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-usage-report"
+          ],
+          "description": "Don't send anonymous stats to the developers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "no-usage-report"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "run"
+        }
+      ]
+    },
+    {
+      "name": "scale",
+      "description": "Scale a running test",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for scale"
+        },
+        {
+          "names": [
+            "-m",
+            "--max"
+          ],
+          "description": "Max available virtual users",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "max"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-u",
+            "--vus"
+          ],
+          "description": "Number of virtual users (default 1)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "vus"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "stats",
+      "description": "Show test metrics",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for stats"
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Show test status",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for status"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Show the application version and exit",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Help for version"
+        }
+      ]
+    }
+  ]
+}

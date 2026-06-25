@@ -1,0 +1,81 @@
+{
+  "name": "remix",
+  "description": "Remix CLI to start, build and export your application",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Output usage information"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "build",
+      "description": "Create an optimized production build of your application",
+      "options": [
+        {
+          "names": [
+            "--sourcemap"
+          ],
+          "description": "Enables production sourcemap"
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "dev",
+      "description": "Start the application in development mode",
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "setup",
+      "description": "Prepare node_modules/remix folder (after installation of packages)",
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "routes",
+      "description": "Generate the route config of the application",
+      "options": [
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Print the route config as JSON"
+        }
+      ],
+      "args": [
+        {
+          "name": "dir",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    }
+  ]
+}

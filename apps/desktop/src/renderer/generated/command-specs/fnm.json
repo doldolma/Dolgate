@@ -1,0 +1,1264 @@
+{
+  "name": "fnm",
+  "description": "Fast Node Manager",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Prints version information"
+    },
+    {
+      "names": [
+        "--arch"
+      ],
+      "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "arch"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--fnm-dir"
+      ],
+      "description": "The root directory of fnm installations",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dir",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-level"
+      ],
+      "description": "The log level of fnm commands",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "logLevel"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--node-dist-mirror"
+      ],
+      "description": "Mirror of https://nodejs.org/dist",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "nodeDistMirror"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--version-file-strategy"
+      ],
+      "description": "Strategy for how to resolve the Node version",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "strategy"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "install",
+      "description": "Install a new Node.js version",
+      "options": [
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Install latest LTS"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstall a Node.js version",
+      "options": [
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Install latest LTS"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "use",
+      "description": "Change Node.js version",
+      "options": [
+        {
+          "names": [
+            "--install-if-missing"
+          ],
+          "description": "Install the version if it isn't installed yet"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Install latest LTS"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Run a command within fnm context",
+      "options": [
+        {
+          "names": [
+            "--using"
+          ],
+          "description": "Either an explicit version, or a filename with the version written in it",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Install latest LTS"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "command",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "current",
+      "description": "Print the current Node.js version",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List all locally installed Node.js versions",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list-remote",
+      "description": "List all remote Node.js versions",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "alias",
+      "description": "Alias a version to a common name",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        },
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "unalias",
+      "description": "Deletes the alias named <name>",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "requested-alias"
+        }
+      ]
+    },
+    {
+      "name": "completions",
+      "description": "Print shell completions to stdout",
+      "options": [
+        {
+          "names": [
+            "shell"
+          ],
+          "description": "The shell syntax to use. Infers when missing",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "shell"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "default",
+      "description": "Set a version as the default version. This is a shorthand for 'fnm alias VERSION default'",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Print and set up required environment variables for fnm",
+      "options": [
+        {
+          "names": [
+            "--use-on-cd"
+          ],
+          "description": "Print the script to change Node versions every directory change"
+        },
+        {
+          "names": [
+            "shell"
+          ],
+          "description": "The shell syntax to use. Infers when missing",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "shell"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Prints the help page or the help of the given subcommand(s)",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Override the architecture of the installed Node binary. Defaults to arch of fnm binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fnm-dir"
+          ],
+          "description": "The root directory of fnm installations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--log-level"
+          ],
+          "description": "The log level of fnm commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logLevel"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--node-dist-mirror"
+          ],
+          "description": "Mirror of https://nodejs.org/dist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "nodeDistMirror"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version-file-strategy"
+          ],
+          "description": "Strategy for how to resolve the Node version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "strategy"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

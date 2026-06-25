@@ -1,0 +1,311 @@
+{
+  "name": "screen",
+  "description": "Screen manager with VT100/ANSI terminal emulation",
+  "options": [
+    {
+      "names": [
+        "-a"
+      ],
+      "description": "Force all capabilities into each window's termcap"
+    },
+    {
+      "names": [
+        "-A"
+      ],
+      "description": "Adapt all windows to the new display width & height"
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Read configuration file instead of '.screenrc'",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Change command characters",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "xy"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Flow control on"
+    },
+    {
+      "names": [
+        "-fn"
+      ],
+      "description": "Flow control off"
+    },
+    {
+      "names": [
+        "-fa"
+      ],
+      "description": "Flow control automatic"
+    },
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Set the size of the scrollback history buffer",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "h"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i"
+      ],
+      "description": "Interrupt output sooner when flow control is on"
+    },
+    {
+      "names": [
+        "-list",
+        "-ls"
+      ],
+      "description": "Do nothing, just list our SockDir"
+    },
+    {
+      "names": [
+        "-L"
+      ],
+      "description": "Turn on output logging"
+    },
+    {
+      "names": [
+        "-m"
+      ],
+      "description": "Ignore $STY variable, do create a new screen session"
+    },
+    {
+      "names": [
+        "-O"
+      ],
+      "description": "Choose optimal output rather than exact vt100 emulation"
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Preselect the named window if it exists",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "window"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q"
+      ],
+      "description": "Quiet startup. Exits with non-zero return code if unsuccessful"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Shell to execute rather than $SHELL",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "shell"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S"
+      ],
+      "description": "Name this session <pid>.sockname instead of <pid>.<tty>.<host>",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "sockname"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Set title. (window's name)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "title"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-T"
+      ],
+      "description": "Use term as $TERM for windows, rather than 'screen'",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "term"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-U"
+      ],
+      "description": "Tell screen to use UTF-8 encoding"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Print 'Screen version 4.00.03 (FAU) 23-Oct-06'"
+    },
+    {
+      "names": [
+        "-wipe"
+      ],
+      "description": "Do nothing, just clean up SockDir",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "match",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-x"
+      ],
+      "description": "Attach to a not detached screen. (Multi display mode)"
+    },
+    {
+      "names": [
+        "-X"
+      ],
+      "description": "Execute <cmd> as a screen command in the specified session"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "-d",
+      "description": "Does not start screen, but detaches the elsewhere running screen session",
+      "subcommands": [
+        {
+          "name": "-r",
+          "description": "Reattach a session and if necessary detach it first",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        },
+        {
+          "name": "-R",
+          "description": "Reattach a session and if necessary detach or even create it first",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        },
+        {
+          "name": "-RR",
+          "description": "Reattach a session and if necessary detach or create it. Use the first session if more than one session is available",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "-D",
+      "description": "Does not start screen, but detaches the elsewhere running screen session",
+      "subcommands": [
+        {
+          "name": "-r",
+          "description": "Reattach a session. If necessary detach and logout remotely first",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        },
+        {
+          "name": "-R",
+          "description": "Attach here and now. In detail this means: If a session is running, then reattach. If necessary detach and logout remotely first",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        },
+        {
+          "name": "-RR",
+          "description": "Attach here and now. Whatever that means, just do it",
+          "args": [
+            {
+              "name": "identifier"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "-r",
+      "description": "Resumes a detached screen session",
+      "args": [
+        {
+          "name": "identifier"
+        }
+      ]
+    },
+    {
+      "name": "-R",
+      "description": "Attempts to resume the first detached screen session it finds",
+      "args": [
+        {
+          "name": "identifier"
+        }
+      ]
+    },
+    {
+      "name": "-dmS",
+      "description": "Start as daemon: Screen session in detached mode",
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "cmd"
+    },
+    {
+      "name": "args",
+      "variadic": true
+    }
+  ]
+}

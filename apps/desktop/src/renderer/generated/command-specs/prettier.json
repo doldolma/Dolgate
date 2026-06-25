@@ -1,0 +1,437 @@
+{
+  "name": "prettier",
+  "description": "Run Prettier from the command line",
+  "options": [
+    {
+      "names": [
+        "-c",
+        "--check"
+      ],
+      "description": "Check if your files are formatted",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file, dir, or glob",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--list-different"
+      ],
+      "description": "Print the names of files that are different from Prettier's formatting"
+    },
+    {
+      "names": [
+        "-w",
+        "--write"
+      ],
+      "description": "Edit files in-place"
+    },
+    {
+      "names": [
+        "--arrow-parens"
+      ],
+      "description": "Include parentheses around a sole arrow function parameter",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-bracket-spacing"
+      ],
+      "description": "Do not print spaces between brackets"
+    },
+    {
+      "names": [
+        "--embedded-language-formatting"
+      ],
+      "description": "Control how Prettier formats quoted code embedded in the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--end-of-line"
+      ],
+      "description": "Which end of line characters to apply",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "choice"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--html-whitespace-sensitivity"
+      ],
+      "description": "How to handle whitespaces in HTML",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "choice"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--jsx-bracket-same-line"
+      ],
+      "description": "Put > on the last line instead of at a new line"
+    },
+    {
+      "names": [
+        "--jsx-single-quote"
+      ],
+      "description": "Use single quotes in JSX"
+    },
+    {
+      "names": [
+        "--parser"
+      ],
+      "description": "Which parser to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "parser"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--print-width"
+      ],
+      "description": "The line length where Prettier will try wrap",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--prose-wrap"
+      ],
+      "description": "How to wrap prose",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--quote-props"
+      ],
+      "description": "Change when properties in objects are quoted",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-semi"
+      ],
+      "description": "Do not print semicolons, except at the beginning of lines which may need them"
+    },
+    {
+      "names": [
+        "--single-quote"
+      ],
+      "description": "Use single quotes instead of double quotes"
+    },
+    {
+      "names": [
+        "--tab-width"
+      ],
+      "description": "Number of spaces per indentation level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--trailing-comma"
+      ],
+      "description": "Print trailing commas wherever possible when multi-line",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--use-tabs"
+      ],
+      "description": "Indent with tabs instead of spaces"
+    },
+    {
+      "names": [
+        "--vue-indent-script-and-style"
+      ],
+      "description": "Indent script and style tags in Vue files"
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Path to a Prettier configuration file (.prettierrc, package.json, prettier.config.js)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-config"
+      ],
+      "description": "Do not look for a configuration file"
+    },
+    {
+      "names": [
+        "--config-precedence"
+      ],
+      "description": "Define in which order config files and CLI options should be evaluated",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "precedence"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-editorconfig"
+      ],
+      "description": "Don't take .editorconfig into account when parsing configuration"
+    },
+    {
+      "names": [
+        "--find-config-path"
+      ],
+      "description": "Finds a path to the configuration file for the given input file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ignore-path"
+      ],
+      "description": "Path to a file with patterns describing files to ignore",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--plugin"
+      ],
+      "description": "Add a plugin",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--plugin-search-dir"
+      ],
+      "description": "Custom directory that contains prettier plugins in node_modules subdirectory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "variadic": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--with-node-modules"
+      ],
+      "description": "Process files inside 'node_modules' directory"
+    },
+    {
+      "names": [
+        "--cursor-offset"
+      ],
+      "description": "Print (to stderr) where a cursor at the given position would move to after formatting",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--range-end"
+      ],
+      "description": "Format code ending at a given character offset (exclusive)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--range-start"
+      ],
+      "description": "Format code starting at a given character offset",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "int"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Do not colorize error messages"
+    },
+    {
+      "names": [
+        "--file-info"
+      ],
+      "description": "Extract the following info (as JSON) for a given file path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show CLI usage, or details about the given flag",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "flag",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "--ignore-unknown"
+      ],
+      "description": "Ignore unknown files"
+    },
+    {
+      "names": [
+        "--insert-pragma"
+      ],
+      "description": "Insert @format pragma into file's first docblock comment"
+    },
+    {
+      "names": [
+        "--loglevel"
+      ],
+      "description": "What level of logs to report",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--require-pragma"
+      ],
+      "description": "Require either '@prettier' or '@format' to be present in the file's first docblock comment in order for it to be formatted"
+    },
+    {
+      "names": [
+        "--stdin-filepath"
+      ],
+      "description": "Path to the file to pretend that stdin comes from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--support-info"
+      ],
+      "description": "Print support information as JSON"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print Prettier version"
+    },
+    {
+      "names": [
+        "--debug-check"
+      ],
+      "description": "This will cause Prettier to print an error message if it detects that code correctness might have changed"
+    },
+    {
+      "names": [
+        "--no-error-on-unmatched-pattern"
+      ],
+      "description": "Prevent errors when pattern is unmatched"
+    }
+  ],
+  "args": [
+    {
+      "name": "file, dir or glob",
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

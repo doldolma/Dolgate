@@ -1,0 +1,101 @@
+{
+  "name": "gltfjsx",
+  "description": "GLTF to JSX converter",
+  "options": [
+    {
+      "names": [
+        "-t",
+        "--types"
+      ],
+      "description": "Add Typescript definitions"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Verbose output w/ names and empty groups"
+    },
+    {
+      "names": [
+        "-m",
+        "--meta"
+      ],
+      "description": "Include metadata (as userData)"
+    },
+    {
+      "names": [
+        "-s",
+        "--shadows"
+      ],
+      "description": "Let meshes cast and receive shadows"
+    },
+    {
+      "names": [
+        "-w",
+        "--printwidth"
+      ],
+      "description": "Prettier printWidth (default: 120)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "width"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--precision"
+      ],
+      "description": "Number of fractional digits (default: 2)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "digits"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--draco"
+      ],
+      "description": "Draco binary path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--root"
+      ],
+      "description": "Sets directory from which .gltf file is served",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "root",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D",
+        "--debug"
+      ],
+      "description": "Debug output"
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "template": "filepaths"
+    }
+  ]
+}

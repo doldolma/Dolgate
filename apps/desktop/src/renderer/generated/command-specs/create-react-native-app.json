@@ -1,0 +1,89 @@
+{
+  "name": "create-react-native-app",
+  "description": "Creates a new React Native project",
+  "options": [
+    {
+      "names": [
+        "--template"
+      ],
+      "description": "The name of a template from expo/examples or URL to a GitHub repo that contains an example",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "template"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--template-path"
+      ],
+      "description": "The path inside of a GitHub repo where the example lives",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--yes"
+      ],
+      "description": "Use the default options for creating a project",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-install"
+      ],
+      "description": "Skip installing npm packages or CocoaPods",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--use-npm"
+      ],
+      "description": "Use npm to install dependencies. (default when Yarn is not installed)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "args": [
+    {
+      "name": "name",
+      "template": "folders"
+    }
+  ]
+}

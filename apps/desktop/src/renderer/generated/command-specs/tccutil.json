@@ -1,0 +1,17 @@
+{
+  "name": "tccutil",
+  "description": "Manage the privacy database",
+  "args": [
+    {
+      "name": "command"
+    },
+    {
+      "name": "service"
+    },
+    {
+      "name": "bundle id",
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

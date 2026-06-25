@@ -1,0 +1,82 @@
+{
+  "name": "expressots",
+  "description": "ExpressoTS CLI",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for expressots"
+    },
+    {
+      "names": [
+        "i",
+        "info"
+      ],
+      "description": "Display CLI details"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "new",
+      "description": "Create a new ExpressoTS application",
+      "options": [
+        {
+          "names": [
+            "-t",
+            "--template"
+          ],
+          "description": "Choose a template to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "template",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--package-manager"
+          ],
+          "description": "Choose a package manager to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package-manager",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--directory"
+          ],
+          "description": "Create the application in a specific directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Show command help"
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    }
+  ]
+}

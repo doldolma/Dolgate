@@ -1,0 +1,70 @@
+{
+  "name": "tsx",
+  "description": "Run TypeScript file using tsx",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for tsx"
+    },
+    {
+      "names": [
+        "--no-cache"
+      ],
+      "description": "Disable caching"
+    },
+    {
+      "names": [
+        "--clear-screen"
+      ],
+      "description": "Disable clearing the screen on rerun",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "script path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version"
+    },
+    {
+      "names": [
+        "--tsconfig"
+      ],
+      "description": "Custom tsconfig.json path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tsconfig.json path",
+          "template": "filepaths"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "watch",
+      "description": "Run the script and watch for changes",
+      "args": [
+        {
+          "name": "script path",
+          "template": "filepaths"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "script path",
+      "template": "filepaths"
+    }
+  ]
+}

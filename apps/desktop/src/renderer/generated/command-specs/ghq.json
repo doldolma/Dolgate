@@ -1,0 +1,191 @@
+{
+  "name": "ghq",
+  "description": "'ghq' provides a way to organize remote repository clones, like go get does. When you clone a remote repository by ghq get, ghq makes a directory under a specific root directory (by default ~/ghq) using the remote repository URL’s host and path",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help",
+        "h",
+        "help"
+      ],
+      "description": "Show help"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print the version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "get",
+      "description": "Clone/sync with a remote repository",
+      "options": [
+        {
+          "names": [
+            "-u",
+            "--update"
+          ],
+          "description": "Update local repository if cloned already (default: false)"
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Clone with SSH (default: false)"
+        },
+        {
+          "names": [
+            "--shallow"
+          ],
+          "description": "Do a shallow clone (default: false)"
+        },
+        {
+          "names": [
+            "-l",
+            "--look"
+          ],
+          "description": "Look after get (default: false)"
+        },
+        {
+          "names": [
+            "--vcs"
+          ],
+          "description": "Specify vcs backend for cloning",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "vcs"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--silent"
+          ],
+          "description": "Clone or update silently (default: false)"
+        },
+        {
+          "names": [
+            "--no-recursive"
+          ],
+          "description": "Prevent recursive fetching (default: false)"
+        },
+        {
+          "names": [
+            "-b",
+            "--branch"
+          ],
+          "description": "Specify branch name. This flag implies --single-branch on Git",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-P",
+            "--parallel"
+          ],
+          "description": "Import parallelly (default: false)"
+        },
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Do a bare clone (default: false)"
+        }
+      ],
+      "args": [
+        {
+          "name": "<repository URL>|<project>|<user>/<project>|<host>/<user>/<project>"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List local repositories",
+      "options": [
+        {
+          "names": [
+            "-e",
+            "--exact"
+          ],
+          "description": "Perform an exact match (default: false)"
+        },
+        {
+          "names": [
+            "--vcs"
+          ],
+          "description": "Specify vcs backend for matching",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "vcs"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--full-path"
+          ],
+          "description": "Print full paths (default: false)"
+        },
+        {
+          "names": [
+            "--unique"
+          ],
+          "description": "Print unique subpaths (default: false)"
+        }
+      ],
+      "args": [
+        {
+          "name": "query",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "root",
+      "description": "Show repositories' root",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Show all roots (default: false)"
+        }
+      ]
+    },
+    {
+      "name": "create",
+      "description": "Create a new repository",
+      "options": [
+        {
+          "names": [
+            "--vcs"
+          ],
+          "description": "Specify vcs backend explicitly",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "vcs"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "<project>|<user>/<project>|<host>/<user>/<project>"
+        }
+      ]
+    }
+  ]
+}

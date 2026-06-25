@@ -1,0 +1,566 @@
+{
+  "name": "pipx",
+  "description": "Install and Run Python Applications in Isolated Environments",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for pipx"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "install",
+      "description": "Install a package",
+      "options": [
+        {
+          "names": [
+            "--include-deps"
+          ],
+          "description": "Include apps of dependent packages"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Modify existing virtual environment and files in PIPX_BIN_DIR"
+        },
+        {
+          "names": [
+            "--suffix"
+          ],
+          "description": "Optional suffix for virtual environment and executable names",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SUFFIX"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "The Python executable used to create the Virtual Environment and run the associated app/apps. Must be v3.6+",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PYTHON"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--system-site-packages"
+          ],
+          "description": "Give the virtual environment access to the system site-packages dir"
+        },
+        {
+          "names": [
+            "--index-url",
+            "-i"
+          ],
+          "description": "Base URL of Python Package Index",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "INDEX_URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--editable",
+            "-e"
+          ],
+          "description": "Install a project in editable mode"
+        },
+        {
+          "names": [
+            "--pip-args"
+          ],
+          "description": "Arbitrary pip arguments to pass directly to pip install/upgrade commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PIP_ARGS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package_spec"
+        }
+      ]
+    },
+    {
+      "name": "inject",
+      "description": "Installs packages to an existing pipx-managed virtual environment",
+      "options": [
+        {
+          "names": [
+            "--include-apps"
+          ],
+          "description": "Add apps from the injected packages onto your PATH"
+        },
+        {
+          "names": [
+            "--include-deps"
+          ],
+          "description": "Include apps of dependent packages"
+        },
+        {
+          "names": [
+            "--system-site-packages"
+          ],
+          "description": "Give the virtual environment access to the system site-packages dir"
+        },
+        {
+          "names": [
+            "--index-url",
+            "-i"
+          ],
+          "description": "Base URL of Python Package Index",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "INDEX_URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--editable",
+            "-e"
+          ],
+          "description": "Install a project in editable mode"
+        },
+        {
+          "names": [
+            "--pip-args"
+          ],
+          "description": "Arbitrary pip arguments to pass directly to pip install/upgrade commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PIP_ARGS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Modify existing virtual environment and files in PIPX_BIN_DIR"
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        },
+        {
+          "name": "dependencies"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade a package in a pipx-managed Virtual Environment by running 'pip install --upgrade PACKAGE'",
+      "options": [
+        {
+          "names": [
+            "--include-injected"
+          ],
+          "description": "Also upgrade packages injected into the main app's environment"
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Modify existing virtual environment and files in PIPX_BIN_DIR"
+        },
+        {
+          "names": [
+            "--system-site-packages"
+          ],
+          "description": "Give the virtual environment access to the system site-packages dir"
+        },
+        {
+          "names": [
+            "--index-url",
+            "-i"
+          ],
+          "description": "Base URL of Python Package Index",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "INDEX_URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--editable",
+            "-e"
+          ],
+          "description": "Install a project in editable mode"
+        },
+        {
+          "names": [
+            "--pip-args"
+          ],
+          "description": "Arbitrary pip arguments to pass directly to pip install/upgrade commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PIP_ARGS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "upgrade-all",
+      "description": "Upgrades all packages within their virtual environments by running 'pip install --upgrade PACKAGE'",
+      "options": [
+        {
+          "names": [
+            "--include-injected"
+          ],
+          "description": "Also upgrade packages injected into the main app's environment"
+        },
+        {
+          "names": [
+            "--skip"
+          ],
+          "description": "Skip these packages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages to skip",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Modify existing virtual environment and files in PIPX_BIN_DIR"
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstalls a pipx-managed Virtual Environment by deleting it and any files that point to its apps",
+      "options": [
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "uninstall-all",
+      "description": "Uninstall all pipx-managed packages",
+      "options": [
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ]
+    },
+    {
+      "name": "reinstall",
+      "description": "Reinstalls a package",
+      "options": [
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "The Python executable used to recreate the Virtual Environment and run the associated app/apps. Must be v3.6+",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PYTHON"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "reinstall-all",
+      "description": "Reinstalls all packages",
+      "options": [
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "The Python executable used to recreate the Virtual Environment and run the associated app/apps. Must be v3.6+",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PYTHON"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--skip"
+          ],
+          "description": "Skip these packages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages to skip",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List packages and apps installed with pipx",
+      "options": [
+        {
+          "names": [
+            "--include-injected"
+          ],
+          "description": "Show packages injected into the main app's environment"
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output rich data in json format"
+        },
+        {
+          "names": [
+            "--short"
+          ],
+          "description": "List packages only"
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Download the latest version of a package to a temporary virtual environment, then run an app from it",
+      "options": [
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Do not re-use cached virtual environment if it exists"
+        },
+        {
+          "names": [
+            "--pypackages"
+          ],
+          "description": "Require app to be run from local __pypackages__ directory"
+        },
+        {
+          "names": [
+            "--spec"
+          ],
+          "description": "The package name or specific installation source passed to pip",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "The Python version to run package's CLI app with",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PYTHON"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--system-site-packages"
+          ],
+          "description": "Give the virtual environment access to the system site-packages dir"
+        },
+        {
+          "names": [
+            "--index-url",
+            "-i"
+          ],
+          "description": "Base URL of Python Package Index",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "INDEX_URL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--editable",
+            "-e"
+          ],
+          "description": "Install a project in editable mode"
+        },
+        {
+          "names": [
+            "--pip-args"
+          ],
+          "description": "Arbitrary pip arguments to pass directly to pip install/upgrade commands",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PIP_ARGS"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "app",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "runpip",
+      "description": "Run pip in an existing pipx-managed Virtual Environment",
+      "options": [
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Show verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "package"
+        },
+        {
+          "name": "pipargs",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "ensurepath",
+      "description": "Ensure directory where pipx stores apps is in your PATH environment variable",
+      "options": [
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Add text to your shell's config file even if it looks like your PATH already contains paths to pipx and pipx-install apps"
+        }
+      ]
+    },
+    {
+      "name": "environment",
+      "description": "Print a list of variables used in pipx.constants",
+      "options": [
+        {
+          "names": [
+            "--value"
+          ],
+          "description": "Print the value of the variable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "VARIABLE"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "completions",
+      "description": "Print instructions on enabling shell completions for pipx"
+    }
+  ]
+}

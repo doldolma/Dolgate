@@ -1,0 +1,444 @@
+{
+  "name": "nvm",
+  "description": "Node Package Manager",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help page"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print out the installed version of nvm"
+    },
+    {
+      "names": [
+        "--no-colors"
+      ],
+      "description": "Suppress colored output"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "install",
+      "description": "Download and install a <version>. Uses .nvmrc if available and version is omitted",
+      "options": [
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Skip binary download, install from source only"
+        },
+        {
+          "names": [
+            "--reinstall-packages-from"
+          ],
+          "description": "When installing, reinstall packages installed in <version>",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When installing, only select from LTS (long-term support) versions"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When installing, only select from versions for a specific LTS line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--skip-default-packages"
+          ],
+          "description": "When installing, skip the default-packages file if it exists"
+        },
+        {
+          "names": [
+            "--latest-npm"
+          ],
+          "description": "After installing, attempt to upgrade to the latest working npm on the given node version"
+        },
+        {
+          "names": [
+            "--no-progress"
+          ],
+          "description": "Disable the progress bar on any downloads"
+        },
+        {
+          "names": [
+            "--alias"
+          ],
+          "description": "After installing, set the alias specified to the version specified. (same as: nvm alias <name> <version>)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--default"
+          ],
+          "description": "After installing, set default alias to the version specified. (same as: nvm alias default <version>)"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstall a version",
+      "options": [
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uninstall using automatic LTS (long-term support) alias `lts/*`, if available"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uninstall using automatic alias for provided LTS line, if available",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "use",
+      "description": "Modify PATH to use <version>. Uses .nvmrc if available and version is omitted",
+      "options": [
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Silences stdout/stderr output"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic LTS (long-term support) alias `lts/*`, if available"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic alias for provided LTS line, if available",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Run <command> on <version>. Uses .nvmrc if available and version is omitted",
+      "options": [
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Silences stdout/stderr output"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic LTS (long-term support) alias `lts/*`, if available"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic alias for provided LTS line, if available",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        },
+        {
+          "name": "command",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run `node` on <version> with <args> as arguments. Uses .nvmrc if available and version is omitted",
+      "options": [
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Silences stdout/stderr output"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic LTS (long-term support) alias `lts/*`, if available"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "Uses automatic alias for provided LTS line, if available",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        },
+        {
+          "name": "args",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "current",
+      "description": "Display currently activated version of Node"
+    },
+    {
+      "name": "ls",
+      "description": "List installed versions, matching a given <version> if provided",
+      "options": [
+        {
+          "names": [
+            "--no-colors"
+          ],
+          "description": "Suppress colored output"
+        },
+        {
+          "names": [
+            "--no-alias"
+          ],
+          "description": "Suppress `nvm alias` output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "ls-remote",
+      "description": "List remote versions available for install, matching a given <version> if provided",
+      "options": [
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When listing, only show LTS (long-term support) versions"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When listing, only show versions for a specific LTS line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-colors"
+          ],
+          "description": "Suppress colored output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Resolve the given description to a single local version",
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "version-remote",
+      "description": "Resolve the given description to a single remote version",
+      "options": [
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When listing, only show LTS (long-term support) versions"
+        },
+        {
+          "names": [
+            "--lts"
+          ],
+          "description": "When listing, only show versions for a specific LTS line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LTS name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "deactivate",
+      "description": "Undo effects of `nvm` on current shell",
+      "options": [
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Silences stdout/stderr output"
+        }
+      ]
+    },
+    {
+      "name": "alias",
+      "description": "Show all aliases beginning with <pattern> or Set an alias named <name> pointing to <version>",
+      "args": [
+        {
+          "name": "pattern or name"
+        },
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "unalias",
+      "description": "Deletes the alias named <name>",
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "install-latest-npm",
+      "description": "Attempt to upgrade to the latest working `npm` on the current node version"
+    },
+    {
+      "name": "reinstall-packages",
+      "description": "Reinstall global `npm` packages contained in <version> to current version",
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "unload",
+      "description": "Unload `nvm` from shell"
+    },
+    {
+      "name": "which",
+      "description": "Display path to installed node version. Uses .nvmrc if available and version is omitted",
+      "options": [
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Silences stdout/stderr output when a version is omitted"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "current"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "args": [
+        {}
+      ]
+    },
+    {
+      "name": "set-colors",
+      "description": "Set five text colors using format \"yMeBg\". Available when supported",
+      "args": [
+        {
+          "name": "color codes"
+        }
+      ]
+    }
+  ]
+}

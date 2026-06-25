@@ -1,0 +1,339 @@
+{
+  "name": "jmeter",
+  "description": "Apache JMeter - 100% Java Load Testing Tool",
+  "options": [
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print the JMeter version information and exit"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print usage information and exit"
+    },
+    {
+      "names": [
+        "-p",
+        "--propfile"
+      ],
+      "description": "The jmeter property file to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "property",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q",
+        "--addprop"
+      ],
+      "description": "Additional JMeter property file(s)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "files...",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--testfile"
+      ],
+      "description": "The JMeter test(.jmx) file to run. \"-t LAST\" will load last used file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "testfile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--logfile"
+      ],
+      "description": "The file to log samples to",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "logfile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--jmeterlogconf"
+      ],
+      "description": "JMeter logging configuration file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "jmeterlogconf",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-j",
+        "--jmeterlogfile"
+      ],
+      "description": "JMeter run log file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "jmeterlogfile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--nongui"
+      ],
+      "description": "Run JMeter in nongui mode"
+    },
+    {
+      "names": [
+        "-s",
+        "--server"
+      ],
+      "description": "Run the JMeter server"
+    },
+    {
+      "names": [
+        "-E",
+        "--proxyScheme"
+      ],
+      "description": "Set a proxy scheme to use for the proxy server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "proxyScheme"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-H",
+        "--proxyHost"
+      ],
+      "description": "Set a proxy server for JMeter to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "server"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--proxyPort"
+      ],
+      "description": "Set proxy server port for JMeter to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-N",
+        "--nonProxyHosts"
+      ],
+      "description": "Set nonproxy host list (e.g. *.apache.org|localhost)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "nonProxyHosts"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "--username"
+      ],
+      "description": "Set username for proxy server that JMeter is to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "username"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-a",
+        "--password"
+      ],
+      "description": "Set password for proxy server that JMeter is to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "password"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-J",
+        "--jmeterproperty"
+      ],
+      "description": "Define additional JMeter properties <argument>=<value>",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "jmeterproperty"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-G",
+        "--globalproperty"
+      ],
+      "description": "Define Global properties (sent to servers) e.g. -Gport=123 or -Gglobal.properties",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "globalproperty"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D",
+        "--systemproperty"
+      ],
+      "description": "Define additional system properties <argument>=<value>",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "systemproperty"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S",
+        "--systemPropertyFile"
+      ],
+      "description": "Additional system property file(s)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "systemPropertyFile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--forceDeleteResultFile"
+      ],
+      "description": "Force delete existing results files and web report folder"
+    },
+    {
+      "names": [
+        "-L",
+        "--loglevel"
+      ],
+      "description": "[category=]level e.g. jorphan=INFO, jmeter.util=DEBUG or com.example.foo=WARN",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "loglevel"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--runremote"
+      ],
+      "description": "Start remote servers (as defined in remote_hosts)"
+    },
+    {
+      "names": [
+        "-R",
+        "--remotestart"
+      ],
+      "description": "Start these remote servers (overrides remote_hosts)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "servers",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--homedir"
+      ],
+      "description": "The JMeter home directory to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "homedir"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-X",
+        "--remoteexit"
+      ],
+      "description": "Exit the remote servers at end  of test (non-GUI)"
+    },
+    {
+      "names": [
+        "-g",
+        "--reportonly"
+      ],
+      "description": "Generate report dashboard only, from a test results file"
+    },
+    {
+      "names": [
+        "-e",
+        "--reportatendofloadtests"
+      ],
+      "description": "Generate report dashboard after load test"
+    },
+    {
+      "names": [
+        "-o",
+        "--reportoutputfolder"
+      ],
+      "description": "Output folder for report dashboard",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "reportoutputfolder",
+          "template": "folders"
+        }
+      ]
+    }
+  ]
+}

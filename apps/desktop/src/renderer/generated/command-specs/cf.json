@@ -1,0 +1,2566 @@
+{
+  "name": "cf",
+  "description": "Cloudfoundry cli",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for Cloud Foundry command line tool"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Print API request diagnostics to stdout"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "app",
+      "description": "Display health and status for app",
+      "options": [
+        {
+          "names": [
+            "--guid"
+          ],
+          "description": "Retrieve and display the given app's guid.  All other health and status output for the app is suppressed"
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "ssh",
+      "description": "Display health and status for app",
+      "options": [
+        {
+          "names": [
+            "-v"
+          ],
+          "description": "Verbose output"
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Show all env variables for an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "orgs",
+      "description": "List all orgs"
+    },
+    {
+      "name": "version",
+      "description": "Print the version of cf"
+    },
+    {
+      "name": "login",
+      "description": "Log user in",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "API endpoint (e.g. https://api.example.com)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "API endpoint"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Org",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Org",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Space",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Space",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Password",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Password"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-u"
+          ],
+          "description": "Username",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Username"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Log user out"
+    },
+    {
+      "name": "password",
+      "description": "Change user password"
+    },
+    {
+      "name": "target",
+      "description": "Set or view the targeted org or space",
+      "options": [
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Org",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Org",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Space",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Space",
+              "hasGenerator": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "api",
+      "description": "Set or view target api url",
+      "options": [
+        {
+          "names": [
+            "--skip-ssl-validation"
+          ],
+          "description": "Skip verification of the API endpoint. Not recommended!"
+        },
+        {
+          "names": [
+            "--unset"
+          ],
+          "description": "Remove all api endpoint targeting"
+        }
+      ],
+      "args": [
+        {
+          "name": "url",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Auth user non-interactively",
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "password"
+        }
+      ]
+    },
+    {
+      "name": "apps",
+      "description": "List all apps in the target space"
+    },
+    {
+      "name": "push",
+      "description": "Push a new app or sync changes to an existing app",
+      "options": [
+        {
+          "names": [
+            "-b"
+          ],
+          "description": "Custom buildpack by name or git url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Buildpack"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Startup command, set to null to reset to default start command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Command",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d"
+          ],
+          "description": "Domain",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Domain"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--docker-image"
+          ],
+          "description": "Docker image",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Docker image"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Path to manifest",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Path to manifest"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--host-name"
+          ],
+          "description": "Hostname",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Number of instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Number of instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-k"
+          ],
+          "description": "Disk limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Disk limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Memory limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Memory limit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scale",
+      "description": "Change or view the instance count, disk space limit, and memory limit for an app",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force restart of app without prompt"
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Number of instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Number of instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-k"
+          ],
+          "description": "Disk limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Disk limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Memory limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Memory limit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete an app",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Also delete any mapped routes"
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rename",
+      "description": "Rename an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "new app name"
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "description": "Start an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "stop",
+      "description": "Stop an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "restart",
+      "description": "Stop all instances of the app, then start them again. This may cause downtime",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "restage",
+      "description": "Recreate the app's executable artifact using the latest pushed app files and the latest environment (variables, service bindings, buildpack, stack, etc.)",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "restart-app-instance",
+      "description": "Terminate the running application Instance at the given index and instantiate a new instance of the application with the same index",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "index"
+        }
+      ]
+    },
+    {
+      "name": "run-task",
+      "description": "Run a one-off task on an app",
+      "options": [
+        {
+          "names": [
+            "-k"
+          ],
+          "description": "Disk limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Disk limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Memory limit",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Memory limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Name for task",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Name for task"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "tasks",
+      "description": "List tasks of an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "terminate-task",
+      "description": "Terminate a running task of an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "task id"
+        }
+      ]
+    },
+    {
+      "name": "events",
+      "description": "Show recent app events",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "files",
+      "description": "Print out a list of files in a directory or the contents of a specific file of an app running on the DEA backend",
+      "options": [
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Instance",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "instance"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "path",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Trail or show recent logs for an app",
+      "options": [
+        {
+          "names": [
+            "--recent"
+          ],
+          "description": "Dump recent logs instead of tailing"
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "set-env",
+      "description": "Set an environment variable for an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "env var name"
+        },
+        {
+          "name": "env var value"
+        }
+      ]
+    },
+    {
+      "name": "unset-env",
+      "description": "Remove an environment variable",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "env var name"
+        }
+      ]
+    },
+    {
+      "name": "stacks",
+      "description": "List all stacks (a stack is a pre-built file system, including an operating system, that can run apps)"
+    },
+    {
+      "name": "copy-source",
+      "description": "Copies the source code of an application to another existing application (and restarts that application)",
+      "options": [
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Space that contains the target application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "space",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Org that contains the target application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "org",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-restart"
+          ],
+          "description": "Override restart of the application in target environment after copy-source completes"
+        }
+      ],
+      "args": [
+        {
+          "name": "source app"
+        },
+        {
+          "name": "target app"
+        }
+      ]
+    },
+    {
+      "name": "create-app-manifest",
+      "description": "Create an app manifest for an app that has been pushed successfully",
+      "options": [
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Path for file creation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "get-health-check",
+      "description": "Show the type of health check performed on an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "set-health-check",
+      "description": "Change type of health check performed on an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "type of health check"
+        }
+      ]
+    },
+    {
+      "name": "enable-ssh",
+      "description": "Enable ssh for the application",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "disable-ssh",
+      "description": "Disable ssh for the application",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "ssh-enabled",
+      "description": "Reports whether SSH is enabled on an application container instance",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "marketplace",
+      "description": "List available offerings in the marketplace",
+      "options": [
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Show plan details for a particular service offering",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "services",
+      "description": "List all service instances in the target space"
+    },
+    {
+      "name": "create-service",
+      "description": "Create a service instance",
+      "options": [
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Valid JSON object containing service-specific configuration parameters, provided either in-line or in a file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON object"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t"
+          ],
+          "description": "User provided tags",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tags"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "service"
+        },
+        {
+          "name": "plan"
+        },
+        {
+          "name": "service instance"
+        }
+      ]
+    },
+    {
+      "name": "update-service",
+      "description": "Update a service instance",
+      "options": [
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Valid JSON object containing service-specific configuration parameters, provided either in-line or in a file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON object"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Change service plan for a service instance",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "new plan"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t"
+          ],
+          "description": "User provided tags",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tags"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "service",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "delete-service",
+      "description": "Delete a service instance",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rename-service",
+      "description": "Rename a service instance",
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        },
+        {
+          "name": "new service instance"
+        }
+      ]
+    },
+    {
+      "name": "create-service-key",
+      "description": "Create key for a service instance",
+      "options": [
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Valid JSON object containing service-specific configuration parameters, provided either in-line or in a file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON object"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        },
+        {
+          "name": "service key"
+        }
+      ]
+    },
+    {
+      "name": "service-keys",
+      "description": "List keys for a service instance",
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "service-key",
+      "description": "Show service key info",
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        },
+        {
+          "name": "service key"
+        }
+      ]
+    },
+    {
+      "name": "delete-service-key",
+      "description": "Delete a service key",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        },
+        {
+          "name": "service key"
+        }
+      ]
+    },
+    {
+      "name": "bind-service",
+      "description": "Bind a service instance to an app",
+      "options": [
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Valid JSON object containing service-specific configuration parameters, provided either in-line or in a file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON object"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "unbind-service",
+      "description": "Unbind a service instance from an app",
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "bind-route-service",
+      "description": "Bind a service instance to an HTTP route",
+      "options": [
+        {
+          "names": [
+            "-c"
+          ],
+          "description": "Valid JSON object containing service-specific configuration parameters, provided either in-line or in a file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON object"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--hostname"
+          ],
+          "description": "Hostname used in combination with DOMAIN to specify the route to bind",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path used in combination with HOSTNAME and DOMAIN to specify the route to bind",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "domain"
+        },
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "unbind-route-service",
+      "description": "Unbind a service instance from an HTTP route",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force unbinding without confirmation"
+        },
+        {
+          "names": [
+            "-n",
+            "--hostname"
+          ],
+          "description": "Hostname used in combination with DOMAIN to specify the route to bind",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path used in combination with HOSTNAME and DOMAIN to specify the route to bind",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "domain"
+        },
+        {
+          "name": "service instance",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "create-user-provided-service",
+      "description": "Make a user-provided service instance available to CF apps",
+      "options": [
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Credentials, provided inline or in a file, to be exposed in the VCAP_SERVICES environment variable for bound applications",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "credentials"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-l"
+          ],
+          "description": "URL to which logs for bound applications will be streamed",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sys log drain url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "URL to which requests for bound routes will be forwarded. Scheme for this URL must be https",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "serice url"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "service instance"
+        }
+      ]
+    },
+    {
+      "name": "update-user-provided-service",
+      "description": "Update user-provided service instance",
+      "options": [
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Credentials, provided inline or in a file, to be exposed in the VCAP_SERVICES environment variable for bound applications",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "credentials"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-l"
+          ],
+          "description": "URL to which logs for bound applications will be streamed",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sys log drain url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "URL to which requests for bound routes will be forwarded. Scheme for this URL must be https",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "serice url"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "service instance"
+        }
+      ]
+    },
+    {
+      "name": "org",
+      "description": "Show org info",
+      "options": [
+        {
+          "names": [
+            "--guid"
+          ],
+          "description": "Retrieve and display the given org's guid.  All other output for the org is suppressed"
+        }
+      ],
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "create-org",
+      "description": "Create an org",
+      "options": [
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Quota to assign to the newly created org (excluding this option results in assignment of default quota)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "quota"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "org"
+        }
+      ]
+    },
+    {
+      "name": "delete-org",
+      "description": "Delete an org",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rename-org",
+      "description": "Rename an org",
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "new org"
+        }
+      ]
+    },
+    {
+      "name": "spaces",
+      "description": "List all spaces in an org"
+    },
+    {
+      "name": "space",
+      "description": "Show space info",
+      "options": [
+        {
+          "names": [
+            "--guid"
+          ],
+          "description": "Retrieve and display the given org's guid.  All other output for the org is suppressed"
+        },
+        {
+          "names": [
+            "--security-group-rules"
+          ],
+          "description": "Retrieve the rules for all the security groups associated with the space's guid.  All other output for the org is suppressed"
+        }
+      ],
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "create-space",
+      "description": "Create a space",
+      "options": [
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Org",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "org",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p"
+          ],
+          "description": "Quota to assign to the newly created space",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "quota"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "space"
+        }
+      ]
+    },
+    {
+      "name": "delete-space",
+      "description": "Delete a space",
+      "options": [
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Delete space within specified org",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "org",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rename-space",
+      "description": "Rename a space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "new space"
+        }
+      ]
+    },
+    {
+      "name": "allow-space-ssh",
+      "description": "Allow SSH access for the space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "disallow-space-ssh",
+      "description": "Disallow SSH access for the space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "space-ssh-allowed",
+      "description": "Reports whether SSH is allowed in a space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "domains",
+      "description": "List domains in the target org"
+    },
+    {
+      "name": "create-domain",
+      "description": "Create a domain in an org for later use",
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "delete-domain",
+      "description": "Delete a domain",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "create-shared-domain",
+      "description": "Create a domain that can be used by all orgs (admin-only)",
+      "options": [
+        {
+          "names": [
+            "--router-group"
+          ],
+          "description": "Routes for this domain will be configured only on the specified router group"
+        }
+      ],
+      "args": [
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "delete-shared-domain",
+      "description": "Delete a shared domain",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "router-groups",
+      "description": "List router groups"
+    },
+    {
+      "name": "routes",
+      "description": "List all routes in the current space or the current organization",
+      "options": [
+        {
+          "names": [
+            "--orglevel"
+          ],
+          "description": "List all the routes for all spaces of current organization"
+        }
+      ]
+    },
+    {
+      "name": "create-route",
+      "description": "Create a url route in a space for later use",
+      "options": [
+        {
+          "names": [
+            "--hostname",
+            "-n"
+          ],
+          "description": "Hostname for the HTTP route (required for shared domains)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path for the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "Port for the TCP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--random-port"
+          ],
+          "description": "Create a random port for the TCP route"
+        }
+      ],
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "check-route",
+      "description": "Perform a simple check to determine whether a route currently exists or not",
+      "options": [
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path for the route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "host"
+        },
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "map-route",
+      "description": "Add a url route to an app",
+      "options": [
+        {
+          "names": [
+            "--hostname",
+            "-n"
+          ],
+          "description": "Hostname for the HTTP route (required for shared domains)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path for the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "Port for the TCP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--random-port"
+          ],
+          "description": "Create a random port for the TCP route"
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "unmap-route",
+      "description": "Remove a url route from an app",
+      "options": [
+        {
+          "names": [
+            "--hostname",
+            "-n"
+          ],
+          "description": "Hostname used to identify the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path used to identify the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "Port used to identify the TCP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "APP_NAME",
+          "hasGenerator": true
+        },
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "delete-route",
+      "description": "Delete a route",
+      "options": [
+        {
+          "names": [
+            "--hostname",
+            "-n"
+          ],
+          "description": "Hostname used to identify the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "hostname"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Path used to identify the HTTP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "Port used to identify the TCP route",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "domain"
+        }
+      ]
+    },
+    {
+      "name": "delete-orphaned-routes",
+      "description": "Delete all orphaned routes (i.e. those that are not mapped to an app)",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ]
+    },
+    {
+      "name": "create-user",
+      "description": "Create a new user",
+      "options": [
+        {
+          "names": [
+            "--origin"
+          ],
+          "description": "Origin for mapping a user account to a user in an external identity provider",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "provider"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "password"
+        }
+      ]
+    },
+    {
+      "name": "delete-user",
+      "description": "Delete a user",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "username"
+        }
+      ]
+    },
+    {
+      "name": "org-users",
+      "description": "Show org users by role",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "List all users in the org"
+        }
+      ],
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "set-org-role",
+      "description": "Assign an org role to a user",
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "role"
+        }
+      ]
+    },
+    {
+      "name": "unset-org-role",
+      "description": "Remove an org role from a user",
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "role"
+        }
+      ]
+    },
+    {
+      "name": "space-users",
+      "description": "Show space users by role"
+    },
+    {
+      "name": "set-space-role",
+      "description": "Assign a space role to a user",
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "role"
+        }
+      ]
+    },
+    {
+      "name": "unset-space-role",
+      "description": "Remove a space role from a user",
+      "args": [
+        {
+          "name": "username"
+        },
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "role"
+        }
+      ]
+    },
+    {
+      "name": "quotas",
+      "description": "List available usage quotas"
+    },
+    {
+      "name": "quota",
+      "description": "Show quota info",
+      "args": [
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "set-quota",
+      "description": "Assign a quota to an org",
+      "args": [
+        {
+          "name": "org",
+          "hasGenerator": true
+        },
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "create-quota",
+      "description": "Define a new resource quota",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "Total number of application instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number of application instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Maximum amount of memory an application instance can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "instance memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Total amount of memory a space can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "total memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--reserved-route-ports"
+          ],
+          "description": "Maximum number of routes that may be created with reserved ports (Default: 0)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "reserved route ports"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Total number of service instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Total number of routes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "routes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-paid-service-plans"
+          ],
+          "description": "Can provision instances of paid service plans"
+        }
+      ],
+      "args": [
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "delete-quota",
+      "description": "Delete a quota",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "update-quota",
+      "description": "Update an existing resource quota",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "Total number of application instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number of application instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Maximum amount of memory an application instance can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "instance memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Total amount of memory a space can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "total memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--reserved-route-ports"
+          ],
+          "description": "Maximum number of routes that may be created with reserved ports (Default: 0)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "reserved route ports"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Total number of service instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Total number of routes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "routes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n"
+          ],
+          "description": "New name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-paid-service-plans"
+          ],
+          "description": "Can provision instances of paid service plans"
+        },
+        {
+          "names": [
+            "--disallow-paid-service-plans"
+          ],
+          "description": "Cannot provision instances of paid service plans"
+        }
+      ],
+      "args": [
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "space-quotas",
+      "description": "List available space resource quotas"
+    },
+    {
+      "name": "space-quota",
+      "description": "Show space quota info",
+      "args": [
+        {
+          "name": "space quota"
+        }
+      ]
+    },
+    {
+      "name": "create-space-quota",
+      "description": "Define a new space resource quota",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "Total number of application instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number of application instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Maximum amount of memory an application instance can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "instance memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Total amount of memory a space can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "total memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--reserved-route-ports"
+          ],
+          "description": "Maximum number of routes that may be created with reserved ports (Default: 0)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "reserved route ports"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Total number of service instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Total number of routes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "routes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-paid-service-plans"
+          ],
+          "description": "Can provision instances of paid service plans"
+        }
+      ],
+      "args": [
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "update-space-quota",
+      "description": "Update an existing space quota",
+      "options": [
+        {
+          "names": [
+            "-a"
+          ],
+          "description": "Total number of application instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number of application instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Maximum amount of memory an application instance can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "instance memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m"
+          ],
+          "description": "Total amount of memory a space can have",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "total memory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--reserved-route-ports"
+          ],
+          "description": "Maximum number of routes that may be created with reserved ports (Default: 0)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "reserved route ports"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s"
+          ],
+          "description": "Total number of service instances",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "service instances"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Total number of routes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "routes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n"
+          ],
+          "description": "New name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-paid-service-plans"
+          ],
+          "description": "Can provision instances of paid service plans"
+        },
+        {
+          "names": [
+            "--disallow-paid-service-plans"
+          ],
+          "description": "Cannot provision instances of paid service plans"
+        }
+      ],
+      "args": [
+        {
+          "name": "space quota"
+        }
+      ]
+    },
+    {
+      "name": "delete-space-quota",
+      "description": "Delete a space quota definition and unassign the space quota from all spaces",
+      "options": [
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force deletion without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "space quota"
+        }
+      ]
+    },
+    {
+      "name": "set-space-quota",
+      "description": "Assign a space quota definition to a space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "unset-space-quota",
+      "description": "Unassign a quota from a space",
+      "args": [
+        {
+          "name": "space",
+          "hasGenerator": true
+        },
+        {
+          "name": "quota"
+        }
+      ]
+    },
+    {
+      "name": "curl",
+      "description": "Executes a request to the targeted API endpoint",
+      "options": [
+        {
+          "names": [
+            "-H"
+          ],
+          "description": "Custom headers to include in the request, flag can be specified multiple times",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "headers"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-X"
+          ],
+          "description": "HTTP method (GET,POST,PUT,DELETE,etc)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "HTTP method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d"
+          ],
+          "description": "HTTP data to include in the request body, or '@' followed by a file name to read the data from",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "data"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output"
+          ],
+          "description": "Write curl body to FILE instead of stdout",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path to file"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i"
+          ],
+          "description": "Include response headers in the output"
+        }
+      ],
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "name": "oauth-token",
+      "description": "Retrieve and display the OAuth token for the current session"
+    },
+    {
+      "name": "ssh-code",
+      "description": "Get a one time password for ssh clients"
+    },
+    {
+      "name": "add-plugin-repo",
+      "description": "Add a new plugin repository",
+      "args": [
+        {
+          "name": "repo name"
+        },
+        {
+          "name": "url"
+        }
+      ]
+    },
+    {
+      "name": "remove-plugin-repo",
+      "description": "Remove a plugin repository",
+      "args": [
+        {
+          "name": "repo name"
+        }
+      ]
+    },
+    {
+      "name": "list-plugin-repos",
+      "description": "List all the added plugin repositories"
+    },
+    {
+      "name": "repo-plugins",
+      "description": "List all available plugins in specified repository or in all added repositories",
+      "options": [
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Name of a registered repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "repo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plugins",
+      "description": "List all available plugin commands",
+      "options": [
+        {
+          "names": [
+            "--checksum"
+          ],
+          "description": "Compute and show the sha1 value of the plugin binary file"
+        }
+      ]
+    },
+    {
+      "name": "install-plugin",
+      "description": "Install CLI plugin",
+      "options": [
+        {
+          "names": [
+            "-r"
+          ],
+          "description": "Name of a registered repository where the specified plugin is located",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "repo name"
+            },
+            {
+              "name": "plugin name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f"
+          ],
+          "description": "Force install of plugin without confirmation"
+        }
+      ],
+      "args": [
+        {
+          "name": "path"
+        },
+        {
+          "name": "url"
+        }
+      ]
+    },
+    {
+      "name": "uninstall-plugin",
+      "description": "Uninstall the plugin defined in command argument",
+      "args": [
+        {
+          "name": "plugin name"
+        }
+      ]
+    }
+  ]
+}

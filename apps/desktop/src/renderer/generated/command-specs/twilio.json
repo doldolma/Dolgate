@@ -1,0 +1,5118 @@
+{
+  "name": "twilio",
+  "description": "Manage your Twilio resources from your terminal",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show a help message"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "autocomplete",
+      "description": "Display autocomplete installation instructions",
+      "options": [
+        {
+          "names": [
+            "-r",
+            "--refresh-cache"
+          ],
+          "description": "Refresh cache (ignores displaying instructions)"
+        }
+      ],
+      "args": [
+        {
+          "name": "shell"
+        }
+      ]
+    },
+    {
+      "name": "config:list",
+      "description": "List Twilio CLI configurations",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        }
+      ]
+    },
+    {
+      "name": "config:set",
+      "description": "Update Twilio CLI configurations",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "-e",
+            "--edge"
+          ],
+          "description": "Sets an Edge configuration"
+        },
+        {
+          "names": [
+            "--require-profile-input"
+          ]
+        },
+        {
+          "names": [
+            "--no-require-profile-input"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "debugger:logs:list",
+      "description": "Show a list of log events generated for the account"
+    },
+    {
+      "name": "email:send",
+      "description": "Sends emails to single or multiple recipients",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--attachment"
+          ],
+          "description": "Path for the file that you want to attach",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "attachment",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--from"
+          ],
+          "description": "Email address of the sender",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "from"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-attachment"
+          ],
+          "description": "Do not include or prompt for an attachment"
+        },
+        {
+          "names": [
+            "--subject"
+          ],
+          "description": "The subject line for an email",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subject"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text"
+          ],
+          "description": "Text to send within the email body",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "text"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--to"
+          ],
+          "description": "Email address of recipient (comma-separated)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "to"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "email:set",
+      "description": "Sets a default sending email address and subject line",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--from"
+          ],
+          "description": "Email address of the sender",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "from"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--subject"
+          ],
+          "description": "The subject line for an email",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "subject"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "feedback",
+      "description": "Provide feedback to the CLI team"
+    },
+    {
+      "name": "login",
+      "description": "Create a new profile to store Twilio Account credentials and configuration",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force overwriting existing profile credentials"
+        },
+        {
+          "names": [
+            "-p",
+            "--profile"
+          ],
+          "description": "Shorthand identifier for your profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--auth-token"
+          ],
+          "description": "Your Twilio Auth Token for your Twilio Account or Subaccount",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "auth-token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--region"
+          ],
+          "description": "Twilio region to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:local",
+      "description": "Purchase a local phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:machine-to-machine",
+      "description": "Purchase a machine-to-machine phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:mobile",
+      "description": "Purchase a mobile phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:national",
+      "description": "Purchase a national phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:shared-cost",
+      "description": "Purchase a shared-cost phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:toll-free",
+      "description": "Purchase a toll-free phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:buy:voip",
+      "description": "Purchase a voip phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--country-code"
+          ],
+          "description": "The ISO-3166-1 country code of the country from which to read phone numbers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "country-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "The SID of the Account requesting the AvailablePhoneNumber resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--address-sid"
+          ],
+          "description": "The SID of the Address resource we should associate with the new phone number. Some regions require addresses to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--api-version"
+          ],
+          "description": "The API version to use for incoming calls made to the new phone number. The default is `2010-04-01`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "api-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--area-code"
+          ],
+          "description": "The area code of the phone numbers to read. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "area-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--no-beta"
+          ],
+          "description": "Whether to read phone numbers that are new to the Twilio platform. Can be: `true` or `false` and the default is `true`"
+        },
+        {
+          "names": [
+            "--bundle-sid"
+          ],
+          "description": "The SID of the Bundle resource that you associate with the phone number. Some regions require a Bundle to meet local Regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--contains"
+          ],
+          "description": "The pattern on which to match phone numbers. Valid characters are `*`, `0-9`, `a-z`, and `A-Z`. The `*` character matches any single digit. For examples, see Example 2 and Example 3. If specified, this value must have at least two characters",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "contains"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--distance"
+          ],
+          "description": "The search radius, in miles, for a `near_` query.  Can be up to `500` and the default is `25`. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "distance"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-address-sid"
+          ],
+          "description": "The SID of the emergency address configuration to use for emergency calling from the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "emergency-address-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--emergency-status"
+          ],
+          "description": "The parameter displays if emergency calling is enabled for this number. Active numbers may place emergency calls by dialing valid emergency numbers for the country",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-all-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require an Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-foreign-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a foreign Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--no-exclude-local-address-required"
+          ],
+          "description": "Whether to exclude phone numbers that require a local Address. Can be: `true` or `false` and the default is `false`"
+        },
+        {
+          "names": [
+            "--fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-fax-enabled"
+          ],
+          "description": "Whether the phone numbers can receive faxes. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A descriptive string that you created to describe the new phone number. It can be up to 64 characters long. By default, this is a formatted version of the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--identity-sid"
+          ],
+          "description": "The SID of the Identity resource that we should associate with the new phone number. Some regions require an identity to meet local regulations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "identity-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-lata"
+          ],
+          "description": "Limit results to a specific local access and transport area (LATA). Given a phone number, search within the same LATA as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-lata"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-locality"
+          ],
+          "description": "Limit results to a particular locality or city. Given a phone number, search within the same Locality as that number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-locality"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-postal-code"
+          ],
+          "description": "Limit results to a particular postal code. Given a phone number, search within the same postal code as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-postal-code"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-rate-center"
+          ],
+          "description": "Limit results to a specific rate center, or given a phone number search within the same rate center as that number. Requires `in_lata` to be set as well. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-rate-center"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--in-region"
+          ],
+          "description": "Limit results to a particular region, state, or province. Given a phone number, search within the same region as that number. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "in-region"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "The maximum number of resources to return. Use '--no-limit' to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-mms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive MMS messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--near-lat-long"
+          ],
+          "description": "Given a latitude/longitude pair `lat,long` find geographically close numbers within `distance` miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-lat-long"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--near-number"
+          ],
+          "description": "Given a phone number, find a geographically close number within `distance` miles. Distance defaults to 25 miles. Applies to only phone numbers in the US and Canada",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "near-number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--page-size"
+          ],
+          "description": "How many resources to return in each list page. The default is 50, and the maximum is 1000",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "page-size"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-application-sid"
+          ],
+          "description": "The SID of the application that should handle SMS messages sent to the new phone number. If an `sms_application_sid` is present, we ignore all of the `sms_*_url` urls and use those set on the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-sms-enabled"
+          ],
+          "description": "Whether the phone numbers can receive text messages. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs while requesting or executing the TwiML defined by `sms_url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method that we should use to call `sms_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL we should call when the new phone number receives an incoming SMS message",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback"
+          ],
+          "description": "The URL we should call using the `status_callback_method` to send status information to your application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status-callback"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--status-callback-method"
+          ],
+          "description": "The HTTP method we should use to call `status_callback`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--trunk-sid"
+          ],
+          "description": "The SID of the Trunk we should use to handle calls to the new phone number. If a `trunk_sid` is present, we ignore all of the voice urls and voice applications and use only those set on the Trunk. Setting a `trunk_sid` will automatically delete your `voice_application_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "trunk-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-application-sid"
+          ],
+          "description": "The SID of the application we should use to handle calls to the new phone number. If a `voice_application_sid` is present, we ignore all of the voice urls and use only those set on the application. Setting a `voice_application_sid` will automatically delete your `trunk_sid` and vice versa",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-application-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--no-voice-caller-id-lookup"
+          ],
+          "description": "Whether to lookup the caller's name from the CNAM database and post it to your app. Can be: `true` or `false` and defaults to `false`"
+        },
+        {
+          "names": [
+            "--voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--no-voice-enabled"
+          ],
+          "description": "Whether the phone numbers can receive calls. Can be: `true` or `false`"
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_fallback_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "The URL that we should call when an error occurs retrieving or executing the TwiML requested by `url`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method that we should use to call `voice_url`. Can be: `GET` or `POST` and defaults to `POST`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-receive-mode"
+          ],
+          "description": "The configuration parameter for the new phone number to receive incoming voice calls or faxes. Can be: `fax` or `voice` and defaults to `voice`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that we should call to answer a call to the new phone number. The `voice_url` will not be called if a `voice_application_sid` or a `trunk_sid` is set",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:list",
+      "description": "Show what Twilio phone numbers you have configured",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "Access resources for the specified account",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        },
+        {
+          "names": [
+            "--properties"
+          ],
+          "description": "The incomingPhoneNumber object properties you would like to display (JSON output always shows all properties)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "properties"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "phone-numbers:update",
+      "description": "Update the properties of a Twilio phone number",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--account-sid"
+          ],
+          "description": "Access resources for the specified account",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "account-sid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--friendly-name"
+          ],
+          "description": "A human readable descriptive text for this resource, up to 64 characters long",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "friendly-name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-method"
+          ],
+          "description": "The HTTP method that should be used to request the SmsFallbackUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-fallback-url"
+          ],
+          "description": "A URL that Twilio will request if an error occurs requesting or executing the TwiML defined by SmsUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-method"
+          ],
+          "description": "The HTTP method Twilio will use when making requests to the SmsUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sms-url"
+          ],
+          "description": "The URL that Twilio should request when somebody sends an SMS to the new phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sms-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-method"
+          ],
+          "description": "The HTTP method Twilio will use when requesting the VoiceFallbackUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-fallback-url"
+          ],
+          "description": "A URL that Twilio will request if an error occurs requesting or executing the TwiML defined by VoiceUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-fallback-url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-method"
+          ],
+          "description": "The HTTP method Twilio will use when making requests to the VoiceUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "method"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--voice-url"
+          ],
+          "description": "The URL that Twilio should request when somebody dials the phone number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "voice-url"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "phone-number"
+        }
+      ]
+    },
+    {
+      "name": "plugins:available",
+      "description": "List available plugins for installation"
+    },
+    {
+      "name": "plugins:inspect",
+      "description": "Displays installation properties of a plugin",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "plugin"
+        }
+      ]
+    },
+    {
+      "name": "plugins:install",
+      "description": "Installs a plugin into the CLI",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "`yarn install` with force flag"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "plugin"
+        }
+      ]
+    },
+    {
+      "name": "plugins:link",
+      "description": "Links a plugin into the CLI for development",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "plugins:uninstall",
+      "description": "Removes a plugin from the CLI",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "plugin"
+        }
+      ]
+    },
+    {
+      "name": "plugins:update",
+      "description": "Update installed plugins",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "profiles:add",
+      "description": "Create a new profile to store Twilio Account credentials and configuration",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force overwriting existing profile credentials"
+        },
+        {
+          "names": [
+            "-p",
+            "--profile"
+          ],
+          "description": "Shorthand identifier for your profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--auth-token"
+          ],
+          "description": "Your Twilio Auth Token for your Twilio Account or Subaccount",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "auth-token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--region"
+          ],
+          "description": "Twilio region to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "profiles:create",
+      "description": "Create a new profile to store Twilio Account credentials and configuration",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force overwriting existing profile credentials"
+        },
+        {
+          "names": [
+            "-p",
+            "--profile"
+          ],
+          "description": "Shorthand identifier for your profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--auth-token"
+          ],
+          "description": "Your Twilio Auth Token for your Twilio Account or Subaccount",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "auth-token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--region"
+          ],
+          "description": "Twilio region to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "profiles:list",
+      "description": "Show what profiles you have configured",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        },
+        {
+          "names": [
+            "--no-header"
+          ],
+          "description": "Skip including of headers while listing the data"
+        }
+      ]
+    },
+    {
+      "name": "profiles:port",
+      "description": "Port API keys from keytar to config file. This command ports ALL keys by default, although to only port a specific key append the profile-id as additional argument",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        }
+      ],
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "name": "profiles:remove",
+      "description": "Select which profile to remove",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        }
+      ],
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "name": "profiles:use",
+      "description": "Select which profile to use",
+      "options": [
+        {
+          "names": [
+            "-l"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o"
+          ],
+          "description": "Format of command output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent"
+          ],
+          "description": "Suppress output and logs. This is a shorthand for \"-l none -o none\""
+        }
+      ],
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update the twilio CLI",
+      "options": [
+        {
+          "names": [
+            "--from-local"
+          ],
+          "description": "Interactively choose an already installed version"
+        }
+      ],
+      "args": [
+        {
+          "name": "channel",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "args": [
+        {
+          "name": "command",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "plugins",
+      "description": "List installed plugins",
+      "options": [
+        {
+          "names": [
+            "--core"
+          ],
+          "description": "List core plugins"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "command",
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

@@ -1,0 +1,155 @@
+{
+  "name": "preset",
+  "description": "Elegant, ecosystem-agnostic scaffolding tool",
+  "options": [
+    {
+      "names": [
+        "--path",
+        "-p"
+      ],
+      "description": "Path to a sub-directory in which to look for a preset",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tag",
+        "-t"
+      ],
+      "description": "Branch or tag to use if the preset is a repository",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-ssh"
+      ],
+      "description": "Do not use SSH when cloning repositories"
+    },
+    {
+      "names": [
+        "--no-cache"
+      ],
+      "description": "Do not use the cached repository if it exists"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for preset"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Show the version number"
+    },
+    {
+      "names": [
+        "--no-interaction"
+      ],
+      "description": "Disable interactions"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Display debug information instead of standard output"
+    },
+    {
+      "names": [
+        "--silent"
+      ],
+      "description": "Do not print anything"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "apply",
+      "description": "Apply a preset",
+      "options": [
+        {
+          "names": [
+            "--path",
+            "-p"
+          ],
+          "description": "Path to a sub-directory in which to look for a preset",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag",
+            "-t"
+          ],
+          "description": "Branch or tag to use if the preset is a repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-ssh"
+          ],
+          "description": "Do not use SSH when cloning repositories"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Do not use the cached repository if it exists"
+        }
+      ],
+      "args": [
+        {
+          "name": "resolvable",
+          "template": "filepaths"
+        },
+        {
+          "name": "target-directory",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Create a new preset",
+      "args": [
+        {
+          "name": "target-directory",
+          "optional": true,
+          "template": "folders"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "resolvable",
+      "template": "filepaths"
+    },
+    {
+      "name": "target-directory",
+      "optional": true,
+      "template": "folders"
+    }
+  ]
+}

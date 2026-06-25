@@ -1,0 +1,158 @@
+{
+  "name": "serve",
+  "description": "Static file serving and directory listing",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Shows help message"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Displays the current version of serve"
+    },
+    {
+      "names": [
+        "-l",
+        "--listen"
+      ],
+      "description": "Specify a URI endpoint on which to listen - more than one may be specified to listen in multiple places",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "listen_uri"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Specify custom port",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--debug"
+      ],
+      "description": "Show debugging information"
+    },
+    {
+      "names": [
+        "-s",
+        "--single"
+      ],
+      "description": "Rewrite all not-found requests to `index.html`"
+    },
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Specify custom path to `serve.json`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path to config file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C",
+        "--cors"
+      ],
+      "description": "Enable CORS, sets `Access-Control-Allow-Origin` to `*`"
+    },
+    {
+      "names": [
+        "-n",
+        "--no-clipboard"
+      ],
+      "description": "Do not copy the local address to the clipboard"
+    },
+    {
+      "names": [
+        "-u",
+        "--no-compression"
+      ],
+      "description": "Do not compress files"
+    },
+    {
+      "names": [
+        "--no-etag"
+      ],
+      "description": "Send `Last-Modified` header instead of `ETag`"
+    },
+    {
+      "names": [
+        "-S",
+        "--symlinks"
+      ],
+      "description": "Resolve symlinks instead of showing 404 errors"
+    },
+    {
+      "names": [
+        "--ssl-cert"
+      ],
+      "description": "Optional path to an SSL/TLS certificate to serve with HTTPS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path to SSL/TLS certificate",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ssl-key"
+      ],
+      "description": "Optional path to the SSL/TLS certificate's private key",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path to private key",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ssl-pass"
+      ],
+      "description": "Optional path to the SSL/TLS certificate's passphrase",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path to passphrase",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-port-switching"
+      ],
+      "description": "Do not open a port other than the one specified when it's taken"
+    }
+  ],
+  "args": [
+    {
+      "name": "location",
+      "template": "folders"
+    }
+  ]
+}

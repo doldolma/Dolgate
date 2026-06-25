@@ -1,0 +1,244 @@
+{
+  "name": "dotenv-vault",
+  "description": "CLI for dotenv-vault",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Get documentation for the command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "new",
+      "description": "Create your project",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ],
+      "args": [
+        {
+          "name": "DOTENV_VAULT",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Log in to dotenv-vault",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ],
+      "args": [
+        {
+          "name": "DOTENV_ME",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Log out from dotenv-vault",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "description": "Opens project page in a browser",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ],
+      "args": [
+        {
+          "name": "ENVIRONMENT",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "push",
+      "description": "Push .env securely",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        },
+        {
+          "names": [
+            "-m",
+            "--dotenvMe"
+          ],
+          "description": "Pass .env.me (DOTENV_ME) credential directly (rather than reading from .env.me file)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DOTENV_ME"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "ENVIRONMENT",
+          "optional": true
+        },
+        {
+          "name": "FILENAME",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "pull",
+      "description": "Pull .env securely",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        },
+        {
+          "names": [
+            "-m",
+            "--dotenvMe"
+          ],
+          "description": "Pass .env.me (DOTENV_ME) credential directly (rather than reading from .env.me file)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DOTENV_ME"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "ENVIRONMENT",
+          "optional": true
+        },
+        {
+          "name": "FILENAME",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "versions",
+      "description": "List version history",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        },
+        {
+          "names": [
+            "-m",
+            "--dotenvMe"
+          ],
+          "description": "Pass .env.me (DOTENV_ME) credential directly (rather than reading from .env.me file)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DOTENV_ME"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "ENVIRONMENT",
+          "optional": true
+        },
+        {
+          "name": "FILENAME",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "whoami",
+      "description": "Display the current logged in user",
+      "options": [
+        {
+          "names": [
+            "-m",
+            "--dotenvMe"
+          ],
+          "description": "Pass .env.me (DOTENV_ME) credential directly (rather than reading from .env.me file)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DOTENV_ME"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "status",
+      "description": "Check dotenv-operational status",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Display help for dotenv-vault"
+    },
+    {
+      "name": "update",
+      "description": "Update the dotenv-vault CLI",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Automatic yes to prompts. Assume yes to all prompts and run non-interactively"
+        }
+      ]
+    }
+  ]
+}

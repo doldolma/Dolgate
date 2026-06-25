@@ -1,0 +1,56 @@
+{
+  "name": "envchain",
+  "description": "Set environment variables with macOS keychain or D-Bus secret service",
+  "subcommands": [
+    {
+      "name": "-s",
+      "description": "Add keychain item of environment variable +ENV+ for namespace +NAMESPACE+",
+      "options": [
+        {
+          "names": [
+            "-n",
+            "--noecho"
+          ],
+          "description": "Do not echo user input"
+        },
+        {
+          "names": [
+            "-p",
+            "--require-passphrase"
+          ],
+          "description": "Always ask for keychain passphrase"
+        },
+        {
+          "names": [
+            "-P",
+            "--no-require-passphrase"
+          ],
+          "description": "Do not ask for keychain passphrase"
+        }
+      ],
+      "args": [
+        {
+          "name": "NAMESPACE",
+          "hasGenerator": true
+        },
+        {
+          "name": "ENV",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "-l",
+      "description": "List namespaces that have been created"
+    }
+  ],
+  "args": [
+    {
+      "name": "NAMESPACE",
+      "hasGenerator": true
+    },
+    {
+      "name": "CMD"
+    }
+  ]
+}

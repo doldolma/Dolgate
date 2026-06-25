@@ -1,0 +1,67 @@
+{
+  "name": "asar",
+  "description": "A simple extensive tar-like archive format with indexing",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for asar"
+    },
+    {
+      "names": [
+        "--V",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "pack",
+      "description": "Create asar archive",
+      "args": [
+        {
+          "name": "directory"
+        },
+        {
+          "name": "output"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List files of asar archive",
+      "args": [
+        {
+          "name": "archive"
+        }
+      ]
+    },
+    {
+      "name": "extract-file",
+      "description": "Extract one file from archive",
+      "args": [
+        {
+          "name": "archive"
+        },
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "name": "extract",
+      "description": "Extract archive",
+      "args": [
+        {
+          "name": "archive"
+        },
+        {
+          "name": "directory"
+        }
+      ]
+    }
+  ]
+}

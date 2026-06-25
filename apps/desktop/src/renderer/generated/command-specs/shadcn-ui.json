@@ -1,0 +1,117 @@
+{
+  "name": "shadcn-ui",
+  "description": "Shadcn UI CLI",
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add a component to your project",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Skip confirmation prompt"
+        },
+        {
+          "names": [
+            "-o",
+            "--overwrite"
+          ],
+          "description": "Overwrite existing files"
+        },
+        {
+          "names": [
+            "-c",
+            "--cwd"
+          ],
+          "description": "The working directory. defaults to the current directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cwd"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--path"
+          ],
+          "description": "The path to add the component to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "components",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "diff",
+      "description": "Check for updates against the registry",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Skip confirmation prompt"
+        },
+        {
+          "names": [
+            "-c",
+            "--cwd"
+          ],
+          "description": "The working directory. defaults to the current directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cwd"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "component",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initialize your project and install dependencies",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Skip confirmation prompt"
+        },
+        {
+          "names": [
+            "-c",
+            "--cwd"
+          ],
+          "description": "The working directory. defaults to the current directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cwd"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

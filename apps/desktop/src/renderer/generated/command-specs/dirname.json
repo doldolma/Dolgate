@@ -1,0 +1,11 @@
+{
+  "name": "dirname",
+  "description": "Return directory portion of pathname",
+  "args": [
+    {
+      "name": "string",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

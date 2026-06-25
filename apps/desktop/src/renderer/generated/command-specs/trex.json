@@ -1,0 +1,178 @@
+{
+  "name": "trex",
+  "description": "Advanced package management for deno, based on import_map.json",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help info"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version"
+    },
+    {
+      "names": [
+        "-c",
+        "--custom"
+      ],
+      "description": "Install custom package",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "custom package"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "i",
+      "description": "Install a package",
+      "options": [
+        {
+          "names": [
+            "-m",
+            "--map"
+          ],
+          "description": "Install package from deno.land",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--nest"
+          ],
+          "description": "Install package from nest.land",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--pkg"
+          ],
+          "description": "Install package from some repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "repository"
+            },
+            {
+              "name": "Package Name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete a package",
+      "args": [
+        {
+          "name": "package name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade trex",
+      "options": [
+        {
+          "names": [
+            "--canary"
+          ],
+          "description": "Install from dev branch"
+        }
+      ]
+    },
+    {
+      "name": "tree",
+      "description": "View dependency tree"
+    },
+    {
+      "name": "run",
+      "description": "Run a script alias in a file run.json",
+      "options": [
+        {
+          "names": [
+            "-w",
+            "--watch"
+          ],
+          "description": "Use reboot script alias protocol (rsap)"
+        },
+        {
+          "names": [
+            "-wv"
+          ],
+          "description": "Verbose output in --watch mode (rsap)"
+        }
+      ],
+      "args": [
+        {
+          "name": "script alias",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "purge",
+      "description": "Remove a package or url from cache",
+      "args": [
+        {
+          "name": "package | url",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "ls",
+      "description": "Shows the list of installed packages"
+    },
+    {
+      "name": "exec",
+      "description": "Execute a cli tool with out install then",
+      "options": [
+        {
+          "names": [
+            "--perms"
+          ],
+          "description": "Specify cli permisions"
+        }
+      ],
+      "args": [
+        {
+          "name": "cli tool"
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Check deno.land [std/x] dependencies updates",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--fix"
+          ],
+          "description": "Update outdated dependencies"
+        }
+      ]
+    }
+  ]
+}

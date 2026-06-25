@@ -1,0 +1,62 @@
+{
+  "name": "yo",
+  "description": "Yeoman generator",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Print info and generator's options and usage"
+    },
+    {
+      "names": [
+        "-f",
+        "--force"
+      ],
+      "description": "Overwrite files that already exist"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print version"
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Disable color"
+    },
+    {
+      "names": [
+        "--insight"
+      ],
+      "description": "Enable anonymous tracking"
+    },
+    {
+      "names": [
+        "--no-insight"
+      ],
+      "description": "Disable anonymous tracking"
+    },
+    {
+      "names": [
+        "--generators"
+      ],
+      "description": "Print available generators"
+    },
+    {
+      "names": [
+        "--local-only"
+      ],
+      "description": "Disable lookup of globally-installed generators"
+    }
+  ],
+  "args": [
+    {
+      "name": "generator",
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "name": "create-t3-app",
+  "description": "A CLI for creating web applications with the t3 stack",
+  "options": [
+    {
+      "names": [
+        "--noGit"
+      ],
+      "description": "Explicitly tell the CLI to not initialize a new git repo in the project (default: false)"
+    },
+    {
+      "names": [
+        "--noInstall"
+      ],
+      "description": "Explicitly tell the CLI to not run the package manager's install command (default: false)"
+    },
+    {
+      "names": [
+        "-y",
+        "--default"
+      ],
+      "description": "Bypass the CLI and use all default options to bootstrap a new t3-app (default: false)"
+    },
+    {
+      "names": [
+        "--CI"
+      ],
+      "description": "Boolean value if we're running in CI (default: false)"
+    },
+    {
+      "names": [
+        "--tailwind"
+      ],
+      "description": "Experimental: Boolean value if we should install Tailwind CSS. Must be used in conjunction with `--CI`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--nextAuth"
+      ],
+      "description": "Experimental: Boolean value if we should install NextAuth.js. Must be used in conjunction with `--CI`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--prisma"
+      ],
+      "description": "Experimental: Boolean value if we should install Prisma. Must be used in conjunction with `--CI`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--trpc"
+      ],
+      "description": "Experimental: Boolean value if we should install tRPC. Must be used in conjunction with `--CI`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "boolean"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--import-alias"
+      ],
+      "description": "Explicitly tell the CLI to use a custom import alias",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "alias"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Display the version number"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help for command"
+    }
+  ],
+  "args": [
+    {
+      "name": "dir",
+      "optional": true,
+      "template": "folders"
+    }
+  ]
+}

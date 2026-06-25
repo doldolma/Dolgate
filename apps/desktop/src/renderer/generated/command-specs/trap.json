@@ -1,0 +1,30 @@
+{
+  "name": "trap",
+  "description": "Automatically execute commands after receiving signals by processes or the operating system",
+  "options": [
+    {
+      "names": [
+        "--print",
+        "-p"
+      ],
+      "description": "Prints all defined signal handlers"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Displays help about using this command"
+    }
+  ],
+  "args": [
+    {
+      "name": "function name",
+      "optional": true
+    },
+    {
+      "name": "reason",
+      "hasGenerator": true
+    }
+  ]
+}

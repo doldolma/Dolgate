@@ -1,0 +1,124 @@
+{
+  "name": "mosh",
+  "description": "",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for mosh"
+    },
+    {
+      "names": [
+        "--client"
+      ],
+      "description": "Mosh client on local machine (default: \"mosh-client\")"
+    },
+    {
+      "names": [
+        "--server"
+      ],
+      "description": "Mosh server on remote machine (default: \"mosh-server\")"
+    },
+    {
+      "names": [
+        "--predict"
+      ],
+      "description": "Local echo options",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "-4"
+      ],
+      "description": "Use IPv4 only"
+    },
+    {
+      "names": [
+        "-6"
+      ],
+      "description": "Use IPv6 only"
+    },
+    {
+      "names": [
+        "--family"
+      ],
+      "description": "Network Type",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--port",
+        "-p"
+      ],
+      "description": "Server-side UDP port or range, (No effect on server-side SSH port)"
+    },
+    {
+      "names": [
+        "--bind-server"
+      ],
+      "description": "{ssh|any|IP}, ask the server to reply from an IP address, (default: \"ssh\")"
+    },
+    {
+      "names": [
+        "--ssh"
+      ],
+      "description": "Ssh command to run when setting up session, (example: \"ssh -p 2222\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-ssh-pty"
+      ],
+      "description": "Do not allocate a pseudo tty on ssh connection"
+    },
+    {
+      "names": [
+        "--no-init"
+      ],
+      "description": "Do not send terminal initialization string"
+    },
+    {
+      "names": [
+        "--local"
+      ],
+      "description": "Run mosh-server locally without using ssh"
+    },
+    {
+      "names": [
+        "--experimental-remote-ip"
+      ],
+      "description": "Select the method for discovering the remote IP address to use for mosh",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "method"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Version and copyright information"
+    }
+  ],
+  "args": [
+    {
+      "name": "user@hostname",
+      "hasGenerator": true
+    }
+  ]
+}

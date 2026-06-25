@@ -1,0 +1,183 @@
+{
+  "name": "man",
+  "description": "Format and display the on-line manual pages",
+  "options": [
+    {
+      "names": [
+        "-C"
+      ],
+      "description": "Specify the configuration file to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config_file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-M"
+      ],
+      "description": "Specify the list of directories to search (colon separated)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P"
+      ],
+      "description": "Specify the pager program",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pager"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-B"
+      ],
+      "description": "Specify which browser to use for HTML files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "browser"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-H"
+      ],
+      "description": "Specify a command that renders HTML files as text",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S"
+      ],
+      "description": "Specify a colon-separated list of manual sections to search",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "sections"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-a"
+      ],
+      "description": "Open every matching page instead of just the first"
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Reformat the source page, even when an up-to-date cat-page exists"
+    },
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Don't actually display the pages (dry run)"
+    },
+    {
+      "names": [
+        "-D"
+      ],
+      "description": "Both display and print debugging info"
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Equivalent to `whatis`"
+    },
+    {
+      "names": [
+        "-F",
+        "--preformat"
+      ],
+      "description": "Format only, do not display"
+    },
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Print a help message and exit"
+    },
+    {
+      "names": [
+        "-k"
+      ],
+      "description": "Equivalent to apropos"
+    },
+    {
+      "names": [
+        "-K"
+      ],
+      "description": "Search for a given string in all pages"
+    },
+    {
+      "names": [
+        "-m"
+      ],
+      "description": "Specify an alternate set of pages to search based on the system name given",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "system"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Specify the sequence of preprocessors to run before nroff or troff",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "preprocessors"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Use `/usr/bin/groff -Tps -mandoc -c` to format the page"
+    },
+    {
+      "names": [
+        "-w",
+        "--path"
+      ],
+      "description": "Print the location of files that would be displayed"
+    },
+    {
+      "names": [
+        "-W"
+      ],
+      "description": "Print file locations, one per line"
+    }
+  ],
+  "args": [
+    {
+      "optional": true,
+      "variadic": true,
+      "hasGenerator": true
+    }
+  ]
+}

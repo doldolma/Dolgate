@@ -1,0 +1,190 @@
+{
+  "name": "okta",
+  "description": "The Okta CLI is the easiest way to get started with Okta!",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for Okta CLI"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Print version information"
+    },
+    {
+      "names": [
+        "--verbose"
+      ],
+      "description": "Verbose logging"
+    },
+    {
+      "names": [
+        "--batch"
+      ],
+      "description": "Batch mode, will not prompt for user input"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "register",
+      "description": "Sign up for a new Okta account",
+      "options": [
+        {
+          "names": [
+            "--company"
+          ],
+          "description": "Company/organization used when registering a new Okta account"
+        },
+        {
+          "names": [
+            "--email"
+          ],
+          "description": "Email used when registering a new Okta account"
+        },
+        {
+          "names": [
+            "--first-name"
+          ],
+          "description": "First name used when registering a new Okta account"
+        },
+        {
+          "names": [
+            "--last-name"
+          ],
+          "description": "Last name used when registering a new Okta account"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Authorizes the Okta CLI tool"
+    },
+    {
+      "name": "apps",
+      "description": "Manage Okta apps",
+      "subcommands": [
+        {
+          "name": "config",
+          "description": "Show an Okta app's configuration",
+          "options": [
+            {
+              "names": [
+                "--app"
+              ],
+              "description": "The App ID"
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "description": "Create a new Okta app",
+          "options": [
+            {
+              "names": [
+                "--app-name"
+              ],
+              "description": "Application name to be created, defaults to current directory name"
+            },
+            {
+              "names": [
+                "--authorization-server-id"
+              ],
+              "description": "Okta Authorization Server Id"
+            },
+            {
+              "names": [
+                "--config-file"
+              ],
+              "description": "Application config file"
+            },
+            {
+              "names": [
+                "--redirect-uri"
+              ],
+              "description": "OIDC Redirect URI"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes an Okta app",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Deactivate and delete applications without confirmation"
+            }
+          ],
+          "args": [
+            {
+              "name": "appIds"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "start",
+      "description": "Creates an Okta Sample Application",
+      "args": [
+        {
+          "name": "name",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Displays help information about the specified command",
+      "options": [
+        {
+          "names": [
+            "register"
+          ],
+          "description": "Sign up for a new Okta account"
+        },
+        {
+          "names": [
+            "login"
+          ],
+          "description": "Authorizes the Okta CLI tool"
+        },
+        {
+          "names": [
+            "apps"
+          ],
+          "description": "Manage Okta apps"
+        },
+        {
+          "names": [
+            "start"
+          ],
+          "description": "Creates an Okta Sample Application"
+        },
+        {
+          "names": [
+            "help"
+          ],
+          "description": "Displays help information about the specified command"
+        },
+        {
+          "names": [
+            "generate-completion"
+          ],
+          "description": "Generate bash/zsh completion script for Okta"
+        }
+      ]
+    },
+    {
+      "name": "generate-completion",
+      "description": "Generate bash/zsh completion script for Okta"
+    }
+  ]
+}

@@ -1,0 +1,2407 @@
+{
+  "name": "swift",
+  "description": "Swift compiler",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h",
+        "-help"
+      ],
+      "description": "Show help information"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the version"
+    },
+    {
+      "names": [
+        "-access-notes-path"
+      ],
+      "description": "Specify YAML file to override attributes on Swift declarations in this module",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-assert-config"
+      ],
+      "description": "Specify the assert_configuration replacement",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "configuration"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-async-main"
+      ],
+      "description": "Resolve main function as if it were called from an asynchronous context"
+    },
+    {
+      "names": [
+        "-clang-target"
+      ],
+      "description": "Separately set the target we should use for internal Clang instance",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "target"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-color-diagnostics"
+      ],
+      "description": "Print diagnostics in color"
+    },
+    {
+      "names": [
+        "-continue-building-after-errors"
+      ],
+      "description": "Continue building, even after errors are encountered"
+    },
+    {
+      "names": [
+        "-coverage-prefix-map"
+      ],
+      "description": "Remap source paths in coverage info",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "prefix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-debug-info-format"
+      ],
+      "description": "Specify the debug info format type",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-debug-info-store-invocation"
+      ],
+      "description": "Emit the compiler invocation in the debug info"
+    },
+    {
+      "names": [
+        "-debug-prefix-map"
+      ],
+      "description": "Remap source paths in debug info",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "prefix=replacement"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-diagnostic-style"
+      ],
+      "description": "The formatting style used when printing diagnostics",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-disable-actor-data-race-checks"
+      ],
+      "description": "Disable runtime checks for actor data races"
+    },
+    {
+      "names": [
+        "-disable-autolinking-runtime-compatibility-concurrency"
+      ],
+      "description": "Do not use autolinking for the concurrency runtime compatibility library"
+    },
+    {
+      "names": [
+        "-disable-autolinking-runtime-compatibility-dynamic-replacements"
+      ],
+      "description": "Do not use autolinking for the dynamic replacement runtime compatibility library"
+    },
+    {
+      "names": [
+        "-disable-autolinking-runtime-compatibility"
+      ],
+      "description": "Do not use autolinking for runtime compatibility libraries"
+    },
+    {
+      "names": [
+        "-disable-clang-target"
+      ],
+      "description": "Disable a separately specified target triple for Clang instance to use"
+    },
+    {
+      "names": [
+        "-disable-incremental-imports"
+      ],
+      "description": "Disable cross-module incremental build metadata and driver scheduling for Swift modules"
+    },
+    {
+      "names": [
+        "-disable-only-one-dependency-file"
+      ],
+      "description": "Disables incremental build optimization that only produces one dependencies file"
+    },
+    {
+      "names": [
+        "-disallow-use-new-driver"
+      ],
+      "description": "Disable using new swift-driver"
+    },
+    {
+      "names": [
+        "-D"
+      ],
+      "description": "Marks a conditional compilation flag as true",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "flag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-embed-tbd-for-module"
+      ],
+      "description": "Embed symbols from the module in the emitted tbd file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "module"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-enable-actor-data-race-checks"
+      ],
+      "description": "Emit runtime checks for actor data races"
+    },
+    {
+      "names": [
+        "-enable-bare-slash-regex"
+      ],
+      "description": "Enable the use of forward slash regular-expression literal syntax"
+    },
+    {
+      "names": [
+        "-enable-experimental-additive-arithmetic-derivation"
+      ],
+      "description": "Enable experimental 'AdditiveArithmetic' derived conformances"
+    },
+    {
+      "names": [
+        "-enable-experimental-concise-pound-file"
+      ],
+      "description": "Enable experimental concise '#file' identifier"
+    },
+    {
+      "names": [
+        "-enable-experimental-cxx-interop"
+      ],
+      "description": "Allow importing C++ modules into Swift (experimental feature)"
+    },
+    {
+      "names": [
+        "-enable-experimental-forward-mode-differentiation"
+      ],
+      "description": "Enable experimental forward mode differentiation"
+    },
+    {
+      "names": [
+        "-enable-incremental-imports"
+      ],
+      "description": "Enable cross-module incremental build metadata and driver scheduling for Swift modules"
+    },
+    {
+      "names": [
+        "-enable-library-evolution"
+      ],
+      "description": "Build the module to allow binary-compatible library evolution"
+    },
+    {
+      "names": [
+        "-enable-only-one-dependency-file"
+      ],
+      "description": "Enables incremental build optimization that only produces one dependencies file"
+    },
+    {
+      "names": [
+        "-enforce-exclusivity"
+      ],
+      "description": "Enforce law of exclusivity",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "enforcement"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-experimental-cxx-stdlib"
+      ],
+      "description": "C++ standard library to use; forwarded to Clang's -std lib flag",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "stdlib"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-file-compilation-dir"
+      ],
+      "description": "The compilation directory to embed in the debug info. Coverage mapping is not supported yet",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-file-prefix-map"
+      ],
+      "description": "Remap source paths in debug, coverage, and index info",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "prefix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-framework"
+      ],
+      "description": "Specifies a framework which should be linked against",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "framework"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Fsystem"
+      ],
+      "description": "Add directory to system framework search path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-F"
+      ],
+      "description": "Add directory to framework search path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-gdwarf-types"
+      ],
+      "description": "Emit full DWARF type info"
+    },
+    {
+      "names": [
+        "-gline-tables-only"
+      ],
+      "description": "Emit minimal debug info for backtraces only"
+    },
+    {
+      "names": [
+        "-gnone"
+      ],
+      "description": "Don't emit debug info"
+    },
+    {
+      "names": [
+        "-g"
+      ],
+      "description": "Emit debug info. This is the preferred setting for debugging with LLDB"
+    },
+    {
+      "names": [
+        "-index-ignore-clang-modules"
+      ],
+      "description": "Avoid indexing clang modules (pcms)"
+    },
+    {
+      "names": [
+        "-index-store-path"
+      ],
+      "description": "Store indexing data to path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-index-unit-output-path"
+      ],
+      "description": "Use the specified path as the output path in the produced index data",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-I"
+      ],
+      "description": "Add directory to the import search path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-j"
+      ],
+      "description": "Number of commands to execute in parallel",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-libc"
+      ],
+      "description": "The libc runtime library to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "runtime"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-locale"
+      ],
+      "description": "Choose a language for diagnostic messages",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "code"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-localization-path"
+      ],
+      "description": "Path to localized diagnostic messages directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-L"
+      ],
+      "description": "Add directory to library link search path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "Specifies a library which should be linked against",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-module-abi-name"
+      ],
+      "description": "ABI name to use for the contents of this module",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-module-alias"
+      ],
+      "description": "If a source file imports or references module <alias_name>, the <underlying_name> is used for the contents of the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "alias"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-module-cache-path"
+      ],
+      "description": "Specifies the Clang module cache path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-module-link-name"
+      ],
+      "description": "Library to link against when using this module",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-module-name"
+      ],
+      "description": "Name of the module to build",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-no-color-diagnostics"
+      ],
+      "description": "Do not print diagnostics in color"
+    },
+    {
+      "names": [
+        "-no-warnings-as-errors"
+      ],
+      "description": "Don't treat warnings as error"
+    },
+    {
+      "names": [
+        "-nostdimport"
+      ],
+      "description": "Don't search the standard library import path for modules"
+    },
+    {
+      "names": [
+        "-num-threads"
+      ],
+      "description": "Enable multi-threading and specify number of threads",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Onone"
+      ],
+      "description": "Compile without any optimization"
+    },
+    {
+      "names": [
+        "-Osize"
+      ],
+      "description": "Compile with optimizations and target small code size"
+    },
+    {
+      "names": [
+        "-Ounchecked"
+      ],
+      "description": "Compile with optimizations and remove runtime safety checks"
+    },
+    {
+      "names": [
+        "-O"
+      ],
+      "description": "Compile with optimizations"
+    },
+    {
+      "names": [
+        "-prefix-serialized-debugging-options"
+      ],
+      "description": "Apply debug prefix mappings to serialized debug info in Swiftmodule files"
+    },
+    {
+      "names": [
+        "-pretty-print"
+      ],
+      "description": "Pretty-print the output JSON"
+    },
+    {
+      "names": [
+        "-print-educational-notes"
+      ],
+      "description": "Include educational notes in printed diagnostic output, if available"
+    },
+    {
+      "names": [
+        "-print-target-info"
+      ],
+      "description": "Print target information for the given target <triple>, such as x86_64-apple-macos10.9"
+    },
+    {
+      "names": [
+        "-Rcross-import"
+      ],
+      "description": "Emit a remark if a cross-import of a module is triggered"
+    },
+    {
+      "names": [
+        "-remove-runtime-asserts"
+      ],
+      "description": "Remove runtime safety checks"
+    },
+    {
+      "names": [
+        "-requirement-machine-abstract-signatures"
+      ],
+      "description": "Control usage of experimental generic signature minimization",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-requirement-machine-inferred-signatures"
+      ],
+      "description": "Control usage of experimental generic signature minimization",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-requirement-machine-protocol-signatures"
+      ],
+      "description": "Control usage of experimental protocol requirement signature minimization",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Rmodule-loading"
+      ],
+      "description": "Emit a remark and file path of each loaded module"
+    },
+    {
+      "names": [
+        "-Rpass-missed"
+      ],
+      "description": "Report missed transformations by optimization passes whose name matches the given POSIX regular expression",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Rpass"
+      ],
+      "description": "Report performed transformations by optimization passes whose name matches the given POSIX regular expression",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-runtime-compatibility-version"
+      ],
+      "description": "Link compatibility library for Swift runtime version, or 'none'",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-save-optimization-record-passes"
+      ],
+      "description": "Only include passes which match a specified regular expression in the generated optimization record (by default, include all passes)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-save-optimization-record-path"
+      ],
+      "description": "Specify the file name of any generated optimization record",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-save-optimization-record"
+      ],
+      "description": "Generate an optimization record file in a specific format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-save-optimization-record"
+      ],
+      "description": "Generate a YAML optimization record file"
+    },
+    {
+      "names": [
+        "-sdk"
+      ],
+      "description": "Compile against a specific SDK",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "sdk"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-serialize-diagnostics-path"
+      ],
+      "description": "Emit a serialized diagnostics file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-static-executable"
+      ],
+      "description": "Statically link the executable"
+    },
+    {
+      "names": [
+        "-static-stdlib"
+      ],
+      "description": "Statically link the Swift standard library"
+    },
+    {
+      "names": [
+        "-strict-concurrency"
+      ],
+      "description": "Specify the how strict concurrency checking will be",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "concurrency"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-suppress-warnings"
+      ],
+      "description": "Suppress all warnings"
+    },
+    {
+      "names": [
+        "-swift-isa-ptrauth-mode"
+      ],
+      "description": "Mode for staging isa/super signing",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-swift-ptrauth-mode"
+      ],
+      "description": "Mode for staging pointer authentication",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-swift-version"
+      ],
+      "description": "Interpret input according to a specific Swift language version number",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-target-cpu"
+      ],
+      "description": "Generate code for a particular CPU variant",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cpu"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-target-min-inlining-version"
+      ],
+      "description": "Require inlinable code with no '@available' attribute to back-deploy to this version of the '-target' OS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-target-variant"
+      ],
+      "description": "Generate 'zippered' code for macCatalyst that can run on the specified variant target triple in addition to the main -target triple",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "variant"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-target"
+      ],
+      "description": "Generate code for the given target <triple>, such as x86_64-apple-macos10.9",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "triple"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-use-ld"
+      ],
+      "description": "Specifies the linker to be used",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "linker"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-user-module-version"
+      ],
+      "description": "Module version specified from Swift module authors",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "module"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-vfsoverlay"
+      ],
+      "description": "Add directory to VFS overlay file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Show commands to run and use verbose output"
+    },
+    {
+      "names": [
+        "-warn-concurrency"
+      ],
+      "description": "Warn about code that is unsafe according to the Swift Concurrency model and will become ill-formed in a future language version"
+    },
+    {
+      "names": [
+        "-warn-implicit-overrides"
+      ],
+      "description": "Warn about implicit overrides of protocol members"
+    },
+    {
+      "names": [
+        "-warn-swift3-objc-inference-complete"
+      ],
+      "description": "Warn about deprecated @objc inference in Swift 3 for every declaration that will no longer be inferred as @objc in Swift 4"
+    },
+    {
+      "names": [
+        "-warn-swift3-objc-inference-minimal"
+      ],
+      "description": "Warn about deprecated @objc inference in Swift 3 based on direct uses of the Objective-C entrypoint"
+    },
+    {
+      "names": [
+        "-warnings-as-errors"
+      ],
+      "description": "Treat warnings as errors"
+    },
+    {
+      "names": [
+        "-working-directory"
+      ],
+      "description": "Resolve file paths relative to the specified directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Xcc"
+      ],
+      "description": "Pass <arg> to the C/C++/Objective-C compiler",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "arg"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Xlinker"
+      ],
+      "description": "Specifies an option which should be passed to the linker",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "arg"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "build",
+      "description": "Build sources into binary products",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h",
+            "-help"
+          ],
+          "description": "Show help information"
+        },
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Show the version"
+        },
+        {
+          "names": [
+            "--build-tests"
+          ],
+          "description": "Build both source and test targets"
+        },
+        {
+          "names": [
+            "--show-bin-path"
+          ],
+          "description": "Print the binary output path"
+        },
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "Build the specified target",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--product"
+          ],
+          "description": "Build the specified product",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "product"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Build and run an executable product",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h",
+            "-help"
+          ],
+          "description": "Show help information"
+        },
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Show the version"
+        },
+        {
+          "names": [
+            "--skip-build"
+          ],
+          "description": "Skip building the executable product"
+        },
+        {
+          "names": [
+            "--build-tests"
+          ],
+          "description": "Build both source and test targets"
+        },
+        {
+          "names": [
+            "--repl"
+          ],
+          "description": "Launch Swift REPL for the package"
+        }
+      ],
+      "args": [
+        {
+          "name": "executable",
+          "optional": true
+        },
+        {
+          "name": "arguments",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Build and run tests",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h",
+            "-help"
+          ],
+          "description": "Show help information"
+        },
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Show the version"
+        },
+        {
+          "names": [
+            "--skip-build"
+          ],
+          "description": "Skip building the test target"
+        },
+        {
+          "names": [
+            "--parallel"
+          ],
+          "description": "Run the tests in parallel"
+        },
+        {
+          "names": [
+            "--num-workers"
+          ],
+          "description": "Number of tests to execute in parallel",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "num-workers"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-l",
+            "--list-tests"
+          ],
+          "description": "Lists test methods in specifier format"
+        },
+        {
+          "names": [
+            "--show-codecov-path"
+          ],
+          "description": "Print the path of the exported code coverage JSON file"
+        },
+        {
+          "names": [
+            "-s",
+            "--specifier"
+          ],
+          "description": ""
+        },
+        {
+          "names": [
+            "--filter"
+          ],
+          "description": "Run test cases matching regular expression",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--skip"
+          ],
+          "description": "Skip test cases matching regular expression",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "regex"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--xunit-output"
+          ],
+          "description": "Path where the xUnit xml file should be generated",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--test-product"
+          ],
+          "description": "Test the specified product",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "product"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "package",
+      "description": "Perform operations on Swift packages",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h",
+            "-help"
+          ],
+          "description": "Show help information"
+        },
+        {
+          "names": [
+            "--version"
+          ],
+          "description": "Show the version"
+        },
+        {
+          "names": [
+            "-Xcc"
+          ],
+          "description": "Pass a flag through to all C compiler invocations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "flag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Xswiftc"
+          ],
+          "description": "Pass a flag through to all Swift compiler invocations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "flag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-Xlinker"
+          ],
+          "description": "Pass a flag through to all linker invocations",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "flag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-c",
+            "--configuration"
+          ],
+          "description": "Build with configuration (default: debug)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "configuration"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--build-path"
+          ],
+          "description": "Specify build/cache directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cache-path"
+          ],
+          "description": "Specify the shared cache directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--enable-repository-cache"
+          ],
+          "description": "Enable the use of a shared cache when fetching repositories (default: enabled)"
+        },
+        {
+          "names": [
+            "--disable-repository-cache"
+          ],
+          "description": "Disable the use of a shared cache when fetching repositories (default: enabled)"
+        },
+        {
+          "names": [
+            "-C",
+            "--chdir"
+          ],
+          "description": "The custom working directory that the tool should operate in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "chdir"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--package-path"
+          ],
+          "description": "Change working directory before any other operation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--multiroot-data-file"
+          ],
+          "description": "The path to the file containing multiroot package data. This is currently Xcode's workspace file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "multiroot-data-file"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--enable-prefetching"
+          ],
+          "description": "Enable prefetching in resolver which will kick off parallel git cloning (default: enabled)"
+        },
+        {
+          "names": [
+            "--disable-prefetching"
+          ],
+          "description": "Disable  prefetching in resolver which will kick off parallel git cloning (default: enabled)"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase verbosity of informational output"
+        },
+        {
+          "names": [
+            "--disable-sandbox"
+          ],
+          "description": "Disable using the sandbox when executing subprocesses"
+        },
+        {
+          "names": [
+            "--manifest-cache"
+          ],
+          "description": "Caching mode of Package.swift manifests",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--destination"
+          ],
+          "description": "Path to the compilation destination describing JSON file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--triple"
+          ],
+          "description": "The compilation destination's target triple",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "triple"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sdk"
+          ],
+          "description": "Path to the compilation destination's SDK",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--toolchain"
+          ],
+          "description": "Path to the compilation destination's toolchain",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--static-swift-stdlib"
+          ],
+          "description": "Link Swift stdlib statically (default: false)"
+        },
+        {
+          "names": [
+            "--no-static-swift-stdlib"
+          ],
+          "description": "Don't link Swift stdlib statically (default: false)"
+        },
+        {
+          "names": [
+            "--skip-update"
+          ],
+          "description": "Skip updating dependencies from their remote during a resolution"
+        },
+        {
+          "names": [
+            "--sanitize"
+          ],
+          "description": "Turn on runtime checks for erroneous behavior",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--enable-code-coverage"
+          ],
+          "description": "Enable code coverage (default: disabled)"
+        },
+        {
+          "names": [
+            "--disable-code-coverage"
+          ],
+          "description": "Disable code coverage (default: disabled)"
+        },
+        {
+          "names": [
+            "--force-resolved-versions",
+            "--disable-automatic-resolution",
+            "--only-use-versions-from-resolved-file"
+          ],
+          "description": "Only use versions from the Package.resolved file and fail resolution if it is out-of-date"
+        },
+        {
+          "names": [
+            "--auto-index-store"
+          ],
+          "description": "Enable or disable indexing-while-building feature (default: auto)"
+        },
+        {
+          "names": [
+            "--enable-index-store"
+          ],
+          "description": "Enable indexing-while-building feature (default: auto)"
+        },
+        {
+          "names": [
+            "--disable-index-store"
+          ],
+          "description": "Disable indexing-while-building feature (default: auto)"
+        },
+        {
+          "names": [
+            "--enable-parseable-module-interfaces"
+          ],
+          "description": "Whether to enable generation of `.swiftinterface`s alongside `.swiftmodule`s"
+        },
+        {
+          "names": [
+            "--trace-resolver"
+          ],
+          "description": "Write dependency resolver trace to a file"
+        },
+        {
+          "names": [
+            "-j",
+            "--jobs"
+          ],
+          "description": "The number of jobs to spawn in parallel during the build process",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "jobs"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--enable-build-manifest-caching"
+          ],
+          "description": "Whether to enable llbuild manifest caching (default: enabled)"
+        },
+        {
+          "names": [
+            "--disable-build-manifest-caching"
+          ],
+          "description": "Whether to disable llbuild manifest caching (default: enabled)"
+        },
+        {
+          "names": [
+            "--emit-swift-module-separately"
+          ],
+          "description": "Emit the Swift module separately from the object files"
+        },
+        {
+          "names": [
+            "--use-integrated-swift-driver"
+          ],
+          "description": "Whether to use the integrated Swift driver rather than shelling out to a separate process"
+        },
+        {
+          "names": [
+            "--experimental-explicit-module-build"
+          ],
+          "description": "Whether to use the explicit module build flow (with the integrated driver)"
+        },
+        {
+          "names": [
+            "--print-manifest-job-graph"
+          ],
+          "description": "Write the command graph for the build manifest as a graphviz file"
+        },
+        {
+          "names": [
+            "--build-system"
+          ],
+          "description": "The build system to use (default: native)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "build system"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--netrc"
+          ],
+          "description": "Whether to load .netrc files for authenticating with remote servers when downloading binary artifacts or communicating with a registry",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bool"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--netrc-file"
+          ],
+          "description": "The path to the .netrc file used when `netrc` is `true`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "clean",
+          "description": "Delete build artifacts",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "purge-cache",
+          "description": "Purge the global repository cache",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset the complete cache/build directory",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Update package dependencies",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "-n",
+                "-dry-run"
+              ],
+              "description": "Display the list of dependencies that can be updated"
+            }
+          ]
+        },
+        {
+          "name": "describe",
+          "description": "Describe the current package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--type"
+              ],
+              "description": "The output type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "type"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "init",
+          "description": "Initialize a new package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--type"
+              ],
+              "description": "The package type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name"
+              ],
+              "description": "Provide custom package name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "experimental-api-diff",
+          "description": "Diagnose API-breaking changes to Swift modules in a package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--invert-baseline"
+              ],
+              "description": "Invert the baseline which is helpful for determining API additions"
+            }
+          ],
+          "args": [
+            {
+              "name": "treeish"
+            }
+          ]
+        },
+        {
+          "name": "dump-symbol-graph",
+          "description": "Dump Symbol Graph",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "dump-pif",
+          "description": "Dump PIF",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--preserve-structure"
+              ],
+              "description": "Preserve the internal structure of PIF"
+            }
+          ]
+        },
+        {
+          "name": "dump-package",
+          "description": "Print parsed Package.swift as JSON",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "edit",
+          "description": "Put a package in editable mode",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--revision"
+              ],
+              "description": "The revision to edit",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "revision"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--branch"
+              ],
+              "description": "The branch to create",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "branch"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--path"
+              ],
+              "description": "Create or use the checkout at this path",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "unedit",
+          "description": "Remove a package from editable mode",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Unedit the package even if it has uncommitted and unpushed changes"
+            }
+          ],
+          "args": [
+            {
+              "name": "package-name"
+            }
+          ]
+        },
+        {
+          "name": "config",
+          "description": "Manipulate configuration of the package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "set-mirror",
+              "description": "Set a mirror for a dependency",
+              "options": [
+                {
+                  "names": [
+                    "--help",
+                    "-h",
+                    "-help"
+                  ],
+                  "description": "Show help information"
+                },
+                {
+                  "names": [
+                    "--version"
+                  ],
+                  "description": "Show the version"
+                },
+                {
+                  "names": [
+                    "--package-url"
+                  ],
+                  "description": "The package dependency url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "package-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--original-url"
+                  ],
+                  "description": "The original url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "original-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--mirror-url"
+                  ],
+                  "description": "The mirror url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "original-url"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "unset-mirror",
+              "description": "Remove an existing mirror",
+              "options": [
+                {
+                  "names": [
+                    "--help",
+                    "-h",
+                    "-help"
+                  ],
+                  "description": "Show help information"
+                },
+                {
+                  "names": [
+                    "--version"
+                  ],
+                  "description": "Show the version"
+                },
+                {
+                  "names": [
+                    "--package-url"
+                  ],
+                  "description": "The package dependency url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "package-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--original-url"
+                  ],
+                  "description": "The original url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "original-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--mirror-url"
+                  ],
+                  "description": "The mirror url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "original-url"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get-mirror",
+              "description": "Print mirror configuration for the given package dependency",
+              "options": [
+                {
+                  "names": [
+                    "--help",
+                    "-h",
+                    "-help"
+                  ],
+                  "description": "Show help information"
+                },
+                {
+                  "names": [
+                    "--version"
+                  ],
+                  "description": "Show the version"
+                },
+                {
+                  "names": [
+                    "--package-url"
+                  ],
+                  "description": "The package dependency url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "package-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--original-url"
+                  ],
+                  "description": "The original url",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "original-url"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resolve",
+          "description": "Resolve package dependencies",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "version",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--branch"
+              ],
+              "description": "The branch to resolve at",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "branch"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--revision"
+              ],
+              "description": "The revision to resolve at",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "revision"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "package-name"
+            }
+          ]
+        },
+        {
+          "name": "show-dependencies",
+          "description": "Print the resolved dependency graph",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--format"
+              ],
+              "description": "The format type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "format"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "tools-version",
+          "description": "Manipulate tools version of the current package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--format"
+              ],
+              "description": "The format type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "format"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--set-current"
+              ],
+              "description": "Set tools version of package to the current tools version in use"
+            },
+            {
+              "names": [
+                "--set"
+              ],
+              "description": "Set tools version of package to the given value",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tools version"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "generate-xcodeproj",
+          "description": "Generates an Xcode project (this command will be deprecated soon)",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "--xcconfig-overrides"
+              ],
+              "description": "Path to xcconfig file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output"
+              ],
+              "description": "Path where the Xcode project should be generated",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--legacy-scheme-generator"
+              ],
+              "description": "Use the legacy scheme generator"
+            },
+            {
+              "names": [
+                "--watch"
+              ],
+              "description": "Watch for changes to the Package manifest to regenerate the Xcode project"
+            },
+            {
+              "names": [
+                "--skip-extra-files"
+              ],
+              "description": "Do not add file references for extra files to the generated Xcode project"
+            }
+          ]
+        },
+        {
+          "name": "compute-checksum",
+          "description": "Compute the checksum for a binary artifact",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ]
+        },
+        {
+          "name": "archive-source",
+          "description": "Create a source archive for the package",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            },
+            {
+              "names": [
+                "-o",
+                "--output"
+              ],
+              "description": "The absolute or relative path for the generated source archive",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "completion-tool",
+          "description": "Completion tool (for shell completions)",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h",
+                "-help"
+              ],
+              "description": "Show help information"
+            },
+            {
+              "names": [
+                "--version"
+              ],
+              "description": "Show the version"
+            }
+          ],
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

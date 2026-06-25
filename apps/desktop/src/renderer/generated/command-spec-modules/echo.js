@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (echo), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var r={custom:async(e,i,n)=>e.length<3||e[e.length-1].startsWith("$")?Object.keys(n.environmentVariables).map(t=>({name:`$${t}`,type:"arg",description:"Environment Variable"})):[],trigger:"$"},a={name:"echo",description:"Write arguments to the standard output",args:{name:"string",isVariadic:!0,optionsCanBreakVariadicArg:!1,suggestCurrentToken:!0,generators:r},options:[{name:"-n",description:"Do not print the trailing newline character"},{name:"-e",description:"Interpret escape sequences"},{name:"-E",description:"Disable escape sequences"}]},s=a;export{s as default};

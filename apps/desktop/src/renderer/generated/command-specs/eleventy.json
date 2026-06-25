@@ -1,0 +1,124 @@
+{
+  "name": "eleventy",
+  "description": "Eleventy is a simpler static site generator",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help message and exit"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show program's version number and exit"
+    },
+    {
+      "names": [
+        "--quiet"
+      ],
+      "description": "Don’t print all written files"
+    },
+    {
+      "names": [
+        "--watch"
+      ],
+      "description": "Wait for files to change and automatically rewrite"
+    },
+    {
+      "names": [
+        "--dryrun"
+      ],
+      "description": "Don’t write any files"
+    },
+    {
+      "names": [
+        "--input"
+      ],
+      "description": "Input template files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Template File",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output"
+      ],
+      "description": "Write HTML output to this folder",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--serve"
+      ],
+      "description": "Run web server on port and watch them too"
+    },
+    {
+      "names": [
+        "--port"
+      ],
+      "description": "Run Web Server on specified port",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "port"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--formats"
+      ],
+      "description": "Whitelist only certain template types",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Template Names Separated by ,"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Override the eleventy config file path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Config File",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pathprefix"
+      ],
+      "description": "Change all url template filters to use this subdirectory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Subdirectory",
+          "template": "folders"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "template": "folders"
+    }
+  ]
+}

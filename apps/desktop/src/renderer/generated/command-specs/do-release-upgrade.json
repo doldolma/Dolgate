@@ -1,0 +1,75 @@
+{
+  "name": "do-release-upgrade",
+  "description": "Upgrade Ubuntu to latest release",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help message and exit"
+    },
+    {
+      "names": [
+        "-d",
+        "--devel-release"
+      ],
+      "description": "If using the latest supported release, upgrade to the development release"
+    },
+    {
+      "names": [
+        "-p",
+        "--proposed"
+      ],
+      "description": "Try upgrading to the latest release using the upgrader from Ubuntu-proposed"
+    },
+    {
+      "names": [
+        "-m"
+      ],
+      "description": "Run in a special upgrade mode",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--mode"
+      ],
+      "description": "Run in a special upgrade mode",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Run the specified frontend",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "frontend"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--frontend"
+      ],
+      "description": "Run the specified frontend",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "frontend"
+        }
+      ]
+    }
+  ]
+}

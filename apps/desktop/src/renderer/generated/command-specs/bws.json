@@ -1,0 +1,324 @@
+{
+  "name": "bws",
+  "options": [
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "Output format [default: json]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c",
+        "--color"
+      ],
+      "description": "Use colors in the output [default: auto]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Color"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--access-token"
+      ],
+      "description": "Specify access token for the service account [env: BWS_ACCESS_TOKEN]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Access Token"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--config-file"
+      ],
+      "description": "Config file to use [default: ~/.bws.config]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Config File",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--profile"
+      ],
+      "description": "Profile to use from the config file [env: BWS_PROFILE=]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Profile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "--server-url"
+      ],
+      "description": "Override the server URL from the config file [env: BWS_SERVER_URL=]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Server URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Print version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "config",
+      "description": "Specify server settings for the Secrets Manager CLI",
+      "options": [
+        {
+          "names": [
+            "--profile"
+          ],
+          "description": "Save specified value(s) to an alternate profile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "profile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config-file"
+          ],
+          "description": "Save specified value(s) to an alternative config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Config file path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for login command"
+        }
+      ],
+      "args": [
+        {
+          "name": "Setting"
+        }
+      ]
+    },
+    {
+      "name": "completions",
+      "description": "Generate shell completions",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for logout command"
+        }
+      ],
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "project",
+      "description": "Access, manipulate and create projects",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Access, manipulate and create projects"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a new project",
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete one or more existing projects",
+          "args": [
+            {
+              "name": "PROJECT_ID(s)"
+            }
+          ]
+        },
+        {
+          "name": "edit",
+          "description": "Change the name of an existing project",
+          "args": [
+            {
+              "name": "--name"
+            },
+            {
+              "name": "PROJECT_ID"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Retrieve a specific project accessible to this service account",
+          "args": [
+            {
+              "name": "PROJECT_ID"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List projects accessible to this service account"
+        }
+      ]
+    },
+    {
+      "name": "secret",
+      "description": "Access, manipulate and create secrets",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for unlock command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a new secret",
+          "options": [
+            {
+              "names": [
+                "--note"
+              ],
+              "description": "Optional notes about this secret"
+            }
+          ],
+          "args": [
+            {
+              "name": "KEY"
+            },
+            {
+              "name": "VALUE"
+            },
+            {
+              "name": "PROJECT_ID"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete an existing secret",
+          "args": [
+            {
+              "name": "SECRET_IDS"
+            }
+          ]
+        },
+        {
+          "name": "edit",
+          "description": "Edit an existing secret",
+          "options": [
+            {
+              "names": [
+                "key"
+              ],
+              "description": "Edit the Secret Key"
+            },
+            {
+              "names": [
+                "value"
+              ],
+              "description": "Edit the Secret Value"
+            },
+            {
+              "names": [
+                "project-id"
+              ],
+              "description": "Edit the ID of project this secret belongs to"
+            },
+            {
+              "names": [
+                "note"
+              ],
+              "description": "Edit the optional notes about this secret"
+            }
+          ],
+          "args": [
+            {
+              "name": "SECRET_ID"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "description": "Retrieve an existing secret",
+          "args": [
+            {
+              "name": "SECRET_ID"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List the secrets this service account can access",
+          "args": [
+            {
+              "name": "Project",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "--help",
+      "description": "Get help about using the Bitwarden Secrets Manager CLI tool"
+    }
+  ]
+}

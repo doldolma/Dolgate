@@ -1,0 +1,3841 @@
+{
+  "name": "poetry",
+  "description": "Poetry is a tool for dependency management and packaging in Python",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help information"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Increase the verbosity of messages"
+    },
+    {
+      "names": [
+        "-vv"
+      ],
+      "description": "More verbose output"
+    },
+    {
+      "names": [
+        "-vvv"
+      ],
+      "description": "Debug output"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Display this application version"
+    },
+    {
+      "names": [
+        "--ansi"
+      ],
+      "description": "Force ANSI output"
+    },
+    {
+      "names": [
+        "--no-ansi"
+      ],
+      "description": "Disable ANSI output"
+    },
+    {
+      "names": [
+        "-n",
+        "--no-interaction"
+      ],
+      "description": "Do not ask any interactive question"
+    },
+    {
+      "names": [
+        "--no-plugins"
+      ],
+      "description": "Disables plugins"
+    },
+    {
+      "names": [
+        "--no-cache"
+      ],
+      "description": "Disables poetry source caches"
+    },
+    {
+      "names": [
+        "--directory"
+      ],
+      "description": "The working directory for the poetry command",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Do not output any message"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "about",
+      "description": "Shows information about poetry",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        }
+      ]
+    },
+    {
+      "name": "add",
+      "description": "Adds a new dependency to pyproject.toml",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--group"
+          ],
+          "description": "The group to add the dependency to"
+        },
+        {
+          "names": [
+            "--dev"
+          ],
+          "description": "Add as a development dependency. (Deprecated) Use --group=dev instead"
+        },
+        {
+          "names": [
+            "--editable"
+          ],
+          "description": "Add vcs/path dependencies as editable"
+        },
+        {
+          "names": [
+            "--extras"
+          ],
+          "description": "Extras to activate for the dependency"
+        },
+        {
+          "names": [
+            "--optional"
+          ],
+          "description": "Add as an optional dependency"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Python version for which the dependency must be installed"
+        },
+        {
+          "names": [
+            "--platform"
+          ],
+          "description": "Platforms for which the dependency must be installed"
+        },
+        {
+          "names": [
+            "--source"
+          ],
+          "description": "Name of the source to use to install the package"
+        },
+        {
+          "names": [
+            "--allow-prereleases"
+          ],
+          "description": "Accept prereleases"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+        },
+        {
+          "names": [
+            "--lock"
+          ],
+          "description": "Do not perform operations (only update the lockfile)"
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Builds a package, as a tarball and a wheel by default",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "Limit the format to either sdist or wheel"
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "description": "The cache command regroups sub commands to interact with poetry's cache",
+      "subcommands": [
+        {
+          "name": "clear",
+          "description": "Clears a poetry cache by name",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Clear all entries in the cache"
+            }
+          ],
+          "args": [
+            {
+              "name": "cache"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List poetry's caches",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Checks the validity of the pyproject.toml file",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Manages configuration settings",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "List configuration settings"
+        },
+        {
+          "names": [
+            "--unset"
+          ],
+          "description": "Unset configuration setting"
+        },
+        {
+          "names": [
+            "--local"
+          ],
+          "description": "Set/Get from the project's local configuration"
+        }
+      ],
+      "args": [
+        {
+          "name": "key"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "The debug command regroups sub commands to interact with debug session",
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Shows debug information",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            }
+          ]
+        },
+        {
+          "name": "resolve",
+          "description": "Debugs dependency resolution",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--extras"
+              ],
+              "description": "Extras to activate for the dependency"
+            },
+            {
+              "names": [
+                "--python"
+              ],
+              "description": "Python version(s) to use for resolution"
+            },
+            {
+              "names": [
+                "--tree"
+              ],
+              "description": "Display the dependency tree"
+            },
+            {
+              "names": [
+                "--install"
+              ],
+              "description": "Show what would be installed for the current system"
+            }
+          ],
+          "args": [
+            {
+              "name": "package"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "The env command regroups sub commands to interact with the virtualenvs associated with a specific project",
+      "subcommands": [
+        {
+          "name": "info",
+          "description": "Displays information about the current environment",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--path"
+              ],
+              "description": "Only display the environment's path"
+            },
+            {
+              "names": [
+                "--executable"
+              ],
+              "description": "Only display the environment's python executable path"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "Lists all virtualenvs associated with the current project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--full-path"
+              ],
+              "description": "Output the full paths of the virtualenvs"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove virtual environments associated with the project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Remove all managed virtual environments associated with the project"
+            }
+          ],
+          "args": [
+            {
+              "name": "python"
+            }
+          ]
+        },
+        {
+          "name": "use",
+          "description": "Activates or creates a new virtualenv for the current project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            }
+          ],
+          "args": [
+            {
+              "name": "python"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Creates a basic pyproject.toml file in the current directory",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Name of the package"
+        },
+        {
+          "names": [
+            "--description"
+          ],
+          "description": "Description of the package"
+        },
+        {
+          "names": [
+            "--author"
+          ],
+          "description": "Author name of the package"
+        },
+        {
+          "names": [
+            "--python"
+          ],
+          "description": "Compatible Python versions"
+        },
+        {
+          "names": [
+            "--dependency"
+          ],
+          "description": "Package to require, with an optional version constraint, e.g. requests:^2.10.0 or requests=2.11.1"
+        },
+        {
+          "names": [
+            "--dev-dependency"
+          ],
+          "description": "Package to require for development, with an optional version constraint, e.g. requests:^2.10.0 or requests=2.11.1"
+        },
+        {
+          "names": [
+            "--license"
+          ],
+          "description": "License of the package"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Installs the project dependencies",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--without"
+          ],
+          "description": "The dependency groups to ignore"
+        },
+        {
+          "names": [
+            "--with"
+          ],
+          "description": "The optional dependency groups to include"
+        },
+        {
+          "names": [
+            "--only"
+          ],
+          "description": "The only dependency groups to include"
+        },
+        {
+          "names": [
+            "--no-dev"
+          ],
+          "description": "Do not install the development dependencies. (Deprecated)"
+        },
+        {
+          "names": [
+            "--sync"
+          ],
+          "description": "Synchronize the environment with the locked packages and the specified groups"
+        },
+        {
+          "names": [
+            "--no-root"
+          ],
+          "description": "Do not install the root package (the current project)"
+        },
+        {
+          "names": [
+            "--no-directory"
+          ],
+          "description": "Do not install any directory path dependencies; useful to install dependencies without source code, e.g. for caching of Docker layers)"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+        },
+        {
+          "names": [
+            "--remove-untracked"
+          ],
+          "description": "Removes packages not present in the lock file. (Deprecated)"
+        },
+        {
+          "names": [
+            "--extras"
+          ],
+          "description": "Extra sets of dependencies to install"
+        },
+        {
+          "names": [
+            "--all-extras"
+          ],
+          "description": "Install all extra dependencies"
+        },
+        {
+          "names": [
+            "--only-root"
+          ],
+          "description": "Exclude all dependencies"
+        },
+        {
+          "names": [
+            "--compile"
+          ],
+          "description": "Compile Python source files to bytecode. (This option has no effect if modern-installation is disabled because the old installer always compiles.)"
+        }
+      ]
+    },
+    {
+      "name": "lock",
+      "description": "Locks the project dependencies",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--no-update"
+          ],
+          "description": "Do not update locked versions, only refresh lock file"
+        },
+        {
+          "names": [
+            "--check"
+          ],
+          "description": "Check that the poetry.lock file corresponds to the current version of pyproject.toml"
+        }
+      ]
+    },
+    {
+      "name": "new",
+      "description": "Creates a new Python project at <path>",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Set the resulting package name"
+        },
+        {
+          "names": [
+            "--src"
+          ],
+          "description": "Use the src layout for the project"
+        },
+        {
+          "names": [
+            "--readme"
+          ],
+          "description": "Specify the readme file format. One of md (default) or rst"
+        }
+      ],
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "name": "publish",
+      "description": "Publishes a package to a remote repository",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--repository"
+          ],
+          "description": "The repository to publish the package to"
+        },
+        {
+          "names": [
+            "--username"
+          ],
+          "description": "The username to access the repository"
+        },
+        {
+          "names": [
+            "--password"
+          ],
+          "description": "The password to access the repository"
+        },
+        {
+          "names": [
+            "--cert"
+          ],
+          "description": "Certificate authority to access the repository"
+        },
+        {
+          "names": [
+            "--client-cert"
+          ],
+          "description": "Client certificate to access the repository"
+        },
+        {
+          "names": [
+            "--build"
+          ],
+          "description": "Build the package before publishing"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Perform all actions except upload the package"
+        },
+        {
+          "names": [
+            "--skip-existing"
+          ],
+          "description": "Ignore errors from files already existing in the repository"
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Removes a package from the project dependencies",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--group"
+          ],
+          "description": "The group to remove the dependency from"
+        },
+        {
+          "names": [
+            "--dev"
+          ],
+          "description": "Remove a package from the development dependencies. (Deprecated) Use --group=dev instead"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+        },
+        {
+          "names": [
+            "--lock"
+          ],
+          "description": "Do not perform operations (only update the lockfile)"
+        }
+      ],
+      "args": [
+        {
+          "name": "packages"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Runs a command in the appropriate environment",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        }
+      ],
+      "args": [
+        {
+          "name": "args"
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Searches for packages on remote repositories",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        }
+      ],
+      "args": [
+        {
+          "name": "tokens"
+        }
+      ]
+    },
+    {
+      "name": "self",
+      "description": "The self namespace regroups sub commands to manage the poetry installation itself",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add additional packages to poetry's runtime environment",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--editable"
+              ],
+              "description": "Add vcs/path dependencies as editable"
+            },
+            {
+              "names": [
+                "--extras"
+              ],
+              "description": "Extras to activate for the dependency"
+            },
+            {
+              "names": [
+                "--source"
+              ],
+              "description": "Name of the source to use to install the package"
+            },
+            {
+              "names": [
+                "--allow-prereleases"
+              ],
+              "description": "Accept prereleases"
+            },
+            {
+              "names": [
+                "--dry-run"
+              ],
+              "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+            }
+          ],
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "description": "Install locked packages (incl. addons) required by this poetry installation",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--sync"
+              ],
+              "description": "Synchronize the environment with the locked packages and the specified groups"
+            },
+            {
+              "names": [
+                "--dry-run"
+              ],
+              "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+            }
+          ]
+        },
+        {
+          "name": "lock",
+          "description": "Lock the poetry installation's system requirements",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--no-update"
+              ],
+              "description": "Do not update locked versions, only refresh lock file"
+            },
+            {
+              "names": [
+                "--check"
+              ],
+              "description": "Check that the poetry.lock file corresponds to the current version of pyproject.toml"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove additional packages from poetry's runtime environment",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--dry-run"
+              ],
+              "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+            }
+          ],
+          "args": [
+            {
+              "name": "packages"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Show packages from poetry's runtime environment",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--addons"
+              ],
+              "description": "List only add-on packages installed"
+            },
+            {
+              "names": [
+                "--tree"
+              ],
+              "description": "List the dependencies as a tree"
+            },
+            {
+              "names": [
+                "--latest"
+              ],
+              "description": "Show the latest version"
+            },
+            {
+              "names": [
+                "--outdated"
+              ],
+              "description": "Show the latest version but only for packages that are outdated"
+            }
+          ],
+          "args": [
+            {
+              "name": "package"
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Updates poetry to the latest version",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--preview"
+              ],
+              "description": "Allow the installation of pre-release versions"
+            },
+            {
+              "names": [
+                "--dry-run"
+              ],
+              "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+            }
+          ],
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Spawns a shell within the virtual environment",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Shows information about packages",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--without"
+          ],
+          "description": "The dependency groups to ignore"
+        },
+        {
+          "names": [
+            "--with"
+          ],
+          "description": "The optional dependency groups to include"
+        },
+        {
+          "names": [
+            "--only"
+          ],
+          "description": "The only dependency groups to include"
+        },
+        {
+          "names": [
+            "--no-dev"
+          ],
+          "description": "Do not list the development dependencies. (Deprecated)"
+        },
+        {
+          "names": [
+            "--tree"
+          ],
+          "description": "List the dependencies as a tree"
+        },
+        {
+          "names": [
+            "--why"
+          ],
+          "description": "When showing the full list, or a --tree for a single package, also display why it's included"
+        },
+        {
+          "names": [
+            "--latest"
+          ],
+          "description": "Show the latest version"
+        },
+        {
+          "names": [
+            "--outdated"
+          ],
+          "description": "Show the latest version but only for packages that are outdated"
+        },
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Show all packages (even those not compatible with current system)"
+        },
+        {
+          "names": [
+            "--top-level"
+          ],
+          "description": "Show only top-level dependencies"
+        }
+      ],
+      "args": [
+        {
+          "name": "package"
+        }
+      ]
+    },
+    {
+      "name": "source",
+      "description": "The source namespace regroups sub commands to manage repository sources for a poetry project",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add source configuration for project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            },
+            {
+              "names": [
+                "--default"
+              ],
+              "description": "Set this source as the default (disable PyPI). A default source will also be the fallback source if you add other sources. (Deprecated, use --priority)"
+            },
+            {
+              "names": [
+                "--secondary"
+              ],
+              "description": "Set this source as secondary. (Deprecated, use --priority)"
+            },
+            {
+              "names": [
+                "--priority"
+              ],
+              "description": "Set the priority of this source. One of: default, primary, secondary, supplemental, explicit. Defaults to primary"
+            }
+          ],
+          "args": [
+            {
+              "name": "name"
+            },
+            {
+              "name": "url"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove source configured for the project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            }
+          ],
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Show information about sources configured for the project",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help information"
+            },
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "Increase the verbosity of messages"
+            },
+            {
+              "names": [
+                "-vv"
+              ],
+              "description": "More verbose output"
+            },
+            {
+              "names": [
+                "-vvv"
+              ],
+              "description": "Debug output"
+            },
+            {
+              "names": [
+                "-V",
+                "--version"
+              ],
+              "description": "Display this application version"
+            },
+            {
+              "names": [
+                "--ansi"
+              ],
+              "description": "Force ANSI output"
+            },
+            {
+              "names": [
+                "--no-ansi"
+              ],
+              "description": "Disable ANSI output"
+            },
+            {
+              "names": [
+                "-n",
+                "--no-interaction"
+              ],
+              "description": "Do not ask any interactive question"
+            },
+            {
+              "names": [
+                "--no-plugins"
+              ],
+              "description": "Disables plugins"
+            },
+            {
+              "names": [
+                "--no-cache"
+              ],
+              "description": "Disables poetry source caches"
+            },
+            {
+              "names": [
+                "--directory"
+              ],
+              "description": "The working directory for the poetry command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "directory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Do not output any message"
+            }
+          ],
+          "args": [
+            {
+              "name": "source"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update the dependencies as according to the pyproject.toml file",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--without"
+          ],
+          "description": "The dependency groups to ignore"
+        },
+        {
+          "names": [
+            "--with"
+          ],
+          "description": "The optional dependency groups to include"
+        },
+        {
+          "names": [
+            "--only"
+          ],
+          "description": "The only dependency groups to include"
+        },
+        {
+          "names": [
+            "--no-dev"
+          ],
+          "description": "Do not update the development dependencies. (Deprecated)"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Output the operations but do not execute anything (implicitly enables --verbose)"
+        },
+        {
+          "names": [
+            "--lock"
+          ],
+          "description": "Do not perform operations (only update the lockfile)"
+        }
+      ],
+      "args": [
+        {
+          "name": "packages"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Shows the version of the project or bumps it when a valid bump rule is provided",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help information"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "Increase the verbosity of messages"
+        },
+        {
+          "names": [
+            "-vv"
+          ],
+          "description": "More verbose output"
+        },
+        {
+          "names": [
+            "-vvv"
+          ],
+          "description": "Debug output"
+        },
+        {
+          "names": [
+            "-V",
+            "--version"
+          ],
+          "description": "Display this application version"
+        },
+        {
+          "names": [
+            "--ansi"
+          ],
+          "description": "Force ANSI output"
+        },
+        {
+          "names": [
+            "--no-ansi"
+          ],
+          "description": "Disable ANSI output"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-interaction"
+          ],
+          "description": "Do not ask any interactive question"
+        },
+        {
+          "names": [
+            "--no-plugins"
+          ],
+          "description": "Disables plugins"
+        },
+        {
+          "names": [
+            "--no-cache"
+          ],
+          "description": "Disables poetry source caches"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "The working directory for the poetry command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Do not output any message"
+        },
+        {
+          "names": [
+            "--short"
+          ],
+          "description": "Output the version number only"
+        },
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Do not update pyproject.toml file"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    }
+  ]
+}

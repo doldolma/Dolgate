@@ -1,0 +1,209 @@
+{
+  "name": "asciinema",
+  "description": "Terminal session recorder",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Ouput version information and exit"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output help message and exit"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "rec",
+      "description": "Start a recording",
+      "options": [
+        {
+          "names": [
+            "--stdin"
+          ],
+          "description": "Enable stdin (keyboard) recording"
+        },
+        {
+          "names": [
+            "--append"
+          ],
+          "description": "Append to existing recording"
+        },
+        {
+          "names": [
+            "--raw"
+          ],
+          "description": "Save raw output, without timing or other metadata"
+        },
+        {
+          "names": [
+            "--overwrite"
+          ],
+          "description": "Overwrite the recording if it already exists"
+        },
+        {
+          "names": [
+            "-c",
+            "--command"
+          ],
+          "description": "Specify command to record, defaults to $SHELL",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "command"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-e",
+            "--env"
+          ],
+          "description": "List of environment variables to capture",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "variables"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--title"
+          ],
+          "description": "Specify the title of the asciicast",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "title"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-i",
+            "--idle-time-limit"
+          ],
+          "description": "Limit recorded terminal inactivity to max amount of seconds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "seconds"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cols"
+          ],
+          "description": "Override terminal columns for recorded process",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cols"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rows"
+          ],
+          "description": "Override terminal rows for recorded process",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rows"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-y",
+            "--yes"
+          ],
+          "description": "Answer “yes” to all prompts (e.g. upload confirmation)"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Be quiet, suppress all notices/warnings (implies -y)"
+        }
+      ],
+      "args": [
+        {
+          "name": "filename",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "play",
+      "description": "Replay recorded asciicast in a terminal",
+      "options": [
+        {
+          "names": [
+            "-i",
+            "--idle-time-linit"
+          ],
+          "description": "Limit replayed terminal inactivity",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "seconds"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--speed"
+          ],
+          "description": "Playback speed",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "factor"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "file or URL",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "cat",
+      "description": "Print full output of recorded asciicast to a terminal",
+      "args": [
+        {
+          "name": "file or URL",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "upload",
+      "description": "Upload recorded asciicast to asciinema.org site",
+      "args": [
+        {
+          "name": "file or URL",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Link and manage your install ID with your asciinema.org user account"
+    }
+  ]
+}

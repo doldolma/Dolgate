@@ -1,0 +1,102 @@
+{
+  "name": "ignite-cli",
+  "description": "Ignite is a CLI that helps you spin up a new React Native app using a battle-tested tech stack",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output usage information"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "new",
+      "description": "Create a new React Native app",
+      "options": [
+        {
+          "names": [
+            "--expo"
+          ],
+          "description": "Use Expo"
+        },
+        {
+          "names": [
+            "--bundle"
+          ],
+          "description": "Set the bundle ID of the app",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "bundle"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "name": "g",
+      "description": "Generate components and other app features",
+      "options": [
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "List installed generators"
+        },
+        {
+          "names": [
+            "--update"
+          ],
+          "description": "Update installed generators"
+        }
+      ],
+      "args": [
+        {
+          "name": "generator",
+          "optional": true,
+          "hasGenerator": true
+        },
+        {
+          "name": "name",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update installed generators",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Update all installed generators"
+        }
+      ],
+      "args": [
+        {
+          "name": "generator",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "doctor",
+      "description": "Check your environment & display versions of installed dependencies"
+    }
+  ]
+}

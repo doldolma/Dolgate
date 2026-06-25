@@ -1,0 +1,281 @@
+{
+  "name": "pass",
+  "description": "Pass - stores, retrieves, generates, and synchronizes passwords securely",
+  "options": [
+    {
+      "names": [
+        "--clip",
+        "-c"
+      ],
+      "description": "Copy the password to the clipboard"
+    },
+    {
+      "names": [
+        "--qrcode",
+        "-q"
+      ],
+      "description": "Display a QRcode of the password"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help for pass"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Initialize new password storage and use gpg-id for encryption",
+      "options": [
+        {
+          "names": [
+            "--path",
+            "-p"
+          ],
+          "description": "A specific gpg-id or set of gpg-ids is assigned for that specific sub folder of the password store",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "sub-folder",
+              "template": "folders"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "gpg-id"
+        }
+      ]
+    },
+    {
+      "name": "insert",
+      "description": "Insert a new password into the password store called pass-name",
+      "options": [
+        {
+          "names": [
+            "--echo",
+            "-e"
+          ],
+          "description": "Disable keyboard echo when the password is entered and confirm the password by asking for it twice"
+        },
+        {
+          "names": [
+            "--multi-line",
+            "-m"
+          ],
+          "description": "Lines will be read until EOF or Ctrl+D is reached. Otherwise, only a single line from standard in is read"
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Don't prompt before overwriting an existing password"
+        }
+      ],
+      "args": [
+        {
+          "name": "pass-name"
+        }
+      ]
+    },
+    {
+      "name": "git",
+      "description": "Password store git functions"
+    },
+    {
+      "name": "version",
+      "description": "Show version information"
+    },
+    {
+      "name": "help",
+      "description": "Show usage message"
+    },
+    {
+      "name": "cp",
+      "description": "Copies the password or directory named old-path to new-path",
+      "options": [
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Do not interactively prompt before moving"
+        }
+      ],
+      "args": [
+        {
+          "name": "old-path",
+          "hasGenerator": true
+        },
+        {
+          "name": "new-path"
+        }
+      ]
+    },
+    {
+      "name": "mv",
+      "description": "Renames the password or directory named old-path to new-path",
+      "options": [
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Do not interactively prompt before moving"
+        }
+      ],
+      "args": [
+        {
+          "name": "old-path",
+          "hasGenerator": true
+        },
+        {
+          "name": "new-path"
+        }
+      ]
+    },
+    {
+      "name": "rm",
+      "description": "Remove the password named pass-name from the password store",
+      "options": [
+        {
+          "names": [
+            "--recursive",
+            "-r"
+          ],
+          "description": "Delete pass-name recursively if it is a directory"
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Do not interactively prompt before removal"
+        }
+      ],
+      "args": [
+        {
+          "name": "pass-name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "generate",
+      "description": "Generate a new password of length pass-length and insert into pass-name",
+      "options": [
+        {
+          "names": [
+            "--no-symbols",
+            "-n"
+          ],
+          "description": "Do not use any non-alphanumeric characters in the generated password"
+        },
+        {
+          "names": [
+            "--clip",
+            "-c"
+          ],
+          "description": "Do not print the password but instead copy it to the clipboard"
+        },
+        {
+          "names": [
+            "--in-place",
+            "-i"
+          ],
+          "description": "Do not interactively prompt, and only replace the first line of the password file with the new generated password, keeping the remainder of the file intact"
+        },
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Overwrite the existing password"
+        }
+      ],
+      "args": [
+        {
+          "name": "pass-name"
+        },
+        {
+          "name": "pass-length",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "ls",
+      "description": "List names of passwords inside the tree at subfolder by using the tree",
+      "args": [
+        {
+          "name": "password sub-directory",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "find",
+      "description": "List names of passwords inside the tree that match pass-names",
+      "args": [
+        {
+          "name": "pass-name"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Decrypt and print a password",
+      "options": [
+        {
+          "names": [
+            "--clip",
+            "-c"
+          ],
+          "description": "Copy the password to the clipboard"
+        },
+        {
+          "names": [
+            "--qrcode",
+            "-q"
+          ],
+          "description": "Display a QRcode of the password"
+        }
+      ],
+      "args": [
+        {
+          "name": "pass-name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "edit",
+      "description": "Insert a new password or edit an existing password using the default text editor specified by the environment",
+      "args": [
+        {
+          "name": "pass-name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "grep",
+      "description": "Searches inside each decrypted password file for search-string. Grep options can be used",
+      "args": [
+        {
+          "name": "pass-name"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "pass-name",
+      "hasGenerator": true
+    }
+  ]
+}

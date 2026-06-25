@@ -1,0 +1,6240 @@
+{
+  "name": "gum",
+  "description": "A tool for glamorous shell scripts",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show context-sensitive help"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Print the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "choose",
+      "description": "Choose an option from a list of choices",
+      "options": [
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Height of the list",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor"
+          ],
+          "description": "Prefix to show on item that corresponds to the cursor position",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-prefix"
+          ],
+          "description": "Prefix to show on the cursor item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-prefix"
+          ],
+          "description": "Prefix to show on selected items",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix"
+          ],
+          "description": "Prefix to show on unselected items",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected"
+          ],
+          "description": "Options that should start as selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "option"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "Maximum number of options to pick",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-limit"
+          ],
+          "description": "Pick unlimited number of options (ignores limit)"
+        },
+        {
+          "names": [
+            "--cursor.background"
+          ],
+          "description": "Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.foreground"
+          ],
+          "description": "Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border"
+          ],
+          "description": "Border Style for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-background"
+          ],
+          "description": "Border Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.align"
+          ],
+          "description": "Text Alignment for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.height"
+          ],
+          "description": "Text height for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.width"
+          ],
+          "description": "Text width for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.margin"
+          ],
+          "description": "Text margin for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.padding"
+          ],
+          "description": "Text padding for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.bold"
+          ],
+          "description": "Bold text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.faint"
+          ],
+          "description": "Faint text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.italic"
+          ],
+          "description": "Italicize text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.underline"
+          ],
+          "description": "Underline text for cursor"
+        },
+        {
+          "names": [
+            "--item.background"
+          ],
+          "description": "Background Color for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.foreground"
+          ],
+          "description": "Foreground Color for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.border"
+          ],
+          "description": "Border Style for item",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--item.border-background"
+          ],
+          "description": "Border Background Color for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.border-foreground"
+          ],
+          "description": "Border Foreground Color for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.align"
+          ],
+          "description": "Text Alignment for item",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--item.height"
+          ],
+          "description": "Text height for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.width"
+          ],
+          "description": "Text width for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.margin"
+          ],
+          "description": "Text margin for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.padding"
+          ],
+          "description": "Text padding for item",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--item.bold"
+          ],
+          "description": "Bold text for item"
+        },
+        {
+          "names": [
+            "--item.faint"
+          ],
+          "description": "Faint text for item"
+        },
+        {
+          "names": [
+            "--item.italic"
+          ],
+          "description": "Italicize text for item"
+        },
+        {
+          "names": [
+            "--item.strikethrough"
+          ],
+          "description": "Strikethrough text for item"
+        },
+        {
+          "names": [
+            "--item.underline"
+          ],
+          "description": "Underline text for item"
+        },
+        {
+          "names": [
+            "--selected.background"
+          ],
+          "description": "Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.foreground"
+          ],
+          "description": "Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border"
+          ],
+          "description": "Border Style for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-background"
+          ],
+          "description": "Border Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-foreground"
+          ],
+          "description": "Border Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.align"
+          ],
+          "description": "Text Alignment for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.height"
+          ],
+          "description": "Text height for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.width"
+          ],
+          "description": "Text width for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.margin"
+          ],
+          "description": "Text margin for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.padding"
+          ],
+          "description": "Text padding for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.bold"
+          ],
+          "description": "Bold text for selected"
+        },
+        {
+          "names": [
+            "--selected.faint"
+          ],
+          "description": "Faint text for selected"
+        },
+        {
+          "names": [
+            "--selected.italic"
+          ],
+          "description": "Italicize text for selected"
+        },
+        {
+          "names": [
+            "--selected.strikethrough"
+          ],
+          "description": "Strikethrough text for selected"
+        },
+        {
+          "names": [
+            "--selected.underline"
+          ],
+          "description": "Underline text for selected"
+        }
+      ],
+      "args": [
+        {
+          "name": "options",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "confirm",
+      "description": "Ask a user to confirm an action",
+      "options": [
+        {
+          "names": [
+            "--affirmative"
+          ],
+          "description": "The title of the affirmative action",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "title"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--negative"
+          ],
+          "description": "The title of the negative action",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "title"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--default"
+          ],
+          "description": "Default confirmation action"
+        },
+        {
+          "names": [
+            "--timeout"
+          ],
+          "description": "Timeout for confirmation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "duration"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.background"
+          ],
+          "description": "Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.foreground"
+          ],
+          "description": "Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border"
+          ],
+          "description": "Border Style for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-background"
+          ],
+          "description": "Border Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-foreground"
+          ],
+          "description": "Border Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.align"
+          ],
+          "description": "Text Alignment for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.height"
+          ],
+          "description": "Text height for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.width"
+          ],
+          "description": "Text width for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.margin"
+          ],
+          "description": "Text margin for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.padding"
+          ],
+          "description": "Text padding for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.bold"
+          ],
+          "description": "Bold text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.faint"
+          ],
+          "description": "Faint text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.italic"
+          ],
+          "description": "Italicize text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.strikethrough"
+          ],
+          "description": "Strikethrough text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.underline"
+          ],
+          "description": "Underline text for prompt"
+        },
+        {
+          "names": [
+            "--selected.background"
+          ],
+          "description": "Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.foreground"
+          ],
+          "description": "Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border"
+          ],
+          "description": "Border Style for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-background"
+          ],
+          "description": "Border Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-foreground"
+          ],
+          "description": "Border Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.align"
+          ],
+          "description": "Text Alignment for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.height"
+          ],
+          "description": "Text height for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.width"
+          ],
+          "description": "Text width for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.margin"
+          ],
+          "description": "Text margin for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.padding"
+          ],
+          "description": "Text padding for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.bold"
+          ],
+          "description": "Bold text for selected"
+        },
+        {
+          "names": [
+            "--selected.faint"
+          ],
+          "description": "Faint text for selected"
+        },
+        {
+          "names": [
+            "--selected.italic"
+          ],
+          "description": "Italicize text for selected"
+        },
+        {
+          "names": [
+            "--selected.strikethrough"
+          ],
+          "description": "Strikethrough text for selected"
+        },
+        {
+          "names": [
+            "--selected.underline"
+          ],
+          "description": "Underline text for selected"
+        },
+        {
+          "names": [
+            "--unselected.background"
+          ],
+          "description": "Background Color for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.foreground"
+          ],
+          "description": "Foreground Color for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.border"
+          ],
+          "description": "Border Style for unselected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--unselected.border-background"
+          ],
+          "description": "Border Background Color for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.border-foreground"
+          ],
+          "description": "Border Foreground Color for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.align"
+          ],
+          "description": "Text Alignment for unselected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--unselected.height"
+          ],
+          "description": "Text height for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.width"
+          ],
+          "description": "Text width for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.margin"
+          ],
+          "description": "Text margin for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.padding"
+          ],
+          "description": "Text padding for unselected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected.bold"
+          ],
+          "description": "Bold text for unselected"
+        },
+        {
+          "names": [
+            "--unselected.faint"
+          ],
+          "description": "Faint text for unselected"
+        },
+        {
+          "names": [
+            "--unselected.italic"
+          ],
+          "description": "Italicize text for unselected"
+        },
+        {
+          "names": [
+            "--unselected.strikethrough"
+          ],
+          "description": "Strikethrough text for unselected"
+        },
+        {
+          "names": [
+            "--unselected.underline"
+          ],
+          "description": "Underline text for unselected"
+        }
+      ],
+      "args": [
+        {
+          "name": "prompt"
+        }
+      ]
+    },
+    {
+      "name": "filter",
+      "description": "Filter items from a list",
+      "options": [
+        {
+          "names": [
+            "--indicator"
+          ],
+          "description": "Character for selection",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-prefix"
+          ],
+          "description": "Character to indicate selected items",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix"
+          ],
+          "description": "Character to indicate unselected items",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "symbol"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder"
+          ],
+          "description": "Placeholder value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "placeholder"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt"
+          ],
+          "description": "Prompt to display",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "prompt"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--width"
+          ],
+          "description": "Input width",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Input height",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value"
+          ],
+          "description": "Initial filter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--reverse"
+          ],
+          "description": "Display from the bottom of the screen"
+        },
+        {
+          "names": [
+            "--indicator.background"
+          ],
+          "description": "Background Color for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.foreground"
+          ],
+          "description": "Foreground Color for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.border"
+          ],
+          "description": "Border Style for indicator",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--indicator.border-background"
+          ],
+          "description": "Border Background Color for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.border-foreground"
+          ],
+          "description": "Border Foreground Color for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.align"
+          ],
+          "description": "Text Alignment for indicator",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--indicator.height"
+          ],
+          "description": "Text height for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.width"
+          ],
+          "description": "Text width for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.margin"
+          ],
+          "description": "Text margin for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.padding"
+          ],
+          "description": "Text padding for indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--indicator.bold"
+          ],
+          "description": "Bold text for indicator"
+        },
+        {
+          "names": [
+            "--indicator.faint"
+          ],
+          "description": "Faint text for indicator"
+        },
+        {
+          "names": [
+            "--indicator.italic"
+          ],
+          "description": "Italicize text for indicator"
+        },
+        {
+          "names": [
+            "--indicator.strikethrough"
+          ],
+          "description": "Strikethrough text for indicator"
+        },
+        {
+          "names": [
+            "--indicator.underline"
+          ],
+          "description": "Underline text for indicator"
+        },
+        {
+          "names": [
+            "--selected-indicator.background"
+          ],
+          "description": "Background Color for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.foreground"
+          ],
+          "description": "Foreground Color for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.border"
+          ],
+          "description": "Border Style for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.border-background"
+          ],
+          "description": "Border Background Color for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.border-foreground"
+          ],
+          "description": "Border Foreground Color for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.align"
+          ],
+          "description": "Text Alignment for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.height"
+          ],
+          "description": "Text height for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.width"
+          ],
+          "description": "Text width for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.margin"
+          ],
+          "description": "Text margin for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.padding"
+          ],
+          "description": "Text padding for selected-indicator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected-indicator.bold"
+          ],
+          "description": "Bold text for selected-indicator"
+        },
+        {
+          "names": [
+            "--selected-indicator.faint"
+          ],
+          "description": "Faint text for selected-indicator"
+        },
+        {
+          "names": [
+            "--selected-indicator.italic"
+          ],
+          "description": "Italicize text for selected-indicator"
+        },
+        {
+          "names": [
+            "--selected-indicator.strikethrough"
+          ],
+          "description": "Strikethrough text for selected-indicator"
+        },
+        {
+          "names": [
+            "--selected-indicator.underline"
+          ],
+          "description": "Underline text for selected-indicator"
+        },
+        {
+          "names": [
+            "--unselected-prefix.background"
+          ],
+          "description": "Background Color for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.foreground"
+          ],
+          "description": "Foreground Color for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.border"
+          ],
+          "description": "Border Style for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.border-background"
+          ],
+          "description": "Border Background Color for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.border-foreground"
+          ],
+          "description": "Border Foreground Color for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.align"
+          ],
+          "description": "Text Alignment for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.height"
+          ],
+          "description": "Text height for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.width"
+          ],
+          "description": "Text width for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.margin"
+          ],
+          "description": "Text margin for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.padding"
+          ],
+          "description": "Text padding for unselected-prefix",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unselected-prefix.bold"
+          ],
+          "description": "Bold text for unselected-prefix"
+        },
+        {
+          "names": [
+            "--unselected-prefix.faint"
+          ],
+          "description": "Faint text for unselected-prefix"
+        },
+        {
+          "names": [
+            "--unselected-prefix.italic"
+          ],
+          "description": "Italicize text for unselected-prefix"
+        },
+        {
+          "names": [
+            "--unselected-prefix.strikethrough"
+          ],
+          "description": "Strikethrough text for unselected-prefix"
+        },
+        {
+          "names": [
+            "--unselected-prefix.underline"
+          ],
+          "description": "Underline text for unselected-prefix"
+        },
+        {
+          "names": [
+            "--text.background"
+          ],
+          "description": "Background Color for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.foreground"
+          ],
+          "description": "Foreground Color for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.border"
+          ],
+          "description": "Border Style for text",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--text.border-background"
+          ],
+          "description": "Border Background Color for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.border-foreground"
+          ],
+          "description": "Border Foreground Color for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.align"
+          ],
+          "description": "Text Alignment for text",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--text.height"
+          ],
+          "description": "Text height for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.width"
+          ],
+          "description": "Text width for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.margin"
+          ],
+          "description": "Text margin for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.padding"
+          ],
+          "description": "Text padding for text",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--text.bold"
+          ],
+          "description": "Bold text for text"
+        },
+        {
+          "names": [
+            "--text.faint"
+          ],
+          "description": "Faint text for text"
+        },
+        {
+          "names": [
+            "--text.italic"
+          ],
+          "description": "Italicize text for text"
+        },
+        {
+          "names": [
+            "--text.strikethrough"
+          ],
+          "description": "Strikethrough text for text"
+        },
+        {
+          "names": [
+            "--text.underline"
+          ],
+          "description": "Underline text for text"
+        },
+        {
+          "names": [
+            "--match.background"
+          ],
+          "description": "Background Color for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.foreground"
+          ],
+          "description": "Foreground Color for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.border"
+          ],
+          "description": "Border Style for match",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--match.border-background"
+          ],
+          "description": "Border Background Color for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.border-foreground"
+          ],
+          "description": "Border Foreground Color for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.align"
+          ],
+          "description": "Text Alignment for match",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--match.height"
+          ],
+          "description": "Text height for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.width"
+          ],
+          "description": "Text width for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.margin"
+          ],
+          "description": "Text margin for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.padding"
+          ],
+          "description": "Text padding for match",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--match.bold"
+          ],
+          "description": "Bold text for match"
+        },
+        {
+          "names": [
+            "--match.faint"
+          ],
+          "description": "Faint text for match"
+        },
+        {
+          "names": [
+            "--match.italic"
+          ],
+          "description": "Italicize text for match"
+        },
+        {
+          "names": [
+            "--match.strikethrough"
+          ],
+          "description": "Strikethrough text for match"
+        },
+        {
+          "names": [
+            "--match.underline"
+          ],
+          "description": "Underline text for match"
+        },
+        {
+          "names": [
+            "--prompt.background"
+          ],
+          "description": "Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.foreground"
+          ],
+          "description": "Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border"
+          ],
+          "description": "Border Style for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-background"
+          ],
+          "description": "Border Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-foreground"
+          ],
+          "description": "Border Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.align"
+          ],
+          "description": "Text Alignment for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.height"
+          ],
+          "description": "Text height for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.width"
+          ],
+          "description": "Text width for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.margin"
+          ],
+          "description": "Text margin for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.padding"
+          ],
+          "description": "Text padding for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.bold"
+          ],
+          "description": "Bold text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.faint"
+          ],
+          "description": "Faint text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.italic"
+          ],
+          "description": "Italicize text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.strikethrough"
+          ],
+          "description": "Strikethrough text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.underline"
+          ],
+          "description": "Underline text for prompt"
+        }
+      ]
+    },
+    {
+      "name": "format",
+      "description": "Format a string using a template",
+      "options": [
+        {
+          "names": [
+            "--type",
+            "-t"
+          ],
+          "description": "Format to use",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "template",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "input",
+      "description": "Prompt for some input",
+      "options": [
+        {
+          "names": [
+            "--placeholder"
+          ],
+          "description": "Placeholder value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "placeholder"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt"
+          ],
+          "description": "Prompt to display",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "prompt"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value"
+          ],
+          "description": "Initial value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--char-limit"
+          ],
+          "description": "Maximum value length",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--width"
+          ],
+          "description": "Input width",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--password"
+          ],
+          "description": "Mask input characters"
+        },
+        {
+          "names": [
+            "--prompt.background"
+          ],
+          "description": "Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.foreground"
+          ],
+          "description": "Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border"
+          ],
+          "description": "Border Style for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-background"
+          ],
+          "description": "Border Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-foreground"
+          ],
+          "description": "Border Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.align"
+          ],
+          "description": "Text Alignment for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.height"
+          ],
+          "description": "Text height for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.width"
+          ],
+          "description": "Text width for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.margin"
+          ],
+          "description": "Text margin for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.padding"
+          ],
+          "description": "Text padding for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.bold"
+          ],
+          "description": "Bold text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.faint"
+          ],
+          "description": "Faint text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.italic"
+          ],
+          "description": "Italicize text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.strikethrough"
+          ],
+          "description": "Strikethrough text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.underline"
+          ],
+          "description": "Underline text for prompt"
+        },
+        {
+          "names": [
+            "--cursor.background"
+          ],
+          "description": "Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.foreground"
+          ],
+          "description": "Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border"
+          ],
+          "description": "Border Style for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-background"
+          ],
+          "description": "Border Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.align"
+          ],
+          "description": "Text Alignment for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.height"
+          ],
+          "description": "Text height for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.width"
+          ],
+          "description": "Text width for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.margin"
+          ],
+          "description": "Text margin for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.padding"
+          ],
+          "description": "Text padding for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.bold"
+          ],
+          "description": "Bold text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.faint"
+          ],
+          "description": "Faint text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.italic"
+          ],
+          "description": "Italicize text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.underline"
+          ],
+          "description": "Underline text for cursor"
+        }
+      ]
+    },
+    {
+      "name": "join",
+      "description": "Join text vertically or horizontally",
+      "options": [
+        {
+          "names": [
+            "--align"
+          ],
+          "description": "Text alignment",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--horizontal"
+          ],
+          "description": "Join (potentially multi-line) strings horizontally"
+        },
+        {
+          "names": [
+            "--vertical"
+          ],
+          "description": "Join (potentially multi-line) strings vertically"
+        }
+      ],
+      "args": [
+        {
+          "name": "text",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "spin",
+      "description": "Display spinner while running a command",
+      "options": [
+        {
+          "names": [
+            "--show-output"
+          ],
+          "description": "Show output of command"
+        },
+        {
+          "names": [
+            "--spinner",
+            "-s"
+          ],
+          "description": "Spinner type",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--title"
+          ],
+          "description": "Text to display to user while spinning",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "text"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--align",
+            "-a"
+          ],
+          "description": "Alignment of spinner with regard to the title",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--spinner.background"
+          ],
+          "description": "Background Color for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.foreground"
+          ],
+          "description": "Foreground Color for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.border"
+          ],
+          "description": "Border Style for spinner",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--spinner.border-background"
+          ],
+          "description": "Border Background Color for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.border-foreground"
+          ],
+          "description": "Border Foreground Color for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.align"
+          ],
+          "description": "Text Alignment for spinner",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--spinner.height"
+          ],
+          "description": "Text height for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.width"
+          ],
+          "description": "Text width for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.margin"
+          ],
+          "description": "Text margin for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.padding"
+          ],
+          "description": "Text padding for spinner",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--spinner.bold"
+          ],
+          "description": "Bold text for spinner"
+        },
+        {
+          "names": [
+            "--spinner.faint"
+          ],
+          "description": "Faint text for spinner"
+        },
+        {
+          "names": [
+            "--spinner.italic"
+          ],
+          "description": "Italicize text for spinner"
+        },
+        {
+          "names": [
+            "--spinner.strikethrough"
+          ],
+          "description": "Strikethrough text for spinner"
+        },
+        {
+          "names": [
+            "--spinner.underline"
+          ],
+          "description": "Underline text for spinner"
+        },
+        {
+          "names": [
+            "--title.background"
+          ],
+          "description": "Background Color for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.foreground"
+          ],
+          "description": "Foreground Color for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.border"
+          ],
+          "description": "Border Style for title",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--title.border-background"
+          ],
+          "description": "Border Background Color for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.border-foreground"
+          ],
+          "description": "Border Foreground Color for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.align"
+          ],
+          "description": "Text Alignment for title",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--title.height"
+          ],
+          "description": "Text height for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.width"
+          ],
+          "description": "Text width for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.margin"
+          ],
+          "description": "Text margin for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.padding"
+          ],
+          "description": "Text padding for title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--title.bold"
+          ],
+          "description": "Bold text for title"
+        },
+        {
+          "names": [
+            "--title.faint"
+          ],
+          "description": "Faint text for title"
+        },
+        {
+          "names": [
+            "--title.italic"
+          ],
+          "description": "Italicize text for title"
+        },
+        {
+          "names": [
+            "--title.strikethrough"
+          ],
+          "description": "Strikethrough text for title"
+        },
+        {
+          "names": [
+            "--title.underline"
+          ],
+          "description": "Underline text for title"
+        }
+      ]
+    },
+    {
+      "name": "style",
+      "description": "Apply coloring, borders, spacing to text",
+      "options": [
+        {
+          "names": [
+            "--background"
+          ],
+          "description": "Background Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--foreground"
+          ],
+          "description": "Foreground Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--border"
+          ],
+          "description": "Border Style",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--border-background"
+          ],
+          "description": "Border Background Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--border-foreground"
+          ],
+          "description": "Border Foreground Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--align"
+          ],
+          "description": "Text Alignment",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Text height",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--width"
+          ],
+          "description": "Text width",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--margin"
+          ],
+          "description": "Text margin",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--padding"
+          ],
+          "description": "Text padding",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bold"
+          ],
+          "description": "Bold text"
+        },
+        {
+          "names": [
+            "--faint"
+          ],
+          "description": "Faint text"
+        },
+        {
+          "names": [
+            "--italic"
+          ],
+          "description": "Italicize text"
+        },
+        {
+          "names": [
+            "--strikethrough"
+          ],
+          "description": "Strikethrough text"
+        },
+        {
+          "names": [
+            "--underline"
+          ],
+          "description": "Underline text"
+        }
+      ],
+      "args": [
+        {
+          "name": "text",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "write",
+      "description": "Prompt for long-form text",
+      "options": [
+        {
+          "names": [
+            "--width"
+          ],
+          "description": "Text area width",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Text area height",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--placeholder"
+          ],
+          "description": "Placeholder value",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt"
+          ],
+          "description": "Prompt to display",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--show-cursor-line"
+          ],
+          "description": "Show cursor line"
+        },
+        {
+          "names": [
+            "--show-line-numbers"
+          ],
+          "description": "Show line numbers"
+        },
+        {
+          "names": [
+            "--value"
+          ],
+          "description": "Initial value (can be passed via stdin)",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--char-limit"
+          ],
+          "description": "Maximum value length (0 for no limit)",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--header"
+          ],
+          "description": "Header value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.background"
+          ],
+          "description": "Background Color for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.foreground"
+          ],
+          "description": "Foreground Color for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.border"
+          ],
+          "description": "Border Style for base",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--base.border-background"
+          ],
+          "description": "Border Background Color for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.border-foreground"
+          ],
+          "description": "Border Foreground Color for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.align"
+          ],
+          "description": "Text Alignment for base",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--base.height"
+          ],
+          "description": "Text height for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.width"
+          ],
+          "description": "Text width for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.margin"
+          ],
+          "description": "Text margin for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.padding"
+          ],
+          "description": "Text padding for base",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--base.bold"
+          ],
+          "description": "Bold text for base"
+        },
+        {
+          "names": [
+            "--base.faint"
+          ],
+          "description": "Faint text for base"
+        },
+        {
+          "names": [
+            "--base.italic"
+          ],
+          "description": "Italicize text for base"
+        },
+        {
+          "names": [
+            "--base.strikethrough"
+          ],
+          "description": "Strikethrough text for base"
+        },
+        {
+          "names": [
+            "--base.underline"
+          ],
+          "description": "Underline text for base"
+        },
+        {
+          "names": [
+            "--cursor-line-number.background"
+          ],
+          "description": "Background Color for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.foreground"
+          ],
+          "description": "Foreground Color for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.border"
+          ],
+          "description": "Border Style for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.border-background"
+          ],
+          "description": "Border Background Color for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.align"
+          ],
+          "description": "Text Alignment for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.height"
+          ],
+          "description": "Text height for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.width"
+          ],
+          "description": "Text width for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.margin"
+          ],
+          "description": "Text margin for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.padding"
+          ],
+          "description": "Text padding for cursor-line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line-number.bold"
+          ],
+          "description": "Bold text for cursor-line-number"
+        },
+        {
+          "names": [
+            "--cursor-line-number.faint"
+          ],
+          "description": "Faint text for cursor-line-number"
+        },
+        {
+          "names": [
+            "--cursor-line-number.italic"
+          ],
+          "description": "Italicize text for cursor-line-number"
+        },
+        {
+          "names": [
+            "--cursor-line-number.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor-line-number"
+        },
+        {
+          "names": [
+            "--cursor-line-number.underline"
+          ],
+          "description": "Underline text for cursor-line-number"
+        },
+        {
+          "names": [
+            "--cursor-line.background"
+          ],
+          "description": "Background Color for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.foreground"
+          ],
+          "description": "Foreground Color for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.border"
+          ],
+          "description": "Border Style for cursor-line",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.border-background"
+          ],
+          "description": "Border Background Color for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.align"
+          ],
+          "description": "Text Alignment for cursor-line",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.height"
+          ],
+          "description": "Text height for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.width"
+          ],
+          "description": "Text width for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.margin"
+          ],
+          "description": "Text margin for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.padding"
+          ],
+          "description": "Text padding for cursor-line",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor-line.bold"
+          ],
+          "description": "Bold text for cursor-line"
+        },
+        {
+          "names": [
+            "--cursor-line.faint"
+          ],
+          "description": "Faint text for cursor-line"
+        },
+        {
+          "names": [
+            "--cursor-line.italic"
+          ],
+          "description": "Italicize text for cursor-line"
+        },
+        {
+          "names": [
+            "--cursor-line.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor-line"
+        },
+        {
+          "names": [
+            "--cursor-line.underline"
+          ],
+          "description": "Underline text for cursor-line"
+        },
+        {
+          "names": [
+            "--cursor.background"
+          ],
+          "description": "Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.foreground"
+          ],
+          "description": "Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border"
+          ],
+          "description": "Border Style for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-background"
+          ],
+          "description": "Border Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.align"
+          ],
+          "description": "Text Alignment for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.height"
+          ],
+          "description": "Text height for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.width"
+          ],
+          "description": "Text width for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.margin"
+          ],
+          "description": "Text margin for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.padding"
+          ],
+          "description": "Text padding for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.bold"
+          ],
+          "description": "Bold text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.faint"
+          ],
+          "description": "Faint text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.italic"
+          ],
+          "description": "Italicize text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.underline"
+          ],
+          "description": "Underline text for cursor"
+        },
+        {
+          "names": [
+            "--end-of-buffer.background"
+          ],
+          "description": "Background Color for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.foreground"
+          ],
+          "description": "Foreground Color for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.border"
+          ],
+          "description": "Border Style for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.border-background"
+          ],
+          "description": "Border Background Color for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.border-foreground"
+          ],
+          "description": "Border Foreground Color for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.align"
+          ],
+          "description": "Text Alignment for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.height"
+          ],
+          "description": "Text height for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.width"
+          ],
+          "description": "Text width for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.margin"
+          ],
+          "description": "Text margin for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.padding"
+          ],
+          "description": "Text padding for end-of-buffer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--end-of-buffer.bold"
+          ],
+          "description": "Bold text for end-of-buffer"
+        },
+        {
+          "names": [
+            "--end-of-buffer.faint"
+          ],
+          "description": "Faint text for end-of-buffer"
+        },
+        {
+          "names": [
+            "--end-of-buffer.italic"
+          ],
+          "description": "Italicize text for end-of-buffer"
+        },
+        {
+          "names": [
+            "--end-of-buffer.strikethrough"
+          ],
+          "description": "Strikethrough text for end-of-buffer"
+        },
+        {
+          "names": [
+            "--end-of-buffer.underline"
+          ],
+          "description": "Underline text for end-of-buffer"
+        },
+        {
+          "names": [
+            "--line-number.background"
+          ],
+          "description": "Background Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.foreground"
+          ],
+          "description": "Foreground Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border"
+          ],
+          "description": "Border Style for line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border-background"
+          ],
+          "description": "Border Background Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border-foreground"
+          ],
+          "description": "Border Foreground Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.align"
+          ],
+          "description": "Text Alignment for line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--line-number.height"
+          ],
+          "description": "Text height for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.width"
+          ],
+          "description": "Text width for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.margin"
+          ],
+          "description": "Text margin for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.padding"
+          ],
+          "description": "Text padding for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.bold"
+          ],
+          "description": "Bold text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.faint"
+          ],
+          "description": "Faint text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.italic"
+          ],
+          "description": "Italicize text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.strikethrough"
+          ],
+          "description": "Strikethrough text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.underline"
+          ],
+          "description": "Underline text for line-number"
+        },
+        {
+          "names": [
+            "--placeholder.background"
+          ],
+          "description": "Background Color for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.foreground"
+          ],
+          "description": "Foreground Color for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.border"
+          ],
+          "description": "Border Style for placeholder",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.border-background"
+          ],
+          "description": "Border Background Color for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.border-foreground"
+          ],
+          "description": "Border Foreground Color for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.align"
+          ],
+          "description": "Text Alignment for placeholder",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.height"
+          ],
+          "description": "Text height for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.width"
+          ],
+          "description": "Text width for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.margin"
+          ],
+          "description": "Text margin for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.padding"
+          ],
+          "description": "Text padding for placeholder",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--placeholder.bold"
+          ],
+          "description": "Bold text for placeholder"
+        },
+        {
+          "names": [
+            "--placeholder.faint"
+          ],
+          "description": "Faint text for placeholder"
+        },
+        {
+          "names": [
+            "--placeholder.italic"
+          ],
+          "description": "Italicize text for placeholder"
+        },
+        {
+          "names": [
+            "--placeholder.strikethrough"
+          ],
+          "description": "Strikethrough text for placeholder"
+        },
+        {
+          "names": [
+            "--placeholder.underline"
+          ],
+          "description": "Underline text for placeholder"
+        },
+        {
+          "names": [
+            "--prompt.background"
+          ],
+          "description": "Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.foreground"
+          ],
+          "description": "Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border"
+          ],
+          "description": "Border Style for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-background"
+          ],
+          "description": "Border Background Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.border-foreground"
+          ],
+          "description": "Border Foreground Color for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.align"
+          ],
+          "description": "Text Alignment for prompt",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--prompt.height"
+          ],
+          "description": "Text height for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.width"
+          ],
+          "description": "Text width for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.margin"
+          ],
+          "description": "Text margin for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.padding"
+          ],
+          "description": "Text padding for prompt",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--prompt.bold"
+          ],
+          "description": "Bold text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.faint"
+          ],
+          "description": "Faint text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.italic"
+          ],
+          "description": "Italicize text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.strikethrough"
+          ],
+          "description": "Strikethrough text for prompt"
+        },
+        {
+          "names": [
+            "--prompt.underline"
+          ],
+          "description": "Underline text for prompt"
+        }
+      ]
+    },
+    {
+      "name": "file",
+      "description": "Pick a file from a folder",
+      "options": [
+        {
+          "names": [
+            "--cursor",
+            "-c"
+          ],
+          "description": "The cursor character",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cursor"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--all",
+            "-a"
+          ],
+          "description": "Show hidden and 'dot' files"
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Maximum number of files to display",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.background"
+          ],
+          "description": "Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.foreground"
+          ],
+          "description": "Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border"
+          ],
+          "description": "Border Style for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-background"
+          ],
+          "description": "Border Background Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.border-foreground"
+          ],
+          "description": "Border Foreground Color for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.align"
+          ],
+          "description": "Text Alignment for cursor",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cursor.height"
+          ],
+          "description": "Text height for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.width"
+          ],
+          "description": "Text width for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.margin"
+          ],
+          "description": "Text margin for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.padding"
+          ],
+          "description": "Text padding for cursor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cursor.bold"
+          ],
+          "description": "Bold text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.faint"
+          ],
+          "description": "Faint text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.italic"
+          ],
+          "description": "Italicize text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.strikethrough"
+          ],
+          "description": "Strikethrough text for cursor"
+        },
+        {
+          "names": [
+            "--cursor.underline"
+          ],
+          "description": "Underline text for cursor"
+        },
+        {
+          "names": [
+            "--symlink.background"
+          ],
+          "description": "Background Color for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.foreground"
+          ],
+          "description": "Foreground Color for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.border"
+          ],
+          "description": "Border Style for symlink",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--symlink.border-background"
+          ],
+          "description": "Border Background Color for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.border-foreground"
+          ],
+          "description": "Border Foreground Color for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.align"
+          ],
+          "description": "Text Alignment for symlink",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--symlink.height"
+          ],
+          "description": "Text height for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.width"
+          ],
+          "description": "Text width for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.margin"
+          ],
+          "description": "Text margin for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.padding"
+          ],
+          "description": "Text padding for symlink",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--symlink.bold"
+          ],
+          "description": "Bold text for symlink"
+        },
+        {
+          "names": [
+            "--symlink.faint"
+          ],
+          "description": "Faint text for symlink"
+        },
+        {
+          "names": [
+            "--symlink.italic"
+          ],
+          "description": "Italicize text for symlink"
+        },
+        {
+          "names": [
+            "--symlink.strikethrough"
+          ],
+          "description": "Strikethrough text for symlink"
+        },
+        {
+          "names": [
+            "--symlink.underline"
+          ],
+          "description": "Underline text for symlink"
+        },
+        {
+          "names": [
+            "--directory.background"
+          ],
+          "description": "Background Color for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.foreground"
+          ],
+          "description": "Foreground Color for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.border"
+          ],
+          "description": "Border Style for directory",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--directory.border-background"
+          ],
+          "description": "Border Background Color for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.border-foreground"
+          ],
+          "description": "Border Foreground Color for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.align"
+          ],
+          "description": "Text Alignment for directory",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--directory.height"
+          ],
+          "description": "Text height for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.width"
+          ],
+          "description": "Text width for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.margin"
+          ],
+          "description": "Text margin for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.padding"
+          ],
+          "description": "Text padding for directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--directory.bold"
+          ],
+          "description": "Bold text for directory"
+        },
+        {
+          "names": [
+            "--directory.faint"
+          ],
+          "description": "Faint text for directory"
+        },
+        {
+          "names": [
+            "--directory.italic"
+          ],
+          "description": "Italicize text for directory"
+        },
+        {
+          "names": [
+            "--directory.strikethrough"
+          ],
+          "description": "Strikethrough text for directory"
+        },
+        {
+          "names": [
+            "--directory.underline"
+          ],
+          "description": "Underline text for directory"
+        },
+        {
+          "names": [
+            "--file.background"
+          ],
+          "description": "Background Color for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.foreground"
+          ],
+          "description": "Foreground Color for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.border"
+          ],
+          "description": "Border Style for file",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--file.border-background"
+          ],
+          "description": "Border Background Color for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.border-foreground"
+          ],
+          "description": "Border Foreground Color for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.align"
+          ],
+          "description": "Text Alignment for file",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--file.height"
+          ],
+          "description": "Text height for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.width"
+          ],
+          "description": "Text width for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.margin"
+          ],
+          "description": "Text margin for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.padding"
+          ],
+          "description": "Text padding for file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file.bold"
+          ],
+          "description": "Bold text for file"
+        },
+        {
+          "names": [
+            "--file.faint"
+          ],
+          "description": "Faint text for file"
+        },
+        {
+          "names": [
+            "--file.italic"
+          ],
+          "description": "Italicize text for file"
+        },
+        {
+          "names": [
+            "--file.strikethrough"
+          ],
+          "description": "Strikethrough text for file"
+        },
+        {
+          "names": [
+            "--file.underline"
+          ],
+          "description": "Underline text for file"
+        },
+        {
+          "names": [
+            "--permissions.background"
+          ],
+          "description": "Background Color for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.foreground"
+          ],
+          "description": "Foreground Color for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.border"
+          ],
+          "description": "Border Style for permissions",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--permissions.border-background"
+          ],
+          "description": "Border Background Color for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.border-foreground"
+          ],
+          "description": "Border Foreground Color for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.align"
+          ],
+          "description": "Text Alignment for permissions",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--permissions.height"
+          ],
+          "description": "Text height for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.width"
+          ],
+          "description": "Text width for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.margin"
+          ],
+          "description": "Text margin for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.padding"
+          ],
+          "description": "Text padding for permissions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--permissions.bold"
+          ],
+          "description": "Bold text for permissions"
+        },
+        {
+          "names": [
+            "--permissions.faint"
+          ],
+          "description": "Faint text for permissions"
+        },
+        {
+          "names": [
+            "--permissions.italic"
+          ],
+          "description": "Italicize text for permissions"
+        },
+        {
+          "names": [
+            "--permissions.strikethrough"
+          ],
+          "description": "Strikethrough text for permissions"
+        },
+        {
+          "names": [
+            "--permissions.underline"
+          ],
+          "description": "Underline text for permissions"
+        },
+        {
+          "names": [
+            "--selected.background"
+          ],
+          "description": "Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.foreground"
+          ],
+          "description": "Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border"
+          ],
+          "description": "Border Style for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-background"
+          ],
+          "description": "Border Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-foreground"
+          ],
+          "description": "Border Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.align"
+          ],
+          "description": "Text Alignment for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.height"
+          ],
+          "description": "Text height for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.width"
+          ],
+          "description": "Text width for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.margin"
+          ],
+          "description": "Text margin for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.padding"
+          ],
+          "description": "Text padding for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.bold"
+          ],
+          "description": "Bold text for selected"
+        },
+        {
+          "names": [
+            "--selected.faint"
+          ],
+          "description": "Faint text for selected"
+        },
+        {
+          "names": [
+            "--selected.italic"
+          ],
+          "description": "Italicize text for selected"
+        },
+        {
+          "names": [
+            "--selected.strikethrough"
+          ],
+          "description": "Strikethrough text for selected"
+        },
+        {
+          "names": [
+            "--selected.underline"
+          ],
+          "description": "Underline text for selected"
+        },
+        {
+          "names": [
+            "--file-size.background"
+          ],
+          "description": "Background Color for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.foreground"
+          ],
+          "description": "Foreground Color for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.border"
+          ],
+          "description": "Border Style for file-size",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--file-size.border-background"
+          ],
+          "description": "Border Background Color for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.border-foreground"
+          ],
+          "description": "Border Foreground Color for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.align"
+          ],
+          "description": "Text Alignment for file-size",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--file-size.height"
+          ],
+          "description": "Text height for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.width"
+          ],
+          "description": "Text width for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.margin"
+          ],
+          "description": "Text margin for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.padding"
+          ],
+          "description": "Text padding for file-size",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file-size.bold"
+          ],
+          "description": "Bold text for file-size"
+        },
+        {
+          "names": [
+            "--file-size.faint"
+          ],
+          "description": "Faint text for file-size"
+        },
+        {
+          "names": [
+            "--file-size.italic"
+          ],
+          "description": "Italicize text for file-size"
+        },
+        {
+          "names": [
+            "--file-size.strikethrough"
+          ],
+          "description": "Strikethrough text for file-size"
+        },
+        {
+          "names": [
+            "--file-size.underline"
+          ],
+          "description": "Underline text for file-size"
+        }
+      ],
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "name": "table",
+      "description": "Render a table of data",
+      "options": [
+        {
+          "names": [
+            "--separator",
+            "-s"
+          ],
+          "description": "Row separator",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "separator"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--columns",
+            "-c"
+          ],
+          "description": "Column names",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "names"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--widths",
+            "-w"
+          ],
+          "description": "Column widths",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "widths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Table height",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--file",
+            "-f"
+          ],
+          "description": "File path",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "filename"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.background"
+          ],
+          "description": "Background Color for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.foreground"
+          ],
+          "description": "Foreground Color for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.border"
+          ],
+          "description": "Border Style for cell",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cell.border-background"
+          ],
+          "description": "Border Background Color for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.border-foreground"
+          ],
+          "description": "Border Foreground Color for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.align"
+          ],
+          "description": "Text Alignment for cell",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--cell.height"
+          ],
+          "description": "Text height for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.width"
+          ],
+          "description": "Text width for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.margin"
+          ],
+          "description": "Text margin for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.padding"
+          ],
+          "description": "Text padding for cell",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--cell.bold"
+          ],
+          "description": "Bold text for cell"
+        },
+        {
+          "names": [
+            "--cell.faint"
+          ],
+          "description": "Faint text for cell"
+        },
+        {
+          "names": [
+            "--cell.italic"
+          ],
+          "description": "Italicize text for cell"
+        },
+        {
+          "names": [
+            "--cell.strikethrough"
+          ],
+          "description": "Strikethrough text for cell"
+        },
+        {
+          "names": [
+            "--cell.underline"
+          ],
+          "description": "Underline text for cell"
+        },
+        {
+          "names": [
+            "--header.background"
+          ],
+          "description": "Background Color for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.foreground"
+          ],
+          "description": "Foreground Color for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.border"
+          ],
+          "description": "Border Style for header",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--header.border-background"
+          ],
+          "description": "Border Background Color for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.border-foreground"
+          ],
+          "description": "Border Foreground Color for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.align"
+          ],
+          "description": "Text Alignment for header",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--header.height"
+          ],
+          "description": "Text height for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.width"
+          ],
+          "description": "Text width for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.margin"
+          ],
+          "description": "Text margin for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.padding"
+          ],
+          "description": "Text padding for header",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header.bold"
+          ],
+          "description": "Bold text for header"
+        },
+        {
+          "names": [
+            "--header.faint"
+          ],
+          "description": "Faint text for header"
+        },
+        {
+          "names": [
+            "--header.italic"
+          ],
+          "description": "Italicize text for header"
+        },
+        {
+          "names": [
+            "--header.strikethrough"
+          ],
+          "description": "Strikethrough text for header"
+        },
+        {
+          "names": [
+            "--header.underline"
+          ],
+          "description": "Underline text for header"
+        },
+        {
+          "names": [
+            "--selected.background"
+          ],
+          "description": "Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.foreground"
+          ],
+          "description": "Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border"
+          ],
+          "description": "Border Style for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-background"
+          ],
+          "description": "Border Background Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.border-foreground"
+          ],
+          "description": "Border Foreground Color for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.align"
+          ],
+          "description": "Text Alignment for selected",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--selected.height"
+          ],
+          "description": "Text height for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.width"
+          ],
+          "description": "Text width for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.margin"
+          ],
+          "description": "Text margin for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.padding"
+          ],
+          "description": "Text padding for selected",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--selected.bold"
+          ],
+          "description": "Bold text for selected"
+        },
+        {
+          "names": [
+            "--selected.faint"
+          ],
+          "description": "Faint text for selected"
+        },
+        {
+          "names": [
+            "--selected.italic"
+          ],
+          "description": "Italicize text for selected"
+        },
+        {
+          "names": [
+            "--selected.strikethrough"
+          ],
+          "description": "Strikethrough text for selected"
+        },
+        {
+          "names": [
+            "--selected.underline"
+          ],
+          "description": "Underline text for selected"
+        }
+      ]
+    },
+    {
+      "name": "pager",
+      "description": "Scroll through a file",
+      "options": [
+        {
+          "names": [
+            "--show-line-numbers"
+          ],
+          "description": "Show line numbers"
+        },
+        {
+          "names": [
+            "--background"
+          ],
+          "description": "Background Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--foreground"
+          ],
+          "description": "Foreground Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--border"
+          ],
+          "description": "Border Style",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--border-background"
+          ],
+          "description": "Border Background Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--border-foreground"
+          ],
+          "description": "Border Foreground Color",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--align"
+          ],
+          "description": "Text Alignment",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--height"
+          ],
+          "description": "Text height",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--width"
+          ],
+          "description": "Text width",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--margin"
+          ],
+          "description": "Text margin",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--padding"
+          ],
+          "description": "Text padding",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--bold"
+          ],
+          "description": "Bold text"
+        },
+        {
+          "names": [
+            "--faint"
+          ],
+          "description": "Faint text"
+        },
+        {
+          "names": [
+            "--italic"
+          ],
+          "description": "Italicize text"
+        },
+        {
+          "names": [
+            "--strikethrough"
+          ],
+          "description": "Strikethrough text"
+        },
+        {
+          "names": [
+            "--underline"
+          ],
+          "description": "Underline text"
+        },
+        {
+          "names": [
+            "--help.background"
+          ],
+          "description": "Background Color for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.foreground"
+          ],
+          "description": "Foreground Color for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.border"
+          ],
+          "description": "Border Style for help",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--help.border-background"
+          ],
+          "description": "Border Background Color for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.border-foreground"
+          ],
+          "description": "Border Foreground Color for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.align"
+          ],
+          "description": "Text Alignment for help",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--help.height"
+          ],
+          "description": "Text height for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.width"
+          ],
+          "description": "Text width for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.margin"
+          ],
+          "description": "Text margin for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.padding"
+          ],
+          "description": "Text padding for help",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help.bold"
+          ],
+          "description": "Bold text for help"
+        },
+        {
+          "names": [
+            "--help.faint"
+          ],
+          "description": "Faint text for help"
+        },
+        {
+          "names": [
+            "--help.italic"
+          ],
+          "description": "Italicize text for help"
+        },
+        {
+          "names": [
+            "--help.strikethrough"
+          ],
+          "description": "Strikethrough text for help"
+        },
+        {
+          "names": [
+            "--help.underline"
+          ],
+          "description": "Underline text for help"
+        },
+        {
+          "names": [
+            "--line-number.background"
+          ],
+          "description": "Background Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.foreground"
+          ],
+          "description": "Foreground Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border"
+          ],
+          "description": "Border Style for line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border-background"
+          ],
+          "description": "Border Background Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.border-foreground"
+          ],
+          "description": "Border Foreground Color for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "color"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.align"
+          ],
+          "description": "Text Alignment for line-number",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--line-number.height"
+          ],
+          "description": "Text height for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lines"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.width"
+          ],
+          "description": "Text width for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "width"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.margin"
+          ],
+          "description": "Text margin for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "margin"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.padding"
+          ],
+          "description": "Text padding for line-number",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "padding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--line-number.bold"
+          ],
+          "description": "Bold text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.faint"
+          ],
+          "description": "Faint text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.italic"
+          ],
+          "description": "Italicize text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.strikethrough"
+          ],
+          "description": "Strikethrough text for line-number"
+        },
+        {
+          "names": [
+            "--line-number.underline"
+          ],
+          "description": "Underline text for line-number"
+        }
+      ],
+      "args": [
+        {
+          "name": "content"
+        }
+      ]
+    }
+  ]
+}

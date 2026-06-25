@@ -1,0 +1,196 @@
+{
+  "name": "aws-vault",
+  "description": "A vault for securely storing and accessing AWS credentials in development environments",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show context-sensitive help (also try --help-long and --help-man)"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show application version"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Show debugging output"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add credentials to the secure keystore",
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Remove credentials from the secure keystore",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force-remove the profile without a prompt"
+        }
+      ],
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List profiles, along with their credentials and sessions",
+      "options": [
+        {
+          "names": [
+            "--profiles"
+          ],
+          "description": "Show only the profile names"
+        },
+        {
+          "names": [
+            "--sessions"
+          ],
+          "description": "Show only the session names"
+        },
+        {
+          "names": [
+            "--credentials"
+          ],
+          "description": "Show only the profiles with stored credential"
+        }
+      ]
+    },
+    {
+      "name": "rotate",
+      "description": "Rotate credentials",
+      "options": [
+        {
+          "names": [
+            "-n",
+            "--no-session"
+          ],
+          "description": "Use master credentials, no session or role used"
+        }
+      ],
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Execute a command with AWS credentials",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--duration"
+          ],
+          "description": "Duration of the temporary or assume-role session. Defaults to 1h",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "DURATION"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-n",
+            "--no-session"
+          ],
+          "description": "Use master credentials, no session or role used"
+        },
+        {
+          "names": [
+            "--region"
+          ],
+          "description": "The AWS region",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "REGION"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--mfa-token"
+          ],
+          "description": "The MFA token to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "MFA-TOKEN"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        },
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "description": "Export AWS credentials",
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "clear",
+      "description": "Clear temporary credentials from the secure keystore",
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Generate a login link for the AWS Console",
+      "args": [
+        {
+          "name": "profile",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Show help about the command",
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "name": "networkQuality",
+  "description": "Measure the different aspects of network quality",
+  "options": [
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Show help for networkQuality"
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Produce computer readable output"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Run tests sequentially instead of in parallel"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Verbose output"
+    },
+    {
+      "names": [
+        "-C"
+      ],
+      "description": "Use a custom configuration URL",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-I"
+      ],
+      "description": "Bind test to interface",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "interface",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

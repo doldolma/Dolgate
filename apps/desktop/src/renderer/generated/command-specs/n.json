@@ -1,0 +1,288 @@
+{
+  "name": "n",
+  "description": "Node version management",
+  "options": [
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output version of n"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help information"
+    },
+    {
+      "names": [
+        "-p",
+        "--preserve"
+      ],
+      "description": "Preserve npm and npx during install of Node.js"
+    },
+    {
+      "names": [
+        "--no-preserve"
+      ],
+      "description": "Do not preserve npm and npx during install of Node.js"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Disable curl output. Disable log messages processing \"auto\" and \"engine\" labels"
+    },
+    {
+      "names": [
+        "-d",
+        "--download"
+      ],
+      "description": "Download only"
+    },
+    {
+      "names": [
+        "-a",
+        "--arch"
+      ],
+      "description": "Override system architecture",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Architecture"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--insecure"
+      ],
+      "description": "Turn off certificate checking for https requests (may be needed from behind a proxy server)"
+    },
+    {
+      "names": [
+        "--use-xz"
+      ],
+      "description": "Override automatic detection of xz support and enable use of xz compressed node downloads"
+    },
+    {
+      "names": [
+        "--no-use-xz"
+      ],
+      "description": "Override automatic detection of xz support and disable use of xz compressed node downloads"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "i",
+      "description": "Install a Node.js version",
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "rm",
+      "description": "Remove a Node.js version",
+      "args": [
+        {
+          "name": "version",
+          "variadic": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "prune",
+      "description": "Remove all cached Node.js versions except the installed version"
+    },
+    {
+      "name": "doctor",
+      "description": "Display diagnostics to help resolve problems"
+    },
+    {
+      "name": "uninstall",
+      "description": "Remove the installed Node.js"
+    },
+    {
+      "name": "ls",
+      "description": "Output downloaded versions"
+    },
+    {
+      "name": "lsr",
+      "description": "Output matching versions available for download",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Ls-remote displays all matches instead of last 20"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "which",
+      "description": "Output path for downloaded node version",
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Execute downloaded Node.js version with args",
+      "options": [
+        {
+          "names": [
+            "-e",
+            "--eval=..."
+          ],
+          "description": "Evaluate script",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--watch"
+          ],
+          "description": "Watch input files"
+        },
+        {
+          "names": [
+            "--watch-path"
+          ],
+          "description": "Specify a watch directory or file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--watch-preserve-output"
+          ],
+          "description": "Disable the clearing of the console when watch mode restarts the process"
+        },
+        {
+          "names": [
+            "--env-file"
+          ],
+          "description": "Specify a file containing environment variables",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-p",
+            "--print"
+          ],
+          "description": "Evaluate script and print result"
+        },
+        {
+          "names": [
+            "-c",
+            "--check"
+          ],
+          "description": "Syntax check script without executing"
+        },
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Print Node.js version"
+        },
+        {
+          "names": [
+            "-i",
+            "--interactive"
+          ],
+          "description": "Always enter the REPL even if stdin does not appear to be a terminal"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print node command line options (currently set)"
+        },
+        {
+          "names": [
+            "--inspect"
+          ],
+          "description": "Activate inspector on host:port (default: 127.0.0.1:9229)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "[host:]port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--preserve-symlinks"
+          ],
+          "description": "Follows symlinks to directories when examining source code and templates for translation strings"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        },
+        {
+          "name": "node script",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Execute command with modified PATH, so downloaded node version and npm first",
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        },
+        {
+          "name": "cmd"
+        },
+        {
+          "name": "args",
+          "variadic": true
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "version",
+      "optional": true,
+      "hasGenerator": true
+    }
+  ]
+}

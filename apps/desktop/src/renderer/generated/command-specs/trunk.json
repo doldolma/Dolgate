@@ -1,0 +1,466 @@
+{
+  "name": "trunk",
+  "description": "An all-in-one tool for scalably checking, formatting, and monitoring code",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Usage information"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "The version"
+    },
+    {
+      "names": [
+        "-m",
+        "--monitor"
+      ],
+      "description": "Enable the trunk daemon to monitor file changes in your repo",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ci"
+      ],
+      "description": "Run in continuous integration mode"
+    },
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "Output format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-progress"
+      ],
+      "description": "Don't show progress updates"
+    },
+    {
+      "names": [
+        "--ci-progress"
+      ],
+      "description": "Show updates every 30 seconds without clearing terminal screen (implicit with --ci)"
+    },
+    {
+      "names": [
+        "--action_timeout"
+      ],
+      "description": "How long actions (downloads, lint runs, etc.) have to time out, with units (s, ms, etc)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "timeout"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Output details about what's happening under the hood"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Setup trunk in this repo",
+      "options": [
+        {
+          "names": [
+            "--lock"
+          ],
+          "description": "Add sha256s to trunk.yaml for additional verification"
+        },
+        {
+          "names": [
+            "--check-sample"
+          ],
+          "description": "Run `trunk check sample` without prompting"
+        },
+        {
+          "names": [
+            "--nocheck-sample"
+          ],
+          "description": "Do not run `trunk check sample` post-init"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Overwrite existing trunk.yaml"
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Universal code checker",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--fix"
+          ],
+          "description": "Automatically apply all fixes without prompting"
+        },
+        {
+          "names": [
+            "-a",
+            "--all"
+          ],
+          "description": "Run on all files instead of only changed files"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-fix"
+          ],
+          "description": "Don't automatically apply fixes"
+        },
+        {
+          "names": [
+            "--include-existing-autofixes"
+          ],
+          "description": "Show autofixes for existing issues"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Run on all files, even if ignored"
+        },
+        {
+          "names": [
+            "--diff"
+          ],
+          "description": "Diff printing mode",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--filter"
+          ],
+          "description": "Filter the set of executed linters and/or the returned codes; use a leading '-' to exclude a linter or code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "linter or code",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Shorthand for an inverse --filter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "linter or code",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-j",
+            "--jobs"
+          ],
+          "description": "Number of concurrent jobs (does not affect background linting)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sample"
+          ],
+          "description": "Run each linter on N files (implies --no-fix and --all if no paths are given)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "N"
+            },
+            {
+              "name": "paths",
+              "optional": true,
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--upstream"
+          ],
+          "description": "Upstream branch used to compute changed files (autodetected by default)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch"
+            }
+          ]
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "upgrade",
+          "description": "Upgrade all linters to latest versions",
+          "args": [
+            {
+              "name": "linters",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "download",
+          "description": "Download all files needed for trunk to work offline",
+          "args": [
+            {
+              "name": "tools",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "enable",
+          "description": "Enable linters",
+          "args": [
+            {
+              "name": "linters",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "disable",
+          "description": "Disable linters",
+          "args": [
+            {
+              "name": "linters",
+              "variadic": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "paths",
+          "optional": true,
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "fmt",
+      "description": "Universal code formatter",
+      "options": [
+        {
+          "names": [
+            "-a",
+            "--all"
+          ],
+          "description": "Run on all files instead of only changed files"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-fix"
+          ],
+          "description": "Don't automatically apply fixes"
+        },
+        {
+          "names": [
+            "--include-existing-autofixes"
+          ],
+          "description": "Show autofixes for existing issues"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Run on all files, even if ignored"
+        },
+        {
+          "names": [
+            "--diff"
+          ],
+          "description": "Diff printing mode",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--filter"
+          ],
+          "description": "Filter the set of executed linters and/or the returned codes; use a leading '-' to exclude a linter or code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "linter or code",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "Shorthand for an inverse --filter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "linter or code",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-j",
+            "--jobs"
+          ],
+          "description": "Number of concurrent jobs (does not affect background linting)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--sample"
+          ],
+          "description": "Run each linter on N files (implies --no-fix and --all if no paths are given)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "N"
+            },
+            {
+              "name": "paths",
+              "optional": true,
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--upstream"
+          ],
+          "description": "Upstream branch used to compute changed files (autodetected by default)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "paths",
+          "optional": true,
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade trunk to the latest release"
+    },
+    {
+      "name": "git-hooks",
+      "description": "Git hooks",
+      "subcommands": [
+        {
+          "name": "install",
+          "description": "Install trunk git hooks"
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "description": "Cache management",
+      "subcommands": [
+        {
+          "name": "clean",
+          "description": "Clean the cache",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Delete all files (including results cache)"
+            },
+            {
+              "names": [
+                "-n",
+                "--dry-run"
+              ],
+              "description": "Print all directories that would be cleaned out without running deletion"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "print-config",
+      "description": "Print the resolved trunk config"
+    },
+    {
+      "name": "daemon",
+      "description": "Daemon management",
+      "subcommands": [
+        {
+          "name": "launch",
+          "description": "Start the trunk daemon if its not already running"
+        },
+        {
+          "name": "shutdown",
+          "description": "Shutdown the trunk daemon if it is running"
+        },
+        {
+          "name": "status",
+          "description": "Report daemon status"
+        }
+      ]
+    }
+  ]
+}

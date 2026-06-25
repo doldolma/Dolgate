@@ -1,0 +1,240 @@
+{
+  "name": "direnv",
+  "description": "Unclutter your .profile",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Prints the version or checks that direnv is older than VERSION_AT_LEAST",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "VERSION_AT_LEAST",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Help for direnv",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SHOW_PRIVATE",
+          "optional": true
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "allow",
+      "description": "Grants direnv to load the given .envrc",
+      "args": [
+        {
+          "name": "PATH_TO_RC",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "deny",
+      "description": "Revokes the authorization of a given .envrc",
+      "args": [
+        {
+          "name": "PATH_TO_RC",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "edit",
+      "description": "Opens PATH_TO_RC or the current .envrc into an $EDITOR and allow the file to be loaded afterwards",
+      "args": [
+        {
+          "name": "PATH_TO_RC",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Executes a command after loading the first .envrc found in DIR",
+      "args": [
+        {
+          "name": "DIR",
+          "template": "folders"
+        },
+        {
+          "name": "COMMAND"
+        }
+      ]
+    },
+    {
+      "name": "fetchurl",
+      "description": "Fetches a given URL into direnv's CAS",
+      "args": [
+        {
+          "name": "url"
+        },
+        {
+          "name": "integrity-hash",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help for direnv",
+      "args": [
+        {
+          "name": "SHOW_PRIVATE",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "hook",
+      "description": "Used to setup the shell hook",
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "prune",
+      "description": "Removes old allowed files"
+    },
+    {
+      "name": "reload",
+      "description": "Triggers an env reload"
+    },
+    {
+      "name": "status",
+      "description": "Prints some debug status information"
+    },
+    {
+      "name": "stdlib",
+      "description": "Displays the stdlib available in the .envrc execution context"
+    },
+    {
+      "name": "version",
+      "description": "Prints the version or checks that direnv is older than VERSION_AT_LEAST",
+      "args": [
+        {
+          "name": "VERSION_AT_LEAST",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "apply_dump",
+      "description": "Accepts a filename containing `direnv dump` output and generates a series of bash export statements to apply the given env",
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "show_dump",
+      "description": "Show the data inside of a dump for debugging purposes",
+      "args": [
+        {
+          "name": "DUMP",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "dotenv",
+      "description": "Transforms a .env file to evaluatable `export KEY=PAIR` statements",
+      "args": [
+        {
+          "name": "SHELL",
+          "optional": true
+        },
+        {
+          "name": "PATH_TO_DOTENV",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "dump",
+      "description": "Used to export the inner bash state at the end of execution",
+      "args": [
+        {
+          "name": "SHELL",
+          "optional": true
+        },
+        {
+          "name": "FILE",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "description": "Loads an .envrc and prints the diff in terms of exports",
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "description": "Adds a path to the list that direnv watches for changes",
+      "args": [
+        {
+          "name": "SHELL"
+        },
+        {
+          "name": "PATH",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "watch-dir",
+      "description": "Recursively adds a directory to the list that direnv watches for changes",
+      "args": [
+        {
+          "name": "SHELL"
+        },
+        {
+          "name": "DIR",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "watch-list",
+      "description": "Pipe pairs of `mtime path` to stdin to build a list of files to watch",
+      "args": [
+        {
+          "name": "SHELL",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "current",
+      "description": "Reports whether direnv's view of a file is current (or stale)",
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    }
+  ]
+}

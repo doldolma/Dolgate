@@ -1,0 +1,4077 @@
+{
+  "name": "nylas",
+  "description": "A command line interface for Nylas's API",
+  "options": [
+    {
+      "names": [
+        "--access_token"
+      ],
+      "description": "Nylas account access token",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "access_token"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config_dir"
+      ],
+      "description": "Config directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config_dir",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config_file"
+      ],
+      "description": "Config file (default is config.yaml)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config_file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--dashboard_api_url"
+      ],
+      "description": "Dashboard API URL",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dashboard_api_url"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Enable debugging output"
+    },
+    {
+      "names": [
+        "--disable_telemetry"
+      ],
+      "description": "Disables sending telemetry data"
+    },
+    {
+      "names": [
+        "--nylas_api_url"
+      ],
+      "description": "Nylas API URL",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "nylas_api_url"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output",
+        "-o"
+      ],
+      "description": "Output format (e.g. json, table)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--region"
+      ],
+      "description": "Nylas Region (values: us, ireland, canada, australia)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "region"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--silent"
+      ],
+      "description": "Silences the output"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "api",
+      "description": "Access the Nylas API endpoints",
+      "subcommands": [
+        {
+          "name": "a",
+          "description": "A API commands",
+          "subcommands": [
+            {
+              "name": "accounts",
+              "description": "Accounts commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete an Account",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Accounts",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--limit"
+                      ],
+                      "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "limit"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--metadata_key"
+                      ],
+                      "description": "Pass in your keys to search for metadata. `?metadata_key=goodmorning`.  You can also combine this with `metadata_value`, `?metadata_key=goodmorning&metadata_value=goodbye`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "metadata_key"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--metadata_pair"
+                      ],
+                      "description": "Pass in your metadata key and value pair to search for metadata. `?metadata_pair=goodmorning:goodnight`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "metadata_pair"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--metadata_value"
+                      ],
+                      "description": "Pass in your value to search for metadata. `?metadata_value=goodnight`. You can also combine this with `metadata_key`, `?metadata_key=goodmorning&metadata_value=goodbye`.  See [Metadata](/docs/developer-tools/api/metadata/)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "metadata_value"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--offset"
+                      ],
+                      "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "offset"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "accounts:downgrade",
+              "description": "Accounts:downgrade commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Cancel an Account",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "accounts:revoke-all",
+              "description": "Accounts:revoke-all commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Revoke All Tokens",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "accounts:token-info",
+              "description": "Accounts:token-info commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Return Token Information",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "accounts:upgrade",
+              "description": "Accounts:upgrade commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Reactivate an Account",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "accounts",
+          "description": "Gets a list of authed accounts",
+          "options": [
+            {
+              "names": [
+                "--limit",
+                "-l"
+              ],
+              "description": "This is usage",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "limit"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "applications",
+          "description": "Gets your application info"
+        },
+        {
+          "name": "calendars",
+          "description": "Calendars API commands",
+          "subcommands": [
+            {
+              "name": "availability",
+              "description": "Availability commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Availability for a Single Meeting",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "availability:consecutive",
+              "description": "Availability:consecutive commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Availability for Multiple Meetings",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Delete a Calendar",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "free-busy",
+              "description": "Free-busy commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Calendar Free or Busy",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Calendars",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_key"
+                  ],
+                  "description": "Pass in your keys to search for metadata. `?metadata_key=goodmorning`.  You can also combine this with `metadata_value`, `?metadata_key=goodmorning&metadata_value=goodbye`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_key"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_pair"
+                  ],
+                  "description": "Pass in your metadata key and value pair to search for metadata. `?metadata_pair=goodmorning:goodnight`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_pair"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_value"
+                  ],
+                  "description": "Pass in your value to search for metadata. `?metadata_value=goodnight`. You can also combine this with `metadata_key`, `?metadata_key=goodmorning&metadata_value=goodbye`.  See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_value"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "If using Search, only `view=expanded` is supported. See [Views](/docs/api/#overview--views) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create a Calendar",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update A Calendar",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "connect",
+          "description": "Connect API commands",
+          "subcommands": [
+            {
+              "name": "detect-provider",
+              "description": "Detect-provider commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Detect Provider",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "contacts",
+          "description": "Contacts API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a Contact",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Contacts",
+              "options": [
+                {
+                  "names": [
+                    "--country"
+                  ],
+                  "description": "Returns the contacts matching the contact's exact physical addresses",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "country"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--email"
+                  ],
+                  "description": "Returns the contacts matching the exact contact's email",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "email"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--group"
+                  ],
+                  "description": "Returns the contacts belonging to the Contact Group matching this ID",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "group"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--phone_number"
+                  ],
+                  "description": "Returns the contacts matching the contact's exact phone number",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "phone_number"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--postal_code"
+                  ],
+                  "description": "Returns the contacts matching the contact's exact postal code of one of the contact's addresses",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "postal_code"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--source"
+                  ],
+                  "description": "Returns the contacts matching from the address book or auto-generated contacts from emails. For example of contacts only from the address book: `/`contacts?source=address_book` or for only autogenerated contacts: `/contacts?source=inbox`",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "source"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--state"
+                  ],
+                  "description": "Returns the contacts matching the contact's exact state for one of the contact's physical addresses",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "state"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--street_address"
+                  ],
+                  "description": "Returns the contacts matching the one of the contact's exact street address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "street_address"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "groups",
+              "description": "Groups commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Return Contact Groups",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "picture",
+              "description": "Picture commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Returns a Contacts Picture",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create a Contact",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Contact",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "delta",
+          "description": "Delta API commands",
+          "subcommands": [
+            {
+              "name": "get",
+              "description": "Request Delta Cursors",
+              "options": [
+                {
+                  "names": [
+                    "--cursor"
+                  ],
+                  "description": "The data cursor from `/delta/latest_cursor`",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cursor"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--excluded_types"
+                  ],
+                  "description": "A comma-separated list of object types to exclude from the returned deltas. You can not use `included_types` and `excluded_types` together",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "excluded_types"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--include_types"
+                  ],
+                  "description": "A comma-separated list of the object types that will only be included in the returned deltas. You can not use `included_types` and `excluded_types` together",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "include_types"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "This value indicates if the data expands thread and message objects in the response to include additional information, when the value is set to expanded",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "latest:cursor",
+              "description": "Latest:cursor commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Get a Delta Cursor",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "longpoll",
+              "description": "Longpoll commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Return Long-Polling Deltas",
+                  "options": [
+                    {
+                      "names": [
+                        "--cursor"
+                      ],
+                      "description": "The data cursor from `/delta/latest_cursor`",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "cursor"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--excluded_types"
+                      ],
+                      "description": "A comma-separated list of object types to exclude from the returned deltas. You can not use `included_types` and `excluded_types` together",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "excluded_types"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--include_types"
+                      ],
+                      "description": "A comma-separated list of the object types that will only be included in the returned deltas. You can not use `included_types` and `excluded_types` together",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "include_types"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--timeout"
+                      ],
+                      "description": "The time difference between the deltas retrieved",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "timeout"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--view"
+                      ],
+                      "description": "This value indicates if the data expands thread and message objects in the response to include additional information, when the value is set to expanded",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "view"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "streaming",
+              "description": "Streaming commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Streaming Deltas",
+                  "options": [
+                    {
+                      "names": [
+                        "--cursor"
+                      ],
+                      "description": "The data cursor from `/delta/latest_cursor`",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "cursor"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--excluded_types"
+                      ],
+                      "description": "A comma-separated list of object types to exclude from the returned deltas. You can not use `included_types` and `excluded_types` together",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "excluded_types"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--include_types"
+                      ],
+                      "description": "A comma-separated list of the object types that will only be included in the returned deltas. You can not use `included_types` and `excluded_types` together",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "include_types"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--view"
+                      ],
+                      "description": "This value indicates if the data expands thread and message objects in the response to include additional information, when the value is set to expanded",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "view"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "drafts",
+          "description": "Drafts API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a Draft",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Drafts",
+              "options": [
+                {
+                  "names": [
+                    "--any_email"
+                  ],
+                  "description": "Return emails that have been sent or received from this comma-separated list of email addresses. For example: mail1@mail.com,mail2@mail.com. A maximum of 25 emails may be specified",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "any_email"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--bcc"
+                  ],
+                  "description": "Return threads containing messages that were BCC'd to this email address, likely sent from the parent account. (Most SMTP gateways remove BCC information.)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "bcc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cc"
+                  ],
+                  "description": "Return threads containing messages that were CC'd to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--filename"
+                  ],
+                  "description": "Return object with the filename",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "filename"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--in"
+                  ],
+                  "description": "This parameter supports the name, display_name, or id of a folder or label. To return drafts, pass in `drafts`",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_message_after"
+                  ],
+                  "description": "Return threads whose most recent message was received after this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_message_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_message_before"
+                  ],
+                  "description": "Return threads whose most recent message was received before this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_message_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--not_in"
+                  ],
+                  "description": "Filter messages not in a given folder or label. The filter supports the name, display, or ID of a folder or label",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "not_in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--started_after"
+                  ],
+                  "description": "Return threads whose first message was received after this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "started_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--started_before"
+                  ],
+                  "description": "Return threads whose first message was received before this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "started_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--subject"
+                  ],
+                  "description": "Return threads with a matching literal subject",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "subject"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--thread_id"
+                  ],
+                  "description": "Return messages belonging to a specific thread",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "thread_id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--to"
+                  ],
+                  "description": "Return threads containing messages sent to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "to"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "If using Search, only `view=expanded` is supported. See [Views](/docs/api/#overview--views) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create a New Draft",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Draft",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "events",
+          "description": "Events API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete An Event",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Events",
+              "options": [
+                {
+                  "names": [
+                    "--calendar_id"
+                  ],
+                  "description": "Return events belonging to the specified calendar ID",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "calendar_id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--count"
+                  ],
+                  "description": "See [Count](/docs/api/#overview--count-view) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "count"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--description"
+                  ],
+                  "description": "Return events matching the specified description",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "description"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--ends_after"
+                  ],
+                  "description": "Return events ending after the specified unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "ends_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--ends_before"
+                  ],
+                  "description": "Return events ending before the specified unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "ends_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--event_id"
+                  ],
+                  "description": "Return the event matching the specified event ID",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "event_id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--location"
+                  ],
+                  "description": "Return events matching the specified location",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "location"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_key"
+                  ],
+                  "description": "Pass in your keys to search for metadata. `?metadata_key=goodmorning`.  You can also combine this with `metadata_value`, `?metadata_key=goodmorning&metadata_value=goodbye`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_key"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_pair"
+                  ],
+                  "description": "Pass in your metadata key and value pair to search for metadata. `?metadata_pair=goodmorning:goodnight`. See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_pair"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--metadata_value"
+                  ],
+                  "description": "Pass in your value to search for metadata. `?metadata_value=goodnight`. You can also combine this with `metadata_key`, `?metadata_key=goodmorning&metadata_value=goodbye`.  See [Metadata](/docs/developer-tools/api/metadata/)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "metadata_value"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--show_cancelled"
+                  ],
+                  "description": "Return events that have a status of `cancelled`. If an event is recurring, then it returns no matter the value of show_cancelled. Default false",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "show_cancelled"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--starts_after"
+                  ],
+                  "description": "Return events starting after the specified unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "starts_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--starts_before"
+                  ],
+                  "description": "Return events starting before the specified unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "starts_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--title"
+                  ],
+                  "description": "Return events matching the specified title",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "title"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create an Event",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update An Event",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "to-ics",
+              "description": "To-ics commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Generate ICS File",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "files",
+          "description": "Files API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a File",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "download",
+              "description": "Download commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Download a File",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Files",
+              "options": [
+                {
+                  "names": [
+                    "--content_type"
+                  ],
+                  "description": "Return objects matching the specified content type",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "content_type"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--filename"
+                  ],
+                  "description": "Return object with the filename",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "filename"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--message_id"
+                  ],
+                  "description": "Return objects matching the specified message ID",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "message_id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "If using Search, only `view=expanded` is supported. See [Views](/docs/api/#overview--views) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Upload a New File",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "folders",
+          "description": "Folders API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a Folder",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Folders",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create a Folder",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Folder",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ip-addresses",
+          "description": "Gets a list of Nylas IP addresses (paid customers only)"
+        },
+        {
+          "name": "job-statuses",
+          "description": "Job-Statuses API commands",
+          "subcommands": [
+            {
+              "name": "get",
+              "description": "Return All Job Statuses",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "labels",
+          "description": "Labels API commands",
+          "subcommands": [
+            {
+              "name": "delete",
+              "description": "Delete a Label",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "get",
+              "description": "Return All Labels",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "post",
+              "description": "Create a Label",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Label",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "messages",
+          "description": "Messages API commands",
+          "subcommands": [
+            {
+              "name": "get",
+              "description": "Return All Messages",
+              "options": [
+                {
+                  "names": [
+                    "--any_email"
+                  ],
+                  "description": "Return emails that have been sent or received from this comma-separated list of email addresses. For example: mail1@mail.com,mail2@mail.com. A maximum of 25 emails may be specified",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "any_email"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--bcc"
+                  ],
+                  "description": "Return threads containing messages that were BCC'd to this email address, likely sent from the parent account. (Most SMTP gateways remove BCC information.)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "bcc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cc"
+                  ],
+                  "description": "Return threads containing messages that were CC'd to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--filename"
+                  ],
+                  "description": "Return object with the filename",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "filename"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--from"
+                  ],
+                  "description": "Return threads containing messages sent from this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "from"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--in"
+                  ],
+                  "description": "This parameter supports the name, display_name, or id of a folder or label. To return drafts, pass in `drafts`",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--not_in"
+                  ],
+                  "description": "Filter messages not in a given folder or label. The filter supports the name, display, or ID of a folder or label",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "not_in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--received_after"
+                  ],
+                  "description": "Return messages received after this unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "received_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--received_before"
+                  ],
+                  "description": "Return messages received before this unix timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "received_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--subject"
+                  ],
+                  "description": "Return threads with a matching literal subject",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "subject"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--thread_id"
+                  ],
+                  "description": "Return messages belonging to a specific thread",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "thread_id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--to"
+                  ],
+                  "description": "Return threads containing messages sent to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "to"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "If using Search, only `view=expanded` is supported. See [Views](/docs/api/#overview--views) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Message",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "neural",
+          "description": "Neural API commands",
+          "subcommands": [
+            {
+              "name": "categorize",
+              "description": "Categorize commands",
+              "subcommands": [
+                {
+                  "name": "put",
+                  "description": "Categorize a Message",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "categorize:feedback",
+              "description": "Categorize:feedback commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Categorize Message Feedback",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "conversation",
+              "description": "Conversation commands",
+              "subcommands": [
+                {
+                  "name": "put",
+                  "description": "Clean Conversation",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "conversation:feedback",
+              "description": "Conversation:feedback commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Clean Conversations Feedback",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ocr",
+              "description": "Ocr commands",
+              "subcommands": [
+                {
+                  "name": "put",
+                  "description": "Optical Character Recognition",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "ocr:feedback",
+              "description": "Ocr:feedback commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Optical Character Recognition Feedback",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "sentiment",
+              "description": "Sentiment commands",
+              "subcommands": [
+                {
+                  "name": "put",
+                  "description": "Sentiment Analysis",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "sentiment:feedback",
+              "description": "Sentiment:feedback commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Sentiment Analysis Feedback",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "signature",
+              "description": "Signature commands",
+              "subcommands": [
+                {
+                  "name": "put",
+                  "description": "Signature Extraction",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "signature:feedback",
+              "description": "Signature:feedback commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Signature Extraction Feedback",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resources",
+          "description": "Resources API commands",
+          "subcommands": [
+            {
+              "name": "get",
+              "description": "Return Room Resource Information",
+              "options": [
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "send",
+          "description": "Send API commands",
+          "subcommands": [
+            {
+              "name": "post",
+              "description": "Send a Message",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "send-rsvp",
+          "description": "Send-Rsvp API commands",
+          "subcommands": [
+            {
+              "name": "post",
+              "description": "Send RSVP",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "threads",
+          "description": "Threads API commands",
+          "subcommands": [
+            {
+              "name": "get",
+              "description": "Returns All Threads",
+              "options": [
+                {
+                  "names": [
+                    "--any_email"
+                  ],
+                  "description": "Return emails that have been sent or received from this comma-separated list of email addresses. For example: mail1@mail.com,mail2@mail.com. A maximum of 25 emails may be specified",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "any_email"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--bcc"
+                  ],
+                  "description": "Return threads containing messages that were BCC'd to this email address, likely sent from the parent account. (Most SMTP gateways remove BCC information.)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "bcc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cc"
+                  ],
+                  "description": "Return threads containing messages that were CC'd to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cc"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--filename"
+                  ],
+                  "description": "Return object with the filename",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "filename"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--from"
+                  ],
+                  "description": "Return threads containing messages sent from this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "from"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--in"
+                  ],
+                  "description": "This parameter supports the name, display_name, or id of a folder or label. To return drafts, pass in `drafts`",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_message_after"
+                  ],
+                  "description": "Return threads whose most recent message was received after this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_message_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_message_before"
+                  ],
+                  "description": "Return threads whose most recent message was received before this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_message_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_updated_after"
+                  ],
+                  "description": "Return threads whose most recent last updated date is after this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_updated_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_updated_before"
+                  ],
+                  "description": "Return threads whose most recent last updated date is before this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_updated_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--last_updated_timestamp"
+                  ],
+                  "description": "Return threads that been updated or changed recently. UNIX timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "last_updated_timestamp"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "The number of objects to return. Defaults to 100. If set too high, requests may fail to prevent excessively large response bodies",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--not_in"
+                  ],
+                  "description": "Filter messages not in a given folder or label. The filter supports the name, display, or ID of a folder or label",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "not_in"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--offset"
+                  ],
+                  "description": "Zero-based offset from default object sorting. See [pagination](/docs/api/#overview--pagintaion) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "offset"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--started_after"
+                  ],
+                  "description": "Return threads whose first message was received after this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "started_after"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--started_before"
+                  ],
+                  "description": "Return threads whose first message was received before this Unix-based timestamp",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "started_before"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--subject"
+                  ],
+                  "description": "Return threads with a matching literal subject",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "subject"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--to"
+                  ],
+                  "description": "Return threads containing messages sent to this email address",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "to"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--view"
+                  ],
+                  "description": "If using Search, only `view=expanded` is supported. See [Views](/docs/api/#overview--views) for more information",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "view"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "put",
+              "description": "Update a Thread",
+              "options": [
+                {
+                  "names": [
+                    "--body"
+                  ],
+                  "description": "Request body (or use < to redirect a JSON file)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "body"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--display_columns"
+                  ],
+                  "description": "(optional) A comma separated list of column headers to display for the table output",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "headers"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "v2",
+          "description": "V2 API commands",
+          "subcommands": [
+            {
+              "name": "outbox",
+              "description": "Outbox commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete Scheduled Message",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Messages to Be Sent",
+                  "options": [
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "post",
+                  "description": "Send a Message",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "put",
+                  "description": "Update Send Time",
+                  "options": [
+                    {
+                      "names": [
+                        "--body"
+                      ],
+                      "description": "Request body (or use < to redirect a JSON file)",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "body"
+                        }
+                      ]
+                    },
+                    {
+                      "names": [
+                        "--display_columns"
+                      ],
+                      "description": "(optional) A comma separated list of column headers to display for the table output",
+                      "takesArg": true,
+                      "args": [
+                        {
+                          "name": "headers"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "webhooks",
+          "description": "Gets a list of webhooks",
+          "options": [
+            {
+              "names": [
+                "--limit",
+                "-l"
+              ],
+              "description": "This is usage",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "limit"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Auth your email account"
+    },
+    {
+      "name": "docs",
+      "description": "Documentation lookup (preview)"
+    },
+    {
+      "name": "init",
+      "description": "Setup your dashboard application credentials"
+    },
+    {
+      "name": "version",
+      "description": "Gets the current CLI version"
+    },
+    {
+      "name": "webhook",
+      "description": "Create and test Nylas' Webhooks",
+      "subcommands": [
+        {
+          "name": "tunnel",
+          "description": "Starts listening for incoming Nylas webhook events",
+          "options": [
+            {
+              "names": [
+                "--callback_domain"
+              ],
+              "description": "The domain for the callback URL",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "callback_domain"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--forward",
+                "-f"
+              ],
+              "description": "Address to forward requests to (e.g. http://localhost:3000)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "forward"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--print",
+                "-p"
+              ],
+              "description": "Prints the (json) payload to the console"
+            },
+            {
+              "names": [
+                "--triggers",
+                "-t"
+              ],
+              "description": "The triggers to register for your webhooks",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "triggers"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--websocket_domain"
+              ],
+              "description": "The domain for the websocket server",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "websocket_domain"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "api",
+          "description": "Access the Nylas API endpoints",
+          "subcommands": [
+            {
+              "name": "a",
+              "description": "A API commands",
+              "subcommands": [
+                {
+                  "name": "accounts",
+                  "description": "Accounts commands",
+                  "subcommands": [
+                    {
+                      "name": "delete",
+                      "description": "Delete an Account"
+                    },
+                    {
+                      "name": "get",
+                      "description": "Return All Accounts"
+                    }
+                  ]
+                },
+                {
+                  "name": "accounts:downgrade",
+                  "description": "Accounts:downgrade commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Cancel an Account"
+                    }
+                  ]
+                },
+                {
+                  "name": "accounts:revoke-all",
+                  "description": "Accounts:revoke-all commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Revoke All Tokens"
+                    }
+                  ]
+                },
+                {
+                  "name": "accounts:token-info",
+                  "description": "Accounts:token-info commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Return Token Information"
+                    }
+                  ]
+                },
+                {
+                  "name": "accounts:upgrade",
+                  "description": "Accounts:upgrade commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Reactivate an Account"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "accounts",
+              "description": "Gets a list of authed accounts"
+            },
+            {
+              "name": "applications",
+              "description": "Gets your application info"
+            },
+            {
+              "name": "calendars",
+              "description": "Calendars API commands",
+              "subcommands": [
+                {
+                  "name": "availability",
+                  "description": "Availability commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Availability for a Single Meeting"
+                    }
+                  ]
+                },
+                {
+                  "name": "availability:consecutive",
+                  "description": "Availability:consecutive commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Availability for Multiple Meetings"
+                    }
+                  ]
+                },
+                {
+                  "name": "delete",
+                  "description": "Delete a Calendar"
+                },
+                {
+                  "name": "free-busy",
+                  "description": "Free-busy commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Calendar Free or Busy"
+                    }
+                  ]
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Calendars"
+                },
+                {
+                  "name": "post",
+                  "description": "Create a Calendar"
+                },
+                {
+                  "name": "put",
+                  "description": "Update A Calendar"
+                }
+              ]
+            },
+            {
+              "name": "connect",
+              "description": "Connect API commands",
+              "subcommands": [
+                {
+                  "name": "detect-provider",
+                  "description": "Detect-provider commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Detect Provider"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "contacts",
+              "description": "Contacts API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete a Contact"
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Contacts"
+                },
+                {
+                  "name": "groups",
+                  "description": "Groups commands",
+                  "subcommands": [
+                    {
+                      "name": "get",
+                      "description": "Return Contact Groups"
+                    }
+                  ]
+                },
+                {
+                  "name": "picture",
+                  "description": "Picture commands",
+                  "subcommands": [
+                    {
+                      "name": "get",
+                      "description": "Returns a Contacts Picture"
+                    }
+                  ]
+                },
+                {
+                  "name": "post",
+                  "description": "Create a Contact"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Contact"
+                }
+              ]
+            },
+            {
+              "name": "delta",
+              "description": "Delta API commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Request Delta Cursors"
+                },
+                {
+                  "name": "latest:cursor",
+                  "description": "Latest:cursor commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Get a Delta Cursor"
+                    }
+                  ]
+                },
+                {
+                  "name": "longpoll",
+                  "description": "Longpoll commands",
+                  "subcommands": [
+                    {
+                      "name": "get",
+                      "description": "Return Long-Polling Deltas"
+                    }
+                  ]
+                },
+                {
+                  "name": "streaming",
+                  "description": "Streaming commands",
+                  "subcommands": [
+                    {
+                      "name": "get",
+                      "description": "Streaming Deltas"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "drafts",
+              "description": "Drafts API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete a Draft"
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Drafts"
+                },
+                {
+                  "name": "post",
+                  "description": "Create a New Draft"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Draft"
+                }
+              ]
+            },
+            {
+              "name": "events",
+              "description": "Events API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete An Event"
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Events"
+                },
+                {
+                  "name": "post",
+                  "description": "Create an Event"
+                },
+                {
+                  "name": "put",
+                  "description": "Update An Event"
+                },
+                {
+                  "name": "to-ics",
+                  "description": "To-ics commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Generate ICS File"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "files",
+              "description": "Files API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete a File"
+                },
+                {
+                  "name": "download",
+                  "description": "Download commands",
+                  "subcommands": [
+                    {
+                      "name": "get",
+                      "description": "Download a File"
+                    }
+                  ]
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Files"
+                },
+                {
+                  "name": "post",
+                  "description": "Upload a New File"
+                }
+              ]
+            },
+            {
+              "name": "folders",
+              "description": "Folders API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete a Folder"
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Folders"
+                },
+                {
+                  "name": "post",
+                  "description": "Create a Folder"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Folder"
+                }
+              ]
+            },
+            {
+              "name": "ip-addresses",
+              "description": "Gets a list of Nylas IP addresses (paid customers only)"
+            },
+            {
+              "name": "job-statuses",
+              "description": "Job-Statuses API commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Return All Job Statuses"
+                }
+              ]
+            },
+            {
+              "name": "labels",
+              "description": "Labels API commands",
+              "subcommands": [
+                {
+                  "name": "delete",
+                  "description": "Delete a Label"
+                },
+                {
+                  "name": "get",
+                  "description": "Return All Labels"
+                },
+                {
+                  "name": "post",
+                  "description": "Create a Label"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Label"
+                }
+              ]
+            },
+            {
+              "name": "messages",
+              "description": "Messages API commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Return All Messages"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Message"
+                }
+              ]
+            },
+            {
+              "name": "neural",
+              "description": "Neural API commands",
+              "subcommands": [
+                {
+                  "name": "categorize",
+                  "description": "Categorize commands",
+                  "subcommands": [
+                    {
+                      "name": "put",
+                      "description": "Categorize a Message"
+                    }
+                  ]
+                },
+                {
+                  "name": "categorize:feedback",
+                  "description": "Categorize:feedback commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Categorize Message Feedback"
+                    }
+                  ]
+                },
+                {
+                  "name": "conversation",
+                  "description": "Conversation commands",
+                  "subcommands": [
+                    {
+                      "name": "put",
+                      "description": "Clean Conversation"
+                    }
+                  ]
+                },
+                {
+                  "name": "conversation:feedback",
+                  "description": "Conversation:feedback commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Clean Conversations Feedback"
+                    }
+                  ]
+                },
+                {
+                  "name": "ocr",
+                  "description": "Ocr commands",
+                  "subcommands": [
+                    {
+                      "name": "put",
+                      "description": "Optical Character Recognition"
+                    }
+                  ]
+                },
+                {
+                  "name": "ocr:feedback",
+                  "description": "Ocr:feedback commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Optical Character Recognition Feedback"
+                    }
+                  ]
+                },
+                {
+                  "name": "sentiment",
+                  "description": "Sentiment commands",
+                  "subcommands": [
+                    {
+                      "name": "put",
+                      "description": "Sentiment Analysis"
+                    }
+                  ]
+                },
+                {
+                  "name": "sentiment:feedback",
+                  "description": "Sentiment:feedback commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Sentiment Analysis Feedback"
+                    }
+                  ]
+                },
+                {
+                  "name": "signature",
+                  "description": "Signature commands",
+                  "subcommands": [
+                    {
+                      "name": "put",
+                      "description": "Signature Extraction"
+                    }
+                  ]
+                },
+                {
+                  "name": "signature:feedback",
+                  "description": "Signature:feedback commands",
+                  "subcommands": [
+                    {
+                      "name": "post",
+                      "description": "Signature Extraction Feedback"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "resources",
+              "description": "Resources API commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Return Room Resource Information"
+                }
+              ]
+            },
+            {
+              "name": "send",
+              "description": "Send API commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Send a Message"
+                }
+              ]
+            },
+            {
+              "name": "send-rsvp",
+              "description": "Send-Rsvp API commands",
+              "subcommands": [
+                {
+                  "name": "post",
+                  "description": "Send RSVP"
+                }
+              ]
+            },
+            {
+              "name": "threads",
+              "description": "Threads API commands",
+              "subcommands": [
+                {
+                  "name": "get",
+                  "description": "Returns All Threads"
+                },
+                {
+                  "name": "put",
+                  "description": "Update a Thread"
+                }
+              ]
+            },
+            {
+              "name": "v2",
+              "description": "V2 API commands",
+              "subcommands": [
+                {
+                  "name": "outbox",
+                  "description": "Outbox commands",
+                  "subcommands": [
+                    {
+                      "name": "delete",
+                      "description": "Delete Scheduled Message"
+                    },
+                    {
+                      "name": "get",
+                      "description": "Return All Messages to Be Sent"
+                    },
+                    {
+                      "name": "post",
+                      "description": "Send a Message"
+                    },
+                    {
+                      "name": "put",
+                      "description": "Update Send Time"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "webhooks",
+              "description": "Gets a list of webhooks"
+            }
+          ]
+        },
+        {
+          "name": "auth",
+          "description": "Auth your email account"
+        },
+        {
+          "name": "docs",
+          "description": "Documentation lookup (preview)"
+        },
+        {
+          "name": "init",
+          "description": "Setup your dashboard application credentials"
+        },
+        {
+          "name": "version",
+          "description": "Gets the current CLI version"
+        },
+        {
+          "name": "webhook",
+          "description": "Create and test Nylas' Webhooks",
+          "subcommands": [
+            {
+              "name": "tunnel",
+              "description": "Starts listening for incoming Nylas webhook events"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

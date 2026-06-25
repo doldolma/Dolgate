@@ -1,0 +1,44 @@
+{
+  "name": "passwd",
+  "description": "Modify a user's password",
+  "options": [
+    {
+      "names": [
+        "-i"
+      ],
+      "description": "Specify where the password update should be applied",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "infosystem"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "Causes the password to be updated in the given location of the chosen directory system",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "location",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u"
+      ],
+      "description": "Specify the user name to use when authenticating to the directory node",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "authname",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

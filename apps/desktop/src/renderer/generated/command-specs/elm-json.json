@@ -1,0 +1,220 @@
+{
+  "name": "elm-json",
+  "description": "Deal with your elm.json",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--offline"
+      ],
+      "description": "Enable offline mode, which means no HTTP traffic will happen"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Prints version information"
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Sets the level of verbosity"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "help",
+      "description": "Prints help information or the help of the given subcommand(s)",
+      "args": [
+        {
+          "name": "subcommand"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install a package",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--test"
+          ],
+          "description": "Install as a test-dependency"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--yes"
+          ],
+          "description": "Answer \"yes\" to all questions"
+        }
+      ],
+      "args": [
+        {
+          "name": "PACKAGE",
+          "hasGenerator": true
+        },
+        {
+          "name": "-- INPUT",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "new",
+      "description": "Create a new elm.json file",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        }
+      ]
+    },
+    {
+      "name": "tree",
+      "description": "List entire dependency graph as a tree",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--test"
+          ],
+          "description": "Promote test-dependencies to top-level dependencies"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        }
+      ],
+      "args": [
+        {
+          "name": "PACKAGE",
+          "hasGenerator": true
+        },
+        {
+          "name": "-- INPUT",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstall a package",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--yes"
+          ],
+          "description": "Answer \"yes\" to all questions"
+        }
+      ],
+      "args": [
+        {
+          "name": "PACKAGE",
+          "hasGenerator": true
+        },
+        {
+          "name": "-- INPUT",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Bring your dependencies up to date",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Prints help information"
+        },
+        {
+          "names": [
+            "--unsafe"
+          ],
+          "description": "Allow major versions bumps"
+        },
+        {
+          "names": [
+            "--version",
+            "-V"
+          ],
+          "description": "Prints version information"
+        },
+        {
+          "names": [
+            "--yes"
+          ],
+          "description": "Answer \"yes\" to all questions"
+        }
+      ],
+      "args": [
+        {
+          "name": "INPUT",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    }
+  ]
+}

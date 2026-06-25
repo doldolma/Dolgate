@@ -1,0 +1,1540 @@
+{
+  "name": "kafkactl",
+  "description": "Command-line interface for Apache Kafka",
+  "options": [
+    {
+      "names": [
+        "--config-file",
+        "-C"
+      ],
+      "description": "Config file. one of: [$HOME/.config/kafkactl $HOME/.kafkactl $SNAP_REAL_HOME/.config/kafkactl $SNAP_DATA/kafkactl /etc/kafkactl]",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config-file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verbose",
+        "-V"
+      ],
+      "description": "Verbose output"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "edit",
+      "description": "Alter topics, partitions",
+      "subcommands": [
+        {
+          "name": "partition",
+          "description": "Alter a partition",
+          "options": [
+            {
+              "names": [
+                "--replicas",
+                "-r"
+              ],
+              "description": "Set replicas for a partition",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "replicas"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--validate-only",
+                "-v"
+              ],
+              "description": "Validate only"
+            }
+          ]
+        },
+        {
+          "name": "topic",
+          "description": "Alter a topic",
+          "options": [
+            {
+              "names": [
+                "--config",
+                "-c"
+              ],
+              "description": "Configs in format `key=value`",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "config"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--partitions",
+                "-p"
+              ],
+              "description": "Number of partitions",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partitions"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--replication-factor",
+                "-r"
+              ],
+              "description": "Replication factor",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "replication-factor"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--validate-only",
+                "-v"
+              ],
+              "description": "Validate only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "attach",
+      "description": "Run kafkactl pod in kubernetes and attach to it"
+    },
+    {
+      "name": "clone",
+      "description": "Clone topics, consumerGroups",
+      "subcommands": [
+        {
+          "name": "cg",
+          "description": "Clone existing consumerGroup with all offsets"
+        },
+        {
+          "name": "topic",
+          "description": "Clone existing topic (number of partitions, replication factor, config entries) to new one"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Generate shell auto-completion file"
+    },
+    {
+      "name": "config",
+      "description": "Show and edit configurations",
+      "subcommands": [
+        {
+          "name": "currentContext",
+          "description": "Show current context"
+        },
+        {
+          "name": "getContexts",
+          "description": "List configured contexts",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: compact",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "useContext",
+          "description": "Switch active context"
+        },
+        {
+          "name": "view",
+          "description": "Show contents of config file"
+        }
+      ]
+    },
+    {
+      "name": "consume",
+      "description": "Consume messages from a topic",
+      "options": [
+        {
+          "names": [
+            "--exit",
+            "-e"
+          ],
+          "description": "Stop consuming when latest offset is reached"
+        },
+        {
+          "names": [
+            "--from-beginning",
+            "-b"
+          ],
+          "description": "Set offset for consumer to the oldest offset"
+        },
+        {
+          "names": [
+            "--group",
+            "-g"
+          ],
+          "description": "Consumer group to join",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "group"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-encoding"
+          ],
+          "description": "Key encoding (auto-detected by default). One of: none|hex|base64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-proto-type"
+          ],
+          "description": "Key protobuf message type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-proto-type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--max-messages"
+          ],
+          "description": "Stop consuming after n messages have been read",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "max-messages"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--offset"
+          ],
+          "description": "Offsets in format `partition=offset (for partitions not specified, other parameters apply)`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "offset"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output format. One of: json|yaml",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--partitions",
+            "-p"
+          ],
+          "description": "Partitions to consume. The default is to consume from all partitions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "partitions"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--print-headers"
+          ],
+          "description": "Print message headers"
+        },
+        {
+          "names": [
+            "--print-keys",
+            "-k"
+          ],
+          "description": "Print message keys"
+        },
+        {
+          "names": [
+            "--print-schema",
+            "-a"
+          ],
+          "description": "Print details about avro schema used for decoding"
+        },
+        {
+          "names": [
+            "--print-timestamps",
+            "-t"
+          ],
+          "description": "Print message timestamps"
+        },
+        {
+          "names": [
+            "--proto-file"
+          ],
+          "description": "Additional protobuf description file for searching message description",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "proto-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--proto-import-path"
+          ],
+          "description": "Additional path to search files listed in proto 'import' directive",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "proto-import-path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--protoset-file"
+          ],
+          "description": "Additional compiled protobuf description file for searching message description",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "protoset-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--separator",
+            "-s"
+          ],
+          "description": "Separator to split key and value",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "separator"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tail"
+          ],
+          "description": "Show only the last n messages on the topic",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tail"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value-encoding"
+          ],
+          "description": "Value encoding (auto-detected by default). One of: none|hex|base64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value-encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value-proto-type"
+          ],
+          "description": "Value protobuf message type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value-proto-type"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "create",
+      "description": "Create topics, consumerGroups, acls",
+      "subcommands": [
+        {
+          "name": "acl",
+          "description": "Create an acl",
+          "options": [
+            {
+              "names": [
+                "--allow",
+                "-a"
+              ],
+              "description": "Acl of permissionType 'allow' (choose this or 'deny')"
+            },
+            {
+              "names": [
+                "--cluster",
+                "-c"
+              ],
+              "description": "Create acl for the cluster"
+            },
+            {
+              "names": [
+                "--deny",
+                "-d"
+              ],
+              "description": "Acl of permissionType 'deny' (choose this or 'allow')"
+            },
+            {
+              "names": [
+                "--group",
+                "-g"
+              ],
+              "description": "Create acl for a consumer group",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "group"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--host"
+              ],
+              "description": "Hosts to allow",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "host"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--operation",
+                "-o"
+              ],
+              "description": "Operations of acl",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "operation"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--pattern"
+              ],
+              "description": "Pattern type. one of (match, prefixed, literal)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "pattern"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--principal",
+                "-p"
+              ],
+              "description": "Principal to be authenticated",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "principal"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "Create acl for a topic",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--validate-only",
+                "-v"
+              ],
+              "description": "Validate only"
+            }
+          ]
+        },
+        {
+          "name": "cg",
+          "description": "Create a consumerGroup",
+          "options": [
+            {
+              "names": [
+                "--newest"
+              ],
+              "description": "Set the offset to newest offset (for all partitions or the specified partition)"
+            },
+            {
+              "names": [
+                "--offset"
+              ],
+              "description": "Set offset to this value. offset with value -1 is ignored",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "offset"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--oldest"
+              ],
+              "description": "Set the offset to oldest offset (for all partitions or the specified partition)"
+            },
+            {
+              "names": [
+                "--partition",
+                "-p"
+              ],
+              "description": "Partition to create group for. -1 stands for all partitions",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partition"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "One or more topics to create group for",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "topic",
+          "description": "Create a topic",
+          "options": [
+            {
+              "names": [
+                "--config",
+                "-c"
+              ],
+              "description": "Configs in format `key=value`",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "config"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--partitions",
+                "-p"
+              ],
+              "description": "Number of partitions",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partitions"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--replication-factor",
+                "-r"
+              ],
+              "description": "Replication factor",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "replication-factor"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--validate-only",
+                "-v"
+              ],
+              "description": "Validate only"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete topics, consumerGroups, consumer-group-offset, acls",
+      "subcommands": [
+        {
+          "name": "acl",
+          "description": "Delete an acl",
+          "options": [
+            {
+              "names": [
+                "--allow",
+                "-a"
+              ],
+              "description": "Acl of permissionType 'allow'"
+            },
+            {
+              "names": [
+                "--cluster",
+                "-c"
+              ],
+              "description": "Delete acl for the cluster"
+            },
+            {
+              "names": [
+                "--deny",
+                "-d"
+              ],
+              "description": "Acl of permissionType 'deny'"
+            },
+            {
+              "names": [
+                "--groups",
+                "-g"
+              ],
+              "description": "Delete acl for a consumer group"
+            },
+            {
+              "names": [
+                "--operation",
+                "-o"
+              ],
+              "description": "Operation of acl",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "operation"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--pattern"
+              ],
+              "description": "Pattern type. one of (any, match, prefixed, literal)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "pattern"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topics",
+                "-t"
+              ],
+              "description": "Delete acl for a topic"
+            },
+            {
+              "names": [
+                "--validate-only",
+                "-v"
+              ],
+              "description": "Validate only"
+            }
+          ]
+        },
+        {
+          "name": "consumer-groups",
+          "description": "Delete a consumer-group"
+        },
+        {
+          "name": "cgo",
+          "description": "Delete a consumer-group-offset",
+          "options": [
+            {
+              "names": [
+                "--partition",
+                "-p"
+              ],
+              "description": "Delete offset for this partition. -1 stands for all partitions",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partition"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "Delete offset for this topic",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "topic",
+          "description": "Delete a topic"
+        }
+      ]
+    },
+    {
+      "name": "describe",
+      "description": "Describe topics, consumerGroups, brokers",
+      "subcommands": [
+        {
+          "name": "broker",
+          "description": "Describe a broker",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "cg",
+          "description": "Describe a consumerGroup",
+          "options": [
+            {
+              "names": [
+                "--only-with-lag",
+                "-l"
+              ],
+              "description": "Show only partitions that have a lag"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--print-members",
+                "-m"
+              ],
+              "description": "Print group members"
+            },
+            {
+              "names": [
+                "--print-topics",
+                "-T"
+              ],
+              "description": "Print topic details"
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "Show group details for given topic only",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "topic",
+          "description": "Describe a topic",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--print-configs",
+                "-c"
+              ],
+              "description": "Print configs"
+            },
+            {
+              "names": [
+                "--skip-empty",
+                "-s"
+              ],
+              "description": "Show only partitions that have a messages"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "Get info about topics, consumerGroups, acls, brokers",
+      "subcommands": [
+        {
+          "name": "acl",
+          "description": "List available acls",
+          "options": [
+            {
+              "names": [
+                "--allow",
+                "-a"
+              ],
+              "description": "Acl of permissionType 'allow'"
+            },
+            {
+              "names": [
+                "--cluster",
+                "-c"
+              ],
+              "description": "List acl for the cluster"
+            },
+            {
+              "names": [
+                "--deny",
+                "-d"
+              ],
+              "description": "Acl of permissionType 'deny'"
+            },
+            {
+              "names": [
+                "--groups",
+                "-g"
+              ],
+              "description": "List acl for consumer groups"
+            },
+            {
+              "names": [
+                "--operation"
+              ],
+              "description": "Operation of acl",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "operation"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--pattern"
+              ],
+              "description": "Pattern type. one of (any, match, prefixed, literal)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "pattern"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topics",
+                "-t"
+              ],
+              "description": "List acl for topics"
+            }
+          ]
+        },
+        {
+          "name": "brokers",
+          "description": "List brokers",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|compact",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "cg",
+          "description": "List available consumerGroups",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide|compact",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "Show groups for given topic only",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "topics",
+          "description": "List available topics",
+          "options": [
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml|wide|compact",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "produce",
+      "description": "Produce messages to a topic",
+      "options": [
+        {
+          "names": [
+            "--file",
+            "-f"
+          ],
+          "description": "File to read input from",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--header",
+            "-H"
+          ],
+          "description": "Headers in format `key:value`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "header"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key",
+            "-k"
+          ],
+          "description": "Key to use for all messages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-encoding"
+          ],
+          "description": "Key encoding (none by default). One of: none|hex|base64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-proto-type"
+          ],
+          "description": "Key protobuf message type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-proto-type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key-schema-version",
+            "-K"
+          ],
+          "description": "Avro schema version that should be used for key serialization (default is latest)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "key-schema-version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--lineSeparator",
+            "-L"
+          ],
+          "description": "Separator to split multiple messages from stdin or file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "lineSeparator"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--max-message-bytes"
+          ],
+          "description": "The maximum permitted size of a message (defaults to 1000000)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "max-message-bytes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--null-value"
+          ],
+          "description": "Produce a null value (can be used instead of providing a value with --value)"
+        },
+        {
+          "names": [
+            "--partition",
+            "-p"
+          ],
+          "description": "Partition to produce to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "partition"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--partitioner",
+            "-P"
+          ],
+          "description": "The partitioning scheme to use. Can be `murmur2`, `hash`, `hash-ref` `manual`, or `random`. (default is murmur2)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "partitioner"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--proto-file"
+          ],
+          "description": "Additional protobuf description file for searching message description",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "proto-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--proto-import-path"
+          ],
+          "description": "Additional path to search files listed in proto 'import' directive",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "proto-import-path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--protoset-file"
+          ],
+          "description": "Additional compiled protobuf description file for searching message description",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "protoset-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rate",
+            "-r"
+          ],
+          "description": "Amount of messages per second to produce on the topic",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rate"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--required-acks"
+          ],
+          "description": "Required acks. One of `NoResponse`, `WaitForLocal`, `WaitForAll`. (default is WaitForLocal)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "required-acks"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--separator",
+            "-S"
+          ],
+          "description": "Separator to split key and value from stdin or file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "separator"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--silent",
+            "-s"
+          ],
+          "description": "Do not write to standard output"
+        },
+        {
+          "names": [
+            "--value",
+            "-v"
+          ],
+          "description": "Value to produce",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value-encoding"
+          ],
+          "description": "Value encoding (none by default). One of: none|hex|base64",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value-encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value-proto-type"
+          ],
+          "description": "Value protobuf message type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value-proto-type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--value-schema-version",
+            "-i"
+          ],
+          "description": "Avro schema version that should be used for value serialization (default is latest)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "value-schema-version"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reset",
+      "description": "Reset consumerGroupsOffset",
+      "subcommands": [
+        {
+          "name": "cgo",
+          "description": "Reset a consumer group offset",
+          "options": [
+            {
+              "names": [
+                "--all-topics"
+              ],
+              "description": "Do the operation for all topics in the consumer group"
+            },
+            {
+              "names": [
+                "--execute",
+                "-e"
+              ],
+              "description": "Execute the reset (as default only the results are displayed for validation)"
+            },
+            {
+              "names": [
+                "--newest"
+              ],
+              "description": "Set the offset to newest offset (for all partitions or the specified partition)"
+            },
+            {
+              "names": [
+                "--offset"
+              ],
+              "description": "Set offset to this value. offset with value -1 is ignored",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "offset"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--oldest"
+              ],
+              "description": "Set the offset to oldest offset (for all partitions or the specified partition)"
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "Output format. One of: json|yaml",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--partition",
+                "-p"
+              ],
+              "description": "Partition to apply the offset. -1 stands for all partitions",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partition"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--topic",
+                "-t"
+              ],
+              "description": "One ore more topics to change offset for",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "topic"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print the version of kafkactl"
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "edit",
+          "description": "Alter topics, partitions",
+          "subcommands": [
+            {
+              "name": "partition",
+              "description": "Alter a partition"
+            },
+            {
+              "name": "topic",
+              "description": "Alter a topic"
+            }
+          ]
+        },
+        {
+          "name": "attach",
+          "description": "Run kafkactl pod in kubernetes and attach to it"
+        },
+        {
+          "name": "clone",
+          "description": "Clone topics, consumerGroups",
+          "subcommands": [
+            {
+              "name": "cg",
+              "description": "Clone existing consumerGroup with all offsets"
+            },
+            {
+              "name": "topic",
+              "description": "Clone existing topic (number of partitions, replication factor, config entries) to new one"
+            }
+          ]
+        },
+        {
+          "name": "completion",
+          "description": "Generate shell auto-completion file"
+        },
+        {
+          "name": "config",
+          "description": "Show and edit configurations",
+          "subcommands": [
+            {
+              "name": "currentContext",
+              "description": "Show current context"
+            },
+            {
+              "name": "getContexts",
+              "description": "List configured contexts"
+            },
+            {
+              "name": "useContext",
+              "description": "Switch active context"
+            },
+            {
+              "name": "view",
+              "description": "Show contents of config file"
+            }
+          ]
+        },
+        {
+          "name": "consume",
+          "description": "Consume messages from a topic"
+        },
+        {
+          "name": "create",
+          "description": "Create topics, consumerGroups, acls",
+          "subcommands": [
+            {
+              "name": "acl",
+              "description": "Create an acl"
+            },
+            {
+              "name": "cg",
+              "description": "Create a consumerGroup"
+            },
+            {
+              "name": "topic",
+              "description": "Create a topic"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete topics, consumerGroups, consumer-group-offset, acls",
+          "subcommands": [
+            {
+              "name": "acl",
+              "description": "Delete an acl"
+            },
+            {
+              "name": "consumer-groups",
+              "description": "Delete a consumer-group"
+            },
+            {
+              "name": "cgo",
+              "description": "Delete a consumer-group-offset"
+            },
+            {
+              "name": "topic",
+              "description": "Delete a topic"
+            }
+          ]
+        },
+        {
+          "name": "describe",
+          "description": "Describe topics, consumerGroups, brokers",
+          "subcommands": [
+            {
+              "name": "broker",
+              "description": "Describe a broker"
+            },
+            {
+              "name": "cg",
+              "description": "Describe a consumerGroup"
+            },
+            {
+              "name": "topic",
+              "description": "Describe a topic"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "Get info about topics, consumerGroups, acls, brokers",
+          "subcommands": [
+            {
+              "name": "acl",
+              "description": "List available acls"
+            },
+            {
+              "name": "brokers",
+              "description": "List brokers"
+            },
+            {
+              "name": "cg",
+              "description": "List available consumerGroups"
+            },
+            {
+              "name": "topics",
+              "description": "List available topics"
+            }
+          ]
+        },
+        {
+          "name": "produce",
+          "description": "Produce messages to a topic"
+        },
+        {
+          "name": "reset",
+          "description": "Reset consumerGroupsOffset",
+          "subcommands": [
+            {
+              "name": "cgo",
+              "description": "Reset a consumer group offset"
+            }
+          ]
+        },
+        {
+          "name": "version",
+          "description": "Print the version of kafkactl"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,262 @@
+{
+  "name": "pkill",
+  "description": "Send  the  specified  signal  (by default SIGTERM) to each specified process",
+  "options": [
+    {
+      "names": [
+        "--signal"
+      ],
+      "description": "Signal to send (either number or name)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "signal"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q",
+        "--queue"
+      ],
+      "description": "Integer value to be sent with the signal",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e",
+        "--echo"
+      ],
+      "description": "Display what is killed"
+    },
+    {
+      "names": [
+        "-f",
+        "--full"
+      ],
+      "description": "Use full process name to match"
+    },
+    {
+      "names": [
+        "-g",
+        "--pgroup"
+      ],
+      "description": "Match listed process group IDs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PGID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-G",
+        "--group"
+      ],
+      "description": "Match real group IDs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "GID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--ignore-case"
+      ],
+      "description": "Match case insensitively"
+    },
+    {
+      "names": [
+        "-n",
+        "--newest"
+      ],
+      "description": "Select most recently started"
+    },
+    {
+      "names": [
+        "-o",
+        "--oldest"
+      ],
+      "description": "Select least recently started"
+    },
+    {
+      "names": [
+        "-O",
+        "--older"
+      ],
+      "description": "Select where older than seconds",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "seconds"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--parent"
+      ],
+      "description": "Match only child processes of the given parent",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PPID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--session"
+      ],
+      "description": "Match session IDs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--terminal"
+      ],
+      "description": "Match by controlling terminal",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tty",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "--euid"
+      ],
+      "description": "Match by effective IDs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-U",
+        "--uid"
+      ],
+      "description": "Match by real IDs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-x",
+        "--exact"
+      ],
+      "description": "Match exactly with the command name"
+    },
+    {
+      "names": [
+        "-F",
+        "--pidfile"
+      ],
+      "description": "Read PIDs from file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-L",
+        "logpidfile"
+      ],
+      "description": "Fail if PID file is not locked"
+    },
+    {
+      "names": [
+        "-r",
+        "--runstates"
+      ],
+      "description": "Match runstates",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "state"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ns"
+      ],
+      "description": "Match the processes that belong to a specified PID",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PID"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--nslist"
+      ],
+      "description": "List which namespaces will be considered for the --ns option",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ns",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Output help message and exit"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output version information and exit"
+    }
+  ],
+  "args": [
+    {
+      "name": "pattern"
+    }
+  ]
+}

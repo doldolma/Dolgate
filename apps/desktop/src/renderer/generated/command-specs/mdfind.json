@@ -1,0 +1,92 @@
+{
+  "name": "mdfind",
+  "description": "Finds files matching a given query",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for mdfind"
+    },
+    {
+      "names": [
+        "-0"
+      ],
+      "description": "Prints an ASCII NUL character after each result path"
+    },
+    {
+      "names": [
+        "-live"
+      ],
+      "description": "Provide live-updates to the number of files matching the query"
+    },
+    {
+      "names": [
+        "-count"
+      ],
+      "description": "Output the total number of matches, instead of the path to the matching items"
+    },
+    {
+      "names": [
+        "-onlyin"
+      ],
+      "description": "Limit the scope of the search to <dir>",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dir",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-name"
+      ],
+      "description": "Search for matching file names to <filename> only",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-reprint"
+      ],
+      "description": "Reprint results on live update"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Show contents of smart folder ~/Library/Saved Searches/<folder>.savedSearch",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "folder",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-literal"
+      ],
+      "description": "Force the provided query string to be taken as a literal query string, without interpretation"
+    },
+    {
+      "names": [
+        "-interpret"
+      ],
+      "description": "Force the provided query string to be interpreted as if it had been typed into the Spotlight menu"
+    }
+  ],
+  "args": [
+    {
+      "name": "query"
+    }
+  ]
+}

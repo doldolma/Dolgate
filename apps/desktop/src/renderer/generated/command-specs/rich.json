@@ -1,0 +1,398 @@
+{
+  "name": "rich",
+  "description": "Rich text and formatting in the terminal",
+  "options": [
+    {
+      "names": [
+        "-p",
+        "--print"
+      ],
+      "description": "Print console markup. See https://rich.readthedocs.io/en/latest/markup.html"
+    },
+    {
+      "names": [
+        "-u",
+        "--rule"
+      ],
+      "description": "Display a horizontal rule"
+    },
+    {
+      "names": [
+        "-j",
+        "--json"
+      ],
+      "description": "Display as JSON"
+    },
+    {
+      "names": [
+        "-m",
+        "--markdown"
+      ],
+      "description": "Display as markdown"
+    },
+    {
+      "names": [
+        "--rst"
+      ],
+      "description": "Display restructured text"
+    },
+    {
+      "names": [
+        "--csv"
+      ],
+      "description": "Display CSV as a table"
+    },
+    {
+      "names": [
+        "--ipynb"
+      ],
+      "description": "Display Jupyter notebook"
+    },
+    {
+      "names": [
+        "--syntax"
+      ],
+      "description": "Syntax highlighting"
+    },
+    {
+      "names": [
+        "--inspect"
+      ],
+      "description": "Inspect a python object"
+    },
+    {
+      "names": [
+        "-h",
+        "--head"
+      ],
+      "description": "Display first LINES of the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "lines"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--tail"
+      ],
+      "description": "Display last LINES of the file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "lines"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--emoji"
+      ],
+      "description": "Enable emoji code. e.g. :sparkle:"
+    },
+    {
+      "names": [
+        "-l",
+        "--left"
+      ],
+      "description": "Align to left"
+    },
+    {
+      "names": [
+        "-r",
+        "--right"
+      ],
+      "description": "Align to right"
+    },
+    {
+      "names": [
+        "-c",
+        "--center"
+      ],
+      "description": "Align to center"
+    },
+    {
+      "names": [
+        "-L",
+        "--text-left"
+      ],
+      "description": "Justify text to left"
+    },
+    {
+      "names": [
+        "-R",
+        "--text-right"
+      ],
+      "description": "Justify text to right"
+    },
+    {
+      "names": [
+        "-C",
+        "--text-center"
+      ],
+      "description": "Justify text to center"
+    },
+    {
+      "names": [
+        "-F",
+        "--text-full"
+      ],
+      "description": "Justify text to both left and right edges"
+    },
+    {
+      "names": [
+        "--soft"
+      ],
+      "description": "Enable soft wrapping of text"
+    },
+    {
+      "names": [
+        "-e",
+        "--expand"
+      ],
+      "description": "Expand to full width"
+    },
+    {
+      "names": [
+        "-w",
+        "--width"
+      ],
+      "description": "Fit output to SIZE characters",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-W",
+        "--max-width"
+      ],
+      "description": "Set maximum width to SIZE characters",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--style"
+      ],
+      "description": "Set text style to STYLE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--rule-style"
+      ],
+      "description": "Set rule style to STYLE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--rule-char"
+      ],
+      "description": "Use CHARACTER to generate a line with --rule",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "character"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--padding"
+      ],
+      "description": "Padding around output. 1, 2 or 4 comma separated integers, e.g. 2,4",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "top,right,bottom,left",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-a",
+        "--panel"
+      ],
+      "description": "Set panel type to BOX",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "box"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S",
+        "--panel-style"
+      ],
+      "description": "Set the panel style to STYLE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--theme"
+      ],
+      "description": "Set syntax theme to THEME. See https://pygments.org/styles/",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "theme"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--line-numbers"
+      ],
+      "description": "Enable line number in syntax"
+    },
+    {
+      "names": [
+        "-g",
+        "--guides"
+      ],
+      "description": "Enable indentation guides in syntax highlighting"
+    },
+    {
+      "names": [
+        "-x",
+        "--lexer"
+      ],
+      "description": "Use LEXER for syntax highlighting. See https://pygments.org/docs/lexers/",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "lexer"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-y",
+        "--hyperlinks"
+      ],
+      "description": "Render hyperlinks in markdown"
+    },
+    {
+      "names": [
+        "--no-wrap"
+      ],
+      "description": "Don't word wrap syntax highlighted files"
+    },
+    {
+      "names": [
+        "--title"
+      ],
+      "description": "Set panel title to TEXT",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--caption"
+      ],
+      "description": "Set panel caption to TEXT",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--force-terminal"
+      ],
+      "description": "Force terminal output when not writing to a terminal"
+    },
+    {
+      "names": [
+        "-o",
+        "--export-html"
+      ],
+      "description": "Write HTML to PATH",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--export-svg"
+      ],
+      "description": "Write SVG to PATH",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pager"
+      ],
+      "description": "Display in an interactive pager"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version and exit"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show this message and exit"
+    }
+  ],
+  "args": [
+    {
+      "name": "path/text/url",
+      "template": "filepaths"
+    }
+  ]
+}

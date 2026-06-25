@@ -1,0 +1,45 @@
+{
+  "name": "tr",
+  "description": "Translate characters",
+  "options": [
+    {
+      "names": [
+        "-C"
+      ],
+      "description": "Complement the set of characters in string1, that is '-C ab' includes every character except for 'a' and 'b'"
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Same as '-C' but complement the set of values in string1"
+    },
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Delete characters in string1 from the input"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Squeeze multiple occurrences of the characters listed in the last operand (either string1 or string2) in the input into a single instance of the character. This occurs after all deletion and translation is completed"
+    },
+    {
+      "names": [
+        "-u"
+      ],
+      "description": "Guarantee that any output is unbuffered"
+    }
+  ],
+  "args": [
+    {
+      "name": "string1"
+    },
+    {
+      "name": "string2",
+      "optional": true
+    }
+  ]
+}

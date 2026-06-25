@@ -1,0 +1,300 @@
+{
+  "name": "googler",
+  "description": "Google from the command-line",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show this help message and exit"
+    },
+    {
+      "names": [
+        "-s",
+        "--start"
+      ],
+      "description": "Start at the Nth result",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "N"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--count"
+      ],
+      "description": "Show N results",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "N"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-N",
+        "--news"
+      ],
+      "description": "Show results from news section"
+    },
+    {
+      "names": [
+        "-V",
+        "--videos"
+      ],
+      "description": "Show results from videos section"
+    },
+    {
+      "names": [
+        "-c",
+        "--tld"
+      ],
+      "description": "Country-specific search with top-level domain .TLD, e.g., 'in' for India",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "top-level domain"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--lang"
+      ],
+      "description": "Display in language",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "language"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-g",
+        "--geoloc"
+      ],
+      "description": "Country-specific geolocation search with country code CC, e.g. 'in' for India",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "CC"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-x",
+        "--exact"
+      ],
+      "description": "Disable automatic spelling correction"
+    },
+    {
+      "names": [
+        "--colorize"
+      ],
+      "description": "Whether to colorize output which enables color when stdout is a tty device",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C",
+        "--nocolor"
+      ],
+      "description": "Equivalent to --colorize=never"
+    },
+    {
+      "names": [
+        "--colors"
+      ],
+      "description": "Set output colors",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "colors",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-j",
+        "--first",
+        "--lucky"
+      ],
+      "description": "Open the first result in web browser and exit"
+    },
+    {
+      "names": [
+        "-t",
+        "--time"
+      ],
+      "description": "Time limit search [h5 (5 hrs), d5 (5 days), w5 (5 weeks), m5 (5 months), y5 (5 years)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "time limit"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--from"
+      ],
+      "description": "Starting date/month/year of date range. Can be used in conjunction with --to and overrides -t, --time",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "date"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--to"
+      ],
+      "description": "Ending date/month/year of date range",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "date"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-w",
+        "--site"
+      ],
+      "description": "Search a site using Google",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "site"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e",
+        "--exclude"
+      ],
+      "description": "Exclude site from results"
+    },
+    {
+      "names": [
+        "--unfilter"
+      ],
+      "description": "Do not omit similar results"
+    },
+    {
+      "names": [
+        "-p",
+        "--proxy"
+      ],
+      "description": "Tunnel traffic through an HTTP proxy",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PROXY"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--notweak"
+      ],
+      "description": "Disable TCP optimizations and forced TLS 1.2"
+    },
+    {
+      "names": [
+        "--json"
+      ],
+      "description": "Output in JSON format; implies --noprompt"
+    },
+    {
+      "names": [
+        "--url-handler"
+      ],
+      "description": "Custom script or cli utility to open results",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "util"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--show-browser-logs"
+      ],
+      "description": "Do not suppress browser output (stdout and stderr)"
+    },
+    {
+      "names": [
+        "--np",
+        "--noprompt"
+      ],
+      "description": "Search and exit, do not prompt"
+    },
+    {
+      "names": [
+        "-4",
+        "--ipv4"
+      ],
+      "description": "Only connect over IPv4 (by default, IPv4 is preferred but IPv6 is used as a fallback)"
+    },
+    {
+      "names": [
+        "-6",
+        "--ipv6"
+      ],
+      "description": "Only connect over IPv6"
+    },
+    {
+      "names": [
+        "-u",
+        "--upgrade"
+      ],
+      "description": "Perform in-place self-upgrade"
+    },
+    {
+      "names": [
+        "--include-git"
+      ],
+      "description": "When used with --upgrade, get latest git master"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show program's version number and exit"
+    },
+    {
+      "names": [
+        "-d",
+        "--debug"
+      ],
+      "description": "Enable debugging"
+    }
+  ],
+  "args": [
+    {
+      "name": "keyword",
+      "optional": true,
+      "variadic": true
+    }
+  ]
+}

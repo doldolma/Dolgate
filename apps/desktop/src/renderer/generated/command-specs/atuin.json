@@ -1,0 +1,764 @@
+{
+  "name": "atuin",
+  "description": "Magical shell history",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Print help"
+    },
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Print version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "history",
+      "description": "Manipulate shell history",
+      "subcommands": [
+        {
+          "name": "start",
+          "description": "Begins a new command in the history",
+          "args": [
+            {
+              "name": "COMMAND",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "end",
+          "description": "Finishes a new command in the history (adds time, exit code)",
+          "options": [
+            {
+              "names": [
+                "--exit",
+                "-e"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "EXIT"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "ID"
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List all items in history",
+          "options": [
+            {
+              "names": [
+                "--cwd",
+                "-c"
+              ]
+            },
+            {
+              "names": [
+                "--session",
+                "-s"
+              ]
+            },
+            {
+              "names": [
+                "--human"
+              ]
+            },
+            {
+              "names": [
+                "--cmd-only"
+              ],
+              "description": "Show only the text of the command"
+            },
+            {
+              "names": [
+                "--format",
+                "-f"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "FORMAT"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "last",
+          "description": "Get the last command ran",
+          "options": [
+            {
+              "names": [
+                "--human"
+              ]
+            },
+            {
+              "names": [
+                "--cmd-only"
+              ],
+              "description": "Show only the text of the command"
+            },
+            {
+              "names": [
+                "--format",
+                "-f"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "FORMAT"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "import",
+      "description": "Import shell history from file",
+      "subcommands": [
+        {
+          "name": "auto",
+          "description": "Import history for the current shell"
+        },
+        {
+          "name": "zsh",
+          "description": "Import history from the zsh history file"
+        },
+        {
+          "name": "zsh-hist-db",
+          "description": "Import history from the zsh history file"
+        },
+        {
+          "name": "bash",
+          "description": "Import history from the bash history file"
+        },
+        {
+          "name": "resh",
+          "description": "Import history from the resh history file"
+        },
+        {
+          "name": "fish",
+          "description": "Import history from the fish history file"
+        },
+        {
+          "name": "nu",
+          "description": "Import history from the nu history file"
+        },
+        {
+          "name": "nu-hist-db",
+          "description": "Import history from the nu history file"
+        }
+      ]
+    },
+    {
+      "name": "stats",
+      "description": "Calculate statistics for your history",
+      "options": [
+        {
+          "names": [
+            "--count",
+            "-c"
+          ],
+          "description": "How many top commands to list",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "COUNT"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "PERIOD",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Interactive history search",
+      "options": [
+        {
+          "names": [
+            "--cwd",
+            "-c"
+          ],
+          "description": "Filter search result by directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "CWD"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-cwd"
+          ],
+          "description": "Exclude directory from results",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "EXCLUDE_CWD"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exit",
+            "-e"
+          ],
+          "description": "Filter search result by exit code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "EXIT"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-exit"
+          ],
+          "description": "Exclude results with this exit code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "EXCLUDE_EXIT"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--before",
+            "-b"
+          ],
+          "description": "Only include results added before this date",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "BEFORE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--after"
+          ],
+          "description": "Only include results after this date",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "AFTER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "How many entries to return at most",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "LIMIT"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--offset"
+          ],
+          "description": "Offset from the start of the results",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "OFFSET"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--interactive",
+            "-i"
+          ],
+          "description": "Open interactive search UI"
+        },
+        {
+          "names": [
+            "--filter-mode"
+          ],
+          "description": "Allow overriding filter mode over config",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "FILTER_MODE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--search-mode"
+          ],
+          "description": "Allow overriding search mode over config",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SEARCH_MODE"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--human"
+          ],
+          "description": "Use human-readable formatting for time"
+        },
+        {
+          "names": [
+            "--cmd-only"
+          ],
+          "description": "Show only the text of the command"
+        },
+        {
+          "names": [
+            "--delete"
+          ],
+          "description": "Delete anything matching this query. Will not print out the match"
+        },
+        {
+          "names": [
+            "--delete-it-all"
+          ],
+          "description": "Delete EVERYTHING!"
+        },
+        {
+          "names": [
+            "--reverse",
+            "-r"
+          ],
+          "description": "Reverse the order of results, oldest first"
+        },
+        {
+          "names": [
+            "--format",
+            "-f"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "FORMAT"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inline-height"
+          ],
+          "description": "Set the maximum number of lines Atuin's interface should take up",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "INLINE_HEIGHT"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "QUERY",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "sync",
+      "description": "Sync with the configured server",
+      "options": [
+        {
+          "names": [
+            "--force",
+            "-f"
+          ],
+          "description": "Force re-download everything"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Login to the configured server",
+      "options": [
+        {
+          "names": [
+            "--username",
+            "-u"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "USERNAME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--password",
+            "-p"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PASSWORD"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--key",
+            "-k"
+          ],
+          "description": "The encryption key for your account",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "KEY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Log out"
+    },
+    {
+      "name": "register",
+      "description": "Register with the configured server",
+      "options": [
+        {
+          "names": [
+            "--username",
+            "-u"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "USERNAME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--password",
+            "-p"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PASSWORD"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--email",
+            "-e"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "EMAIL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "key",
+      "description": "Print the encryption key for transfer to another machine",
+      "options": [
+        {
+          "names": [
+            "--base64"
+          ],
+          "description": "Switch to base64 output of the key"
+        }
+      ]
+    },
+    {
+      "name": "status"
+    },
+    {
+      "name": "account",
+      "subcommands": [
+        {
+          "name": "login",
+          "description": "Login to the configured server",
+          "options": [
+            {
+              "names": [
+                "--username",
+                "-u"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "USERNAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--password",
+                "-p"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "PASSWORD"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--key",
+                "-k"
+              ],
+              "description": "The encryption key for your account",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "KEY"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "register",
+          "options": [
+            {
+              "names": [
+                "--username",
+                "-u"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "USERNAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--password",
+                "-p"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "PASSWORD"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--email",
+                "-e"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "EMAIL"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "logout",
+          "description": "Log out"
+        },
+        {
+          "name": "delete"
+        }
+      ]
+    },
+    {
+      "name": "kv",
+      "subcommands": [
+        {
+          "name": "set",
+          "options": [
+            {
+              "names": [
+                "--key",
+                "-k"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "KEY"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--namespace",
+                "-n"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "NAMESPACE"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "VALUE"
+            }
+          ]
+        },
+        {
+          "name": "get",
+          "options": [
+            {
+              "names": [
+                "--namespace",
+                "-n"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "NAMESPACE"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "KEY"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "server",
+      "description": "Start an atuin server",
+      "subcommands": [
+        {
+          "name": "start",
+          "description": "Start the server",
+          "options": [
+            {
+              "names": [
+                "--host"
+              ],
+              "description": "The host address to bind",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "HOST"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--port",
+                "-p"
+              ],
+              "description": "The port to bind",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "PORT"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Output shell setup",
+      "options": [
+        {
+          "names": [
+            "--disable-ctrl-r"
+          ],
+          "description": "Disable the binding of CTRL-R to atuin"
+        },
+        {
+          "names": [
+            "--disable-up-arrow"
+          ],
+          "description": "Disable the binding of the Up Arrow key to atuin"
+        }
+      ],
+      "args": [
+        {
+          "name": "SHELL"
+        }
+      ]
+    },
+    {
+      "name": "uuid",
+      "description": "Generate a UUID"
+    },
+    {
+      "name": "contributors"
+    },
+    {
+      "name": "gen-completions",
+      "description": "Generate shell completions",
+      "options": [
+        {
+          "names": [
+            "--shell",
+            "-s"
+          ],
+          "description": "Set the shell for generating completions",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SHELL"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--out-dir",
+            "-o"
+          ],
+          "description": "Set the output directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "OUT_DIR"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

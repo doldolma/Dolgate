@@ -1,0 +1,912 @@
+{
+  "name": "zapier",
+  "description": "The Zapier CLI is a developer-focused way to create and maintain Zapier integrations. See more at https://github.com/zapier/zapier-platform",
+  "subcommands": [
+    {
+      "name": "analytics",
+      "description": "Show the status of the analytics that are collected. Also used to change what is collected",
+      "options": [
+        {
+          "names": [
+            "-m",
+            "--mode"
+          ],
+          "description": "Choose how much information to share. Anonymous mode drops the OS type and Zapier user id, but keeps command info. Identifying information is used only for debugging purposes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Build a pushable zip from the current directory",
+      "options": [
+        {
+          "names": [
+            "--disable-dependency-detection"
+          ],
+          "description": "Disable \"smart\" file inclusion. By default, Zapier only includes files that are required by `index.js`. If you (or your dependencies) require files dynamically (such as with `require(someVar)`), then you may see \"Cannot find module\" errors. Disabling this may make your `build.zip` too large. If that's the case, try using the `includeInBuild` option in your `.zapierapprc`. See the docs about `includeInBuild` for more info"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "convert",
+      "description": "Convert a Legacy Web Builder app or Visual Builder integration to a CLI integration",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Convert a specific version. Required when converting a Visual Builder integration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "integrationId"
+        },
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "delete:integration",
+      "description": "Delete your integration (including all versions)",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "delete:version",
+      "description": "Delete a specific version of your integration",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "deprecate",
+      "description": "Mark a non-production version of your integration as deprecated, with removal by a certain date",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        },
+        {
+          "name": "date"
+        }
+      ]
+    },
+    {
+      "name": "describe",
+      "description": "Describe the current integraiton",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "env:get",
+      "description": "Get environment variables for a version",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "env:set",
+      "description": "Set environment variables for a version",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        },
+        {
+          "name": "key-value pairs...",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "env:unset",
+      "description": "Unset environment variables for a version",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        },
+        {
+          "name": "keys...",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "history",
+      "description": "Get the history of your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initialize a new Zapier integration with a project template",
+      "options": [
+        {
+          "names": [
+            "-t",
+            "--template"
+          ],
+          "description": "The template to start your integration with",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "template"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "integrations",
+      "description": "List integrations you have admin access to",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "link",
+      "description": "Link the current directory with an existing integration",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Configure your `~/.zapierrc` with a deploy key",
+      "options": [
+        {
+          "names": [
+            "-s",
+            "--sso"
+          ],
+          "description": "Use this flag if you log into Zapier a Single Sign-On (SSO) button and don't have a Zapier password"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Deactivate your active deploy key and reset `~/.zapierrc`",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Print recent logs",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--version"
+          ],
+          "description": "Filter logs to the specified version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-s",
+            "--status"
+          ],
+          "description": "Filter logs to only see errors or successes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--type"
+          ],
+          "description": "See logs of the specified type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--detailed"
+          ],
+          "description": "See extra info, like request/response body and headers"
+        },
+        {
+          "names": [
+            "-u",
+            "--user"
+          ],
+          "description": "Only show logs for this user. Defaults to your account",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "user"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--limit"
+          ],
+          "description": "Cap the number of logs returned. Max is 50 (also the default)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "limit"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "migrate",
+      "description": "Migrate users from one version of your integration to another",
+      "options": [
+        {
+          "names": [
+            "--user"
+          ],
+          "description": "Migrate only this user",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "user"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "fromVersion"
+        },
+        {
+          "name": "toVersion"
+        },
+        {
+          "name": "percent",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "promote",
+      "description": "Promote a specific version to public access",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "version"
+        }
+      ]
+    },
+    {
+      "name": "push",
+      "description": "Build and upload the current integration",
+      "options": [
+        {
+          "names": [
+            "--disable-dependency-detection"
+          ],
+          "description": "Disable \"smart\" file inclusion. By default, Zapier only includes files that are required by `index.js`. If you (or your dependencies) require files dynamically (such as with `require(someVar)`), then you may see \"Cannot find module\" errors. Disabling this may make your `build.zip` too large. If that's the case, try using the `includeInBuild` option in your `.zapierapprc`. See the docs about `includeInBuild` for more info"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "register",
+      "description": "Register a new integration in your account",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "title",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "scaffold",
+      "description": "Add a starting trigger, create, search, or resource to your integration",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--dest"
+          ],
+          "description": "Specify the new file's directory. Use this flag when you want to create a different folder structure such as `src/triggers` instead of the default `triggers`. Defaults to `[triggers|searches|creates]/{noun}`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dest",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--test-dest"
+          ],
+          "description": "Specify the new test file's directory. Use this flag when you want to create a different folder structure such as `src/triggers` instead of the default `triggers`. Defaults to `test/[triggers|searches|creates]/{noun}`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "test-dest",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-e",
+            "--entry"
+          ],
+          "description": "Supply the path to your integration's root (`index.js`). Only needed if your `index.js` is in a subfolder, like `src`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "entry",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Should we overwrite an existing trigger/search/create file?"
+        },
+        {
+          "names": [
+            "--no-help"
+          ],
+          "description": "When scaffolding, should we skip adding helpful intro comments? Useful if this isn't your first rodeo"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "actionType"
+        },
+        {
+          "name": "noun"
+        }
+      ]
+    },
+    {
+      "name": "team:add",
+      "description": "Add a team member to your integration",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "email"
+        },
+        {
+          "name": "role"
+        },
+        {
+          "name": "message",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "team:get",
+      "description": "Get team members involved with your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "team:remove",
+      "description": "Remove a team member from all versions of your integration",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Test your integration via the \"test\" script in your \"package.json\"",
+      "options": [
+        {
+          "names": [
+            "--skip-validate"
+          ],
+          "description": "Forgo running `zapier validate` before tests are run. This will speed up tests if you're modifying functionality of an existing integration rather than adding new actions"
+        },
+        {
+          "names": [
+            "--yarn"
+          ],
+          "description": "Use `yarn` instead of `npm`. This happens automatically if there's a `yarn.lock` file, but you can manually force `yarn` if you run tests from a sub-directory"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "upload",
+      "description": "Upload the latest build of your integration to Zapier",
+      "options": [
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "users:add",
+      "description": "Add a user to some or all versions of your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Skip confirmation. Useful for running programmatically"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "email"
+        },
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "users:get",
+      "description": "Get a list of users who have been invited to your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "users:links",
+      "description": "Get a list of links that are used to invite users to your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "users:remove",
+      "description": "Remove a user from all versions of your integration",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Skips confirmation. Useful for running programmatically"
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ],
+      "args": [
+        {
+          "name": "email"
+        }
+      ]
+    },
+    {
+      "name": "validate",
+      "description": "Validate your integration",
+      "options": [
+        {
+          "names": [
+            "--without-style"
+          ],
+          "description": "Forgo pinging the Zapier server to run further checks"
+        },
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "versions",
+      "description": "List the versions of your integration available for use in the Zapier editor",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Change the way structured data is presented. If \"json\" or \"raw\", you can pipe the output of the command into other tools, such as jq",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--debug"
+          ],
+          "description": "Show extra debugging output"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Display help for <%= config.bin %>",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "See all commands in CLI"
+        }
+      ],
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

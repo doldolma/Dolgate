@@ -1,0 +1,202 @@
+{
+  "name": "swc",
+  "description": "SWC is a super-fast compiler written in rust; producing widely-supported javascript from modern standards and typescript",
+  "options": [
+    {
+      "names": [
+        "--filename",
+        "-f"
+      ],
+      "description": "Filename to use when reading from stdin. This will be used in source maps and errors",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--config-file"
+      ],
+      "description": "Path to a .swcrc file to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "CONFIG_FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--env-name"
+      ],
+      "description": "The name of the 'env' to use when loading configs and plugins. Defaults to the value of SWC_ENV, or else NODE_ENV, or else development",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ENV_NAME"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-swcrc"
+      ],
+      "description": "Whether or not to look up .swcrc files"
+    },
+    {
+      "names": [
+        "--ignore"
+      ],
+      "description": "List of glob paths to not compile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--only"
+      ],
+      "description": "List of glob paths to only compile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PATH",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--watch",
+        "-w"
+      ],
+      "description": "Watch for changes and recompile"
+    },
+    {
+      "names": [
+        "--quiet",
+        "-q"
+      ],
+      "description": "Suppress compilation output"
+    },
+    {
+      "names": [
+        "--source-maps",
+        "-s"
+      ],
+      "description": "Generate source maps",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "SOURCE_MAP"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--source-map-target"
+      ],
+      "description": "Define the file for the source map",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--source-file-name"
+      ],
+      "description": "Set sources[0] on returned source map"
+    },
+    {
+      "names": [
+        "--source-root"
+      ],
+      "description": "The root from which all sources are relative"
+    },
+    {
+      "names": [
+        "--out-file",
+        "-o"
+      ],
+      "description": "Compile all input files into a single file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "OUTPUT_FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--out-dir",
+        "-d"
+      ],
+      "description": "Compile an input directory of modules into an output directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "OUTPUT_DIR",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--copy-files",
+        "-D"
+      ],
+      "description": "When compiling a directory, copy over non-compilable files"
+    },
+    {
+      "names": [
+        "--include-dotfiles"
+      ],
+      "description": "Include dotfiles when compiling and copying non-compilable files"
+    },
+    {
+      "names": [
+        "--config",
+        "-C"
+      ],
+      "description": "Override a config from .swcrc file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "CONFIG_FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sync"
+      ],
+      "description": "Invoke swc synchronously. Useful for debugging"
+    },
+    {
+      "names": [
+        "--log-watch-compilation"
+      ],
+      "description": "Log a message when a watched file is successfully compiled"
+    },
+    {
+      "names": [
+        "--extensions"
+      ],
+      "description": "Log a message when a watched file is successfully compiled"
+    }
+  ]
+}

@@ -1,0 +1,373 @@
+{
+  "name": "src",
+  "description": "Interact with Sourcegraph from the command line",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for src"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "search",
+      "description": "Run a code search",
+      "options": [
+        {
+          "names": [
+            "-display"
+          ],
+          "description": "Limit the number of results that are displayed. Only supported together with stream flag. Statistics continue to report all results"
+        },
+        {
+          "names": [
+            "-dump-requests"
+          ],
+          "description": "Log GraphQL requests and responses to stdout"
+        },
+        {
+          "names": [
+            "-explain-json"
+          ],
+          "description": "Explain the JSON output schema and exit"
+        },
+        {
+          "names": [
+            "-get-curl"
+          ],
+          "description": "Print the curl command for executing this query and exit. (WARNING: Includes printing your access token!)"
+        },
+        {
+          "names": [
+            "-insecure-skip-verify"
+          ],
+          "description": "Skip validation of TLD certificates against trusted chains"
+        },
+        {
+          "names": [
+            "-json"
+          ],
+          "description": "Whether or not to output results as JSON"
+        },
+        {
+          "names": [
+            "-less"
+          ],
+          "description": "Pipe output to `less -R` (only if stdout is terminal, and not json flag)"
+        },
+        {
+          "names": [
+            "-stream"
+          ],
+          "description": "Consume results as stream. Streaming search only supports a subset of flags and parameters: trace, insecure-skip-verify, display, json"
+        },
+        {
+          "names": [
+            "-trace"
+          ],
+          "description": "Log the trace ID for requests"
+        },
+        {
+          "names": [
+            "-user-agent-telemetry"
+          ],
+          "description": "Include the operating system and architecture in the User-Agent sent with requests to Sourcegraph"
+        }
+      ]
+    },
+    {
+      "name": "api",
+      "description": "Sourcegraph API Access",
+      "options": [
+        {
+          "names": [
+            "-get-curl"
+          ],
+          "description": "Print the curl command for executing this query and exit (WARNING: includes printing your access token!)"
+        },
+        {
+          "names": [
+            "-dump-requests"
+          ],
+          "description": "Log GraphQL requests and responses to stdout"
+        },
+        {
+          "names": [
+            "-insecure-skip-verify"
+          ],
+          "description": "Skip validation of TLS certificates against trusted chains"
+        },
+        {
+          "names": [
+            "-query"
+          ],
+          "description": "GraphQL query to execute, e.g. ‘query { currentUser { username } }’ (stdin otherwise)"
+        },
+        {
+          "names": [
+            "-trace"
+          ],
+          "description": "Log the trace ID for requests"
+        },
+        {
+          "names": [
+            "-user-agent-telemetry"
+          ],
+          "description": "Include the operating system and architecture in the User-Agent sent with requests to Sourcegraph"
+        },
+        {
+          "names": [
+            "-vars"
+          ],
+          "description": "GraphQL query variables to include as JSON string, e.g. ‘{“var”: “val”, “var2”: “val2”}’"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "'src login' helps you authenticate 'src' to access a Sourcegraph instance with your user credentials",
+      "options": [
+        {
+          "names": [
+            "-dump-requests"
+          ],
+          "description": "Log GraphQL requests and responses to stdout"
+        },
+        {
+          "names": [
+            "-get-curl"
+          ],
+          "description": "Print the curl command for executing this query and exit (WARNING: includes printing your access token!)"
+        },
+        {
+          "names": [
+            "-insecure-skip-verify"
+          ],
+          "description": "Skip validation of TLS certificates against trusted chains"
+        },
+        {
+          "names": [
+            "-trace"
+          ],
+          "description": "Log the trace ID for requests"
+        },
+        {
+          "names": [
+            "-user-agent-telemetry"
+          ],
+          "description": "Include the operating system and architecture in the User-Agent sent with requests to Sourcegraph"
+        }
+      ]
+    },
+    {
+      "name": "batch",
+      "description": "'Batch gives you a declarative structure for finding and modifying code across all of your repositories",
+      "subcommands": [
+        {
+          "name": "apply",
+          "description": "Apply batch"
+        },
+        {
+          "name": "exec",
+          "description": "Execute batch"
+        },
+        {
+          "name": "new",
+          "description": "New batch"
+        },
+        {
+          "name": "preview",
+          "description": "Preview batch"
+        },
+        {
+          "name": "repositories",
+          "description": "Repositories to batch"
+        },
+        {
+          "name": "validate",
+          "description": "Validate batch"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "'src config' helps you configure 'src'",
+      "subcommands": [
+        {
+          "name": "edit",
+          "description": "Edit config"
+        },
+        {
+          "name": "get",
+          "description": "Get configs"
+        },
+        {
+          "name": "list",
+          "description": "List configs"
+        }
+      ]
+    },
+    {
+      "name": "extsvc",
+      "description": "Edit or view external service configuration on the Sourcegraph instance",
+      "subcommands": [
+        {
+          "name": "edit",
+          "description": "Edit external service configuration"
+        },
+        {
+          "name": "list",
+          "description": "List external service configurations"
+        }
+      ]
+    },
+    {
+      "name": "lsif",
+      "description": "Upload an LSIF dumps",
+      "subcommands": [
+        {
+          "name": "upload",
+          "description": "Upload LSIF dump"
+        }
+      ]
+    },
+    {
+      "name": "orgs",
+      "description": "Create, edit, view, or delete organizations and members",
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create an organization"
+        },
+        {
+          "name": "delete",
+          "description": "Delete an organization"
+        },
+        {
+          "name": "get",
+          "description": "Get an organization"
+        },
+        {
+          "name": "list",
+          "description": "List organizations"
+        },
+        {
+          "name": "members",
+          "description": "List organization members"
+        }
+      ]
+    },
+    {
+      "name": "repos",
+      "description": "View or delete repositories",
+      "subcommands": [
+        {
+          "name": "delete",
+          "description": "Delete repository"
+        },
+        {
+          "name": "get",
+          "description": "Get repository"
+        },
+        {
+          "name": "list",
+          "description": "List repositories"
+        }
+      ]
+    },
+    {
+      "name": "serve-git",
+      "description": "By default 'src serve-git' will recursively serve your current directory on the address ':3434'",
+      "options": [
+        {
+          "names": [
+            "-addr"
+          ],
+          "description": "Address on which to server (end with : for unused port)"
+        },
+        {
+          "names": [
+            "-list"
+          ],
+          "description": "List found repository names"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "description": "Create, edit, view, tag, or delete users",
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create user"
+        },
+        {
+          "name": "delete",
+          "description": "Delete user"
+        },
+        {
+          "name": "get",
+          "description": "Get user"
+        },
+        {
+          "name": "list",
+          "description": "List users"
+        },
+        {
+          "name": "tag",
+          "description": "Tag user"
+        }
+      ]
+    },
+    {
+      "name": "validate",
+      "description": "EXPERIMENTAL: Instance validation provides a quick way to check that a Sourcegraph instance functions properly after a fresh install or an update",
+      "options": [
+        {
+          "names": [
+            "-context"
+          ],
+          "description": "Comma-separated list of key=value pairs to add to the script execution context"
+        },
+        {
+          "names": [
+            "-dump-requests"
+          ],
+          "description": "Log GraphQL requests and responses to stdout"
+        },
+        {
+          "names": [
+            "-get-curl"
+          ],
+          "description": "Print the curl command for executing this query and exit (WARNING: includes printing your access token!)"
+        },
+        {
+          "names": [
+            "-insecure-skip-verify"
+          ],
+          "description": "Skip validation of TLS certificates against trusted chains"
+        },
+        {
+          "names": [
+            "-secrets"
+          ],
+          "description": "Path to a file containing key=value lines. The key value pairs will be added to the script context"
+        },
+        {
+          "names": [
+            "-trace"
+          ],
+          "description": "Log the trace ID for requests"
+        },
+        {
+          "names": [
+            "-user-agent-telemetry"
+          ],
+          "description": "Include the operating system and architecture in the User-Agent sent with requests to Sourcegraph"
+        }
+      ]
+    }
+  ]
+}

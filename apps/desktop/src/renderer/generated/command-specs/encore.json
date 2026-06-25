@@ -1,0 +1,601 @@
+{
+  "name": "encore",
+  "description": "Encore is the fastest way of developing backend applications",
+  "options": [
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Verbose output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "verbose"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "app",
+      "description": "Commands to create and link Encore apps",
+      "subcommands": [
+        {
+          "name": "clone",
+          "description": "Clone an Encore app to your computer"
+        },
+        {
+          "name": "create",
+          "description": "Create a new Encore app",
+          "options": [
+            {
+              "names": [
+                "--example"
+              ],
+              "description": "URL to example code to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "example"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "link",
+          "description": "Link an Encore app with the server",
+          "options": [
+            {
+              "names": [
+                "--force",
+                "-f"
+              ],
+              "description": "Force link even if the app is already linked"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "description": "Commands to authenticate with Encore",
+      "subcommands": [
+        {
+          "name": "login",
+          "description": "Log in to Encore",
+          "options": [
+            {
+              "names": [
+                "--auth-key",
+                "-k"
+              ],
+              "description": "Auth Key to use for login",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "auth-key"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "logout",
+          "description": "Logs out the currently logged in user"
+        },
+        {
+          "name": "signup",
+          "description": "Create a new Encore account"
+        },
+        {
+          "name": "whoami",
+          "description": "Show the current logged in user"
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "description": "Checks your application for compile-time errors using Encore's compiler",
+      "options": [
+        {
+          "names": [
+            "--codegen-debug"
+          ],
+          "description": "Dump generated code (for debugging Encore's code generation)"
+        }
+      ]
+    },
+    {
+      "name": "daemon",
+      "description": "Starts the encore daemon",
+      "options": [
+        {
+          "names": [
+            "--foreground",
+            "-f"
+          ],
+          "description": "Start the daemon in the foreground"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "env",
+          "description": "Prints Encore environment information"
+        }
+      ]
+    },
+    {
+      "name": "db",
+      "description": "Database management commands",
+      "subcommands": [
+        {
+          "name": "conn-uri",
+          "description": "Outputs the database connection string",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "-e"
+              ],
+              "description": "Environment name to connect to (such as \"prod\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "proxy",
+          "description": "Sets up a proxy tunnel to the database",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "-e"
+              ],
+              "description": "Environment name to connect to (such as \"prod\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--port",
+                "-p"
+              ],
+              "description": "Port to listen on (defaults to a random port)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "port"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Resets the databases for the given services. Use --all to reset all databases",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Reset all services in the application"
+            }
+          ]
+        },
+        {
+          "name": "shell",
+          "description": "Connects to the database via psql shell",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "-e"
+              ],
+              "description": "Environment name to connect to (such as \"prod\")",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "eject",
+      "description": "Eject provides ways to eject your application to migrate away from using Encore",
+      "subcommands": [
+        {
+          "name": "docker",
+          "description": "Docker builds a portable docker image of your Encore application",
+          "options": [
+            {
+              "names": [
+                "--base"
+              ],
+              "description": "Base image to build from",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "base"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--push",
+                "-p"
+              ],
+              "description": "Push image to remote repository"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gen",
+      "description": "Code generation commands",
+      "subcommands": [
+        {
+          "name": "client",
+          "description": "Generates an API client for your app",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "-e"
+              ],
+              "description": "The environment to fetch the API for (defaults to the primary environment)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--lang",
+                "-l"
+              ],
+              "description": "The language to generate code for (\"typescript\" and \"go\" are supported)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "lang"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output",
+                "-o"
+              ],
+              "description": "The filename to write the generated client code to",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output",
+                  "template": "filepaths"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "wrappers",
+          "description": "Generates user-facing wrapper code"
+        }
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Streams logs from your application",
+      "options": [
+        {
+          "names": [
+            "--env",
+            "-e"
+          ],
+          "description": "Environment name to stream logs from (defaults to the production environment)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "env"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Whether to print logs in raw JSON format"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Runs your application",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Compile for debugging (disables some optimizations)"
+        },
+        {
+          "names": [
+            "--listen"
+          ],
+          "description": "Address to listen on (for example \"0.0.0.0:4000\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "listen"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port",
+            "-p"
+          ],
+          "description": "Port to listen on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tunnel"
+          ],
+          "description": "Create a tunnel to your machine for others to test against"
+        },
+        {
+          "names": [
+            "--watch",
+            "-w"
+          ],
+          "description": "Watch for changes and live-reload"
+        }
+      ]
+    },
+    {
+      "name": "secret",
+      "description": "Secret management commands",
+      "subcommands": [
+        {
+          "name": "set",
+          "description": "Sets a secret value",
+          "options": [
+            {
+              "names": [
+                "--dev",
+                "-d"
+              ],
+              "description": "To set the secret for development use"
+            },
+            {
+              "names": [
+                "--prod",
+                "-p"
+              ],
+              "description": "To set the secret for production use"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Tests your application"
+    },
+    {
+      "name": "version",
+      "description": "Reports the current version of the encore application",
+      "subcommands": [
+        {
+          "name": "update",
+          "description": "Checks for an update of encore and, if one is available, runs the appropriate command to update it"
+        }
+      ]
+    },
+    {
+      "name": "vpn",
+      "description": "VPN management commands",
+      "subcommands": [
+        {
+          "name": "start",
+          "description": "Sets up a secure connection to private environments"
+        },
+        {
+          "name": "status",
+          "description": "Determines the status of the VPN connection"
+        },
+        {
+          "name": "stop",
+          "description": "Stops the VPN connection"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "app",
+          "description": "Commands to create and link Encore apps",
+          "subcommands": [
+            {
+              "name": "clone",
+              "description": "Clone an Encore app to your computer"
+            },
+            {
+              "name": "create",
+              "description": "Create a new Encore app"
+            },
+            {
+              "name": "link",
+              "description": "Link an Encore app with the server"
+            }
+          ]
+        },
+        {
+          "name": "auth",
+          "description": "Commands to authenticate with Encore",
+          "subcommands": [
+            {
+              "name": "login",
+              "description": "Log in to Encore"
+            },
+            {
+              "name": "logout",
+              "description": "Logs out the currently logged in user"
+            },
+            {
+              "name": "signup",
+              "description": "Create a new Encore account"
+            },
+            {
+              "name": "whoami",
+              "description": "Show the current logged in user"
+            }
+          ]
+        },
+        {
+          "name": "check",
+          "description": "Checks your application for compile-time errors using Encore's compiler"
+        },
+        {
+          "name": "daemon",
+          "description": "Starts the encore daemon",
+          "subcommands": [
+            {
+              "name": "env",
+              "description": "Prints Encore environment information"
+            }
+          ]
+        },
+        {
+          "name": "db",
+          "description": "Database management commands",
+          "subcommands": [
+            {
+              "name": "conn-uri",
+              "description": "Outputs the database connection string"
+            },
+            {
+              "name": "proxy",
+              "description": "Sets up a proxy tunnel to the database"
+            },
+            {
+              "name": "reset",
+              "description": "Resets the databases for the given services. Use --all to reset all databases"
+            },
+            {
+              "name": "shell",
+              "description": "Connects to the database via psql shell"
+            }
+          ]
+        },
+        {
+          "name": "eject",
+          "description": "Eject provides ways to eject your application to migrate away from using Encore",
+          "subcommands": [
+            {
+              "name": "docker",
+              "description": "Docker builds a portable docker image of your Encore application"
+            }
+          ]
+        },
+        {
+          "name": "gen",
+          "description": "Code generation commands",
+          "subcommands": [
+            {
+              "name": "client",
+              "description": "Generates an API client for your app"
+            },
+            {
+              "name": "wrappers",
+              "description": "Generates user-facing wrapper code"
+            }
+          ]
+        },
+        {
+          "name": "logs",
+          "description": "Streams logs from your application"
+        },
+        {
+          "name": "run",
+          "description": "Runs your application"
+        },
+        {
+          "name": "secret",
+          "description": "Secret management commands",
+          "subcommands": [
+            {
+              "name": "set",
+              "description": "Sets a secret value"
+            }
+          ]
+        },
+        {
+          "name": "test",
+          "description": "Tests your application"
+        },
+        {
+          "name": "version",
+          "description": "Reports the current version of the encore application",
+          "subcommands": [
+            {
+              "name": "update",
+              "description": "Checks for an update of encore and, if one is available, runs the appropriate command to update it"
+            }
+          ]
+        },
+        {
+          "name": "vpn",
+          "description": "VPN management commands",
+          "subcommands": [
+            {
+              "name": "start",
+              "description": "Sets up a secure connection to private environments"
+            },
+            {
+              "name": "status",
+              "description": "Determines the status of the VPN connection"
+            },
+            {
+              "name": "stop",
+              "description": "Stops the VPN connection"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

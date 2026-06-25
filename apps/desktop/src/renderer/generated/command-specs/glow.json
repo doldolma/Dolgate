@@ -1,0 +1,131 @@
+{
+  "name": "glow",
+  "description": "Render markdown on the CLI, with pizzazz!",
+  "options": [
+    {
+      "names": [
+        "-a",
+        "--all"
+      ],
+      "description": "Show system files and directories (TUI-mode only)"
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Config file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Help for glow"
+    },
+    {
+      "names": [
+        "-l",
+        "--local"
+      ],
+      "description": "Show local files only; no network (TUI-mode only)"
+    },
+    {
+      "names": [
+        "-p",
+        "--pager"
+      ],
+      "description": "Display with pager"
+    },
+    {
+      "names": [
+        "-s",
+        "--style"
+      ],
+      "description": "Style name or JSON path (default 'auto')",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Version for glow"
+    },
+    {
+      "names": [
+        "-w",
+        "--width"
+      ],
+      "description": "Word-wrap at width",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "column"
+        }
+      ]
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "config",
+      "description": "Edit the glow config file"
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "stash",
+      "description": "Manage your stash of markdown files",
+      "options": [
+        {
+          "names": [
+            "-m",
+            "--memo"
+          ],
+          "description": "Memo/note for stashing",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "note"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "path",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "source|dir",
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

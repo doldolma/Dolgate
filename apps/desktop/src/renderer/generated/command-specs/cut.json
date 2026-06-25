@@ -1,0 +1,80 @@
+{
+  "name": "cut",
+  "description": "Cut out selected portions of each line of a file",
+  "options": [
+    {
+      "names": [
+        "-b"
+      ],
+      "description": "Byte positions as a comma or - separated list of numbers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Column positions as a comma or - separated list of numbers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Field positions as a comma or - separated list of numbers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "list"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n"
+      ],
+      "description": "Do not split multi-byte characters"
+    },
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Use delim as the field delimiter character instead of the tab character",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "delim",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Suppress lines with no field delimiter characters.  unless specified, lines with no delimiters are passed through unmodified"
+    },
+    {
+      "names": [
+        "-w"
+      ],
+      "description": "Use whitespace (spaces and tabs) as the delimiter.  Consecutive spaces and tabs count as one single field separator"
+    }
+  ],
+  "args": [
+    {
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

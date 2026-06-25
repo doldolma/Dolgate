@@ -1,0 +1,177 @@
+{
+  "name": "build-storybook",
+  "description": "Storybook build CLI tools",
+  "options": [
+    {
+      "names": [
+        "-o",
+        "--output-dir"
+      ],
+      "description": "Directory where to store built files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-w",
+        "--watch"
+      ],
+      "description": "Enables watch mode"
+    },
+    {
+      "names": [
+        "--loglevel"
+      ],
+      "description": "Controls level of logging during build",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Display usage information"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Display the version number"
+    },
+    {
+      "names": [
+        "-s",
+        "--static-dir"
+      ],
+      "description": "Directory where to load static files from, comma-separated list",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c",
+        "--config-dir"
+      ],
+      "description": "Directory where to load Storybook configurations from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--https"
+      ],
+      "description": "Serve Storybook over HTTPS. Note: You must provide your own certificate information"
+    },
+    {
+      "names": [
+        "--ssl-ca"
+      ],
+      "description": "Provide an SSL certificate authority. (Optional with --https, required if using a self-signed certificate)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "certificate authority"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ssl-cert"
+      ],
+      "description": "Provide an SSL certificate. (Required with --https)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "certificate"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ssl-key"
+      ],
+      "description": "Provide an SSL key. (Required with --https)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "key"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--smoke-test"
+      ],
+      "description": "Exit after successful start"
+    },
+    {
+      "names": [
+        "--ci"
+      ],
+      "description": "CI mode (skip interactive prompts, don't open browser)"
+    },
+    {
+      "names": [
+        "--quiet"
+      ],
+      "description": "Suppress verbose build output"
+    },
+    {
+      "names": [
+        "--no-dll"
+      ],
+      "description": "Do not use dll reference (no-op)"
+    },
+    {
+      "names": [
+        "--debug-webpack"
+      ],
+      "description": "Display final webpack configurations for debugging purposes"
+    },
+    {
+      "names": [
+        "--webpack-stats-json"
+      ],
+      "description": "Write Webpack Stats JSON to disk",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--docs"
+      ],
+      "description": "Starts Storybook in documentation mode"
+    },
+    {
+      "names": [
+        "--no-manager-cache"
+      ],
+      "description": "Disables Storybook's manager caching mechanism. NOTE: this flag disables the internal caching of Storybook and can severely impact your Storybook loading time, so only use it when you need to refresh Storybook's UI, such as when editing themes"
+    }
+  ]
+}

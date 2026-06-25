@@ -1,0 +1,113 @@
+{
+  "name": "shasum",
+  "description": "Print or Check SHA Checksums",
+  "options": [
+    {
+      "names": [
+        "-a",
+        "--algorithm"
+      ],
+      "description": "Select SHA algorithm",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "-b",
+        "--binary"
+      ],
+      "description": "Read in binary mode"
+    },
+    {
+      "names": [
+        "-c",
+        "--check"
+      ],
+      "description": "Read SHA sums from the FILEs and check them"
+    },
+    {
+      "names": [
+        "--tag"
+      ],
+      "description": "Create a BSD-style checksum"
+    },
+    {
+      "names": [
+        "-t",
+        "--text"
+      ],
+      "description": "Read in text mode (default)"
+    },
+    {
+      "names": [
+        "-U",
+        "--UNIVERSAL"
+      ],
+      "description": "Read in Universal Newlines mode - produces same digest on Windows/Unix/Mac"
+    },
+    {
+      "names": [
+        "-0",
+        "--01"
+      ],
+      "description": "Read in BITS mode - ASCII '0' as 0-bit, ASCII '1' as 1-bit, others ignored"
+    },
+    {
+      "names": [
+        "--ignore-missing"
+      ],
+      "description": "Don't fail or report status for missing files"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Don't print OK for each successfully verified file"
+    },
+    {
+      "names": [
+        "-s",
+        "--status"
+      ],
+      "description": "Don't output anything, status code shows success"
+    },
+    {
+      "names": [
+        "--strict"
+      ],
+      "description": "Exit non-zero for improperly formatted checksum lines"
+    },
+    {
+      "names": [
+        "-w",
+        "--warn"
+      ],
+      "description": "Warn about improperly formatted checksum lines"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help and exit"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output version information and exit"
+    }
+  ],
+  "args": [
+    {
+      "name": "FILE",
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

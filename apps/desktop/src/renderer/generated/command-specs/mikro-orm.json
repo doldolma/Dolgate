@@ -1,0 +1,418 @@
+{
+  "name": "mikro-orm",
+  "description": "TypeScript ORM for Node.js based on Data Mapper, Unit of Work and Identity Map patterns. Supports MongoDB, MySQL, MariaDB, PostgreSQL and SQLite databases",
+  "options": [
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version number"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "cache:clear",
+      "description": "Clear metadata cache"
+    },
+    {
+      "name": "cache:generate",
+      "description": "Generate metadata cache for production"
+    },
+    {
+      "name": "generate-entities",
+      "description": "Generate entities based on current database schema",
+      "options": [
+        {
+          "names": [
+            "-s",
+            "--save"
+          ],
+          "description": "Saves entities to directory defined by --path"
+        },
+        {
+          "names": [
+            "-d",
+            "--dump"
+          ],
+          "description": "Dumps all entities to console"
+        },
+        {
+          "names": [
+            "-p",
+            "--path"
+          ],
+          "description": "Sets path to directory where to save entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Generates entities only for given schema",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schema"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "database:create",
+      "description": "Create your database if it does not exist"
+    },
+    {
+      "name": "database:import",
+      "description": "Imports the SQL file to the database",
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "seeder:run",
+      "description": "Seed the database using the seeder class"
+    },
+    {
+      "name": "seeder:create",
+      "description": "Create a new seeder class",
+      "options": [
+        {
+          "names": [
+            "--class"
+          ],
+          "description": "Seeder class to run"
+        }
+      ]
+    },
+    {
+      "name": "schema:create",
+      "description": "Create database schema based on current metadata",
+      "options": [
+        {
+          "names": [
+            "-r",
+            "--run"
+          ],
+          "description": "Runs queries"
+        },
+        {
+          "names": [
+            "-d",
+            "--dump"
+          ],
+          "description": "Dumps all queries to console"
+        },
+        {
+          "names": [
+            "--fk-checks"
+          ],
+          "description": "Do not skip foreign key checks"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Set the current schema for wildcard schema entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schema"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seed"
+          ],
+          "description": "Allows to seed the database on create or drop and recreate",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "seed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "schema:drop",
+      "description": "Drop database schema based on current metadata",
+      "options": [
+        {
+          "names": [
+            "-r",
+            "--run"
+          ],
+          "description": "Runs queries"
+        },
+        {
+          "names": [
+            "-d",
+            "--dump"
+          ],
+          "description": "Dumps all queries to console"
+        },
+        {
+          "names": [
+            "--fk-checks"
+          ],
+          "description": "Do not skip foreign key checks"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Set the current schema for wildcard schema entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schema"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--drop-migrations-table"
+          ],
+          "description": "Drop also migrations table"
+        },
+        {
+          "names": [
+            "--drop-db"
+          ],
+          "description": "Drop the whole database"
+        }
+      ]
+    },
+    {
+      "name": "schema:update",
+      "description": "Update database schema based on current metadata",
+      "options": [
+        {
+          "names": [
+            "-r",
+            "--run"
+          ],
+          "description": "Runs queries"
+        },
+        {
+          "names": [
+            "-d",
+            "--dump"
+          ],
+          "description": "Dumps all queries to console"
+        },
+        {
+          "names": [
+            "--fk-checks"
+          ],
+          "description": "Do not skip foreign key checks"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Set the current schema for wildcard schema entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schema"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--safe"
+          ],
+          "description": "Allows to disable table and column dropping"
+        },
+        {
+          "names": [
+            "--drop-tables"
+          ],
+          "description": "Allows to disable table dropping"
+        }
+      ]
+    },
+    {
+      "name": "schema:fresh",
+      "description": "Drop and recreate database schema based on current metadata",
+      "options": [
+        {
+          "names": [
+            "-r",
+            "--run"
+          ],
+          "description": "Runs queries"
+        },
+        {
+          "names": [
+            "--schema"
+          ],
+          "description": "Set the current schema for wildcard schema entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schema"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--seed"
+          ],
+          "description": "Allows to seed the database on create or drop and recreate",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "seed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "migration:create",
+      "description": "Create new migration with current schema diff",
+      "options": [
+        {
+          "names": [
+            "-b",
+            "--blank"
+          ],
+          "description": "Create blank migration"
+        },
+        {
+          "names": [
+            "-i",
+            "--initial"
+          ],
+          "description": "Create initial migration"
+        },
+        {
+          "names": [
+            "-d",
+            "--dump"
+          ],
+          "description": "Dumps all queries to console"
+        },
+        {
+          "names": [
+            "-p",
+            "--path"
+          ],
+          "description": "Sets path to directory where to save entities",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "migration:up",
+      "description": "Migrate up to the latest version",
+      "options": [
+        {
+          "names": [
+            "-t",
+            "--to"
+          ],
+          "description": "Migrate up to specific version"
+        },
+        {
+          "names": [
+            "-f",
+            "--from"
+          ],
+          "description": "Start migration from specific version"
+        },
+        {
+          "names": [
+            "-o",
+            "--only"
+          ],
+          "description": "Migrate only specified versions"
+        }
+      ]
+    },
+    {
+      "name": "migration:down",
+      "description": "Migrate one step down",
+      "options": [
+        {
+          "names": [
+            "-t",
+            "--to"
+          ],
+          "description": "Migrate down to specific version"
+        },
+        {
+          "names": [
+            "-f",
+            "--from"
+          ],
+          "description": "Start migration from specific version"
+        },
+        {
+          "names": [
+            "-o",
+            "--only"
+          ],
+          "description": "Migrate only specified versions"
+        }
+      ]
+    },
+    {
+      "name": "migration:list",
+      "description": "List all executed migrations"
+    },
+    {
+      "name": "migration:pending",
+      "description": "List all pending migrations"
+    },
+    {
+      "name": "migration:fresh",
+      "description": "Clear the database and rerun all migrations",
+      "options": [
+        {
+          "names": [
+            "--seed"
+          ],
+          "description": "Allows to seed the database on create or drop and recreate",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "seed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "Debug CLI configuration"
+    }
+  ]
+}

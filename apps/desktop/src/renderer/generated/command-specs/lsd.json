@@ -1,0 +1,280 @@
+{
+  "name": "lsd",
+  "description": "An ls command with a lot of pretty colors and some other stuff",
+  "options": [
+    {
+      "names": [
+        "-1",
+        "--oneline"
+      ],
+      "description": "Display one entry per line"
+    },
+    {
+      "names": [
+        "-A",
+        "--almost-all"
+      ],
+      "description": "Do not list implied . and"
+    },
+    {
+      "names": [
+        "-a",
+        "--all"
+      ],
+      "description": "Do not ignore entries starting with"
+    },
+    {
+      "names": [
+        "-d",
+        "--directory-only"
+      ],
+      "description": "Display directories themselves, and not their contents (recursively when used with --tree)"
+    },
+    {
+      "names": [
+        "-F",
+        "--classify"
+      ],
+      "description": "Append indicator (one of */=>@|) at the end of the file names"
+    },
+    {
+      "names": [
+        "-h",
+        "--human-readable"
+      ],
+      "description": "For ls compatibility purposes ONLY, currently set by default"
+    },
+    {
+      "names": [
+        "-i",
+        "--inode"
+      ],
+      "description": "Display the index number of each file"
+    },
+    {
+      "names": [
+        "-L",
+        "--dereference"
+      ],
+      "description": "When showing file information for a symbolic link, show information for the file the link references rather than for the link itself"
+    },
+    {
+      "names": [
+        "-l",
+        "--long"
+      ],
+      "description": "Display the extended file metadata as a table"
+    },
+    {
+      "names": [
+        "-R",
+        "--recursive"
+      ],
+      "description": "Recurse into directories"
+    },
+    {
+      "names": [
+        "-r",
+        "--reverse"
+      ],
+      "description": "Reverse the order of the sort"
+    },
+    {
+      "names": [
+        "-S",
+        "--sizesort"
+      ],
+      "description": "Sort by size"
+    },
+    {
+      "names": [
+        "-t",
+        "--timesort"
+      ],
+      "description": "Sort by time modified"
+    },
+    {
+      "names": [
+        "-v",
+        "--versionsort"
+      ],
+      "description": "Natural sort of (version) numbers within text"
+    },
+    {
+      "names": [
+        "--classic"
+      ],
+      "description": "Enable classic mode (no colors or icons)"
+    },
+    {
+      "names": [
+        "-X",
+        "--extensionsort"
+      ],
+      "description": "Sort by file extension"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--ignore-config"
+      ],
+      "description": "Ignore the configuration file"
+    },
+    {
+      "names": [
+        "--no-symlink"
+      ],
+      "description": "Do not display symlink target"
+    },
+    {
+      "names": [
+        "--total-size"
+      ],
+      "description": "Display the total size of directories"
+    },
+    {
+      "names": [
+        "--tree"
+      ],
+      "description": "Recurse into directories and present the result as a tree"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Prints version information"
+    },
+    {
+      "names": [
+        "--blocks"
+      ],
+      "description": "Specify the blocks that will be displayed and in what order",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "blocks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "When to use terminal colours",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "color"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--date"
+      ],
+      "description": "How to display date",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "date"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--depth"
+      ],
+      "description": "Stop recursing into directories after reaching depth",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "num"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--group-dirs"
+      ],
+      "description": "Sort the directories then the files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "group-dirs"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--icon"
+      ],
+      "description": "When to print the icons",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "icon"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--icon-theme"
+      ],
+      "description": "Whether to use fancy or unicode icons",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "icon-theme"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ignore-glob"
+      ],
+      "description": "Do not display files/directories with names matching the glob pattern(s). More than one can be specified by repeating the argument",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--size"
+      ],
+      "description": "How to display size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sort"
+      ],
+      "description": "Sort by WORD instead of name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "WORD"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "folders"
+    }
+  ]
+}

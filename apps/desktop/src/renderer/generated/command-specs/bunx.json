@@ -1,0 +1,9 @@
+{
+  "name": "bunx",
+  "args": [
+    {
+      "name": "command",
+      "hasGenerator": true
+    }
+  ]
+}

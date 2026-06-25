@@ -1,0 +1,182 @@
+{
+  "name": "laravel",
+  "description": "Laravel Installer",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display the help message"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Do not output any message"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Display this application version"
+    },
+    {
+      "names": [
+        "--ansi"
+      ],
+      "description": "Force ANSI output"
+    },
+    {
+      "names": [
+        "--no-ansi"
+      ],
+      "description": "Disable ANSI output"
+    },
+    {
+      "names": [
+        "-n",
+        "--no-interaction"
+      ],
+      "description": "Do not ask any interactive question"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Increase the verbosity of messages: 1 for normal output, 2 for more verbose output and 3 for debug"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "help",
+      "options": [
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "The output format (txt, xml, json, or md)",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--raw"
+          ],
+          "description": "To output raw command list"
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "options": [
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "The output format (txt, xml, json, or md)",
+          "takesArg": true,
+          "args": [
+            {}
+          ]
+        },
+        {
+          "names": [
+            "--raw"
+          ],
+          "description": "To output raw command list"
+        }
+      ]
+    },
+    {
+      "name": "new",
+      "description": "Create a new Laravel application",
+      "options": [
+        {
+          "names": [
+            "--dev"
+          ],
+          "description": "Installs the latest \"development\" release"
+        },
+        {
+          "names": [
+            "--git"
+          ],
+          "description": "Initialize a Git repository"
+        },
+        {
+          "names": [
+            "--branch"
+          ],
+          "description": "The branch that should be created for a new repository",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "BRANCH"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--github"
+          ],
+          "description": "Create a new repository on GitHub",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "GITHUB",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--jet"
+          ],
+          "description": "Installs the Laravel Jetstream scaffolding"
+        },
+        {
+          "names": [
+            "--stack"
+          ],
+          "description": "The Jetstream stack that should be installed",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "STACK"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--teams"
+          ],
+          "description": "Indicates whether Jetstream should be scaffolded with team support"
+        },
+        {
+          "names": [
+            "--prompt-jetstream"
+          ],
+          "description": "Issues a prompt to determine if Jetstream should be installed"
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Forces install even if the directory already exists"
+        }
+      ],
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    }
+  ]
+}

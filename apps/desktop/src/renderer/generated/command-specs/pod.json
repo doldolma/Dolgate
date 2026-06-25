@@ -1,0 +1,1663 @@
+{
+  "name": "pod",
+  "description": "CocoaPods, the Cocoa library package manager",
+  "options": [
+    {
+      "names": [
+        "--silent"
+      ],
+      "description": "Show nothing"
+    },
+    {
+      "names": [
+        "--verbose"
+      ],
+      "description": "Show more debugging information"
+    },
+    {
+      "names": [
+        "--no-ansi"
+      ],
+      "description": "Show output without ANSI codes"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help banner of specified command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "deintegrate",
+      "description": "Deintegrate CocoaPods from your project",
+      "options": [
+        {
+          "names": [
+            "--project-directory"
+          ],
+          "description": "The path to the root of the project directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "/project/dir/",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "args": [
+        {
+          "name": "XCODE_PROJECT",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "description": "Manipulate the CocoaPods cache",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "clean",
+          "description": "Remove the cache for pods",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Remove all the cached pods without asking"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List the paths of pod caches for each known pod",
+          "options": [
+            {
+              "names": [
+                "--short"
+              ],
+              "description": "Only print the path relative to the cache root"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List pods",
+      "options": [
+        {
+          "names": [
+            "--update"
+          ],
+          "description": "Run `pod repo update` before listing"
+        },
+        {
+          "names": [
+            "--stats"
+          ],
+          "description": "Show additional stats (like GitHub watchers and forks)"
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ]
+    },
+    {
+      "name": "setup",
+      "description": "Setup the CocoaPods environment",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ]
+    },
+    {
+      "name": "spec",
+      "description": "Manage pod specs",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "edit",
+          "description": "Edit a spec file",
+          "options": [
+            {
+              "names": [
+                "--regex"
+              ],
+              "description": "Interpret the `QUERY` as a regular expression"
+            },
+            {
+              "names": [
+                "--show-all"
+              ],
+              "description": "Pick from all versions of the given podspec"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "QUERY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "description": "Create spec file stub",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME|https://github.com/USER/REPO",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "cat",
+          "description": "Prints a spec file",
+          "options": [
+            {
+              "names": [
+                "--regex"
+              ],
+              "description": "Interpret the `QUERY` as a regular expression"
+            },
+            {
+              "names": [
+                "--show-all"
+              ],
+              "description": "Pick from all versions of the given podspec"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "QUERY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "which",
+          "description": "Prints the path of the given spec",
+          "options": [
+            {
+              "names": [
+                "--regex"
+              ],
+              "description": "Interpret the `QUERY` as a regular expression"
+            },
+            {
+              "names": [
+                "--show-all"
+              ],
+              "description": "Print all versions of the given podspec"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "QUERY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validates a spec file",
+          "options": [
+            {
+              "names": [
+                "--quick"
+              ],
+              "description": "Lint skips checks that would require to download and build the spec"
+            },
+            {
+              "names": [
+                "--allow-warnings"
+              ],
+              "description": "Lint validates even if warnings are present"
+            },
+            {
+              "names": [
+                "--subspec"
+              ],
+              "description": "Lint validates only the given subspec",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "NAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-subspecs"
+              ],
+              "description": "Lint skips validation of subspecs"
+            },
+            {
+              "names": [
+                "--no-clean"
+              ],
+              "description": "Lint leaves the build directory intact for inspection"
+            },
+            {
+              "names": [
+                "--fail-fast"
+              ],
+              "description": "Lint stops on the first failing platform or subspec"
+            },
+            {
+              "names": [
+                "--use-libraries"
+              ],
+              "description": "Lint uses static libraries to install the spec"
+            },
+            {
+              "names": [
+                "--use-modular-headers"
+              ],
+              "description": "Lint uses modular headers during installation"
+            },
+            {
+              "names": [
+                "--use-static-frameworks"
+              ],
+              "description": "Lint uses static frameworks during installation"
+            },
+            {
+              "names": [
+                "--sources"
+              ],
+              "description": "The sources from which to pull dependent pods (defaults to https://cdn.cocoapods.org/). Multiple sources must be comma-delimited",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "source"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--platforms"
+              ],
+              "description": "Lint against specific platforms (defaults to all platforms supported by the podspec). Multiple platforms must be comma-delimited",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "platform"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--private"
+              ],
+              "description": "Lint skips checks that apply only to public specs"
+            },
+            {
+              "names": [
+                "--swift-version"
+              ],
+              "description": "The `SWIFT_VERSION` that should be used to lint the spec. This takes precedence over the Swift versions specified by the spec or a `.swift-version` file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "VERSION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-import-validation"
+              ],
+              "description": "Lint skips validating that the pod can be imported"
+            },
+            {
+              "names": [
+                "--skip-tests"
+              ],
+              "description": "Lint skips building and running tests during validation"
+            },
+            {
+              "names": [
+                "--test-specs"
+              ],
+              "description": "List of test specs to run",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "test-spec"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--analyze"
+              ],
+              "description": "Validate with the Xcode Static Analysis tool"
+            },
+            {
+              "names": [
+                "--configuration"
+              ],
+              "description": "Build using the given configuration (defaults to Release)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "CONFIGURATION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME.podspec|DIRECTORY|http://PATH/NAME.podspec",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install project dependencies according to versions from a Podfile.lock",
+      "options": [
+        {
+          "names": [
+            "--repo-update"
+          ],
+          "description": "Force running `pod repo update` before install"
+        },
+        {
+          "names": [
+            "--deployment"
+          ],
+          "description": "Disallow any changes to the Podfile or the Podfile.lock during installation"
+        },
+        {
+          "names": [
+            "--clean-install"
+          ],
+          "description": "Ignore the contents of the project cache and force a full pod installation. This only applies to projects that have enabled incremental installation"
+        },
+        {
+          "names": [
+            "--project-directory"
+          ],
+          "description": "The path to the root of the project directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "/project/dir/",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Display pod environment",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ]
+    },
+    {
+      "name": "outdated",
+      "description": "Show outdated project dependencies",
+      "options": [
+        {
+          "names": [
+            "--project-directory"
+          ],
+          "description": "The path to the root of the project directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "/project/dir/",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-repo-update"
+          ],
+          "description": "Skip running `pod repo update` before install"
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Generate a Podfile for the current directory",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "args": [
+        {
+          "name": "XCODEPROJ"
+        }
+      ]
+    },
+    {
+      "name": "ipc",
+      "description": "Inter-process communication",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "Lists the specifications known to CocoaPods",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ]
+        },
+        {
+          "name": "update-search-index",
+          "description": "Updates the search index",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ]
+        },
+        {
+          "name": "podfile-json",
+          "description": "Converts a Podfile to JSON",
+          "options": [
+            {
+              "names": [
+                "--project-directory"
+              ],
+              "description": "The path to the root of the project directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "/project/dir/",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "PATH",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "spec",
+          "description": "Converts a podspec to JSON",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "PATH"
+            }
+          ]
+        },
+        {
+          "name": "podfile",
+          "description": "Converts a Podfile to YAML",
+          "options": [
+            {
+              "names": [
+                "--project-directory"
+              ],
+              "description": "The path to the root of the project directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "/project/dir/",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "PATH",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "repl",
+          "description": "The repl listens to commands on standard input",
+          "options": [
+            {
+              "names": [
+                "--project-directory"
+              ],
+              "description": "The path to the root of the project directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "/project/dir/",
+                  "template": "folders"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plugins",
+      "description": "Show available CocoaPods plugins",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "search",
+          "description": "Search for known plugins",
+          "options": [
+            {
+              "names": [
+                "--full"
+              ],
+              "description": "Search by name  author, and description"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "QUERY"
+            }
+          ]
+        },
+        {
+          "name": "installed",
+          "description": "List plugins installed on your machine",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "description": "Creates a new plugin",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            },
+            {
+              "name": "TEMPLATE_URL",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "publish",
+          "description": "Request to add the plugin to the official plugins list",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lib",
+      "description": "Develop pods",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Creates a new Pod",
+          "options": [
+            {
+              "names": [
+                "--template-url"
+              ],
+              "description": "The URL of the git repo containing a compatible template",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "URL"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validates a Pod",
+          "options": [
+            {
+              "names": [
+                "--quick"
+              ],
+              "description": "Lint skips checks that would require to download and build the spec"
+            },
+            {
+              "names": [
+                "--allow-warnings"
+              ],
+              "description": "Lint validates even if warnings are present"
+            },
+            {
+              "names": [
+                "--subspec"
+              ],
+              "description": "Lint validates only the given subspec",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "NAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-subspecs"
+              ],
+              "description": "Lint skips validation of subspecs"
+            },
+            {
+              "names": [
+                "--no-clean"
+              ],
+              "description": "Lint leaves the build directory intact for inspection"
+            },
+            {
+              "names": [
+                "--fail-fast"
+              ],
+              "description": "Lint stops on the first failing platform or subspec"
+            },
+            {
+              "names": [
+                "--use-libraries"
+              ],
+              "description": "Lint uses static libraries to install the spec"
+            },
+            {
+              "names": [
+                "--use-modular-headers"
+              ],
+              "description": "Lint uses modular headers during installation"
+            },
+            {
+              "names": [
+                "--use-static-frameworks"
+              ],
+              "description": "Lint uses static frameworks during installation"
+            },
+            {
+              "names": [
+                "--sources"
+              ],
+              "description": "The sources from which to pull dependent pods (defaults to https://cdn.cocoapods.org/). Multiple,sources must be comma-delimited",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "source"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--platforms"
+              ],
+              "description": "Lint against specific platforms (defaults to all platforms supported by the podspec). Multiple platforms must be comma-delimited",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "platform"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--private"
+              ],
+              "description": "Lint skips checks that apply only to public specs"
+            },
+            {
+              "names": [
+                "--swift-version"
+              ],
+              "description": "The `SWIFT_VERSION` that should be used to lint the spec. This takes precedence over the Swift versions specified by the spec or a `.swift-version` file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "VERSION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--include-podspecs"
+              ],
+              "description": "Additional ancillary podspecs which are used for linting via :path",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "podspec",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--external-podspecs"
+              ],
+              "description": "Additional ancillary podspecs which are used for linting via :podspec. If there are --include-podspecs, then these are removed from them",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "podspec",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-import-validation"
+              ],
+              "description": "Lint skips validating that the pod can be imported"
+            },
+            {
+              "names": [
+                "--skip-tests"
+              ],
+              "description": "Lint skips building and running tests during validation"
+            },
+            {
+              "names": [
+                "--test-specs"
+              ],
+              "description": "List of test specs to run",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "test-spec"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--analyze"
+              ],
+              "description": "Validate with the Xcode Static Analysis tool"
+            },
+            {
+              "names": [
+                "--configuration"
+              ],
+              "description": "Build using the given configuration (defaults to Release)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "CONFIGURATION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "PODSPEC_PATHS",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Search for pods",
+      "options": [
+        {
+          "names": [
+            "--regex"
+          ],
+          "description": "Interpret the `QUERY` as a regular expression"
+        },
+        {
+          "names": [
+            "--simple"
+          ],
+          "description": "Search only by name"
+        },
+        {
+          "names": [
+            "--stats"
+          ],
+          "description": "Show additional stats (like GitHub watchers and forks)"
+        },
+        {
+          "names": [
+            "--web"
+          ],
+          "description": "Searches on cocoapods.org"
+        },
+        {
+          "names": [
+            "--ios"
+          ],
+          "description": "Restricts the search to Pods supported on iOS"
+        },
+        {
+          "names": [
+            "--osx"
+          ],
+          "description": "Restricts the search to Pods supported on macOS"
+        },
+        {
+          "names": [
+            "--watchos"
+          ],
+          "description": "Restricts the search to Pods supported on watchOS"
+        },
+        {
+          "names": [
+            "--tvos"
+          ],
+          "description": "Restricts the search to Pods supported on tvOS"
+        },
+        {
+          "names": [
+            "--no-pager"
+          ],
+          "description": "Do not pipe search results into a pager"
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "args": [
+        {
+          "name": "QUERY"
+        }
+      ]
+    },
+    {
+      "name": "repo",
+      "description": "Manage spec-repositories",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "push",
+          "description": "Push new specifications to a spec-repo",
+          "options": [
+            {
+              "names": [
+                "--allow-warnings"
+              ],
+              "description": "Allows pushing even if there are warnings"
+            },
+            {
+              "names": [
+                "--use-libraries"
+              ],
+              "description": "Linter uses static libraries to install the spec"
+            },
+            {
+              "names": [
+                "--use-modular-headers"
+              ],
+              "description": "Lint uses modular headers during installation"
+            },
+            {
+              "names": [
+                "--sources"
+              ],
+              "description": "The sources from which to pull dependent pods (defaults to all available repos). Multiple sources must be comma-delimited",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "source"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--local-only"
+              ],
+              "description": "Does not perform the step of pushing REPO to its remote"
+            },
+            {
+              "names": [
+                "--no-private"
+              ],
+              "description": "Lint includes checks that apply only to public repos"
+            },
+            {
+              "names": [
+                "--skip-import-validation"
+              ],
+              "description": "Lint skips validating that the pod can be imported"
+            },
+            {
+              "names": [
+                "--skip-tests"
+              ],
+              "description": "Lint skips building and running tests during validation"
+            },
+            {
+              "names": [
+                "--commit-message"
+              ],
+              "description": "Add custom commit message. Opens default editor if no commit message is specified",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "message"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--use-json"
+              ],
+              "description": "Convert the podspec to JSON before pushing it to the repo"
+            },
+            {
+              "names": [
+                "--swift-version"
+              ],
+              "description": "The `SWIFT_VERSION` that should be used when linting the spec. This takes precedence over the Swift versions specified by the spec or a `.swift-version` file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "VERSION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-overwrite"
+              ],
+              "description": "Disallow pushing that would overwrite an existing spec"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "REPO"
+            },
+            {
+              "name": "NAME.podspec",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "add",
+          "description": "Add a spec repo",
+          "options": [
+            {
+              "names": [
+                "--progress"
+              ],
+              "description": "Show the progress of cloning the spec repository"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            },
+            {
+              "name": "URL"
+            },
+            {
+              "name": "BRANCH",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove a spec repo",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "name": "add-cdn",
+          "description": "Add a spec repo backed by a CDN",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            },
+            {
+              "name": "URL"
+            }
+          ]
+        },
+        {
+          "name": "lint",
+          "description": "Validates all specs in a repo list",
+          "options": [
+            {
+              "names": [
+                "--only-errors"
+              ],
+              "description": "Lint presents only the errors"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME|DIRECTORY",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Update a spec repo",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "trunk",
+      "description": "Interact with the CocoaPods API (e.g. publishing new specs)",
+      "options": [
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "push",
+          "description": "Publish a podspec",
+          "options": [
+            {
+              "names": [
+                "--allow-warnings"
+              ],
+              "description": "Allows push even if there are lint warnings"
+            },
+            {
+              "names": [
+                "--use-libraries"
+              ],
+              "description": "Linter uses static libraries to install the spec"
+            },
+            {
+              "names": [
+                "--use-modular-headers"
+              ],
+              "description": "Lint uses modular headers during installation"
+            },
+            {
+              "names": [
+                "--swift-version"
+              ],
+              "description": "The SWIFT_VERSION that should be used to lint the spec. This takes precedence over a .swift-version file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "VERSION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--skip-import-validation"
+              ],
+              "description": "Lint skips validating that the pod can be imported"
+            },
+            {
+              "names": [
+                "--skip-tests"
+              ],
+              "description": "Lint skips building and running tests during validation"
+            },
+            {
+              "names": [
+                "--synchronous"
+              ],
+              "description": "If validation depends on other recently pushed pods ,synchronize"
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "PATH",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "deprecate",
+          "description": "Deprecates a pod",
+          "options": [
+            {
+              "names": [
+                "--in-favor-of"
+              ],
+              "description": "The pod to deprecate this pod in favor of",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "OTHER_NAME"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes a version of a pod",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            },
+            {
+              "name": "VERSION"
+            }
+          ]
+        },
+        {
+          "name": "add-owner",
+          "description": "Add an owner to a pod",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "POD"
+            },
+            {
+              "name": "OWNER-EMAIL"
+            }
+          ]
+        },
+        {
+          "name": "remove-owner",
+          "description": "Remove an owner from a pod",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "POD"
+            },
+            {
+              "name": "OWNER-EMAIL"
+            }
+          ]
+        },
+        {
+          "name": "me",
+          "description": "Display information about your sessions",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "clean-sessions",
+              "description": "Remove sessions",
+              "options": [
+                {
+                  "names": [
+                    "--all"
+                  ],
+                  "description": "Removes all your sessions  except for the current one"
+                },
+                {
+                  "names": [
+                    "--allow-root"
+                  ],
+                  "description": "Allows CocoaPods to run as root"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "register",
+          "description": "Manage sessions",
+          "options": [
+            {
+              "names": [
+                "--description"
+              ],
+              "description": "An arbitrary description to easily identify your session later on",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "DESCRIPTION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "EMAIL"
+            },
+            {
+              "name": "YOUR_NAME",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "info",
+          "description": "Returns information about a Pod",
+          "options": [
+            {
+              "names": [
+                "--allow-root"
+              ],
+              "description": "Allows CocoaPods to run as root"
+            }
+          ],
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update outdated project dependencies and create new Podfile.lock",
+      "options": [
+        {
+          "names": [
+            "--sources"
+          ],
+          "description": "The sources from which to update dependent pods. Multiple sources must be comma-delimited",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "https://cdn.cocoapods.org/"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-pods"
+          ],
+          "description": "Pods to exclude during update. Multiple pods must be comma-delimited",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "podName"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--clean-install"
+          ],
+          "description": "Ignore the contents of the project cache and force a full pod installation. This only applies to projects that have enabled incremental installation"
+        },
+        {
+          "names": [
+            "--project-directory"
+          ],
+          "description": "The path to the root of the project directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "/project/dir/",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-repo-update"
+          ],
+          "description": "Skip running `pod repo update` before install"
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "args": [
+        {
+          "name": "POD_NAMES",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "try",
+      "description": "Try a Pod!",
+      "options": [
+        {
+          "names": [
+            "--podspec_name"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-repo-update"
+          ],
+          "description": "Skip running `pod repo update` before install"
+        },
+        {
+          "names": [
+            "--allow-root"
+          ],
+          "description": "Allows CocoaPods to run as root"
+        }
+      ],
+      "args": [
+        {
+          "name": "NAME|URL"
+        }
+      ]
+    }
+  ]
+}

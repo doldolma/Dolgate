@@ -1,0 +1,434 @@
+{
+  "name": "asdf",
+  "description": "Extendable version manager with support for Ruby, Node.js, Elixir, Erlang & more",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Version for asdf"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Help for asdf"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "plugin",
+      "description": "Plugin management sub-commands",
+      "subcommands": [
+        {
+          "name": "add",
+          "description": "Add a plugin from the plugin repo OR, add a Git repo as a plugin by specifying the name and repo url",
+          "args": [
+            {
+              "name": "name",
+              "hasGenerator": true
+            },
+            {
+              "name": "git-url",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List installed plugins. Optionally show git urls and git-ref",
+          "options": [
+            {
+              "names": [
+                "--urls"
+              ],
+              "description": "Show git urls"
+            },
+            {
+              "names": [
+                "--refs"
+              ],
+              "description": "Show git refs"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "all",
+              "description": "List plugins registered on asdf-plugins repository with URLs"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "Remove plugin and package versions",
+          "args": [
+            {
+              "name": "name",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Update a plugin to latest commit on default branch or a particular git-ref",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Update all plugins to latest commit on default branch"
+            }
+          ],
+          "args": [
+            {
+              "name": "name",
+              "optional": true
+            },
+            {
+              "name": "git-ref",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plugin-add",
+      "description": "Add a plugin from the plugin repo OR, add a Git repo as a plugin by specifying the name and repo url",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "git-url",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "plugin-list",
+      "description": "List installed plugins. Optionally show git urls and git-ref",
+      "options": [
+        {
+          "names": [
+            "--urls"
+          ],
+          "description": "Show git urls"
+        },
+        {
+          "names": [
+            "--refs"
+          ],
+          "description": "Show git refs"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "all",
+          "description": "List plugins registered on asdf-plugins repository with URLs"
+        }
+      ]
+    },
+    {
+      "name": "plugin-list-all",
+      "description": "List plugins registered on asdf-plugins repository with URLs"
+    },
+    {
+      "name": "plugin-remove",
+      "description": "Remove plugin and package versions",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "plugin-update",
+      "description": "Update a plugin to latest commit on default branch or a particular git-ref",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Update all plugins to latest commit on default branch"
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "optional": true
+        },
+        {
+          "name": "git-ref",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install plugin at stated version, or all from .tools-versions",
+      "args": [
+        {
+          "name": "name",
+          "optional": true,
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Remove a specific version of a package",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "current",
+      "description": "Display current versions for named package (else all)",
+      "args": [
+        {
+          "name": "name",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "where",
+      "description": "Display install path for given package at optional specified version",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "which",
+      "description": "Display path to an executable",
+      "args": [
+        {
+          "name": "command",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "local",
+      "description": "Set package local version",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "global",
+      "description": "Set package global version",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Set the package version to ASDF_${LANG}_VERSION` in the current shell",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "latest",
+      "description": "Display latest version available to install for a named package",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List installed versions of a package",
+      "subcommands": [
+        {
+          "name": "all",
+          "description": "List all available (remote) versions of a package",
+          "args": [
+            {
+              "name": "name",
+              "hasGenerator": true
+            },
+            {
+              "name": "version",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list-all",
+      "description": "List all available (remote) versions of a package",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Output documentation for plugin and tool",
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Executes the command shim for the current version",
+      "args": [
+        {
+          "name": "command",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Prints or runs an executable under a command environment",
+      "args": [
+        {
+          "name": "command",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "info",
+      "description": "Print os, shell and asdf debug information"
+    },
+    {
+      "name": "reshim",
+      "description": "Recreate shims for version of a package",
+      "args": [
+        {
+          "name": "name",
+          "optional": true,
+          "hasGenerator": true
+        },
+        {
+          "name": "version",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "shim",
+      "description": "Shim management sub-commands",
+      "subcommands": [
+        {
+          "name": "versions",
+          "description": "List for given command which plugins and versions provide it",
+          "args": [
+            {
+              "name": "command",
+              "hasGenerator": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "shim-versions",
+      "description": "List for given command which plugins and versions provide it",
+      "args": [
+        {
+          "name": "command",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update ASDF to the latest stable release (unless --head)",
+      "options": [
+        {
+          "names": [
+            "--head"
+          ],
+          "description": "Using HEAD commit"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Version for asdf"
+    }
+  ]
+}

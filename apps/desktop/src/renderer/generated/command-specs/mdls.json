@@ -1,0 +1,58 @@
+{
+  "name": "mdls",
+  "description": "Lists the metadata attributes for the specified file",
+  "options": [
+    {
+      "names": [
+        "--name",
+        "-name"
+      ],
+      "description": "Print only the matching metadata attribute value.  Can be used multiple times",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "attributeName"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--raw",
+        "-raw"
+      ],
+      "description": "Print raw attribute data in the order that was requested. Fields will be separated with a ASCII NUL character, suitable for piping to xargs(1) -0"
+    },
+    {
+      "names": [
+        "--nullMarker",
+        "-nullMarker"
+      ],
+      "description": "Sets a marker string to be used when a requested attribute is null. Only used in -raw mode.  Default is '(null)'"
+    },
+    {
+      "names": [
+        "--plist",
+        "-plist"
+      ],
+      "description": "Output attributes in XML format to file. Use - to write to stdout option. Incompatible with options -raw, -nullMarker, and -name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "stdout or file",
+          "template": "filepaths"
+        },
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

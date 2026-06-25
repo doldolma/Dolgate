@@ -1,0 +1,456 @@
+{
+  "name": "svtplay-dl",
+  "description": "Download videos from your favourite play services",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for svtplay-dl"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show program's version number and exit"
+    },
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "Outputs to the given filename or folder"
+    },
+    {
+      "names": [
+        "--subfolder"
+      ],
+      "description": "Create a subfolder titled as the show, non-series gets in folder movies"
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Specify configuration file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "configfile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--force"
+      ],
+      "description": "Overwrite if file exists already"
+    },
+    {
+      "names": [
+        "-r",
+        "--resume"
+      ],
+      "description": "Resume a download (RTMP obsolete)"
+    },
+    {
+      "names": [
+        "-l",
+        "--live"
+      ],
+      "description": "Enable for live streams (RTMP based ones)"
+    },
+    {
+      "names": [
+        "-c",
+        "--capture_time"
+      ],
+      "description": "Define capture time in minutes of a live stream",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "capture_time"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--silent"
+      ],
+      "description": "Be less verbose"
+    },
+    {
+      "names": [
+        "--silent-semi"
+      ],
+      "description": "Only show a message when the file is downloaded"
+    },
+    {
+      "names": [
+        "-u",
+        "--username"
+      ],
+      "description": "Username (if applicable)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "username"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--password"
+      ],
+      "description": "Password (if applicable)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "password"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--thumbnail"
+      ],
+      "description": "Download thumbnail from the site if available"
+    },
+    {
+      "names": [
+        "-g",
+        "--get-url"
+      ],
+      "description": "Do not download any video, but instead print the URL"
+    },
+    {
+      "names": [
+        "--get-only-episode-url"
+      ],
+      "description": "Do not get video URLs, only print the episode URL"
+    },
+    {
+      "names": [
+        "--dont-verify-ssl-cert"
+      ],
+      "description": "Don't attempt to verify SSL certificates"
+    },
+    {
+      "names": [
+        "--http-header"
+      ],
+      "description": "A header to add to each HTTP request",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "header1=value;header2=value2"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cookies"
+      ],
+      "description": "A cookies to add to each HTTP request",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cookie1=value;cookie2=value2"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--exclude"
+      ],
+      "description": "Exclude videos with the WORD(s) in the filename. Comma separated",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "WORD1,WORD2,..."
+        }
+      ]
+    },
+    {
+      "names": [
+        "--after-date"
+      ],
+      "description": "Only videos published on or after this date",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "yyyy-MM-dd"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--proxy"
+      ],
+      "description": "Use the specified HTTP/HTTPS/SOCKS proxy. To enable experimental SOCKS proxy, specify a proper scheme. For example socks5://127.0.0.1:1080/",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "proxy"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Explain what is going on"
+    },
+    {
+      "names": [
+        "--nfo"
+      ],
+      "description": "Create a NFO file"
+    },
+    {
+      "names": [
+        "--force-nfo"
+      ],
+      "description": "Download only NFO if used with --nfo"
+    },
+    {
+      "names": [
+        "--only-audio"
+      ],
+      "description": "Only download audio if audio and video is separated"
+    },
+    {
+      "names": [
+        "--only-video"
+      ],
+      "description": "Only download video if audio and video is separated"
+    },
+    {
+      "names": [
+        "-q",
+        "--quality"
+      ],
+      "description": "Choose what format to download based on bitrate/video resolution. It will download the best format by default",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "quality"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Q",
+        "--flexible-quality"
+      ],
+      "description": "Allow given quality (as above) to differ by an amount",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "amount"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--preferred"
+      ],
+      "description": "Preferred download method (dash, hls, or http)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "preferred"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--list-quality"
+      ],
+      "description": "List the quality for a video"
+    },
+    {
+      "names": [
+        "--stream-priority"
+      ],
+      "description": "If two streams have the same quality, choose the one you prefer",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dash,hls,http"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--format-preferred"
+      ],
+      "description": "Choose the format you prefer, use --list-quality to show which one to choose from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "h264,h264-51"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--audio-language"
+      ],
+      "description": "Choose the language of the audio (it can override the default one), use --list-quality to show which one to choose from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "AUDIO_LANGUAGE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--audio-role"
+      ],
+      "description": "Choose the role of the audio (it can override the default one), use --list-quality to show which one to choose from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "AUDIO_ROLE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S",
+        "--subtitle"
+      ],
+      "description": "Download subtitle from the site if available"
+    },
+    {
+      "names": [
+        "-M",
+        "--merge-subtitle"
+      ],
+      "description": "Merge subtitle with video/audio file with corresponding ISO639-3 language code. This invokes --remux automatically"
+    },
+    {
+      "names": [
+        "--force-subtitle"
+      ],
+      "description": "Download only subtitle if its used with -S"
+    },
+    {
+      "names": [
+        "--require-subtitle"
+      ],
+      "description": "Download only if a subtitle is available"
+    },
+    {
+      "names": [
+        "--all-subtitles"
+      ],
+      "description": "Download all available subtitles for the video"
+    },
+    {
+      "names": [
+        "--raw-subtitles"
+      ],
+      "description": "Also download the subtitles in their native format"
+    },
+    {
+      "names": [
+        "--convert-subtitle-colors"
+      ],
+      "description": "Converts the color information in subtitles, to <font color=\"\"> tags"
+    },
+    {
+      "names": [
+        "-A",
+        "--all-episodes"
+      ],
+      "description": "Try to download all episodes"
+    },
+    {
+      "names": [
+        "--all-last"
+      ],
+      "description": "Get last NN episodes instead of all episodes",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NN"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--include-clips"
+      ],
+      "description": "Include clips from websites when using -A"
+    },
+    {
+      "names": [
+        "--cmore-operatorlist"
+      ],
+      "description": "Show operatorlist for cmore"
+    },
+    {
+      "names": [
+        "--cmore-operator"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "operator"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-remux"
+      ],
+      "description": "Do not automatically remux to mp4"
+    },
+    {
+      "names": [
+        "--no-merge"
+      ],
+      "description": "Do not automatically merge video, audio and possibly also subtitle(s) together"
+    },
+    {
+      "names": [
+        "--no-postprocess"
+      ],
+      "description": "Do not postprocess anything"
+    },
+    {
+      "names": [
+        "--keep-original"
+      ],
+      "description": "Do postprocessing while also keeping original files"
+    },
+    {
+      "names": [
+        "--output-format"
+      ],
+      "description": "Format you want resulting file in (mkv or mp4), mp4 is default",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mp4,mkv"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "urls",
+      "variadic": true,
+      "hasGenerator": true
+    }
+  ]
+}

@@ -1,0 +1,565 @@
+{
+  "name": "rollup",
+  "description": "Next-generation ES module bundler",
+  "options": [
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Use this config file (if argument is used but value is unspecified, defaults to rollup.config.js)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--dir"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "dirname",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e",
+        "--external"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ids"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--format"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-g",
+        "--globals"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pairs"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help message"
+    },
+    {
+      "names": [
+        "-i",
+        "--input"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "filename",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-m",
+        "--sourcemap"
+      ],
+      "description": "Generate sourcemap (`-m inline` for inline map)"
+    },
+    {
+      "names": [
+        "-n",
+        "--name"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--file"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--plugin"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "plugin"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version number"
+    },
+    {
+      "names": [
+        "-w",
+        "--watch"
+      ],
+      "description": "Watch files in bundle and rebuild on changes"
+    },
+    {
+      "names": [
+        "--amd.id"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "id"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--amd.autoId"
+      ],
+      "description": "Generate the AMD ID based off the chunk name"
+    },
+    {
+      "names": [
+        "--amd.basePath"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "prefix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--amd.define"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--assetFileNames"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--banner"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--chunkFileNames"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--compact"
+      ],
+      "description": "Minify wrapper code"
+    },
+    {
+      "names": [
+        "--context"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "variable"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--entryFileNames"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--environment"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "values"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-esModule"
+      ],
+      "description": "Do not add __esmodule property"
+    },
+    {
+      "names": [
+        "--exports"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--extend"
+      ],
+      "description": "Extend global variable defined by --name"
+    },
+    {
+      "names": [
+        "--no-externalLiveBindings"
+      ],
+      "description": "Do not generate code to support live bindings"
+    },
+    {
+      "names": [
+        "--failAfterWarnings"
+      ],
+      "description": "Exit with an error if the build produced warnings"
+    },
+    {
+      "names": [
+        "--footer"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-freeze"
+      ],
+      "description": "Do not freeze namespace objects"
+    },
+    {
+      "names": [
+        "--no-hoistTransistiveImports"
+      ],
+      "description": "Do not hoist transistive imports into entry chunks"
+    },
+    {
+      "names": [
+        "--no-indent"
+      ],
+      "description": "Don't indent result"
+    },
+    {
+      "names": [
+        "--no-interop"
+      ],
+      "description": "Do not include interop block"
+    },
+    {
+      "names": [
+        "--inlineDynamicImports"
+      ],
+      "description": "Create a single bundle when using dynamic imports"
+    },
+    {
+      "names": [
+        "--intro"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--minifyInternalImports"
+      ],
+      "description": "Force or disable minification of internal imports"
+    },
+    {
+      "names": [
+        "--namespaceToStringTag"
+      ],
+      "description": "Create proper '.toString' methods for namespaces"
+    },
+    {
+      "names": [
+        "--noConflict"
+      ],
+      "description": "Generate a noConflict method for UMD globals"
+    },
+    {
+      "names": [
+        "--outro"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--preferConst"
+      ],
+      "description": "Use 'const' instead of 'var' for exports"
+    },
+    {
+      "names": [
+        "--no-preserveEntrySignatures"
+      ],
+      "description": "Avoid facade chunks for entry points"
+    },
+    {
+      "names": [
+        "--preserveModules"
+      ],
+      "description": "Preserve module structure"
+    },
+    {
+      "names": [
+        "--preserveModulesRoot"
+      ],
+      "description": "Put preserved modules under this path at root level"
+    },
+    {
+      "names": [
+        "--preserveSymlinks"
+      ],
+      "description": "Do not follow symlinks when resolving files"
+    },
+    {
+      "names": [
+        "--no-sanitizeFileName"
+      ],
+      "description": "Do not replace invalid characters in file names"
+    },
+    {
+      "names": [
+        "--shimMissingExports"
+      ],
+      "description": "Create shim variables for missing exports"
+    },
+    {
+      "names": [
+        "--silent"
+      ],
+      "description": "Don't print warnings"
+    },
+    {
+      "names": [
+        "--sourcemapExcludeSources"
+      ],
+      "description": "Do not include source code in source maps"
+    },
+    {
+      "names": [
+        "--sourcemapFile"
+      ],
+      "description": "Specify bundle position for source maps",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--stdin=ext"
+      ],
+      "description": "Specify file extension used for stdin input"
+    },
+    {
+      "names": [
+        "--no-stdin"
+      ],
+      "description": "Do not read \"-\" from stdin"
+    },
+    {
+      "names": [
+        "--no-strict"
+      ],
+      "description": "Don't emit '\"use strict\"; in the generated modules"
+    },
+    {
+      "names": [
+        "--strictDeprecations"
+      ],
+      "description": "Throw errors for deprecated features"
+    },
+    {
+      "names": [
+        "--systemNullSetters"
+      ],
+      "description": "Replace empty SystemJS setters with 'null'"
+    },
+    {
+      "names": [
+        "--no-treeshake"
+      ],
+      "description": "Disable tree-shaking optimizations"
+    },
+    {
+      "names": [
+        "--no-treeshake.annotations"
+      ],
+      "description": "Ignore pure call annotations"
+    },
+    {
+      "names": [
+        "--no-treeshake.moduleSideEffects"
+      ],
+      "description": "Assume modules have no side effects"
+    },
+    {
+      "names": [
+        "--no-treeshake.propertyReadSideEffects"
+      ],
+      "description": "Ignore property access side-effects"
+    },
+    {
+      "names": [
+        "--no-treeshake.tryCatchDeoptimization"
+      ],
+      "description": "Do not turn off try-catch-tree-shaking"
+    },
+    {
+      "names": [
+        "--no-treeshake.unknownGlobalSideEffects"
+      ],
+      "description": "Assume unknown globals do not throw"
+    },
+    {
+      "names": [
+        "--waitForBuildInput"
+      ],
+      "description": "Wait for bundle input files"
+    },
+    {
+      "names": [
+        "--watch.buildDelay"
+      ],
+      "description": "Throttle watch rebuilds",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-watch.clearScreen"
+      ],
+      "description": "Do not clear the screen when rebuilding"
+    },
+    {
+      "names": [
+        "--watch.skipWrite"
+      ],
+      "description": "Do not write files to disk when watching"
+    },
+    {
+      "names": [
+        "--watch.exclude"
+      ],
+      "description": "Exclude files from being watched",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "files"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--watch.include"
+      ],
+      "description": "Limit watching to specified files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "files"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--validate"
+      ],
+      "description": "Validate output"
+    }
+  ]
+}

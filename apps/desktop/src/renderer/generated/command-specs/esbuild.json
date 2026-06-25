@@ -1,0 +1,666 @@
+{
+  "name": "esbuild",
+  "description": "An extremely fast JavaScript bundler",
+  "options": [
+    {
+      "names": [
+        "--bundle"
+      ],
+      "description": "Bundle all dependencies into the output files"
+    },
+    {
+      "names": [
+        "--define"
+      ],
+      "description": "Replace variable names with a literal value, eg. --define:DEBUG=true",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name=value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--external"
+      ],
+      "description": "Exclude modules from the build",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "module specifier"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--format"
+      ],
+      "description": "The output format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--loader"
+      ],
+      "description": "For a given file extension, specify a loader",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "loaders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--minify"
+      ],
+      "description": "Minify the output (sets all the --minify-* options)"
+    },
+    {
+      "names": [
+        "--outdir"
+      ],
+      "description": "The output directory for multiple entrypoints",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--outfile"
+      ],
+      "description": "The output file for one entrypoint",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--platform"
+      ],
+      "description": "The platform target",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--serve"
+      ],
+      "description": "Start a local HTTP server on this host:port",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "[address:]port",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--splitting"
+      ],
+      "description": "Enable code splitting"
+    },
+    {
+      "names": [
+        "--target"
+      ],
+      "description": "Set the environment target. Can be a particular ES version or browser version, eg. chrome101",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "target"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--watch"
+      ],
+      "description": "Rebuild on file system changes",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "forever",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--allow-overwrite"
+      ],
+      "description": "Allow output files to overwrite input files"
+    },
+    {
+      "names": [
+        "--analyze"
+      ],
+      "description": "Print a report about the contents of the bundle",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "verbose",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--asset-names"
+      ],
+      "description": "Path template for 'file' loader files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "template"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--banner"
+      ],
+      "description": "Text to be prepended to each output file type",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ext=text[,ext=text...]"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--charset"
+      ],
+      "description": "Use UTF-8 instead of escaped codepoints in ASCII",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--chunk-names"
+      ],
+      "description": "Path template to use for code splitting chunks",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "template"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Force use of terminal colors",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "enabled"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--drop"
+      ],
+      "description": "Remove certain constructs",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--entry-names"
+      ],
+      "description": "Path template to use for entry point output paths",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "template"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--footer"
+      ],
+      "description": "Text to be appended to each file type",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ext=text"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--global-name"
+      ],
+      "description": "The name of the global if using --format=iife",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ignore-annotations"
+      ],
+      "description": "Enable this to work with packages that have incorrect tree-shaking annotations"
+    },
+    {
+      "names": [
+        "--inject"
+      ],
+      "description": "Import the file into all input files, automatically replace matching globals",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "import",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--jsx-factory"
+      ],
+      "description": "What to use for the JSX factory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "factory"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--jsx-fragment"
+      ],
+      "description": "What to use for the JS Fragment factory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "fragment"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--jsx"
+      ],
+      "description": "Preserve JSX instead of transforming",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--jsx-dev"
+      ],
+      "description": "Toggles development mode for the automatic runtime"
+    },
+    {
+      "names": [
+        "--jsx-import-source"
+      ],
+      "description": "Overrides the root import for runtime functions (default: react)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "source"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--keep-names"
+      ],
+      "description": "Preserve 'name' on functions and classes"
+    },
+    {
+      "names": [
+        "--legal-comments"
+      ],
+      "description": "Where to place legal comments",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "location"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-level"
+      ],
+      "description": "Set the log level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-limit"
+      ],
+      "description": "Maximum message count, 0 to disable",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "count"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--log-override"
+      ],
+      "description": "For a particular identifier, set the log level",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "identifier:level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--main-fields"
+      ],
+      "description": "Override the main file order in package.json",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "field order"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--mangle-cache"
+      ],
+      "description": "Save 'mangle props' decisions to a JSON file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--mangle-props"
+      ],
+      "description": "Rename all properties matching a regular expression",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--mangle-quoted"
+      ],
+      "description": "Enable mangling (renaming) quoted properties",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "status"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--metafile"
+      ],
+      "description": "Write metadata about the build to a JSON file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--minify-whitespace"
+      ],
+      "description": "Remove unnecessary whitespace in output files"
+    },
+    {
+      "names": [
+        "--minify-identifiers"
+      ],
+      "description": "Shorten identifiers in output files"
+    },
+    {
+      "names": [
+        "--minify-syntax"
+      ],
+      "description": "Use equivalent but shorter syntax in output files"
+    },
+    {
+      "names": [
+        "--out-extension"
+      ],
+      "description": "Use a custom output extension for each extension",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "ext=new"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--outbase"
+      ],
+      "description": "Base path used to determine entrypoint output paths, for multiple entrypoints",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--preserve-symlinks"
+      ],
+      "description": "Disable symlink resolution"
+    },
+    {
+      "names": [
+        "--public-path"
+      ],
+      "description": "Set the base URL for the 'file' loader",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pure"
+      ],
+      "description": "Mark the name as a pure function for tree shaking",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--reserve-props"
+      ],
+      "description": "Do not mangle these properties",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "properties"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--resolve-extensions"
+      ],
+      "description": "Comma-separated list of implicit extensions",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "extensions"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--servedir"
+      ],
+      "description": "What to serve in addition to the generated output files",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--source-root"
+      ],
+      "description": "Set the sourceRoot field in generated source maps",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "URL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sourcefile"
+      ],
+      "description": "Set the source file for the source map if there's no file name to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sourcemap"
+      ],
+      "description": "Generate source maps?",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "options",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sources-content"
+      ],
+      "description": "Omit the sourcesContent field in generated source maps",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--supported"
+      ],
+      "description": "Consider a given syntax to be supported",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "syntax=status"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tree-shaking"
+      ],
+      "description": "Force tree shaking on or off",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "status"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tsconfig"
+      ],
+      "description": "Use this TypeScript config instead of the default",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print the current version and exit"
+    }
+  ],
+  "args": [
+    {
+      "name": "entry points",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "login",
+  "description": "Begin session on the system",
+  "options": [
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Preserve environment"
+    },
+    {
+      "names": [
+        "-r"
+      ],
+      "description": "Perform autologin protocol for rlogin"
+    },
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Specify host",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "host"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f"
+      ],
+      "description": "Don't authenticate user, user is preauthenticated"
+    }
+  ],
+  "args": [
+    {
+      "name": "username",
+      "hasGenerator": true
+    }
+  ]
+}

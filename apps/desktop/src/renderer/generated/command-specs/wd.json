@@ -1,0 +1,123 @@
+{
+  "name": "wd",
+  "description": "Warp to directories without using cd",
+  "options": [
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Print version"
+    },
+    {
+      "names": [
+        "-d",
+        "--debug"
+      ],
+      "description": "Exit after execution with exit codes (for testing)"
+    },
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Specify config file (default ~/.warprc)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Suppress all output"
+    },
+    {
+      "names": [
+        "-f",
+        "--force"
+      ],
+      "description": "Allows overwriting without warning (for add & clean)"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Adds the current working directory to your warp points",
+      "args": [
+        {
+          "name": "point",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "rm",
+      "description": "Removes the given warp point",
+      "args": [
+        {
+          "name": "point",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Print path to given warp point",
+      "args": [
+        {
+          "name": "point",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "Print all stored warp points"
+    },
+    {
+      "name": "ls",
+      "description": "Show files from given warp point (ls)",
+      "args": [
+        {
+          "name": "point",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "path",
+      "description": "Show the path to given warp point (pwd)",
+      "args": [
+        {
+          "name": "point",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Remove points warping to nonexistent directories (will prompt unless --force is used)"
+    },
+    {
+      "name": "help",
+      "description": "Shows help for wd"
+    }
+  ],
+  "args": [
+    {
+      "name": "point",
+      "hasGenerator": true
+    },
+    {
+      "name": "path",
+      "optional": true
+    }
+  ]
+}

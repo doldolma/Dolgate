@@ -1,0 +1,101 @@
+{
+  "name": "stepzen",
+  "description": "The StepZen CLI is the primary way to build, deploy and test your schemas on StepZen",
+  "subcommands": [
+    {
+      "name": "help",
+      "description": "Display help for StepZen",
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Login to StepZen"
+    },
+    {
+      "name": "logout",
+      "description": "Logout of StepZen"
+    },
+    {
+      "name": "start",
+      "description": "Deploy, watch and develop your API",
+      "options": [
+        {
+          "names": [
+            "--dir"
+          ],
+          "description": "The working directory for StepZen assets",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--endpoint"
+          ],
+          "description": "The folder/endpoint to deploy to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "endpoint",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "The port number to use for the GraphiQL explorer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "import",
+      "description": "Import pre-configured schemas to Your API",
+      "options": [
+        {
+          "names": [
+            "--dir"
+          ],
+          "description": "The directory to which the schema will be imported",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "folders"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List the assets of a specified type that are linked to the StepZen account",
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,697 @@
+{
+  "name": "robot",
+  "description": "CLI for running Robot Framework automation tests",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "-?",
+        "--help"
+      ],
+      "description": "Print usage instructions"
+    },
+    {
+      "names": [
+        "--rpa"
+      ],
+      "description": "Turn on the generic automation mode. Mainly affects terminology so that \"test\" is replaced with \"task\" in logs and reports"
+    },
+    {
+      "names": [
+        "-F",
+        "--extension"
+      ],
+      "description": "Parse only files with this extension when executing a directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "extension"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-N",
+        "--name"
+      ],
+      "description": "Set a name of the top level suite",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-D",
+        "--doc"
+      ],
+      "description": "Set a documentation of the top level suite"
+    },
+    {
+      "names": [
+        "-M",
+        "--metadata"
+      ],
+      "description": "Set metadata of the top level suite",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name:value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-G",
+        "--settag"
+      ],
+      "description": "Sets given tag to all executed tests",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--test"
+      ],
+      "description": "Select tests by name or by long name containing also parent suite name like `Parent.Test`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--task"
+      ],
+      "description": "Alias to --test. Especially applicable with --rpa",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--suite"
+      ],
+      "description": "Select suites by name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--include"
+      ],
+      "description": "Select test cases by tag",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e",
+        "--exclude"
+      ],
+      "description": "Select test cases not to run by tag",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-R",
+        "--rerunfailed"
+      ],
+      "description": "Select failed tests from an earlier output file to be re-executed",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S",
+        "--rerunfailedsuites"
+      ],
+      "description": "Select failed suites from an earlier output file to be re-executed",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--runemptysuite"
+      ],
+      "description": "Executes suite even if it contains no tests"
+    },
+    {
+      "names": [
+        "--skip"
+      ],
+      "description": "Tests having given tag will be skipped",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--skiponfailure"
+      ],
+      "description": "Tests having given tag will be skipped if they fail",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--variable"
+      ],
+      "description": "Set variables in the test data",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "variable",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-V",
+        "--variablefile"
+      ],
+      "description": "Python or YAML file file to read variables from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--outputdir"
+      ],
+      "description": "Where to create output files. The default is the directory where tests are run from",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "directory",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "XML output file relative to --outputdir unless given as an absolute path. Default: output.xml",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--log"
+      ],
+      "description": "HTML log file. Can be disabled by giving a special value `NONE`. Default: log.html",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--report"
+      ],
+      "description": "HTML report file. Can be disabled with `NONE` similarly as --log. Default: report.html",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-x",
+        "--xunit"
+      ],
+      "description": "XUnit compatible result file. Not created unless this option is specified",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-b",
+        "--debugfile"
+      ],
+      "description": "Debug file written during execution. Not created unless this option is specified",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-T",
+        "--timestampoutputs"
+      ],
+      "description": "Adds timestamp in a format `YYYYMMDD-hhmmss` to all generated output files between their basename and extension"
+    },
+    {
+      "names": [
+        "--splitlog"
+      ],
+      "description": "Split the log file into smaller pieces that open in browsers transparently"
+    },
+    {
+      "names": [
+        "--logtitle"
+      ],
+      "description": "Title for the generated log file. The default title is `<SuiteName> Log.`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "title"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--reporttitle"
+      ],
+      "description": "Title for the generated report file. The default title is `<SuiteName> Report`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "title"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--reportbackground"
+      ],
+      "description": "Background colors to use in the report file. Given in format `passed:failed:skipped` where the `:skipped` part can be omitted",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "colors"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--maxerrorlines"
+      ],
+      "description": "Maximum number of error message lines to show in report when tests fail. Default is 40, minimum is 10 and `NONE` can be used to show the full message",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "lines"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--maxassignlength"
+      ],
+      "description": "Maximum number of characters to show in log when variables are assigned. Zero or negative values can be used to avoid showing assigned values at all. Default is 200",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "characters"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-L",
+        "--loglevel"
+      ],
+      "description": "Threshold level for logging",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--suitestatlevel"
+      ],
+      "description": "How many levels to show in `Statistics by Suite` in log and report",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tagstatinclude"
+      ],
+      "description": "Include only matching tags in `Statistics by Tag` in log and report",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tagstatexclude"
+      ],
+      "description": "Exclude matching tags from `Statistics by Tag`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tagstatcombine"
+      ],
+      "description": "Create combined statistics based on tags. These statistics are added into `Statistics by Tag`",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tags:name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tagdoc"
+      ],
+      "description": "Add documentation to tags matching the given pattern",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern:doc",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tagstatlink"
+      ],
+      "description": "Add external links into `Statistics by Tag`. Pattern can use `*`, `?` and `[]` as wildcards",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern:link:title",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--expandkeywords"
+      ],
+      "description": "Matching keywords will be automatically expanded in the log file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--removekeywords"
+      ],
+      "description": "Remove keyword data from the generated log file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--flattenkeywords"
+      ],
+      "description": "Flattens matching keywords in the generated log file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pattern"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--listener"
+      ],
+      "description": "A class for monitoring test execution. Gets notifications e.g. when tests start and end",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "class"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--nostatusrc"
+      ],
+      "description": "Sets the return code to zero regardless of failures in test cases. Error codes are returned normally"
+    },
+    {
+      "names": [
+        "--dryrun"
+      ],
+      "description": "Sets the return code to zero regardless of failures in test cases. Error codes are returned normally"
+    },
+    {
+      "names": [
+        "-X",
+        "--exitonfailure"
+      ],
+      "description": "Stops test execution if any test fails"
+    },
+    {
+      "names": [
+        "--exitonerror"
+      ],
+      "description": "Stops test execution if any error occurs when parsing test data, importing libraries, and so on"
+    },
+    {
+      "names": [
+        "--skipteardownonexit"
+      ],
+      "description": "Causes teardowns to be skipped if test execution is stopped prematurely"
+    },
+    {
+      "names": [
+        "--randomize"
+      ],
+      "description": "Randomizes the test execution order",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--prerunmodifier"
+      ],
+      "description": "Class to programmatically modify the suite structure before execution",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "class"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--prerebotmodifier"
+      ],
+      "description": "Class to programmatically modify the result model before creating reports and logs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "class"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--console"
+      ],
+      "description": "How to report execution on the console",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-.",
+        "--dotted"
+      ],
+      "description": "Shortcut for `--console dotted`"
+    },
+    {
+      "names": [
+        "--quiet"
+      ],
+      "description": "Shortcut for `--console quiet`"
+    },
+    {
+      "names": [
+        "-W",
+        "--consolewidth"
+      ],
+      "description": "Width of the console output. Default is 78",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "chars"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C",
+        "--consolecolors"
+      ],
+      "description": "Use colors on console output or not",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-K",
+        "--consolemarkers"
+      ],
+      "description": "Show markers on the console when top level keywords in a test case end",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "option"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-P",
+        "--pythonpath"
+      ],
+      "description": "Additional locations (directories, ZIPs) where to search libraries and other extensions when they are imported",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-A",
+        "--argumentfile"
+      ],
+      "description": "Text file to read more arguments from. Use special path `STDIN` to read contents from the standard input stream",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print version information"
+    }
+  ],
+  "args": [
+    {
+      "name": "robot script",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

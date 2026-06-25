@@ -1,0 +1,118 @@
+{
+  "name": "create-nx-workspace",
+  "description": "Create a new Nx workspace",
+  "options": [
+    {
+      "names": [
+        "--name"
+      ],
+      "description": "Workspace name (e.g., org name)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "workspace"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--preset"
+      ],
+      "description": "What to create in a new workspace (options: \"empty\", \"npm\", \"web-components\", \"angular\", \"angular-nest\", \"react\", \"react-express\", \"react-native\", \"next\", \"gatsby\", \"nest\", \"express\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "preset"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--appName"
+      ],
+      "description": "The name of the application created by some presets",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "appName",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cli"
+      ],
+      "description": "CLI to power the Nx workspace (options: \"nx\", \"angular\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cli"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--style"
+      ],
+      "description": "Default style option to be used when a non-empty preset is selected options: (\"css\", \"scss\", \"less\") plus (\"styl\") for all non-Angular and (\"styled-components\", \"@emotion/styled\", \"styled-jsx\") for React, Next.js, Gatsby",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "style"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--interactive"
+      ],
+      "description": "Enable interactive mode when using presets (boolean)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "interactive",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--packageManager",
+        "--pm"
+      ],
+      "description": "Package manager to use (npm, yarn, pnpm)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "packageManager"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--nx-cloud"
+      ],
+      "description": "Use Nx Cloud (boolean)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "nx-cloud",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for create-nx-workspace"
+    }
+  ],
+  "args": [
+    {
+      "name": "workspace"
+    }
+  ]
+}

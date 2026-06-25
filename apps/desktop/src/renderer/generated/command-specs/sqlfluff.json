@@ -1,0 +1,730 @@
+{
+  "name": "sqlfluff",
+  "description": "A dialect-flexible and configurable SQL linter",
+  "options": [
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the version and exit"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for sqlfluff"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "lint",
+      "description": "Lint SQL files via passing a list of files or using stdin",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--ignore",
+            "-i"
+          ],
+          "description": "Ignore particular families of errors so that they don’t cause a failed run. -–ignore behaves somewhat like noqa comments, except it applies globally",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "error"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        },
+        {
+          "names": [
+            "--exclude-rules",
+            "-e"
+          ],
+          "description": "Exclude specific rules. This could either be the allowlist, or the general set if there is no specific allowlist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exclude_rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rules",
+            "-r"
+          ],
+          "description": "Narrow the search to only specific rules",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--templater",
+            "-t"
+          ],
+          "description": "The templater to use (default=jinja)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "templater"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dialect",
+            "-d"
+          ],
+          "description": "The dialect of SQL to lint",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dialect"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--format",
+            "-f"
+          ],
+          "description": "What format to return the lint result in (default=human)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--processes",
+            "-p"
+          ],
+          "description": "The number of parallel processes to run. Positive numbers work as expected. Zero and negative numbers will work as number_of_cpus - number. e.g -1 means all cpus except one. 0 means all cpus",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "processes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disable-noqa"
+          ],
+          "description": "Set this flag to ignore inline noqa comments"
+        },
+        {
+          "names": [
+            "--bench"
+          ],
+          "description": "Set this flag to engage the benchmarking tool output"
+        },
+        {
+          "names": [
+            "--logger"
+          ],
+          "description": "Choose to limit the logging to one of the loggers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logger"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--encoding"
+          ],
+          "description": "Specify encoding to use when reading and writing files. Defaults to autodetect",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-local-config"
+          ],
+          "description": "Ignore config files in default search path locations. This option allows the user to lint with the default config or can be used in conjunction with –config to only reference the custom config file"
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Include additional config file. By default the config is generated from the standard configuration files described in the documentation. This argument allows you to specify an additional configuration file that overrides the standard configuration files. N.B. cfg format is required",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extra_config_path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--write-output"
+          ],
+          "description": "Optionally provide a filename to write the results to, mostly used in tandem with –format. NB: Setting an output file re-enables normal stdout logging",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "write_output",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--annotation-level"
+          ],
+          "description": "When format is set to github-annotation or github-annotation-native, default annotation level (default=notice). failure and error are equivalent",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "annotation-level"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disregard-sqlfluffignores"
+          ],
+          "description": "Perform the operation regardless of .sqlfluffignore configurations"
+        },
+        {
+          "names": [
+            "--disable-progress-bar"
+          ],
+          "description": "Disables progress bars"
+        },
+        {
+          "names": [
+            "--nofail"
+          ],
+          "description": "If set, the exit code will always be zero, regardless of violations found. This is potentially useful during rollout"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Show help for sqlfluff"
+        }
+      ],
+      "args": [
+        {
+          "optional": true,
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "fix",
+      "description": "Fix SQL files",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--ignore",
+            "-i"
+          ],
+          "description": "Ignore particular families of errors so that they don’t cause a failed run. -–ignore behaves somewhat like noqa comments, except it applies globally",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "errors"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        },
+        {
+          "names": [
+            "--exclude-rules",
+            "-e"
+          ],
+          "description": "Exclude specific rules. This could either be the allowlist, or the general set if there is no specific allowlist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exclude_rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rules",
+            "-r"
+          ],
+          "description": "Narrow the search to only specific rules",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--templater",
+            "-t"
+          ],
+          "description": "The templater to use (default=jinja)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "templater"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dialect",
+            "-d"
+          ],
+          "description": "The dialect of SQL to lint",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dialect"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--format",
+            "-f"
+          ],
+          "description": "What format to return the lint result in (default=human)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--processes",
+            "-p"
+          ],
+          "description": "The number of parallel processes to run. Positive numbers work as expected. Zero and negative numbers will work as number_of_cpus - number. e.g -1 means all cpus except one. 0 means all cpus",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "processes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fixed-suffix",
+            "-x"
+          ],
+          "description": "An optional suffix to add to fixed files",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "fixed_suffix"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disable-noqa"
+          ],
+          "description": "Set this flag to ignore inline noqa comments"
+        },
+        {
+          "names": [
+            "--bench"
+          ],
+          "description": "Set this flag to engage the benchmarking tool output"
+        },
+        {
+          "names": [
+            "--logger"
+          ],
+          "description": "Choose to limit the logging to one of the loggers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logger"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--encoding"
+          ],
+          "description": "Specify encoding to use when reading and writing files. Defaults to autodetect",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-local-config"
+          ],
+          "description": "Ignore config files in default search path locations. This option allows the user to lint with the default config or can be used in conjunction with –config to only reference the custom config file"
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Include additional config file. By default the config is generated from the standard configuration files described in the documentation. This argument allows you to specify an additional configuration file that overrides the standard configuration files. N.B. cfg format is required",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extra_config_path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--write-output"
+          ],
+          "description": "Optionally provide a filename to write the results to, mostly used in tandem with –format. NB: Setting an output file re-enables normal stdout logging",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "write_output",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disable-progress-bar"
+          ],
+          "description": "Disables progress bars"
+        },
+        {
+          "names": [
+            "--FIX-EVEN-UNPARSABLE"
+          ],
+          "description": "Enables fixing of files that have templating or parse errors"
+        },
+        {
+          "names": [
+            "--show-lint-violations"
+          ],
+          "description": "Show lint violations"
+        }
+      ],
+      "args": [
+        {
+          "optional": true,
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "parse",
+      "description": "Parse SQL files and just spit out the result",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--ignore",
+            "-i"
+          ],
+          "description": "Ignore particular families of errors so that they don’t cause a failed run. -–ignore behaves somewhat like noqa comments, except it applies globally",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "errors"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        },
+        {
+          "names": [
+            "--exclude-rules",
+            "-e"
+          ],
+          "description": "Exclude specific rules. This could either be the allowlist, or the general set if there is no specific allowlist",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exclude_rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rules",
+            "-r"
+          ],
+          "description": "Narrow the search to only specific rules",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rules"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--templater",
+            "-t"
+          ],
+          "description": "The templater to use (default=jinja)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "templater"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--dialect",
+            "-d"
+          ],
+          "description": "The dialect of SQL to lint",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dialect"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--code-only",
+            "-c"
+          ],
+          "description": "Output only the code elements of the parse tree"
+        },
+        {
+          "names": [
+            "--include-meta",
+            "-m"
+          ],
+          "description": "Include meta segments (indents, dedents and placeholders) in the output. This only applies when outputting json or yaml"
+        },
+        {
+          "names": [
+            "--format",
+            "-f"
+          ],
+          "description": "What format to return the lint result in (default=human)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--disable-noqa"
+          ],
+          "description": "Set this flag to ignore inline noqa comments"
+        },
+        {
+          "names": [
+            "--bench"
+          ],
+          "description": "Set this flag to engage the benchmarking tool output"
+        },
+        {
+          "names": [
+            "--recurse"
+          ],
+          "description": "The depth to recursively parse to (0 for unlimited)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "recurse"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--logger"
+          ],
+          "description": "Choose to limit the logging to one of the loggers",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "logger"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--encoding"
+          ],
+          "description": "Specify encoding to use when reading and writing files. Defaults to autodetect",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "encoding"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore-local-config"
+          ],
+          "description": "Ignore config files in default search path locations. This option allows the user to lint with the default config or can be used in conjunction with –config to only reference the custom config file"
+        },
+        {
+          "names": [
+            "--config"
+          ],
+          "description": "Include additional config file. By default the config is generated from the standard configuration files described in the documentation. This argument allows you to specify an additional configuration file that overrides the standard configuration files. N.B. cfg format is required",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extra_config_path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--write-output"
+          ],
+          "description": "Optionally provide a filename to write the results to, mostly used in tandem with –format. NB: Setting an output file re-enables normal stdout logging",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "write_output",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--profiler"
+          ],
+          "description": "Set this flag to engage the python profiler"
+        },
+        {
+          "names": [
+            "--nofail"
+          ],
+          "description": "If set, the exit code will always be zero, regardless of violations found. This is potentially useful during rollout"
+        }
+      ],
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "dialects",
+      "description": "Show the current dialects available",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Show the version of sqlfluff",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        }
+      ]
+    },
+    {
+      "name": "rules",
+      "description": "Show the current rules in use",
+      "options": [
+        {
+          "names": [
+            "--nocolor",
+            "-n"
+          ],
+          "description": "No color - output will be without ANSI color codes"
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "Verbosity, how detailed should the output be. This is stackable, so -vv is more verbose than -v. For the most verbose option try -vvvv or -vvvvv"
+        }
+      ]
+    }
+  ]
+}

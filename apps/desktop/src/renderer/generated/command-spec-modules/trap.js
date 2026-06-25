@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (trap), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var a=/(\d+\)\s)?([\w-+]+)/g,s=i=>({script:["command","kill","-l"],postProcess:e=>[...e.matchAll(a)].map(n=>({name:n[2]}))}),t={name:"trap",description:"Automatically execute commands after receiving signals by processes or the operating system",options:[{name:["--print","-p"],description:"Prints all defined signal handlers"},{name:["--help","-h"],description:"Displays help about using this command"}],args:[{name:"function name",isOptional:!0},{name:"reason",generators:s()}]},o=t;export{o as default};

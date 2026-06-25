@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (php), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var n=async(s,a)=>(await s({command:"ls",args:[a]})).status===0,p={name:"php",description:"Run the PHP interpreter",generateSpec:async(s,a)=>{let e=[];return await Promise.all([(async()=>{await n(a,"artisan")&&e.push({name:"artisan",loadSpec:"php/artisan"})})(),(async()=>{await n(a,"please")&&e.push({name:"please",loadSpec:"php/please"})})(),(async()=>{await n(a,"bin/console")&&e.push({name:"bin/console",loadSpec:"php/bin-console"})})()]),{name:"php",subcommands:e,args:{generators:{template:"filepaths",filterTemplateSuggestions:function(t){return t.filter(i=>i.name.indexOf(".")===-1)}}}}}},r=p;export{r as default};

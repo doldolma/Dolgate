@@ -1,0 +1,152 @@
+{
+  "name": "tokei",
+  "description": "Count your code, quickly",
+  "options": [
+    {
+      "names": [
+        "-f",
+        "--files"
+      ],
+      "description": "Will print out statistics on individual files"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Prints help information"
+    },
+    {
+      "names": [
+        "--hidden"
+      ],
+      "description": "Count hidden files"
+    },
+    {
+      "names": [
+        "-l",
+        "--languages"
+      ],
+      "description": "Prints out supported languages and their extensions"
+    },
+    {
+      "names": [
+        "--no-ignore"
+      ],
+      "description": "Don't respect ignore files (.gitignore, .ignore, etc.)"
+    },
+    {
+      "names": [
+        "--no-ignore-dot"
+      ],
+      "description": "Don't respect .ignore and .tokeignore files, including those in parent directories"
+    },
+    {
+      "names": [
+        "--no-ignore-parent"
+      ],
+      "description": "Don't respect ignore files (.gitignore, .ignore, etc.) in parent directories"
+    },
+    {
+      "names": [
+        "--no-ignore-vcs"
+      ],
+      "description": "Don't respect VCS ignore files (.gitignore, .hgignore, etc.), including those in parent directories"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Prints version information"
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Set log output level:"
+    },
+    {
+      "names": [
+        "-c",
+        "--columns"
+      ],
+      "description": "Sets a strict column width of the output, only available for terminal output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "columns"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-e",
+        "--exclude"
+      ],
+      "description": "Ignore all files & directories matching the pattern",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "exclude",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--input"
+      ],
+      "description": "Gives statistics from a previous tokei run. Can be given a file path, or \"stdin\" to read from stdin",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "input",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "Outputs Tokei in a specific format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--sort"
+      ],
+      "description": "Sort languages based on column",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "sort"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--type"
+      ],
+      "description": "Filters output by language type, seperated by a comma. i.e. -t=Rust,Markdown",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "type",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

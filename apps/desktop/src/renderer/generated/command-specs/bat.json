@@ -1,0 +1,303 @@
+{
+  "name": "bat",
+  "description": "A cat(1) clone with syntax highlighting and Git integration",
+  "options": [
+    {
+      "names": [
+        "-A",
+        "--show-all"
+      ],
+      "description": "Show non-printable characters"
+    },
+    {
+      "names": [
+        "-p",
+        "--plain"
+      ],
+      "description": "Show plain style, no decorations"
+    },
+    {
+      "names": [
+        "-l",
+        "--language"
+      ],
+      "description": "Explicitly set the language for syntax highlighting",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<language>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-H",
+        "--highlight-line"
+      ],
+      "description": "Highlight the specified line ranges",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<N:M> "
+        }
+      ]
+    },
+    {
+      "names": [
+        "--file-name"
+      ],
+      "description": "Specify the name to display for a file. Useful when piping data to bat from STDIN when bat does not otherwise know the filename",
+      "takesArg": true,
+      "args": [
+        {
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--diff"
+      ],
+      "description": "Show lines that have been added/removed/modified with respect to the Git index"
+    },
+    {
+      "names": [
+        "--diff-context"
+      ],
+      "description": "Include N lines of context around added/removed/modified lines when using '--diff'",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<N> "
+        }
+      ]
+    },
+    {
+      "names": [
+        "--tabs"
+      ],
+      "description": "Set the tab width to T spaces. Use a width of 0 to pass tabs through directly",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<T> "
+        }
+      ]
+    },
+    {
+      "names": [
+        "--wrap"
+      ],
+      "description": "Specify when to use colored output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<mode>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--terminal-width"
+      ],
+      "description": "Explicitly set the width of the terminal instead of determining it automatically",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<width> "
+        }
+      ]
+    },
+    {
+      "names": [
+        "-n",
+        "--number"
+      ],
+      "description": "Show line numbers, no other decorations"
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Specify when to use colored output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<when>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--italic-text"
+      ],
+      "description": "Specify when to use ANSI sequences for italic text in the output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<when>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--decorations"
+      ],
+      "description": "Specify when to use the decorations that have been specified via '--style'",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<when>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--force-colorization"
+      ],
+      "description": "Alias for '--decorations=always --color=always'"
+    },
+    {
+      "names": [
+        "--paging"
+      ],
+      "description": "Specify when to use the pager",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<when>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pager"
+      ],
+      "description": "Determine which pager is used",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<command>"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-m",
+        "--map-syntax"
+      ],
+      "description": "Map a glob pattern to an existing syntax name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<glob:syntax>"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ignored-suffix"
+      ],
+      "description": "Ignore extension",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<ignored-suffix>"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--theme"
+      ],
+      "description": "Set the theme for syntax highlighting",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<theme>",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--list-themes"
+      ],
+      "description": "Display a list of supported themes for syntax highlighting"
+    },
+    {
+      "names": [
+        "--style"
+      ],
+      "description": "Display a list of supported themes for syntax highlighting"
+    },
+    {
+      "names": [
+        "-r",
+        "--line-range"
+      ],
+      "description": "Only print the specified range of lines for each file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "<N:M> "
+        }
+      ]
+    },
+    {
+      "names": [
+        "-L",
+        "--list-languages"
+      ],
+      "description": "Display a list of supported languages for syntax highlighting"
+    },
+    {
+      "names": [
+        "-u",
+        "--unbuffered"
+      ],
+      "description": "Make output unbuffered (exists for POSIX-compliance reasons and is simply ignored)"
+    },
+    {
+      "names": [
+        "--diagnostic"
+      ],
+      "description": "Show diagnostic information for bug reports"
+    },
+    {
+      "names": [
+        "--acknowledgements"
+      ],
+      "description": "Show acknowledgements"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help message"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Show version information"
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

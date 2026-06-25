@@ -1,0 +1,3 @@
+// AUTO-GENERATED from withfig/autocomplete (kdoctor), MIT. Do not edit.
+// Bundled Fig spec WITH generator functions for runtime use. See NOTICE.md.
+var e={name:"kdoctor",description:"Tool that helps to set up the environment for Kotlin Multiplatform Mobile app development",options:[{name:"--version",description:"Report a version of KDoctor"},{name:["--verbose","-v"],description:"Report an extended information"},{name:["--all","-a"],description:"Run extra diagnostics"},{name:"--team-ids",description:"Report all available Apple dev team ids"},{name:["--help","-h"],description:"Usage info"}]},o=e;export{o as default};

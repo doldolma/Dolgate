@@ -1,0 +1,44 @@
+{
+  "name": "sudo",
+  "description": "Execute a command as the superuser or another user",
+  "options": [
+    {
+      "names": [
+        "-g",
+        "--group"
+      ],
+      "description": "Run command as the specified group name or ID",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "group"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help message and exit"
+    },
+    {
+      "names": [
+        "-u",
+        "--user"
+      ],
+      "description": "Run command as specified user name or ID",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "user"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "command"
+    }
+  ]
+}

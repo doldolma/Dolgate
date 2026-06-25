@@ -1,0 +1,101 @@
+{
+  "name": "tldr",
+  "description": "A simpler man page than the existing man page",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help for command"
+    },
+    {
+      "names": [
+        "-s",
+        "--search"
+      ],
+      "description": "Search all pages for the query",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "query"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--linux"
+      ],
+      "description": "Show command page for Linux",
+      "takesArg": true,
+      "args": [
+        {
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--osx"
+      ],
+      "description": "Show command page for OSX",
+      "takesArg": true,
+      "args": [
+        {
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--sunos"
+      ],
+      "description": "Show command page for SunOS",
+      "takesArg": true,
+      "args": [
+        {
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--list"
+      ],
+      "description": "Show all pages for current platform"
+    },
+    {
+      "names": [
+        "-u",
+        "--update"
+      ],
+      "description": "Download the latest pages and generate search index"
+    },
+    {
+      "names": [
+        "-c",
+        "--clear-cache"
+      ],
+      "description": "Delete the entire local cache"
+    },
+    {
+      "names": [
+        "--platform",
+        "-p"
+      ],
+      "description": "Select platform",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "platform"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "hasGenerator": true
+    }
+  ]
+}

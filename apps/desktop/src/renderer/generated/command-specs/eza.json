@@ -1,0 +1,502 @@
+{
+  "name": "eza",
+  "description": "A modern replacement for ls",
+  "options": [
+    {
+      "names": [
+        "-?",
+        "--help"
+      ],
+      "description": "Show list of command-line options"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show version of eza"
+    },
+    {
+      "names": [
+        "-1",
+        "--oneline"
+      ],
+      "description": "Display one entry per line"
+    },
+    {
+      "names": [
+        "-l",
+        "--long"
+      ],
+      "description": "Display extended file metadata as a table"
+    },
+    {
+      "names": [
+        "-G",
+        "--grid"
+      ],
+      "description": "Display entries as a grid (default)"
+    },
+    {
+      "names": [
+        "-x",
+        "--across"
+      ],
+      "description": "Sort the grid across, rather than downward"
+    },
+    {
+      "names": [
+        "-R",
+        "--recurse"
+      ],
+      "description": "Recurse into directories"
+    },
+    {
+      "names": [
+        "-T",
+        "--tree"
+      ],
+      "description": "Recurse into directories as a tree"
+    },
+    {
+      "names": [
+        "-X",
+        "--dereference"
+      ],
+      "description": "Dereference symbolic links when displaying information"
+    },
+    {
+      "names": [
+        "-F",
+        "--classify"
+      ],
+      "description": "Display type indicator by file names",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color",
+        "--colour"
+      ],
+      "description": "When to use terminal colours",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color-scale",
+        "--colour-scale"
+      ],
+      "description": "Highlight levels of 'field' distinctly",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "field"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color-scale-mode",
+        "--colour-scale-mode"
+      ],
+      "description": "Use gradient or fixed colors in --color-scale",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--icons"
+      ],
+      "description": "When to display icons",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-quotes"
+      ],
+      "description": "Don't quote file names with spaces"
+    },
+    {
+      "names": [
+        "--hyperlink"
+      ],
+      "description": "Display entries as hyperlinks"
+    },
+    {
+      "names": [
+        "--absolute"
+      ],
+      "description": "Display entries with their absolute path",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "mode"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--follow-symlinks"
+      ],
+      "description": "Drill down into symbolic links that point to directories"
+    },
+    {
+      "names": [
+        "-w",
+        "--width"
+      ],
+      "description": "Set screen width in columns",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "columns"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-a",
+        "--all"
+      ],
+      "description": "Show hidden and 'dot' files"
+    },
+    {
+      "names": [
+        "-A",
+        "--almost-all"
+      ],
+      "description": "Equivalent to '--all'"
+    },
+    {
+      "names": [
+        "-d",
+        "--list-dirs"
+      ],
+      "description": "List directories like regular files"
+    },
+    {
+      "names": [
+        "-D",
+        "--only-dirs"
+      ],
+      "description": "List only directories"
+    },
+    {
+      "names": [
+        "-f",
+        "--only-files"
+      ],
+      "description": "List only files"
+    },
+    {
+      "names": [
+        "--show-symlinks"
+      ],
+      "description": "Explicitly show symbolic links"
+    },
+    {
+      "names": [
+        "--no-symlinks"
+      ],
+      "description": "Do not show symbolic links"
+    },
+    {
+      "names": [
+        "-L",
+        "--level"
+      ],
+      "description": "Limit the depth of recursion",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "depth"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-r",
+        "--reverse"
+      ],
+      "description": "Reverse the sort order"
+    },
+    {
+      "names": [
+        "-s",
+        "--sort"
+      ],
+      "description": "Which field to sort by",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "field"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--group-directories-first"
+      ],
+      "description": "List directories before other files"
+    },
+    {
+      "names": [
+        "--group-directories-last"
+      ],
+      "description": "List directories after other files"
+    },
+    {
+      "names": [
+        "-I",
+        "--ignore-glob"
+      ],
+      "description": "Glob patterns (pipe-separated) of files to ignore",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "globs"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--git-ignore"
+      ],
+      "description": "Ignore files mentioned in '.gitignore'"
+    },
+    {
+      "names": [
+        "-b",
+        "--binary"
+      ],
+      "description": "List file sizes with binary prefixes"
+    },
+    {
+      "names": [
+        "-B",
+        "--bytes"
+      ],
+      "description": "List file sizes in bytes, without any prefixes"
+    },
+    {
+      "names": [
+        "-g",
+        "--group"
+      ],
+      "description": "List each file's group"
+    },
+    {
+      "names": [
+        "--smart-group"
+      ],
+      "description": "Only show group if it has a different name from owner"
+    },
+    {
+      "names": [
+        "-h",
+        "--header"
+      ],
+      "description": "Add a header row to each column"
+    },
+    {
+      "names": [
+        "-H",
+        "--links"
+      ],
+      "description": "List each file's number of hard links"
+    },
+    {
+      "names": [
+        "-i",
+        "--inode"
+      ],
+      "description": "List each file's inode number"
+    },
+    {
+      "names": [
+        "-M",
+        "--mounts"
+      ],
+      "description": "Show mount details"
+    },
+    {
+      "names": [
+        "-n",
+        "--numeric"
+      ],
+      "description": "List numeric user and group IDs"
+    },
+    {
+      "names": [
+        "-O",
+        "--flags"
+      ],
+      "description": "List file flags"
+    },
+    {
+      "names": [
+        "-S",
+        "--blocksize"
+      ],
+      "description": "Show size of allocated file system blocks"
+    },
+    {
+      "names": [
+        "-t",
+        "--time"
+      ],
+      "description": "Which timestamp field to list",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "field"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-m",
+        "--modified"
+      ],
+      "description": "Use the modified timestamp field"
+    },
+    {
+      "names": [
+        "-u",
+        "--accessed"
+      ],
+      "description": "Use the accessed timestamp field"
+    },
+    {
+      "names": [
+        "-U",
+        "--created"
+      ],
+      "description": "Use the created timestamp field"
+    },
+    {
+      "names": [
+        "--changed"
+      ],
+      "description": "Use the changed timestamp field"
+    },
+    {
+      "names": [
+        "--time-style"
+      ],
+      "description": "How to format timestamps",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--total-size"
+      ],
+      "description": "Show the size of a directory as the size of all files and directories inside"
+    },
+    {
+      "names": [
+        "-o",
+        "--octal-permissions"
+      ],
+      "description": "List each file's permission in octal format"
+    },
+    {
+      "names": [
+        "--no-permissions"
+      ],
+      "description": "Suppress the permissions field"
+    },
+    {
+      "names": [
+        "--no-filesize"
+      ],
+      "description": "Suppress the filesize field"
+    },
+    {
+      "names": [
+        "--no-user"
+      ],
+      "description": "Suppress the user field"
+    },
+    {
+      "names": [
+        "--no-time"
+      ],
+      "description": "Suppress the time field"
+    },
+    {
+      "names": [
+        "--stdin"
+      ],
+      "description": "Read file names from stdin, one per line or other separator specified in environment"
+    },
+    {
+      "names": [
+        "--git"
+      ],
+      "description": "List each file's Git status, if tracked or ignored"
+    },
+    {
+      "names": [
+        "--no-git"
+      ],
+      "description": "Suppress Git status"
+    },
+    {
+      "names": [
+        "--git-repos"
+      ],
+      "description": "List root of git-tree status"
+    },
+    {
+      "names": [
+        "--git-repos-no-status"
+      ],
+      "description": "List each git-repos branch name (much faster)"
+    },
+    {
+      "names": [
+        "-@",
+        "--extended"
+      ],
+      "description": "List each file's extended attributes and sizes"
+    },
+    {
+      "names": [
+        "-Z",
+        "--context"
+      ],
+      "description": "List each file's security context"
+    }
+  ],
+  "args": [
+    {
+      "variadic": true,
+      "template": "folders"
+    }
+  ]
+}

@@ -1,0 +1,5835 @@
+{
+  "name": "copilot",
+  "description": "👩‍✈️ Launch and manage containerized applications on AWS",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Help for command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Create a new ECS or App Runner application",
+      "options": [
+        {
+          "names": [
+            "--app",
+            "-a"
+          ],
+          "description": "Name of the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "app"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--deploy"
+          ],
+          "description": "Deploy your service or job to a \"test\" environment"
+        },
+        {
+          "names": [
+            "--dockerfile",
+            "-d"
+          ],
+          "description": "Path to the Dockerfile",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dockerfile"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--image",
+            "-i"
+          ],
+          "description": "The location of an existing Docker image",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "image"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--name",
+            "-n"
+          ],
+          "description": "Name of the service or job",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port"
+          ],
+          "description": "The port on which your service listens",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--retries"
+          ],
+          "description": "Optional. The number of times to try restarting the job on a failure",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "retries"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--schedule"
+          ],
+          "description": "The schedule on which to run this job.  Accepts cron expressions of the format (M H DoM M DoW) and schedule definition strings.  For example: \"0 * * * *\", \"@daily\", \"@weekly\", \"@every 1h30m\". AWS Schedule Expressions of the form \"rate(10 minutes)\" or \"cron(0 12 L * ? 2021)\" are also accepted",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "schedule"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag"
+          ],
+          "description": "Optional. The container image tag",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--timeout"
+          ],
+          "description": "Optional. The total execution time for the task, including retries. Accepts valid Go duration strings. For example: \"2h\", \"1h30m\", \"900s\"",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "timeout"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--type",
+            "-t"
+          ],
+          "description": "Type of job or svc to create",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ]
+    },
+    {
+      "name": "docs",
+      "description": "Open the copilot docs",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ]
+    },
+    {
+      "name": "app",
+      "description": "Commands for applications. Applications are a collection of services and environments",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a new empty application",
+          "options": [
+            {
+              "names": [
+                "--domain"
+              ],
+              "description": "Optional. Your existing custom domain name",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "domain"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resource-tags"
+              ],
+              "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "resource-tags"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "Lists all the applications in your account",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Shows info about an application",
+          "options": [
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete all resources associated with the application",
+          "options": [
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "upgrade",
+          "description": "Upgrades the template of an application to the latest version",
+          "options": [
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "env",
+      "description": "Commands for environments. Environments are deployment stages shared between services",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a new environment in your application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--aws-access-key-id"
+              ],
+              "description": "Optional. An AWS access key",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "aws-access-key-id"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--aws-secret-access-key"
+              ],
+              "description": "Optional. An AWS secret access key",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "aws-secret-access-key"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--aws-session-token"
+              ],
+              "description": "Optional. An AWS session token for temporary credentials",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "aws-session-token"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--default-config"
+              ],
+              "description": "Optional. Skip prompting and use default environment configuration"
+            },
+            {
+              "names": [
+                "--import-private-subnets"
+              ],
+              "description": "Optional. Use existing private subnet IDs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "import-private-subnets"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--import-public-subnets"
+              ],
+              "description": "Optional. Use existing public subnet IDs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "import-public-subnets"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--import-vpc-id"
+              ],
+              "description": "Optional. Use an existing VPC ID",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "import-vpc-id"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--override-az-names"
+              ],
+              "description": "Optional. Availability Zone names. (default 2 random AZs)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "override-az-names"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--override-private-cidrs"
+              ],
+              "description": "Optional. CIDR to use for private subnets. (default 10.0.2.0/24,10.0.3.0/24)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "override-private-cidrs"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--override-public-cidrs"
+              ],
+              "description": "Optional. CIDR to use for public subnets.  (default 10.0.0.0/24,10.0.1.0/24)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "override-public-cidrs"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--override-vpc-cidr"
+              ],
+              "description": "Optional. Global CIDR to use for VPC. (default 10.0.0.0/16)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "override-vpc-cidr"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--prod"
+              ],
+              "description": "If the environment contains production services"
+            },
+            {
+              "names": [
+                "--profile"
+              ],
+              "description": "Name of the profile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "profile"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--region"
+              ],
+              "description": "Optional. An AWS region where the environment will be created",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "region"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "Lists all the environments in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes an environment from your application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Shows info about a deployed environment",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resources"
+              ],
+              "description": "Optional. Show the resources in your environment"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "svc",
+      "description": "Commands for services. Services are long-running ECS or App Runner services",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a new service in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--dockerfile",
+                "-d"
+              ],
+              "description": "Path to the Dockerfile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dockerfile"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--image",
+                "-i"
+              ],
+              "description": "The location of an existing Docker image",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "image"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-subscribe"
+              ],
+              "description": "Optional. Turn off selection for adding subscriptions for worker services"
+            },
+            {
+              "names": [
+                "--port"
+              ],
+              "description": "The port on which your service listens",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "port"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--subscribe-topics"
+              ],
+              "description": "Optional. SNS Topics to subscribe to from other services in your application. Must be of format '<svcName>:<topicName>'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "subscribe-topics"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--svc-type",
+                "-t"
+              ],
+              "description": "Type of service to create",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "svc-type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "Lists all the services in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--local"
+              ],
+              "description": "Only show services in the workspace"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "package",
+          "description": "Prints the AWS CloudFormation template of a service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output-dir"
+              ],
+              "description": "Optional. Writes the stack template and template configuration to a directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output-dir"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tag"
+              ],
+              "description": "Optional. The container image tag",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tag"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "deploy",
+          "description": "Deploys a service to an environment",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Optional. Force a new service deployment using the existing image"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resource-tags"
+              ],
+              "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "resource-tags"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tag"
+              ],
+              "description": "Optional. The container image tag",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tag"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes a service from an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Shows info about a deployed service per environment",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resources"
+              ],
+              "description": "Optional. Show the resources in your service"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Shows status of a deployed service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "logs",
+          "description": "Displays logs of a deployed service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--end-time"
+              ],
+              "description": "Optional. Only return logs before a specific date (RFC3339). Defaults to all logs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "end-time"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--follow"
+              ],
+              "description": "Optional. Specifies if the logs should be streamed"
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--limit"
+              ],
+              "description": "Optional. The maximum number of log events returned. Default is 10 unless any time filtering flags are set",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "limit"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--log-group"
+              ],
+              "description": "Optional. Only return logs from specific log group",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "log-group"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--since"
+              ],
+              "description": "Optional. Only return logs newer than a relative duration like 5s, 2m, or 3h. Defaults to all logs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "since"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--start-time"
+              ],
+              "description": "Optional. Only return logs after a specific date (RFC3339). Defaults to all logs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "start-time"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tasks"
+              ],
+              "description": "Optional. Only return logs from specific task IDs",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tasks"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "exec",
+          "description": "Execute a command in a running container part of a service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--command",
+                "-c"
+              ],
+              "description": "Optional. The command that is passed to a running container",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "command"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--container"
+              ],
+              "description": "Optional. The specific container you want to exec in. By default the first essential container will be used",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "container"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service, job, or task group",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--task-id"
+              ],
+              "description": "Optional. ID of the task you want to exec in",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "task-id"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Optional. Whether to update the Session Manager Plugin"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "pause",
+          "description": "Pause running App Runner service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "resume",
+          "description": "Resumes a paused service",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "job",
+      "description": "Commands for jobs. Jobs are tasks that are triggered by events",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a new scheduled job in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--dockerfile",
+                "-d"
+              ],
+              "description": "Path to the Dockerfile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dockerfile"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--image",
+                "-i"
+              ],
+              "description": "The location of an existing Docker image",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "image"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--job-type",
+                "-t"
+              ],
+              "description": "Type of job to create",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "job-type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the job",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--retries"
+              ],
+              "description": "Optional. The number of times to try restarting the job on a failure",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "retries"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--schedule",
+                "-s"
+              ],
+              "description": "The schedule on which to run this job.  Accepts cron expressions of the format (M H DoM M DoW) and schedule definition strings.  For example: \"0 * * * *\", \"@daily\", \"@weekly\", \"@every 1h30m\". AWS Schedule Expressions of the form \"rate(10 minutes)\" or \"cron(0 12 L * ? 2021)\" are also accepted",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "schedule"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--timeout"
+              ],
+              "description": "Optional. The total execution time for the task, including retries. Accepts valid Go duration strings. For example: \"2h\", \"1h30m\", \"900s\"",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "timeout"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "Lists all the jobs in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--local"
+              ],
+              "description": "Only show jobs in the workspace"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "package",
+          "description": "Prints the AWS CloudFormation template of a job",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the job",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--output-dir"
+              ],
+              "description": "Optional. Writes the stack template and template configuration to a directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "output-dir"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tag"
+              ],
+              "description": "Optional. The container image tag",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tag"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "deploy",
+          "description": "Deploys a job to an environment",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the job",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resource-tags"
+              ],
+              "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "resource-tags"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tag"
+              ],
+              "description": "Optional. The container image tag",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tag"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes a job from an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the job",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "task",
+      "description": "Commands for tasks. One-off Amazon ECS tasks that terminate once their work is done",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "run",
+          "description": "Run a one-off task on Amazon ECS",
+          "options": [
+            {
+              "names": [
+                "--app"
+              ],
+              "description": "Optional. Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "app",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--build-context"
+              ],
+              "description": "Path to the Docker build context",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "build-context"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--cluster"
+              ],
+              "description": "Optional. The short name or full ARN of the cluster to run the task in",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "cluster"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--command"
+              ],
+              "description": "Optional. The command that is passed to \"docker run\" to override the default command",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "command"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--count"
+              ],
+              "description": "Optional. The number of tasks to set up",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "count"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--cpu"
+              ],
+              "description": "Optional. The number of CPU units to reserve for each task",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "cpu"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--default"
+              ],
+              "description": "Optional. Run tasks in default cluster and default subnets"
+            },
+            {
+              "names": [
+                "--dockerfile"
+              ],
+              "description": "Path to the Dockerfile",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "dockerfile"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--entrypoint"
+              ],
+              "description": "Optional. The entrypoint that is passed to \"docker run\" to override the default entrypoint",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "entrypoint"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--env"
+              ],
+              "description": "Optional. Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--env-vars"
+              ],
+              "description": "Optional. Environment variables specified by key=value separated by commas",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "env-vars"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--execution-role"
+              ],
+              "description": "Optional. The ARN of the role that grants the container agent permission to make AWS API calls",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "execution-role"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--follow"
+              ],
+              "description": "Optional. Specifies if the logs should be streamed"
+            },
+            {
+              "names": [
+                "--generate-cmd"
+              ],
+              "description": "Optional. Generate a command with a pre-filled value for each flag. To use it for an ECS service, specify --generate-cmd <cluster name>/<service name>. Alternatively, if the service or job is created with Copilot, specify --generate-cmd <application>/<environment>/<service or job name>. Cannot be specified with any other flags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "generate-cmd"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--image",
+                "-i"
+              ],
+              "description": "The location of an existing Docker image",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "image"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--memory"
+              ],
+              "description": "Optional. The amount of memory to reserve in MiB for each task",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "memory"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--platform-arch"
+              ],
+              "description": "Optional. Architecture of the task. Must be specified along with 'platform-os'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "platform-arch"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--platform-os"
+              ],
+              "description": "Optional. Operating system of the task. Must be specified along with 'platform-arch'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "platform-os"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resource-tags"
+              ],
+              "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "resource-tags"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--secrets"
+              ],
+              "description": "Optional. Secrets to inject into the container. Specified by key=value separated by commas",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "secrets"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--security-groups"
+              ],
+              "description": "Optional. The security group IDs for the task to use. Can be specified multiple times",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "security-groups"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--subnets"
+              ],
+              "description": "Optional. The subnet IDs for the task to use. Can be specified multiple times",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "subnets"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tag"
+              ],
+              "description": "Optional. The container image tag in addition to \"latest\"",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tag"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--task-group-name",
+                "-n"
+              ],
+              "description": "Optional. The group name of the task.  Tasks with the same group name share the same set of resources.  (default directory name)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "task-group-name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--task-role"
+              ],
+              "description": "Optional. The ARN of the role for the task to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "task-role"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "exec",
+          "description": "Execute a command in a running container part of a task",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--command",
+                "-c"
+              ],
+              "description": "Optional. The command that is passed to a running container",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "command"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--default"
+              ],
+              "description": "Optional. Execute commands in running tasks in default cluster and default subnets"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service, job, or task group",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--task-id"
+              ],
+              "description": "Optional. ID of the task you want to exec in",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "task-id"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Optional. Whether to update the Session Manager Plugin"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes a one-off task from an application or default cluster",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--default"
+              ],
+              "description": "Optional. Delete a task which was launched in the default cluster and subnets"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the environment",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the service",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "storage",
+      "description": "Commands for working with storage and databases",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a new AWS CloudFormation template for a storage resource",
+          "options": [
+            {
+              "names": [
+                "--engine"
+              ],
+              "description": "The database engine used in the cluster. Must be either \"MySQL\" or \"PostgreSQL\"",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "engine"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--initial-db"
+              ],
+              "description": "The initial database to create in the cluster",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "initial-db"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--lsi"
+              ],
+              "description": "Optional. Attribute to use as an alternate sort key. May be specified up to 5 times. Must be of the format '<keyName>:<dataType>'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "lsi"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the storage resource to create",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--no-lsi"
+              ],
+              "description": "Optional. Don't ask about configuring alternate sort keys"
+            },
+            {
+              "names": [
+                "--no-sort"
+              ],
+              "description": "Optional. Skip configuring sort keys"
+            },
+            {
+              "names": [
+                "--parameter-group"
+              ],
+              "description": "Optional. The name of the parameter group to associate with the cluster",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "parameter-group"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--partition-key"
+              ],
+              "description": "Partition key for the DDB table. Must be of the format '<keyName>:<dataType>'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "partition-key"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--sort-key"
+              ],
+              "description": "Optional. Sort key for the DDB table. Must be of the format '<keyName>:<dataType>'",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "sort-key"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--storage-type",
+                "-t"
+              ],
+              "description": "Type of storage to add. Must be one of: \"DynamoDB\", \"S3\", \"Aurora\"",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "storage-type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--workload",
+                "-w"
+              ],
+              "description": "Name of the service or job to associate with storage",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "workload"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "secret",
+      "description": "Commands for secrets. Secrets are sensitive information that you need in your application",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Create or update secrets in SSM Parameter Store",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--cli-input-yaml"
+              ],
+              "description": "Optional. A YAML file in which the secret values are specified",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "cli-input-yaml"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "The name of the secret",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--overwrite"
+              ],
+              "description": "Optional. Whether to overwrite an existing secret"
+            },
+            {
+              "names": [
+                "--values"
+              ],
+              "description": "Values of the secret in each environment. Specified as <environment>=<value> separated by commas",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "values"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print the version number",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Output shell completion code",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ]
+    },
+    {
+      "name": "pipeline",
+      "description": "Commands for pipelines. Continuous delivery pipelines to release services",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Creates a pipeline for the services in your workspace",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--environments",
+                "-e"
+              ],
+              "description": "Environments to add to the pipeline",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "environments"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--git-branch",
+                "-b"
+              ],
+              "description": "Branch used to trigger your pipeline",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "git-branch"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--github-access-token",
+                "-t"
+              ],
+              "description": "GitHub personal access token for your repository",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "github-access-token"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--github-url"
+              ],
+              "description": "(Deprecated.) Use --url instead. Repository URL to trigger your pipeline",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "github-url"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--url",
+                "-u"
+              ],
+              "description": "The repository URL to trigger your pipeline. Supported providers are: GitHub, CodeCommit, Bitbucket",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "url"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "update",
+          "description": "Deploys a pipeline for the services in your workspace",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Deletes the pipeline associated with your workspace",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--delete-secret"
+              ],
+              "description": "Deletes AWS Secrets Manager secret associated with a pipeline source repository"
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Skips confirmation prompt"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Shows info about a deployed pipeline for an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the pipeline",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--resources"
+              ],
+              "description": "Optional. Show the resources in your pipeline"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Shows the status of a pipeline",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Name of the pipeline",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "ls",
+          "description": "Lists all the deployed pipelines in an application",
+          "options": [
+            {
+              "names": [
+                "--app",
+                "-a"
+              ],
+              "description": "Name of the application",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Outputs in JSON format"
+            },
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "deploy",
+      "description": "Deploy a Copilot job or service",
+      "options": [
+        {
+          "names": [
+            "--app",
+            "-a"
+          ],
+          "description": "Name of the application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--name",
+            "-n"
+          ],
+          "description": "Name of the environment",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Optional. Force a new service deployment using the existing image"
+        },
+        {
+          "names": [
+            "--name",
+            "-n"
+          ],
+          "description": "Name of the service or job",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--resource-tags"
+          ],
+          "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "resource-tags"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag"
+          ],
+          "description": "Optional. The container image tag",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tag"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "options": [
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "init",
+          "description": "Create a new ECS or App Runner application",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "docs",
+          "description": "Open the copilot docs",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "app",
+          "description": "Commands for applications. Applications are a collection of services and environments",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a new empty application",
+              "options": [
+                {
+                  "names": [
+                    "--domain"
+                  ],
+                  "description": "Optional. Your existing custom domain name",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "domain"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resource-tags"
+                  ],
+                  "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "resource-tags"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "ls",
+              "description": "Lists all the applications in your account",
+              "options": [
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "Shows info about an application",
+              "options": [
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Delete all resources associated with the application",
+              "options": [
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "upgrade",
+              "description": "Upgrades the template of an application to the latest version",
+              "options": [
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "env",
+          "description": "Commands for environments. Environments are deployment stages shared between services",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a new environment in your application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--aws-access-key-id"
+                  ],
+                  "description": "Optional. An AWS access key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "aws-access-key-id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--aws-secret-access-key"
+                  ],
+                  "description": "Optional. An AWS secret access key",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "aws-secret-access-key"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--aws-session-token"
+                  ],
+                  "description": "Optional. An AWS session token for temporary credentials",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "aws-session-token"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--default-config"
+                  ],
+                  "description": "Optional. Skip prompting and use default environment configuration"
+                },
+                {
+                  "names": [
+                    "--import-private-subnets"
+                  ],
+                  "description": "Optional. Use existing private subnet IDs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "import-private-subnets"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--import-public-subnets"
+                  ],
+                  "description": "Optional. Use existing public subnet IDs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "import-public-subnets"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--import-vpc-id"
+                  ],
+                  "description": "Optional. Use an existing VPC ID",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "import-vpc-id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--override-az-names"
+                  ],
+                  "description": "Optional. Availability Zone names. (default 2 random AZs)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "override-az-names"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--override-private-cidrs"
+                  ],
+                  "description": "Optional. CIDR to use for private subnets. (default 10.0.2.0/24,10.0.3.0/24)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "override-private-cidrs"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--override-public-cidrs"
+                  ],
+                  "description": "Optional. CIDR to use for public subnets.  (default 10.0.0.0/24,10.0.1.0/24)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "override-public-cidrs"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--override-vpc-cidr"
+                  ],
+                  "description": "Optional. Global CIDR to use for VPC. (default 10.0.0.0/16)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "override-vpc-cidr"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--prod"
+                  ],
+                  "description": "If the environment contains production services"
+                },
+                {
+                  "names": [
+                    "--profile"
+                  ],
+                  "description": "Name of the profile",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "profile"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--region"
+                  ],
+                  "description": "Optional. An AWS region where the environment will be created",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "region"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "ls",
+              "description": "Lists all the environments in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Deletes an environment from your application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "Shows info about a deployed environment",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resources"
+                  ],
+                  "description": "Optional. Show the resources in your environment"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "svc",
+          "description": "Commands for services. Services are long-running ECS or App Runner services",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a new service in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--dockerfile",
+                    "-d"
+                  ],
+                  "description": "Path to the Dockerfile",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "dockerfile"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--image",
+                    "-i"
+                  ],
+                  "description": "The location of an existing Docker image",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "image"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--no-subscribe"
+                  ],
+                  "description": "Optional. Turn off selection for adding subscriptions for worker services"
+                },
+                {
+                  "names": [
+                    "--port"
+                  ],
+                  "description": "The port on which your service listens",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "port"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--subscribe-topics"
+                  ],
+                  "description": "Optional. SNS Topics to subscribe to from other services in your application. Must be of format '<svcName>:<topicName>'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "subscribe-topics"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--svc-type",
+                    "-t"
+                  ],
+                  "description": "Type of service to create",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "svc-type"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "ls",
+              "description": "Lists all the services in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--local"
+                  ],
+                  "description": "Only show services in the workspace"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "package",
+              "description": "Prints the AWS CloudFormation template of a service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--output-dir"
+                  ],
+                  "description": "Optional. Writes the stack template and template configuration to a directory",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "output-dir"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tag"
+                  ],
+                  "description": "Optional. The container image tag",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tag"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "deploy",
+              "description": "Deploys a service to an environment",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--force"
+                  ],
+                  "description": "Optional. Force a new service deployment using the existing image"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resource-tags"
+                  ],
+                  "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "resource-tags"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tag"
+                  ],
+                  "description": "Optional. The container image tag",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tag"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Deletes a service from an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "Shows info about a deployed service per environment",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resources"
+                  ],
+                  "description": "Optional. Show the resources in your service"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "description": "Shows status of a deployed service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "logs",
+              "description": "Displays logs of a deployed service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--end-time"
+                  ],
+                  "description": "Optional. Only return logs before a specific date (RFC3339). Defaults to all logs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "end-time"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--follow"
+                  ],
+                  "description": "Optional. Specifies if the logs should be streamed"
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--limit"
+                  ],
+                  "description": "Optional. The maximum number of log events returned. Default is 10 unless any time filtering flags are set",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "limit"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--log-group"
+                  ],
+                  "description": "Optional. Only return logs from specific log group",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "log-group"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--since"
+                  ],
+                  "description": "Optional. Only return logs newer than a relative duration like 5s, 2m, or 3h. Defaults to all logs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "since"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--start-time"
+                  ],
+                  "description": "Optional. Only return logs after a specific date (RFC3339). Defaults to all logs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "start-time"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tasks"
+                  ],
+                  "description": "Optional. Only return logs from specific task IDs",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tasks"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "exec",
+              "description": "Execute a command in a running container part of a service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--command",
+                    "-c"
+                  ],
+                  "description": "Optional. The command that is passed to a running container",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "command"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--container"
+                  ],
+                  "description": "Optional. The specific container you want to exec in. By default the first essential container will be used",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "container"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service, job, or task group",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--task-id"
+                  ],
+                  "description": "Optional. ID of the task you want to exec in",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "task-id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Optional. Whether to update the Session Manager Plugin"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "pause",
+              "description": "Pause running App Runner service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "resume",
+              "description": "Resumes a paused service",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "job",
+          "description": "Commands for jobs. Jobs are tasks that are triggered by events",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a new scheduled job in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--dockerfile",
+                    "-d"
+                  ],
+                  "description": "Path to the Dockerfile",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "dockerfile"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--image",
+                    "-i"
+                  ],
+                  "description": "The location of an existing Docker image",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "image"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--job-type",
+                    "-t"
+                  ],
+                  "description": "Type of job to create",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "job-type"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the job",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--retries"
+                  ],
+                  "description": "Optional. The number of times to try restarting the job on a failure",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "retries"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--schedule",
+                    "-s"
+                  ],
+                  "description": "The schedule on which to run this job.  Accepts cron expressions of the format (M H DoM M DoW) and schedule definition strings.  For example: \"0 * * * *\", \"@daily\", \"@weekly\", \"@every 1h30m\". AWS Schedule Expressions of the form \"rate(10 minutes)\" or \"cron(0 12 L * ? 2021)\" are also accepted",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "schedule"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--timeout"
+                  ],
+                  "description": "Optional. The total execution time for the task, including retries. Accepts valid Go duration strings. For example: \"2h\", \"1h30m\", \"900s\"",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "timeout"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "ls",
+              "description": "Lists all the jobs in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--local"
+                  ],
+                  "description": "Only show jobs in the workspace"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "package",
+              "description": "Prints the AWS CloudFormation template of a job",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the job",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--output-dir"
+                  ],
+                  "description": "Optional. Writes the stack template and template configuration to a directory",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "output-dir"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tag"
+                  ],
+                  "description": "Optional. The container image tag",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tag"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "deploy",
+              "description": "Deploys a job to an environment",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the job",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resource-tags"
+                  ],
+                  "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "resource-tags"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tag"
+                  ],
+                  "description": "Optional. The container image tag",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tag"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Deletes a job from an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the job",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "task",
+          "description": "Commands for tasks. One-off Amazon ECS tasks that terminate once their work is done",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "run",
+              "description": "Run a one-off task on Amazon ECS",
+              "options": [
+                {
+                  "names": [
+                    "--app"
+                  ],
+                  "description": "Optional. Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "app",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--build-context"
+                  ],
+                  "description": "Path to the Docker build context",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "build-context"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cluster"
+                  ],
+                  "description": "Optional. The short name or full ARN of the cluster to run the task in",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cluster"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--command"
+                  ],
+                  "description": "Optional. The command that is passed to \"docker run\" to override the default command",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "command"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--count"
+                  ],
+                  "description": "Optional. The number of tasks to set up",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "count"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cpu"
+                  ],
+                  "description": "Optional. The number of CPU units to reserve for each task",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cpu"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--default"
+                  ],
+                  "description": "Optional. Run tasks in default cluster and default subnets"
+                },
+                {
+                  "names": [
+                    "--dockerfile"
+                  ],
+                  "description": "Path to the Dockerfile",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "dockerfile"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--entrypoint"
+                  ],
+                  "description": "Optional. The entrypoint that is passed to \"docker run\" to override the default entrypoint",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "entrypoint"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--env"
+                  ],
+                  "description": "Optional. Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "env"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--env-vars"
+                  ],
+                  "description": "Optional. Environment variables specified by key=value separated by commas",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "env-vars"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--execution-role"
+                  ],
+                  "description": "Optional. The ARN of the role that grants the container agent permission to make AWS API calls",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "execution-role"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--follow"
+                  ],
+                  "description": "Optional. Specifies if the logs should be streamed"
+                },
+                {
+                  "names": [
+                    "--generate-cmd"
+                  ],
+                  "description": "Optional. Generate a command with a pre-filled value for each flag. To use it for an ECS service, specify --generate-cmd <cluster name>/<service name>. Alternatively, if the service or job is created with Copilot, specify --generate-cmd <application>/<environment>/<service or job name>. Cannot be specified with any other flags",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "generate-cmd"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--image",
+                    "-i"
+                  ],
+                  "description": "The location of an existing Docker image",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "image"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--memory"
+                  ],
+                  "description": "Optional. The amount of memory to reserve in MiB for each task",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "memory"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--platform-arch"
+                  ],
+                  "description": "Optional. Architecture of the task. Must be specified along with 'platform-os'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "platform-arch"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--platform-os"
+                  ],
+                  "description": "Optional. Operating system of the task. Must be specified along with 'platform-arch'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "platform-os"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resource-tags"
+                  ],
+                  "description": "Optional. Labels with a key and value separated by commas. Allows you to categorize resources",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "resource-tags"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--secrets"
+                  ],
+                  "description": "Optional. Secrets to inject into the container. Specified by key=value separated by commas",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "secrets"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--security-groups"
+                  ],
+                  "description": "Optional. The security group IDs for the task to use. Can be specified multiple times",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "security-groups"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--subnets"
+                  ],
+                  "description": "Optional. The subnet IDs for the task to use. Can be specified multiple times",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "subnets"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--tag"
+                  ],
+                  "description": "Optional. The container image tag in addition to \"latest\"",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "tag"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--task-group-name",
+                    "-n"
+                  ],
+                  "description": "Optional. The group name of the task.  Tasks with the same group name share the same set of resources.  (default directory name)",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "task-group-name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--task-role"
+                  ],
+                  "description": "Optional. The ARN of the role for the task to use",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "task-role"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "exec",
+              "description": "Execute a command in a running container part of a task",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--command",
+                    "-c"
+                  ],
+                  "description": "Optional. The command that is passed to a running container",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "command"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--default"
+                  ],
+                  "description": "Optional. Execute commands in running tasks in default cluster and default subnets"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service, job, or task group",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--task-id"
+                  ],
+                  "description": "Optional. ID of the task you want to exec in",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "task-id"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Optional. Whether to update the Session Manager Plugin"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Deletes a one-off task from an application or default cluster",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--default"
+                  ],
+                  "description": "Optional. Delete a task which was launched in the default cluster and subnets"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the environment",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the service",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "storage",
+          "description": "Commands for working with storage and databases",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a new AWS CloudFormation template for a storage resource",
+              "options": [
+                {
+                  "names": [
+                    "--engine"
+                  ],
+                  "description": "The database engine used in the cluster. Must be either \"MySQL\" or \"PostgreSQL\"",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "engine"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--initial-db"
+                  ],
+                  "description": "The initial database to create in the cluster",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "initial-db"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--lsi"
+                  ],
+                  "description": "Optional. Attribute to use as an alternate sort key. May be specified up to 5 times. Must be of the format '<keyName>:<dataType>'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "lsi"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the storage resource to create",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--no-lsi"
+                  ],
+                  "description": "Optional. Don't ask about configuring alternate sort keys"
+                },
+                {
+                  "names": [
+                    "--no-sort"
+                  ],
+                  "description": "Optional. Skip configuring sort keys"
+                },
+                {
+                  "names": [
+                    "--parameter-group"
+                  ],
+                  "description": "Optional. The name of the parameter group to associate with the cluster",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "parameter-group"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--partition-key"
+                  ],
+                  "description": "Partition key for the DDB table. Must be of the format '<keyName>:<dataType>'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "partition-key"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--sort-key"
+                  ],
+                  "description": "Optional. Sort key for the DDB table. Must be of the format '<keyName>:<dataType>'",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "sort-key"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--storage-type",
+                    "-t"
+                  ],
+                  "description": "Type of storage to add. Must be one of: \"DynamoDB\", \"S3\", \"Aurora\"",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "storage-type"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--workload",
+                    "-w"
+                  ],
+                  "description": "Name of the service or job to associate with storage",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "workload"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "secret",
+          "description": "Commands for secrets. Secrets are sensitive information that you need in your application",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Create or update secrets in SSM Parameter Store",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--cli-input-yaml"
+                  ],
+                  "description": "Optional. A YAML file in which the secret values are specified",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "cli-input-yaml"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "The name of the secret",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--overwrite"
+                  ],
+                  "description": "Optional. Whether to overwrite an existing secret"
+                },
+                {
+                  "names": [
+                    "--values"
+                  ],
+                  "description": "Values of the secret in each environment. Specified as <environment>=<value> separated by commas",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "values"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "version",
+          "description": "Print the version number",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "completion",
+          "description": "Output shell completion code",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        },
+        {
+          "name": "pipeline",
+          "description": "Commands for pipelines. Continuous delivery pipelines to release services",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Creates a pipeline for the services in your workspace",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--environments",
+                    "-e"
+                  ],
+                  "description": "Environments to add to the pipeline",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "environments"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--git-branch",
+                    "-b"
+                  ],
+                  "description": "Branch used to trigger your pipeline",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "git-branch"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--github-access-token",
+                    "-t"
+                  ],
+                  "description": "GitHub personal access token for your repository",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "github-access-token"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--github-url"
+                  ],
+                  "description": "(Deprecated.) Use --url instead. Repository URL to trigger your pipeline",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "github-url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--url",
+                    "-u"
+                  ],
+                  "description": "The repository URL to trigger your pipeline. Supported providers are: GitHub, CodeCommit, Bitbucket",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "url"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "update",
+              "description": "Deploys a pipeline for the services in your workspace",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "delete",
+              "description": "Deletes the pipeline associated with your workspace",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--delete-secret"
+                  ],
+                  "description": "Deletes AWS Secrets Manager secret associated with a pipeline source repository"
+                },
+                {
+                  "names": [
+                    "--yes"
+                  ],
+                  "description": "Skips confirmation prompt"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "show",
+              "description": "Shows info about a deployed pipeline for an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the pipeline",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--resources"
+                  ],
+                  "description": "Optional. Show the resources in your pipeline"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "description": "Shows the status of a pipeline",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--name",
+                    "-n"
+                  ],
+                  "description": "Name of the pipeline",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name"
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            },
+            {
+              "name": "ls",
+              "description": "Lists all the deployed pipelines in an application",
+              "options": [
+                {
+                  "names": [
+                    "--app",
+                    "-a"
+                  ],
+                  "description": "Name of the application",
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "name",
+                      "hasGenerator": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Outputs in JSON format"
+                },
+                {
+                  "names": [
+                    "--help",
+                    "-h"
+                  ],
+                  "description": "Help for command"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "deploy",
+          "description": "Deploy a Copilot job or service",
+          "options": [
+            {
+              "names": [
+                "--help",
+                "-h"
+              ],
+              "description": "Help for command"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

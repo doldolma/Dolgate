@@ -1,0 +1,761 @@
+{
+  "name": "scarb",
+  "description": "Scarb, The build toolchain and package manager for Cairo and Starknet ecosystems",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "add",
+      "description": "Add dependencies to a Scarb.toml manifest file",
+      "options": [
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Do not actually write the manifest"
+        },
+        {
+          "names": [
+            "-p",
+            "--package"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        },
+        {
+          "names": [
+            "--path"
+          ],
+          "description": "Filesystem path to local package to add",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "PATH"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--git"
+          ],
+          "description": "Git repository location",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "URI"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--branch"
+          ],
+          "description": "Git branch to download the package from",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "BRANCH"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--tag"
+          ],
+          "description": "Git tag to download the package from",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "TAG"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rev"
+          ],
+          "description": "Git reference to download the package from",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "REV"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "DEP_ID"
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Remove dependencies from a manifest file",
+      "options": [
+        {
+          "names": [
+            "--dry-run"
+          ],
+          "description": "Do not actually write the manifest"
+        },
+        {
+          "names": [
+            "-p",
+            "--package"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-w",
+            "--workspace"
+          ],
+          "description": "Run for all packages in the workspace"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "DEP_ID",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Compile current project",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--package"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-w",
+            "--workspace"
+          ],
+          "description": "Run for all packages in the workspace"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "cache",
+      "description": "Manipulate packages cache",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "clean",
+          "description": "Remove all cached dependencies",
+          "options": [
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "More output per occurrence"
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Less output per occurrence"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "path",
+          "description": "Print the path of the cache directory",
+          "options": [
+            {
+              "names": [
+                "-v",
+                "--verbose"
+              ],
+              "description": "More output per occurrence"
+            },
+            {
+              "names": [
+                "-q",
+                "--quiet"
+              ],
+              "description": "Less output per occurrence"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)"
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Remove generated artifacts",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "commands",
+      "description": "List installed commands",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "fetch",
+      "description": "Fetch dependencies of packages from the network",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "fmt",
+      "description": "Format project files",
+      "options": [
+        {
+          "names": [
+            "-c",
+            "--check"
+          ],
+          "description": "Only check if files are formatted, do not write the changes to disk"
+        },
+        {
+          "names": [
+            "--no-color"
+          ],
+          "description": "Do not color output"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-p",
+            "--package"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-w",
+            "--workspace"
+          ],
+          "description": "Run for all packages in the workspace"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Create a new Scarb package in existing directory",
+      "options": [
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Set the resulting package name, defaults to the directory name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-vcs"
+          ],
+          "description": "Do not initialize a new Git repository"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "metadata",
+      "description": "Output the resolved dependencies of a package, the concrete used versions including overrides, in machine-readable format",
+      "options": [
+        {
+          "names": [
+            "--format-version"
+          ],
+          "description": "Format version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "VERSION"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-deps"
+          ],
+          "description": "Output information only about the workspace members and don't fetch dependencies"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "manifest-path",
+      "description": "Print path to current Scarb.toml file to standard output",
+      "options": [
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "new",
+      "description": "Create a new Scarb package at <PATH>",
+      "options": [
+        {
+          "names": [
+            "--name"
+          ],
+          "description": "Set the resulting package name, defaults to the directory name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "NAME"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-vcs"
+          ],
+          "description": "Do not initialize a new Git repository"
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "PATH"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run arbitrary package scripts",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--package"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-v",
+            "--verbose"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "-w",
+            "--workspace"
+          ],
+          "description": "Run for all packages in the workspace"
+        },
+        {
+          "names": [
+            "-q",
+            "--quiet"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "SCRIPT"
+        },
+        {
+          "name": "ARGS",
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Runs test in the local project, if it has a Scarb.toml manifest. If project is a virtual workspace, will run all tests by default",
+      "options": [
+        {
+          "names": [
+            "--workspace",
+            "-w"
+          ],
+          "description": "Run for all packages in the workspace"
+        },
+        {
+          "names": [
+            "--filter",
+            "-f"
+          ],
+          "description": "Runs the test with a specific filter",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "FILTER"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--include-ignored"
+          ],
+          "description": "Run ignored and not ignored tests"
+        },
+        {
+          "names": [
+            "--ignored"
+          ],
+          "description": "Run only ignored tests"
+        },
+        {
+          "names": [
+            "--verbose",
+            "-v"
+          ],
+          "description": "More output per occurrence"
+        },
+        {
+          "names": [
+            "--quiet",
+            "-q"
+          ],
+          "description": "Less output per occurrence"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Print help"
+        },
+        {
+          "names": [
+            "--package",
+            "-p"
+          ],
+          "description": "Packages to run this command on",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "SPEC",
+              "hasGenerator": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

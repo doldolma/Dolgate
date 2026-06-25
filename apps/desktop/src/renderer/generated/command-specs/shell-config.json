@@ -1,0 +1,212 @@
+{
+  "name": "shell-config",
+  "options": [
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output the version number"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help for command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Init shell-config setup with this CLI version. Execute this command only when you want to force-apply the latest shell-config setup",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install MacOS setup with Multi-Selection",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "Setup a shell configuration with a robust set of tools and architecture",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Update the CLI to the latest version",
+      "options": [
+        {
+          "names": [
+            "-t",
+            "--target"
+          ],
+          "description": "Select update version",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m",
+            "--mute"
+          ],
+          "description": "Daemon check for update notification. When specified is true"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "assets",
+      "description": "Configure your shell assets, such as `gitprofile` and `npmrc`",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "external",
+      "description": "Install and manage your external shell",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "Show list of all exists externals shells",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help for command"
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "description": "Install external shell",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help for command"
+            }
+          ],
+          "args": [
+            {
+              "name": "file_path"
+            },
+            {
+              "name": "external_name"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete external shell",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Display help for command"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Display help for command",
+          "args": [
+            {
+              "name": "command",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "completion-script",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Display help for command",
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "name": "yomo",
+  "description": "CLI interface for YoMo",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for yomo"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Initial an example StreamFunction",
+      "options": [
+        {
+          "names": [
+            "--rx"
+          ],
+          "description": "Generate Rx code template"
+        }
+      ],
+      "args": [
+        {
+          "name": "function name"
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Build a StreamFunction to WebAssembly",
+      "options": [
+        {
+          "names": [
+            "--target"
+          ],
+          "description": "Build to wasm or binary",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "wasm"
+            },
+            {
+              "name": "binary"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m",
+            "--modfile"
+          ],
+          "description": "Custom go.mod filepath",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "module",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": ".go file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a wasm stream function",
+      "options": [
+        {
+          "names": [
+            "-z",
+            "--zipper"
+          ],
+          "description": "Zipper endpoint this StreamFunction will connect to"
+        },
+        {
+          "names": [
+            "-n",
+            "--name"
+          ],
+          "description": "Specify the name of this StreamFunction"
+        }
+      ],
+      "args": [
+        {
+          "name": ".wasm file",
+          "template": "filepaths"
+        }
+      ]
+    }
+  ]
+}

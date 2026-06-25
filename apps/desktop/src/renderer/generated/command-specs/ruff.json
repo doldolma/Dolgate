@@ -1,0 +1,703 @@
+{
+  "name": "ruff",
+  "description": "Ruff: An extremely fast Python linter",
+  "options": [
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "Enable verbose logging"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Print diagnostics, but nothing else"
+    },
+    {
+      "names": [
+        "-s",
+        "--silent"
+      ],
+      "description": "Disable all logging (but still exit with status code \"1\" upon detecting diagnostics)"
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Path to the `pyproject.toml` or `ruff.toml` file to use for configuration",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--isolated"
+      ],
+      "description": "Ignore all configuration files"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Print help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "check",
+      "description": "Run Ruff on the given files or directories",
+      "options": [
+        {
+          "names": [
+            "--fix"
+          ],
+          "description": "Apply fixes to resolve lint violations"
+        },
+        {
+          "names": [
+            "--unsafe-fixes"
+          ],
+          "description": "Include fixes that may not retain the original intent of the code"
+        },
+        {
+          "names": [
+            "--show-fixes"
+          ],
+          "description": "Show an enumeration of all fixed lint violations"
+        },
+        {
+          "names": [
+            "--diff"
+          ],
+          "description": "Avoid writing any fixed files back; instead, output a diff for each changed file to stdout, and exit 0 if there are no diffs. Implies `--fix-only`"
+        },
+        {
+          "names": [
+            "-w",
+            "--watch"
+          ],
+          "description": "Run in watch mode by re-running whenever files change"
+        },
+        {
+          "names": [
+            "--fix-only"
+          ],
+          "description": "Apply fixes to resolve lint violations, but don't report on, or exit non-zero for, leftover violations. Implies `--fix`"
+        },
+        {
+          "names": [
+            "--ignore-noqa"
+          ],
+          "description": "Ignore any `# noqa` comments"
+        },
+        {
+          "names": [
+            "--output-format"
+          ],
+          "description": "Output serialization format for violations. The default serialization format is 'full'",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output_format",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--output-file"
+          ],
+          "description": "Specify file to write the linter output to (default: stdout)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output_file",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target-version"
+          ],
+          "description": "The minimum Python version that should be supported",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target_version",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--preview"
+          ],
+          "description": "Enable preview mode; checks will include unstable rules and fixes"
+        },
+        {
+          "names": [
+            "--extension"
+          ],
+          "description": "List of mappings from file extension to language (one of `python`, `ipynb`, `pyi`). For example, to treat `.ipy` files as IPython notebooks, use `--extension ipy:ipynb`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extension",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--statistics"
+          ],
+          "description": "Show counts for every rule with at least one violation"
+        },
+        {
+          "names": [
+            "--add-noqa"
+          ],
+          "description": "Enable automatic additions of `noqa` directives to failing lines"
+        },
+        {
+          "names": [
+            "--show-files"
+          ],
+          "description": "See the files Ruff will be run against with the current settings"
+        },
+        {
+          "names": [
+            "--show-settings"
+          ],
+          "description": "See the settings Ruff will use to lint a given Python file"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        },
+        {
+          "names": [
+            "--select"
+          ],
+          "description": "Comma-separated list of rule codes to enable (or ALL, to enable all rules)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "select",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignore"
+          ],
+          "description": "Comma-separated list of rule codes to disable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ignore",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--extend-select"
+          ],
+          "description": "Like --select, but adds additional rule codes on top of the selected ones",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extend_select",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--per-file-ignores"
+          ],
+          "description": "List of mappings from file pattern to code to exclude",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "per_file_ignores",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--extend-per-file-ignores"
+          ],
+          "description": "Like `--per-file-ignores`, but adds additional ignores on top of those already specified",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extend_per_file_ignores",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--fixable"
+          ],
+          "description": "List of rule codes to treat as eligible for fix. Only applicable when fix itself is enabled (e.g., via `--fix`)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "fixable",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--unfixable"
+          ],
+          "description": "List of rule codes to treat as ineligible for fix. Only applicable when fix itself is enabled (e.g., via `--fix`)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "unfixable",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--extend-fixable"
+          ],
+          "description": "Like --fixable, but adds additional rule codes on top of those already specified",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extend_fixable",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "List of paths, used to omit files and/or directories from analysis",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exclude",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--extend-exclude"
+          ],
+          "description": "Like --exclude, but adds additional files and directories on top of those already excluded",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extend_exclude",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--respect-gitignore"
+          ],
+          "description": "Respect file exclusions via `.gitignore` and other standard ignore files"
+        },
+        {
+          "names": [
+            "--force-exclude"
+          ],
+          "description": "Enforce exclusions, even for paths passed to Ruff directly on the command-line"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-cache"
+          ],
+          "description": "Disable cache reads"
+        },
+        {
+          "names": [
+            "--cache-dir"
+          ],
+          "description": "Path to the cache directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cache_dir",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--stdin-filename"
+          ],
+          "description": "The name of the file when passing it through stdin",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stdin_filename",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-e",
+            "--exit-zero"
+          ],
+          "description": "Exit with status code \"0\", even upon detecting lint violations"
+        },
+        {
+          "names": [
+            "--exit-non-zero-on-fix"
+          ],
+          "description": "Exit with a non-zero status code if any files were modified via fix, even if no lint violations remain"
+        }
+      ],
+      "args": [
+        {
+          "name": "Path",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "rule",
+      "description": "Explain a rule (or all rules)",
+      "options": [
+        {
+          "names": [
+            "--all"
+          ],
+          "description": "Explain all rules"
+        },
+        {
+          "names": [
+            "--output-format"
+          ],
+          "description": "Output format [default: text]",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-format"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "rule"
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "List or describe the available configuration options",
+      "options": [
+        {
+          "names": [
+            "--output-format"
+          ],
+          "description": "Output format [default: text]",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-format"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "linter",
+      "description": "List all supported upstream linters",
+      "options": [
+        {
+          "names": [
+            "--output-format"
+          ],
+          "description": "Output format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-format"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "clean",
+      "description": "Clear any caches in the current directory and any subdirectories"
+    },
+    {
+      "name": "format",
+      "description": "Run the Ruff formatter on the given files or directories",
+      "options": [
+        {
+          "names": [
+            "--check"
+          ],
+          "description": "Avoid writing any formatted files back; instead, exit with a non-zero status code if any files would have been modified, and zero otherwise"
+        },
+        {
+          "names": [
+            "--diff"
+          ],
+          "description": "Avoid writing any formatted files back; instead, exit with a non-zero status code and the difference between the current file and how the formatted file would look like"
+        },
+        {
+          "names": [
+            "--extension"
+          ],
+          "description": "List of mappings from file extension to language (one of `python`, `ipynb`, `pyi`). For example, to treat `.ipy` files as IPython notebooks, use `--extension ipy:ipynb`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "extension",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--target-version"
+          ],
+          "description": "The minimum Python version that should be supported",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target_version",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--preview"
+          ],
+          "description": "Enable preview mode; enables unstable formatting. Use `--no-preview` to disable"
+        },
+        {
+          "names": [
+            "-n",
+            "--no-cache"
+          ],
+          "description": "Disable cache reads (env: RUFF_NO_CACHE=)"
+        },
+        {
+          "names": [
+            "--cache-dir"
+          ],
+          "description": "Path to the cache directory (env: RUFF_CACHE_DIR=)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "cache_dir",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--stdin-filename"
+          ],
+          "description": "The name of the file when passing it through stdin",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "stdin_filename",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--respect-gitignore"
+          ],
+          "description": "Respect file exclusions via `.gitignore` and other standard ignore files"
+        },
+        {
+          "names": [
+            "--exclude"
+          ],
+          "description": "List of paths, used to omit files and/or directories from analysis",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "exclude",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force-exclude"
+          ],
+          "description": "Enforce exclusions, even for paths passed to Ruff directly on the command-line"
+        },
+        {
+          "names": [
+            "--line-length"
+          ],
+          "description": "Set the line-length",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "line_length",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--range"
+          ],
+          "description": "When specified, Ruff will try to only format the code in the given range",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "range",
+              "optional": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "Path",
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "server",
+      "description": "Run the language server",
+      "options": [
+        {
+          "names": [
+            "--preview"
+          ],
+          "description": "Enable preview mode. Use `--no-preview` to disable"
+        },
+        {
+          "names": [
+            "--no-preview"
+          ],
+          "description": "Disable preview mode"
+        }
+      ]
+    },
+    {
+      "name": "analyze",
+      "description": "Run analysis over Python source code",
+      "subcommands": [
+        {
+          "name": "graph",
+          "description": "Generate a map of Python file dependencies or dependents",
+          "options": [
+            {
+              "names": [
+                "--direction"
+              ],
+              "description": "The direction of the import map. By default, generates a dependency map, i.e., a map from file to files that it depends on. Use `--direction dependents` to generate a map from file to files that depend on it",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "DIRECTION"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--detect-string-imports"
+              ],
+              "description": "Attempt to detect imports from string literals"
+            },
+            {
+              "names": [
+                "--preview"
+              ],
+              "description": "Enable preview mode. Use `--no-preview` to disable"
+            },
+            {
+              "names": [
+                "--no-preview"
+              ],
+              "description": "Disable preview mode"
+            },
+            {
+              "names": [
+                "--target-version"
+              ],
+              "description": "The minimum Python version that should be supported",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "TARGET_VERSION"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "Path",
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Display Ruff's version",
+      "options": [
+        {
+          "names": [
+            "--output-format"
+          ],
+          "description": "Output format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-format"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Print this message or the help of the given subcommand(s)"
+    }
+  ]
+}

@@ -1,0 +1,495 @@
+{
+  "name": "dcli",
+  "description": "Dashlane CLI",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help for command"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output the version number"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Print debug messages"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "sync",
+      "description": "Manually synchronize the local vault with Dashlane"
+    },
+    {
+      "name": "read",
+      "description": "Retrieve a secret from the local vault via its path",
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "name": "exec",
+      "description": "Execute a command with secrets injected into the environment variables (-- <command>)",
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "inject",
+      "description": "Inject secrets into a templated string or file (uses stdin and stdout by default)",
+      "options": [
+        {
+          "names": [
+            "-i",
+            "--in"
+          ],
+          "description": "Input file of a template to inject the credential into",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--out"
+          ],
+          "description": "Output file to write the injected template to",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "file",
+              "template": "filepaths"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "password",
+      "description": "Retrieve a password from the local vault and copy it to the clipboard",
+      "options": [
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "How to print the passwords. The JSON option outputs all the matching credentials",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "filters",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "otp",
+      "description": "Retrieve an OTP code from local vault and copy it to the clipboard",
+      "options": [
+        {
+          "names": [
+            "--print"
+          ],
+          "description": "Prints just the OTP code, instead of copying it to the clipboard"
+        }
+      ],
+      "args": [
+        {
+          "name": "filters",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "note",
+      "description": "Retrieve a secure note from the local vault and open it",
+      "options": [
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "How to print the notes. The JSON option outputs all the matching notes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "type"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "filters",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "accounts",
+      "description": "Manage your accounts connected to the CLI",
+      "subcommands": [
+        {
+          "name": "whoami",
+          "description": "Prints the login email of the account currently in use"
+        },
+        {
+          "name": "help",
+          "description": "Display help for command",
+          "args": [
+            {
+              "name": "command",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "devices",
+      "description": "Operations on devices",
+      "subcommands": [
+        {
+          "name": "list",
+          "description": "Lists all registered devices that can access your account",
+          "options": [
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Output in JSON format"
+            }
+          ]
+        },
+        {
+          "name": "remove",
+          "description": "De-registers a list of devices. De-registering the CLI will implies doing a \"dcli logout\"",
+          "options": [
+            {
+              "names": [
+                "--all"
+              ],
+              "description": "Remove all devices including this one (dangerous)"
+            },
+            {
+              "names": [
+                "--others"
+              ],
+              "description": "Remove all other devices"
+            }
+          ],
+          "args": [
+            {
+              "name": "device ids",
+              "optional": true,
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "register",
+          "description": "Registers a new device to be used in non-interactive mode",
+          "options": [
+            {
+              "names": [
+                "--json"
+              ],
+              "description": "Output in JSON format"
+            }
+          ],
+          "args": [
+            {
+              "name": "device name"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Display help for command",
+          "args": [
+            {
+              "name": "command",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "team",
+      "description": "Team related commands",
+      "subcommands": [
+        {
+          "name": "credentials",
+          "description": "Team credentials operations",
+          "subcommands": [
+            {
+              "name": "generate",
+              "description": "Generate new team credentials",
+              "options": [
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Output in JSON format"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "description": "List all team credentials",
+              "options": [
+                {
+                  "names": [
+                    "--json"
+                  ],
+                  "description": "Output in JSON format"
+                }
+              ]
+            },
+            {
+              "name": "revoke",
+              "description": "Revoke credentials by access key",
+              "args": [
+                {
+                  "name": "accessKey",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Display help for command",
+              "args": [
+                {
+                  "name": "command",
+                  "optional": true
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "members",
+          "description": "List team members",
+          "options": [
+            {
+              "names": [
+                "--csv"
+              ],
+              "description": "Output in CSV format"
+            },
+            {
+              "names": [
+                "--human-readable"
+              ],
+              "description": "Output dates in human readable format"
+            }
+          ],
+          "args": [
+            {
+              "name": "page",
+              "optional": true
+            },
+            {
+              "name": "limit",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "logs",
+          "description": "List audit logs",
+          "options": [
+            {
+              "names": [
+                "--start"
+              ],
+              "description": "Start timestamp in ms",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "start"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--end"
+              ],
+              "description": "End timestamp in ms (use \"now\" to get the current timestamp)",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "end"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--type"
+              ],
+              "description": "Log type",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "type"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--category"
+              ],
+              "description": "Log category",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "category"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--csv"
+              ],
+              "description": "Output in CSV format"
+            },
+            {
+              "names": [
+                "--human-readable"
+              ],
+              "description": "Output dates in human readable format"
+            }
+          ]
+        },
+        {
+          "name": "report",
+          "description": "Get team report",
+          "args": [
+            {
+              "name": "days",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Display help for command",
+          "args": [
+            {
+              "name": "command",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "configure",
+      "description": "Configure the CLI",
+      "subcommands": [
+        {
+          "name": "disable-auto-sync",
+          "description": "Disable automatic synchronization which is done once per hour (default: false)",
+          "args": [
+            {
+              "name": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "save-master-password",
+          "description": "Should the encrypted master password be saved and the OS keychain be used (default: true)",
+          "args": [
+            {
+              "name": "boolean"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Display help for command",
+          "args": [
+            {
+              "name": "command",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backup",
+      "description": "Backup your local vault (will use the current directory by default)",
+      "options": [
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "Output directory of the backup (\".\" by default)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "directory",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--filename"
+          ],
+          "description": "Filename of the backup (\"dashlane-backup-<unix_timestamp>.db by default\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "filename"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Logout and clean your local database and OS keychain"
+    },
+    {
+      "name": "help",
+      "description": "Display help for command",
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

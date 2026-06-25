@@ -1,0 +1,3924 @@
+{
+  "name": "cw",
+  "description": "Top level cli commands",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Print version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "app",
+      "description": "Interact with the desktop app",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "install",
+          "description": "Install the CodeWhisperer app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "onboarding",
+          "description": "Run the CodeWhisperer tutorial again",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "running",
+          "description": "Check if CodeWhisperer is running",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "launch",
+          "description": "Launch the CodeWhisperer desktop app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "restart",
+          "description": "Restart the CodeWhisperer desktop app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "quit",
+          "description": "Quit the CodeWhisperer desktop app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "set-path",
+          "description": "Set the internal pseudo-terminal path",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "description": "Uninstall the CodeWhisperer app",
+          "options": [
+            {
+              "names": [
+                "--app-bundle"
+              ],
+              "description": "Remove executable and user data"
+            },
+            {
+              "names": [
+                "--input-method"
+              ],
+              "description": "Remove input method"
+            },
+            {
+              "names": [
+                "--daemon"
+              ],
+              "description": "Remove CodeWhisperer daemon"
+            },
+            {
+              "names": [
+                "--dotfiles"
+              ],
+              "description": "Remove dotfile shell integration"
+            },
+            {
+              "names": [
+                "--ssh"
+              ],
+              "description": "Remove SSH integration"
+            },
+            {
+              "names": [
+                "--no-open"
+              ],
+              "description": "Do not open the uninstallation page"
+            },
+            {
+              "names": [
+                "--only-open"
+              ],
+              "description": "Only open the uninstallation page"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "prompts",
+          "description": "Prompts shown on terminal startup",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "install",
+              "description": "Install the CodeWhisperer app"
+            },
+            {
+              "name": "onboarding",
+              "description": "Run the CodeWhisperer tutorial again"
+            },
+            {
+              "name": "running",
+              "description": "Check if CodeWhisperer is running"
+            },
+            {
+              "name": "launch",
+              "description": "Launch the CodeWhisperer desktop app"
+            },
+            {
+              "name": "restart",
+              "description": "Restart the CodeWhisperer desktop app"
+            },
+            {
+              "name": "quit",
+              "description": "Quit the CodeWhisperer desktop app"
+            },
+            {
+              "name": "set-path",
+              "description": "Set the internal pseudo-terminal path"
+            },
+            {
+              "name": "uninstall",
+              "description": "Uninstall the CodeWhisperer app"
+            },
+            {
+              "name": "prompts",
+              "description": "Prompts shown on terminal startup"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "hook",
+      "description": "Hook commands",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "editbuffer",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "session_id"
+            },
+            {
+              "name": "integration"
+            },
+            {
+              "name": "tty"
+            },
+            {
+              "name": "pid"
+            },
+            {
+              "name": "histno"
+            },
+            {
+              "name": "cursor"
+            },
+            {
+              "name": "text"
+            }
+          ]
+        },
+        {
+          "name": "hide",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "init",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "pid"
+            },
+            {
+              "name": "tty"
+            }
+          ]
+        },
+        {
+          "name": "integration-ready",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "integration"
+            }
+          ]
+        },
+        {
+          "name": "keyboard-focus-changed",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "app_identifier"
+            },
+            {
+              "name": "focused_session_id"
+            }
+          ]
+        },
+        {
+          "name": "pre-exec",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "pid"
+            },
+            {
+              "name": "tty"
+            }
+          ]
+        },
+        {
+          "name": "prompt",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "pid"
+            },
+            {
+              "name": "tty"
+            }
+          ]
+        },
+        {
+          "name": "ssh",
+          "options": [
+            {
+              "names": [
+                "--prompt"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "pid"
+            },
+            {
+              "name": "tty"
+            },
+            {
+              "name": "control_path"
+            },
+            {
+              "name": "remote_dest"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "editbuffer"
+            },
+            {
+              "name": "hide"
+            },
+            {
+              "name": "init"
+            },
+            {
+              "name": "integration-ready"
+            },
+            {
+              "name": "keyboard-focus-changed"
+            },
+            {
+              "name": "pre-exec"
+            },
+            {
+              "name": "prompt"
+            },
+            {
+              "name": "ssh"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "Debug CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "app",
+          "description": "Debug CodeWhisperer app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "build",
+          "description": "Switch to another branch of a Fig.js app",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "app"
+            },
+            {
+              "name": "build",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "autocomplete-window",
+          "description": "Toggle/set autocomplete window debug mode",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "mode",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "logs",
+          "description": "Show CodeWhisperer debug logs",
+          "options": [
+            {
+              "names": [
+                "--level"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "level",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "files",
+              "optional": true,
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "name": "input-method",
+          "description": "CodeWhisperer input method editor",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "install",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ],
+              "args": [
+                {
+                  "name": "bundle_path",
+                  "optional": true,
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "uninstall",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ],
+              "args": [
+                {
+                  "name": "bundle_path",
+                  "optional": true,
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "list",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ],
+              "args": [
+                {
+                  "name": "bundle_path",
+                  "optional": true,
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "name": "source",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ],
+              "args": [
+                {
+                  "name": "bundle_identifier"
+                },
+                {
+                  "name": "action"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "install"
+                },
+                {
+                  "name": "uninstall"
+                },
+                {
+                  "name": "list"
+                },
+                {
+                  "name": "status"
+                },
+                {
+                  "name": "source"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "prompt-accessibility",
+          "description": "Prompt accessibility",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "sample",
+          "description": "Sample CodeWhisperer process",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "verify-codesign",
+          "description": "Debug CodeWhisperer codesign verification",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "accessibility",
+          "description": "Accessibility",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "action",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "key-tester",
+          "description": "Key Tester",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "diagnostics",
+          "description": "Watches diagnostics",
+          "options": [
+            {
+              "names": [
+                "--rate"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "rate",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--watch"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "query-index",
+          "description": "Queries remote repository for updates given the specified metadata",
+          "options": [
+            {
+              "names": [
+                "-c",
+                "--channel"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "channel"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-k",
+                "--kind"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "kind"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-v",
+                "--variant"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "variant"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-e",
+                "--version"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "version"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-a",
+                "--architecture"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "architecture"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-t",
+                "--override-threshold"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "override_threshold",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-r",
+                "--enable-rollout"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "devtools",
+          "description": "Open up the devtools of a specific webview",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "app"
+            }
+          ]
+        },
+        {
+          "name": "get-index",
+          "description": "Displays remote index",
+          "options": [
+            {
+              "names": [
+                "-d",
+                "--debug"
+              ],
+              "description": "Display using debug formatting"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "channel"
+            }
+          ]
+        },
+        {
+          "name": "list-intellij-variants",
+          "description": "Lists installed IntelliJ variants",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "shell",
+          "description": "Disables sourcing of user shell config and instead uses a minimal CodeWhisperer default",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "app",
+              "description": "Debug CodeWhisperer app"
+            },
+            {
+              "name": "build",
+              "description": "Switch to another branch of a Fig.js app"
+            },
+            {
+              "name": "autocomplete-window",
+              "description": "Toggle/set autocomplete window debug mode"
+            },
+            {
+              "name": "logs",
+              "description": "Show CodeWhisperer debug logs"
+            },
+            {
+              "name": "input-method",
+              "description": "CodeWhisperer input method editor",
+              "subcommands": [
+                {
+                  "name": "install"
+                },
+                {
+                  "name": "uninstall"
+                },
+                {
+                  "name": "list"
+                },
+                {
+                  "name": "status"
+                },
+                {
+                  "name": "source"
+                }
+              ]
+            },
+            {
+              "name": "prompt-accessibility",
+              "description": "Prompt accessibility"
+            },
+            {
+              "name": "sample",
+              "description": "Sample CodeWhisperer process"
+            },
+            {
+              "name": "verify-codesign",
+              "description": "Debug CodeWhisperer codesign verification"
+            },
+            {
+              "name": "accessibility",
+              "description": "Accessibility"
+            },
+            {
+              "name": "key-tester",
+              "description": "Key Tester"
+            },
+            {
+              "name": "diagnostics",
+              "description": "Watches diagnostics"
+            },
+            {
+              "name": "query-index",
+              "description": "Queries remote repository for updates given the specified metadata"
+            },
+            {
+              "name": "devtools",
+              "description": "Open up the devtools of a specific webview"
+            },
+            {
+              "name": "get-index",
+              "description": "Displays remote index"
+            },
+            {
+              "name": "list-intellij-variants",
+              "description": "Lists installed IntelliJ variants"
+            },
+            {
+              "name": "shell",
+              "description": "Disables sourcing of user shell config and instead uses a minimal CodeWhisperer default"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "settings",
+      "description": "Customize appearance & behavior",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Format of the output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-d",
+            "--delete"
+          ],
+          "description": "Delete a value"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help (see more with '--help')"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "open",
+          "description": "Open the settings file",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "all",
+          "description": "List all the settings",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--format"
+              ],
+              "description": "Format of the output",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "format",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help (see more with '--help')"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "open",
+              "description": "Open the settings file"
+            },
+            {
+              "name": "all",
+              "description": "List all the settings"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "key",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "tips",
+      "description": "Enable/disable CodeWhisperer tips",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "enable",
+          "description": "Enable CodeWhisperer tips",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "disable",
+          "description": "Disable CodeWhisperer tips",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "reset",
+          "description": "Reset the tips to the default",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "prompt",
+          "description": "Show the tips",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "enable",
+              "description": "Enable CodeWhisperer tips"
+            },
+            {
+              "name": "disable",
+              "description": "Disable CodeWhisperer tips"
+            },
+            {
+              "name": "reset",
+              "description": "Reset the tips to the default"
+            },
+            {
+              "name": "prompt",
+              "description": "Show the tips"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Install CodeWhisperer cli components",
+      "options": [
+        {
+          "names": [
+            "--daemon"
+          ],
+          "description": "Install only the daemon"
+        },
+        {
+          "names": [
+            "--dotfiles"
+          ],
+          "description": "Install only the shell integrations"
+        },
+        {
+          "names": [
+            "--input-method"
+          ],
+          "description": "Prompt input method installation"
+        },
+        {
+          "names": [
+            "--no-confirm"
+          ],
+          "description": "Don't confirm automatic installation"
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force installation of CodeWhisperer"
+        },
+        {
+          "names": [
+            "--ssh"
+          ],
+          "description": "Install only the ssh integration"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "uninstall",
+      "description": "Uninstall CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-y",
+            "--no-confirm"
+          ],
+          "description": "Force uninstall"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Check for updates",
+      "options": [
+        {
+          "names": [
+            "--no-confirm"
+          ],
+          "description": "(deprecated) Use --non-interactive instead"
+        },
+        {
+          "names": [
+            "-y",
+            "--non-interactive"
+          ],
+          "description": "Don't prompt for confirmation"
+        },
+        {
+          "names": [
+            "--relaunch-dashboard"
+          ],
+          "description": "Relaunch into dashboard after update (false will launch in background)"
+        },
+        {
+          "names": [
+            "--rollout"
+          ],
+          "description": "Uses rollout"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "diagnostic",
+      "description": "Run diagnostic tests",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "The format of the output",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force limited diagnostic output"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help (see more with '--help')"
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Generate the dotfiles for the given shell",
+      "options": [
+        {
+          "names": [
+            "--rcfile"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rcfile",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help (see more with '--help')"
+        }
+      ],
+      "args": [
+        {
+          "name": "shell"
+        },
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "name": "theme",
+      "description": "Get or set theme",
+      "options": [
+        {
+          "names": [
+            "--list"
+          ]
+        },
+        {
+          "names": [
+            "--folder"
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "theme",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "issue",
+      "description": "Create a new Github issue",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Force issue creation"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "description",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Login to CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Logout of CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "whoami",
+      "description": "Prints details about the current user",
+      "options": [
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "Output format to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help (see more with '--help')"
+        }
+      ]
+    },
+    {
+      "name": "user",
+      "description": "Manage your CodeWhisperer user",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "login",
+          "description": "Login to CodeWhisperer",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "logout",
+          "description": "Logout of CodeWhisperer",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "whoami",
+          "description": "Prints details about the current user",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--format"
+              ],
+              "description": "Output format to use",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "format",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help (see more with '--help')"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "login",
+              "description": "Login to CodeWhisperer"
+            },
+            {
+              "name": "logout",
+              "description": "Logout of CodeWhisperer"
+            },
+            {
+              "name": "whoami",
+              "description": "Prints details about the current user"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "doctor",
+      "description": "Check CodeWhisperer is properly configured",
+      "options": [
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Run all doctor tests, with no fixes"
+        },
+        {
+          "names": [
+            "--strict"
+          ],
+          "description": "Error on warnings"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Generate the completion spec for CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help (see more with '--help')"
+        }
+      ],
+      "args": [
+        {
+          "name": "shell",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "internal",
+      "description": "Internal subcommands used for CodeWhisperer",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "pre-cmd",
+          "description": "Command that is run during the PreCmd section of the CodeWhisperer integrations",
+          "options": [
+            {
+              "names": [
+                "--alias"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "alias",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "local-state",
+          "description": "Change the local-state file",
+          "options": [
+            {
+              "names": [
+                "-f",
+                "--format"
+              ],
+              "description": "Format of the output",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "format",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-d",
+                "--delete"
+              ],
+              "description": "Delete the state"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help (see more with '--help')"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "init",
+              "description": "Reload the state listener",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "open",
+              "description": "Open the state file",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "description": "List all the settings",
+              "options": [
+                {
+                  "names": [
+                    "-f",
+                    "--format"
+                  ],
+                  "takesArg": true,
+                  "args": [
+                    {
+                      "name": "format",
+                      "optional": true
+                    }
+                  ]
+                },
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help (see more with '--help')"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "init",
+                  "description": "Reload the state listener"
+                },
+                {
+                  "name": "open",
+                  "description": "Open the state file"
+                },
+                {
+                  "name": "all",
+                  "description": "List all the settings"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "key",
+              "optional": true
+            },
+            {
+              "name": "value",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "callback",
+          "description": "Callback used for the internal pseudoterminal",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "handler_id"
+            },
+            {
+              "name": "filename",
+              "optional": true
+            },
+            {
+              "name": "exit_code",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "description": "Install fig cli",
+          "options": [
+            {
+              "names": [
+                "--daemon"
+              ],
+              "description": "Install only the daemon"
+            },
+            {
+              "names": [
+                "--dotfiles"
+              ],
+              "description": "Install only the shell integrations"
+            },
+            {
+              "names": [
+                "--input-method"
+              ],
+              "description": "Prompt input method installation"
+            },
+            {
+              "names": [
+                "--no-confirm"
+              ],
+              "description": "Don't confirm automatic installation"
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Force installation of fig"
+            },
+            {
+              "names": [
+                "--ssh"
+              ],
+              "description": "Install only the ssh integration"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "description": "Uninstall fig cli",
+          "options": [
+            {
+              "names": [
+                "--daemon"
+              ],
+              "description": "Uninstall only the daemon"
+            },
+            {
+              "names": [
+                "--dotfiles"
+              ],
+              "description": "Uninstall only the shell integrations"
+            },
+            {
+              "names": [
+                "--input-method"
+              ],
+              "description": "Uninstall only the input method"
+            },
+            {
+              "names": [
+                "--binary"
+              ],
+              "description": "Uninstall only the binary"
+            },
+            {
+              "names": [
+                "--ssh"
+              ],
+              "description": "Uninstall only the ssh integration"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "get-shell",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "hostname",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "should-figterm-launch",
+          "description": "Detects if Figterm should be launched",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help (see more with '--help')"
+            }
+          ]
+        },
+        {
+          "name": "event",
+          "options": [
+            {
+              "names": [
+                "--name"
+              ],
+              "description": "Name of the event",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--payload"
+              ],
+              "description": "Payload of the event as a JSON string",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "payload",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--apps"
+              ],
+              "description": "Apps to send the event to",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "apps",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "sockets-dir",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "stream-from-socket",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "figterm-socket-path",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "session_id"
+            }
+          ]
+        },
+        {
+          "name": "ipc",
+          "options": [
+            {
+              "names": [
+                "--figterm"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "figterm",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--json"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "json"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--app"
+              ]
+            },
+            {
+              "names": [
+                "--recv"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "uninstall-for-all-users",
+          "description": "Linux only",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "uuidgen",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "open-uninstall-page",
+          "options": [
+            {
+              "names": [
+                "--verbose"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "ssh-local-command",
+          "description": "Displays prompt to install remote shell integrations",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "remote_dest"
+            },
+            {
+              "name": "uuid"
+            }
+          ]
+        },
+        {
+          "name": "prompt-ssh",
+          "description": "\\[Deprecated\\] Displays prompt to install remote shell integrations",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "remote_dest"
+            }
+          ]
+        },
+        {
+          "name": "attempt-to-finish-input-method-installation",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "bundle_path",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "dump-state",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "component"
+            }
+          ]
+        },
+        {
+          "name": "finish-update",
+          "options": [
+            {
+              "names": [
+                "--relaunch-dashboard"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "swap-files",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "from",
+              "template": "filepaths"
+            },
+            {
+              "name": "to",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "name": "check-ssh",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "args": [
+            {
+              "name": "remote_username"
+            }
+          ]
+        },
+        {
+          "name": "brew-uninstall",
+          "options": [
+            {
+              "names": [
+                "--zap"
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "generate-ssh",
+          "description": "Generates an SSH configuration file",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help (see more with '--help')"
+            }
+          ],
+          "args": [
+            {
+              "name": "remote_username"
+            }
+          ]
+        },
+        {
+          "name": "ghost-text",
+          "options": [
+            {
+              "names": [
+                "--buffer"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "buffer"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "ghost-text-accept",
+          "options": [
+            {
+              "names": [
+                "--buffer"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "buffer"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--suggestion"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "suggestion"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "pre-cmd",
+              "description": "Command that is run during the PreCmd section of the fig integrations"
+            },
+            {
+              "name": "local-state",
+              "description": "Change the local-state file",
+              "subcommands": [
+                {
+                  "name": "init",
+                  "description": "Reload the state listener"
+                },
+                {
+                  "name": "open",
+                  "description": "Open the state file"
+                },
+                {
+                  "name": "all",
+                  "description": "List all the settings"
+                }
+              ]
+            },
+            {
+              "name": "callback",
+              "description": "Callback used for the internal pseudoterminal"
+            },
+            {
+              "name": "install",
+              "description": "Install fig cli"
+            },
+            {
+              "name": "uninstall",
+              "description": "Uninstall fig cli"
+            },
+            {
+              "name": "get-shell"
+            },
+            {
+              "name": "hostname"
+            },
+            {
+              "name": "should-figterm-launch",
+              "description": "Detects if Figterm should be launched"
+            },
+            {
+              "name": "event"
+            },
+            {
+              "name": "sockets-dir"
+            },
+            {
+              "name": "stream-from-socket"
+            },
+            {
+              "name": "figterm-socket-path"
+            },
+            {
+              "name": "ipc"
+            },
+            {
+              "name": "uninstall-for-all-users",
+              "description": "Linux only"
+            },
+            {
+              "name": "uuidgen"
+            },
+            {
+              "name": "open-uninstall-page"
+            },
+            {
+              "name": "ssh-local-command",
+              "description": "Displays prompt to install remote shell integrations"
+            },
+            {
+              "name": "prompt-ssh",
+              "description": "\\[Deprecated\\] Displays prompt to install remote shell integrations"
+            },
+            {
+              "name": "attempt-to-finish-input-method-installation"
+            },
+            {
+              "name": "dump-state"
+            },
+            {
+              "name": "finish-update"
+            },
+            {
+              "name": "swap-files"
+            },
+            {
+              "name": "check-ssh"
+            },
+            {
+              "name": "brew-uninstall"
+            },
+            {
+              "name": "generate-ssh",
+              "description": "Generates an SSH configuration file"
+            },
+            {
+              "name": "ghost-text"
+            },
+            {
+              "name": "ghost-text-accept"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "launch",
+      "description": "Launch the CodeWhisperer desktop app",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "quit",
+      "description": "Quit the CodeWhisperer desktop app",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "restart",
+      "description": "Restart the CodeWhisperer desktop app",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "process",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "onboarding",
+      "description": "Run the CodeWhisperer tutorial",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "integrations",
+      "description": "Manage system integrations",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "install",
+          "options": [
+            {
+              "names": [
+                "-s",
+                "--silent"
+              ],
+              "description": "Suppress status messages"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "dotfiles",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help (see more with '--help')"
+                }
+              ],
+              "args": [
+                {
+                  "name": "shell",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "daemon",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "ssh",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "input-method",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "vscode",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "intellij-plugin",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "uninstall",
+          "options": [
+            {
+              "names": [
+                "-s",
+                "--silent"
+              ],
+              "description": "Suppress status messages"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "dotfiles",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help (see more with '--help')"
+                }
+              ],
+              "args": [
+                {
+                  "name": "shell",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "daemon",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "ssh",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "input-method",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "vscode",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "intellij-plugin",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "reinstall",
+          "options": [
+            {
+              "names": [
+                "-s",
+                "--silent"
+              ],
+              "description": "Suppress status messages"
+            },
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "dotfiles",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help (see more with '--help')"
+                }
+              ],
+              "args": [
+                {
+                  "name": "shell",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "daemon",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "ssh",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "input-method",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "vscode",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "intellij-plugin",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "dotfiles",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help (see more with '--help')"
+                }
+              ],
+              "args": [
+                {
+                  "name": "shell",
+                  "optional": true
+                }
+              ]
+            },
+            {
+              "name": "daemon",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "ssh",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "input-method",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "vscode",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "intellij-plugin",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "all",
+              "options": [
+                {
+                  "names": [
+                    "-h",
+                    "--help"
+                  ],
+                  "description": "Print help"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                },
+                {
+                  "name": "help",
+                  "description": "Print this message or the help of the given subcommand(s)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "install",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "uninstall",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "reinstall",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ai",
+      "description": "English -> Bash translation",
+      "options": [
+        {
+          "names": [
+            "-n",
+            "--n"
+          ],
+          "description": "Number of completions to generate (must be <=5)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "n",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "input",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    },
+    {
+      "name": "telemetry",
+      "description": "Enable/disable telemetry",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "enable",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "disable",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "options": [
+            {
+              "names": [
+                "-h",
+                "--help"
+              ],
+              "description": "Print help"
+            }
+          ]
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)",
+          "subcommands": [
+            {
+              "name": "enable"
+            },
+            {
+              "name": "disable"
+            },
+            {
+              "name": "status"
+            },
+            {
+              "name": "help",
+              "description": "Print this message or the help of the given subcommand(s)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Version",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "help-all",
+      "description": "Print help for all subcommands",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "dashboard",
+      "description": "Open the fig dashboard",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Print this message or the help of the given subcommand(s)",
+      "subcommands": [
+        {
+          "name": "app",
+          "description": "Interact with the desktop app",
+          "subcommands": [
+            {
+              "name": "install",
+              "description": "Install the Fig app"
+            },
+            {
+              "name": "onboarding",
+              "description": "Run the CodeWhisperer tutorial again"
+            },
+            {
+              "name": "running",
+              "description": "Check if CodeWhisperer is running"
+            },
+            {
+              "name": "launch",
+              "description": "Launch the CodeWhisperer desktop app"
+            },
+            {
+              "name": "restart",
+              "description": "Restart the CodeWhisperer desktop app"
+            },
+            {
+              "name": "quit",
+              "description": "Quit the CodeWhisperer desktop app"
+            },
+            {
+              "name": "set-path",
+              "description": "Set the internal pseudo-terminal path"
+            },
+            {
+              "name": "uninstall",
+              "description": "Uninstall the CodeWhisperer app"
+            },
+            {
+              "name": "prompts",
+              "description": "Prompts shown on terminal startup"
+            }
+          ]
+        },
+        {
+          "name": "hook",
+          "description": "Hook commands",
+          "subcommands": [
+            {
+              "name": "editbuffer"
+            },
+            {
+              "name": "hide"
+            },
+            {
+              "name": "init"
+            },
+            {
+              "name": "integration-ready"
+            },
+            {
+              "name": "keyboard-focus-changed"
+            },
+            {
+              "name": "pre-exec"
+            },
+            {
+              "name": "prompt"
+            },
+            {
+              "name": "ssh"
+            }
+          ]
+        },
+        {
+          "name": "debug",
+          "description": "Debug CodeWhisperer",
+          "subcommands": [
+            {
+              "name": "app",
+              "description": "Debug CodeWhisperer app"
+            },
+            {
+              "name": "build",
+              "description": "Switch to another branch of a Fig.js app"
+            },
+            {
+              "name": "autocomplete-window",
+              "description": "Toggle/set autocomplete window debug mode"
+            },
+            {
+              "name": "logs",
+              "description": "Show CodeWhisperer debug logs"
+            },
+            {
+              "name": "input-method",
+              "description": "CodeWhisperer input method editor",
+              "subcommands": [
+                {
+                  "name": "install"
+                },
+                {
+                  "name": "uninstall"
+                },
+                {
+                  "name": "list"
+                },
+                {
+                  "name": "status"
+                },
+                {
+                  "name": "source"
+                }
+              ]
+            },
+            {
+              "name": "prompt-accessibility",
+              "description": "Prompt accessibility"
+            },
+            {
+              "name": "sample",
+              "description": "Sample CodeWhisperer process"
+            },
+            {
+              "name": "verify-codesign",
+              "description": "Debug CodeWhisperer codesign verification"
+            },
+            {
+              "name": "accessibility",
+              "description": "Accessibility"
+            },
+            {
+              "name": "key-tester",
+              "description": "Key Tester"
+            },
+            {
+              "name": "diagnostics",
+              "description": "Watches diagnostics"
+            },
+            {
+              "name": "query-index",
+              "description": "Queries remote repository for updates given the specified metadata"
+            },
+            {
+              "name": "devtools",
+              "description": "Open up the devtools of a specific webview"
+            },
+            {
+              "name": "get-index",
+              "description": "Displays remote index"
+            },
+            {
+              "name": "list-intellij-variants",
+              "description": "Lists installed IntelliJ variants"
+            },
+            {
+              "name": "shell",
+              "description": "Disables sourcing of user shell config and instead uses a minimal CodeWhisperer default"
+            }
+          ]
+        },
+        {
+          "name": "settings",
+          "description": "Customize appearance & behavior",
+          "subcommands": [
+            {
+              "name": "open",
+              "description": "Open the settings file"
+            },
+            {
+              "name": "all",
+              "description": "List all the settings"
+            }
+          ]
+        },
+        {
+          "name": "tips",
+          "description": "Enable/disable fig tips",
+          "subcommands": [
+            {
+              "name": "enable",
+              "description": "Enable fig tips"
+            },
+            {
+              "name": "disable",
+              "description": "Disable fig tips"
+            },
+            {
+              "name": "reset",
+              "description": "Reset the tips to the default"
+            },
+            {
+              "name": "prompt",
+              "description": "Show the tips"
+            }
+          ]
+        },
+        {
+          "name": "install",
+          "description": "Install fig cli components"
+        },
+        {
+          "name": "uninstall",
+          "description": "Uninstall fig"
+        },
+        {
+          "name": "update",
+          "description": "Update dotfiles"
+        },
+        {
+          "name": "diagnostic",
+          "description": "Run diagnostic tests"
+        },
+        {
+          "name": "init",
+          "description": "Generate the dotfiles for the given shell"
+        },
+        {
+          "name": "theme",
+          "description": "Get or set theme"
+        },
+        {
+          "name": "issue",
+          "description": "Create a new Github issue"
+        },
+        {
+          "name": "login",
+          "description": "Login to CodeWhisperer"
+        },
+        {
+          "name": "logout",
+          "description": "Logout of CodeWhisperer"
+        },
+        {
+          "name": "whoami",
+          "description": "Prints details about the current user"
+        },
+        {
+          "name": "user",
+          "description": "Manage your fig user",
+          "subcommands": [
+            {
+              "name": "login",
+              "description": "Login to CodeWhisperer"
+            },
+            {
+              "name": "logout",
+              "description": "Logout of CodeWhisperer"
+            },
+            {
+              "name": "whoami",
+              "description": "Prints details about the current user"
+            }
+          ]
+        },
+        {
+          "name": "doctor",
+          "description": "Check CodeWhisperer is properly configured"
+        },
+        {
+          "name": "completion",
+          "description": "Generate the completion spec for CodeWhisperer"
+        },
+        {
+          "name": "internal",
+          "description": "Internal subcommands used for CodeWhisperer",
+          "subcommands": [
+            {
+              "name": "pre-cmd",
+              "description": "Command that is run during the PreCmd section of the fig integrations"
+            },
+            {
+              "name": "local-state",
+              "description": "Change the local-state file",
+              "subcommands": [
+                {
+                  "name": "init",
+                  "description": "Reload the state listener"
+                },
+                {
+                  "name": "open",
+                  "description": "Open the state file"
+                },
+                {
+                  "name": "all",
+                  "description": "List all the settings"
+                }
+              ]
+            },
+            {
+              "name": "callback",
+              "description": "Callback used for the internal pseudoterminal"
+            },
+            {
+              "name": "install",
+              "description": "Install fig cli"
+            },
+            {
+              "name": "uninstall",
+              "description": "Uninstall fig cli"
+            },
+            {
+              "name": "get-shell"
+            },
+            {
+              "name": "hostname"
+            },
+            {
+              "name": "should-figterm-launch",
+              "description": "Detects if Figterm should be launched"
+            },
+            {
+              "name": "event"
+            },
+            {
+              "name": "sockets-dir"
+            },
+            {
+              "name": "stream-from-socket"
+            },
+            {
+              "name": "figterm-socket-path"
+            },
+            {
+              "name": "ipc"
+            },
+            {
+              "name": "uninstall-for-all-users",
+              "description": "Linux only"
+            },
+            {
+              "name": "uuidgen"
+            },
+            {
+              "name": "open-uninstall-page"
+            },
+            {
+              "name": "ssh-local-command",
+              "description": "Displays prompt to install remote shell integrations"
+            },
+            {
+              "name": "prompt-ssh",
+              "description": "\\[Deprecated\\] Displays prompt to install remote shell integrations"
+            },
+            {
+              "name": "attempt-to-finish-input-method-installation"
+            },
+            {
+              "name": "dump-state"
+            },
+            {
+              "name": "finish-update"
+            },
+            {
+              "name": "swap-files"
+            },
+            {
+              "name": "check-ssh"
+            },
+            {
+              "name": "brew-uninstall"
+            },
+            {
+              "name": "generate-ssh",
+              "description": "Generates an SSH configuration file"
+            },
+            {
+              "name": "ghost-text"
+            },
+            {
+              "name": "ghost-text-accept"
+            }
+          ]
+        },
+        {
+          "name": "launch",
+          "description": "Launch the CodeWhisperer desktop app"
+        },
+        {
+          "name": "quit",
+          "description": "Quit the CodeWhisperer desktop app"
+        },
+        {
+          "name": "restart",
+          "description": "Restart the CodeWhisperer desktop app"
+        },
+        {
+          "name": "onboarding",
+          "description": "Run the CodeWhisperer tutorial"
+        },
+        {
+          "name": "integrations",
+          "description": "Manage system integrations",
+          "subcommands": [
+            {
+              "name": "install",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "uninstall",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "reinstall",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            },
+            {
+              "name": "status",
+              "subcommands": [
+                {
+                  "name": "dotfiles"
+                },
+                {
+                  "name": "daemon"
+                },
+                {
+                  "name": "ssh"
+                },
+                {
+                  "name": "input-method"
+                },
+                {
+                  "name": "vscode"
+                },
+                {
+                  "name": "intellij"
+                },
+                {
+                  "name": "all"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ai",
+          "description": "English -> Bash translation"
+        },
+        {
+          "name": "telemetry",
+          "description": "Enable/disable telemetry",
+          "subcommands": [
+            {
+              "name": "enable"
+            },
+            {
+              "name": "disable"
+            },
+            {
+              "name": "status"
+            }
+          ]
+        },
+        {
+          "name": "version",
+          "description": "Version"
+        },
+        {
+          "name": "help-all",
+          "description": "Print help for all subcommands"
+        },
+        {
+          "name": "dashboard",
+          "description": "Open the fig dashboard"
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "name": "rscript",
+  "description": "Scripting Front-End for R",
+  "options": [
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "R expression to run",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "expression"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Print usage and exit"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Print version and exit"
+    },
+    {
+      "names": [
+        "--verbose"
+      ],
+      "description": "Print information on progress"
+    },
+    {
+      "names": [
+        "--no-echo"
+      ],
+      "description": "Run as quietly as possible"
+    },
+    {
+      "names": [
+        "--no-restore"
+      ],
+      "description": "Don't restore anything"
+    },
+    {
+      "names": [
+        "--save"
+      ],
+      "description": "Do save workspace at the end of the session"
+    },
+    {
+      "names": [
+        "--no-environ"
+      ],
+      "description": "Don't read the site and user environment files"
+    },
+    {
+      "names": [
+        "--no-site-file"
+      ],
+      "description": "Don't read the site-wide Rprofile"
+    },
+    {
+      "names": [
+        "--no-init-file"
+      ],
+      "description": "Don't read the user R profile"
+    },
+    {
+      "names": [
+        "--restore"
+      ],
+      "description": "Do restore previously saved objects at startup"
+    },
+    {
+      "names": [
+        "--vanilla"
+      ],
+      "description": "Combine --no-save, --no-restore, --no-site-file --no-init-file and --no-environ"
+    },
+    {
+      "names": [
+        "--default-packages"
+      ],
+      "description": "Comma separated list of default packages",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "packages"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "template": "filepaths"
+    },
+    {
+      "name": "args",
+      "variadic": true
+    }
+  ]
+}

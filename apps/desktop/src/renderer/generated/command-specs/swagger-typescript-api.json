@@ -1,0 +1,354 @@
+{
+  "name": "swagger-typescript-api",
+  "description": "Generate api via swagger scheme",
+  "options": [
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Output the current version"
+    },
+    {
+      "names": [
+        "--path",
+        "-p"
+      ],
+      "description": "Path/url to swagger scheme",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output",
+        "-o"
+      ],
+      "description": "Output path of typescript api file (default: \"./\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--name",
+        "-n"
+      ],
+      "description": "Name of output typescript api file (default: \"Api.ts\")",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--templates",
+        "-t"
+      ],
+      "description": "Path to folder containing templates",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--default-as-success",
+        "-d"
+      ],
+      "description": "Use \"default\" response status code as success response too"
+    },
+    {
+      "names": [
+        "--responses",
+        "-r"
+      ],
+      "description": "Generate additional information about request responses"
+    },
+    {
+      "names": [
+        "--union-enums"
+      ],
+      "description": "Generate all \"enum\" types as union types (T1 | T2 | TN)"
+    },
+    {
+      "names": [
+        "--add-readonly"
+      ],
+      "description": "Generate readonly properties"
+    },
+    {
+      "names": [
+        "--route-types"
+      ],
+      "description": "Generate type definitions for API routes"
+    },
+    {
+      "names": [
+        "--no-client"
+      ],
+      "description": "Do not generate an API class"
+    },
+    {
+      "names": [
+        "--enum-names-as-values"
+      ],
+      "description": "Use values in 'x-enumNames' as enum values (not only as keys)"
+    },
+    {
+      "names": [
+        "--extract-request-params"
+      ],
+      "description": "Extract request params to data contract"
+    },
+    {
+      "names": [
+        "--extract-request-body"
+      ],
+      "description": "Extract request body type to data contract"
+    },
+    {
+      "names": [
+        "--extract-response-body"
+      ],
+      "description": "Extract response body type to data contract"
+    },
+    {
+      "names": [
+        "--extract-response-error"
+      ],
+      "description": "Extract response error type to data contract"
+    },
+    {
+      "names": [
+        "--modular"
+      ],
+      "description": "Generate separated files for http client, data contracts, and routes"
+    },
+    {
+      "names": [
+        "--js"
+      ],
+      "description": "Generate js api module with declaration file"
+    },
+    {
+      "names": [
+        "--module-name-index"
+      ],
+      "description": "Determines which path index should be used for routes separation",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Index"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--module-name-first-tag"
+      ],
+      "description": "Splits routes based on the first tag"
+    },
+    {
+      "names": [
+        "--disableStrictSSL"
+      ],
+      "description": "Disabled strict SSL"
+    },
+    {
+      "names": [
+        "--disableProxy"
+      ],
+      "description": "Disabled proxy"
+    },
+    {
+      "names": [
+        "--axios"
+      ],
+      "description": "Generate axios http client"
+    },
+    {
+      "names": [
+        "--unwrap-response-data"
+      ],
+      "description": "Unwrap the data item from the response"
+    },
+    {
+      "names": [
+        "--disable-throw-on-error"
+      ],
+      "description": "Do not throw an error when response.ok is not true (default: false)"
+    },
+    {
+      "names": [
+        "--single-http-client"
+      ],
+      "description": "Ability to send HttpClient instance to Api constructor (default: false)"
+    },
+    {
+      "names": [
+        "--silent"
+      ],
+      "description": "Output only errors to console"
+    },
+    {
+      "names": [
+        "--default-response"
+      ],
+      "description": "Default type for empty response schema",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Type"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--type-prefix"
+      ],
+      "description": "Data contract name prefix",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Prefix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--type-suffix"
+      ],
+      "description": "Data contract name suffix",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Suffix"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--clean-output"
+      ],
+      "description": "Clean output folder before generate api. WARNING: May cause data loss (default: false)"
+    },
+    {
+      "names": [
+        "--api-class-name"
+      ],
+      "description": "Name of the api class",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--patch"
+      ],
+      "description": "Fix up small errors in the swagger source definition (default: false)"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Additional information about processes inside this tool (default: false)"
+    },
+    {
+      "names": [
+        "--another-array-type"
+      ],
+      "description": "Generate array types as Array<Type> (by default Type[]) (default: false)"
+    },
+    {
+      "names": [
+        "--sort-types"
+      ],
+      "description": "Sort fields and types (default: false)"
+    },
+    {
+      "names": [
+        "--extract-enums"
+      ],
+      "description": "Extract all enums from inline interface\type content to typescript enum construction (default: false)"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for swagger-typescript-api"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "generate-templates",
+      "description": "Generate \".ejs\" templates needed for generate api",
+      "options": [
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output path of generated templates",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Path",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--modular",
+            "-m"
+          ],
+          "description": "Generate templates needed to separate files for http client, data contracts, and routes"
+        },
+        {
+          "names": [
+            "--http-client"
+          ],
+          "description": "Http client type",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "Http client"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--clean-output",
+            "-c"
+          ],
+          "description": "Clean output folder before generate template"
+        },
+        {
+          "names": [
+            "--rewrite",
+            "-r"
+          ],
+          "description": "Rewrite content in existing templates"
+        }
+      ]
+    }
+  ]
+}

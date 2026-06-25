@@ -1,0 +1,1327 @@
+{
+  "name": "meteor",
+  "description": "Run the meteor command-line tool",
+  "subcommands": [
+    {
+      "name": "npm"
+    },
+    {
+      "name": "help",
+      "description": "Get help on meteor command line usage",
+      "subcommands": [
+        {
+          "name": "admin",
+          "subcommands": [
+            {
+              "name": "maintainers"
+            },
+            {
+              "name": "recommend-release"
+            },
+            {
+              "name": "change-homepage"
+            },
+            {
+              "name": "list-organizations"
+            },
+            {
+              "name": "members"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "run",
+      "description": "Run a meteor development server in the current project. Searches upward from the current directory for the root directory of a Meteor project",
+      "options": [
+        {
+          "names": [
+            "target"
+          ],
+          "description": "If you have added a platform to your app with 'meteor add-platform', you can pass one of the following targets as an argument to this command"
+        },
+        {
+          "names": [
+            "--port",
+            "-p"
+          ],
+          "description": "Port to listen on (instead of the default 3000)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect-brk"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code. The server will be paused at startup, waiting for clients to attach to the process on the specified port",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mobile-server"
+          ],
+          "description": "Location where mobile builds connect to the Meteor server. Defaults to your local IP and the port that the Meteor server binds to. Can include a URL scheme (for example, --mobile-server https://example.com:443)"
+        },
+        {
+          "names": [
+            "--cordova-server-port"
+          ],
+          "description": "Local port where Cordova will serve the content. It's important when multiple Cordova apps are build from the same Meteor app source code as by default the port is generated using the id inside .meteor/.id file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--production"
+          ],
+          "description": "Simulate production mode. Minify and bundle CSS and JS files"
+        },
+        {
+          "names": [
+            "--raw-logs"
+          ],
+          "description": "Run without parsing logs from stdout and stderr"
+        },
+        {
+          "names": [
+            "--settings",
+            "-s"
+          ],
+          "description": "Set optional data for Meteor.settings on the server",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON File",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Specify the release of Meteor to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "release"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Print all output from builds logs"
+        },
+        {
+          "names": [
+            "--no-lint"
+          ],
+          "description": "Don't run linters used by the app on every rebuild"
+        },
+        {
+          "names": [
+            "--no-release-check"
+          ],
+          "description": "Don't run the release updater to check for new releases"
+        },
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        },
+        {
+          "names": [
+            "--extra-packages"
+          ],
+          "description": "Run with additional packages (comma separated, for example: --extra-packages \"package-name1, package-name2@1.2.3\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-archs"
+          ],
+          "description": "Don't create bundles for certain web architectures (comma separated, for example: --exclude-archs \"web.browser.legacy, web.cordova\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "architectures"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "debug",
+      "description": "DEPRECATED. The 'meteor debug' command is deprecated in favor of 'meteor --inspect-brk'"
+    },
+    {
+      "name": "create",
+      "description": "Create a new Meteor project. By default, it uses React and makes a subdirectory named name and copies in the template app. You can pass an absolute or relative path",
+      "options": [
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Specify the release of Meteor to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "release"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--package"
+          ],
+          "description": "Create a new meteor package instead of an app",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package_name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--example"
+          ],
+          "description": "Example template to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "example_name",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "Show list of available examples"
+        },
+        {
+          "names": [
+            "--bare"
+          ],
+          "description": "Create an empty app"
+        },
+        {
+          "names": [
+            "--minimal"
+          ],
+          "description": "Create an app with as few Meteor packages as possible"
+        },
+        {
+          "names": [
+            "--full"
+          ],
+          "description": "Create a fully scaffolded app"
+        },
+        {
+          "names": [
+            "--react"
+          ],
+          "description": "Create a basic react-based app, same as default"
+        },
+        {
+          "names": [
+            "--vue"
+          ],
+          "description": "Create a basic vue-based app"
+        },
+        {
+          "names": [
+            "--apollo"
+          ],
+          "description": "Create a basic apollo-based app"
+        },
+        {
+          "names": [
+            "--svelte"
+          ],
+          "description": "Create a basic svelte-based app"
+        },
+        {
+          "names": [
+            "--typescript"
+          ],
+          "description": "Create a basic Typescript React-based app"
+        },
+        {
+          "names": [
+            "--blaze"
+          ],
+          "description": "Create a basic blaze-based app"
+        },
+        {
+          "names": [
+            "--tailwind"
+          ],
+          "description": "Create a basic react-based app, with tailwind configured"
+        }
+      ],
+      "args": [
+        {
+          "name": "path"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Attempts to bring you to the latest version of Meteor, and then to upgrade your packages to their latest versions. By default, update will not break compatibility",
+      "options": [
+        {
+          "names": [
+            "--packages-only"
+          ],
+          "description": "Update the package versions only. Do not update the release"
+        },
+        {
+          "names": [
+            "--patch"
+          ],
+          "description": "Update the release to a patch release only"
+        },
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Update to a specific release of meteor",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "release"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        },
+        {
+          "names": [
+            "--all-packages"
+          ],
+          "description": "Update all packages including indirect dependencies"
+        }
+      ],
+      "args": [
+        {
+          "name": "package_names",
+          "optional": true,
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "add",
+      "description": "Add packages to your Meteor project. You can add multiple packages with one command",
+      "options": [
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        }
+      ],
+      "args": [
+        {
+          "name": "package"
+        }
+      ]
+    },
+    {
+      "name": "remove",
+      "description": "Removes a package previously added to your Meteor project. You can remove multiple packages with one command. For a list of the packages that your application is currently using, see \"meteor list\"",
+      "args": [
+        {
+          "name": "package",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "Lists the packages that you have explicitly added to your project",
+      "options": [
+        {
+          "names": [
+            "--tree"
+          ],
+          "description": "Outputs a tree showing how packages are referenced"
+        },
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Outputs the tree in JSON format"
+        },
+        {
+          "names": [
+            "--weak"
+          ],
+          "description": "Show weakly referenced dependencies in the tree"
+        },
+        {
+          "names": [
+            "--details"
+          ],
+          "description": "Adds more package details to the JSON output"
+        }
+      ]
+    },
+    {
+      "name": "add-platform",
+      "description": "Adds platforms to your Meteor project. You can add multiple platforms with one command",
+      "args": [
+        {
+          "name": "platform"
+        }
+      ]
+    },
+    {
+      "name": "remove-platform",
+      "description": "Removes a platform previously added to your Meteor project",
+      "args": [
+        {
+          "name": "platform",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list-platforms",
+      "description": "Lists all of the platforms added to your project"
+    },
+    {
+      "name": "ensure-cordova-dependencies",
+      "description": "Check if the dependencies are installed, otherwise install them"
+    },
+    {
+      "name": "build",
+      "description": "Package this project up for deployment. The command outputs a directory with builds for all platforms in this project",
+      "options": [
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Build in debug mode (don't minify, etc)"
+        },
+        {
+          "names": [
+            "--directory"
+          ],
+          "description": "Output a directory (rather than a tarball) for the application server bundle. If the output location exists, it will be recursively deleted first"
+        },
+        {
+          "names": [
+            "--server-only"
+          ],
+          "description": "Skip building mobile apps even if mobile platforms have been added"
+        },
+        {
+          "names": [
+            "--mobile-settings"
+          ],
+          "description": "Set optional data for the initial value of Meteor.settings in your mobile application"
+        },
+        {
+          "names": [
+            "--server"
+          ],
+          "description": "Location where mobile builds connect to the Meteor server. Defaults to localhost:3000. Can include a URL scheme (for example, --server https://example.com:443)"
+        },
+        {
+          "names": [
+            "--architecture"
+          ],
+          "description": "Builds the server for a different architecture than your developer machine's architecture. Note: This option selects the architecture of the binary-dependent Atmosphere packages you would like bundled into your application, when those packages were specifically published for multiple architectures (i.e. with meteor publish-for-arch). If your project doesn't use any Atmosphere packages that have binary dependencies, --architecture has no effect",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        },
+        {
+          "names": [
+            "--platforms"
+          ],
+          "description": "Builds only the specified platforms (when available)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "platforms",
+              "optional": true,
+              "variadic": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--packageType"
+          ],
+          "description": "Choose between apk/bundle for android builds",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "package-type",
+              "optional": true
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "output path",
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "name": "lint",
+      "description": "Run through the whole build process for the app and run all linters the app uses",
+      "options": [
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        }
+      ]
+    },
+    {
+      "name": "shell",
+      "description": "When `meteor shell` is executed in an application directory where a server is already running, it connects to the server and starts an interactive shell for evaluating server-side code"
+    },
+    {
+      "name": "mongo",
+      "description": "Opens a Mongo shell to view or manipulate collections. Can only be used when developing locally",
+      "options": [
+        {
+          "names": [
+            "--url",
+            "-U"
+          ],
+          "description": "Mongo database URL",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reset",
+      "description": "Reset the current project to a fresh state. Removes all local data"
+    },
+    {
+      "name": "deploy",
+      "description": "Deploys the project in your current directory to Meteor's servers",
+      "options": [
+        {
+          "names": [
+            "--delete",
+            "-D"
+          ],
+          "description": "Permanently delete this deployment"
+        },
+        {
+          "names": [
+            "--debug"
+          ],
+          "description": "Deploy in debug mode (don't minify, etc)"
+        },
+        {
+          "names": [
+            "--settings",
+            "-s"
+          ],
+          "description": "Set optional data for Meteor.settings",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON File",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        },
+        {
+          "names": [
+            "--deploy-polling-timeout"
+          ],
+          "description": "The number of milliseconds to wait for build/deploy success or failure after a successful upload of your app's minified code; defaults to 15 minutes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "milliseconds"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-wait"
+          ],
+          "description": "Exits when Meteor has uploaded the app's code instead of waiting for the deploy to conclude"
+        },
+        {
+          "names": [
+            "--cache-build"
+          ],
+          "description": "Reuses the build already created if the git commit hash is the same"
+        },
+        {
+          "names": [
+            "--free"
+          ],
+          "description": "When deploying an app for the first time, you can pass this option to deploy your app in the Galaxy's free mode"
+        },
+        {
+          "names": [
+            "--plan"
+          ],
+          "description": "You can change the app plan by providing this argument with one of the following values: professional, essentials, or free. Be aware that this argument overwrites the `--free` argument"
+        },
+        {
+          "names": [
+            "--mongo"
+          ],
+          "description": "If this flag is true and it's not provided a mongo url in the settings ('galaxy.meteor.com'.env.MONGO_URL), when deploying, Galaxy will create a database to your app in its shared cluster and will insert the URL in your app's settings for you",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "true/false"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--container-size"
+          ],
+          "description": "Change your app's container size using the deploy command",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "size"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "site"
+        }
+      ]
+    },
+    {
+      "name": "authorized",
+      "description": "Manage authorized users and organizations",
+      "options": [
+        {
+          "names": [
+            "--add"
+          ],
+          "description": "Add an authorized user or organization"
+        },
+        {
+          "names": [
+            "--remove"
+          ],
+          "description": "Remove an authorized user or organization"
+        },
+        {
+          "names": [
+            "--transfer"
+          ],
+          "description": "Transfer the (Galaxy) app to a new user or organization"
+        },
+        {
+          "names": [
+            "--list"
+          ],
+          "description": "List authorized users and organizations"
+        }
+      ],
+      "args": [
+        {
+          "name": "site"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Prompts for your username and password and logs you in to your Meteor developer account",
+      "options": [
+        {
+          "names": [
+            "--email"
+          ],
+          "description": "Add an authorized user or organization",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Log out of your Meteor developer account"
+    },
+    {
+      "name": "whoami",
+      "description": "Prints the username of the currently logged-in Meteor developer"
+    },
+    {
+      "name": "test-packages",
+      "description": "Runs unit tests for one or more packages. The results are shown in a browser dashboard that updates whenever a relevant source file is modified",
+      "options": [
+        {
+          "names": [
+            "--release"
+          ],
+          "description": "Specify the release of Meteor to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "release"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port",
+            "-p"
+          ],
+          "description": "Port to listen on (instead of the default 3000). Also uses port N+1 and N+2",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect-brk"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code. The server will be paused at startup, waiting for clients to attach to the process on the specified port",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mobile-server"
+          ],
+          "description": "Location where mobile builds connect to the Meteor server. Defaults to your local IP and the port that the Meteor server binds to. Can include a URL scheme (for example, --mobile-server https://example.com:443)"
+        },
+        {
+          "names": [
+            "--cordova-server-port"
+          ],
+          "description": "Local port where Cordova will serve the content. It's important when multiple Cordova apps are build from the same Meteor app source code as by default the port is generated using the id inside .meteor/.id file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--production"
+          ],
+          "description": "Simulate production mode. Minify and bundle CSS and JS files"
+        },
+        {
+          "names": [
+            "--settings",
+            "-s"
+          ],
+          "description": "Set optional data for Meteor.settings on the server",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON File",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ios"
+          ],
+          "description": "Run tests in an iOS emulator. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--android"
+          ],
+          "description": "Run tests in an Android emulator. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--ios-device"
+          ],
+          "description": "Run tests on iOS mobile device. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--android-device"
+          ],
+          "description": "Run tests on Android emulator or on a mobile device. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--test-app-path"
+          ],
+          "description": "Set the directory in which to create a temporary app used for tests. Defaults to the system's temporary directory, usually /tmp",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "optional": true,
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Print all output from builds logs"
+        },
+        {
+          "names": [
+            "--no-lint"
+          ],
+          "description": "Don't run linters used by the app on every rebuild"
+        },
+        {
+          "names": [
+            "--extra-packages"
+          ],
+          "description": "Run with additional packages (comma separated, for example: --extra-packages \"package-name1, package-name2@1.2.3\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--driver-package"
+          ],
+          "description": "Test driver package to use to run tests and display results. For example: --driver-package meteortesting:mocha",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "driver-package"
+            }
+          ]
+        },
+        {
+          "names": [
+            "package"
+          ],
+          "description": "Package name"
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Runs tests against the application",
+      "options": [
+        {
+          "names": [
+            "--full-app"
+          ],
+          "description": "Your app is loaded as usual, then hidden, so that your tests can inspect and interact with the full running application",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--port",
+            "-p"
+          ],
+          "description": "Port to listen on (instead of the default 3000). Also uses port N+1 and N+2",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--inspect-brk"
+          ],
+          "description": "Enable server-side debugging via debugging clients like the Node.js command-line debugger, Chrome DevTools, or Visual Studio Code. The server will be paused at startup, waiting for clients to attach to the process on the specified port",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port",
+              "optional": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mobile-server"
+          ],
+          "description": "Location where mobile builds connect to the Meteor server. Defaults to your local IP and the port that the Meteor server binds to. Can include a URL scheme (for example, --mobile-server https://example.com:443)"
+        },
+        {
+          "names": [
+            "--cordova-server-port"
+          ],
+          "description": "Local port where Cordova will serve the content. It's important when multiple Cordova apps are build from the same Meteor app source code as by default the port is generated using the id inside .meteor/.id file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "port"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--raw-logs"
+          ],
+          "description": "Run without parsing logs from stdout and stderr"
+        },
+        {
+          "names": [
+            "--settings",
+            "-s"
+          ],
+          "description": "Set optional data for Meteor.settings on the server",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "JSON File",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ios"
+          ],
+          "description": "Run tests in an iOS emulator. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--android"
+          ],
+          "description": "Run tests in an Android emulator. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--ios-device"
+          ],
+          "description": "Run tests on iOS mobile device. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--android-device"
+          ],
+          "description": "Run tests on Android emulator or on a mobile device. All of the tests for client and server will run in addition to mobile-specific tests"
+        },
+        {
+          "names": [
+            "--test-app-path"
+          ],
+          "description": "Set the directory in which to create a temporary app used for tests. Defaults to the system's temporary directory, usually /tmp",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "optional": true,
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--verbose"
+          ],
+          "description": "Print all output from builds logs"
+        },
+        {
+          "names": [
+            "--extra-packages"
+          ],
+          "description": "Run with additional packages (comma separated, for example: --extra-packages \"package-name1, package-name2@1.2.3\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "packages"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--driver-package"
+          ],
+          "description": "Test driver package to use to run tests and display results. For example: --driver-package meteortesting:mocha",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "driver-package"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--exclude-archs"
+          ],
+          "description": "Don't create bundles for certain web architectures (comma separated, for example: --exclude-archs \"web.browser.legacy, web.cordova\")",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "architectures"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "admin",
+      "description": "Rarely used commands for administering official Meteor services",
+      "subcommands": [
+        {
+          "name": "maintainers",
+          "description": "Manage users and organizations that are maintainers for a particular package",
+          "options": [
+            {
+              "names": [
+                "--add"
+              ],
+              "description": "Add an authorized maintainer to a package",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "username"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--remove"
+              ],
+              "description": "Remove an authorized maintainer from a package. You cannot remove yourself if you are the last maintainer on a package",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "username"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--list"
+              ],
+              "description": "List authorized maintainers"
+            }
+          ],
+          "args": [
+            {
+              "name": "package_name"
+            }
+          ]
+        },
+        {
+          "name": "recommend-release",
+          "description": "Recommend a version of a meteor release",
+          "args": [
+            {
+              "name": "package_name"
+            }
+          ]
+        },
+        {
+          "name": "change-homepage",
+          "description": "Change the homepage containing package information",
+          "args": [
+            {
+              "name": "package_name"
+            },
+            {
+              "name": "new_url"
+            }
+          ]
+        },
+        {
+          "name": "list-organizations",
+          "description": "List the organizations of which you are a member"
+        },
+        {
+          "name": "members",
+          "description": "Manage members of an organization",
+          "options": [
+            {
+              "names": [
+                "--add"
+              ],
+              "description": "Add a member to the organization",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "username"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--remove"
+              ],
+              "description": "Remove a member to the organization",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "username"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--list"
+              ],
+              "description": "List members of the organization"
+            }
+          ],
+          "args": [
+            {
+              "name": "organization_name"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    },
+    {
+      "name": "list-sites",
+      "description": "List the sites that you have deployed with `meteor deploy`, and sites for which other users have authorized you with the `meteor authorized` command. To see sites in a region other than us-east-1, set the DEPLOY_HOSTNAME environment variable. For example, `DEPLOY_HOSTNAME=eu-west-1.galaxy-deploy.meteor.com meteor list-sites`"
+    },
+    {
+      "name": "publish-release",
+      "description": "Publishes a new release to the package server, as determined by a JSON configuration file",
+      "options": [
+        {
+          "names": [
+            "--create-track"
+          ],
+          "description": "Publish a new release track"
+        }
+      ],
+      "args": [
+        {
+          "name": "JSON File",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "publish",
+      "description": "Publishes a new version of a local package to the package server. Must be runfrom the directory containing the package",
+      "options": [
+        {
+          "names": [
+            "--create"
+          ],
+          "description": "Publish a new package"
+        },
+        {
+          "names": [
+            "--update"
+          ],
+          "description": "Publish a new package"
+        },
+        {
+          "names": [
+            "--allow-incompatible-update"
+          ],
+          "description": "Allow packages in your project to be upgraded or downgraded to versions that are potentially incompatible with the current versions, if required to satisfy all package version constraints"
+        },
+        {
+          "names": [
+            "--no-lint"
+          ],
+          "description": "Don't run linters used by the app on every rebuild"
+        }
+      ]
+    },
+    {
+      "name": "publish-for-arch",
+      "description": "Publish a package for the same architecture that you are currently on",
+      "args": [
+        {
+          "name": "packageName@version"
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Searches through the Meteor package and release database for items whose names match the regular expression",
+      "options": [
+        {
+          "names": [
+            "--maintainer"
+          ],
+          "description": "Filter by authorized maintainer",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "maintainer_name"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--show-all"
+          ],
+          "description": "Show all matches, even prereleases"
+        },
+        {
+          "names": [
+            "--ejson"
+          ],
+          "description": "Show more detailed output in EJSON format"
+        }
+      ],
+      "args": [
+        {
+          "name": "regex"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Searches through the Meteor package and release database for items whose names match the regular expression",
+      "options": [
+        {
+          "names": [
+            "--show-all"
+          ],
+          "description": "Show all matches, even prereleases"
+        },
+        {
+          "names": [
+            "--ejson"
+          ],
+          "description": "Show more detailed output in EJSON format"
+        }
+      ],
+      "args": [
+        {
+          "name": "name or name@version"
+        }
+      ]
+    }
+  ]
+}

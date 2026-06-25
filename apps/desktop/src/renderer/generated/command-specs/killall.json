@@ -1,0 +1,290 @@
+{
+  "name": "killall",
+  "description": "Kill processes by name",
+  "options": [
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Be verbose (dry run) and display number of user processes"
+    },
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Use the effective user ID instead of the real user ID for matching processes with -u"
+    },
+    {
+      "names": [
+        "-help"
+      ],
+      "description": "Display help and exit"
+    },
+    {
+      "names": [
+        "-I"
+      ],
+      "description": "Request confirmation before killing each process"
+    },
+    {
+      "names": [
+        "-l"
+      ],
+      "description": "List the names of the available signals and exit"
+    },
+    {
+      "names": [
+        "-m"
+      ],
+      "description": "Match the process name as a regular expression"
+    },
+    {
+      "names": [
+        "-v"
+      ],
+      "description": "Be verbose"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Be verbose (dry run)"
+    },
+    {
+      "names": [
+        "-SIGHUP"
+      ],
+      "description": "Send HUP instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGINT"
+      ],
+      "description": "Send INT instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGQUIT"
+      ],
+      "description": "Send QUIT instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGILL"
+      ],
+      "description": "Send ILL instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGTRAP"
+      ],
+      "description": "Send TRAP instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGABRT"
+      ],
+      "description": "Send ABRT instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGEMT"
+      ],
+      "description": "Send EMT instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGFPE"
+      ],
+      "description": "Send FPE instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGKILL"
+      ],
+      "description": "Send KILL instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGBUS"
+      ],
+      "description": "Send BUS instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGSEGV"
+      ],
+      "description": "Send SEGV instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGSYS"
+      ],
+      "description": "Send SYS instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGPIPE"
+      ],
+      "description": "Send PIPE instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGALRM"
+      ],
+      "description": "Send ALRM instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGURG"
+      ],
+      "description": "Send URG instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGSTOP"
+      ],
+      "description": "Send STOP instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGTSTP"
+      ],
+      "description": "Send TSTP instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGCONT"
+      ],
+      "description": "Send CONT instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGCHLD"
+      ],
+      "description": "Send CHLD instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGTTIN"
+      ],
+      "description": "Send TTIN instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGTTOU"
+      ],
+      "description": "Send TTOU instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGIO"
+      ],
+      "description": "Send IO instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGXCPU"
+      ],
+      "description": "Send XCPU instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGXFSZ"
+      ],
+      "description": "Send XFSZ instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGVTALRM"
+      ],
+      "description": "Send VTALRM instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGPROF"
+      ],
+      "description": "Send PROF instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGWINCH"
+      ],
+      "description": "Send WINCH instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGINFO"
+      ],
+      "description": "Send INFO instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGUSR1"
+      ],
+      "description": "Send USR1 instead of TERM"
+    },
+    {
+      "names": [
+        "-SIGUSR2"
+      ],
+      "description": "Send USR2 instead of TERM"
+    },
+    {
+      "names": [
+        "-u"
+      ],
+      "description": "Limit potentially matching processes to those belonging to the user",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "user",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t"
+      ],
+      "description": "Limit matching processes to those running on the specified TTY",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tty"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Limit matching processes to those matching the given name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "name"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q"
+      ],
+      "description": "Suppress error message if no processes are matched"
+    },
+    {
+      "names": [
+        "-z"
+      ],
+      "description": "Do not skip zombies"
+    }
+  ],
+  "args": [
+    {
+      "name": "process_name",
+      "variadic": true,
+      "hasGenerator": true
+    }
+  ]
+}

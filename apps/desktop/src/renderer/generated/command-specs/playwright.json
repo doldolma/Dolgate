@@ -1,0 +1,87 @@
+{
+  "name": "playwright",
+  "description": "",
+  "options": [
+    {
+      "names": [
+        "--version",
+        "-V"
+      ],
+      "description": "Output the version number"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help for command"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "test",
+      "description": "Run tests with Playwright Test",
+      "options": [
+        {
+          "names": [
+            "-g"
+          ],
+          "description": "Run the test with the title",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "title"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--headed"
+          ],
+          "description": "Run tests in headed browsers"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Display help for command"
+        }
+      ],
+      "args": [
+        {
+          "name": "tests",
+          "optional": true,
+          "variadic": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "install",
+      "description": "Running without arguments will install default browsers",
+      "options": [
+        {
+          "names": [
+            "--with-deps"
+          ],
+          "description": "Install system dependencies for browsers"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Display help for command"
+        }
+      ],
+      "args": [
+        {
+          "name": "browsers",
+          "optional": true,
+          "variadic": true
+        }
+      ]
+    }
+  ]
+}

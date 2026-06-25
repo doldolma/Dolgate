@@ -1,0 +1,435 @@
+{
+  "name": "space",
+  "description": "Deta Space CLI for mananging Deta Space projects",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "completion",
+      "description": "Generate the autocompletion script for the specified shell",
+      "subcommands": [
+        {
+          "name": "bash",
+          "description": "Generate the autocompletion script for bash",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "fish",
+          "description": "Generate the autocompletion script for fish",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "powershell",
+          "description": "Generate the autocompletion script for powershell",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        },
+        {
+          "name": "zsh",
+          "description": "Generate the autocompletion script for zsh",
+          "options": [
+            {
+              "names": [
+                "--no-descriptions"
+              ],
+              "description": "Disable completion descriptions"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "link",
+      "description": "Link code to project",
+      "options": [
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to link",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--id",
+            "-i"
+          ],
+          "description": "Project id of project to link",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Login to space"
+    },
+    {
+      "name": "new",
+      "description": "Create new project",
+      "options": [
+        {
+          "names": [
+            "--blank",
+            "-b"
+          ],
+          "description": "Create blank project"
+        },
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to release",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--name",
+            "-n"
+          ],
+          "description": "Project name",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "open",
+      "description": "Open current project in browser",
+      "options": [
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to open",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--id",
+            "-i"
+          ],
+          "description": "Project id of project to open",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "push",
+      "description": "Push code for project",
+      "options": [
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to push",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--id",
+            "-i"
+          ],
+          "description": "Project id of project to push",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--open",
+            "-o"
+          ],
+          "description": "Open builder instance/project in browser after push"
+        },
+        {
+          "names": [
+            "--skip-logs"
+          ],
+          "description": "Skip following logs after push"
+        },
+        {
+          "names": [
+            "--tag",
+            "-t"
+          ],
+          "description": "Tag to identify this push",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "tag"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "release",
+      "description": "Create release for a project",
+      "options": [
+        {
+          "names": [
+            "--confirm",
+            "-c"
+          ],
+          "description": "Release latest revision"
+        },
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to release",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--id",
+            "-i"
+          ],
+          "description": "Project id of an existing project",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "id"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--listed",
+            "-l"
+          ],
+          "description": "Listed on discovery"
+        },
+        {
+          "names": [
+            "--notes",
+            "-n"
+          ],
+          "description": "Release notes",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "notes"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--rid",
+            "-r"
+          ],
+          "description": "Revision id for release",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "rid"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--version",
+            "-v"
+          ],
+          "description": "Version for the release",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "version"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "validate",
+      "description": "Validate spacefile in dir",
+      "options": [
+        {
+          "names": [
+            "--dir",
+            "-d"
+          ],
+          "description": "Src of project to validate",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "dir",
+              "template": "folders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Space CLI version",
+      "subcommands": [
+        {
+          "name": "upgrade",
+          "description": "Upgrade Space CLI version",
+          "options": [
+            {
+              "names": [
+                "--version",
+                "-v"
+              ],
+              "description": "Version number",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "version"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "completion",
+          "description": "Generate the autocompletion script for the specified shell",
+          "subcommands": [
+            {
+              "name": "bash",
+              "description": "Generate the autocompletion script for bash"
+            },
+            {
+              "name": "fish",
+              "description": "Generate the autocompletion script for fish"
+            },
+            {
+              "name": "powershell",
+              "description": "Generate the autocompletion script for powershell"
+            },
+            {
+              "name": "zsh",
+              "description": "Generate the autocompletion script for zsh"
+            }
+          ]
+        },
+        {
+          "name": "link",
+          "description": "Link code to project"
+        },
+        {
+          "name": "login",
+          "description": "Login to space"
+        },
+        {
+          "name": "new",
+          "description": "Create new project"
+        },
+        {
+          "name": "open",
+          "description": "Open current project in browser"
+        },
+        {
+          "name": "push",
+          "description": "Push code for project"
+        },
+        {
+          "name": "release",
+          "description": "Create release for a project"
+        },
+        {
+          "name": "validate",
+          "description": "Validate spacefile in dir"
+        },
+        {
+          "name": "version",
+          "description": "Space CLI version",
+          "subcommands": [
+            {
+              "name": "upgrade",
+              "description": "Upgrade Space CLI version"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

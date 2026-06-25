@@ -1,0 +1,457 @@
+{
+  "name": "typst",
+  "description": "The Typst compiler",
+  "options": [
+    {
+      "names": [
+        "--cert"
+      ],
+      "description": "Path to a custom CA certificate to use when making network requests",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "cert",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbosity"
+      ],
+      "description": "Sets the level of logging verbosity: -v = warning & error, -vv = info, -vvv = debug, -vvvv = trace"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Print version"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "compile",
+      "description": "Compiles an input file into a supported output format",
+      "options": [
+        {
+          "names": [
+            "--root"
+          ],
+          "description": "Configures the project root (for absolute paths)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "root",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--font-path"
+          ],
+          "description": "Adds additional directories to search for fonts",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "font_paths",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--diagnostic-format"
+          ],
+          "description": "The format to emit diagnostics in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "diagnostic_format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "The format of the output file, inferred from the extension by default",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--open"
+          ],
+          "description": "Opens the output file using the default viewer after compilation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "open",
+              "optional": true,
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ppi"
+          ],
+          "description": "The PPI (pixels per inch) to use for PNG export",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ppi"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--flamegraph"
+          ],
+          "description": "Produces a flamegraph of the compilation process",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "flamegraph",
+              "optional": true,
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "input",
+          "template": "filepaths"
+        },
+        {
+          "name": "output",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "description": "Watches an input file and recompiles on changes",
+      "options": [
+        {
+          "names": [
+            "--root"
+          ],
+          "description": "Configures the project root (for absolute paths)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "root",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--font-path"
+          ],
+          "description": "Adds additional directories to search for fonts",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "font_paths",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--diagnostic-format"
+          ],
+          "description": "The format to emit diagnostics in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "diagnostic_format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--format"
+          ],
+          "description": "The format of the output file, inferred from the extension by default",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--open"
+          ],
+          "description": "Opens the output file using the default viewer after compilation",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "open",
+              "optional": true,
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ppi"
+          ],
+          "description": "The PPI (pixels per inch) to use for PNG export",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "ppi"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--flamegraph"
+          ],
+          "description": "Produces a flamegraph of the compilation process",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "flamegraph",
+              "optional": true,
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "input",
+          "template": "filepaths"
+        },
+        {
+          "name": "output",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "name": "query",
+      "description": "Processes an input file to extract provided metadata",
+      "options": [
+        {
+          "names": [
+            "--root"
+          ],
+          "description": "Configures the project root (for absolute paths)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "root",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--font-path"
+          ],
+          "description": "Adds additional directories to search for fonts",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "font_paths",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--diagnostic-format"
+          ],
+          "description": "The format to emit diagnostics in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "diagnostic_format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--field"
+          ],
+          "description": "Extracts just one field from all retrieved elements",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "field"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--format"
+          ],
+          "description": "The format to serialize in",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "format"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--one"
+          ],
+          "description": "Expects and retrieves exactly one element"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "input",
+          "template": "filepaths"
+        },
+        {
+          "name": "selector"
+        }
+      ]
+    },
+    {
+      "name": "fonts",
+      "description": "Lists all discovered fonts in system and custom font paths",
+      "options": [
+        {
+          "names": [
+            "--font-path"
+          ],
+          "description": "Adds additional directories to search for fonts",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "font_paths",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--variants"
+          ],
+          "description": "Also lists style variants of each font family"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ]
+    },
+    {
+      "name": "update",
+      "description": "Self update the Typst CLI (disabled)",
+      "options": [
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Forces a downgrade to an older version (required for downgrading)"
+        },
+        {
+          "names": [
+            "--revert"
+          ],
+          "description": "Reverts to the version from before the last update (only possible if `typst update` has previously ran)"
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Print help"
+        }
+      ],
+      "args": [
+        {
+          "name": "version",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Print this message or the help of the given subcommand(s)",
+      "subcommands": [
+        {
+          "name": "compile",
+          "description": "Compiles an input file into a supported output format"
+        },
+        {
+          "name": "watch",
+          "description": "Watches an input file and recompiles on changes"
+        },
+        {
+          "name": "query",
+          "description": "Processes an input file to extract provided metadata"
+        },
+        {
+          "name": "fonts",
+          "description": "Lists all discovered fonts in system and custom font paths"
+        },
+        {
+          "name": "update",
+          "description": "Self update the Typst CLI (disabled)"
+        },
+        {
+          "name": "help",
+          "description": "Print this message or the help of the given subcommand(s)"
+        }
+      ]
+    }
+  ]
+}

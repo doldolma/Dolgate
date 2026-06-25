@@ -1,0 +1,65 @@
+{
+  "name": "seq",
+  "description": "Print sequences of numbers. (Defaults to increments of 1)",
+  "options": [
+    {
+      "names": [
+        "-w",
+        "--fixed-width"
+      ],
+      "description": "Equalize the widths of all numbers by padding with zeros as necessary"
+    },
+    {
+      "names": [
+        "-s",
+        "--separator"
+      ],
+      "description": "String separator between numbers. Default is newline",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--format"
+      ],
+      "description": "Use a printf(3) style format to print each number",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--terminator"
+      ],
+      "description": "Use string to terminate sequence of numbers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "first"
+    },
+    {
+      "name": "step",
+      "optional": true
+    },
+    {
+      "name": "last",
+      "optional": true
+    }
+  ]
+}

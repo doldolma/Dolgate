@@ -1,0 +1,237 @@
+{
+  "name": "tailwindcss",
+  "description": "Tailwindcss CLI tools",
+  "options": [
+    {
+      "names": [
+        "-i",
+        "--input"
+      ],
+      "description": "Specify input file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "input file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--output"
+      ],
+      "description": "Specify output file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "output file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Specify config file to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "config file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--postcss"
+      ],
+      "description": "Load custom PostCSS configuration",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "postcss config file",
+          "optional": true,
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--purge"
+      ],
+      "description": "Content paths to use for removing unused classes. [Deprecated]: use `--content` instead"
+    },
+    {
+      "names": [
+        "--content"
+      ],
+      "description": "Content paths to use for removing unused classes"
+    },
+    {
+      "names": [
+        "--watch",
+        "-w"
+      ],
+      "description": "Watch for changes and rebuild as needed"
+    },
+    {
+      "names": [
+        "--minify",
+        "-m"
+      ],
+      "description": "Minify the output"
+    },
+    {
+      "names": [
+        "--no-autoprefixer"
+      ],
+      "description": "Disable autoprefixer"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display usage information"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "init",
+      "description": "Creates Tailwind config file. Default: tailwind.config.js",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--postcss"
+          ],
+          "description": "Initialize a 'postcss.config.js' file"
+        },
+        {
+          "names": [
+            "-f",
+            "--full"
+          ],
+          "description": "Initialize a full 'tailwind.config.js' file"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Display usage information"
+        }
+      ],
+      "args": [
+        {
+          "name": "filename",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Build CSS file",
+      "options": [
+        {
+          "names": [
+            "-i",
+            "--input"
+          ],
+          "description": "Specify input file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "input file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--output"
+          ],
+          "description": "Specify output file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-c",
+            "--config"
+          ],
+          "description": "Specify config file to use",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--postcss"
+          ],
+          "description": "Load custom PostCSS configuration",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "postcss config file",
+              "optional": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--purge"
+          ],
+          "description": "Content paths to use for removing unused classes. [Deprecated]: use `--content` instead"
+        },
+        {
+          "names": [
+            "--content"
+          ],
+          "description": "Content paths to use for removing unused classes"
+        },
+        {
+          "names": [
+            "--watch",
+            "-w"
+          ],
+          "description": "Watch for changes and rebuild as needed"
+        },
+        {
+          "names": [
+            "--minify",
+            "-m"
+          ],
+          "description": "Minify the output"
+        },
+        {
+          "names": [
+            "--no-autoprefixer"
+          ],
+          "description": "Disable autoprefixer"
+        },
+        {
+          "names": [
+            "--help",
+            "-h"
+          ],
+          "description": "Display usage information"
+        }
+      ]
+    }
+  ]
+}

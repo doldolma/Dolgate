@@ -1,0 +1,586 @@
+{
+  "name": "dtm",
+  "description": "DevStream is an open-source DevOps toolchain manager",
+  "options": [
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Debug level log"
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Display help"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "apply",
+      "description": "Create or update DevOps tools according to DevStream configuration file",
+      "options": [
+        {
+          "names": [
+            "--config-file",
+            "-f"
+          ],
+          "description": "Config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--plugin-dir",
+            "-d"
+          ],
+          "description": "Plugins directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugin-dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Apply directly without confirmation"
+        }
+      ]
+    },
+    {
+      "name": "completion",
+      "description": "Generate the autocompletion script for dtm for the specified shell",
+      "subcommands": [
+        {
+          "name": "bash",
+          "description": "Generate autocompletion script for bash"
+        },
+        {
+          "name": "fish",
+          "description": "Generate autocompletion script for fish"
+        },
+        {
+          "name": "powershell",
+          "description": "Generate autocompletion script for powershell"
+        },
+        {
+          "name": "zsh",
+          "description": "Generate autocompletion script for zsh"
+        }
+      ]
+    },
+    {
+      "name": "delete",
+      "description": "Delete DevOps tools according to DevStream configuration file",
+      "options": [
+        {
+          "names": [
+            "--config-file",
+            "-f"
+          ],
+          "description": "Config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force delete by config"
+        },
+        {
+          "names": [
+            "--plugin-dir",
+            "-d"
+          ],
+          "description": "Plugins directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugin-dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Delete directly without confirmation"
+        }
+      ]
+    },
+    {
+      "name": "destroy",
+      "description": "Destroy DevOps tools deployment according to DevStream configuration file & state file",
+      "options": [
+        {
+          "names": [
+            "--config-file",
+            "-f"
+          ],
+          "description": "Config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--force"
+          ],
+          "description": "Force destroy by config"
+        },
+        {
+          "names": [
+            "--plugin-dir",
+            "-d"
+          ],
+          "description": "Plugins directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugin-dir"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Destroy directly without confirmation"
+        }
+      ]
+    },
+    {
+      "name": "develop",
+      "description": "Develop is used for develop a new plugin",
+      "subcommands": [
+        {
+          "name": "create-plugin",
+          "description": "Create a new plugin",
+          "options": [
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Specify name of the plugin to be created",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "validate-plugin",
+          "description": "Validate a plugin",
+          "options": [
+            {
+              "names": [
+                "--all",
+                "-a"
+              ],
+              "description": "Validate all plugins"
+            },
+            {
+              "names": [
+                "--name",
+                "-n"
+              ],
+              "description": "Specify name of the plugin to be validated",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "name"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Download needed plugins according to the config file",
+      "options": [
+        {
+          "names": [
+            "--all",
+            "-a"
+          ],
+          "description": "Download all plugins"
+        },
+        {
+          "names": [
+            "--arch"
+          ],
+          "description": "Download plugins for specific arch",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "arch"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--config-file",
+            "-f"
+          ],
+          "description": "Config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--download-only"
+          ],
+          "description": "Download plugins only"
+        },
+        {
+          "names": [
+            "--os"
+          ],
+          "description": "Download plugins for specific os",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "os"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--plugin-dir",
+            "-d"
+          ],
+          "description": "Plugins directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugin-dir",
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--plugins",
+            "-p"
+          ],
+          "description": "The plugins to be downloaded",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugins"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "This command only supports listing plugins now",
+      "subcommands": [
+        {
+          "name": "plugins",
+          "description": "List all plugins",
+          "options": [
+            {
+              "names": [
+                "--filter",
+                "-r"
+              ],
+              "description": "Filter plugin by regex",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "filter"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Show is used to print plugins' configuration templates or status",
+      "subcommands": [
+        {
+          "name": "config",
+          "description": "Show configuration information",
+          "options": [
+            {
+              "names": [
+                "--plugin",
+                "-p"
+              ],
+              "description": "Specify name with the plugin",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "plugin",
+                  "hasGenerator": true
+                }
+              ]
+            },
+            {
+              "names": [
+                "--template",
+                "-t"
+              ],
+              "description": "Print a template config, e.g. quickstart/gitops/",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "template"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "status",
+          "description": "Show status information",
+          "options": [
+            {
+              "names": [
+                "--all",
+                "-a"
+              ],
+              "description": "Show all instances of all plugins status"
+            },
+            {
+              "names": [
+                "--config-file",
+                "-f"
+              ],
+              "description": "Config file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "config-file"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--id",
+                "-i"
+              ],
+              "description": "Specify id with the plugin instance",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "id"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--plugin",
+                "-p"
+              ],
+              "description": "Specify name with the plugin",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "plugin"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--plugin-dir",
+                "-d"
+              ],
+              "description": "Plugins directory",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "plugin-dir"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade dtm to the latest release version",
+      "options": [
+        {
+          "names": [
+            "--yes",
+            "-y"
+          ],
+          "description": "Upgrade directly without confirmation"
+        }
+      ]
+    },
+    {
+      "name": "verify",
+      "description": "Verify DevOps tools according to DevStream config file and state",
+      "options": [
+        {
+          "names": [
+            "--config-file",
+            "-f"
+          ],
+          "description": "Config file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "config-file",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--plugin-dir",
+            "-d"
+          ],
+          "description": "Plugins directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "plugin-dir",
+              "template": "folders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "description": "Print the version number of DevStream"
+    },
+    {
+      "name": "help",
+      "description": "Help about any command",
+      "subcommands": [
+        {
+          "name": "apply",
+          "description": "Create or update DevOps tools according to DevStream configuration file"
+        },
+        {
+          "name": "completion",
+          "description": "Generate the autocompletion script for dtm for the specified shell",
+          "subcommands": [
+            {
+              "name": "bash",
+              "description": "Generate autocompletion script for bash"
+            },
+            {
+              "name": "fish",
+              "description": "Generate autocompletion script for fish"
+            },
+            {
+              "name": "powershell",
+              "description": "Generate autocompletion script for powershell"
+            },
+            {
+              "name": "zsh",
+              "description": "Generate autocompletion script for zsh"
+            }
+          ]
+        },
+        {
+          "name": "delete",
+          "description": "Delete DevOps tools according to DevStream configuration file"
+        },
+        {
+          "name": "destroy",
+          "description": "Destroy DevOps tools deployment according to DevStream configuration file & state file"
+        },
+        {
+          "name": "develop",
+          "description": "Develop is used for develop a new plugin",
+          "subcommands": [
+            {
+              "name": "create-plugin",
+              "description": "Create a new plugin"
+            },
+            {
+              "name": "validate-plugin",
+              "description": "Validate a plugin"
+            }
+          ]
+        },
+        {
+          "name": "init",
+          "description": "Download needed plugins according to the config file"
+        },
+        {
+          "name": "list",
+          "description": "This command only supports listing plugins now",
+          "subcommands": [
+            {
+              "name": "plugins",
+              "description": "List all plugins"
+            }
+          ]
+        },
+        {
+          "name": "show",
+          "description": "Show is used to print plugins' configuration templates or status",
+          "subcommands": [
+            {
+              "name": "config",
+              "description": "Show configuration information"
+            },
+            {
+              "name": "status",
+              "description": "Show status information"
+            }
+          ]
+        },
+        {
+          "name": "upgrade",
+          "description": "Upgrade dtm to the latest release version"
+        },
+        {
+          "name": "verify",
+          "description": "Verify DevOps tools according to DevStream config file and state"
+        },
+        {
+          "name": "version",
+          "description": "Print the version number of DevStream"
+        }
+      ]
+    }
+  ]
+}

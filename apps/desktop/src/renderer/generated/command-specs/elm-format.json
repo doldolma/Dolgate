@@ -1,0 +1,63 @@
+{
+  "name": "elm-format",
+  "description": "Format your code in the Elm idiomatic way",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for elm-format"
+    },
+    {
+      "names": [
+        "--output"
+      ],
+      "description": "Write output to FILE instead of overwriting the given source file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--yes"
+      ],
+      "description": "Reply 'yes' to all automated prompts"
+    },
+    {
+      "names": [
+        "--validate"
+      ],
+      "description": "Check if files are formatted without changing them"
+    },
+    {
+      "names": [
+        "--stdin"
+      ],
+      "description": "Read from stdin, output to stdout"
+    },
+    {
+      "names": [
+        "--elm-version"
+      ],
+      "description": "The Elm version of the source files being formatted",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "VERSION",
+          "optional": true
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "INPUT",
+      "template": "filepaths"
+    }
+  ]
+}

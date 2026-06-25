@@ -1,0 +1,90 @@
+{
+  "name": "wing",
+  "subcommands": [
+    {
+      "name": "run",
+      "description": "Runs a Wing executable in the Wing Console",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ],
+      "args": [
+        {
+          "name": "executable"
+        }
+      ]
+    },
+    {
+      "name": "compile",
+      "description": "Compiles a Wing program",
+      "options": [
+        {
+          "names": [
+            "-o",
+            "--out-dir"
+          ],
+          "description": "Output directory",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "out-dir"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--target"
+          ],
+          "description": "Target platform (options: 'tf-aws', 'sim')",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ],
+      "args": [
+        {
+          "name": "entrypoint"
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrades the Wing toolchain to the latest version",
+      "options": [
+        {
+          "names": [
+            "-h",
+            "--help"
+          ],
+          "description": "Display help for command"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Display help for command",
+      "args": [
+        {
+          "name": "command",
+          "optional": true
+        }
+      ]
+    }
+  ]
+}

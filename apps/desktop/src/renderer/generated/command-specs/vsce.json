@@ -1,0 +1,526 @@
+{
+  "name": "vsce",
+  "description": "The Visual Studio Code Extension Manager",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help for command"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Output the version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "ls",
+      "description": "Lists all the files that will be published",
+      "options": [
+        {
+          "names": [
+            "--yarn"
+          ],
+          "description": "Use yarn instead of npm (default inferred from presence of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--no-yarn"
+          ],
+          "description": "Use npm instead of yarn (default inferred from lack of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--packagedDependencies"
+          ],
+          "description": "Select packages that should be published only (includes dependencies)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "paths",
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--ignoreFile"
+          ],
+          "description": "Indicate alternative .vscodeignore",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-dependencies"
+          ],
+          "description": "Disable dependency detection via npm or yarn"
+        }
+      ]
+    },
+    {
+      "name": "package",
+      "description": "Packages an extension",
+      "options": [
+        {
+          "names": [
+            "-o",
+            "--out"
+          ],
+          "description": "Output .vsix extension file to <path> location (defaults to <name>-<version>.vsix)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--target"
+          ],
+          "description": "Target architecture",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m",
+            "--message"
+          ],
+          "description": "Commit message used when calling `npm version`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "commit message"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-git-tag-version"
+          ],
+          "description": "Do not create a version commit and tag when calling `npm version`. Valid only when [version] is provided"
+        },
+        {
+          "names": [
+            "--no-update-package-json"
+          ],
+          "description": "Do not update `package.json`. Valid only when [version] is provided"
+        },
+        {
+          "names": [
+            "--githubBranch"
+          ],
+          "description": "The GitHub branch used to infer relative links in README.md. Can be overridden by --baseContentUrl and --baseImagesUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--gitlabBranch"
+          ],
+          "description": "The GitLab branch used to infer relative links in README.md. Can be overridden by --baseContentUrl and --baseImagesUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-rewrite-relative-links"
+          ],
+          "description": "Skip rewriting relative links"
+        },
+        {
+          "names": [
+            "--baseContentUrl"
+          ],
+          "description": "Prepend all relative links in README.md with this url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--baseImagesUrl"
+          ],
+          "description": "Prepend all relative image links in README.md with this url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--yarn"
+          ],
+          "description": "Use yarn instead of npm (default inferred from presence of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--no-yarn"
+          ],
+          "description": "Use npm instead of yarn (default inferred from lack of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--ignoreFile"
+          ],
+          "description": "Indicate alternative .vscodeignore",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-gitHubIssueLinking"
+          ],
+          "description": "Disable automatic expansion of GitHub-style issue syntax into links"
+        },
+        {
+          "names": [
+            "--no-gitLabIssueLinking"
+          ],
+          "description": "Disable automatic expansion of GitLab-style issue syntax into links"
+        },
+        {
+          "names": [
+            "--no-dependencies"
+          ],
+          "description": "Disable dependency detection via npm or yarn"
+        },
+        {
+          "names": [
+            "--pre-release"
+          ],
+          "description": "Mark this package as a pre-release"
+        }
+      ]
+    },
+    {
+      "name": "publish",
+      "description": "Publishes an extension",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--pat"
+          ],
+          "description": "Personal Access Token (defaults to VSCE_PAT environment variable)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-t",
+            "--target"
+          ],
+          "description": "Target architecture",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "target",
+              "variadic": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "-m",
+            "--message"
+          ],
+          "description": "Commit message used when calling `npm version`",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "commit message"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-git-tag-version"
+          ],
+          "description": "Do not create a version commit and tag when calling `npm version`. Valid only when [version] is provided"
+        },
+        {
+          "names": [
+            "--no-update-package-json"
+          ],
+          "description": "Do not update `package.json`. Valid only when [version] is provided"
+        },
+        {
+          "names": [
+            "-i",
+            "--packagePath"
+          ],
+          "description": "Publish the provided VSIX packages",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "paths",
+              "variadic": true,
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--githubBranch"
+          ],
+          "description": "The GitHub branch used to infer relative links in README.md. Can be overridden by --baseContentUrl and --baseImagesUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--gitlabBranch"
+          ],
+          "description": "The GitLab branch used to infer relative links in README.md. Can be overridden by --baseContentUrl and --baseImagesUrl",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "branch",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--baseContentUrl"
+          ],
+          "description": "Prepend all relative links in README.md with this url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--baseImagesUrl"
+          ],
+          "description": "Prepend all relative image links in README.md with this url",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "url"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--yarn"
+          ],
+          "description": "Use yarn instead of npm (default inferred from presence of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--no-yarn"
+          ],
+          "description": "Use npm instead of yarn (default inferred from lack of yarn.lock or .yarnrc)"
+        },
+        {
+          "names": [
+            "--noVerify"
+          ]
+        },
+        {
+          "names": [
+            "--ignoreFile"
+          ],
+          "description": "Indicate alternative .vscodeignore",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--no-dependencies"
+          ],
+          "description": "Disable dependency detection via npm or yarn"
+        },
+        {
+          "names": [
+            "--pre-release"
+          ],
+          "description": "Mark this package as a pre-release"
+        }
+      ]
+    },
+    {
+      "name": "unpublish",
+      "description": "Unpublishes an extension. Example extension id: microsoft.csharp",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--pat"
+          ],
+          "description": "Personal Access Token",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-f",
+            "--force"
+          ],
+          "description": "Forces Unpublished Extension"
+        }
+      ]
+    },
+    {
+      "name": "ls-publishers",
+      "description": "List all known publishers"
+    },
+    {
+      "name": "delete-publisher",
+      "description": "Deletes a publisher",
+      "args": [
+        {
+          "name": "publisher"
+        }
+      ]
+    },
+    {
+      "name": "login",
+      "description": "Add a publisher to the known publishers list",
+      "args": [
+        {
+          "name": "publisher"
+        }
+      ]
+    },
+    {
+      "name": "logout",
+      "description": "Remove a publisher from the known publishers list",
+      "args": [
+        {
+          "name": "publisher"
+        }
+      ]
+    },
+    {
+      "name": "verify-pat",
+      "description": "Verify if the Personal Access Token has publish rights for the publisher",
+      "options": [
+        {
+          "names": [
+            "-p",
+            "--pat"
+          ],
+          "description": "Personal Access Token (defaults to VSCE_PAT environment variable)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "token"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "publisher"
+        }
+      ]
+    },
+    {
+      "name": "show",
+      "description": "Show extension metadata",
+      "options": [
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output data in json format (default: false)"
+        }
+      ],
+      "args": [
+        {
+          "name": "extensionid"
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "description": "Search extension gallery",
+      "options": [
+        {
+          "names": [
+            "--json"
+          ],
+          "description": "Output data in json format (default: false)"
+        }
+      ],
+      "args": [
+        {
+          "name": "text"
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Display help for command",
+      "args": [
+        {
+          "name": "command"
+        }
+      ]
+    }
+  ]
+}

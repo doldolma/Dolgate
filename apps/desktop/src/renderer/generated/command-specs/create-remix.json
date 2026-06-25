@@ -1,0 +1,19 @@
+{
+  "name": "create-remix",
+  "options": [
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Display help for command"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Display version for command"
+    }
+  ]
+}

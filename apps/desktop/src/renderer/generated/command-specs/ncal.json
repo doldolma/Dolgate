@@ -1,0 +1,150 @@
+{
+  "name": "ncal",
+  "description": "Displays a calendar and the date of Easter",
+  "options": [
+    {
+      "names": [
+        "-h"
+      ],
+      "description": "Turns off highlighting of today"
+    },
+    {
+      "names": [
+        "-J"
+      ],
+      "description": "Display Julian Calendar, if combined with the -e option, display date of Easter according to the Julian Calendar"
+    },
+    {
+      "names": [
+        "-e"
+      ],
+      "description": "Display date of Easter (for western churches)"
+    },
+    {
+      "names": [
+        "-j"
+      ],
+      "description": "Display Julian days (days one-based, numbered from January 1)"
+    },
+    {
+      "names": [
+        "-m"
+      ],
+      "description": "Display the specified month.  If month is specified as a decimal number, it may be followed by the letter ‘f’ or ‘p’ to indicate the following or preceding month of that number, respectively",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "month"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-y"
+      ],
+      "description": "Display a calendar for the specified year",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "year"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-o"
+      ],
+      "description": "Display date of Orthodox Easter (Greek and Russian Orthodox Churches)"
+    },
+    {
+      "names": [
+        "-p"
+      ],
+      "description": "Print the country codes and switching days from Julian to Gregorian Calendar as they are assumed by ncal.  The country code as determined from the local environment is marked with an asterisk"
+    },
+    {
+      "names": [
+        "-s"
+      ],
+      "description": "Assume the switch from Julian to Gregorian Calendar at the date associated with the country_code.  If not specified, ncal tries to guess the switch date from the local environment or falls back to September 2, 1752.  This was when Great Britain and her colonies switched to the Gregorian Calendar",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "country_code"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-w"
+      ],
+      "description": "Print the number of the week below each week column"
+    },
+    {
+      "names": [
+        "-3"
+      ],
+      "description": "Display the previous, current and next month surrounding today"
+    },
+    {
+      "names": [
+        "-A"
+      ],
+      "description": "Display the number of months after the current month",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-B"
+      ],
+      "description": "Display the number of months before the current month",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-C"
+      ],
+      "description": "Switch to cal mode"
+    },
+    {
+      "names": [
+        "-N"
+      ],
+      "description": "Switch to ncal mode"
+    },
+    {
+      "names": [
+        "-d"
+      ],
+      "description": "Use yyyy-mm as the current date (for debugging of date selection)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "yyyy-mm"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-H"
+      ],
+      "description": "Use yyyy-mm-dd as the current date (for debugging of highlighting)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "yyyy-mm-dd"
+        }
+      ]
+    }
+  ]
+}

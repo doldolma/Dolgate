@@ -1,0 +1,345 @@
+{
+  "name": "eslint",
+  "description": "Pluggable JavaScript linter",
+  "options": [
+    {
+      "names": [
+        "--no-eslintrc"
+      ],
+      "description": "Disable use of configuration from .eslintrc.*"
+    },
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Use this configuration, overriding .eslintrc.* config options if present",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--env"
+      ],
+      "description": "Specify environments",
+      "takesArg": true,
+      "args": [
+        {
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--ext"
+      ],
+      "description": "Specify JavaScript file extensions",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Extension"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--global"
+      ],
+      "description": "Define global variables",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Variables"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--parser"
+      ],
+      "description": "Specify the parser to be used",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--parser-options"
+      ],
+      "description": "Specify parser options",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--resolve-plugins-relative-to"
+      ],
+      "description": "A folder where plugins should be resolved from",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--rulesdir"
+      ],
+      "description": "Use additional rules from this directory",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "folders"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--plugin"
+      ],
+      "description": "Specify plugins",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Plugin",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--rule"
+      ],
+      "description": "Specify rules",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--fix"
+      ],
+      "description": "Automatically fix problems"
+    },
+    {
+      "names": [
+        "--fix-dry-run"
+      ],
+      "description": "Automatically fix problems without saving the changes to the file system"
+    },
+    {
+      "names": [
+        "--fix-type"
+      ],
+      "description": "Specify the types of fixes to apply",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--ignore-path"
+      ],
+      "description": "Specify path of ignore file",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--no-ignore"
+      ],
+      "description": "Disable use of ignore files and patterns"
+    },
+    {
+      "names": [
+        "--ignore-pattern"
+      ],
+      "description": "Pattern of files to ignore (in addition to those in .eslintignore)",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--stdin"
+      ],
+      "description": "Lint code provided on <STDIN>"
+    },
+    {
+      "names": [
+        "--stdin-filename"
+      ],
+      "description": "Specify filename to process STDIN as",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--quiet"
+      ],
+      "description": "Report errors only"
+    },
+    {
+      "names": [
+        "--max-warnings"
+      ],
+      "description": "Number of warnings to trigger nonzero exit code",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "-o",
+        "--output-file"
+      ],
+      "description": "Specify file to write report to",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--format"
+      ],
+      "description": "Use a specific output format",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Force enabling of color"
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Force disabling of color"
+    },
+    {
+      "names": [
+        "--no-inline-config"
+      ],
+      "description": "Prevent comments from changing config or rules"
+    },
+    {
+      "names": [
+        "--report-unused-disable-directives"
+      ],
+      "description": "Adds reported errors for unused eslint-disable-directives"
+    },
+    {
+      "names": [
+        "--cache"
+      ],
+      "description": "Only check changed files"
+    },
+    {
+      "names": [
+        "--cache-location"
+      ],
+      "description": "Path to the cache file or directory",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--cache-strategy"
+      ],
+      "description": "Strategy to use for detecting changed files",
+      "takesArg": true,
+      "args": [
+        {}
+      ]
+    },
+    {
+      "names": [
+        "--init"
+      ],
+      "description": "Run config initialization wizard"
+    },
+    {
+      "names": [
+        "--env-info"
+      ],
+      "description": "Output execution environment information"
+    },
+    {
+      "names": [
+        "--no-error-on-unmatched-pattern"
+      ],
+      "description": "Prevent errors when pattern is unmatched"
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Output debugging information"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output the version number"
+    },
+    {
+      "names": [
+        "--print-config"
+      ],
+      "description": "Print the configuration for the give file",
+      "takesArg": true,
+      "args": [
+        {
+          "template": "filepaths"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "file|dir|glob",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

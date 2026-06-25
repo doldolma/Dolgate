@@ -1,0 +1,373 @@
+{
+  "name": "sips",
+  "description": "Scriptable image processing system",
+  "options": [
+    {
+      "names": [
+        "-g",
+        "--getProperty"
+      ],
+      "description": "Output the property value for key to stdout",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "key"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-s",
+        "--setProperty"
+      ],
+      "description": "Set a property value for key to value",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "key"
+        },
+        {
+          "name": "value"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--deleteProperty"
+      ],
+      "description": "Remove a property value for key",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "key"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-X",
+        "--extractTag"
+      ],
+      "description": "Extract a profile tag element to tagFile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        },
+        {
+          "name": "tagFile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--verify"
+      ],
+      "description": "Verify any profile problems and log output to stdout"
+    },
+    {
+      "names": [
+        "-x",
+        "--extractProfile"
+      ],
+      "description": "Get the embedded profile from image and write it to profile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--deleteTag"
+      ],
+      "description": "Remove the tag element from a profile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--copyTag"
+      ],
+      "description": "Copy the srcTag element of a profile to dstTag",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "srcTag"
+        },
+        {
+          "name": "dstTag"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--loadTag"
+      ],
+      "description": "Set the tag element of a profile to the contents of tagFile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "tag"
+        },
+        {
+          "name": "tagFile",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--repair"
+      ],
+      "description": "Repair any profile problems and log output to stdout"
+    },
+    {
+      "names": [
+        "-e",
+        "--embedProfile"
+      ],
+      "description": "Embed profile in image",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-E",
+        "--embedProfileIfNone"
+      ],
+      "description": "Embed profile in image only if image doesn't have a profile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-m",
+        "--matchTo"
+      ],
+      "description": "Color match image to profile",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "profile"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-M",
+        "--matchToWithIntent"
+      ],
+      "description": "Color match image to profile with rendering intent perceptual | relative | saturation | absolute",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "profile"
+        },
+        {
+          "name": "intent"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--deleteColorManagementProperties"
+      ],
+      "description": "Delete color management properties in TIFF, PNG, and EXIF dictionaries"
+    },
+    {
+      "names": [
+        "-r",
+        "--rotate"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "degreesCW"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-f",
+        "--flip"
+      ],
+      "takesArg": true,
+      "args": [
+        {
+          "name": "axis"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c",
+        "--cropToHeightWidth"
+      ],
+      "description": "Crop image to fit specified size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsH"
+        },
+        {
+          "name": "pixelsW"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--padToHeightWidth"
+      ],
+      "description": "Pad image with pixels to fit specified size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsH"
+        },
+        {
+          "name": "pixelsW"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-padColor"
+      ],
+      "description": "Use this color when padding.  White=FFFFFF, Red=FF0000, Default=Black=000000",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "hexcolor"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-z",
+        "--resampleHeightWidth"
+      ],
+      "description": "Resample image at specified size. Image apsect ratio may be altered",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsH"
+        },
+        {
+          "name": "pixelsW"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--resampleWidth"
+      ],
+      "description": "Resample image to specified width",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsW"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--resampleHeight"
+      ],
+      "description": "Resample image to specified height",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsH"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-Z",
+        "--resampleHeightWidthMax"
+      ],
+      "description": "Resample image so height and width aren't greater than specified size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "pixelsWH"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-i",
+        "--addIcon"
+      ],
+      "description": "Add a Finder icon to image file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "icon",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--debug"
+      ],
+      "description": "Enable debugging output"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Show help"
+    },
+    {
+      "names": [
+        "-H",
+        "--helpProperties"
+      ],
+      "description": "Show help for properties"
+    },
+    {
+      "names": [
+        "--man"
+      ],
+      "description": "Generate man pages"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Show the version"
+    },
+    {
+      "names": [
+        "--formats"
+      ],
+      "description": "Show the read/write formats"
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,355 @@
+{
+  "name": "bazel",
+  "description": "Bazel the build system!",
+  "options": [
+    {
+      "names": [
+        "--autodetect_server_javabase"
+      ],
+      "description": "Back to the local JDK for running the bazel server and instead exits"
+    },
+    {
+      "names": [
+        "--noautodetect_server_javabase"
+      ],
+      "description": "Does not fall back to the local JDK for running the bazel server and instead exits"
+    },
+    {
+      "names": [
+        "--batch"
+      ],
+      "description": "Run as just a client process without a server"
+    },
+    {
+      "names": [
+        "--nobatch"
+      ],
+      "description": "Run with a server"
+    },
+    {
+      "names": [
+        "--batch_cpu_scheduling"
+      ],
+      "description": "Only on Linux; use 'batch' CPU scheduling for Bazel"
+    },
+    {
+      "names": [
+        "--nobatch_cpu_scheduling"
+      ],
+      "description": "Only on Linux; Bazel does not perform a system call"
+    },
+    {
+      "names": [
+        "--bazelrc"
+      ],
+      "description": "The location of the user .bazelrc file containing default values of Bazel options",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "bazelrc path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--block_for_lock"
+      ],
+      "description": "Wait for a running command to complete"
+    },
+    {
+      "names": [
+        "--noblock_for_lock"
+      ],
+      "description": "Bazel does not wait for a running command to complete, but instead exits immediately"
+    },
+    {
+      "names": [
+        "--client_debug"
+      ],
+      "description": "Log debug information from the client to stderr. Changing this option will not cause the server to restart"
+    },
+    {
+      "names": [
+        "--noclient_debug"
+      ],
+      "description": "Don't log debug information from the client to stderr"
+    },
+    {
+      "names": [
+        "--connect_timeout_secs"
+      ],
+      "description": "The amount of time the client waits for each attempt to connect to the server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "time"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--expand_configs_in_place"
+      ],
+      "description": "Changed the expansion of --config flags to be done in-place"
+    },
+    {
+      "names": [
+        "--noexpand_configs_in_place"
+      ],
+      "description": "--config flags in a fixed point expansion between normal rc options and command-line specified options"
+    },
+    {
+      "names": [
+        "--failure_detail_out"
+      ],
+      "description": "Specifies a location to write a failure_detail protobuf message if the server experiences a failure and cannot report it via gRPC, as normal. Otherwise, the location will be ${OUTPUT_BASE}/failure_detail.rawproto",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--home_rc"
+      ],
+      "description": "Look for the home bazelrc file at $HOME/.bazelrc"
+    },
+    {
+      "names": [
+        "--nohome_rc"
+      ],
+      "description": "Don't look for the home bazelrc file at $HOME/.bazelrc"
+    },
+    {
+      "names": [
+        "--idle_server_tasks"
+      ],
+      "description": "Run System.gc() when the server is idle"
+    },
+    {
+      "names": [
+        "--noidle_server_tasks"
+      ],
+      "description": "Don't run System.gc() when the server is idle"
+    },
+    {
+      "names": [
+        "--ignore_all_rc_files"
+      ],
+      "description": "Disables all rc files, regardless of the values of other rc-modifying flags, even if these flags come later in the list of startup options"
+    },
+    {
+      "names": [
+        "--noignore_all_rc_files"
+      ],
+      "description": "Enables all rc files"
+    },
+    {
+      "names": [
+        "--io_nice_level"
+      ],
+      "description": "Only on Linux; set a level from 0-7 for best-effort IO scheduling using the sys_ioprio_set system call. 0 is highest priority, 7 is lowest",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "io-level"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--local_startup_timeout_secs"
+      ],
+      "description": "The maximum amount of time the client waits to connect to the server",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "seconds"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--macos_qos_class"
+      ],
+      "description": "Sets the QoS service class of the bazel server when running on macOS",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "QoS service class"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--max_idle_secs"
+      ],
+      "description": "The number of seconds the build server will wait idling before shutting down",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "seconds"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output_base"
+      ],
+      "description": "Specifies the output location to which all build output will be written",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--output_base_root"
+      ],
+      "description": "The user-specific directory beneath which all build outputs are written",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--preemptible"
+      ],
+      "description": "If true, the command can be preempted if another command is started"
+    },
+    {
+      "names": [
+        "--nopreemptible"
+      ],
+      "description": "If true, the command can be preempted if another command is started"
+    },
+    {
+      "names": [
+        "--server_jvm_out"
+      ],
+      "description": "The location to write the server's JVM's output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--shutdown_on_low_sys_mem"
+      ],
+      "description": "Linux only. If max_idle_secs is set and the build server has been idle for a while, shut down the server when the system is low on free RAM"
+    },
+    {
+      "names": [
+        "--noshutdown_on_low_sys_mem"
+      ],
+      "description": "Linux only. Don't shut down the server when the system is low on free RAM"
+    },
+    {
+      "names": [
+        "--system_rc"
+      ],
+      "description": "Look for the system-wide bazelrc"
+    },
+    {
+      "names": [
+        "--nosystem_rc"
+      ],
+      "description": "Don't look for the system-wide bazelrc"
+    },
+    {
+      "names": [
+        "--unlimit_coredumps"
+      ],
+      "description": "Raises the soft coredump limit to the hard limit to make coredumps of the server (including the JVM) and the client possible under common conditions"
+    },
+    {
+      "names": [
+        "--nounlimit_coredumps"
+      ],
+      "description": "Don't raise the soft coredump limit to the hard limit to make coredumps of the server (including the JVM) and the client possible under common conditions"
+    },
+    {
+      "names": [
+        "--watchfs"
+      ],
+      "description": "Use the operating system's file watch service for local changes instead of scanning every file for a change"
+    },
+    {
+      "names": [
+        "--nowatchfs"
+      ],
+      "description": "Scan every file for a change"
+    },
+    {
+      "names": [
+        "--windows_enable_symlinks"
+      ],
+      "description": "Real symbolic links will be created on Windows instead of file copying"
+    },
+    {
+      "names": [
+        "--nowindows_enable_symlinks"
+      ],
+      "description": "Real symbolic links will be created via file copying"
+    },
+    {
+      "names": [
+        "--workspace_rc"
+      ],
+      "description": "Look for the workspace bazelrc file at $workspace/.bazelrc"
+    },
+    {
+      "names": [
+        "--noworkspace_rc"
+      ],
+      "description": "Don't look for the workspace bazelrc file at $workspace/.bazelrc"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "run",
+      "description": "Runs the specified target",
+      "args": [
+        {
+          "name": "BUILD file",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "description": "Builds and runs the specified test targets",
+      "args": [
+        {
+          "name": "BUILD file",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "description": "Builds the specified targets",
+      "args": [
+        {
+          "name": "BUILD file",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

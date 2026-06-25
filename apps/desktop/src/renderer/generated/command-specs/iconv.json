@@ -1,0 +1,102 @@
+{
+  "name": "iconv",
+  "description": "Character set conversion",
+  "options": [
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help for iconv"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Output version information and exit"
+    },
+    {
+      "names": [
+        "-f",
+        "--from-code"
+      ],
+      "description": "Specifies the encoding of the input",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "encoding",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-t",
+        "--to-code"
+      ],
+      "description": "Specifies the encoding of the output",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "encoding",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "-c"
+      ],
+      "description": "Discard unconvertible characters"
+    },
+    {
+      "names": [
+        "-l",
+        "--list"
+      ],
+      "description": "List the supported encodings"
+    },
+    {
+      "names": [
+        "--unicode-subst"
+      ],
+      "description": "Substitution for unconvertible Unicode characters",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FORMATSTRING"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--byte-subst"
+      ],
+      "description": "Substitution for unconvertible bytes",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FORMATSTRING"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--widechar-subst"
+      ],
+      "description": "Substitution for unconvertible wide characters",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FORMATSTRING"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "inputfile",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+{
+  "name": "shortcuts",
+  "description": "Command-line utility for running shortcuts",
+  "subcommands": [
+    {
+      "name": "run",
+      "description": "Run a shortcut",
+      "options": [
+        {
+          "names": [
+            "-i",
+            "--input-path"
+          ],
+          "description": "The input to provide to the shortcut",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "input-path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "-o",
+            "--output-path"
+          ],
+          "description": "Where to write the shortcut output, if applicable",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-path",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output-type"
+          ],
+          "description": "What type to output data in, in Universal Type Identifier format",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output-type"
+            }
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "shortcut-name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List your shortcuts",
+      "options": [
+        {
+          "names": [
+            "--folder-name",
+            "-f"
+          ],
+          "description": "The name of the folder to list",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "folder-name",
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "names": [
+            "--folders"
+          ],
+          "description": "List folders instead of shortcuts"
+        }
+      ]
+    },
+    {
+      "name": "view",
+      "description": "View a shortcut in Shortcuts",
+      "args": [
+        {
+          "name": "shortcut-name",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "name": "sign",
+      "description": "Sign a shortcut file",
+      "options": [
+        {
+          "names": [
+            "--input",
+            "-i"
+          ],
+          "description": "The shortcut file to sign",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "input",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--output",
+            "-o"
+          ],
+          "description": "Output path for the signed shortcut file",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "output",
+              "template": "filepaths"
+            }
+          ]
+        },
+        {
+          "names": [
+            "--mode",
+            "-m"
+          ],
+          "description": "The signing mode. (default: people-who-know-me)",
+          "takesArg": true,
+          "args": [
+            {
+              "name": "mode"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "help",
+      "description": "Show help information",
+      "subcommands": [
+        {
+          "name": "run",
+          "description": "Run a shortcut"
+        },
+        {
+          "name": "list",
+          "description": "List your shortcuts"
+        },
+        {
+          "name": "view",
+          "description": "View a shortcut in Shortcuts"
+        },
+        {
+          "name": "sign",
+          "description": "Sign a shortcut file"
+        }
+      ]
+    }
+  ]
+}

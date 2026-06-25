@@ -1,0 +1,165 @@
+{
+  "name": "dd",
+  "description": "Convert and copy a file",
+  "options": [
+    {
+      "names": [
+        "bs"
+      ],
+      "description": "Set input and output block size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "cbs"
+      ],
+      "description": "Set the conversion record size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "count"
+      ],
+      "description": "Copy this many input blocks",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "files"
+      ],
+      "description": "Copy this many files before terminating",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "ibs"
+      ],
+      "description": "Set the input block size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "if"
+      ],
+      "description": "Read an input file instead of stdin",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "iseek"
+      ],
+      "description": "Seek this many blocks on the input file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "blocks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "obs"
+      ],
+      "description": "Set the output block size",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "size"
+        }
+      ]
+    },
+    {
+      "names": [
+        "of"
+      ],
+      "description": "Write to an output file instead of stdout",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "oseek"
+      ],
+      "description": "Seek this many blocks on the output file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "blocks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "seek"
+      ],
+      "description": "Seek this many blocks from the beginning of the output before copying",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "blocks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "skip"
+      ],
+      "description": "Skip this many blocks from the beginning of the input before copying",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "blocks"
+        }
+      ]
+    },
+    {
+      "names": [
+        "conv"
+      ],
+      "description": "Convert input data (comma-separated list)",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "value",
+          "hasGenerator": true
+        }
+      ]
+    }
+  ]
+}

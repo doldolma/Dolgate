@@ -1,0 +1,674 @@
+{
+  "name": "snaplet",
+  "description": "Create and share PostgreSQL snapshots with schema, data transformation, and preview databases for collaborative development (see: https://docs.snaplet.dev)",
+  "options": [
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show help for snaplet"
+    },
+    {
+      "names": [
+        "--version",
+        "-v"
+      ],
+      "description": "Show version number"
+    }
+  ],
+  "subcommands": [
+    {
+      "name": "auth",
+      "description": "Manage auth state",
+      "subcommands": [
+        {
+          "name": "login",
+          "description": "Login with an access token",
+          "args": [
+            {
+              "name": "access-token",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "config",
+      "description": "Manage configuration",
+      "subcommands": [
+        {
+          "name": "generate",
+          "description": "Generate transform files",
+          "options": [
+            {
+              "names": [
+                "--dry-run"
+              ]
+            },
+            {
+              "names": [
+                "--type",
+                "-t"
+              ],
+              "takesArg": true,
+              "args": [
+                {}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List config variables"
+        },
+        {
+          "name": "pull",
+          "description": "Pull cloud project config to local",
+          "options": [
+            {
+              "names": [
+                "--type",
+                "-t"
+              ],
+              "takesArg": true,
+              "args": [
+                {}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "push",
+          "description": "Push local project config to cloud",
+          "options": [
+            {
+              "names": [
+                "--type",
+                "-t"
+              ],
+              "takesArg": true,
+              "args": [
+                {}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "setup",
+          "description": "Setup local project configuration",
+          "options": [
+            {
+              "names": [
+                "--generate"
+              ]
+            },
+            {
+              "names": [
+                "--no-generate"
+              ]
+            },
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Automatically accept any prompt, useful for scripts"
+            }
+          ],
+          "args": [
+            {
+              "name": "targetDatabaseUrl",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "database",
+      "description": "Manage preview database",
+      "subcommands": [
+        {
+          "name": "cache",
+          "description": "Cache a snapshot into the preview database server",
+          "options": [
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Filter snapshots by tags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--latest"
+              ],
+              "description": "Select the latest snapshot captured to cache in the preview database server"
+            },
+            {
+              "names": [
+                "--clear"
+              ],
+              "description": "Remove the snapshot from the preview database server cache"
+            }
+          ],
+          "args": [
+            {
+              "name": "snapshot",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "description": "Create a preview database from a snapshot",
+          "options": [
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Filter snapshots by tags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--latest"
+              ],
+              "description": "Restore the latest snapshot"
+            },
+            {
+              "names": [
+                "--git"
+              ],
+              "description": "Infer the database name from the current git branch"
+            },
+            {
+              "names": [
+                "--no-snapshot"
+              ],
+              "description": "Create an empty database not based on a snapshot"
+            },
+            {
+              "names": [
+                "--force"
+              ],
+              "description": "Force the database creation, it will drop and recreate the existing database if present"
+            }
+          ],
+          "args": [
+            {
+              "name": "database-name"
+            },
+            {
+              "name": "snapshot",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "drop",
+          "description": "Drop a preview database",
+          "options": [
+            {
+              "names": [
+                "--git"
+              ],
+              "description": "Infer the database name from the current git branch"
+            }
+          ],
+          "args": [
+            {
+              "name": "database-name",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "url",
+          "description": "Show a preview database url",
+          "options": [
+            {
+              "names": [
+                "--git"
+              ],
+              "description": "Infer the database name from the current git branch"
+            }
+          ],
+          "args": [
+            {
+              "name": "database-name",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "destroy",
+          "description": "Destroy the database server",
+          "options": [
+            {
+              "names": [
+                "--yes"
+              ],
+              "description": "Automatically accept any prompt, useful for scripts"
+            }
+          ]
+        },
+        {
+          "name": "setup",
+          "description": "Create a preview database server",
+          "options": [
+            {
+              "names": [
+                "--region"
+              ],
+              "description": "Fly.io region where the preview database server should be created",
+              "takesArg": true,
+              "args": [
+                {}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List preview databases"
+        }
+      ]
+    },
+    {
+      "name": "discord",
+      "description": "Open the Snaplet Discord chat window in your browser"
+    },
+    {
+      "name": "documentation",
+      "description": "Opens the Snaplet Documentation in your browser"
+    },
+    {
+      "name": "project",
+      "description": "Manage project configuration",
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a new project",
+          "options": [
+            {
+              "names": [
+                "--team",
+                "-t"
+              ],
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "team-name"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        {
+          "name": "invite",
+          "description": "Create an invite URL for this project"
+        },
+        {
+          "name": "setup",
+          "description": "Set up a project",
+          "args": [
+            {
+              "name": "project-id",
+              "optional": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "proxy",
+      "description": "Start a database proxy"
+    },
+    {
+      "name": "seed",
+      "description": "Populates an empty database with generated data",
+      "options": [
+        {
+          "names": [
+            "-i",
+            "--interactive"
+          ],
+          "description": "Show interactive prompts to customise seeding"
+        },
+        {
+          "names": [
+            "-n",
+            "--entriesPerTable"
+          ],
+          "takesArg": true,
+          "args": [
+            {
+              "name": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "snapshot",
+      "description": "Manage snapshots",
+      "subcommands": [
+        {
+          "name": "capture",
+          "description": "Capture a new snapshot",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "--environment"
+              ],
+              "description": "Environment to use when capturing the snapshot",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "environment-name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-m",
+                "--message"
+              ],
+              "description": "Attach a message to the snapshot",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "message"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--subset-path",
+                "--subset"
+              ],
+              "description": "Path to a subset config file",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "path",
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Attach tags to the snapshot",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-t",
+                "--transform-mode"
+              ],
+              "description": "Transformation mode to apply to the snapshot",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "transformation-mode"
+                }
+              ]
+            }
+          ],
+          "args": [
+            {
+              "name": "destination-path",
+              "optional": true,
+              "template": "folders"
+            }
+          ]
+        },
+        {
+          "name": "create",
+          "description": "Create a snapshot in cloud",
+          "options": [
+            {
+              "names": [
+                "--json"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "list",
+          "description": "List all snapshots",
+          "options": [
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Filter snapshots by tags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "restore",
+          "description": "Restore a snapshot",
+          "options": [
+            {
+              "names": [
+                "data",
+                "--no-data"
+              ],
+              "description": "Restore data on the database (skip with --no-data)"
+            },
+            {
+              "names": [
+                "schema",
+                "--no-schema"
+              ],
+              "description": "Restore schema on the database (skip with --no-schema)"
+            },
+            {
+              "names": [
+                "reset",
+                "--no-reset"
+              ],
+              "description": "Drop destination database before restoring schemas (skip with --no-reset)"
+            },
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Filter snapshots by tags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--latest"
+              ],
+              "description": "Restore the latest snapshot"
+            },
+            {
+              "names": [
+                "-y",
+                "--yes"
+              ],
+              "description": "Performs a restore without a confirmation message"
+            },
+            {
+              "names": [
+                "--schema-only"
+              ],
+              "description": "Skip data, only restore schema"
+            },
+            {
+              "names": [
+                "--data-only"
+              ],
+              "description": "Restore data only (keep the current schema and indexes)"
+            }
+          ],
+          "args": [
+            {
+              "name": "snapshot-name",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "share",
+          "description": "Share a snapshot",
+          "options": [
+            {
+              "names": [
+                "--no-encrypt"
+              ],
+              "description": "Disable encryption"
+            },
+            {
+              "names": [
+                "--tags"
+              ],
+              "description": "Filter snapshots by tags",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "tags-list"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--latest"
+              ],
+              "description": "Share the latest snapshot"
+            }
+          ],
+          "args": [
+            {
+              "name": "snapshot-name",
+              "optional": true,
+              "hasGenerator": true
+            }
+          ]
+        },
+        {
+          "name": "sample",
+          "description": "Create a sample of a database",
+          "options": [
+            {
+              "names": [
+                "--env",
+                "--environment"
+              ],
+              "description": "Environment to use when slicing the snapshot",
+              "takesArg": true,
+              "args": [
+                {
+                  "name": "environment-name"
+                }
+              ]
+            },
+            {
+              "names": [
+                "--sample-config-path",
+                "--subset-path"
+              ],
+              "description": "Path to a sample config file",
+              "takesArg": true,
+              "args": [
+                {
+                  "template": "filepaths"
+                }
+              ]
+            },
+            {
+              "names": [
+                "-f",
+                "--force"
+              ],
+              "description": "Force overwrite existing sample file"
+            }
+          ],
+          "args": [
+            {
+              "name": "destination-path",
+              "optional": true,
+              "template": "folders"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "subset",
+      "description": "Manage subsetting",
+      "subcommands": [
+        {
+          "name": "setup",
+          "description": "Configure subsetting"
+        }
+      ]
+    },
+    {
+      "name": "team",
+      "description": "Manage team configuration",
+      "subcommands": [
+        {
+          "name": "create",
+          "description": "Create a new team",
+          "args": [
+            {
+              "name": "team-name"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "upgrade",
+      "description": "Upgrade this binary"
+    },
+    {
+      "name": "completion",
+      "description": "Generate completion script"
+    }
+  ]
+}

@@ -1,0 +1,467 @@
+{
+  "name": "diff",
+  "description": "Compare files line by line",
+  "options": [
+    {
+      "names": [
+        "-i",
+        "--ignore-case"
+      ],
+      "description": "Ignore case differences in file contents"
+    },
+    {
+      "names": [
+        "--ignore-file-name-case"
+      ],
+      "description": "Ignore case when comparing file names"
+    },
+    {
+      "names": [
+        "--no-ignore-file-name-case"
+      ],
+      "description": "Consider case when comparing file names"
+    },
+    {
+      "names": [
+        "-E",
+        "--ignore-tab-expansion"
+      ],
+      "description": "Ignore changes due to tab expansion"
+    },
+    {
+      "names": [
+        "-b",
+        "--ignore-space-change"
+      ],
+      "description": "Ignore changes in the amount of white space"
+    },
+    {
+      "names": [
+        "-w",
+        "--ignore-all-space"
+      ],
+      "description": "Ignore all white space"
+    },
+    {
+      "names": [
+        "-B",
+        "--ignore-blank-lines"
+      ],
+      "description": "Ignore changes whose lines are all blank"
+    },
+    {
+      "names": [
+        "-I",
+        "--ignore-matching-lines"
+      ],
+      "description": "Ignore changes whose lines all match RE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "RE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--strip-trailing-cr"
+      ],
+      "description": "Strip trailing carriage return on input"
+    },
+    {
+      "names": [
+        "-a",
+        "--text"
+      ],
+      "description": "Treat all files as text"
+    },
+    {
+      "names": [
+        "-c",
+        "-C",
+        "--context"
+      ],
+      "description": "Output NUM lines of copied context",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-u",
+        "-U",
+        "--unified"
+      ],
+      "description": "Output NUM lines of unified context",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--label"
+      ],
+      "description": "Use LABEL instead of file name",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LABEL"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-p",
+        "--show-c-function"
+      ],
+      "description": "Show which C function each change is in"
+    },
+    {
+      "names": [
+        "-F",
+        "--show-function-line"
+      ],
+      "description": "Show the most recent line matching RE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "RE"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-q",
+        "--brief"
+      ],
+      "description": "Output only whether files differ"
+    },
+    {
+      "names": [
+        "-e",
+        "--ed"
+      ],
+      "description": "Output an ed script"
+    },
+    {
+      "names": [
+        "--normal"
+      ],
+      "description": "Output a normal diff"
+    },
+    {
+      "names": [
+        "-n",
+        "--rcs"
+      ],
+      "description": "Output an RCS format diff"
+    },
+    {
+      "names": [
+        "-y",
+        "--side-by-side"
+      ],
+      "description": "Output in two columns"
+    },
+    {
+      "names": [
+        "-W",
+        "--width"
+      ],
+      "description": "Output at most NUM (default 130) print columns",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--left-column"
+      ],
+      "description": "Output only the left column of common lines"
+    },
+    {
+      "names": [
+        "--suppress-common-lines"
+      ],
+      "description": "Do not output common lines"
+    },
+    {
+      "names": [
+        "-D",
+        "--ifdef"
+      ],
+      "description": "Output merged file to show `#ifdef NAME' diffs",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NAME"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-l",
+        "--paginate"
+      ],
+      "description": "Pass the output through `pr' to paginate it"
+    },
+    {
+      "names": [
+        "-t",
+        "--expand-tabs"
+      ],
+      "description": "Expand tabs to spaces in output"
+    },
+    {
+      "names": [
+        "-T",
+        "--initial-tab"
+      ],
+      "description": "Make tabs line up by prepending a tab"
+    },
+    {
+      "names": [
+        "-r",
+        "--recursive"
+      ],
+      "description": "Recursively compare any subdirectories found"
+    },
+    {
+      "names": [
+        "-N",
+        "--new-file"
+      ],
+      "description": "Treat absent files as empty"
+    },
+    {
+      "names": [
+        "--unidirectional-new-file"
+      ],
+      "description": "Treat absent first files as empty"
+    },
+    {
+      "names": [
+        "-s",
+        "--report-identical-files"
+      ],
+      "description": "Report when two files are the same"
+    },
+    {
+      "names": [
+        "-x",
+        "--exclude"
+      ],
+      "description": "Exclude files that match PAT",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "PAT"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-X",
+        "--exclude-from"
+      ],
+      "description": "Exclude files that match any pattern in FILE",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-S",
+        "--starting-file"
+      ],
+      "description": "Start with FILE when comparing directories",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--from-file"
+      ],
+      "description": "Compare FILE1 to all operands. FILE1 can be a directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE1",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--to-file"
+      ],
+      "description": "Compare all operands to FILE2. FILE2 can be a directory",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "FILE2",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--horizon-lines"
+      ],
+      "description": "Keep NUM lines of the common prefix and suffix",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "NUM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-d",
+        "--minimal"
+      ],
+      "description": "Try hard to find a smaller set of changes"
+    },
+    {
+      "names": [
+        "--speed-large-files"
+      ],
+      "description": "Assume large files and many scattered small changes"
+    },
+    {
+      "names": [
+        "-v",
+        "--version"
+      ],
+      "description": "Output version info"
+    },
+    {
+      "names": [
+        "--help"
+      ],
+      "description": "Show help"
+    },
+    {
+      "names": [
+        "--old-group-format"
+      ],
+      "description": "Similar, but format old input groups with GFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "GFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--new-group-format"
+      ],
+      "description": "Similar, but format new input groups with GFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "GFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--unchanged-group-format"
+      ],
+      "description": "Similar, but format unchanged input groups with GFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "GFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--changed-group-format"
+      ],
+      "description": "Similar, but format changed input groups with GFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "GFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--line-format"
+      ],
+      "description": "Format all input lines with LFMT",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--old-line-format"
+      ],
+      "description": "Format old input lines with LFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--new-line-format"
+      ],
+      "description": "Format new input lines with LFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LFTM"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--unchanged-line-format"
+      ],
+      "description": "Format unchanged input lines with LFTM",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "LFTM"
+        }
+      ]
+    }
+  ],
+  "args": [
+    {
+      "name": "file",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

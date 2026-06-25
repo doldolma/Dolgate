@@ -1,0 +1,233 @@
+{
+  "name": "typos",
+  "description": "Source code spelling correction",
+  "options": [
+    {
+      "names": [
+        "-c",
+        "--config"
+      ],
+      "description": "Custom config file",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--isolated"
+      ],
+      "description": "Ignore implicit configuration files"
+    },
+    {
+      "names": [
+        "--diff"
+      ],
+      "description": "Print a diff of what would change"
+    },
+    {
+      "names": [
+        "-w",
+        "--write-changes"
+      ],
+      "description": "Write fixes out"
+    },
+    {
+      "names": [
+        "--files"
+      ],
+      "description": "Debug: Print each file that would be spellchecked"
+    },
+    {
+      "names": [
+        "--identifiers"
+      ],
+      "description": "Debug: Print each identifier that would be spellchecked"
+    },
+    {
+      "names": [
+        "--words"
+      ],
+      "description": "Debug: Print each word that would be spellchecked"
+    },
+    {
+      "names": [
+        "--dump-config"
+      ],
+      "description": "Write the current configuration to file with `-` for stdout",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "path",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--type-list"
+      ],
+      "description": "Show all supported file types"
+    },
+    {
+      "names": [
+        "--format"
+      ],
+      "description": "Set the output format",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "format"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-j",
+        "--threads"
+      ],
+      "description": "The approximate number of threads to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "number"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--exclude"
+      ],
+      "description": "Ignore files & directories matching the glob",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "glob"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--hidden"
+      ],
+      "description": "Search hidden files and directories"
+    },
+    {
+      "names": [
+        "--no-ignore"
+      ],
+      "description": "Don't respect ignore files"
+    },
+    {
+      "names": [
+        "--no-ignore-dot"
+      ],
+      "description": "Don't respect .ignore files"
+    },
+    {
+      "names": [
+        "--no-ignore-global"
+      ],
+      "description": "Don't respect global ignore files"
+    },
+    {
+      "names": [
+        "--no-ignore-parent"
+      ],
+      "description": "Don't respect ignore files in parent directories"
+    },
+    {
+      "names": [
+        "--no-ignore-vcs"
+      ],
+      "description": "Don't respect ignore files in vcs directories"
+    },
+    {
+      "names": [
+        "--binary"
+      ],
+      "description": "Search binary files"
+    },
+    {
+      "names": [
+        "--no-check-filenames"
+      ],
+      "description": "Skip verifying spelling in file names"
+    },
+    {
+      "names": [
+        "--no-check-files"
+      ],
+      "description": "Skip verifying spelling in files"
+    },
+    {
+      "names": [
+        "--no-unicode"
+      ],
+      "description": "Only allow ASCII characters in identifiers"
+    },
+    {
+      "names": [
+        "--locale"
+      ],
+      "description": "Set the locale to use",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "locale"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Controls when to use color",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "when"
+        }
+      ]
+    },
+    {
+      "names": [
+        "-v",
+        "--verbose"
+      ],
+      "description": "More output per occurrence"
+    },
+    {
+      "names": [
+        "-q",
+        "--quiet"
+      ],
+      "description": "Less output per occurrence"
+    },
+    {
+      "names": [
+        "-h",
+        "--help"
+      ],
+      "description": "Print help information"
+    },
+    {
+      "names": [
+        "-V",
+        "--version"
+      ],
+      "description": "Print version information"
+    }
+  ],
+  "args": [
+    {
+      "name": "path",
+      "optional": true,
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}

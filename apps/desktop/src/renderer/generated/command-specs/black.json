@@ -1,0 +1,259 @@
+{
+  "name": "black",
+  "description": "Python code formatter",
+  "options": [
+    {
+      "names": [
+        "--code",
+        "-c"
+      ],
+      "description": "Format the code passed in as a string",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "string"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--line-length",
+        "-l"
+      ],
+      "description": "How many characters per line to allow",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "line length"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--target-version",
+        "-t"
+      ],
+      "description": "Python versions that should be supported",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "python version"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--pyi"
+      ],
+      "description": "Format all input files regardless of file extension"
+    },
+    {
+      "names": [
+        "--ipynb"
+      ],
+      "description": "Format all input files like Jupyter Notebooks regardless of file extension"
+    },
+    {
+      "names": [
+        "--python-cell-magics"
+      ],
+      "description": "Add the given magic to the list of known python-magics",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "python-magic"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--skip-string-normalization",
+        "-S"
+      ],
+      "description": "Don't normalize string quotes or prefixes"
+    },
+    {
+      "names": [
+        "--skip-magic-trailing-comma",
+        "-C"
+      ],
+      "description": "Don't use trailing commas as a reason to split lines"
+    },
+    {
+      "names": [
+        "--preview"
+      ],
+      "description": "Enable potentially disruptive style changes"
+    },
+    {
+      "names": [
+        "--check"
+      ],
+      "description": "Don't write the files back, just return the status"
+    },
+    {
+      "names": [
+        "--diff"
+      ],
+      "description": "Don't write the files back, just output a diff for each file on stdout"
+    },
+    {
+      "names": [
+        "--color"
+      ],
+      "description": "Show colored diff"
+    },
+    {
+      "names": [
+        "--no-color"
+      ],
+      "description": "Show uncolored diff"
+    },
+    {
+      "names": [
+        "--fast"
+      ],
+      "description": "Skip temporary sanity checks"
+    },
+    {
+      "names": [
+        "--safe"
+      ],
+      "description": "Run temporary sanity checks"
+    },
+    {
+      "names": [
+        "--required-version"
+      ],
+      "description": "Require a specific version of Black",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "version",
+          "hasGenerator": true
+        }
+      ]
+    },
+    {
+      "names": [
+        "--include"
+      ],
+      "description": "Regex that matches files and directories that should be included on recursive searches",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--exclude"
+      ],
+      "description": "Regex that matches files and directories that should be excluded on recursive searches",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--extend-exclude"
+      ],
+      "description": "Additional exlusions",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--force-exclude"
+      ],
+      "description": "Exlude matching files and folders even when passed explicitly",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "Regex"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--stdin-filename"
+      ],
+      "description": "The name of the file when passing it through stdin",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--workers",
+        "-W"
+      ],
+      "description": "Number of parallel workers",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "integer"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--quiet",
+        "-q"
+      ],
+      "description": "Don't emit non-error messages to stderr"
+    },
+    {
+      "names": [
+        "--verbose",
+        "-v"
+      ],
+      "description": "Also emit messages about files that were not changed or were ignored due to exclusion patterns"
+    },
+    {
+      "names": [
+        "--version"
+      ],
+      "description": "Show the version"
+    },
+    {
+      "names": [
+        "--config"
+      ],
+      "description": "Read configuration from filepath",
+      "takesArg": true,
+      "args": [
+        {
+          "name": "file",
+          "template": "filepaths"
+        }
+      ]
+    },
+    {
+      "names": [
+        "--help",
+        "-h"
+      ],
+      "description": "Show usage information"
+    }
+  ],
+  "args": [
+    {
+      "name": "file or directory",
+      "variadic": true,
+      "template": "filepaths"
+    }
+  ]
+}
