@@ -82,6 +82,8 @@ export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery
 const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
 const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
 const HOME_BROWSER_CARD_GAP_PX = 13.6;
+const HOST_DRAG_MIME_TYPE = 'application/x-dolssh-host-id';
+const HOSTS_DRAG_MIME_TYPE = 'application/x-dolssh-host-ids';
 
 interface GroupDeleteTarget {
   paths: string[];
@@ -193,6 +195,22 @@ function canReparentGroup(groupPath: string, targetParentPath: string | null): b
   return Boolean(nextGroupPath && nextGroupPath !== normalizedGroupPath);
 }
 
+function parseHostDragIds(payload: string): string[] {
+  if (!payload) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (entry): entry is string => typeof entry === 'string' && entry.length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 interface HostBrowserProps {
   desktopPlatform: DesktopPlatform;
   hosts: HostRecord[];
@@ -280,7 +298,7 @@ export function HostBrowser({
   const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
-  const [draggedHostId, setDraggedHostId] = useState<string | null>(null);
+  const [draggedHostIds, setDraggedHostIds] = useState<string[]>([]);
   const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
   const [isRootDragTarget, setIsRootDragTarget] = useState(false);
   const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
@@ -677,13 +695,38 @@ export function HostBrowser({
 
   function clearDragState() {
     setDragTargetGroupPath(null);
-    setDraggedHostId(null);
+    setDraggedHostIds([]);
     setDraggedGroupPath(null);
     setIsRootDragTarget(false);
   }
 
   const selectedHostIdSet = new Set(selectedHostIds);
   const selectedGroupPathSet = new Set(selectedGroupPaths);
+
+  function getActiveDraggedHostIds(dataTransfer: DataTransfer): string[] {
+    const stateHostIds = getOrderedSelectedHostIds(draggedHostIds);
+    if (stateHostIds.length > 0) {
+      return stateHostIds;
+    }
+
+    const payloadHostIds = getOrderedSelectedHostIds(
+      parseHostDragIds(dataTransfer.getData(HOSTS_DRAG_MIME_TYPE)),
+    );
+    if (payloadHostIds.length > 0) {
+      return payloadHostIds;
+    }
+
+    const singleHostId = dataTransfer.getData(HOST_DRAG_MIME_TYPE);
+    return singleHostId ? getOrderedSelectedHostIds([singleHostId]) : [];
+  }
+
+  function getNextDraggedHostIds(host: HostRecord): string[] {
+    if (!selectedHostIdSet.has(host.id)) {
+      return [host.id];
+    }
+    const orderedSelectedHostIds = getOrderedSelectedHostIds(selectedHostIds);
+    return orderedSelectedHostIds.length > 0 ? orderedSelectedHostIds : [host.id];
+  }
 
   return (
     <div
@@ -897,7 +940,7 @@ export function HostBrowser({
                     onClick={(event) => handleGroupSelection(group.path, event)}
                     onDragStart={(event) => {
                       selectSingleGroup(group.path);
-                      setDraggedHostId(null);
+                      setDraggedHostIds([]);
                       setDraggedGroupPath(group.path);
                       event.dataTransfer.effectAllowed = 'move';
                       event.dataTransfer.setData('application/x-dolssh-group-path', group.path);
@@ -931,11 +974,13 @@ export function HostBrowser({
                       });
                     }}
                     onDragOver={(event) => {
-                      const activeDraggedHostId =
-                        draggedHostId ?? event.dataTransfer.getData('application/x-dolssh-host-id');
+                      const activeDraggedHostIds = getActiveDraggedHostIds(event.dataTransfer);
                       const activeDraggedGroupPath =
                         draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
-                      if (!activeDraggedHostId && (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path))) {
+                      if (
+                        activeDraggedHostIds.length === 0 &&
+                        (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path))
+                      ) {
                         return;
                       }
                       event.preventDefault();
@@ -951,16 +996,20 @@ export function HostBrowser({
                       setDragTargetGroupPath((current) => (current === group.path ? null : current));
                     }}
                     onDrop={async (event) => {
-                      const activeDraggedHostId =
-                        draggedHostId ?? event.dataTransfer.getData('application/x-dolssh-host-id');
+                      const activeDraggedHostIds = getActiveDraggedHostIds(event.dataTransfer);
                       const activeDraggedGroupPath =
                         draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
                       setDragTargetGroupPath(null);
                       setIsRootDragTarget(false);
-                      if (activeDraggedHostId) {
+                      if (activeDraggedHostIds.length > 0) {
                         event.preventDefault();
-                        await onMoveHostToGroup(activeDraggedHostId, group.path);
-                        clearDragState();
+                        try {
+                          for (const hostId of activeDraggedHostIds) {
+                            await onMoveHostToGroup(hostId, group.path);
+                          }
+                        } finally {
+                          clearDragState();
+                        }
                         return;
                       }
                       if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path)) {
@@ -1027,12 +1076,19 @@ export function HostBrowser({
                         handleHostSelection(host.id, event);
                       }}
                       onDragStart={(event) => {
-                        selectSingleHost(host.id);
+                        const nextDraggedHostIds = getNextDraggedHostIds(host);
+                        if (!selectedHostIdSet.has(host.id)) {
+                          selectSingleHost(host.id);
+                        }
                         setDraggedGroupPath(null);
-                        setDraggedHostId(host.id);
+                        setDraggedHostIds(nextDraggedHostIds);
                         event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData('application/x-dolssh-host-id', host.id);
-                        event.dataTransfer.setData('text/plain', host.label);
+                        event.dataTransfer.setData(HOST_DRAG_MIME_TYPE, nextDraggedHostIds[0] ?? host.id);
+                        event.dataTransfer.setData(HOSTS_DRAG_MIME_TYPE, JSON.stringify(nextDraggedHostIds));
+                        event.dataTransfer.setData(
+                          'text/plain',
+                          nextDraggedHostIds.length === 1 ? host.label : `${nextDraggedHostIds.length} hosts`,
+                        );
                       }}
                       onDragEnd={() => {
                         clearDragState();

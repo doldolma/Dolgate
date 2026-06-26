@@ -203,6 +203,7 @@ interface RenderBrowserOptions {
   onRemoveGroup?: ReturnType<typeof vi.fn>;
   onMoveGroup?: ReturnType<typeof vi.fn>;
   onRenameGroup?: ReturnType<typeof vi.fn>;
+  onMoveHostToGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
   onRemoveSecret?: ReturnType<typeof vi.fn>;
   onConnectHost?: ReturnType<typeof vi.fn>;
@@ -233,6 +234,7 @@ function renderBrowser({
   onRemoveGroup = vi.fn().mockResolvedValue(undefined),
   onMoveGroup = vi.fn().mockResolvedValue(undefined),
   onRenameGroup = vi.fn().mockResolvedValue(undefined),
+  onMoveHostToGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
   onRemoveSecret = vi.fn().mockResolvedValue(undefined),
   onConnectHost = vi.fn().mockResolvedValue(undefined),
@@ -275,7 +277,7 @@ function renderBrowser({
       onSelectHost={onSelectHost}
       onEditHost={vi.fn()}
       onDuplicateHosts={onDuplicateHosts}
-      onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
+      onMoveHostToGroup={onMoveHostToGroup}
       onRemoveHost={onRemoveHost}
       onRemoveSecret={onRemoveSecret}
       onConnectHost={onConnectHost}
@@ -819,6 +821,118 @@ describe('HostBrowser dialogs', () => {
     await waitFor(() => {
       expect(onMoveGroup).toHaveBeenCalledWith('Clients', 'Servers/Nested');
     });
+  });
+
+  it('moves all selected hosts when dragging a selected host to a group', async () => {
+    const onMoveHostToGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveHostToGroup
+    });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+    const clientsRow = within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Clients/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.dragStart(dbCard, { dataTransfer });
+    fireEvent.dragOver(clientsRow, { dataTransfer });
+    fireEvent.drop(clientsRow, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveHostToGroup).toHaveBeenCalledTimes(2);
+    });
+    expect(onMoveHostToGroup).toHaveBeenNthCalledWith(1, 'host-1', 'Clients');
+    expect(onMoveHostToGroup).toHaveBeenNthCalledWith(2, 'host-2', 'Clients');
+    expect(dataTransfer.getData('application/x-dolssh-host-ids')).toBe(
+      JSON.stringify(['host-1', 'host-2']),
+    );
+  });
+
+  it('moves only the dragged host when dragging an unselected host', async () => {
+    const onMoveHostToGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveHostToGroup
+    });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+    const awsCard = screen.getByText('AWS App').closest('article') as HTMLElement;
+    const clientsRow = within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Clients/ });
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.dragStart(awsCard, { dataTransfer });
+    fireEvent.dragOver(clientsRow, { dataTransfer });
+    fireEvent.drop(clientsRow, { dataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveHostToGroup).toHaveBeenCalledTimes(1);
+    });
+    expect(onMoveHostToGroup).toHaveBeenCalledWith('aws-1', 'Clients');
+    expect(dataTransfer.getData('application/x-dolssh-host-ids')).toBe(
+      JSON.stringify(['aws-1']),
+    );
+  });
+
+  it('keeps multi-host drop targets active when dragover cannot read custom host payloads', async () => {
+    const onMoveHostToGroup = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-3',
+          name: 'Clients',
+          path: 'Clients',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z'
+        }
+      ],
+      onMoveHostToGroup
+    });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+    const clientsRow = within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Clients/ });
+    const startDataTransfer = createDataTransfer();
+    const emptyDataTransfer = createDataTransfer();
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.dragStart(appCard, { dataTransfer: startDataTransfer });
+    fireEvent.dragOver(clientsRow, { dataTransfer: emptyDataTransfer });
+    fireEvent.drop(clientsRow, { dataTransfer: emptyDataTransfer });
+
+    await waitFor(() => {
+      expect(onMoveHostToGroup).toHaveBeenCalledTimes(2);
+    });
+    expect(onMoveHostToGroup).toHaveBeenNthCalledWith(1, 'host-1', 'Clients');
+    expect(onMoveHostToGroup).toHaveBeenNthCalledWith(2, 'host-2', 'Clients');
   });
 
   it('supports additive host selection and copies all selected hosts from the context menu', async () => {
