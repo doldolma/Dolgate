@@ -98,9 +98,13 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
     privateKeyPath: null,
     certificatePath: null,
     secretRef: record.secretRef ?? null,
+    jumpHostId: record.jumpHostId ?? null,
     groupName: record.groupName ?? null,
     tags: record.tags ?? [],
     terminalThemeId: record.terminalThemeId ?? null,
+    startupCommand: record.startupCommand ?? null,
+    useMosh: record.useMosh ?? null,
+    agentForwarding: record.agentForwarding ?? null,
   };
 }
 

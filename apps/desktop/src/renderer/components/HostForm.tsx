@@ -21,6 +21,7 @@ const defaultSshDraft: SshHostDraft = {
   secretRef: null,
   jumpHostId: null,
   startupCommand: null,
+  agentForwarding: null,
   groupName: '',
   terminalThemeId: null
 };
@@ -642,7 +643,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
         startupCommand: host.startupCommand ?? null,
-        useMosh: host.useMosh ?? null
+        useMosh: host.useMosh ?? null,
+        agentForwarding: host.agentForwarding ?? null
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
@@ -1712,7 +1714,35 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 checked={sshDraft.useMosh === true && !sshDraft.jumpHostId}
                 disabled={Boolean(sshDraft.jumpHostId)}
                 onClick={() =>
-                  setDraft({ ...sshDraft, useMosh: sshDraft.useMosh !== true })
+                  setDraft({
+                    ...sshDraft,
+                    useMosh: sshDraft.useMosh !== true,
+                    agentForwarding:
+                      sshDraft.useMosh !== true
+                        ? null
+                        : sshDraft.agentForwarding,
+                  })
+                }
+              />
+            </div>
+            <div className={fieldClassName}>
+              <ToggleSwitch
+                label="SSH Agent Forwarding"
+                description={
+                  sshDraft.useMosh === true
+                    ? 'mosh 세션에서는 지원하지 않습니다.'
+                    : '원격 서버가 이 세션 동안 로컬 SSH agent에 서명 요청을 보낼 수 있습니다. 신뢰하는 호스트에서만 켜세요.'
+                }
+                checked={
+                  sshDraft.agentForwarding === true &&
+                  sshDraft.useMosh !== true
+                }
+                disabled={sshDraft.useMosh === true}
+                onClick={() =>
+                  setDraft({
+                    ...sshDraft,
+                    agentForwarding: sshDraft.agentForwarding !== true,
+                  })
                 }
               />
             </div>

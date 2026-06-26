@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -23,16 +24,18 @@ import (
 )
 
 type sshTestServer struct {
-	addr           string
-	listener       net.Listener
-	windowChanges  chan [2]int
-	globalRequests chan string
-	hostKeyBase64  string
+	addr            string
+	listener        net.Listener
+	windowChanges   chan [2]int
+	globalRequests  chan string
+	sessionRequests chan string
+	hostKeyBase64   string
 
 	shellPath                 string
 	shellInputs               chan []byte
 	promptMarkerOnIntegration bool
 	execDelay                 time.Duration
+	agentForwardingAccepted   bool
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -233,6 +236,92 @@ func TestManagerSkipsEagerShellIntegrationForUnsupportedShell(t *testing.T) {
 	assertNoShellInput(t, server.shellInputs)
 }
 
+func TestManagerRequestsAgentForwardingBeforeShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix socket agent forwarding test is not supported on Windows")
+	}
+
+	server, _, cleanup := newSSHTestServer(t, withAgentForwardingAccepted())
+	defer cleanup()
+	agentSocket, agentCleanup := newFakeUnixAgentSocket(t)
+	defer agentCleanup()
+
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManager(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, _ []byte) {})
+
+	err := manager.Connect("session-agent", "req-agent", protocol.ConnectPayload{
+		Host:                        "127.0.0.1",
+		Port:                        server.port(),
+		Username:                    "tester",
+		AuthType:                    "password",
+		Password:                    "s3cret",
+		TrustedHostKeyBase64:        server.hostKeyBase64,
+		Cols:                        80,
+		Rows:                        24,
+		AgentForwarding:             true,
+		AgentForwardingEndpointKind: "unix",
+		AgentForwardingEndpoint:     agentSocket,
+	})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	event := waitForEvent(t, events, protocol.EventAgentForwardingStatus)
+	payload, ok := event.Payload.(protocol.AgentForwardingStatusPayload)
+	if !ok {
+		t.Fatalf("unexpected agent forwarding payload: %#v", event.Payload)
+	}
+	if payload.Status != "active" {
+		t.Fatalf("expected active agent forwarding status, got %#v", payload)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	waitForSessionRequest(t, server.sessionRequests, "pty-req")
+	waitForSessionRequest(t, server.sessionRequests, "auth-agent-req@openssh.com")
+	waitForSessionRequest(t, server.sessionRequests, "shell")
+}
+
+func TestManagerAgentForwardingMissingEndpointEmitsUnavailableAndContinues(t *testing.T) {
+	server, _, cleanup := newSSHTestServer(t, withAgentForwardingAccepted())
+	defer cleanup()
+
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManager(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, _ []byte) {})
+
+	err := manager.Connect("session-agent-missing", "req-agent-missing", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
+		AgentForwarding:      true,
+	})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+
+	event := waitForEvent(t, events, protocol.EventAgentForwardingStatus)
+	payload, ok := event.Payload.(protocol.AgentForwardingStatusPayload)
+	if !ok {
+		t.Fatalf("unexpected agent forwarding payload: %#v", event.Payload)
+	}
+	if payload.Status != "unavailable" || payload.Reason != "agent-endpoint-missing" {
+		t.Fatalf("expected missing endpoint status, got %#v", payload)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	waitForSessionRequest(t, server.sessionRequests, "pty-req")
+	waitForSessionRequest(t, server.sessionRequests, "shell")
+	assertNoSessionRequest(t, server.sessionRequests, "auth-agent-req@openssh.com")
+}
+
 func waitForEvent(t *testing.T, events <-chan protocol.Event, expected protocol.EventType) protocol.Event {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
@@ -245,6 +334,29 @@ func waitForEvent(t *testing.T, events <-chan protocol.Event, expected protocol.
 		case <-deadline:
 			t.Fatalf("timed out waiting for event %s", expected)
 		}
+	}
+}
+
+func waitForSessionRequest(t *testing.T, requests <-chan string, expected string) {
+	t.Helper()
+	select {
+	case requestType := <-requests:
+		if requestType != expected {
+			t.Fatalf("expected session request %s, got %s", expected, requestType)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for session request %s", expected)
+	}
+}
+
+func assertNoSessionRequest(t *testing.T, requests <-chan string, unexpected string) {
+	t.Helper()
+	select {
+	case requestType := <-requests:
+		if requestType == unexpected {
+			t.Fatalf("unexpected session request %s", unexpected)
+		}
+	case <-time.After(150 * time.Millisecond):
 	}
 }
 
@@ -290,6 +402,45 @@ func withRemoteShell(path string) sshTestServerOption {
 func withPromptMarkerOnIntegration() sshTestServerOption {
 	return func(server *sshTestServer) {
 		server.promptMarkerOnIntegration = true
+	}
+}
+
+func withAgentForwardingAccepted() sshTestServerOption {
+	return func(server *sshTestServer) {
+		server.agentForwardingAccepted = true
+	}
+}
+
+func newFakeUnixAgentSocket(t *testing.T) (string, func()) {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("/tmp", "dg-agent-*")
+	if err != nil {
+		t.Fatalf("create unix agent socket dir: %v", err)
+	}
+	socketPath := filepath.Join(dir, "a.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		t.Fatalf("listen unix agent socket: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	return socketPath, func() {
+		_ = listener.Close()
+		<-done
+		_ = os.RemoveAll(dir)
 	}
 }
 
@@ -341,12 +492,13 @@ func newSSHTestServer(t *testing.T, options ...sshTestServerOption) (*sshTestSer
 	}
 
 	server := &sshTestServer{
-		addr:           listener.Addr().String(),
-		listener:       listener,
-		windowChanges:  make(chan [2]int, 8),
-		globalRequests: make(chan string, 8),
-		shellInputs:    make(chan []byte, 16),
-		hostKeyBase64:  base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
+		addr:            listener.Addr().String(),
+		listener:        listener,
+		windowChanges:   make(chan [2]int, 8),
+		globalRequests:  make(chan string, 8),
+		sessionRequests: make(chan string, 16),
+		shellInputs:     make(chan []byte, 16),
+		hostKeyBase64:   base64.StdEncoding.EncodeToString(hostSigner.PublicKey().Marshal()),
 	}
 	for _, option := range options {
 		option(server)
@@ -411,6 +563,10 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestSer
 			defer ch.Close()
 			var echoStarted sync.Once
 			for req := range in {
+				select {
+				case server.sessionRequests <- req.Type:
+				default:
+				}
 				switch req.Type {
 				case "exec":
 					if server.execDelay > 0 {
@@ -426,6 +582,8 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestSer
 					return
 				case "pty-req":
 					_ = req.Reply(true, nil)
+				case "auth-agent-req@openssh.com":
+					_ = req.Reply(server.agentForwardingAccepted, nil)
 				case "shell":
 					_ = req.Reply(true, nil)
 					_, _ = ch.Write([]byte("welcome\n"))

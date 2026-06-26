@@ -117,6 +117,7 @@ const (
 	EventTerminalAutocompleteShellState = coretypes.EventTerminalAutocompleteShellState
 	EventTerminalCompletionResult       = coretypes.EventTerminalCompletionResult
 	EventMoshState                      = coretypes.EventMoshState
+	EventAgentForwardingStatus          = coretypes.EventAgentForwardingStatus
 	EventTmuxAvailable                  = coretypes.EventTmuxAvailable
 )
 
@@ -166,6 +167,7 @@ type HostKeyProbePayload = coretypes.HostKeyProbePayload
 type CertificateInspectPayload = coretypes.CertificateInspectPayload
 type CertificateInspectedPayload = coretypes.CertificateInspectedPayload
 type KeyboardInteractivePrompt = coretypes.KeyboardInteractivePrompt
+type AgentForwardingStatusPayload = coretypes.AgentForwardingStatusPayload
 type KeyboardInteractiveChallengePayload = coretypes.KeyboardInteractiveChallengePayload
 type KeyboardInteractiveRespondPayload = coretypes.KeyboardInteractiveRespondPayload
 type ControlSignalPayload = coretypes.ControlSignalPayload

@@ -2,14 +2,68 @@ import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
+  type AgentForwardingEndpointKind,
   type DesktopConnectInput,
   type DesktopLocalConnectInput,
   type KeyboardInteractiveRespondInput,
   type ServerInfoResponse,
 } from "@shared";
+import { execFile } from "node:child_process";
 import { shell as electronShell, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+
+interface AgentForwardingEndpoint {
+  kind: AgentForwardingEndpointKind;
+  endpoint: string;
+}
+
+function execFileText(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: timeoutMs }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
+export async function resolveAgentForwardingEndpoint(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  runLaunchctl: (key: string) => Promise<string | null> = async (key) => {
+    if (platform !== "darwin") {
+      return null;
+    }
+    const output = await execFileText("launchctl", ["getenv", key], 1500)
+      .catch(() => "");
+    const trimmed = output.trim();
+    return trimmed || null;
+  },
+): Promise<AgentForwardingEndpoint | null> {
+  if (platform === "win32") {
+    return {
+      kind: "windows-openssh-pipe",
+      endpoint: "\\\\.\\pipe\\openssh-ssh-agent",
+    };
+  }
+
+  if (platform === "darwin" || platform === "linux") {
+    const fromEnv = env.SSH_AUTH_SOCK?.trim();
+    const endpoint =
+      fromEnv ||
+      (platform === "darwin" ? await runLaunchctl("SSH_AUTH_SOCK") : null);
+    return endpoint ? { kind: "unix", endpoint } : null;
+  }
+
+  return null;
+}
 
 async function assertAwsSsmServerProxySupported(
   ctx: MainIpcContext,
@@ -173,6 +227,12 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
       const title = input.title?.trim() || sshHost.label;
+      const useMosh = jump ? false : sshHost.useMosh === true;
+      const agentForwardingRequested =
+        sshHost.agentForwarding === true && !useMosh;
+      const agentForwardingEndpoint = agentForwardingRequested
+        ? await resolveAgentForwardingEndpoint()
+        : null;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
@@ -197,7 +257,10 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         env: secrets.env,
         // mosh는 jump와 상호 배타다(UI에서 차단). 방어적으로 jump가 있으면 useMosh를
         // 무시해 jump 연결을 보장한다(잘못된 조합이 들어와도 안전하게 SSH로 폴백).
-        useMosh: jump ? false : sshHost.useMosh === true,
+        useMosh,
+        agentForwarding: agentForwardingRequested,
+        agentForwardingEndpointKind: agentForwardingEndpoint?.kind,
+        agentForwardingEndpoint: agentForwardingEndpoint?.endpoint,
         tmux: input.tmux === true,
         // tmux control mode 진입 시 감지된 원격 tmux 버전을 코어로 전달해 버전별 입력
         // 인코딩(-H vs -l)·refresh-client 방언(콤마 vs WxH)을 고르게 한다.

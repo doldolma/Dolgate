@@ -197,6 +197,8 @@ export interface SshHostRecord extends HostBaseRecord {
   startupCommand?: HostStartupCommand | null;
   /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
   useMosh?: boolean | null;
+  /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
+  agentForwarding?: boolean | null;
 }
 
 export interface SshHostDraft extends HostBaseDraft {
@@ -213,6 +215,8 @@ export interface SshHostDraft extends HostBaseDraft {
   startupCommand?: HostStartupCommand | null;
   /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
   useMosh?: boolean | null;
+  /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
+  agentForwarding?: boolean | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {

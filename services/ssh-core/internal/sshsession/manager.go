@@ -266,6 +266,8 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		}
 	}
 
+	m.setupAgentForwarding(sessionID, requestID, client, session, payload)
+
 	if payload.Command != "" {
 		if err := session.Start(payload.Command); err != nil {
 			session.Close()

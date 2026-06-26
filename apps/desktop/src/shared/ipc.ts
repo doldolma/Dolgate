@@ -212,6 +212,7 @@ export type CoreEventType =
   | "terminalAutocompleteShellState"
   | "terminalCompletionResult"
   | "moshState"
+  | "agentForwardingStatus"
   | "tmuxAvailable"
   | "tmuxLayoutChange"
   | "tmuxWindowAdd"
@@ -248,6 +249,8 @@ export interface DesktopConnectInput {
    */
   tmuxVersion?: string;
 }
+
+export type AgentForwardingEndpointKind = "unix" | "windows-openssh-pipe";
 
 export interface DesktopLocalConnectInput {
   cols: number;
@@ -308,6 +311,9 @@ export interface ResolvedCoreConnectPayload {
   rows: number;
   command?: string;
   env?: HostEnvVar[];
+  agentForwarding?: boolean;
+  agentForwardingEndpointKind?: AgentForwardingEndpointKind;
+  agentForwardingEndpoint?: string;
   // true면 SSH 대신 mosh(UDP)로 연결한다. Go 코어의 ConnectPayload.UseMosh에 매핑된다.
   useMosh?: boolean;
   // 감지된 원격 tmux 버전 문자열. Go 코어의 ConnectPayload.TmuxVersion(json: tmuxVersion)에

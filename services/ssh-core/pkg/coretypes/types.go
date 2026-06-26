@@ -116,6 +116,7 @@ const (
 	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
 	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
 	EventMoshState                      EventType = "moshState"
+	EventAgentForwardingStatus          EventType = "agentForwardingStatus"
 	EventTmuxLayoutChange               EventType = "tmuxLayoutChange"
 	EventTmuxWindowAdd                  EventType = "tmuxWindowAdd"
 	EventTmuxWindowClose                EventType = "tmuxWindowClose"
@@ -265,21 +266,24 @@ type EnvVar struct {
 }
 
 type ConnectPayload struct {
-	Host                  string      `json:"host"`
-	Port                  int         `json:"port"`
-	Username              string      `json:"username"`
-	AuthType              string      `json:"authType"`
-	Password              string      `json:"password,omitempty"`
-	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
-	CertificateText       string      `json:"certificateText,omitempty"`
-	Passphrase            string      `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
-	Jump                  *JumpTarget `json:"jump,omitempty"`
-	Cols                  int         `json:"cols"`
-	Rows                  int         `json:"rows"`
-	Command               string      `json:"command,omitempty"`
-	Env                   []EnvVar    `json:"env,omitempty"`
+	Host                        string      `json:"host"`
+	Port                        int         `json:"port"`
+	Username                    string      `json:"username"`
+	AuthType                    string      `json:"authType"`
+	Password                    string      `json:"password,omitempty"`
+	PrivateKeyPEM               string      `json:"privateKeyPem,omitempty"`
+	CertificateText             string      `json:"certificateText,omitempty"`
+	Passphrase                  string      `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64        string      `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64       []string    `json:"trustedHostKeysBase64,omitempty"`
+	Jump                        *JumpTarget `json:"jump,omitempty"`
+	Cols                        int         `json:"cols"`
+	Rows                        int         `json:"rows"`
+	Command                     string      `json:"command,omitempty"`
+	Env                         []EnvVar    `json:"env,omitempty"`
+	AgentForwarding             bool        `json:"agentForwarding,omitempty"`
+	AgentForwardingEndpointKind string      `json:"agentForwardingEndpointKind,omitempty"`
+	AgentForwardingEndpoint     string      `json:"agentForwardingEndpoint,omitempty"`
 	// UseMosh가 true면 SSH 대신 mosh(UDP)로 연결한다. SSH는 mosh-server 부트스트랩에만
 	// 쓰이고 이후 통신은 mosh SSP다. jump host와는 상호 배타(데스크톱 UI에서 차단).
 	UseMosh bool `json:"useMosh,omitempty"`
@@ -288,6 +292,12 @@ type ConnectPayload struct {
 	// 과 refresh-client 인자 방언(콤마 vs WxH)을 버전별로 분기하는 데 쓴다. 비어 있으면
 	// 미상으로 보고 안전 기본(최신 가정: -H + 콤마)을 쓴다. 일반 SSH 연결엔 무의미.
 	TmuxVersion string `json:"tmuxVersion,omitempty"`
+}
+
+type AgentForwardingStatusPayload struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type AWSConnectPayload struct {

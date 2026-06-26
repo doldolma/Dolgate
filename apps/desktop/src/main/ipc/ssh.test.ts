@@ -14,7 +14,10 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { registerSshIpcHandlers } from "./ssh";
+import {
+  registerSshIpcHandlers,
+  resolveAgentForwardingEndpoint,
+} from "./ssh";
 
 function createContext() {
   return {
@@ -54,6 +57,35 @@ function createContext() {
 describe("registerSshIpcHandlers", () => {
   beforeEach(() => {
     ipcHandlers.clear();
+  });
+
+  it("resolves agent forwarding endpoints for macOS env, macOS launchctl, and Windows OpenSSH agent", async () => {
+    await expect(
+      resolveAgentForwardingEndpoint("darwin", {
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+      } as NodeJS.ProcessEnv),
+    ).resolves.toEqual({
+      kind: "unix",
+      endpoint: "/tmp/agent.sock",
+    });
+
+    await expect(
+      resolveAgentForwardingEndpoint(
+        "darwin",
+        {} as NodeJS.ProcessEnv,
+        async () => "/private/tmp/com.apple.launchd.agent/Listeners",
+      ),
+    ).resolves.toEqual({
+      kind: "unix",
+      endpoint: "/private/tmp/com.apple.launchd.agent/Listeners",
+    });
+
+    await expect(
+      resolveAgentForwardingEndpoint("win32", {} as NodeJS.ProcessEnv),
+    ).resolves.toEqual({
+      kind: "windows-openssh-pipe",
+      endpoint: "\\\\.\\pipe\\openssh-ssh-agent",
+    });
   });
 
   afterEach(() => {
@@ -175,6 +207,53 @@ describe("registerSshIpcHandlers", () => {
       expect.objectContaining({
         transport: "ssh",
         startupCommand: "cd /srv/app",
+      }),
+    );
+  });
+
+  it("forwards SSH agent forwarding settings for direct SSH sessions", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      agentForwarding: true,
+    });
+    ctx.requireTrustedHostKeys.mockReturnValue(["trusted"]);
+    ctx.requireConfiguredSshUsername.mockReturnValue("ubuntu");
+    ctx.resolveRuntimeSshSecrets.mockResolvedValue({
+      secrets: { password: "secret" },
+      shouldPersistHostSecret: false,
+    });
+    ctx.coreManager.connect.mockResolvedValue({ sessionId: "session-ssh" });
+    vi.stubEnv("SSH_AUTH_SOCK", "/tmp/dolgate-agent.sock");
+    registerSshIpcHandlers(ctx);
+
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+    await connectHandler?.(null, {
+      hostId: "host-1",
+      cols: 120,
+      rows: 32,
+    });
+
+    const expectedEndpoint =
+      process.platform === "win32"
+        ? {
+            agentForwardingEndpointKind: "windows-openssh-pipe",
+            agentForwardingEndpoint: "\\\\.\\pipe\\openssh-ssh-agent",
+          }
+        : {
+            agentForwardingEndpointKind: "unix",
+            agentForwardingEndpoint: "/tmp/dolgate-agent.sock",
+          };
+    expect(ctx.coreManager.connect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentForwarding: true,
+        ...expectedEndpoint,
       }),
     );
   });

@@ -327,7 +327,8 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
-      startupCommand: normalizeHostStartupCommand(record.startupCommand)
+      startupCommand: normalizeHostStartupCommand(record.startupCommand),
+      agentForwarding: record.agentForwarding === true ? true : null
     };
   }
   if (record.kind === 'warpgate-ssh') {
@@ -477,6 +478,7 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     secretRef: secretRef ?? draft.secretRef ?? null,
     jumpHostId: draft.jumpHostId ?? null,
     useMosh: draft.useMosh ?? null,
+    agentForwarding: draft.agentForwarding === true ? true : null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),

@@ -205,6 +205,46 @@ describe('HostForm', () => {
     );
   });
 
+  it('auto-saves the SSH agent forwarding toggle for an SSH host', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: 'SSH Agent Forwarding' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 1200 });
+    expect(onSubmit).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        agentForwarding: true,
+      }),
+      undefined,
+    );
+  });
+
+  it('disables SSH agent forwarding while mosh is enabled', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        host={createHost({ useMosh: true, agentForwarding: true })}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const agentForwardingToggle = screen.getByRole('switch', {
+      name: 'SSH Agent Forwarding',
+    });
+    expect(agentForwardingToggle).toBeDisabled();
+    expect(agentForwardingToggle).toHaveAttribute('aria-checked', 'false');
+  });
+
   it('keeps create mode manual without auto-saving', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

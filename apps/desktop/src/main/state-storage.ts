@@ -764,6 +764,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     privateKeyPath: typeof value.privateKeyPath === 'string' ? value.privateKeyPath : null,
     certificatePath: typeof value.certificatePath === 'string' ? value.certificatePath : null,
     secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
+    agentForwarding: value.agentForwarding === true ? true : null,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
   };
