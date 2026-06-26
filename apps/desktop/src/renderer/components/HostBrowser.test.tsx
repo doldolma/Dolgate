@@ -205,6 +205,8 @@ interface RenderBrowserOptions {
   onRenameGroup?: ReturnType<typeof vi.fn>;
   onRemoveHost?: ReturnType<typeof vi.fn>;
   onRemoveSecret?: ReturnType<typeof vi.fn>;
+  onConnectHost?: ReturnType<typeof vi.fn>;
+  onConnectHostTmux?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
   onNavigateGroup?: ReturnType<typeof vi.fn>;
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
@@ -233,6 +235,8 @@ function renderBrowser({
   onRenameGroup = vi.fn().mockResolvedValue(undefined),
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
   onRemoveSecret = vi.fn().mockResolvedValue(undefined),
+  onConnectHost = vi.fn().mockResolvedValue(undefined),
+  onConnectHostTmux,
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
   onNavigateGroup = vi.fn(),
   onOpenLocalTerminal = vi.fn(),
@@ -274,7 +278,8 @@ function renderBrowser({
       onMoveHostToGroup={vi.fn().mockResolvedValue(undefined)}
       onRemoveHost={onRemoveHost}
       onRemoveSecret={onRemoveSecret}
-      onConnectHost={vi.fn().mockResolvedValue(undefined)}
+      onConnectHost={onConnectHost}
+      onConnectHostTmux={onConnectHostTmux}
       onOpenHostContainers={onOpenHostContainers}
     />
   );
@@ -493,6 +498,20 @@ describe('HostBrowser helpers', () => {
 
     await waitFor(() => {
       expect(onOpenHostContainers).toHaveBeenCalledWith('host-1');
+    });
+  });
+
+  it('shows the connect action in the host context menu and connects the selected host', async () => {
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onConnectHost });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '연결' }));
+
+    await waitFor(() => {
+      expect(onConnectHost).toHaveBeenCalledWith('host-1');
     });
   });
 
@@ -821,6 +840,66 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: '복사 (2개)' }));
 
     expect(onDuplicateHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
+  });
+
+  it('connects all selected hosts from the context menu in visible order', async () => {
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onConnectHost });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '연결 (2개)' }));
+
+    await waitFor(() => {
+      expect(onConnectHost).toHaveBeenCalledTimes(2);
+    });
+    expect(onConnectHost).toHaveBeenNthCalledWith(1, 'host-1');
+    expect(onConnectHost).toHaveBeenNthCalledWith(2, 'host-2');
+  });
+
+  it('opens containers for all selected hosts from the context menu in visible order', async () => {
+    const onOpenHostContainers = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onOpenHostContainers });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '컨테이너 (2개)' }));
+
+    await waitFor(() => {
+      expect(onOpenHostContainers).toHaveBeenCalledTimes(2);
+    });
+    expect(onOpenHostContainers).toHaveBeenNthCalledWith(1, 'host-1');
+    expect(onOpenHostContainers).toHaveBeenNthCalledWith(2, 'host-2');
+  });
+
+  it('connects all selected hosts with tmux from the context menu in visible order', async () => {
+    const onConnectHostTmux = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onConnectHostTmux });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: 'tmux로 연결 (2개)' }));
+
+    await waitFor(() => {
+      expect(onConnectHostTmux).toHaveBeenCalledTimes(2);
+    });
+    expect(onConnectHostTmux).toHaveBeenNthCalledWith(1, 'host-1');
+    expect(onConnectHostTmux).toHaveBeenNthCalledWith(2, 'host-2');
   });
 
   it('supports shift range selection for hosts without changing the active drawer selection', () => {

@@ -615,6 +615,17 @@ export function HostBrowser({
     return visibleHostIds.filter((hostId) => selectedHostIdSet.has(hostId));
   }
 
+  async function runForOrderedHosts(
+    hostIds: string[],
+    action: (hostId: string) => Promise<void>,
+  ) {
+    const orderedHostIds = getOrderedSelectedHostIds(hostIds);
+    setContextMenu(null);
+    for (const hostId of orderedHostIds) {
+      await action(hostId);
+    }
+  }
+
   function handleBrowserBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     if (
@@ -1122,35 +1133,30 @@ export function HostBrowser({
                 <button
                   type="button"
                   className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                  disabled={contextMenu.hostIds.length !== 1}
                   onClick={async () => {
-                    const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
-                    const targetHostId = orderedHostIds[0];
-                    setContextMenu(null);
-                    if (!targetHostId) {
-                      return;
-                    }
-                    await onOpenHostContainers(targetHostId);
+                    await runForOrderedHosts(contextMenu.hostIds, onConnectHost);
                   }}
                 >
-                  컨테이너
+                  {contextMenu.hostIds.length === 1 ? '연결' : `연결 (${contextMenu.hostIds.length}개)`}
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                  onClick={async () => {
+                    await runForOrderedHosts(contextMenu.hostIds, onOpenHostContainers);
+                  }}
+                >
+                  {contextMenu.hostIds.length === 1 ? '컨테이너' : `컨테이너 (${contextMenu.hostIds.length}개)`}
                 </button>
                 {onConnectHostTmux ? (
                   <button
                     type="button"
                     className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                    disabled={contextMenu.hostIds.length !== 1}
                     onClick={async () => {
-                      const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
-                      const targetHostId = orderedHostIds[0];
-                      setContextMenu(null);
-                      if (!targetHostId) {
-                        return;
-                      }
-                      await onConnectHostTmux?.(targetHostId);
+                      await runForOrderedHosts(contextMenu.hostIds, onConnectHostTmux);
                     }}
                   >
-                    tmux로 연결
+                    {contextMenu.hostIds.length === 1 ? 'tmux로 연결' : `tmux로 연결 (${contextMenu.hostIds.length}개)`}
                   </button>
                 ) : null}
                 <button
