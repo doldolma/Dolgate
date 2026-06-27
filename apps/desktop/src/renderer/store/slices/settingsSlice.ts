@@ -207,6 +207,19 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
               secrets,
             });
             await refreshHostAndKeychainState(set);
+          },
+    generateSshKey: async (input) => {
+            const result = await api.sshKeys.generate(input);
+            await refreshHostAndKeychainState(set);
+            return result;
+          },
+    copySshPublicKey: async (secretRef) => {
+            await api.sshKeys.copyPublicKey(secretRef);
+          },
+    installSshPublicKey: async (input) => {
+            const result = await api.sshKeys.install(input);
+            await refreshHostAndKeychainState(set);
+            return result;
           }
   };
 

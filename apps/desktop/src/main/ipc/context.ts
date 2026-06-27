@@ -21,6 +21,10 @@ import type {
   PortForwardDraft,
   PortForwardRuntimeRecord,
   ResolvedJumpHost,
+  SshKeyGenerateInput,
+  SshKeyInstallInput,
+  SshKeyInstallResult,
+  SshKeyMaterialResult,
   SshCertificateInfo,
 } from "@shared";
 import type { BrowserWindow, WebContents } from "electron";
@@ -239,6 +243,11 @@ export interface MainIpcContext {
     currentSecretRef: string | null,
   ) => Promise<string | undefined>;
   inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>;
+  generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
+  resolveSshPublicKey: (secretRef: string) => Promise<SshKeyMaterialResult>;
+  installSshPublicKey: (
+    input: SshKeyInstallInput,
+  ) => Promise<SshKeyInstallResult>;
   inspectStoredCertificate: (input: {
     secretRef?: string | null;
     certificateText?: string | undefined;

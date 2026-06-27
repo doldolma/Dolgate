@@ -215,6 +215,11 @@ export const ipcChannels = {
     update: 'keychain:update',
     cloneForHost: 'keychain:clone-for-host'
   },
+  sshKeys: {
+    generate: 'ssh-keys:generate',
+    copyPublicKey: 'ssh-keys:copy-public-key',
+    install: 'ssh-keys:install'
+  },
   containers: {
     beginLifecycle: 'containers:begin-lifecycle',
     reportLifecycleError: 'containers:report-lifecycle-error',

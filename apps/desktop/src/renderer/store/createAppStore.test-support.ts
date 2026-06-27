@@ -931,6 +931,21 @@ export function createMockApi(): DesktopApi {
       update: vi.fn().mockResolvedValue(undefined),
       cloneForHost: vi.fn().mockResolvedValue(undefined),
     },
+    sshKeys: {
+      generate: vi.fn().mockResolvedValue({
+        secretRef: "secret:ssh-key",
+        label: "Generated SSH Key",
+        algorithm: "ssh-ed25519",
+        publicKey: "ssh-ed25519 AAAATEST generated",
+        fingerprintSha256: "SHA256:test",
+      }),
+      copyPublicKey: vi.fn().mockResolvedValue(undefined),
+      install: vi.fn().mockResolvedValue({
+        secretRef: "secret:ssh-key",
+        mode: "installOnly",
+        results: [],
+      }),
+    },
     files: {
       getHomeDirectory: vi.fn().mockResolvedValue("/Users/tester"),
       getDownloadsDirectory: vi

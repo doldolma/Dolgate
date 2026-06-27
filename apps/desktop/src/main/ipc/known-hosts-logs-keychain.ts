@@ -221,6 +221,13 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       if (validationError) {
         throw new Error(validationError);
       }
+      const currentRaw = await ctx.secretStore.load(input.secretRef);
+      const currentPayload = currentRaw
+        ? (JSON.parse(currentRaw) as ManagedSecretPayload)
+        : null;
+      const keepPublicKeyMetadata =
+        currentPayload?.privateKeyPem &&
+        currentPayload.privateKeyPem === replacementSecrets.privateKeyPem;
 
       await ctx.secretStore.save(
         input.secretRef,
@@ -231,6 +238,30 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           passphrase: replacementSecrets.passphrase,
           privateKeyPem: replacementSecrets.privateKeyPem,
           certificateText: replacementSecrets.certificateText,
+          publicKey: keepPublicKeyMetadata ? currentPayload.publicKey : undefined,
+          publicKeyFingerprintSha256: keepPublicKeyMetadata
+            ? currentPayload.publicKeyFingerprintSha256
+            : undefined,
+          keyAlgorithm: keepPublicKeyMetadata
+            ? currentPayload.keyAlgorithm
+            : undefined,
+          privateKeyEncrypted: keepPublicKeyMetadata
+            ? currentPayload.privateKeyEncrypted
+            : undefined,
+          keyCurve: keepPublicKeyMetadata ? currentPayload.keyCurve : undefined,
+          keyBits: keepPublicKeyMetadata ? currentPayload.keyBits : undefined,
+          privateKeyCipher: keepPublicKeyMetadata
+            ? currentPayload.privateKeyCipher
+            : undefined,
+          privateKeyKdfRounds: keepPublicKeyMetadata
+            ? currentPayload.privateKeyKdfRounds
+            : undefined,
+          passphraseSaved: keepPublicKeyMetadata
+            ? currentPayload.passphraseSaved
+            : undefined,
+          generatedByApp: keepPublicKeyMetadata
+            ? currentPayload.generatedByApp
+            : undefined,
           env: replacementSecrets.env,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
@@ -242,6 +273,21 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         hasPassphrase: Boolean(replacementSecrets.passphrase),
         hasManagedPrivateKey: Boolean(replacementSecrets.privateKeyPem),
         hasCertificate: Boolean(replacementSecrets.certificateText),
+        privateKeyEncrypted: keepPublicKeyMetadata
+          ? currentPayload.privateKeyEncrypted
+          : undefined,
+        keyAlgorithm: keepPublicKeyMetadata ? currentPayload.keyAlgorithm : undefined,
+        keyCurve: keepPublicKeyMetadata ? currentPayload.keyCurve : undefined,
+        keyBits: keepPublicKeyMetadata ? currentPayload.keyBits : undefined,
+        privateKeyCipher: keepPublicKeyMetadata
+          ? currentPayload.privateKeyCipher
+          : undefined,
+        privateKeyKdfRounds: keepPublicKeyMetadata
+          ? currentPayload.privateKeyKdfRounds
+          : undefined,
+        passphraseSaved: keepPublicKeyMetadata
+          ? currentPayload.passphraseSaved
+          : undefined,
       });
 
       ctx.activityLogs.append("info", "audit", "공유 secret을 갱신했습니다.", {

@@ -6,7 +6,16 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
   if (entry.hasManagedPrivateKey && entry.hasCertificate) {
     labels.push('SSH certificate');
   } else if (entry.hasManagedPrivateKey) {
-    labels.push('Private key');
+    const keyDetails = [
+      entry.keyAlgorithm,
+      entry.keyCurve,
+      entry.keyBits ? `${entry.keyBits}` : null,
+    ].filter(Boolean);
+    labels.push(
+      keyDetails.length > 0
+        ? `Private key (${keyDetails.join(' ')})`
+        : 'Private key',
+    );
   }
 
   if (entry.hasPassword) {
@@ -15,6 +24,8 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
 
   if (entry.hasPassphrase) {
     labels.push('Passphrase');
+  } else if (entry.privateKeyEncrypted) {
+    labels.push('Encrypted key');
   }
 
   if (labels.length === 0) {

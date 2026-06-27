@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,5 +234,143 @@ func TestInspectCertificate(t *testing.T) {
 	invalid := InspectCertificate("ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAABAQ== not-a-cert", now)
 	if invalid.Status != "invalid" {
 		t.Fatalf("InspectCertificate(invalid).Status = %q, want %q", invalid.Status, "invalid")
+	}
+}
+
+func TestInspectPrivateKey(t *testing.T) {
+	signer, privateKeyPEM := generateTestKeyPair(t)
+
+	inspected, err := InspectPrivateKey(string(privateKeyPEM), "")
+	if err != nil {
+		t.Fatalf("InspectPrivateKey() error = %v", err)
+	}
+
+	expectedPublicKey := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
+	if inspected.PublicKey != expectedPublicKey {
+		t.Fatalf("InspectPrivateKey().PublicKey = %q, want %q", inspected.PublicKey, expectedPublicKey)
+	}
+	if inspected.Algorithm != signer.PublicKey().Type() {
+		t.Fatalf("InspectPrivateKey().Algorithm = %q, want %q", inspected.Algorithm, signer.PublicKey().Type())
+	}
+	if inspected.FingerprintSHA256 != ssh.FingerprintSHA256(signer.PublicKey()) {
+		t.Fatalf("InspectPrivateKey().FingerprintSHA256 = %q, want %q", inspected.FingerprintSHA256, ssh.FingerprintSHA256(signer.PublicKey()))
+	}
+}
+
+func TestInspectPrivateKeyRejectsInvalidKey(t *testing.T) {
+	if _, err := InspectPrivateKey("not a private key", ""); err == nil {
+		t.Fatal("InspectPrivateKey(invalid) error = nil, want non-nil")
+	}
+}
+
+func TestGeneratePrivateKeyAlgorithms(t *testing.T) {
+	tests := []struct {
+		name          string
+		request       PrivateKeyGenerationRequest
+		wantAlgorithm string
+		wantCurve     string
+		wantBits      int
+	}{
+		{
+			name:          "ed25519",
+			request:       PrivateKeyGenerationRequest{Algorithm: "ed25519", Comment: "test"},
+			wantAlgorithm: "ssh-ed25519",
+		},
+		{
+			name:          "ecdsa p256",
+			request:       PrivateKeyGenerationRequest{Algorithm: "ecdsa", Curve: "nistp256"},
+			wantAlgorithm: "ecdsa-sha2-nistp256",
+			wantCurve:     "nistp256",
+		},
+		{
+			name:          "ecdsa p384",
+			request:       PrivateKeyGenerationRequest{Algorithm: "ecdsa", Curve: "nistp384"},
+			wantAlgorithm: "ecdsa-sha2-nistp384",
+			wantCurve:     "nistp384",
+		},
+		{
+			name:          "ecdsa p521 default",
+			request:       PrivateKeyGenerationRequest{Algorithm: "ecdsa"},
+			wantAlgorithm: "ecdsa-sha2-nistp521",
+			wantCurve:     "nistp521",
+		},
+		{
+			name:          "rsa 3072",
+			request:       PrivateKeyGenerationRequest{Algorithm: "rsa", RSABits: 3072},
+			wantAlgorithm: "ssh-rsa",
+			wantBits:      3072,
+		},
+		{
+			name:          "rsa 4096 default",
+			request:       PrivateKeyGenerationRequest{Algorithm: "rsa"},
+			wantAlgorithm: "ssh-rsa",
+			wantBits:      4096,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			generated, err := GeneratePrivateKey(tt.request)
+			if err != nil {
+				t.Fatalf("GeneratePrivateKey() error = %v", err)
+			}
+			if generated.Algorithm != tt.wantAlgorithm {
+				t.Fatalf("GeneratePrivateKey().Algorithm = %q, want %q", generated.Algorithm, tt.wantAlgorithm)
+			}
+			if generated.KeyCurve != tt.wantCurve {
+				t.Fatalf("GeneratePrivateKey().KeyCurve = %q, want %q", generated.KeyCurve, tt.wantCurve)
+			}
+			if generated.KeyBits != tt.wantBits {
+				t.Fatalf("GeneratePrivateKey().KeyBits = %d, want %d", generated.KeyBits, tt.wantBits)
+			}
+
+			inspected, err := InspectPrivateKey(generated.PrivateKeyPEM, "")
+			if err != nil {
+				t.Fatalf("InspectPrivateKey(generated) error = %v", err)
+			}
+			if inspected.PublicKey != generated.PublicKey {
+				t.Fatalf("InspectPrivateKey(generated).PublicKey = %q, want %q", inspected.PublicKey, generated.PublicKey)
+			}
+			if inspected.FingerprintSHA256 != generated.FingerprintSHA256 {
+				t.Fatalf("InspectPrivateKey(generated).FingerprintSHA256 = %q, want %q", inspected.FingerprintSHA256, generated.FingerprintSHA256)
+			}
+		})
+	}
+}
+
+func TestGeneratePrivateKeyWithPassphrase(t *testing.T) {
+	generated, err := GeneratePrivateKey(PrivateKeyGenerationRequest{
+		Algorithm:        "ed25519",
+		PrivateKeyCipher: "aes256-cbc",
+		KDFRounds:        128,
+		Passphrase:       "secret",
+	})
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey() error = %v", err)
+	}
+	if !generated.PrivateKeyEncrypted {
+		t.Fatal("GeneratePrivateKey().PrivateKeyEncrypted = false, want true")
+	}
+	if generated.PrivateKeyCipher != "aes256-cbc" {
+		t.Fatalf("GeneratePrivateKey().PrivateKeyCipher = %q, want %q", generated.PrivateKeyCipher, "aes256-cbc")
+	}
+	if generated.PrivateKeyKDFRounds != 128 {
+		t.Fatalf("GeneratePrivateKey().PrivateKeyKDFRounds = %d, want %d", generated.PrivateKeyKDFRounds, 128)
+	}
+	if !strings.Contains(generated.PrivateKeyPEM, "OPENSSH PRIVATE KEY") {
+		t.Fatal("GeneratePrivateKey().PrivateKeyPEM does not look like an OpenSSH key")
+	}
+	if _, err := InspectPrivateKey(generated.PrivateKeyPEM, ""); err == nil {
+		t.Fatal("InspectPrivateKey(encrypted, empty passphrase) error = nil, want non-nil")
+	}
+	if _, err := InspectPrivateKey(generated.PrivateKeyPEM, "wrong"); err == nil {
+		t.Fatal("InspectPrivateKey(encrypted, wrong passphrase) error = nil, want non-nil")
+	}
+	inspected, err := InspectPrivateKey(generated.PrivateKeyPEM, "secret")
+	if err != nil {
+		t.Fatalf("InspectPrivateKey(encrypted) error = %v", err)
+	}
+	if inspected.PublicKey != generated.PublicKey {
+		t.Fatalf("InspectPrivateKey(encrypted).PublicKey = %q, want %q", inspected.PublicKey, generated.PublicKey)
 	}
 }

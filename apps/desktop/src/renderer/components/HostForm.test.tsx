@@ -423,6 +423,44 @@ describe('HostForm', () => {
     expect(onEditExistingSecret).toHaveBeenCalledWith('secret-certificate');
   });
 
+  it('installs a selected existing private key to the edited host', async () => {
+    const onInstallSshPublicKey = vi.fn().mockResolvedValue({
+      secretRef: 'secret-private-key',
+      mode: 'installAndUse',
+      results: [{ hostId: 'host-1', hostLabel: 'Prod', status: 'installed' }],
+    });
+
+    render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={reusableKeychainEntries}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onInstallSshPublicKey={onInstallSshPublicKey}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Auth Type'), {
+      target: { value: 'privateKey' },
+    });
+    fireEvent.change(screen.getByLabelText('Saved Credentials'), {
+      target: { value: 'existing:secret-private-key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Install selected key' }));
+
+    await waitFor(() =>
+      expect(onInstallSshPublicKey).toHaveBeenCalledWith({
+        secretRef: 'secret-private-key',
+        hostIds: ['host-1'],
+        mode: 'installAndUse',
+        passphraseOverride: undefined,
+      }),
+    );
+    expect(
+      await screen.findByText('선택한 SSH 키를 호스트에 설치하고 인증 정보로 전환했습니다.'),
+    ).toBeInTheDocument();
+  });
+
   it('falls back to creating a new password secret when the selected saved secret disappears', async () => {
     const { rerender } = render(
       <HostForm

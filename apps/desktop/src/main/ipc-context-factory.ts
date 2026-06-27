@@ -26,10 +26,7 @@ import type { TermiusImportService } from "./termius-import-service";
 import type { UpdateService } from "./update-service";
 import type { WarpgateService } from "./warpgate-service";
 import type { XshellImportService } from "./xshell-import-service";
-import type {
-  AwsConnectionProgressEmitter,
-  MainIpcContext,
-} from "./ipc/context";
+import type { AwsConnectionProgressEmitter, MainIpcContext } from "./ipc/context";
 import { createAwsSftpCoordinator } from "./ipc/coordinators/aws-sftp-coordinator";
 import { createContainerRuntimeCoordinator } from "./ipc/coordinators/container-runtime-coordinator";
 import { createCoreEventBridge } from "./ipc/coordinators/core-event-bridge";
@@ -37,6 +34,7 @@ import { createDnsPortForwardCoordinator } from "./ipc/coordinators/dns-port-for
 import { createHostCoordinator } from "./ipc/coordinators/host-coordinator";
 import { createSecretCoordinator } from "./ipc/coordinators/secret-coordinator";
 import { createSnapshotCoordinator } from "./ipc/coordinators/snapshot-coordinator";
+import { createSshKeyCoordinator } from "./ipc/coordinators/ssh-key-coordinator";
 import { createTunnelRegistry } from "./ipc/coordinators/tunnel-registry";
 
 export interface RegisterIpcDependencies {
@@ -176,6 +174,21 @@ export function createMainIpcContext(
     localFiles,
     dnsPortForwardCoordinator,
   });
+  const sshKeyCoordinator = createSshKeyCoordinator({
+    hosts,
+    persistSecret: secretCoordinator.persistSecret,
+    loadSecrets: secretCoordinator.loadSecrets,
+    requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
+    requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
+    resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
+    ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
+    generatePrivateKey: (payload) => coreManager.generatePrivateKey(payload),
+    inspectPrivateKey: (privateKeyPem, passphrase) =>
+      coreManager.inspectPrivateKey(privateKeyPem, passphrase),
+    installAuthorizedKey: (payload) =>
+      coreManager.installAuthorizedKey(payload),
+    queueSync,
+  });
 
   return {
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
@@ -256,6 +269,9 @@ export function createMainIpcContext(
     resolveManagedCertificateText:
       secretCoordinator.resolveManagedCertificateText,
     inspectCertificate: secretCoordinator.inspectCertificate,
+    generateSshKey: sshKeyCoordinator.generateSshKey,
+    resolveSshPublicKey: sshKeyCoordinator.resolveSshPublicKey,
+    installSshPublicKey: sshKeyCoordinator.installSshPublicKey,
     inspectStoredCertificate: secretCoordinator.inspectStoredCertificate,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
     requireTrustedHostKey: hostCoordinator.requireTrustedHostKey,

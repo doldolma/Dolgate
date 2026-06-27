@@ -18,6 +18,16 @@ export interface HostSecretInput {
   passphrase?: string;
   privateKeyPem?: string;
   certificateText?: string;
+  publicKey?: string;
+  publicKeyFingerprintSha256?: string;
+  keyAlgorithm?: string;
+  privateKeyEncrypted?: boolean;
+  keyCurve?: string;
+  keyBits?: number;
+  privateKeyCipher?: string;
+  privateKeyKdfRounds?: number;
+  passphraseSaved?: boolean;
+  generatedByApp?: boolean;
   env?: HostEnvVar[];
 }
 

@@ -22,6 +22,9 @@ const (
 	CommandDisconnect                  CommandType = "disconnect"
 	CommandProbeHostKey                CommandType = "probeHostKey"
 	CommandInspectCertificate          CommandType = "inspectCertificate"
+	CommandGeneratePrivateKey          CommandType = "generatePrivateKey"
+	CommandInspectPrivateKey           CommandType = "inspectPrivateKey"
+	CommandInstallAuthorizedKey        CommandType = "installAuthorizedKey"
 	CommandPortForwardStart            CommandType = "portForwardStart"
 	CommandSSMPortForwardStart         CommandType = "ssmPortForwardStart"
 	CommandPortForwardStop             CommandType = "portForwardStop"
@@ -85,6 +88,9 @@ const (
 	EventSerialControlCompleted         EventType = "serialControlCompleted"
 	EventHostKeyProbed                  EventType = "hostKeyProbed"
 	EventCertificateInspected           EventType = "certificateInspected"
+	EventPrivateKeyGenerated            EventType = "privateKeyGenerated"
+	EventPrivateKeyInspected            EventType = "privateKeyInspected"
+	EventAuthorizedKeyInstalled         EventType = "authorizedKeyInstalled"
 	EventKeyboardInteractiveChallenge   EventType = "keyboardInteractiveChallenge"
 	EventKeyboardInteractiveResolved    EventType = "keyboardInteractiveResolved"
 	EventPortForwardStarted             EventType = "portForwardStarted"
@@ -448,6 +454,48 @@ type CertificateInspectedPayload struct {
 	Principals  []string `json:"principals,omitempty"`
 	KeyID       string   `json:"keyId,omitempty"`
 	Serial      string   `json:"serial,omitempty"`
+}
+
+type PrivateKeyInspectPayload struct {
+	PrivateKeyPEM string `json:"privateKeyPem"`
+	Passphrase    string `json:"passphrase,omitempty"`
+}
+
+type PrivateKeyGeneratePayload struct {
+	Algorithm        string `json:"algorithm,omitempty"`
+	Curve            string `json:"curve,omitempty"`
+	RSABits          int    `json:"rsaBits,omitempty"`
+	PrivateKeyCipher string `json:"privateKeyCipher,omitempty"`
+	KDFRounds        int    `json:"kdfRounds,omitempty"`
+	Comment          string `json:"comment,omitempty"`
+	Passphrase       string `json:"passphrase,omitempty"`
+}
+
+type PrivateKeyGeneratedPayload struct {
+	Algorithm           string `json:"algorithm"`
+	PrivateKeyPEM       string `json:"privateKeyPem"`
+	PublicKey           string `json:"publicKey"`
+	FingerprintSHA256   string `json:"fingerprintSha256"`
+	PrivateKeyEncrypted bool   `json:"privateKeyEncrypted"`
+	KeyCurve            string `json:"keyCurve,omitempty"`
+	KeyBits             int    `json:"keyBits,omitempty"`
+	PrivateKeyCipher    string `json:"privateKeyCipher,omitempty"`
+	PrivateKeyKDFRounds int    `json:"privateKeyKdfRounds,omitempty"`
+}
+
+type PrivateKeyInspectedPayload struct {
+	Algorithm         string `json:"algorithm"`
+	PublicKey         string `json:"publicKey"`
+	FingerprintSHA256 string `json:"fingerprintSha256"`
+}
+
+type AuthorizedKeyInstallPayload struct {
+	ConnectPayload
+	PublicKey string `json:"publicKey"`
+}
+
+type AuthorizedKeyInstalledPayload struct {
+	Status string `json:"status"`
 }
 
 type KeyboardInteractivePrompt struct {

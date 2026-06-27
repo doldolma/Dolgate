@@ -44,6 +44,9 @@ type coreRuntime interface {
 	InstallShellIntegration(sessionID string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
+	GeneratePrivateKey(requestID string, payload protocol.PrivateKeyGeneratePayload) error
+	InspectPrivateKey(requestID string, payload protocol.PrivateKeyInspectPayload) error
+	InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error
 	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
 	ConnectContainers(endpointID, requestID string, payload protocol.ContainersConnectPayload) error
 	DisconnectContainers(endpointID, requestID string) error
@@ -252,6 +255,24 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.InspectCertificate(request.ID, payload)
+	case protocol.CommandGeneratePrivateKey:
+		var payload protocol.PrivateKeyGeneratePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.GeneratePrivateKey(request.ID, payload)
+	case protocol.CommandInspectPrivateKey:
+		var payload protocol.PrivateKeyInspectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.InspectPrivateKey(request.ID, payload)
+	case protocol.CommandInstallAuthorizedKey:
+		var payload protocol.AuthorizedKeyInstallPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.InstallAuthorizedKey(request.ID, payload)
 	case protocol.CommandControlSignal:
 		var payload protocol.ControlSignalPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

@@ -166,6 +166,19 @@ function renderSettingsPanel(
   const onRemoveKnownHost = vi.fn().mockResolvedValue(undefined);
   const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
   const onEditSecret = vi.fn();
+  const onGenerateSshKey = vi.fn().mockResolvedValue({
+    secretRef: 'secret-generated',
+    label: 'Generated SSH Key',
+    algorithm: 'ssh-ed25519',
+    publicKey: 'ssh-ed25519 AAAATEST generated',
+    fingerprintSha256: 'SHA256:test',
+  });
+  const onCopySshPublicKey = vi.fn().mockResolvedValue(undefined);
+  const onInstallSshPublicKey = vi.fn().mockResolvedValue({
+    secretRef: 'secret-generated',
+    mode: 'installOnly',
+    results: [],
+  });
   const onLogout = vi.fn();
   const {
     activeSection: initialActiveSection = 'general',
@@ -209,6 +222,9 @@ function renderSettingsPanel(
         onRemoveKnownHost={onRemoveKnownHost}
         onRemoveSecret={onRemoveSecret}
         onEditSecret={onEditSecret}
+        onGenerateSshKey={onGenerateSshKey}
+        onCopySshPublicKey={onCopySshPublicKey}
+        onInstallSshPublicKey={onInstallSshPublicKey}
         onLogout={onLogout}
         {...restOverrides}
       />
@@ -225,6 +241,9 @@ function renderSettingsPanel(
     onRemoveKnownHost,
     onRemoveSecret,
     onEditSecret,
+    onGenerateSshKey,
+    onCopySshPublicKey,
+    onInstallSshPublicKey,
     onLogout
   };
 }
@@ -370,6 +389,83 @@ describe('SettingsPanel', () => {
     expect(
       await screen.findByText('이 인증 정보에는 저장된 비밀번호가 없습니다.'),
     ).toBeInTheDocument();
+  });
+
+  it('generates SSH keys with selected algorithm, cipher, rounds, and passphrase policy', async () => {
+    const { onGenerateSshKey } = renderSettingsPanel({ activeSection: 'secrets' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate SSH Key' }));
+
+    expect(screen.getByRole('button', { name: 'ED25519' })).toHaveClass(
+      'text-[var(--accent-strong)]',
+    );
+    fireEvent.change(screen.getByLabelText('Label'), {
+      target: { value: 'NAS key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'ECDSA' }));
+    expect(screen.getByText('Elliptic curve size (bits)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '384' }));
+    fireEvent.change(screen.getByLabelText('Passphrase'), {
+      target: { value: 'secret-passphrase' },
+    });
+    expect(screen.getByText('Cipher')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'AES-256 CBC' }));
+    fireEvent.change(screen.getByLabelText('Rounds'), {
+      target: { value: '128' },
+    });
+    fireEvent.click(screen.getByRole('switch', { name: 'Save passphrase' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
+
+    await waitFor(() =>
+      expect(onGenerateSshKey).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: 'NAS key',
+          algorithm: 'ecdsa',
+          curve: 'nistp384',
+          privateKeyCipher: 'aes256-cbc',
+          kdfRounds: 128,
+          passphrase: 'secret-passphrase',
+          savePassphrase: true,
+        }),
+      ),
+    );
+  });
+
+  it('passes a transient passphrase when installing an encrypted key without a saved passphrase', async () => {
+    const { onInstallSshPublicKey } = renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: [
+        {
+          secretRef: 'secret-encrypted',
+          label: 'Encrypted SSH key',
+          linkedHostCount: 0,
+          hasPassword: false,
+          hasPassphrase: false,
+          hasManagedPrivateKey: true,
+          hasCertificate: false,
+          privateKeyEncrypted: true,
+          keyAlgorithm: 'ssh-ed25519',
+          passphraseSaved: false,
+          updatedAt: '2026-03-24T12:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '호스트에 설치' }));
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText('Key passphrase'), {
+      target: { value: 'runtime-only' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+
+    await waitFor(() =>
+      expect(onInstallSshPublicKey).toHaveBeenCalledWith({
+        secretRef: 'secret-encrypted',
+        hostIds: ['ssh-lime'],
+        mode: 'installOnly',
+        passphraseOverride: 'runtime-only',
+      }),
+    );
   });
 
   it('filters saved credentials by label and preserves actions', async () => {

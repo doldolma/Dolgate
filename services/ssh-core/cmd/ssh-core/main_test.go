@@ -81,6 +81,15 @@ func (stub *stubCoreRuntime) ProbeHostKey(requestID string, payload protocol.Hos
 func (stub *stubCoreRuntime) InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error {
 	return nil
 }
+func (stub *stubCoreRuntime) GeneratePrivateKey(requestID string, payload protocol.PrivateKeyGeneratePayload) error {
+	return nil
+}
+func (stub *stubCoreRuntime) InspectPrivateKey(requestID string, payload protocol.PrivateKeyInspectPayload) error {
+	return nil
+}
+func (stub *stubCoreRuntime) InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error {
+	return nil
+}
 func (stub *stubCoreRuntime) RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error {
 	return nil
 }

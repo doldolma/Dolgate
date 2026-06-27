@@ -5,6 +5,10 @@ import type {
   HostRecord,
   KnownHostRecord,
   SecretMetadataRecord,
+  SshKeyGenerateInput,
+  SshKeyInstallInput,
+  SshKeyInstallResult,
+  SshKeyMaterialResult,
   SftpConflictPolicy,
   TerminalFontFamilyId,
 } from '@shared';
@@ -52,6 +56,9 @@ interface SettingsPanelProps {
   onRemoveKnownHost: (id: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onEditSecret: (secretRef: string) => void;
+  onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
+  onCopySshPublicKey: (secretRef: string) => Promise<void>;
+  onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
   onLogout: () => Promise<void>;
 }
 
@@ -181,6 +188,9 @@ export function SettingsPanel({
   onRemoveKnownHost,
   onRemoveSecret,
   onEditSecret,
+  onGenerateSshKey,
+  onCopySshPublicKey,
+  onInstallSshPublicKey,
   onLogout
 }: SettingsPanelProps) {
   const visibleTerminalFontOptions =
@@ -749,6 +759,9 @@ export function SettingsPanel({
           onSearchQueryChange={onSavedCredentialsSearchQueryChange}
           onRemoveSecret={onRemoveSecret}
           onEditSecret={onEditSecret}
+          onGenerateSshKey={onGenerateSshKey}
+          onCopySshPublicKey={onCopySshPublicKey}
+          onInstallSshPublicKey={onInstallSshPublicKey}
         />
       ) : null}
 

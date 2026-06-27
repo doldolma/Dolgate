@@ -8,6 +8,7 @@ import {
   normalizeGroupPath,
   type AuthState,
   type HostEnvVar,
+  type SshKeyGenerateInput,
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HomeNavigation } from '../components/HomeNavigation';
@@ -219,6 +220,29 @@ export function HomeShell({
       return;
     }
     await settingsViewModel.removeKeychainSecret(secretRef);
+  }
+
+  async function handleGenerateAndInstallSshKey(
+    hostId: string,
+    input: SshKeyGenerateInput,
+  ) {
+    const host = findHost(homeViewModel.hosts, hostId);
+    if (!host || !isSshHostRecord(host)) {
+      throw new Error('SSH host를 찾지 못했습니다.');
+    }
+    const key = await settingsViewModel.generateSshKey(input);
+    const result = await settingsViewModel.installSshPublicKey({
+      secretRef: key.secretRef,
+      hostIds: [host.id],
+      mode: 'installAndUse',
+      passphraseOverride:
+        input.passphrase && !input.savePassphrase ? input.passphrase : undefined,
+    });
+    const failed = result.results.find((entry) => entry.status === 'failed');
+    if (failed) {
+      throw new Error(failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.');
+    }
+    setHostBrowserStatus(`${host.label} 호스트가 새 SSH 키를 사용하도록 전환되었습니다.`);
   }
 
   return (
@@ -477,6 +501,9 @@ export function HomeShell({
             onRemoveKnownHost={settingsViewModel.removeKnownHost}
             onRemoveSecret={handleRemoveSecret}
             onEditSecret={openKeychainSecretEditor}
+            onGenerateSshKey={settingsViewModel.generateSshKey}
+            onCopySshPublicKey={settingsViewModel.copySshPublicKey}
+            onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
             onLogout={loginController.logout}
           />
         ) : null}
@@ -516,6 +543,8 @@ export function HomeShell({
         onEditExistingSecret={openHostSecretEditor}
         onPersistEnv={handlePersistEnv}
         onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
+        onGenerateAndInstallSshKey={handleGenerateAndInstallSshKey}
+        onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
       />
 
       <AwsImportDialog

@@ -37,6 +37,7 @@ import type {
   ActivityLogRecord,
   AppSettings,
   AppTheme,
+  AuthType,
   AwsProfileMetadataRecord,
   AwsSshMetadataStatus,
   AwsEc2HostDraft,
@@ -752,6 +753,33 @@ export class HostRepository {
         }
         nextRecord = {
           ...entry,
+          secretRef,
+          privateKeyPath: null,
+          certificatePath: null,
+          tags: normalizeTags(entry.tags),
+          terminalThemeId: normalizeTerminalThemeId(entry.terminalThemeId),
+          updatedAt: nowIso()
+        };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
+  }
+
+  updateSshAuthSecret(
+    id: string,
+    authType: Extract<AuthType, 'privateKey' | 'certificate'>,
+    secretRef: string | null
+  ): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id || !isSshHostRecord(entry)) {
+          return entry;
+        }
+        nextRecord = {
+          ...entry,
+          authType,
           secretRef,
           privateKeyPath: null,
           certificatePath: null,
@@ -1890,6 +1918,13 @@ export class SecretMetadataRepository {
     hasPassphrase: boolean;
     hasManagedPrivateKey?: boolean;
     hasCertificate?: boolean;
+    privateKeyEncrypted?: boolean;
+    keyAlgorithm?: string;
+    keyCurve?: string;
+    keyBits?: number;
+    privateKeyCipher?: string;
+    privateKeyKdfRounds?: number;
+    passphraseSaved?: boolean;
   }): void {
     stateStorage.updateState((state) => {
       const timestamp = nowIso();
@@ -1900,6 +1935,13 @@ export class SecretMetadataRepository {
         hasPassphrase: input.hasPassphrase,
         hasManagedPrivateKey: input.hasManagedPrivateKey ?? false,
         hasCertificate: input.hasCertificate ?? false,
+        privateKeyEncrypted: input.privateKeyEncrypted,
+        keyAlgorithm: input.keyAlgorithm,
+        keyCurve: input.keyCurve,
+        keyBits: input.keyBits,
+        privateKeyCipher: input.privateKeyCipher,
+        privateKeyKdfRounds: input.privateKeyKdfRounds,
+        passphraseSaved: input.passphraseSaved,
         linkedHostCount: 0,
         updatedAt: timestamp
       };

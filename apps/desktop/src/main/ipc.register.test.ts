@@ -13,6 +13,7 @@ const moduleSpies = vi.hoisted(() => ({
   sftp: vi.fn(),
   portForwardsDns: vi.fn(),
   knownHostsLogsKeychain: vi.fn(),
+  sshKeys: vi.fn(),
   windowUpdaterSettingsFiles: vi.fn(),
 }));
 
@@ -72,6 +73,9 @@ vi.mock("./ipc/known-hosts-logs-keychain", () => ({
   registerKnownHostsLogsKeychainIpcHandlers:
     moduleSpies.knownHostsLogsKeychain,
 }));
+vi.mock("./ipc/ssh-keys", () => ({
+  registerSshKeyIpcHandlers: moduleSpies.sshKeys,
+}));
 vi.mock("./ipc/window-updater-settings-files", () => ({
   registerWindowUpdaterSettingsFilesIpcHandlers:
     moduleSpies.windowUpdaterSettingsFiles,
@@ -85,6 +89,8 @@ function createDependencySet() {
     setPortForwardEventHandler: vi.fn(),
     setTerminalStreamHandler: vi.fn(),
     listPortForwardRuntimes: vi.fn(() => []),
+    inspectPrivateKey: vi.fn(),
+    installAuthorizedKey: vi.fn(),
   };
 
   return {
@@ -166,6 +172,7 @@ describe("registerIpcHandlers", () => {
     expect(moduleSpies.sftp).toHaveBeenCalledTimes(1);
     expect(moduleSpies.portForwardsDns).toHaveBeenCalledTimes(1);
     expect(moduleSpies.knownHostsLogsKeychain).toHaveBeenCalledTimes(1);
+    expect(moduleSpies.sshKeys).toHaveBeenCalledTimes(1);
     expect(moduleSpies.windowUpdaterSettingsFiles).toHaveBeenCalledTimes(1);
   });
 });

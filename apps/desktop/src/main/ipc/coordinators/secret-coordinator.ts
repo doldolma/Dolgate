@@ -150,6 +150,35 @@ export function createSecretCoordinator(deps: {
       patch.certificateText !== undefined
         ? patch.certificateText
         : current.certificateText,
+    publicKey: patch.publicKey !== undefined ? patch.publicKey : current.publicKey,
+    publicKeyFingerprintSha256:
+      patch.publicKeyFingerprintSha256 !== undefined
+        ? patch.publicKeyFingerprintSha256
+        : current.publicKeyFingerprintSha256,
+    keyAlgorithm:
+      patch.keyAlgorithm !== undefined ? patch.keyAlgorithm : current.keyAlgorithm,
+    privateKeyEncrypted:
+      patch.privateKeyEncrypted !== undefined
+        ? patch.privateKeyEncrypted
+        : current.privateKeyEncrypted,
+    keyCurve: patch.keyCurve !== undefined ? patch.keyCurve : current.keyCurve,
+    keyBits: patch.keyBits !== undefined ? patch.keyBits : current.keyBits,
+    privateKeyCipher:
+      patch.privateKeyCipher !== undefined
+        ? patch.privateKeyCipher
+        : current.privateKeyCipher,
+    privateKeyKdfRounds:
+      patch.privateKeyKdfRounds !== undefined
+        ? patch.privateKeyKdfRounds
+        : current.privateKeyKdfRounds,
+    passphraseSaved:
+      patch.passphraseSaved !== undefined
+        ? patch.passphraseSaved
+        : current.passphraseSaved,
+    generatedByApp:
+      patch.generatedByApp !== undefined
+        ? patch.generatedByApp
+        : current.generatedByApp,
     env: patch.env !== undefined ? patch.env : current.env,
   });
 
@@ -172,6 +201,16 @@ export function createSecretCoordinator(deps: {
         passphrase: secrets.passphrase,
         privateKeyPem: secrets.privateKeyPem,
         certificateText: secrets.certificateText,
+        publicKey: secrets.publicKey,
+        publicKeyFingerprintSha256: secrets.publicKeyFingerprintSha256,
+        keyAlgorithm: secrets.keyAlgorithm,
+        privateKeyEncrypted: secrets.privateKeyEncrypted,
+        keyCurve: secrets.keyCurve,
+        keyBits: secrets.keyBits,
+        privateKeyCipher: secrets.privateKeyCipher,
+        privateKeyKdfRounds: secrets.privateKeyKdfRounds,
+        passphraseSaved: secrets.passphraseSaved,
+        generatedByApp: secrets.generatedByApp,
         env: normalizeHostEnvVars(secrets.env),
         updatedAt,
       } satisfies ManagedSecretPayload),
@@ -183,7 +222,14 @@ export function createSecretCoordinator(deps: {
       hasPassphrase: Boolean(secrets.passphrase),
       hasManagedPrivateKey: Boolean(secrets.privateKeyPem),
       hasCertificate: Boolean(secrets.certificateText),
-    });
+        privateKeyEncrypted: secrets.privateKeyEncrypted,
+        keyAlgorithm: secrets.keyAlgorithm,
+        keyCurve: secrets.keyCurve,
+        keyBits: secrets.keyBits,
+        privateKeyCipher: secrets.privateKeyCipher,
+        privateKeyKdfRounds: secrets.privateKeyKdfRounds,
+        passphraseSaved: secrets.passphraseSaved,
+      });
     return secretRef;
   };
 
@@ -211,6 +257,40 @@ export function createSecretCoordinator(deps: {
       certificateText:
         typeof parsed.certificateText === "string"
           ? parsed.certificateText
+          : undefined,
+      publicKey:
+        typeof parsed.publicKey === "string" ? parsed.publicKey : undefined,
+      publicKeyFingerprintSha256:
+        typeof parsed.publicKeyFingerprintSha256 === "string"
+          ? parsed.publicKeyFingerprintSha256
+          : undefined,
+      keyAlgorithm:
+        typeof parsed.keyAlgorithm === "string"
+          ? parsed.keyAlgorithm
+          : undefined,
+      privateKeyEncrypted:
+        typeof parsed.privateKeyEncrypted === "boolean"
+          ? parsed.privateKeyEncrypted
+          : undefined,
+      keyCurve:
+        typeof parsed.keyCurve === "string" ? parsed.keyCurve : undefined,
+      keyBits:
+        typeof parsed.keyBits === "number" ? parsed.keyBits : undefined,
+      privateKeyCipher:
+        typeof parsed.privateKeyCipher === "string"
+          ? parsed.privateKeyCipher
+          : undefined,
+      privateKeyKdfRounds:
+        typeof parsed.privateKeyKdfRounds === "number"
+          ? parsed.privateKeyKdfRounds
+          : undefined,
+      passphraseSaved:
+        typeof parsed.passphraseSaved === "boolean"
+          ? parsed.passphraseSaved
+          : undefined,
+      generatedByApp:
+        typeof parsed.generatedByApp === "boolean"
+          ? parsed.generatedByApp
           : undefined,
       env: normalizeHostEnvVars(parsed.env as HostEnvVar[] | undefined),
       updatedAt:

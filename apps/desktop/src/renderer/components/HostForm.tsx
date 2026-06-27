@@ -1,8 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MAX_HOST_STARTUP_COMMAND_LENGTH, getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, SshKeyGenerateInput, SshKeyInstallInput, SshKeyInstallResult, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
+import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
@@ -154,6 +155,8 @@ export interface HostFormProps {
   onEditExistingSecret?: (secretRef: string) => void;
   onPersistEnv?: (secretRef: string, env: HostEnvVar[]) => Promise<void>;
   onOpenSecrets?: () => void;
+  onGenerateAndInstallSshKey?: (hostId: string, input: SshKeyGenerateInput) => Promise<void>;
+  onInstallSshPublicKey?: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
   onActionStateChange?: (state: HostFormActionState) => void;
 }
 
@@ -391,6 +394,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onEditExistingSecret,
   onPersistEnv,
   onOpenSecrets,
+  onGenerateAndInstallSshKey,
+  onInstallSshPublicKey,
   onActionStateChange
 }: HostFormProps, ref) {
   const jumpHostSelectOptions = useMemo<SearchableSelectOption[]>(
@@ -432,11 +437,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const [serialPorts, setSerialPorts] = useState<SerialPortSummary[]>([]);
   const [isLoadingSerialPorts, setIsLoadingSerialPorts] = useState(false);
   const [serialPortsError, setSerialPortsError] = useState<string | null>(null);
+  const [sshKeyInstallBusy, setSshKeyInstallBusy] = useState(false);
+  const [sshKeyInstallMessage, setSshKeyInstallMessage] = useState<{
+    tone: 'success' | 'danger';
+    text: string;
+  } | null>(null);
+  const [sshKeyGenerateOpen, setSshKeyGenerateOpen] = useState(false);
+  const [sshKeyGenerateError, setSshKeyGenerateError] = useState<string | null>(null);
+  const [existingKeyInstallPassphrase, setExistingKeyInstallPassphrase] = useState('');
 
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
+  const canGenerateAndInstallSshKey =
+    Boolean(host && isSshHostRecord(host) && onGenerateAndInstallSshKey);
   const isAwsEc2Draft = draft.kind === 'aws-ec2';
   const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const isAwsDraft = isAwsEc2Draft || isAwsEcsDraft;
@@ -481,6 +496,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return entry.hasManagedPrivateKey;
     });
   }, [keychainEntries, sshDraft]);
+  const selectedCredential = useMemo(
+    () =>
+      selectedSecretRef
+        ? keychainEntries.find((entry) => entry.secretRef === selectedSecretRef) ?? null
+        : null,
+    [keychainEntries, selectedSecretRef],
+  );
+  const canInstallSelectedSshKey = Boolean(
+    host &&
+      isSshHostRecord(host) &&
+      onInstallSshPublicKey &&
+      credentialMode === 'existing' &&
+      selectedCredential?.hasManagedPrivateKey,
+  );
+  const selectedCredentialNeedsPassphrase = Boolean(
+    selectedCredential?.privateKeyEncrypted && !selectedCredential.passphraseSaved,
+  );
   const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
     if (!isAwsDraft) {
       return [];
@@ -744,6 +776,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setCredentialMode('new');
     }
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
+
+  useEffect(() => {
+    setExistingKeyInstallPassphrase('');
+  }, [selectedSecretRef]);
 
   const refreshSerialPorts = useCallback(async () => {
     setIsLoadingSerialPorts(true);
@@ -1313,6 +1349,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   }, [isEditMode, onActionStateChange, saveInFlight, saveStatusText]);
 
   return (
+    <>
     <form
       ref={formRef}
       className="flex flex-col gap-[0.95rem]"
@@ -1673,8 +1710,96 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </SelectField>
             </div>
 
+            {canGenerateAndInstallSshKey && host && isSshHostRecord(host) ? (
+              <div className="grid gap-[0.55rem] rounded-[16px] border border-[var(--border)] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className={fieldLabelClassName}>SSH Key</span>
+                  <Button
+                    variant="secondary"
+                    disabled={sshKeyInstallBusy}
+                    onClick={() => {
+                      setSshKeyGenerateError(null);
+                      setSshKeyGenerateOpen(true);
+                    }}
+                  >
+                    {sshKeyInstallBusy ? '설치 중...' : 'Generate and install SSH key'}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             {credentialMode === 'existing' ? (
-              <>
+              <div className="grid gap-[0.55rem]">
+                {canInstallSelectedSshKey ? (
+                  <div className="grid gap-[0.55rem] rounded-[16px] border border-[var(--border)] p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={fieldLabelClassName}>Selected SSH Key</span>
+                      <Button
+                        variant="secondary"
+                        disabled={
+                          sshKeyInstallBusy ||
+                          (selectedCredentialNeedsPassphrase &&
+                            existingKeyInstallPassphrase.trim().length === 0)
+                        }
+                        onClick={async () => {
+                          if (!host || !isSshHostRecord(host) || !selectedSecretRef) {
+                            return;
+                          }
+                          setSshKeyInstallBusy(true);
+                          setSshKeyGenerateError(null);
+                          setSshKeyInstallMessage(null);
+                          try {
+                            const result = await onInstallSshPublicKey?.({
+                              secretRef: selectedSecretRef,
+                              hostIds: [host.id],
+                              mode: 'installAndUse',
+                              passphraseOverride: selectedCredentialNeedsPassphrase
+                                ? existingKeyInstallPassphrase
+                                : undefined,
+                            });
+                            const failed = result?.results.find(
+                              (entry) => entry.status === 'failed',
+                            );
+                            if (failed) {
+                              throw new Error(
+                                failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.',
+                              );
+                            }
+                            setSshKeyInstallMessage({
+                              tone: 'success',
+                              text: '선택한 SSH 키를 호스트에 설치하고 인증 정보로 전환했습니다.',
+                            });
+                          } catch (error) {
+                            setSshKeyInstallMessage({
+                              tone: 'danger',
+                              text:
+                                error instanceof Error && error.message.trim()
+                                  ? error.message
+                                  : 'SSH 키를 설치하지 못했습니다.',
+                            });
+                          } finally {
+                            setSshKeyInstallBusy(false);
+                          }
+                        }}
+                      >
+                        {sshKeyInstallBusy ? '설치 중...' : 'Install selected key'}
+                      </Button>
+                    </div>
+                    {selectedCredentialNeedsPassphrase ? (
+                      <label className={fieldClassName}>
+                        <span className={fieldLabelClassName}>Key passphrase</span>
+                        <Input
+                          type="password"
+                          value={existingKeyInstallPassphrase}
+                          onChange={(event) =>
+                            setExistingKeyInstallPassphrase(event.target.value)
+                          }
+                          placeholder="Required for encrypted private key"
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                ) : null}
                 {host && isSshHostRecord(host) && selectedSecretRef && onEditExistingSecret ? (
                   <Button
                     variant="secondary"
@@ -1683,7 +1808,19 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     편집
                   </Button>
                 ) : null}
-              </>
+              </div>
+            ) : null}
+
+            {sshKeyInstallMessage ? (
+              <p
+                className={
+                  sshKeyInstallMessage.tone === 'danger'
+                    ? 'm-0 text-sm text-[var(--danger-text)]'
+                    : 'm-0 text-sm text-[var(--success-text)]'
+                }
+              >
+                {sshKeyInstallMessage.text}
+              </p>
             ) : null}
 
             <label className={fieldClassName}>
@@ -1991,5 +2128,44 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : null}
 
     </form>
+    {sshKeyGenerateOpen && host && isSshHostRecord(host) ? (
+      <SshKeyGenerateDialog
+        title="Generate and Install SSH Key"
+        initialLabel={`${host.label || `${host.username}@${host.hostname}`} SSH Key`}
+        initialComment={`${host.username}@${host.hostname}`}
+        submitLabel="Generate & install"
+        busy={sshKeyInstallBusy}
+        error={sshKeyGenerateError}
+        onDismiss={() => {
+          if (sshKeyInstallBusy) {
+            return;
+          }
+          setSshKeyGenerateOpen(false);
+          setSshKeyGenerateError(null);
+        }}
+        onSubmit={async (input) => {
+          setSshKeyInstallBusy(true);
+          setSshKeyGenerateError(null);
+          setSshKeyInstallMessage(null);
+          try {
+            await onGenerateAndInstallSshKey?.(host.id, input);
+            setSshKeyGenerateOpen(false);
+            setSshKeyInstallMessage({
+              tone: 'success',
+              text: '새 SSH 키를 생성하고 호스트에 설치했습니다.',
+            });
+          } catch (error) {
+            setSshKeyGenerateError(
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : 'SSH 키를 설치하지 못했습니다.',
+            );
+          } finally {
+            setSshKeyInstallBusy(false);
+          }
+        }}
+      />
+    ) : null}
+    </>
   );
 });

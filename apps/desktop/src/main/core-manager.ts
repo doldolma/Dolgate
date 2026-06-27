@@ -36,10 +36,16 @@ import type {
   ControlSignalPayload,
   ResolvedCertificateInspectPayload,
   ResolvedAwsConnectPayload,
+  ResolvedAuthorizedKeyInstallPayload,
+  ResolvedAuthorizedKeyInstallResult,
   ResolvedContainersConnectPayload,
   ResolvedCoreConnectPayload,
   ResolvedHostKeyProbePayload,
   ResolvedLocalConnectPayload,
+  ResolvedPrivateKeyGeneratePayload,
+  ResolvedPrivateKeyGenerateResult,
+  ResolvedPrivateKeyInspectPayload,
+  ResolvedPrivateKeyInspectResult,
   ResolvedSerialConnectPayload,
   ResolvedSerialControlPayload,
   ResolvedSerialControlResult,
@@ -2615,6 +2621,81 @@ export class CoreManager {
         : [],
       keyId: typeof response.keyId === "string" ? response.keyId : null,
       serial: typeof response.serial === "string" ? response.serial : null,
+    };
+  }
+
+  async inspectPrivateKey(
+    privateKeyPem: string,
+    passphrase?: string,
+  ): Promise<ResolvedPrivateKeyInspectResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "inspectPrivateKey",
+        payload: {
+          privateKeyPem,
+          passphrase: passphrase || undefined,
+        } satisfies ResolvedPrivateKeyInspectPayload,
+      },
+      ["privateKeyInspected"],
+    );
+    return {
+      algorithm: String(response.algorithm ?? ""),
+      publicKey: String(response.publicKey ?? ""),
+      fingerprintSha256: String(response.fingerprintSha256 ?? ""),
+    };
+  }
+
+  async generatePrivateKey(
+    payload: ResolvedPrivateKeyGeneratePayload,
+  ): Promise<ResolvedPrivateKeyGenerateResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "generatePrivateKey",
+        payload,
+      },
+      ["privateKeyGenerated"],
+    );
+    return {
+      algorithm: String(response.algorithm ?? ""),
+      privateKeyPem: String(response.privateKeyPem ?? ""),
+      publicKey: String(response.publicKey ?? ""),
+      fingerprintSha256: String(response.fingerprintSha256 ?? ""),
+      privateKeyEncrypted: response.privateKeyEncrypted === true,
+      keyCurve:
+        typeof response.keyCurve === "string" ? response.keyCurve : undefined,
+      keyBits:
+        typeof response.keyBits === "number" ? response.keyBits : undefined,
+      privateKeyCipher:
+        typeof response.privateKeyCipher === "string"
+          ? response.privateKeyCipher
+          : undefined,
+      privateKeyKdfRounds:
+        typeof response.privateKeyKdfRounds === "number"
+          ? response.privateKeyKdfRounds
+          : undefined,
+    };
+  }
+
+  async installAuthorizedKey(
+    payload: ResolvedAuthorizedKeyInstallPayload,
+  ): Promise<ResolvedAuthorizedKeyInstallResult> {
+    await this.start();
+    const response = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "installAuthorizedKey",
+        payload,
+      },
+      ["authorizedKeyInstalled"],
+      { timeoutMs: 30_000 },
+    );
+    return {
+      status:
+        response.status === "already-present" ? "already-present" : "installed",
     };
   }
 

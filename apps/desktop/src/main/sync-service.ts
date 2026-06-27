@@ -716,6 +716,13 @@ export class SyncService {
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),
         hasCertificate: Boolean(secret.certificateText),
+        privateKeyEncrypted: secret.privateKeyEncrypted,
+        keyAlgorithm: secret.keyAlgorithm,
+        keyCurve: secret.keyCurve,
+        keyBits: secret.keyBits,
+        privateKeyCipher: secret.privateKeyCipher,
+        privateKeyKdfRounds: secret.privateKeyKdfRounds,
+        passphraseSaved: secret.passphraseSaved,
         linkedHostCount: 0,
         updatedAt: secret.updatedAt
       }));

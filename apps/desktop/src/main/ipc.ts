@@ -36,6 +36,7 @@ import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
 import { registerSnippetsIpcHandlers } from "./ipc/snippets";
 import { registerSerialIpcHandlers } from "./ipc/serial";
 import { registerSftpIpcHandlers } from "./ipc/sftp";
+import { registerSshKeyIpcHandlers } from "./ipc/ssh-keys";
 import { registerSshIpcHandlers } from "./ipc/ssh";
 import { registerSyncIpcHandlers } from "./ipc/sync";
 import { registerWindowUpdaterSettingsFilesIpcHandlers } from "./ipc/window-updater-settings-files";
@@ -106,5 +107,6 @@ export function registerIpcHandlers(
   registerPortForwardAndDnsIpcHandlers(ctx);
   registerSnippetsIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
+  registerSshKeyIpcHandlers(ctx);
   registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
 }

@@ -9,6 +9,9 @@ export function useAppSettingsViewModel() {
   const cloneKeychainSecretForHost = useAppStore(
     (state) => state.cloneKeychainSecretForHost,
   );
+  const generateSshKey = useAppStore((state) => state.generateSshKey);
+  const copySshPublicKey = useAppStore((state) => state.copySshPublicKey);
+  const installSshPublicKey = useAppStore((state) => state.installSshPublicKey);
 
   return {
     settings,
@@ -17,6 +20,9 @@ export function useAppSettingsViewModel() {
     openSettingsSection,
     updateKeychainSecret,
     cloneKeychainSecretForHost,
+    generateSshKey,
+    copySshPublicKey,
+    installSshPublicKey,
   };
 }
 
@@ -43,6 +49,9 @@ export function useSettingsViewModel() {
   const cloneKeychainSecretForHost = useAppStore(
     (state) => state.cloneKeychainSecretForHost,
   );
+  const generateSshKey = useAppStore((state) => state.generateSshKey);
+  const copySshPublicKey = useAppStore((state) => state.copySshPublicKey);
+  const installSshPublicKey = useAppStore((state) => state.installSshPublicKey);
 
   return {
     hosts,
@@ -61,5 +70,8 @@ export function useSettingsViewModel() {
     removeKeychainSecret,
     updateKeychainSecret,
     cloneKeychainSecretForHost,
+    generateSshKey,
+    copySshPublicKey,
+    installSshPublicKey,
   };
 }

@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import {
   getAwsEc2HostSftpDisabledReason,
@@ -15,6 +15,7 @@ import type {
 } from "@shared";
 import type { AwsService } from "../../aws-service";
 import type { HostRepository } from "../../database";
+import { createEd25519SshKeyPair } from "../../ssh-key-material";
 import type {
   AwsConnectionProgressEmitter,
   AwsEc2HostRecord,
@@ -153,41 +154,11 @@ export function createAwsSftpCoordinator(deps: {
     return new Error(normalized);
   };
 
-  const base64UrlToBuffer = (value: string): Buffer => {
-    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-    const padding =
-      normalized.length % 4 === 0
-        ? ""
-        : "=".repeat(4 - (normalized.length % 4));
-    return Buffer.from(`${normalized}${padding}`, "base64");
-  };
-
-  const encodeSshWireValue = (value: string | Buffer): Buffer => {
-    const buffer = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(buffer.length, 0);
-    return Buffer.concat([length, buffer]);
-  };
-
   const createEphemeralAwsSftpKeyPair = () => {
-    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const jwk = publicKey.export({ format: "jwk" }) as { x?: string };
-    const x = typeof jwk.x === "string" ? jwk.x : "";
-    if (!x) {
-      throw new Error("임시 SSH 공개 키를 생성하지 못했습니다.");
-    }
-    const rawPublicKey = base64UrlToBuffer(x);
-    const encodedPublicKey = Buffer.concat([
-      encodeSshWireValue("ssh-ed25519"),
-      encodeSshWireValue(rawPublicKey),
-    ]).toString("base64");
-
+    const keyPair = createEd25519SshKeyPair();
     return {
-      privateKeyPem: privateKey.export({
-        format: "pem",
-        type: "pkcs8",
-      }) as string,
-      publicKey: `ssh-ed25519 ${encodedPublicKey}`,
+      privateKeyPem: keyPair.privateKeyPem,
+      publicKey: keyPair.publicKey,
     };
   };
 

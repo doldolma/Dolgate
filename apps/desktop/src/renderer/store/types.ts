@@ -43,6 +43,10 @@ import type {
   SftpPaneId,
   SftpPrincipal,
   SecretMetadataRecord,
+  SshKeyGenerateInput,
+  SshKeyInstallInput,
+  SshKeyInstallResult,
+  SshKeyMaterialResult,
   TabCommandPayload,
   TerminalReconnectState,
   TerminalTab,
@@ -880,6 +884,11 @@ interface AppStateParts {
     sourceSecretRef: string,
     secrets: HostSecretInput,
   ) => Promise<void>;
+  generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
+  copySshPublicKey: (secretRef: string) => Promise<void>;
+  installSshPublicKey: (
+    input: SshKeyInstallInput,
+  ) => Promise<SshKeyInstallResult>;
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
@@ -1218,6 +1227,9 @@ export type SettingsSlice = Pick<
   | "removeKeychainSecret"
   | "updateKeychainSecret"
   | "cloneKeychainSecretForHost"
+  | "generateSshKey"
+  | "copySshPublicKey"
+  | "installSshPublicKey"
 >;
 
 export type RuntimeEventSlice = Pick<

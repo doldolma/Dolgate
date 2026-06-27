@@ -782,6 +782,23 @@ function normalizeSecretMetadataRecord(value: unknown): SecretMetadataRecord | n
     hasPassphrase: Boolean(value.hasPassphrase),
     hasManagedPrivateKey: Boolean(value.hasManagedPrivateKey),
     hasCertificate: Boolean(value.hasCertificate),
+    privateKeyEncrypted:
+      typeof value.privateKeyEncrypted === 'boolean'
+        ? value.privateKeyEncrypted
+        : undefined,
+    keyAlgorithm: typeof value.keyAlgorithm === 'string' ? value.keyAlgorithm : undefined,
+    keyCurve: typeof value.keyCurve === 'string' ? value.keyCurve : undefined,
+    keyBits: typeof value.keyBits === 'number' ? value.keyBits : undefined,
+    privateKeyCipher:
+      typeof value.privateKeyCipher === 'string'
+        ? value.privateKeyCipher
+        : undefined,
+    privateKeyKdfRounds:
+      typeof value.privateKeyKdfRounds === 'number'
+        ? value.privateKeyKdfRounds
+        : undefined,
+    passphraseSaved:
+      typeof value.passphraseSaved === 'boolean' ? value.passphraseSaved : undefined,
     linkedHostCount: typeof value.linkedHostCount === 'number' ? value.linkedHostCount : 0,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };

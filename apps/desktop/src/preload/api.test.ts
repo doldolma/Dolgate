@@ -50,6 +50,7 @@ describe("createDesktopApi", () => {
     await api.ssh.prepareAutocomplete("session-1");
     await api.ssh.refreshAutocomplete("session-1");
     await api.ssh.stopAutocomplete("session-1");
+    await api.sshKeys.copyPublicKey("secret-key");
 
     expect(ipcRenderer.invoke).toHaveBeenNthCalledWith(
       1,
@@ -136,6 +137,10 @@ describe("createDesktopApi", () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(
       ipcChannels.ssh.stopAutocomplete,
       "session-1",
+    );
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+      ipcChannels.sshKeys.copyPublicKey,
+      "secret-key",
     );
   });
 

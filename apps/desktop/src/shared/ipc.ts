@@ -123,6 +123,9 @@ export type CoreCommandType =
   | "disconnect"
   | "probeHostKey"
   | "inspectCertificate"
+  | "generatePrivateKey"
+  | "inspectPrivateKey"
+  | "installAuthorizedKey"
   | "keyboardInteractiveRespond"
   | "portForwardStart"
   | "ssmPortForwardStart"
@@ -181,6 +184,9 @@ export type CoreEventType =
   | "serialControlCompleted"
   | "hostKeyProbed"
   | "certificateInspected"
+  | "privateKeyGenerated"
+  | "privateKeyInspected"
+  | "authorizedKeyInstalled"
   | "keyboardInteractiveChallenge"
   | "keyboardInteractiveResolved"
   | "portForwardStarted"
@@ -381,6 +387,48 @@ export interface ResolvedCertificateInspectPayload {
 
 export interface ResolvedCertificateInspectResult
   extends SshCertificateInfo {}
+
+export interface ResolvedPrivateKeyInspectPayload {
+  privateKeyPem: string;
+  passphrase?: string;
+}
+
+export interface ResolvedPrivateKeyGeneratePayload {
+  algorithm?: "ed25519" | "ecdsa" | "rsa";
+  curve?: "nistp256" | "nistp384" | "nistp521";
+  rsaBits?: 3072 | 4096;
+  privateKeyCipher?: "aes256-ctr" | "aes256-cbc";
+  kdfRounds?: number;
+  comment?: string | null;
+  passphrase?: string;
+}
+
+export interface ResolvedPrivateKeyGenerateResult {
+  algorithm: string;
+  privateKeyPem: string;
+  publicKey: string;
+  fingerprintSha256: string;
+  privateKeyEncrypted: boolean;
+  keyCurve?: string;
+  keyBits?: number;
+  privateKeyCipher?: string;
+  privateKeyKdfRounds?: number;
+}
+
+export interface ResolvedPrivateKeyInspectResult {
+  algorithm: string;
+  publicKey: string;
+  fingerprintSha256: string;
+}
+
+export interface ResolvedAuthorizedKeyInstallPayload
+  extends ResolvedCoreConnectPayload {
+  publicKey: string;
+}
+
+export interface ResolvedAuthorizedKeyInstallResult {
+  status: "installed" | "already-present";
+}
 
 export interface AwsEcsServiceLogsInput {
   hostId: string;
@@ -647,6 +695,48 @@ export interface KeychainSecretCloneInput {
   hostId: string;
   sourceSecretRef: string;
   secrets: HostSecretInput;
+}
+
+export interface SshKeyGenerateInput {
+  label: string;
+  algorithm?: "ed25519" | "ecdsa" | "rsa";
+  curve?: "nistp256" | "nistp384" | "nistp521";
+  rsaBits?: 3072 | 4096;
+  privateKeyCipher?: "aes256-ctr" | "aes256-cbc";
+  kdfRounds?: number;
+  comment?: string | null;
+  passphrase?: string | null;
+  savePassphrase?: boolean;
+}
+
+export interface SshKeyMaterialResult {
+  secretRef: string;
+  label: string;
+  algorithm: string;
+  publicKey: string;
+  fingerprintSha256: string;
+}
+
+export type SshKeyInstallMode = "installOnly" | "installAndUse";
+
+export interface SshKeyInstallInput {
+  secretRef: string;
+  hostIds: string[];
+  mode: SshKeyInstallMode;
+  passphraseOverride?: string | null;
+}
+
+export interface SshKeyInstallHostResult {
+  hostId: string;
+  hostLabel: string;
+  status: "installed" | "already-present" | "failed";
+  message?: string;
+}
+
+export interface SshKeyInstallResult {
+  secretRef: string;
+  mode: SshKeyInstallMode;
+  results: SshKeyInstallHostResult[];
 }
 
 export interface AuthCallbackPayload {
@@ -963,6 +1053,11 @@ export interface DesktopApi {
     remove: (secretRef: string) => Promise<void>;
     update: (input: KeychainSecretUpdateInput) => Promise<void>;
     cloneForHost: (input: KeychainSecretCloneInput) => Promise<void>;
+  };
+  sshKeys: {
+    generate: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
+    copyPublicKey: (secretRef: string) => Promise<void>;
+    install: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
   };
   containers: {
     beginLifecycle: (hostId: string) => Promise<{ lifecycleId: string }>;

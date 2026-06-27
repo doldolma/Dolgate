@@ -188,6 +188,17 @@ export function buildKeychainBridge(
   };
 }
 
+export function buildSshKeysBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["sshKeys"] {
+  return {
+    generate: (input) => ipcRenderer.invoke(ipcChannels.sshKeys.generate, input),
+    copyPublicKey: (secretRef: string) =>
+      ipcRenderer.invoke(ipcChannels.sshKeys.copyPublicKey, secretRef),
+    install: (input) => ipcRenderer.invoke(ipcChannels.sshKeys.install, input),
+  };
+}
+
 export function buildFilesBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["files"] {

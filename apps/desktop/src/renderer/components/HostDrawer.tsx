@@ -22,6 +22,8 @@ interface HostDrawerProps {
   onEditExistingSecret?: (secretRef: string) => void;
   onPersistEnv?: HostFormProps['onPersistEnv'];
   onOpenSecrets?: () => void;
+  onGenerateAndInstallSshKey?: HostFormProps['onGenerateAndInstallSshKey'];
+  onInstallSshPublicKey?: HostFormProps['onInstallSshPublicKey'];
 }
 
 export function HostDrawer({
@@ -40,7 +42,9 @@ export function HostDrawer({
   onConnect,
   onEditExistingSecret,
   onPersistEnv,
-  onOpenSecrets
+  onOpenSecrets,
+  onGenerateAndInstallSshKey,
+  onInstallSshPublicKey
 }: HostDrawerProps) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const hostFormRef = useRef<HostFormHandle | null>(null);
@@ -129,6 +133,8 @@ export function HostDrawer({
           onEditExistingSecret={onEditExistingSecret}
           onPersistEnv={onPersistEnv}
           onOpenSecrets={onOpenSecrets}
+          onGenerateAndInstallSshKey={onGenerateAndInstallSshKey}
+          onInstallSshPublicKey={onInstallSshPublicKey}
           onActionStateChange={setFormActionState}
         />
       </div>

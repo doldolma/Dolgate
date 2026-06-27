@@ -1,7 +1,9 @@
 package runtime
 
 import (
+	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"dolssh/services/ssh-core/internal/moshsession"
 	"dolssh/services/ssh-core/internal/serialsession"
 	coresftp "dolssh/services/ssh-core/internal/sftp"
+	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 	"dolssh/services/ssh-core/internal/ssmforward"
@@ -610,6 +613,127 @@ func (runtime *Runtime) InspectCertificate(requestID string, payload coretypes.C
 		Type:      coretypes.EventCertificateInspected,
 		RequestID: requestID,
 		Payload:   runtime.inspectCertificate(payload),
+	})
+	return nil
+}
+
+func (runtime *Runtime) InspectPrivateKey(requestID string, payload coretypes.PrivateKeyInspectPayload) error {
+	result, err := sshconn.InspectPrivateKey(payload.PrivateKeyPEM, payload.Passphrase)
+	if err != nil {
+		return err
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventPrivateKeyInspected,
+		RequestID: requestID,
+		Payload: coretypes.PrivateKeyInspectedPayload{
+			Algorithm:         result.Algorithm,
+			PublicKey:         result.PublicKey,
+			FingerprintSHA256: result.FingerprintSHA256,
+		},
+	})
+	return nil
+}
+
+func (runtime *Runtime) GeneratePrivateKey(requestID string, payload coretypes.PrivateKeyGeneratePayload) error {
+	result, err := sshconn.GeneratePrivateKey(sshconn.PrivateKeyGenerationRequest{
+		Algorithm:        payload.Algorithm,
+		Curve:            payload.Curve,
+		RSABits:          payload.RSABits,
+		PrivateKeyCipher: payload.PrivateKeyCipher,
+		KDFRounds:        payload.KDFRounds,
+		Comment:          payload.Comment,
+		Passphrase:       payload.Passphrase,
+	})
+	if err != nil {
+		return err
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventPrivateKeyGenerated,
+		RequestID: requestID,
+		Payload: coretypes.PrivateKeyGeneratedPayload{
+			Algorithm:           result.Algorithm,
+			PrivateKeyPEM:       result.PrivateKeyPEM,
+			PublicKey:           result.PublicKey,
+			FingerprintSHA256:   result.FingerprintSHA256,
+			PrivateKeyEncrypted: result.PrivateKeyEncrypted,
+			KeyCurve:            result.KeyCurve,
+			KeyBits:             result.KeyBits,
+			PrivateKeyCipher:    result.PrivateKeyCipher,
+			PrivateKeyKDFRounds: result.PrivateKeyKDFRounds,
+		},
+	})
+	return nil
+}
+
+const installAuthorizedKeyScript = `
+set -eu
+key=$(cat)
+if [ -z "$key" ]; then
+  echo "missing-public-key" >&2
+  exit 2
+fi
+umask 077
+dir="${HOME}/.ssh"
+file="${dir}/authorized_keys"
+mkdir -p "$dir"
+touch "$file"
+chmod 700 "$dir"
+chmod 600 "$file"
+if grep -qxF "$key" "$file" 2>/dev/null; then
+  printf '%s\n' already-present
+else
+  printf '%s\n' "$key" >> "$file"
+  chmod 600 "$file"
+  printf '%s\n' installed
+fi
+`
+
+func (runtime *Runtime) InstallAuthorizedKey(requestID string, payload coretypes.AuthorizedKeyInstallPayload) error {
+	client, err := sshconn.DialClient(sshconn.Target{
+		Host:                  payload.Host,
+		Port:                  payload.Port,
+		Username:              payload.Username,
+		AuthType:              payload.AuthType,
+		Password:              payload.Password,
+		PrivateKeyPEM:         payload.PrivateKeyPEM,
+		CertificateText:       payload.CertificateText,
+		Passphrase:            payload.Passphrase,
+		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
+		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
+		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
+	}, sshconn.DefaultConfig, nil)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	stdout, stderr, err := sshcmd.RunWithInputWithTimeout(
+		client,
+		"sh -c "+sshcmd.QuotePosix(installAuthorizedKeyScript),
+		[]byte(strings.TrimSpace(payload.PublicKey)+"\n"),
+		20*time.Second,
+	)
+	if err != nil {
+		message := strings.TrimSpace(string(stderr))
+		if message != "" {
+			return errors.Join(err, errors.New(message))
+		}
+		return err
+	}
+
+	status := "installed"
+	for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "installed" || trimmed == "already-present" {
+			status = trimmed
+		}
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventAuthorizedKeyInstalled,
+		RequestID: requestID,
+		Payload: coretypes.AuthorizedKeyInstalledPayload{
+			Status: status,
+		},
 	})
 	return nil
 }

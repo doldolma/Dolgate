@@ -2,7 +2,13 @@ package sshconn
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -73,6 +79,34 @@ type CertificateInspection struct {
 	Principals  []string
 	KeyID       string
 	Serial      uint64
+}
+
+type PrivateKeyInspection struct {
+	Algorithm         string
+	PublicKey         string
+	FingerprintSHA256 string
+}
+
+type PrivateKeyGenerationRequest struct {
+	Algorithm        string
+	Curve            string
+	RSABits          int
+	PrivateKeyCipher string
+	KDFRounds        int
+	Comment          string
+	Passphrase       string
+}
+
+type PrivateKeyGeneration struct {
+	Algorithm           string
+	PrivateKeyPEM       string
+	PublicKey           string
+	FingerprintSHA256   string
+	PrivateKeyEncrypted bool
+	KeyCurve            string
+	KeyBits             int
+	PrivateKeyCipher    string
+	PrivateKeyKDFRounds int
 }
 
 type InteractivePrompt struct {
@@ -263,6 +297,94 @@ func InspectCertificate(certificateText string, now time.Time) CertificateInspec
 	}
 
 	return result
+}
+
+func InspectPrivateKey(privateKeyPEM string, passphrase string) (PrivateKeyInspection, error) {
+	signer, err := resolvePrivateKeySigner(Target{
+		PrivateKeyPEM: privateKeyPEM,
+		Passphrase:    passphrase,
+	})
+	if err != nil {
+		return PrivateKeyInspection{}, err
+	}
+
+	publicKey := signer.PublicKey()
+	return PrivateKeyInspection{
+		Algorithm:         publicKey.Type(),
+		PublicKey:         strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey))),
+		FingerprintSHA256: ssh.FingerprintSHA256(publicKey),
+	}, nil
+}
+
+func GeneratePrivateKey(request PrivateKeyGenerationRequest) (PrivateKeyGeneration, error) {
+	algorithm := request.Algorithm
+	if algorithm != "ecdsa" && algorithm != "rsa" {
+		algorithm = "ed25519"
+	}
+
+	var (
+		privateKey any
+		keyCurve   string
+		keyBits    int
+		err        error
+	)
+
+	switch algorithm {
+	case "ecdsa":
+		keyCurve = request.Curve
+		curve := elliptic.P521()
+		if keyCurve == "nistp256" {
+			curve = elliptic.P256()
+		} else if keyCurve == "nistp384" {
+			curve = elliptic.P384()
+		} else {
+			keyCurve = "nistp521"
+		}
+		privateKey, err = ecdsa.GenerateKey(curve, rand.Reader)
+	case "rsa":
+		keyBits = 4096
+		if request.RSABits == 3072 {
+			keyBits = 3072
+		}
+		privateKey, err = rsa.GenerateKey(rand.Reader, keyBits)
+	default:
+		_, privateKey, err = ed25519.GenerateKey(rand.Reader)
+	}
+	if err != nil {
+		return PrivateKeyGeneration{}, err
+	}
+
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		return PrivateKeyGeneration{}, err
+	}
+
+	normalizedPassphrase := strings.TrimSpace(request.Passphrase)
+	block, privateKeyCipher, privateKeyKDFRounds, err := marshalOpenSSHPrivateKeyWithOptions(
+		privateKey,
+		request.Comment,
+		privateKeyEncryptionOptions{
+			Passphrase: []byte(normalizedPassphrase),
+			Cipher:     request.PrivateKeyCipher,
+			KDFRounds:  request.KDFRounds,
+		},
+	)
+	if err != nil {
+		return PrivateKeyGeneration{}, err
+	}
+
+	publicKey := signer.PublicKey()
+	return PrivateKeyGeneration{
+		Algorithm:           publicKey.Type(),
+		PrivateKeyPEM:       string(pem.EncodeToMemory(block)),
+		PublicKey:           strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey))),
+		FingerprintSHA256:   ssh.FingerprintSHA256(publicKey),
+		PrivateKeyEncrypted: normalizedPassphrase != "",
+		KeyCurve:            keyCurve,
+		KeyBits:             keyBits,
+		PrivateKeyCipher:    privateKeyCipher,
+		PrivateKeyKDFRounds: privateKeyKDFRounds,
+	}, nil
 }
 
 func certificateUnixTime(value uint64) *time.Time {
