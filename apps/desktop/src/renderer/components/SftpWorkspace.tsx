@@ -1,4 +1,12 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   CSSProperties,
   DragEvent,
@@ -1173,12 +1181,35 @@ function PaneBrowser({
     (pane.endpoint?.sudoStatus === "root" ||
       pane.endpoint?.sudoStatus === "passwordless" ||
       pane.endpoint?.sudoStatus === "passwordRequired");
-  const contextMenuStyle = contextMenu
-    ? {
-        left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 196))}px`,
-        top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 220))}px`,
-      }
-    : null;
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [contextMenuStyle, setContextMenuStyle] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+
+  // 메뉴가 뜨면 실제로 렌더된 크기를 재서 뷰포트 안으로 클램핑한다.
+  // 항목 수(조건부 "편집" 등)에 따라 높이가 가변이라 상수 추정 대신 실측한다.
+  // useLayoutEffect라 paint 전에 보정 위치가 적용돼 깜빡임이 없다.
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setContextMenuStyle(null);
+      return;
+    }
+    const el = contextMenuRef.current;
+    const width = el?.offsetWidth ?? 196;
+    const height = el?.offsetHeight ?? 220;
+    const margin = 12;
+    setContextMenuStyle({
+      left: Math.max(
+        margin,
+        Math.min(contextMenu.x, window.innerWidth - width - margin),
+      ),
+      top: Math.max(
+        margin,
+        Math.min(contextMenu.y, window.innerHeight - height - margin),
+      ),
+    });
+  }, [contextMenu]);
 
   const contextMenuEntry = contextMenu
     ? pane.entries.find((item) => item.path === contextMenu.entryPath)
@@ -1679,8 +1710,13 @@ function PaneBrowser({
       {contextMenu
         ? createPortal(
             <div
+              ref={contextMenuRef}
               className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
-              style={contextMenuStyle ?? undefined}
+              style={{
+                left: contextMenuStyle?.left ?? contextMenu.x,
+                top: contextMenuStyle?.top ?? contextMenu.y,
+                visibility: contextMenuStyle ? "visible" : "hidden",
+              }}
               role="menu"
             >
               <button

@@ -347,4 +347,49 @@ describe("ssh key coordinator", () => {
       algorithm: "ecdsa-sha2-nistp521",
     });
   });
+
+  it("installs and switches to a passphrase-protected key using its saved passphrase", async () => {
+    const key = createSshKeyPair({
+      algorithm: "ed25519",
+      comment: "passphrase-key",
+    });
+    const { deps, coordinator } = createCoordinator({
+      secretsByRef: {
+        "host-1-secret": { password: "current-password" },
+        "key-ref": {
+          privateKeyPem:
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nenc\n-----END OPENSSH PRIVATE KEY-----",
+          publicKey: key.publicKey,
+          publicKeyFingerprintSha256: key.fingerprintSha256,
+          keyAlgorithm: key.algorithm,
+          passphrase: "saved-passphrase",
+        },
+      },
+    });
+
+    await expect(
+      coordinator.installSshPublicKey({
+        secretRef: "key-ref",
+        hostIds: ["host-1"],
+        mode: "installAndUse",
+      }),
+    ).resolves.toMatchObject({
+      results: [{ hostId: "host-1", status: "installed" }],
+    });
+
+    // installAndUse 검증 연결(2번째 호출)에 저장된 passphrase가 전달돼야 한다.
+    expect(deps.installAuthorizedKey).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        authType: "privateKey",
+        passphrase: "saved-passphrase",
+        publicKey: key.publicKey,
+      }),
+    );
+    expect(deps.hosts.updateSshAuthSecret).toHaveBeenCalledWith(
+      "host-1",
+      "privateKey",
+      "key-ref",
+    );
+  });
 });
