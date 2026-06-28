@@ -16,6 +16,7 @@ import {
 } from '../lib/terminal-cwd-registry';
 import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
 import { Badge, Button, IconButton, TabButton, Tabs } from '../ui';
+import { ArrowUpRight, Bell, Columns2, Container, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -38,6 +39,8 @@ interface AppTitleBarProps {
   onSelectHome: () => void;
   onSelectSftp: () => void;
   onSelectContainers: () => void;
+  /** 열린 컨테이너 탭이 있을 때만 Containers 고정탭을 노출한다(미지정 시 비활성 취급). */
+  hasOpenContainers?: boolean;
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspace: (workspaceId: string) => void;
   onCloseSession: (sessionId: string) => Promise<void>;
@@ -70,7 +73,7 @@ type TabDotState = TabConnState | 'running';
 
 const TAB_DOT_COLOR: Record<TabDotState, string> = {
   connected: 'var(--success,#3fae8f)',
-  reconnecting: 'var(--warning,#d97706)',
+  reconnecting: 'var(--warning-text)',
   error: 'var(--danger,#e2504a)',
   idle: 'var(--text-muted,#8b96ad)',
   running: 'var(--accent,#5b9bd5)',
@@ -136,7 +139,7 @@ function rttColor(ms: number): string {
     return 'var(--success,#3fae8f)';
   }
   if (ms < 200) {
-    return 'var(--warning,#d97706)';
+    return 'var(--warning-text)';
   }
   return 'var(--danger,#e2504a)';
 }
@@ -512,37 +515,43 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
   return count;
 }
 
+// 풀하이트 브라우저 탭: 윗모서리만 둥글고(아래는 네모) 바 하단 경계선에 붙는다.
+// 활성=흰 배경 + 어두운 글자, 비활성=투명(바에 녹아듦) + 밝은 글자.
 function getTitlebarTabClass(active: boolean): string {
+  const base =
+    'h-full gap-2 !rounded-t-[10px] !rounded-b-none border-transparent px-[0.95rem] py-0 text-[0.86rem]';
   if (active) {
-    return 'border-[rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.94)] text-[var(--accent-strong)] shadow-none hover:text-[var(--accent-strong)]';
+    return `${base} bg-[rgba(255,255,255,0.97)] text-[var(--chrome-bg)] shadow-none hover:text-[var(--chrome-bg)]`;
   }
 
-  return 'border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.06)] text-[rgba(243,247,251,0.78)] shadow-none hover:bg-[rgba(255,255,255,0.1)] hover:text-white';
+  return `${base} bg-transparent text-[rgba(243,247,251,0.74)] shadow-none hover:bg-[rgba(255,255,255,0.08)] hover:text-white`;
 }
 
+// 세션탭은 도킹하지 않고 위아래 여백을 두고 떠 있는 알약(self-center). 비활성도 옅은
+// 배경+테두리로 경계가 보여 "어디까지 탭인지" 알 수 있게 한다. 활성은 흰 배경으로 또렷이.
 function getTitlebarDynamicTabContainerClass(active: boolean): string {
   if (active) {
-    return 'border-[rgba(255,255,255,0.14)] bg-[rgba(255,255,255,0.94)] shadow-none';
+    return 'border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.96)] shadow-none';
   }
 
-  return 'border-[rgba(255,255,255,0.04)] bg-[rgba(255,255,255,0.06)] shadow-none hover:bg-[rgba(255,255,255,0.1)]';
+  return 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.07)] shadow-none hover:bg-[rgba(255,255,255,0.12)]';
 }
 
 function getTitlebarDynamicTabButtonClass(active: boolean): string {
   return cn(
-    'min-w-0 justify-start border-transparent bg-transparent px-4 py-[0.58rem] shadow-none hover:bg-transparent',
+    'min-w-0 justify-start rounded-none border-transparent bg-transparent px-3 py-[0.3rem] shadow-none hover:bg-transparent',
     active
-      ? 'text-[var(--accent-strong)] hover:text-[var(--accent-strong)]'
+      ? 'text-[var(--chrome-bg)] hover:text-[var(--chrome-bg)]'
       : 'text-[rgba(243,247,251,0.82)] hover:text-white',
   );
 }
 
 function getTitlebarCloseButtonClass(active: boolean): string {
   if (active) {
-    return 'h-8 w-8 rounded-full text-[0.95rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
+    return 'h-8 w-8 rounded-full text-[0.9rem] text-[color-mix(in_srgb,var(--accent-strong)_84%,var(--text)_16%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)] hover:text-[var(--accent-strong)]';
   }
 
-  return 'h-8 w-8 rounded-full text-[0.95rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
+  return 'h-8 w-8 rounded-full text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
 }
 
 export function AppTitleBar({
@@ -559,6 +568,7 @@ export function AppTitleBar({
   onSelectHome,
   onSelectSftp,
   onSelectContainers,
+  hasOpenContainers,
   onSelectSession,
   onSelectWorkspace,
   onCloseSession,
@@ -1040,8 +1050,8 @@ export function AppTitleBar({
         // ② 우측 빈 spacer(self-stretch, 아래 min-w-16 flex-1). 스트립을 drag 영역에 넣지
         // 않아 스크롤 후 드래그가 죽는 macOS 버그(#40610)도, 풀커버 레이어가 스크롤과 겹쳐
         // "스크롤 위치에 따라 한쪽만 드래그되던" 버그도 모두 피한다.
-        'relative flex min-h-12 select-none items-center gap-4 border-b border-[var(--chrome-border)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[1rem] py-[0.3rem] text-[#f3f7fb] shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)] [-webkit-app-region:no-drag] max-[760px]:px-[1rem] max-[760px]:pr-[0.8rem]',
-        desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.8rem]',
+        'relative flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] [-webkit-app-region:no-drag] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem]',
+        desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.9rem]',
       )}
     >
       {/* ① 좌측 드래그 존: macOS 신호등 영역(헤더 좌측 패딩). 스크롤 스트립과 겹치지 않는
@@ -1054,7 +1064,7 @@ export function AppTitleBar({
       ) : null}
       <div
         className={cn(
-          'relative min-w-0 rounded-[24px] p-[0.2rem] transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
+          'relative min-w-0 self-stretch transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
           isDetachHovering &&
             'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
         )}
@@ -1086,19 +1096,19 @@ export function AppTitleBar({
         {showLeftTabStripFade ? (
           <div
             data-testid="titlebar-tab-strip-fade-left"
-            className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[22px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+            className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[12px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
           />
         ) : null}
         {showRightTabStripFade ? (
           <div
             data-testid="titlebar-tab-strip-fade-right"
-            className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[22px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+            className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[12px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
           />
         ) : null}
         <div
           ref={titlebarTabStripRef}
           data-titlebar-tab-strip="true"
-          className="flex min-w-0 items-center gap-[0.55rem] overflow-x-auto overflow-y-hidden pl-1.5 py-[0.12rem]"
+          className="flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full"
           style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
           onScroll={updateTitlebarTabStripFades}
           onWheel={(event) => {
@@ -1165,18 +1175,19 @@ export function AppTitleBar({
             onReorderDynamicTab(sourceTab, drop.target, drop.placement);
           }}
         >
-          <Tabs className="shrink-0 bg-transparent p-0 shadow-none border-transparent gap-2">
+          <Tabs className="shrink-0 self-stretch items-stretch bg-transparent p-0 shadow-none border-0 gap-0">
             <div
               ref={(node) => {
                 titlebarTabItemRefs.current.home = node;
               }}
-              className="shrink-0"
+              className="shrink-0 flex"
             >
               <TabButton
                 active={activeWorkspaceTab === 'home'}
                 className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
                 onClick={onSelectHome}
               >
+                <Home className="h-4 w-4 flex-none" aria-hidden />
                 Home
               </TabButton>
             </div>
@@ -1184,30 +1195,34 @@ export function AppTitleBar({
               ref={(node) => {
                 titlebarTabItemRefs.current.sftp = node;
               }}
-              className="shrink-0"
+              className="shrink-0 flex"
             >
               <TabButton
                 active={activeWorkspaceTab === 'sftp'}
                 className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
                 onClick={onSelectSftp}
               >
+                <Folder className="h-4 w-4 flex-none" aria-hidden />
                 SFTP
               </TabButton>
             </div>
-            <div
-              ref={(node) => {
-                titlebarTabItemRefs.current.containers = node;
-              }}
-              className="shrink-0"
-            >
-              <TabButton
-                active={activeWorkspaceTab === 'containers'}
-                className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
-                onClick={onSelectContainers}
+            {hasOpenContainers || activeWorkspaceTab === 'containers' ? (
+              <div
+                ref={(node) => {
+                  titlebarTabItemRefs.current.containers = node;
+                }}
+                className="shrink-0 flex"
               >
-                Containers
-              </TabButton>
-            </div>
+                <TabButton
+                  active={activeWorkspaceTab === 'containers'}
+                  className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
+                  onClick={onSelectContainers}
+                >
+                  <Container className="h-4 w-4 flex-none" aria-hidden />
+                  Containers
+                </TabButton>
+              </div>
+            ) : null}
           </Tabs>
           {dynamicItems.map((item, idx) => {
           const slideX = tabSlideX(idx, dragSourceIndex, dropGap);
@@ -1227,7 +1242,7 @@ export function AppTitleBar({
                 }}
                 style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
                   isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
@@ -1303,7 +1318,7 @@ export function AppTitleBar({
                 }}
                 style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                   getTitlebarDynamicTabContainerClass(item.active),
                   isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
@@ -1347,12 +1362,16 @@ export function AppTitleBar({
                     className={cn(
                       'mr-1.5',
                       item.reconnecting
-                        ? 'animate-spin text-[var(--warning,#d97706)]'
+                        ? 'animate-spin text-[var(--warning-text)]'
                         : 'text-[var(--accent)]',
                     )}
                     aria-hidden
                   >
-                    {item.reconnecting ? '↻' : '⊟'}
+                    {item.reconnecting ? (
+                      <RefreshCw className="h-4 w-4" />
+                    ) : (
+                      <Columns2 className="h-4 w-4" />
+                    )}
                   </span>
                   <span className="truncate">{item.title}</span>
                   {item.active && item.rttMs != null ? (
@@ -1390,7 +1409,7 @@ export function AppTitleBar({
               }}
               style={tabSlideStyle}
               className={cn(
-                'group relative flex flex-none items-center gap-1 rounded-[22px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
                 getTitlebarDynamicTabContainerClass(item.active),
                 isDragSource && tabDragSourceHidden && 'opacity-0',
               )}
@@ -1424,19 +1443,19 @@ export function AppTitleBar({
               >
                 <span
                   className={cn(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.88rem]',
+                    'inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.9rem]',
                     item.active
                       ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
                       : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
                   )}
                   aria-hidden="true"
                 >
-                  ⊞
+                  <Rows2 className="h-4 w-4" />
                 </span>
                 <span className="truncate">{item.title}</span>
                 <span
                   className={cn(
-                    'ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.72rem] font-semibold',
+                    'ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.7rem] font-semibold',
                     item.active
                       ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
                       : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
@@ -1457,7 +1476,7 @@ export function AppTitleBar({
                     onNewTmuxWindow?.(item.workspaceId);
                   }}
                 >
-                  ＋
+                  <Plus className="h-4 w-4" />
                 </IconButton>
               ) : null}
               <IconButton
@@ -1482,7 +1501,7 @@ export function AppTitleBar({
                   await onCloseWorkspace(item.workspaceId);
                 }}
               >
-                ×
+                <X className="h-4 w-4" />
               </IconButton>
             </div>
           );
@@ -1505,31 +1524,29 @@ export function AppTitleBar({
         aria-hidden
         className="min-w-16 flex-1 self-stretch [-webkit-app-region:drag]"
       />
-      <div className="relative flex items-center gap-[0.55rem] [-webkit-app-region:no-drag]">
+      <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
           <IconButton
             tone="default"
             active={isUpdateOpen}
-            className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.1rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
+            className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.15rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
             aria-label="업데이트 상태 보기"
             onClick={() => setIsUpdateOpen((current) => !current)}
           >
-            <span aria-hidden="true">
-              🔔
-            </span>
+            <Bell className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
             {showBadge ? <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" /> : null}
           </IconButton>
 
           {isUpdateOpen ? (
             <div
               data-testid="update-popover"
-              className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[26px] border border-[var(--border)] bg-[var(--dialog-surface)] p-5 shadow-[var(--shadow-floating)]"
+              className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] p-5 shadow-[var(--shadow-floating)]"
             >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2.5 text-[var(--text)]">
                     <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface))] text-[var(--accent-strong)]" aria-hidden="true">
-                      ↗
+                      <ArrowUpRight className="h-[1.05rem] w-[1.05rem]" />
                     </span>
                     <strong>{titleText}</strong>
                   </div>
@@ -1541,7 +1558,7 @@ export function AppTitleBar({
                 <Badge>{updateState.currentVersion}</Badge>
               </div>
 
-              <div className="space-y-3 pb-4 text-[0.93rem] leading-[1.55] text-[var(--text-soft)]">
+              <div className="space-y-3 pb-4 text-[0.9rem] leading-[1.55] text-[var(--text-soft)]">
                 {!updateState.enabled ? (
                   <p>자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
                 ) : null}
@@ -1566,7 +1583,8 @@ export function AppTitleBar({
                 <Button variant="secondary" onClick={async () => {
                   await onOpenReleasePage(releaseUrl);
                 }}>
-                  Changelog ↗
+                  Changelog
+                  <ArrowUpRight className="h-[0.9rem] w-[0.9rem]" />
                 </Button>
                 {showCheckAction ? (
                   <Button variant="primary" onClick={onCheckForUpdates}>
@@ -1616,14 +1634,14 @@ export function AppTitleBar({
       {hoveredTab && hoverInfo ? (
         <div
           role="tooltip"
-          className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[12px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
+          className="pointer-events-none fixed z-[200] w-max max-w-[300px] rounded-[10px] border border-[var(--chrome-border)] bg-[color-mix(in_srgb,var(--chrome-bg)_92%,black_8%)] px-3 py-2.5 text-[#f3f7fb] shadow-[0_12px_32px_rgba(0,0,0,0.45)] [-webkit-app-region:no-drag]"
           style={{ left: hoveredTab.left, top: hoveredTab.top }}
         >
-          <div className="text-[0.84rem] font-semibold tracking-[0.01em]">
+          <div className="text-[0.82rem] font-semibold tracking-[0.01em]">
             {hoverInfo.heading}
           </div>
           {hoverInfo.target ? (
-            <div className="mt-0.5 max-w-[276px] truncate font-mono text-[0.72rem] text-[rgba(243,247,251,0.62)]">
+            <div className="mt-0.5 max-w-[276px] truncate font-mono text-[0.7rem] text-[rgba(243,247,251,0.62)]">
               {hoverInfo.target}
             </div>
           ) : null}
@@ -1632,7 +1650,7 @@ export function AppTitleBar({
               {hoverInfo.rows.map((row) => (
                 <div
                   key={row.label}
-                  className="flex items-center justify-between gap-5 text-[0.72rem]"
+                  className="flex items-center justify-between gap-5 text-[0.7rem]"
                 >
                   <span className="flex-none text-[rgba(243,247,251,0.45)]">
                     {row.label}

@@ -32,12 +32,12 @@ export function ToggleSwitch({
       )}
       {...props}
     >
-      <span className="flex min-w-0 flex-col gap-[0.15rem]">
+      <span className="flex min-w-0 flex-col gap-[0.25rem]">
         <span className="text-[0.9rem] font-medium text-[var(--text)]">
           {label}
         </span>
         {description ? (
-          <span className="text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+          <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
             {description}
           </span>
         ) : null}

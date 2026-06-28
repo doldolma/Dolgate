@@ -8,7 +8,7 @@ import type {
   ManagedSecretPayload,
 } from "@shared";
 import { isSshHostRecord, normalizeHostEnvVars } from "@shared";
-import { clipboard, ipcMain } from "electron";
+import { BrowserWindow, clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
 
@@ -71,7 +71,31 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         host && isSshHostRecord(host)
           ? await ctx.resolveJumpHostTarget(host)
           : undefined;
-      return ctx.buildHostKeyProbeResult(emitProgress, input, jump);
+      try {
+        return await ctx.buildHostKeyProbeResult(emitProgress, input, jump);
+      } catch (error) {
+        // 호스트 키 probe는 실제 연결 직전(세션 lifecycle 생성 전) 단계라, 도달 불가 호스트
+        // 등으로 여기서 실패하면 core-manager의 세션 로그 경로를 타지 못한다. 따라서 연결
+        // 실패를 활동 로그에 직접 남겨 Logs/최근 로그에 보이게 한다(ssh/sftp/containers 공통).
+        const reason = error instanceof Error ? error.message : String(error);
+        ctx.activityLogs.append(
+          "error",
+          "session",
+          "호스트 연결에 실패했습니다.",
+          {
+            hostId: input.hostId,
+            hostLabel: host?.label ?? null,
+            endpointId: input.endpointId ?? null,
+            reason,
+          },
+        );
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.isDestroyed()) {
+            window.webContents.send(ipcChannels.logs.changed);
+          }
+        }
+        throw error;
+      }
     },
   );
 
@@ -262,7 +286,9 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           generatedByApp: keepPublicKeyMetadata
             ? currentPayload.generatedByApp
             : undefined,
-          env: replacementSecrets.env,
+          // 환경변수는 이제 호스트 레코드에 저장된다. 자격증명만 수정할 땐 구버전 시크릿의 env를
+          // 지우지 않고 보존해, 아직 호스트로 이전되지 않은 호스트의 폴백 데이터를 잃지 않는다.
+          env: replacementSecrets.env !== undefined ? replacementSecrets.env : currentPayload?.env,
           updatedAt: new Date().toISOString(),
         } satisfies ManagedSecretPayload),
       );

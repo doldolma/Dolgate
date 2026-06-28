@@ -214,7 +214,7 @@ export function KeychainPanel({
   };
 
   return (
-    <div className="flex flex-col gap-[1.05rem]">
+    <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
           <SectionLabel>Saved Credentials</SectionLabel>
@@ -243,8 +243,8 @@ export function KeychainPanel({
           role={copyStatus.tone === 'danger' ? 'alert' : 'status'}
           className={
             copyStatus.tone === 'danger'
-              ? 'rounded-[14px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border))] bg-[var(--danger-bg)] px-4 py-3 text-sm font-semibold text-[var(--danger-text)]'
-              : 'rounded-[14px] border border-[color-mix(in_srgb,var(--success-text)_24%,var(--border))] bg-[var(--success-bg)] px-4 py-3 text-sm font-semibold text-[var(--success-text)]'
+              ? 'rounded-[10px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border))] bg-[var(--danger-bg)] px-4 py-3 text-sm font-semibold text-[var(--danger-text)]'
+              : 'rounded-[10px] border border-[color-mix(in_srgb,var(--success-text)_24%,var(--border))] bg-[var(--success-bg)] px-4 py-3 text-sm font-semibold text-[var(--success-text)]'
           }
         >
           {copyStatus.message}
@@ -422,13 +422,13 @@ export function KeychainPanel({
                     Clear
                   </Button>
                 </div>
-                <div className="grid max-h-[18rem] gap-2 overflow-y-auto rounded-[16px] border border-[var(--border)] bg-[var(--surface-muted)] p-2">
+                <div className="grid max-h-[18rem] gap-2 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] p-2">
                   {sshHosts.length === 0 ? (
-                    <p className="m-0 rounded-[12px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
+                    <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
                       SSH host가 없습니다.
                     </p>
                   ) : visibleInstallHosts.length === 0 ? (
-                    <p className="m-0 rounded-[12px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
+                    <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
                       검색 결과가 없습니다.
                     </p>
                   ) : (
@@ -438,7 +438,7 @@ export function KeychainPanel({
                         <label
                           key={host.id}
                           className={[
-                            'grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-[12px] border px-3 py-2 text-sm transition-[border-color,background] duration-150',
+                            'grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-[10px] border px-3 py-2 text-sm transition-[border-color,background] duration-150',
                             checked
                               ? 'border-[color-mix(in_srgb,var(--accent-strong)_36%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-elevated))]'
                               : 'border-[var(--border)] bg-[var(--surface-elevated)] hover:border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border))]',
@@ -485,7 +485,7 @@ export function KeychainPanel({
                 </div>
               ) : null}
               {installResult ? (
-                <div className="grid gap-2 rounded-[16px] border border-[var(--border)] p-3 text-sm">
+                <div className="grid gap-2 rounded-[10px] border border-[var(--border)] p-3 text-sm">
                   {installResult.results.map((result) => (
                     <div key={result.hostId} className="flex justify-between gap-3">
                       <span>{result.hostLabel}</span>

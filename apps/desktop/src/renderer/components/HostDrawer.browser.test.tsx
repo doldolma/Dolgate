@@ -55,13 +55,14 @@ function renderDrawer(options?: {
   };
 }
 
-describe('HostDrawer outside-click close', () => {
-  it('closes when clicking outside in edit mode', () => {
+describe('HostDrawer close behavior', () => {
+  it('does not close on outside clicks in edit mode (stays open)', () => {
     const { onClose } = renderDrawer({ mode: 'edit' });
 
     fireEvent.mouseDown(document.body);
+    fireEvent.contextMenu(document.body);
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('does not close when clicking inside the edit drawer header or form', () => {
@@ -98,10 +99,11 @@ describe('HostDrawer outside-click close', () => {
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
-  it('renders only the primary action in the fixed footer for edit mode', () => {
+  it('renders only the save action in the fixed footer for edit mode', () => {
     renderDrawer({ mode: 'edit' });
 
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '저장' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
@@ -128,27 +130,28 @@ describe('HostDrawer outside-click close', () => {
     );
   });
 
-  it('flushes pending changes before connecting from the footer action', async () => {
+  it('saves from the footer action without connecting', async () => {
     const { onSubmit, onConnect } = renderDrawer({ mode: 'edit' });
 
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod SSH' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onConnect).toHaveBeenCalledWith('host-1');
-    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(onConnect.mock.invocationCallOrder[0]);
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({ label: 'Prod SSH' });
+    expect(onConnect).not.toHaveBeenCalled();
   });
 
-  it('shows save status text in the footer after an edit auto-save', async () => {
+  it('shows save status text in the footer after an explicit save', async () => {
     const { onSubmit } = renderDrawer({ mode: 'edit' });
 
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod API' } });
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), { timeout: 1200 });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(within(screen.getByTestId('drawer-footer')).getByText('Saved')).toBeInTheDocument(),
     );

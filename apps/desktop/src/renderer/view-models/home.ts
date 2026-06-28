@@ -35,9 +35,11 @@ export function useHomeViewModel() {
   const saveHost = useAppStore((state) => state.saveHost);
   const duplicateHosts = useAppStore((state) => state.duplicateHosts);
   const moveHostToGroup = useAppStore((state) => state.moveHostToGroup);
+  const setHostFavorite = useAppStore((state) => state.setHostFavorite);
   const removeHost = useAppStore((state) => state.removeHost);
   const openLocalTerminal = useAppStore((state) => state.openLocalTerminal);
   const connectHost = useAppStore((state) => state.connectHost);
+  const connectSftpHost = useAppStore((state) => state.connectSftpHost);
   const openHostContainersTab = useAppStore((state) => state.openHostContainersTab);
   const savePortForward = useAppStore((state) => state.savePortForward);
   const saveDnsOverride = useAppStore((state) => state.saveDnsOverride);
@@ -87,9 +89,11 @@ export function useHomeViewModel() {
     saveHost,
     duplicateHosts,
     moveHostToGroup,
+    setHostFavorite,
     removeHost,
     openLocalTerminal,
     connectHost,
+    connectSftpHost,
     openHostContainersTab,
     savePortForward,
     saveDnsOverride,

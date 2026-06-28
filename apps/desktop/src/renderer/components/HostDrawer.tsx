@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
@@ -20,10 +20,7 @@ interface HostDrawerProps {
   onSubmit: HostFormProps['onSubmit'];
   onConnect?: HostFormProps['onConnect'];
   onEditExistingSecret?: (secretRef: string) => void;
-  onPersistEnv?: HostFormProps['onPersistEnv'];
   onOpenSecrets?: () => void;
-  onGenerateAndInstallSshKey?: HostFormProps['onGenerateAndInstallSshKey'];
-  onInstallSshPublicKey?: HostFormProps['onInstallSshPublicKey'];
 }
 
 export function HostDrawer({
@@ -41,10 +38,7 @@ export function HostDrawer({
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onPersistEnv,
-  onOpenSecrets,
-  onGenerateAndInstallSshKey,
-  onInstallSshPublicKey
+  onOpenSecrets
 }: HostDrawerProps) {
   const drawerRef = useRef<HTMLElement | null>(null);
   const hostFormRef = useRef<HostFormHandle | null>(null);
@@ -56,28 +50,6 @@ export function HostDrawer({
   const isFooterBusy = isActionInFlight || formActionState.saveInFlight;
   const formHost = host;
 
-  useEffect(() => {
-    if (!open || mode !== 'edit') {
-      return;
-    }
-
-    function handlePointerDown(event: MouseEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-      if (drawerRef.current?.contains(target)) {
-        return;
-      }
-      onClose();
-    }
-
-    document.addEventListener('mousedown', handlePointerDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-    };
-  }, [mode, onClose, open]);
-
   async function handlePrimaryAction() {
     if (!hostFormRef.current) {
       return;
@@ -88,22 +60,25 @@ export function HostDrawer({
         await hostFormRef.current.submitCreate();
         return;
       }
-      await hostFormRef.current.submitAndConnect();
+      // 저장에 성공하면 편집 폼을 닫아 호스트 상세 화면으로 돌아간다.
+      const saved = await hostFormRef.current.submit();
+      if (saved) {
+        onClose();
+      }
     } finally {
       setIsActionInFlight(false);
     }
   }
 
+  // 패널에 transform(translate-x 슬라이드)을 두면 내부 fixed 다이얼로그(SSH 키 생성 등)의 기준이
+  // 이 좁은 패널로 잡혀 갇히므로, 애니메이션을 빼서 다이얼로그가 앱 중앙에 뜨게 한다.
   return (
     <aside
       ref={drawerRef}
-      className={cn(
-        'flex min-w-0 min-h-0 h-full flex-col overflow-hidden border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_96%,transparent_4%)] opacity-0 translate-x-[18px] transition-[opacity,transform] duration-180',
-        open && 'opacity-100 translate-x-0',
-      )}
+      className="flex min-w-0 min-h-0 h-full flex-col overflow-hidden border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_96%,transparent_4%)]"
       aria-hidden={!open}
     >
-      <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-[1.4rem] pb-[1rem] pt-[1.4rem]">
+      <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-[1.3rem] pb-[0.9rem] pt-[1.3rem]">
         <div>
           <SectionLabel>{mode === 'create' ? 'Create' : 'Edit'}</SectionLabel>
           <h2>{mode === 'create' ? 'New Host' : formHost?.label ?? 'Host'}</h2>
@@ -115,7 +90,7 @@ export function HostDrawer({
 
       <div
         data-testid="drawer-scroll-body"
-        className="min-h-0 flex-1 overflow-y-auto px-[1.4rem] pb-[1.25rem] pt-[1.2rem]"
+        className="min-h-0 flex-1 overflow-y-auto px-[1.3rem] pb-[1.3rem] pt-[1.1rem]"
       >
         <HostForm
           ref={hostFormRef}
@@ -131,34 +106,31 @@ export function HostDrawer({
           onSubmit={onSubmit}
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}
-          onPersistEnv={onPersistEnv}
           onOpenSecrets={onOpenSecrets}
-          onGenerateAndInstallSshKey={onGenerateAndInstallSshKey}
-          onInstallSshPublicKey={onInstallSshPublicKey}
           onActionStateChange={setFormActionState}
         />
       </div>
 
       <div
         data-testid="drawer-footer"
-        className="shrink-0 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_98%,transparent_2%)] px-[1.4rem] pb-[1.3rem] pt-[1rem]"
+        className="shrink-0 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_98%,transparent_2%)] px-[1.3rem] pb-[1.3rem] pt-[0.9rem]"
       >
-        <div className="flex gap-[0.75rem]">
+        <div className="flex gap-[0.7rem]">
           <Button
             variant="primary"
-            className="flex-1 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.95rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
+            className="flex-1 rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-elevated)_90%,var(--accent-strong)_10%)] px-[1.1rem] py-[0.9rem] font-[650] text-[var(--text)] shadow-none transition-[border-color,background-color,color] duration-160 hover:border-[color-mix(in_srgb,var(--accent-strong)_40%,var(--border)_60%)] hover:bg-[color-mix(in_srgb,var(--surface-elevated)_84%,var(--accent-strong)_16%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_60%,white_40%)] focus-visible:ring-offset-2"
             disabled={isFooterBusy}
             onClick={async () => {
               await handlePrimaryAction();
             }}
           >
-            {mode === 'create' ? 'Create Host' : 'Connect'}
+            {mode === 'create' ? 'Create Host' : '저장'}
           </Button>
         </div>
         {mode === 'edit' && formActionState.saveStatusText ? (
           <div
             className={cn(
-              'mt-[0.55rem] text-[0.86rem] leading-[1.4] text-[var(--text-soft)]',
+              'mt-[0.55rem] text-[0.82rem] leading-[1.4] text-[var(--text-soft)]',
               formActionState.saveStatusText === "Couldn't save changes" &&
                 'text-[color-mix(in_srgb,var(--danger)_82%,white_18%)]',
             )}

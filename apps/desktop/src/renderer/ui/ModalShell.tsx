@@ -24,7 +24,7 @@ export function ModalShell({
   return (
     <div
       className={cn(
-        'flex max-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--dialog-surface)] shadow-[var(--shadow-floating)]',
+        'flex max-h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] shadow-[var(--shadow-floating)]',
         sizeClasses[size],
         className,
       )}
@@ -42,7 +42,7 @@ export function ModalHeader({
   return (
     <div
       className={cn(
-        'shrink-0 flex items-center justify-between gap-4 border-b border-[var(--border)] px-6 py-[1.2rem]',
+        'shrink-0 flex items-center justify-between gap-4 border-b border-[var(--border)] px-5 py-[0.9rem]',
         className,
       )}
       {...props}
@@ -54,7 +54,7 @@ export function ModalBody({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('min-h-0 flex-1 overflow-y-auto px-6 pb-[1.35rem] pt-[1.15rem]', className)} {...props} />;
+  return <div className={cn('min-h-0 flex-1 overflow-y-auto px-5 pb-[1.1rem] pt-[0.9rem]', className)} {...props} />;
 }
 
 export function ModalFooter({
@@ -64,7 +64,7 @@ export function ModalFooter({
   return (
     <div
       className={cn(
-        'shrink-0 flex items-center justify-end gap-4 border-t border-[var(--border)] px-6 py-[1.15rem]',
+        'shrink-0 flex items-center justify-end gap-4 border-t border-[var(--border)] px-5 py-[0.9rem]',
         className,
       )}
       {...props}

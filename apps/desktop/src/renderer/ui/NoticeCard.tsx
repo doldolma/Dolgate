@@ -15,7 +15,7 @@ const toneClasses: Record<NoticeTone, string> = {
   info:
     'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--text-soft)]',
   warning:
-    'border-[color-mix(in_srgb,var(--warning,#d9a441)_24%,var(--border))] bg-[color-mix(in_srgb,var(--warning,#d9a441)_8%,var(--surface-muted)_92%)] text-[var(--text)]',
+    'border-[color-mix(in_srgb,var(--warning-text)_24%,var(--border))] bg-[var(--warning-bg)] text-[var(--text)]',
   danger:
     'border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]',
 };
@@ -30,13 +30,13 @@ export function NoticeCard({
   return (
     <div
       className={cn(
-        'rounded-[20px] border px-4 py-3.5 shadow-none',
+        'rounded-[12px] border px-3.5 py-2.5 shadow-none',
         toneClasses[tone],
         className,
       )}
       {...props}
     >
-      {title ? <strong className="mb-1.5 block text-[0.96rem] text-[var(--text)]">{title}</strong> : null}
+      {title ? <strong className="mb-1.5 block text-[1rem] text-[var(--text)]">{title}</strong> : null}
       {children ? <div className="grid gap-1.5 text-sm leading-6">{children}</div> : null}
     </div>
   );

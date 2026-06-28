@@ -27,7 +27,7 @@ export function Card({
   return (
     <Component
       className={cn(
-        'flex items-center justify-between gap-4 rounded-[24px] border px-[1.15rem] py-[1.1rem]',
+        'flex items-center justify-between gap-4 rounded-[12px] border px-[0.9rem] py-[0.9rem]',
         toneClasses[tone],
         className,
       )}
@@ -64,7 +64,7 @@ export function CardMeta({
   return (
     <div
       className={cn(
-        'mt-[0.45rem] flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]',
+        'mt-[0.4rem] flex flex-wrap gap-[0.9rem] text-[0.9rem] text-[var(--text-soft)]',
         className,
       )}
       {...props}
@@ -78,7 +78,7 @@ export function CardActions({
 }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex shrink-0 flex-wrap gap-[0.6rem]', className)}
+      className={cn('flex shrink-0 flex-wrap gap-[0.55rem]', className)}
       {...props}
     />
   );

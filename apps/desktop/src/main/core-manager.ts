@@ -3985,6 +3985,7 @@ export class CoreManager {
               },
             });
           } else if (sessionLifecycle.connectedAt) {
+            // 연결 성공 후 오류: lifecycle을 error로 마감(local 포함).
             this.finalizeSessionLifecycle(
               event.sessionId,
               "error",
@@ -3993,21 +3994,34 @@ export class CoreManager {
                 : null,
             );
           } else if (sessionLifecycle.status !== "error") {
-            this.log({
-              level: "error",
-              category: "session",
-              message: `${this.getConnectionKindLabel(sessionLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
-              metadata: {
-                sessionId: event.sessionId,
-                hostId: sessionLifecycle.hostId,
-                hostLabel: sessionLifecycle.hostLabel,
-                title: sessionLifecycle.title,
-                connectionKind: sessionLifecycle.connectionKind,
-                message: event.payload.message ?? null,
-              },
-            });
-            sessionLifecycle.status = "error";
-            this.sessionLifecycleById.set(event.sessionId, sessionLifecycle);
+            if (sessionLifecycle.connectionKind === "local") {
+              // 로컬 터미널의 연결 전 실패: replay/연결 lifecycle 대상이 아니라 generic 에러 로그만.
+              this.log({
+                level: "error",
+                category: "session",
+                message: `${this.getConnectionKindLabel(sessionLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
+                metadata: {
+                  sessionId: event.sessionId,
+                  hostId: sessionLifecycle.hostId,
+                  hostLabel: sessionLifecycle.hostLabel,
+                  title: sessionLifecycle.title,
+                  connectionKind: sessionLifecycle.connectionKind,
+                  message: event.payload.message ?? null,
+                },
+              });
+              sessionLifecycle.status = "error";
+              this.sessionLifecycleById.set(event.sessionId, sessionLifecycle);
+            } else {
+              // host 세션(ssh/ssm/warpgate/ecs-exec/serial)의 연결 전 실패: hostId 포함
+              // lifecycle error 로그로 남겨 최근 로그/Logs 에 표시한다.
+              this.finalizeSessionLifecycle(
+                event.sessionId,
+                "error",
+                typeof event.payload.message === "string"
+                  ? event.payload.message
+                  : null,
+              );
+            }
           }
         }
       }
@@ -4842,18 +4856,26 @@ export class CoreManager {
     disconnectReason: string | null,
   ): void {
     const lifecycle = this.sessionLifecycleById.get(sessionId);
-    if (!lifecycle || !lifecycle.connectedAt) {
+    if (!lifecycle) {
       return;
     }
     if (lifecycle.disconnectedAt) {
       return;
     }
+    // 로컬 터미널은 연결 전 실패를 lifecycle 로그로 남기지 않는다(generic 로그로만 처리).
+    if (lifecycle.connectionKind === "local" && !lifecycle.connectedAt) {
+      return;
+    }
     const disconnectedAt = new Date().toISOString();
-    const durationMs = Math.max(
-      0,
-      new Date(disconnectedAt).getTime() -
-        new Date(lifecycle.connectedAt).getTime(),
-    );
+    // 연결 전 실패(connectedAt 없음)도 기록한다. 기준 시각은 실패 시각, duration은 null.
+    const referenceAt = lifecycle.connectedAt ?? disconnectedAt;
+    const durationMs = lifecycle.connectedAt
+      ? Math.max(
+          0,
+          new Date(disconnectedAt).getTime() -
+            new Date(lifecycle.connectedAt).getTime(),
+        )
+      : null;
     lifecycle.disconnectedAt = disconnectedAt;
     lifecycle.disconnectReason = disconnectReason;
     lifecycle.status = status;
@@ -4866,7 +4888,7 @@ export class CoreManager {
       title: lifecycle.title,
       connectionDetails: lifecycle.connectionDetails,
       connectionKind: lifecycle.connectionKind,
-      connectedAt: lifecycle.connectedAt,
+      connectedAt: referenceAt,
       disconnectedAt,
       durationMs,
       status,
@@ -4881,7 +4903,7 @@ export class CoreManager {
       kind: "session-lifecycle",
       message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
       metadata: metadata as unknown as Record<string, unknown>,
-      createdAt: lifecycle.connectedAt,
+      createdAt: referenceAt,
       updatedAt: disconnectedAt,
     });
   }

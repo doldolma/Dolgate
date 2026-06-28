@@ -13,7 +13,7 @@ export function SectionLabel({
   return (
     <div
       className={cn(
-        'mb-2 text-[0.72rem] font-semibold uppercase tracking-[0.18em] text-[var(--text-soft)]',
+        'mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.18em] text-[var(--text-soft)]',
         className,
       )}
       {...props}

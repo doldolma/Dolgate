@@ -159,6 +159,6 @@ session-manager-plugin --version
 
 ## 라이선스
 
-MIT © 2026 doldolma — 전문은 [LICENSE](./LICENSE)를 참고하세요.
+MIT © 2026 doldolma
 
 명령어 자동완성의 generator 런타임과 번들 스펙은 Amazon Q Developer CLI(Apache-2.0/MIT)와 withfig/autocomplete(MIT)에서 가져왔으며, 해당 구성요소는 각자의 라이선스를 따릅니다.

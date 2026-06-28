@@ -98,7 +98,7 @@ function renderTerminalThemePreview(
 ) {
   return (
     <div
-      className="flex min-h-[86px] w-full flex-col justify-between rounded-[18px] border border-[color-mix(in_srgb,currentColor_12%,transparent_88%)] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+      className="flex min-h-[86px] w-full flex-col justify-between rounded-[12px] border border-[color-mix(in_srgb,currentColor_12%,transparent_88%)] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
       style={background || color ? { background, color } : undefined}
     >
       {preview}
@@ -109,12 +109,12 @@ function renderTerminalThemePreview(
 function renderTerminalThemePreviewChrome(accent?: string) {
   return (
     <>
-      <span className="inline-flex gap-[0.32rem]">
+      <span className="inline-flex gap-[0.25rem]">
         <i className="h-[0.46rem] w-[0.46rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
         <i className="h-[0.46rem] w-[0.46rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
         <i className="h-[0.46rem] w-[0.46rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
       </span>
-      <span className="grid gap-[0.38rem]">
+      <span className="grid gap-[0.4rem]">
         <span className="block h-[0.42rem] w-[54%] rounded-full" style={accent ? { background: accent } : undefined} />
         <span className="block h-[0.42rem] w-[82%] rounded-full bg-[color-mix(in_srgb,currentColor_24%,transparent_76%)]" />
         <span className="block h-[0.42rem] w-[68%] rounded-full bg-[color-mix(in_srgb,currentColor_24%,transparent_76%)]" />
@@ -131,15 +131,15 @@ function renderAppearanceThemeMiniWindow(
 ) {
   return (
     <div
-      className="grid min-h-[66px] gap-[0.5rem] rounded-[16px] border border-[color-mix(in_srgb,currentColor_12%,transparent_88%)] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+      className="grid min-h-[66px] gap-[0.55rem] rounded-[10px] border border-[color-mix(in_srgb,currentColor_12%,transparent_88%)] px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
       style={{ background, color }}
     >
-      <span className="inline-flex gap-[0.28rem]">
+      <span className="inline-flex gap-[0.25rem]">
         <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
         <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
         <i className="h-[0.42rem] w-[0.42rem] rounded-full bg-[color-mix(in_srgb,currentColor_72%,transparent_28%)]" />
       </span>
-      <span className="grid gap-[0.34rem]">
+      <span className="grid gap-[0.4rem]">
         <span className="block h-[0.4rem] w-[58%] rounded-full" style={{ background: accent }} />
         <span className="block h-[0.4rem] w-[82%] rounded-full bg-[color-mix(in_srgb,currentColor_20%,transparent_80%)]" />
         <span className="block h-[0.4rem] w-[64%] rounded-full bg-[color-mix(in_srgb,currentColor_20%,transparent_80%)]" />
@@ -258,7 +258,7 @@ export function SettingsPanel({
 
   return (
     <div className="flex min-h-full flex-1 flex-col gap-5">
-      <div className="px-0 pb-[0.25rem] pt-[0.35rem]">
+      <div className="px-0 pb-[0.25rem] pt-[0.4rem]">
         <SectionLabel>Preferences</SectionLabel>
         <h2>Settings</h2>
       </div>
@@ -279,7 +279,7 @@ export function SettingsPanel({
 
       {activeSection === 'general' ? (
         <>
-          <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
+          <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4">
               <div>
                 <SectionLabel>Terminal</SectionLabel>
@@ -287,7 +287,7 @@ export function SettingsPanel({
               </div>
             </div>
 
-            <div className="mb-[1.15rem] grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
+            <div className="mb-[1.1rem] grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
               <FieldGroup label="Font">
                 <FontSelectField
                   ariaLabel="Font"
@@ -326,7 +326,7 @@ export function SettingsPanel({
                     handleChangeTerminalScrollbackLines(Number(event.target.value))
                   }
                 />
-                <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   보관할 터미널 히스토리 줄 수입니다.
                 </p>
               </FieldGroup>
@@ -343,7 +343,7 @@ export function SettingsPanel({
                     handleChangeTerminalLineHeight(Number(event.target.value))
                   }
                 />
-                <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   문자 줄 간격을 조절합니다.
                 </p>
               </FieldGroup>
@@ -360,7 +360,7 @@ export function SettingsPanel({
                     handleChangeTerminalLetterSpacing(Number(event.target.value))
                   }
                 />
-                <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   문자 사이 간격을 조금 더 넓힐 수 있습니다.
                 </p>
               </FieldGroup>
@@ -377,7 +377,7 @@ export function SettingsPanel({
                     handleChangeTerminalMinimumContrastRatio(Number(event.target.value))
                   }
                 />
-                <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   가독성이 낮은 색 조합을 자동으로 보정합니다.
                 </p>
               </FieldGroup>
@@ -394,7 +394,7 @@ export function SettingsPanel({
                     handleChangeSessionReplayRetentionCount(Number(event.target.value))
                   }
                 />
-                <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   로컬에 보관할 종료된 세션 replay 개수입니다.
                 </p>
               </FieldGroup>
@@ -402,7 +402,7 @@ export function SettingsPanel({
             </div>
 
             {/* 터미널 동작 토글 — 토글끼리 묶어 input과 높이가 섞이지 않게 한다 */}
-            <div className="mb-[1.15rem] grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1">
+            <div className="mb-[1.1rem] grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1">
               <ToggleSwitch
                 checked={settings.terminalWebglEnabled}
                 label="WebGL Renderer"
@@ -447,14 +447,14 @@ export function SettingsPanel({
                     </option>
                   ))}
                 </SelectField>
-                <p className="mt-1.5 text-[0.78rem] leading-relaxed text-[var(--text-muted)]">
+                <p className="mt-1.5 text-[0.76rem] leading-relaxed text-[var(--text-muted)]">
                   tmux 제어 모드에서 prefix 다음 키를 네이티브 tmux 동작으로 매핑합니다.
                 </p>
               </FieldGroup>
             </div>
 
             {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}
-            <div className="mb-[1.15rem] grid gap-[0.7rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
+            <div className="mb-[1.1rem] grid gap-[0.7rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
               <SectionLabel>Notifications</SectionLabel>
               <ToggleSwitch
                 checked={settings.commandNotificationsEnabled}
@@ -477,7 +477,7 @@ export function SettingsPanel({
               />
 
               {settings.commandNotificationsEnabled ? (
-                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.85rem] max-[760px]:grid-cols-1">
+                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.9rem] max-[760px]:grid-cols-1">
                   <FieldGroup label="알림 기준 시간(초)">
                     <Input
                       aria-label="알림 기준 시간(초)"
@@ -494,7 +494,7 @@ export function SettingsPanel({
                         })
                       }
                     />
-                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                    <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                       이 시간 이상 걸린 명령이 끝나면 알립니다.
                     </p>
                   </FieldGroup>
@@ -539,7 +539,7 @@ export function SettingsPanel({
             </div>
 
             {/* 자동 재연결 — 끊김 시 백오프 재연결 동작 제어 */}
-            <div className="mb-[1.15rem] grid gap-[0.7rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
+            <div className="mb-[1.1rem] grid gap-[0.7rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">
               <SectionLabel>Auto-Reconnect</SectionLabel>
               <ToggleSwitch
                 checked={settings.autoReconnectEnabled}
@@ -553,7 +553,7 @@ export function SettingsPanel({
               />
 
               {settings.autoReconnectEnabled ? (
-                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.85rem] max-[760px]:grid-cols-1">
+                <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.9rem] max-[760px]:grid-cols-1">
                   <FieldGroup label="최대 재시도 횟수">
                     <Input
                       aria-label="최대 재시도 횟수"
@@ -568,7 +568,7 @@ export function SettingsPanel({
                         })
                       }
                     />
-                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                    <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                       이 횟수만큼 실패하면 수동 재연결로 전환합니다.
                     </p>
                   </FieldGroup>
@@ -588,7 +588,7 @@ export function SettingsPanel({
                         })
                       }
                     />
-                    <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                    <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                       지수 백오프가 늘어날 수 있는 최대 간격입니다.
                     </p>
                   </FieldGroup>
@@ -616,7 +616,7 @@ export function SettingsPanel({
             </div>
           </section>
 
-          <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
+          <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4 mt-1">
               <div>
                 <SectionLabel>Terminal</SectionLabel>
@@ -651,20 +651,20 @@ export function SettingsPanel({
             </div>
           </section>
 
-          <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
+          <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4">
               <div>
                 <SectionLabel>Session</SectionLabel>
                 <h3>Account</h3>
               </div>
             </div>
-            <dl className="mb-4 grid gap-[0.85rem]">
-              <div className="grid gap-1 rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
-                <dt className="text-[0.84rem] text-[var(--text-soft)]">Email</dt>
+            <dl className="mb-4 grid gap-[0.9rem]">
+              <div className="grid gap-1 rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
+                <dt className="text-[0.82rem] text-[var(--text-soft)]">Email</dt>
                 <dd className="m-0 break-all text-[var(--text)]">{currentUserEmail ?? '—'}</dd>
               </div>
-              <div className="grid gap-1 rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
-                <dt className="text-[0.84rem] text-[var(--text-soft)]">Server</dt>
+              <div className="grid gap-1 rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
+                <dt className="text-[0.82rem] text-[var(--text-soft)]">Server</dt>
                 <dd className="m-0 break-all text-[var(--text)]">{settings.serverUrl || '—'}</dd>
               </div>
             </dl>
@@ -676,7 +676,7 @@ export function SettingsPanel({
       ) : null}
 
       {activeSection === 'sftp' ? (
-        <section className="rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.55rem] shadow-[var(--shadow-soft)]">
+        <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
           <div className="mb-4">
             <div>
               <SectionLabel>SFTP</SectionLabel>
@@ -717,7 +717,7 @@ export function SettingsPanel({
                   });
                 }}
               />
-              <p className="m-0 text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+              <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                 이 크기 이하의 텍스트 파일만 내장 편집기로 열 수 있습니다.
               </p>
             </FieldGroup>

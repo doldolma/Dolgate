@@ -18,6 +18,7 @@ export * from './StatusBadge';
 export * from './TagInputField';
 export * from './Tabs';
 export * from './Textarea';
+export * from './Tooltip';
 export * from './NoticeCard';
 export * from './OptionCard';
 export * from './Toolbar';

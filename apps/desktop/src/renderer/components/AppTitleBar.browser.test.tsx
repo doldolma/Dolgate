@@ -119,8 +119,9 @@ describe('AppTitleBar update popover', () => {
     renderTitleBar();
 
     const sftpButton = screen.getByRole('button', { name: 'SFTP' });
-    expect(sftpButton.className).toContain('bg-[rgba(255,255,255,0.06)]');
-    expect(sftpButton.className).toContain('text-[rgba(243,247,251,0.78)]');
+    // 비활성 고정탭은 바에 녹아들도록 투명 배경 + 가독성 있는 밝은 글자.
+    expect(sftpButton.className).toContain('bg-transparent');
+    expect(sftpButton.className).toContain('text-[rgba(243,247,251,0.74)]');
   });
 
   it('renders dynamic session tabs as a single pill with the close affordance inside', () => {
@@ -177,7 +178,8 @@ describe('AppTitleBar update popover', () => {
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();
-    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.06)]');
+    // 비활성 세션탭도 옅은 배경+테두리로 경계가 보인다(어디까지 탭인지 알 수 있게).
+    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.07)]');
     expect(pill?.contains(closeButton)).toBe(true);
     expect(container.querySelectorAll('.group').length).toBeGreaterThan(0);
   });
@@ -235,9 +237,9 @@ describe('AppTitleBar update popover', () => {
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();
-    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.94)]');
-    expect(pill?.className).toContain('border-[rgba(255,255,255,0.14)]');
-    expect(sessionButton.className).toContain('text-[var(--accent-strong)]');
+    // 활성 세션탭은 흰 배경 + 어두운 글자로 비활성(옅은 배경/밝은 글자)과 또렷이 구분된다.
+    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.96)]');
+    expect(sessionButton.className).toContain('text-[var(--chrome-bg)]');
   });
 
   it('hides the native scrollbar and shows edge fades when the titlebar tab strip overflows', () => {

@@ -286,6 +286,7 @@ export function createMockApi(): DesktopApi {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined),
+      setFavorite: vi.fn().mockResolvedValue(null),
     },
     aws: {
       listProfiles: vi.fn().mockResolvedValue([]),

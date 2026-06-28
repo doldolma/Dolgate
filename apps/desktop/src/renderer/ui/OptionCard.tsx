@@ -22,7 +22,7 @@ export function OptionCard({
     <button
       type={type}
       className={cn(
-        'flex min-h-[150px] w-full flex-col items-start gap-3 rounded-[22px] border px-4 py-4 text-left transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)]',
+        'flex min-h-[132px] w-full flex-col items-start gap-3 rounded-[12px] border px-3.5 py-3.5 text-left transition-[border-color,box-shadow,background-color] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--app-bg)]',
         active
           ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] shadow-none'
           : 'border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_96%,transparent_4%)]',

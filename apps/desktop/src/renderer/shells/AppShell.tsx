@@ -182,6 +182,7 @@ export function AppShell({
         onSelectHome={homeViewModel.activateHome}
         onSelectSftp={sftpViewModel.activateSftp}
         onSelectContainers={containersViewModel.activateContainers}
+        hasOpenContainers={containersViewModel.containerTabs.length > 0}
         onSelectSession={sessionViewModel.activateSession}
         onSelectWorkspace={sessionViewModel.activateWorkspace}
         onCloseSession={sessionViewModel.disconnectTab}

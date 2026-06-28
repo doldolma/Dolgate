@@ -455,8 +455,8 @@ export function TerminalWorkspace({
 
   if (tabs.length === 0) {
     return (
-      <div className="grid h-full min-h-0 place-items-center rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-soft)]">
-        <div className="grid w-full max-w-[46rem] gap-4 rounded-[30px] border border-[var(--border)] bg-[var(--surface)] px-9 py-8 shadow-[var(--shadow)]">
+      <div className="grid h-full min-h-0 place-items-center rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-soft)]">
+        <div className="grid w-full max-w-[46rem] gap-4 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] px-9 py-8 shadow-[var(--shadow)]">
           <SectionLabel>연결 준비 완료</SectionLabel>
           <h3>첫 SSH 세션을 시작해보세요</h3>
           <p className="text-[var(--text-soft)] leading-[1.7]">
@@ -551,7 +551,7 @@ export function TerminalWorkspace({
       // 큐잉된 resize 태스크가 xterm IdleTaskQueue 에서 크래시(handleResize undefined)한다.
       // 모드 전환은 remount 없이 className/style 재배치 + ResizeObserver 재fit 으로 충분.
       key: tab.stableId,
-      className: isWorkspacePane ? 'absolute p-[0.3rem]' : undefined,
+      className: isWorkspacePane ? 'absolute p-[0.25rem]' : undefined,
       style: isWorkspacePane ? rectStyle : undefined,
       onDragOver: isWorkspacePane
         ? (event) => {

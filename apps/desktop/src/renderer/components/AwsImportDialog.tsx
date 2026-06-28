@@ -839,12 +839,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </div>
 
               {inspectionCandidateChips.length > 0 ? (
-                <div className="flex flex-wrap gap-[0.6rem]">
+                <div className="flex flex-wrap gap-[0.55rem]">
                   {inspectionCandidateChips.map((candidate) => (
                     <Button
                       key={candidate}
                       variant="secondary"
-                      className="px-[0.95rem]"
+                      className="px-[0.9rem]"
                       disabled={inspectionStatus === 'loading' || isRegistering}
                       onClick={() => {
                         usernameDirtyRef.current = true;
@@ -859,7 +859,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               ) : null}
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion && importMode === 'ecs' ? (
-            <div className="mt-[0.95rem]" data-testid="aws-import-ecs-cluster-list">
+            <div className="mt-[0.9rem]" data-testid="aws-import-ecs-cluster-list">
               <PanelSection>
                 {ecsClusters.length === 0 && !isLoadingInstances ? (
                   <EmptyState title="이 리전에 가져올 수 있는 ECS 클러스터가 없습니다." />
@@ -921,7 +921,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               </PanelSection>
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion ? (
-            <div className="mt-[0.95rem]" data-testid="aws-import-instance-list">
+            <div className="mt-[0.9rem]" data-testid="aws-import-instance-list">
               <PanelSection>
                 {instances.length === 0 && !isLoadingInstances ? (
                   <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />

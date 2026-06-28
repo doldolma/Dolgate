@@ -86,9 +86,10 @@ export function RemoteFileEditorModal() {
             <h3 className="truncate" title={session?.remotePath ?? fileName}>
               {fileName}
               {isDirty ? (
-                <span className="ml-2 text-[var(--accent-strong)]" aria-hidden>
-                  ●
-                </span>
+                <span
+                  className="ml-2 inline-block h-2 w-2 rounded-full bg-[var(--accent-strong)] align-middle"
+                  aria-hidden
+                />
               ) : null}
             </h3>
           </div>
@@ -113,7 +114,7 @@ export function RemoteFileEditorModal() {
           {session ? (
             <div className="flex flex-col gap-3">
               {conflict ? (
-                <div className="rounded-[14px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--selection-soft)] px-4 py-3 text-[0.92rem] leading-[1.5] text-[var(--text)]">
+                <div className="rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--selection-soft)] px-4 py-3 text-[0.9rem] leading-[1.5] text-[var(--text)]">
                   <p className="font-semibold">
                     편집하는 동안 원격 파일이 변경되었습니다.
                   </p>
@@ -141,8 +142,8 @@ export function RemoteFileEditorModal() {
               ) : null}
 
               {sudoRequired ? (
-                <div className="rounded-[14px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--surface-secondary)] px-4 py-3">
-                  <p className="text-[0.92rem] font-semibold text-[var(--text)]">
+                <div className="rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--surface-secondary)] px-4 py-3">
+                  <p className="text-[0.9rem] font-semibold text-[var(--text)]">
                     이 파일을 저장하려면 sudo 권한이 필요합니다.
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -180,7 +181,7 @@ export function RemoteFileEditorModal() {
                 <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p>
               ) : null}
 
-              <div className="overflow-hidden rounded-[14px] border border-[var(--border)]">
+              <div className="overflow-hidden rounded-[10px] border border-[var(--border)]">
                 <Suspense
                   fallback={
                     <div className="p-4 text-[var(--text-soft)]">

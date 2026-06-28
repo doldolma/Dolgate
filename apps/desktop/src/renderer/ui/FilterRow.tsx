@@ -8,7 +8,7 @@ export function FilterRow({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-end gap-[0.9rem] rounded-[22px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-[0.9rem]',
+        'flex flex-wrap items-end gap-[0.9rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-[0.7rem]',
         className,
       )}
       {...props}

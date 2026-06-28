@@ -69,7 +69,7 @@ export function TerminalWorkspaceLayoutView({
       onDrop={onDrop}
     >
       {shouldShowBroadcastControl ? (
-        <div className="absolute right-[6.1rem] top-3 z-[5] flex flex-col items-end gap-[0.45rem]">
+        <div className="absolute right-[6.1rem] top-3 z-[5] flex flex-col items-end gap-[0.4rem]">
           <Button
             variant="secondary"
             size="sm"
@@ -126,7 +126,7 @@ export function TerminalWorkspaceLayoutView({
             <div
               id={broadcastTooltipId}
               role="tooltip"
-              className="pointer-events-none max-w-[min(15rem,calc(100vw-2rem))] rounded-[10px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[color-mix(in_srgb,var(--surface)_94%,transparent_6%)] px-[0.65rem] py-[0.45rem] text-[0.76rem] leading-[1.35] whitespace-nowrap text-[var(--text)] shadow-[0_14px_28px_rgba(0,0,0,0.16)]"
+              className="pointer-events-none max-w-[min(15rem,calc(100vw-2rem))] rounded-[10px] border border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[color-mix(in_srgb,var(--surface)_94%,transparent_6%)] px-[0.7rem] py-[0.4rem] text-[0.76rem] leading-[1.35] whitespace-nowrap text-[var(--text)] shadow-[0_14px_28px_rgba(0,0,0,0.16)]"
             >
               {broadcastTooltipText}
             </div>
@@ -193,7 +193,7 @@ export function TerminalWorkspaceLayoutView({
 
       {dropPreview ? (
         <div
-          className="pointer-events-none absolute z-[4] rounded-[24px] border border-[color-mix(in_srgb,var(--accent-strong)_46%,transparent_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%)]"
+          className="pointer-events-none absolute z-[4] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_46%,transparent_54%)] bg-[color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%)]"
           data-workspace-drop-preview="true"
           style={toPercentRectStyle(dropPreview.rect)}
         />

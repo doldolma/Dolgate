@@ -114,6 +114,103 @@ describe('HostRepository', () => {
     expect(hosts.getById('ssh-startup')).toMatchObject({ startupCommand: null });
   });
 
+  it('toggles favorite and preserves it across host edits', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('ssh-fav', {
+      kind: 'ssh',
+      label: 'Fav host',
+      hostname: 'fav.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+    });
+    expect(created.favorite ?? null).toBeNull();
+
+    const favored = hosts.setFavorite('ssh-fav', true);
+    expect(favored).toMatchObject({ favorite: true });
+
+    // 편집 폼 저장(update)에서도 즐겨찾기가 유지되어야 한다.
+    const edited = hosts.update('ssh-fav', {
+      kind: 'ssh',
+      label: 'Fav host (renamed)',
+      hostname: 'fav.example.com',
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password',
+    });
+    expect(edited).toMatchObject({ label: 'Fav host (renamed)', favorite: true });
+
+    // 해제하면 null로 돌아간다.
+    const unfavored = hosts.setFavorite('ssh-fav', false);
+    expect(unfavored?.favorite ?? null).toBeNull();
+  });
+
+  it('stores env on the host record, not the shared credential, so it does not bleed across hosts', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    // 두 호스트가 같은 자격증명(secretRef)을 공유 — 예전엔 env가 시크릿에 있어 서로 번졌다.
+    hosts.create(
+      'ssh-env-a',
+      {
+        kind: 'ssh',
+        label: 'A',
+        hostname: 'a.example.com',
+        port: 22,
+        username: 'ubuntu',
+        authType: 'password',
+        env: [{ key: 'FOO', value: 'a-foo' }],
+      },
+      'secret:shared',
+    );
+    hosts.create(
+      'ssh-env-b',
+      {
+        kind: 'ssh',
+        label: 'B',
+        hostname: 'b.example.com',
+        port: 22,
+        username: 'ubuntu',
+        authType: 'password',
+      },
+      'secret:shared',
+    );
+
+    expect(hosts.getById('ssh-env-a')).toMatchObject({
+      secretRef: 'secret:shared',
+      env: [{ key: 'FOO', value: 'a-foo' }],
+    });
+    expect(hosts.getById('ssh-env-b')).toMatchObject({ secretRef: 'secret:shared', env: null });
+
+    // A의 env를 수정해도 같은 자격증명을 쓰는 B에는 번지지 않는다(env가 호스트 레코드에 있으므로).
+    hosts.update(
+      'ssh-env-a',
+      {
+        kind: 'ssh',
+        label: 'A',
+        hostname: 'a.example.com',
+        port: 22,
+        username: 'ubuntu',
+        authType: 'password',
+        env: [
+          { key: 'FOO', value: 'a-foo' },
+          { key: 'BAR', value: 'a-bar' },
+        ],
+      },
+      'secret:shared',
+    );
+
+    expect(hosts.getById('ssh-env-a')).toMatchObject({
+      env: [
+        { key: 'FOO', value: 'a-foo' },
+        { key: 'BAR', value: 'a-bar' },
+      ],
+    });
+    expect(hosts.getById('ssh-env-b')).toMatchObject({ env: null });
+  });
+
   it('persists AWS SFTP metadata on create and update', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

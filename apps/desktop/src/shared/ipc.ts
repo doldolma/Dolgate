@@ -792,6 +792,7 @@ export interface DesktopApi {
       secrets?: HostSecretInput,
     ) => Promise<HostRecord>;
     remove: (id: string) => Promise<void>;
+    setFavorite: (id: string, favorite: boolean) => Promise<HostRecord | null>;
   };
   groups: {
     list: () => Promise<GroupRecord[]>;

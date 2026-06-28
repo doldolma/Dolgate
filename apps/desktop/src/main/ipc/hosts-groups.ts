@@ -152,6 +152,15 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ctx.queueSync();
   });
 
+  ipcMain.handle(
+    ipcChannels.hosts.setFavorite,
+    async (_event, id: string, favorite: boolean) => {
+      const record = ctx.hosts.setFavorite(id, favorite);
+      ctx.queueSync();
+      return record;
+    },
+  );
+
   ipcMain.handle(ipcChannels.groups.list, async () => ctx.groups.list());
 
   ipcMain.handle(

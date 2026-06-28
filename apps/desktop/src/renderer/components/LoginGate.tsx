@@ -205,9 +205,9 @@ export function LoginGate({
 
   return (
     <div className="grid min-h-0 flex-1 place-items-center px-8 py-10">
-      <div className="w-[min(34rem,100%)] rounded-[32px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[2.5rem] pb-[2.45rem] pt-[2.55rem] shadow-[var(--shadow)]">
+      <div className="w-[min(34rem,100%)] rounded-[12px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[2.4rem] pb-[2.4rem] pt-[2.4rem] shadow-[var(--shadow)]">
         <div className="mb-7 flex items-center justify-between gap-5">
-          <SectionLabel className="mb-0 text-[0.96rem] tracking-[0.24em] text-[color-mix(in_srgb,var(--text-soft)_88%,var(--text)_12%)]">
+          <SectionLabel className="mb-0 text-[1rem] tracking-[0.24em] text-[color-mix(in_srgb,var(--text-soft)_88%,var(--text)_12%)]">
             Dolgate
           </SectionLabel>
           {!isPendingBrowserLogin ? (
@@ -227,17 +227,17 @@ export function LoginGate({
           ) : null}
         </div>
         {localErrorMessage || authState.errorMessage ? (
-          <div className="mb-4 rounded-[20px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[var(--danger-text)] shadow-none">
+          <div className="mb-4 rounded-[12px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[var(--danger-text)] shadow-none">
             {localErrorMessage ?? authState.errorMessage}
           </div>
         ) : null}
         {statusMessage ? (
-          <div className="mb-4 text-[0.92rem] text-[var(--text-soft)]">{statusMessage}</div>
+          <div className="mb-4 text-[0.9rem] text-[var(--text-soft)]">{statusMessage}</div>
         ) : null}
         {isAdvancedOpen && !isPendingBrowserLogin ? (
-          <div className="mb-4 rounded-[22px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 pb-4 pt-[1rem] shadow-none">
-            <label className="flex flex-col gap-[0.45rem]">
-              <span className="text-[0.85rem] text-[var(--text-soft)]">Login Server</span>
+          <div className="mb-4 rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] px-4 pb-4 pt-[0.9rem] shadow-none">
+            <label className="flex flex-col gap-[0.4rem]">
+              <span className="text-[0.82rem] text-[var(--text-soft)]">Login Server</span>
               <Input
                 value={draftServerUrl}
                 onChange={(event) => setDraftServerUrl(event.target.value)}
@@ -248,15 +248,15 @@ export function LoginGate({
                 autoCorrect="off"
               />
             </label>
-            <div className="mt-[0.6rem] text-[0.85rem] leading-[1.5] text-[var(--text-soft)]">
+            <div className="mt-[0.55rem] text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
               경로 없이 서버 루트 주소만 입력해 주세요.
             </div>
             {effectiveValidationMessage ? (
-              <div className="mt-[0.65rem] text-[0.85rem] text-[var(--danger-text)]">
+              <div className="mt-[0.7rem] text-[0.82rem] text-[var(--danger-text)]">
                 {effectiveValidationMessage}
               </div>
             ) : null}
-            <div className="mt-[0.9rem] flex items-center justify-between gap-[0.65rem]">
+            <div className="mt-[0.9rem] flex items-center justify-between gap-[0.7rem]">
               <div>
                 {hasServerUrlOverride ? (
                   <Button
@@ -268,7 +268,7 @@ export function LoginGate({
                   </Button>
                 ) : null}
               </div>
-              <div className="flex gap-[0.65rem]">
+              <div className="flex gap-[0.7rem]">
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -298,7 +298,7 @@ export function LoginGate({
           variant="primary"
           size="lg"
           fullWidth
-          className="min-h-[80px] justify-between rounded-[26px] px-7 text-[1.06rem] shadow-none"
+          className="min-h-[80px] justify-between rounded-[12px] px-7 text-[1rem] shadow-none"
           disabled={shouldDisableLoginGatePrimaryAction({
             authStatus: authState.status,
             isSyncBootstrapping,
@@ -320,7 +320,7 @@ export function LoginGate({
           <Button
             variant="secondary"
             fullWidth
-            className="mt-3 min-h-[56px] rounded-[22px]"
+            className="mt-3 min-h-[56px] rounded-[12px]"
             disabled={isSubmitting}
             onClick={handleCancelBrowserLogin}
           >

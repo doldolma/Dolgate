@@ -254,7 +254,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
             ? input.tmuxCommand?.trim() || undefined
             : input.command?.trim() || undefined,
         startupCommand: input.startupCommand,
-        env: secrets.env,
+        // env는 호스트 속성. 구버전 데이터(시크릿에만 있던 env)는 host.env가 비었을 때만 폴백으로 사용.
+        env: sshHost.env && sshHost.env.length > 0 ? sshHost.env : secrets.env,
         // mosh는 jump와 상호 배타다(UI에서 차단). 방어적으로 jump가 있으면 useMosh를
         // 무시해 jump 연결을 보장한다(잘못된 조합이 들어와도 안전하게 SSH로 폴백).
         useMosh,

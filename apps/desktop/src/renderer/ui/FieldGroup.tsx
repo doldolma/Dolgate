@@ -17,7 +17,7 @@ export function FieldGroup({
   return (
     <label
       className={cn(
-        'flex min-w-0 flex-col gap-[0.55rem] text-[0.95rem] font-medium text-[var(--text)]',
+        'flex min-w-0 flex-col gap-[0.55rem] text-[0.9rem] font-medium text-[var(--text)]',
         compact ? 'max-w-[16rem]' : '',
         className,
       )}

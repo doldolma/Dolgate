@@ -80,6 +80,7 @@ export {
 } from "../lib/file-drop";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
+import { ArrowLeft, ArrowRight, ArrowUp } from "../ui/icons";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   Button,
@@ -636,7 +637,7 @@ function FileEntryIcon({
       data-file-icon={visualKind}
       data-file-kind={fileKind}
       className={cn(
-        "inline-flex h-[1.8rem] w-[1.8rem] shrink-0 items-center justify-center rounded-[12px] border",
+        "inline-flex h-[1.8rem] w-[1.8rem] shrink-0 items-center justify-center rounded-[10px] border",
         toneClassName,
       )}
     >
@@ -758,7 +759,7 @@ function HostPickerSectionHeader({
       )}
     >
       {label ? <SectionLabel className="mb-0">{label}</SectionLabel> : null}
-      <span className="inline-flex min-w-[2rem] items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_80%,white_20%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.5rem] py-[0.1rem] text-[0.72rem] font-semibold text-[var(--text-soft)]">
+      <span className="inline-flex min-w-[2rem] items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--border)_80%,white_20%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-semibold text-[var(--text-soft)]">
         {count}
       </span>
     </div>
@@ -1274,7 +1275,7 @@ function PaneBrowser({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-[0.85rem] px-4 pb-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] px-4 pb-4">
       <Toolbar className="justify-between">
         <Tabs
           className="shrink-0 border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_92%,transparent_8%)] p-1"
@@ -1291,31 +1292,31 @@ function PaneBrowser({
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">
           <IconButton
             size="sm"
-            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[10px]"
             onClick={() => void onNavigateBack()}
             disabled={pane.historyIndex <= 0}
           >
-            ←
+            <ArrowLeft className="h-4 w-4" />
           </IconButton>
           <IconButton
             size="sm"
-            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[10px]"
             onClick={() => void onNavigateForward()}
             disabled={pane.historyIndex >= pane.history.length - 1}
           >
-            →
+            <ArrowRight className="h-4 w-4" />
           </IconButton>
           <IconButton
             size="sm"
-            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[12px]"
+            className="h-[2.3rem] w-[2.3rem] flex-none rounded-[10px]"
             onClick={() => void onNavigateParent()}
           >
-            ↑
+            <ArrowUp className="h-4 w-4" />
           </IconButton>
           <Button
             variant="secondary"
             size="sm"
-            className="flex-none rounded-[12px]"
+            className="flex-none rounded-[10px]"
             onClick={onOpenCreateDirectoryDialog}
             disabled={pane.isLoading}
           >
@@ -1324,7 +1325,7 @@ function PaneBrowser({
           <Button
             variant="secondary"
             size="sm"
-            className="flex-none rounded-[12px]"
+            className="flex-none rounded-[10px]"
             onClick={() => void onRefresh()}
             disabled={pane.isLoading}
           >
@@ -1336,7 +1337,7 @@ function PaneBrowser({
       <div ref={localBreadcrumbRef} className="relative">
         <nav
           aria-label={`Local path for ${pane.id} pane`}
-          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.92rem] text-[var(--text-muted)]"
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.9rem] text-[var(--text-muted)]"
         >
           {breadcrumbs.map((part, index) => {
             const isWindowsDrivePart =
@@ -1350,7 +1351,7 @@ function PaneBrowser({
                 {index > 0 ? (
                   <span
                     aria-hidden="true"
-                    className="text-[0.86rem] text-[var(--text-dim)]"
+                    className="text-[0.82rem] text-[var(--text-dim)]"
                   >
                     ›
                   </span>
@@ -1359,7 +1360,7 @@ function PaneBrowser({
                   <button
                     type="button"
                     className={cn(
-                      "rounded-[8px] px-[0.1rem] py-[0.05rem] text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60",
+                      "rounded-[8px] px-[0.25rem] py-[0.25rem] text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60",
                       isCurrent
                         ? "font-medium text-[var(--text-primary)]"
                         : "text-[var(--text-secondary)] hover:text-[var(--accent-strong)]",
@@ -1398,18 +1399,18 @@ function PaneBrowser({
             id={`${pane.id}-local-root-menu`}
             role="menu"
             aria-label={`Local drive selector for ${pane.id} pane`}
-            className="absolute left-0 top-[calc(100%+0.45rem)] z-20 min-w-[8.5rem] rounded-[16px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.35rem] shadow-[var(--shadow)]"
+            className="absolute left-0 top-[calc(100%+0.45rem)] z-20 min-w-[8.5rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.4rem] shadow-[var(--shadow)]"
           >
             {isLoadingLocalRoots ? (
-              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+              <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
                 드라이브 불러오는 중...
               </div>
             ) : localRootsErrorMessage ? (
-              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--danger)]">
+              <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--danger)]">
                 {localRootsErrorMessage}
               </div>
             ) : localRoots && localRoots.length > 0 ? (
-              <div className="flex flex-col gap-[0.15rem]">
+              <div className="flex flex-col gap-[0.25rem]">
                 {localRoots.map((root) => {
                   const isCurrentRoot =
                     currentWindowsDriveRoot !== null &&
@@ -1421,7 +1422,7 @@ function PaneBrowser({
                       type="button"
                       role="menuitem"
                       className={cn(
-                        "rounded-[12px] px-[0.55rem] py-[0.45rem] text-left text-[0.88rem] transition-colors duration-150",
+                        "rounded-[10px] px-[0.55rem] py-[0.4rem] text-left text-[0.9rem] transition-colors duration-150",
                         isCurrentRoot
                           ? "bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] font-medium text-[var(--accent-strong)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_18%,var(--surface-elevated)_82%)]"
                           : "text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text-primary)]",
@@ -1437,7 +1438,7 @@ function PaneBrowser({
                 })}
               </div>
             ) : (
-              <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+              <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
                 사용할 수 있는 드라이브가 없습니다.
               </div>
             )}
@@ -1461,9 +1462,9 @@ function PaneBrowser({
             <NoticeCard
               key={warning}
               tone="warning"
-              className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+              className="rounded-[10px] px-[0.9rem] py-[0.55rem] shadow-none"
             >
-              <span className="text-[0.92rem] leading-[1.6]">{warning}</span>
+              <span className="text-[0.9rem] leading-[1.6]">{warning}</span>
             </NoticeCard>
           ))}
         </div>
@@ -1472,9 +1473,9 @@ function PaneBrowser({
       {pane.errorMessage ? (
         <NoticeCard
           tone="danger"
-          className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+          className="rounded-[10px] px-[0.9rem] py-[0.55rem] shadow-none"
         >
-          <span className="text-[0.92rem] leading-[1.6]">
+          <span className="text-[0.9rem] leading-[1.6]">
             {pane.errorMessage}
           </span>
         </NoticeCard>
@@ -1482,7 +1483,7 @@ function PaneBrowser({
 
       <div
         className={cn(
-          "relative min-h-0 flex-1 overflow-auto rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] transition-[opacity,border-color,box-shadow]",
+          "relative min-h-0 flex-1 overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] transition-[opacity,border-color,box-shadow]",
           pane.isLoading && "opacity-[0.82]",
           isDropTargetActive &&
             "border-[color-mix(in_srgb,var(--accent-strong)_62%,var(--border)_38%)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_38%,transparent_62%)]",
@@ -1549,7 +1550,7 @@ function PaneBrowser({
               {SFTP_BROWSER_COLUMNS.map((column) => (
                 <th
                   key={column.key}
-                  className="group/header sticky top-0 z-[1] border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.9rem] py-[0.8rem] text-left text-[0.85rem] font-semibold text-[var(--text-soft)]"
+                  className="group/header sticky top-0 z-[1] border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.9rem] py-[0.9rem] text-left text-[0.82rem] font-semibold text-[var(--text-soft)]"
                 >
                   <div className="relative flex min-h-[1.4rem] items-center">
                     <span
@@ -1666,9 +1667,9 @@ function PaneBrowser({
               >
                 <td
                   title={entry.name}
-                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left whitespace-nowrap"
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem] text-left whitespace-nowrap"
                 >
-                  <div className="flex min-w-0 items-center gap-[0.6rem]">
+                  <div className="flex min-w-0 items-center gap-[0.55rem]">
                     <FileEntryIcon
                       visualKind={getFileEntryVisualKind(entry)}
                       fileKind={entry.kind}
@@ -1680,19 +1681,19 @@ function PaneBrowser({
                 </td>
                 <td
                   title={formatDate(entry.mtime)}
-                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
                 >
                   {formatDate(entry.mtime)}
                 </td>
                 <td
                   title={entry.isDirectory ? "--" : formatSize(entry.size)}
-                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem] text-left overflow-hidden text-ellipsis whitespace-nowrap"
                 >
                   {entry.isDirectory ? "--" : formatSize(entry.size)}
                 </td>
                 <td
                   title={getFileEntryKindLabel(entry.kind)}
-                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.8rem] text-left overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-muted)]"
+                  className="border-b border-[color-mix(in_srgb,var(--border)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem] text-left overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-muted)]"
                 >
                   {getFileEntryKindLabel(entry.kind)}
                 </td>
@@ -1701,7 +1702,7 @@ function PaneBrowser({
           </tbody>
         </table>
         {pane.isLoading ? (
-          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.7rem] py-[0.45rem] text-[0.82rem] font-semibold text-[var(--accent-strong)]">
+          <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.7rem] py-[0.4rem] text-[0.82rem] font-semibold text-[var(--accent-strong)]">
             목록을 새로 읽는 중...
           </div>
         ) : null}
@@ -1711,7 +1712,7 @@ function PaneBrowser({
         ? createPortal(
             <div
               ref={contextMenuRef}
-              className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
+              className="fixed z-[24] min-w-[148px] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.4rem] shadow-[0_20px_60px_rgba(18,30,44,0.24)]"
               style={{
                 left: contextMenuStyle?.left ?? contextMenu.x,
                 top: contextMenuStyle?.top ?? contextMenu.y,
@@ -1721,7 +1722,7 @@ function PaneBrowser({
             >
               <button
                 type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length !== 1}
                 onClick={() => {
                   setContextMenu(null);
@@ -1732,7 +1733,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length === 0}
                 onClick={() => {
                   setContextMenu(null);
@@ -1743,7 +1744,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={!canChangeOwner}
                 onClick={() => {
                   setContextMenu(null);
@@ -1755,7 +1756,7 @@ function PaneBrowser({
               {canEditContextEntry ? (
                 <button
                   type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]"
+                  className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]"
                   onClick={() => {
                     const target = contextMenu.entryPath;
                     setContextMenu(null);
@@ -1767,7 +1768,7 @@ function PaneBrowser({
               ) : null}
               <button
                 type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={!canDownloadSelection}
                 onClick={() => {
                   setContextMenu(null);
@@ -1778,7 +1779,7 @@ function PaneBrowser({
               </button>
               <button
                 type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                 disabled={pane.selectedPaths.length === 0}
                 onClick={() => {
                   setContextMenu(null);
@@ -1838,19 +1839,19 @@ function AwsSftpFailureDiagnosticCard({
   return (
     <NoticeCard
       tone="danger"
-      className="grid gap-[0.7rem] rounded-[16px] px-[0.95rem] py-[0.8rem] shadow-none"
+      className="grid gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.9rem] shadow-none"
       role="alert"
     >
       <div className="grid gap-[0.25rem]">
-        <div className="flex flex-wrap items-center gap-x-[0.6rem] gap-y-[0.25rem]">
-          <strong className="text-[0.95rem] text-[var(--text)]">
+        <div className="flex flex-wrap items-center gap-x-[0.55rem] gap-y-[0.25rem]">
+          <strong className="text-[0.9rem] text-[var(--text)]">
             {title}
           </strong>
-          <span className="rounded-[999px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] px-[0.45rem] py-[0.12rem] text-[0.74rem] font-semibold uppercase text-[var(--danger-text)]">
+          <span className="rounded-[999px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] px-[0.4rem] py-[0.25rem] text-[0.76rem] font-semibold uppercase text-[var(--danger-text)]">
             {diagnostic.reasonCode ?? "unknown"}
           </span>
         </div>
-        <span className="text-[0.86rem] font-semibold text-[var(--text)]">
+        <span className="text-[0.82rem] font-semibold text-[var(--text)]">
           {formatConnectionProgressStageLabel(diagnostic.stage)}
         </span>
         <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
@@ -1860,7 +1861,7 @@ function AwsSftpFailureDiagnosticCard({
           {action}
         </span>
       </div>
-      <div className="flex flex-wrap gap-[0.5rem]">
+      <div className="flex flex-wrap gap-[0.55rem]">
         <Button
           type="button"
           variant="primary"
@@ -2005,7 +2006,7 @@ function HostPicker({
 
   return (
     <div
-      className="relative flex min-h-0 flex-1 flex-col gap-[0.85rem] px-4 pb-4"
+      className="relative flex min-h-0 flex-1 flex-col gap-[0.9rem] px-4 pb-4"
       aria-busy={isConnecting}
     >
       <Toolbar className="justify-start">
@@ -2051,7 +2052,7 @@ function HostPicker({
       {breadcrumbs.length > 0 ? (
         <nav
           aria-label={`Host group path for ${pane.id} pane`}
-          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.92rem] text-[var(--text-muted)]"
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.9rem] text-[var(--text-muted)]"
         >
           {breadcrumbs.map((crumb, index) => {
             const isCurrent = crumb.path === pane.hostGroupPath;
@@ -2062,7 +2063,7 @@ function HostPicker({
                 {index > 0 ? (
                   <span
                     aria-hidden="true"
-                    className="text-[0.86rem] text-[var(--text-dim)]"
+                    className="text-[0.82rem] text-[var(--text-dim)]"
                   >
                     ›
                   </span>
@@ -2074,7 +2075,7 @@ function HostPicker({
                 ) : (
                   <button
                     type="button"
-                    className="rounded-[8px] px-[0.1rem] py-[0.05rem] text-left text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60"
+                    className="rounded-[8px] px-[0.25rem] py-[0.25rem] text-left text-[var(--text-secondary)] transition-colors duration-150 hover:text-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-panel)] disabled:cursor-default disabled:opacity-60"
                     onClick={() => onNavigateHostGroup(crumb.path)}
                     disabled={isConnecting}
                   >
@@ -2101,16 +2102,16 @@ function HostPicker({
       ) : pane.errorMessage ? (
         <NoticeCard
           tone="danger"
-          className="rounded-[16px] px-[0.9rem] py-[0.58rem] shadow-none"
+          className="rounded-[10px] px-[0.9rem] py-[0.55rem] shadow-none"
         >
-          <span className="text-[0.92rem] leading-[1.6]">
+          <span className="text-[0.9rem] leading-[1.6]">
             {pane.errorMessage}
           </span>
         </NoticeCard>
       ) : null}
 
       <div
-        className="flex min-h-0 flex-1 flex-col gap-[0.85rem] overflow-y-auto pr-[0.1rem]"
+        className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.25rem]"
         aria-label={`Available hosts for ${pane.id} pane`}
       >
         {visibleGroups.length > 0 ? (
@@ -2118,7 +2119,7 @@ function HostPicker({
             <HostPickerSectionHeader count={visibleGroups.length} />
             <div
               data-group-grid="true"
-              className="mt-[0.7rem] grid content-start gap-[0.75rem]"
+              className="mt-[0.7rem] grid content-start gap-[0.7rem]"
               ref={groupGridRef}
               style={groupGridStyle}
             >
@@ -2160,7 +2161,7 @@ function HostPicker({
           <HostPickerSectionHeader label="Hosts" count={visibleHosts.length} />
           <div
             data-host-grid="true"
-            className="mt-[0.7rem] grid content-start gap-[0.75rem]"
+            className="mt-[0.7rem] grid content-start gap-[0.7rem]"
             ref={hostGridRef}
             style={hostGridStyle}
           >
@@ -2239,7 +2240,7 @@ function HostPicker({
                         <Button
                           variant="secondary"
                           size="sm"
-                          className="rounded-[12px] whitespace-nowrap"
+                          className="rounded-[10px] whitespace-nowrap"
                           onClick={(event) => {
                             event.stopPropagation();
                             onOpenHostSettings(host.id);
@@ -2259,7 +2260,7 @@ function HostPicker({
 
       {matchingInteractiveAuth ? (
         <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="SFTP interactive authentication required"
@@ -2296,12 +2297,12 @@ function HostPicker({
         </div>
       ) : shouldShowConnectingOverlay ? (
         <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="SFTP host connection in progress"
         >
-          <Card className="grid max-w-[20rem] justify-items-center gap-[0.45rem] px-[1.1rem] py-4 text-center">
+          <Card className="grid max-w-[20rem] justify-items-center gap-[0.4rem] px-[1.1rem] py-4 text-center">
             <div
               aria-hidden="true"
               className="h-5 w-5 animate-spin rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
@@ -2372,7 +2373,7 @@ function TransferBar({
   };
 
   return (
-    <div className="flex items-stretch gap-2 overflow-x-auto pb-[0.2rem]">
+    <div className="flex items-stretch gap-2 overflow-x-auto pb-[0.25rem]">
       {transfers.slice(0, 6).map((job) => {
         const progress =
           job.bytesTotal > 0
@@ -2388,14 +2389,14 @@ function TransferBar({
             key={job.id}
             as="article"
             className={cn(
-              "min-w-[360px] max-w-[360px] flex-none flex-col items-stretch justify-start gap-[0.35rem] rounded-[18px] px-[0.95rem] py-[0.85rem]",
+              "min-w-[360px] max-w-[360px] flex-none flex-col items-stretch justify-start gap-[0.4rem] rounded-[12px] px-[0.9rem] py-[0.9rem]",
               job.status === "failed" &&
                 "border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))]",
               job.status === "completed" &&
                 "border-[color-mix(in_srgb,var(--success-text)_24%,var(--border))]",
             )}
           >
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.75rem]">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.7rem]">
               <strong
                 className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                 title={buildTransferCardTitle(job)}
@@ -2409,7 +2410,7 @@ function TransferBar({
                 {getTransferStatusLabel(job.status)}
               </span>
             </div>
-            <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.75rem] text-[0.86rem] text-[var(--text-soft)]">
+            <div className="mt-[0.4rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[0.7rem] text-[0.82rem] text-[var(--text-soft)]">
               <span
                 className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
                 title={buildTransferDirection(job)}
@@ -2431,22 +2432,22 @@ function TransferBar({
               />
             </div>
             {job.status === "failed" ? (
-              <div className="mt-[0.35rem] rounded-[14px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--danger-text)_7%,transparent_93%)] px-[0.75rem] py-[0.62rem] text-[0.86rem]">
+              <div className="mt-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--danger-text)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--danger-text)_7%,transparent_93%)] px-[0.7rem] py-[0.55rem] text-[0.82rem]">
                 <p className="m-0 font-semibold text-[var(--danger-text)]">
                   {getTransferFailureDisplayMessage(job)}
                 </p>
                 {job.errorItemName || job.errorPath ? (
-                  <p className="m-0 mt-[0.28rem] overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-soft)]">
+                  <p className="m-0 mt-[0.25rem] overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-soft)]">
                     {[job.errorItemName, job.errorPath]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
                 ) : null}
                 {failureDetailLines.length > 0 ? (
-                  <div className="mt-[0.42rem]">
+                  <div className="mt-[0.4rem]">
                     <button
                       type="button"
-                      className="rounded-[8px] text-[0.8rem] font-semibold text-[var(--text-secondary)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)]"
+                      className="rounded-[8px] text-[0.82rem] font-semibold text-[var(--text-secondary)] underline-offset-2 hover:text-[var(--text-primary)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-strong)]"
                       aria-expanded={isFailureDetailOpen}
                       onClick={() =>
                         setExpandedFailureDetails((current) => ({
@@ -2458,7 +2459,7 @@ function TransferBar({
                       {isFailureDetailOpen ? "Details 숨기기" : "Details"}
                     </button>
                     {isFailureDetailOpen ? (
-                      <div className="mt-[0.35rem] grid gap-[0.2rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_72%,transparent_28%)] px-[0.55rem] py-[0.45rem] text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+                      <div className="mt-[0.4rem] grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_72%,transparent_28%)] px-[0.55rem] py-[0.4rem] text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                         {failureDetailLines.map((line) => (
                           <span
                             key={line}
@@ -2474,7 +2475,7 @@ function TransferBar({
                 ) : null}
               </div>
             ) : null}
-            <div className="mt-[0.35rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-[0.85rem] gap-y-[0.35rem] text-[0.86rem] text-[var(--text-soft)]">
+            <div className="mt-[0.4rem] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-[0.9rem] gap-y-[0.4rem] text-[0.82rem] text-[var(--text-soft)]">
               <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                 {formatSize(job.bytesCompleted)} / {formatSize(job.bytesTotal)}
               </span>
@@ -2502,7 +2503,7 @@ function TransferBar({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="rounded-[12px] whitespace-nowrap"
+                    className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onPauseTransfer(job.id)}
                   >
                     일시정지
@@ -2510,7 +2511,7 @@ function TransferBar({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="rounded-[12px] whitespace-nowrap"
+                    className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onCancelTransfer(job.id)}
                   >
                     취소
@@ -2522,7 +2523,7 @@ function TransferBar({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="rounded-[12px] whitespace-nowrap"
+                    className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onResumeTransfer(job.id)}
                   >
                     재개
@@ -2530,7 +2531,7 @@ function TransferBar({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="rounded-[12px] whitespace-nowrap"
+                    className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onCancelTransfer(job.id)}
                   >
                     취소
@@ -2541,7 +2542,7 @@ function TransferBar({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[10px] whitespace-nowrap"
                   disabled
                 >
                   취소 중
@@ -2551,7 +2552,7 @@ function TransferBar({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[10px] whitespace-nowrap"
                   onClick={() => void onRetryTransfer(job.id)}
                 >
                   {job.failedItems && job.failedItems.length > 0
@@ -2566,7 +2567,7 @@ function TransferBar({
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[12px] whitespace-nowrap"
+                  className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[10px] whitespace-nowrap"
                   onClick={() => onDismissTransfer(job.id)}
                 >
                   닫기
@@ -2609,7 +2610,7 @@ function ConflictDialog({
         </ModalHeader>
         <ModalBody>
           <p>{pendingConflictDialog.names.join(", ")}</p>
-          <label className="mt-3 inline-flex items-center gap-2 text-[0.86rem] text-[var(--text-soft)]">
+          <label className="mt-3 inline-flex items-center gap-2 text-[0.82rem] text-[var(--text-soft)]">
             <input
               type="checkbox"
               checked={rememberChoice}
@@ -2730,7 +2731,7 @@ function PermissionDialog({
           </div>
         </ModalHeader>
         <ModalBody>
-          <div className="mt-4 grid grid-cols-[minmax(72px,auto)_repeat(3,minmax(54px,1fr))] items-center gap-x-[0.8rem] gap-y-[0.65rem]">
+          <div className="mt-4 grid grid-cols-[minmax(72px,auto)_repeat(3,minmax(54px,1fr))] items-center gap-x-[0.9rem] gap-y-[0.7rem]">
             <div />
             {columns.map((column) => (
               <strong key={column.key} className="text-center">
@@ -2757,7 +2758,7 @@ function PermissionDialog({
               </Fragment>
             ))}
           </div>
-          <div className="mt-[0.95rem] text-[0.9rem] text-[var(--text-soft)]">
+          <div className="mt-[0.9rem] text-[0.9rem] text-[var(--text-soft)]">
             Mode {formatPermissionMode(mode)}
           </div>
         </ModalBody>
@@ -2804,7 +2805,7 @@ function PrincipalPicker({
 }) {
   return (
     <div className="grid gap-[0.55rem]">
-      <label className="text-[0.86rem] font-medium text-[var(--text-soft)]">
+      <label className="text-[0.82rem] font-medium text-[var(--text-soft)]">
         {label}
       </label>
       <Input
@@ -2819,19 +2820,19 @@ function PrincipalPicker({
           placeholder={`${label} 직접 입력`}
         />
       ) : null}
-      <div className="max-h-[9.5rem] overflow-auto rounded-[14px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.3rem]">
+      <div className="max-h-[9.5rem] overflow-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.25rem]">
         {isLoading ? (
-          <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+          <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
             불러오는 중...
           </div>
         ) : principals.length > 0 ? (
-          <div className="grid gap-[0.15rem]">
+          <div className="grid gap-[0.25rem]">
             {principals.map((principal) => (
               <button
                 key={`${principal.kind}:${principal.id}:${principal.name}`}
                 type="button"
                 className={cn(
-                  "rounded-[10px] px-[0.55rem] py-[0.45rem] text-left text-[0.88rem] transition-colors duration-150",
+                  "rounded-[10px] px-[0.55rem] py-[0.4rem] text-left text-[0.9rem] transition-colors duration-150",
                   value === principal.name || value === String(principal.id)
                     ? "bg-[color-mix(in_srgb,var(--accent-strong)_14%,var(--surface-elevated)_86%)] font-medium text-[var(--accent-strong)]"
                     : "text-[var(--text-secondary)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text-primary)]",
@@ -2843,7 +2844,7 @@ function PrincipalPicker({
             ))}
           </div>
         ) : (
-          <div className="px-[0.55rem] py-[0.45rem] text-[0.84rem] text-[var(--text-muted)]">
+          <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
             결과가 없습니다.
           </div>
         )}
@@ -2913,10 +2914,10 @@ function OwnerDialog({
                 disabled={dialog.isSubmitting}
               />
             ) : null}
-            <label className="flex items-start gap-[0.65rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_68%,transparent_32%)] px-[0.75rem] py-[0.65rem] text-[0.9rem] text-[var(--text-secondary)]">
+            <label className="flex items-start gap-[0.7rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_68%,transparent_32%)] px-[0.7rem] py-[0.7rem] text-[0.9rem] text-[var(--text-secondary)]">
               <input
                 type="checkbox"
-                className="mt-[0.2rem] h-4 w-4"
+                className="mt-[0.25rem] h-4 w-4"
                 checked={dialog.recursive}
                 onChange={(event) =>
                   onChange({ recursive: event.target.checked })
@@ -2925,7 +2926,7 @@ function OwnerDialog({
               />
               <span>
                 하위 항목까지 적용
-                <span className="mt-[0.15rem] block text-[0.82rem] text-[var(--text-muted)]">
+                <span className="mt-[0.25rem] block text-[0.82rem] text-[var(--text-muted)]">
                   폴더를 선택한 경우 내부 파일과 하위 폴더의 소유권도 함께 변경합니다.
                 </span>
               </span>
@@ -2996,7 +2997,7 @@ function DeleteDialog({
         </ModalHeader>
         <ModalBody>
           {dialog.includesDirectory ? (
-            <p className="rounded-[16px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--danger-bg)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem] leading-[1.6]">
+            <p className="rounded-[10px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--danger-bg)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem] leading-[1.6]">
               폴더를 삭제하면 하위 항목도 함께 삭제됩니다.
             </p>
           ) : null}
@@ -3346,9 +3347,9 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
           const section = (
             <section
               key={pane.id}
-              className="flex min-h-0 flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"
+              className="flex min-h-0 flex-col overflow-hidden rounded-[12px] border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow)]"
             >
-              <header className="flex items-center justify-between px-[1.1rem] pb-[0.75rem] pt-[1rem]">
+              <header className="flex items-center justify-between px-[1.1rem] pb-[0.7rem] pt-[0.9rem]">
                 <div className="min-w-0 flex-1">
                   <h2>{getSftpPaneTitle(pane)}</h2>
                 </div>
@@ -3357,7 +3358,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     aria-label="연결 종료"
                     title="연결 종료"
                     size="sm"
-                    className="h-[2.35rem] w-[2.35rem] rounded-[12px] p-0"
+                    className="h-[2.35rem] w-[2.35rem] rounded-[10px] p-0"
                     onClick={() => void onDisconnectPane(pane.id)}
                   >
                     <svg
@@ -3547,13 +3548,13 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
               <Fragment key={pane.id}>
                 {section}
                 <div
-                  className="flex min-h-0 w-14 flex-col items-center justify-center gap-[0.65rem] max-[1040px]:hidden"
+                  className="flex min-h-0 w-14 flex-col items-center justify-center gap-[0.7rem] max-[1040px]:hidden"
                   aria-label="Pane transfer controls"
                 >
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="h-12 w-12 rounded-[16px] p-0 text-[1.2rem] font-bold whitespace-nowrap"
+                    className="h-12 w-12 rounded-[10px] p-0 text-[1.15rem] font-bold whitespace-nowrap"
                     aria-label="Transfer selection from left pane to right pane"
                     onClick={() =>
                       void onTransferSelectionToPane("left", "right")
@@ -3570,7 +3571,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="h-12 w-12 rounded-[16px] p-0 text-[1.2rem] font-bold whitespace-nowrap"
+                    className="h-12 w-12 rounded-[10px] p-0 text-[1.15rem] font-bold whitespace-nowrap"
                     aria-label="Transfer selection from right pane to left pane"
                     onClick={() =>
                       void onTransferSelectionToPane("right", "left")

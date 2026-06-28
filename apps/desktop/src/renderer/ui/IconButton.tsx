@@ -13,8 +13,8 @@ export interface IconButtonProps
 }
 
 const sizeClasses: Record<IconButtonSize, string> = {
-  sm: 'h-9 w-9 rounded-[14px] text-sm',
-  md: 'h-11 w-11 rounded-[18px] text-base',
+  sm: 'h-9 w-9 rounded-[10px] text-sm',
+  md: 'h-11 w-11 rounded-[12px] text-base',
 };
 
 const toneClasses: Record<IconButtonTone, string> = {

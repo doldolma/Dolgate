@@ -1,4 +1,5 @@
 import { cn } from '../../lib/cn';
+import { Columns2 } from '../../ui/icons';
 import type { TmuxSessionInfo } from '../../store/types';
 import { TmuxSessionMenu } from './TmuxSessionMenu';
 
@@ -30,9 +31,9 @@ export function TmuxSessionFooter({
   onRefresh,
 }: TmuxSessionFooterProps) {
   return (
-    <div className="mx-[0.55rem] mb-[0.55rem] mt-1 flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.28rem] text-[0.7rem] text-[var(--text-muted)]">
+    <div className="mx-[0.55rem] mb-[0.55rem] mt-1 flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]">
       <span className="leading-none text-[var(--accent)]" aria-hidden>
-        ⊟
+        <Columns2 className="h-3.5 w-3.5" />
       </span>
       <span className="font-medium text-[var(--text)]">tmux</span>
       <span aria-hidden>·</span>
@@ -48,7 +49,7 @@ export function TmuxSessionFooter({
       <button
         type="button"
         className={cn(
-          'ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.5rem] py-[0.18rem] text-[var(--text)] transition-colors',
+          'ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[var(--text)] transition-colors',
           'hover:border-[var(--accent)] hover:text-[var(--accent)]',
         )}
         title="detach — 세션은 유지하고 분리(Ctrl-b d). 재접속으로 복원."

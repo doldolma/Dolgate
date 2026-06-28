@@ -53,7 +53,7 @@ export function AwsStaticProfileForm({
         <div className="grid gap-1.5">
           {title ? <strong>{title}</strong> : null}
           {descriptions.length > 0 ? (
-            <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
+            <div className="flex flex-wrap gap-[0.9rem] text-[0.9rem] text-[var(--text-soft)]">
               {descriptions.map((description) => (
                 <span key={description}>{description}</span>
               ))}
@@ -117,7 +117,7 @@ export function AwsStaticProfileForm({
               disabled={isSubmitting}
             />
             {accessKeyHelpText ? (
-              <p className="m-0 text-[0.8rem] text-[var(--text-soft)]">
+              <p className="m-0 text-[0.82rem] text-[var(--text-soft)]">
                 {accessKeyHelpText}
               </p>
             ) : null}

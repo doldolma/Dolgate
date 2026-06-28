@@ -28,6 +28,7 @@ import {
   normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
+  normalizeHostEnvVars,
   rebaseGroupPath,
   stripRemovedGroupSegment
 } from '@shared';
@@ -302,6 +303,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   if (record.kind === 'aws-ec2') {
     return {
       ...record,
+      favorite: record.favorite === true ? true : null,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
@@ -316,6 +318,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   if (record.kind === 'aws-ecs') {
     return {
       ...record,
+      favorite: record.favorite === true ? true : null,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
@@ -325,16 +328,19 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   if (record.kind === 'ssh') {
     return {
       ...record,
+      favorite: record.favorite === true ? true : null,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
       startupCommand: normalizeHostStartupCommand(record.startupCommand),
-      agentForwarding: record.agentForwarding === true ? true : null
+      agentForwarding: record.agentForwarding === true ? true : null,
+      env: normalizeHostEnvVars(record.env)
     };
   }
   if (record.kind === 'warpgate-ssh') {
     return {
       ...record,
+      favorite: record.favorite === true ? true : null,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
@@ -344,6 +350,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
   if (record.kind === 'serial') {
     return {
       ...record,
+      favorite: record.favorite === true ? true : null,
       groupName: normalizeGroupPath(record.groupName),
       tags: normalizeTags(record.tags),
       terminalThemeId: normalizeTerminalThemeId(record.terminalThemeId),
@@ -484,6 +491,9 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     startupCommand: normalizeHostStartupCommand(draft.startupCommand),
+    // env는 시크릿이 아니라 호스트 속성 — 드래프트 값을 그대로 정규화해 저장(공유 시크릿으로 번지지 않음).
+    env: draft.env !== undefined ? normalizeHostEnvVars(draft.env) : (current?.env ?? null),
+    favorite: current?.favorite ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -512,6 +522,7 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     startupCommand: normalizeHostStartupCommand(draft.startupCommand),
+    favorite: current?.favorite ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -535,6 +546,7 @@ function toAwsEcsHostRecord(
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    favorite: current?.favorite ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -560,6 +572,7 @@ function toWarpgateHostRecord(
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
     startupCommand: normalizeHostStartupCommand(draft.startupCommand),
+    favorite: current?.favorite ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp
   };
@@ -630,6 +643,7 @@ function toSerialHostRecord(
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    favorite: current?.favorite ?? null,
     createdAt: current?.createdAt ?? timestamp,
     updatedAt: timestamp,
   };
@@ -742,6 +756,20 @@ export class HostRepository {
       state.data.hosts = state.data.hosts.map((entry) => (entry.id === id ? record : entry));
     });
     return record;
+  }
+
+  setFavorite(id: string, favorite: boolean): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id) {
+          return entry;
+        }
+        nextRecord = { ...entry, favorite: favorite ? true : null, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
   }
 
   updateSecretRef(id: string, secretRef: string | null): HostRecord | null {

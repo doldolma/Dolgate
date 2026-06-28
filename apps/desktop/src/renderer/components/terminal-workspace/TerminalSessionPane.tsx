@@ -332,11 +332,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   return (
     <div
       className={cn(
-        'absolute inset-0 min-h-0 flex-col gap-[0.65rem]',
+        'absolute inset-0 min-h-0 flex-col gap-[0.7rem]',
         visible || active
           ? 'flex pointer-events-auto opacity-100'
           : 'hidden pointer-events-none opacity-0',
-        showHeader && 'p-[0.45rem]',
+        showHeader && 'p-[0.4rem]',
       )}
       style={style}
       onKeyDownCapture={controller.handlePaneKeyDownCapture}

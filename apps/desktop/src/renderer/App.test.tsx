@@ -40,7 +40,6 @@ vi.mock('./components/AwsEcsWorkspace', () => ({
 vi.mock('./components/CredentialRetryDialog', () => ({
   CredentialRetryDialog: stubComponent('credential-retry-dialog'),
 }));
-vi.mock('./components/HomeNavigation', () => ({ HomeNavigation: stubComponent('home-navigation') }));
 vi.mock('./components/HostBrowser', () => ({ HostBrowser: stubComponent('host-browser') }));
 vi.mock('./components/HostDrawer', () => ({ HostDrawer: stubComponent('host-drawer') }));
 vi.mock('./components/KnownHostPromptDialog', () => ({

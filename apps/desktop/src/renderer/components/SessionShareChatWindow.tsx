@@ -321,11 +321,11 @@ export function SessionShareChatWindow({
   };
 
   return (
-    <div className="fixed inset-0 box-border flex min-h-0 flex-col gap-[0.95rem] overflow-hidden bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
+    <div className="fixed inset-0 box-border flex min-h-0 flex-col gap-[0.9rem] overflow-hidden bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
       <header className="flex items-start justify-between gap-[0.9rem]">
         <div>
           <SectionLabel>Session Share</SectionLabel>
-          <strong className="block text-[1.02rem]">{snapshot.title || '채팅 기록'}</strong>
+          <strong className="block text-[1rem]">{snapshot.title || '채팅 기록'}</strong>
         </div>
         <span className="whitespace-nowrap text-[0.82rem] text-[var(--text-soft)]">
           {loading
@@ -337,7 +337,7 @@ export function SessionShareChatWindow({
       </header>
 
       {errorMessage || sendErrorMessage ? (
-        <div className="grid gap-[0.6rem]">
+        <div className="grid gap-[0.55rem]">
           {errorMessage ? (
             <NoticeCard tone="danger">{errorMessage}</NoticeCard>
           ) : null}
@@ -349,7 +349,7 @@ export function SessionShareChatWindow({
 
       <div
         data-testid="session-share-chat-messages"
-        className="grid min-h-0 flex-1 auto-rows-max content-start gap-[0.7rem] overflow-y-auto pr-[0.15rem]"
+        className="grid min-h-0 flex-1 auto-rows-max content-start gap-[0.7rem] overflow-y-auto pr-[0.25rem]"
         aria-live="polite"
       >
         {!loading && snapshot.messages.length === 0 ? (
@@ -366,22 +366,22 @@ export function SessionShareChatWindow({
               data-owner-message={senderRole === 'owner' ? 'true' : undefined}
               className={
                 senderRole === 'owner'
-                  ? 'grid gap-[0.4rem] rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--share-border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,var(--share-surface)_90%)] px-[0.95rem] py-[0.85rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
-                  : 'grid gap-[0.4rem] rounded-[20px] border border-[var(--share-border)] bg-[var(--share-surface)] px-[0.95rem] py-[0.85rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
+                  ? 'grid gap-[0.4rem] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--share-border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,var(--share-surface)_90%)] px-[0.9rem] py-[0.9rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
+                  : 'grid gap-[0.4rem] rounded-[12px] border border-[var(--share-border)] bg-[var(--share-surface)] px-[0.9rem] py-[0.9rem] shadow-[0_12px_26px_rgba(18,31,47,0.08)]'
               }
             >
-              <div className="flex items-baseline justify-between gap-3 text-[0.8rem] text-[var(--share-text-soft)]">
-                <div className="inline-flex min-w-0 items-center gap-[0.45rem]">
+              <div className="flex items-baseline justify-between gap-3 text-[0.82rem] text-[var(--share-text-soft)]">
+                <div className="inline-flex min-w-0 items-center gap-[0.4rem]">
                   <strong>{displayNickname}</strong>
                   {senderRole === 'owner' ? (
-                    <span className="inline-flex items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_26%,var(--border)_74%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%)] px-[0.42rem] py-[0.14rem] text-[0.68rem] font-bold uppercase tracking-[0.04em] text-[var(--accent-strong)]">Owner</span>
+                    <span className="inline-flex items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_26%,var(--border)_74%)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent_86%)] px-[0.4rem] py-[0.25rem] text-[0.7rem] font-bold uppercase tracking-[0.04em] text-[var(--accent-strong)]">Owner</span>
                   ) : null}
                 </div>
                 <time dateTime={message.sentAt}>
                   {formatChatTimestamp(message.sentAt)}
                 </time>
               </div>
-              <p className="m-0 whitespace-pre-wrap break-words text-[0.95rem] leading-[1.45] text-[var(--share-text)]">{message.text}</p>
+              <p className="m-0 whitespace-pre-wrap break-words text-[0.9rem] leading-[1.45] text-[var(--share-text)]">{message.text}</p>
             </article>
           );
         })}
@@ -396,7 +396,7 @@ export function SessionShareChatWindow({
           void handleSubmit();
         }}
       >
-        <label className="grid min-w-0 gap-[0.35rem]">
+        <label className="grid min-w-0 gap-[0.4rem]">
           <span className="text-[0.76rem] text-[var(--text-soft)]">메시지</span>
           <Textarea
             ref={textareaRef}

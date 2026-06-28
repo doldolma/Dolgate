@@ -13,6 +13,8 @@ export function buildHostsBridge(
     update: (id: string, draft: HostDraft, secrets?: HostSecretInput) =>
       ipcRenderer.invoke(ipcChannels.hosts.update, id, draft, secrets),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.hosts.remove, id),
+    setFavorite: (id: string, favorite: boolean) =>
+      ipcRenderer.invoke(ipcChannels.hosts.setFavorite, id, favorite),
   };
 }
 

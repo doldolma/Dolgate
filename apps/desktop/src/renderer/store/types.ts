@@ -641,7 +641,7 @@ interface AppStateParts {
   refreshOperationalData: () => Promise<void>;
   refreshSyncedWorkspaceData: () => Promise<void>;
   clearSyncedWorkspaceData: () => void;
-  createGroup: (name: string) => Promise<void>;
+  createGroup: (name: string, parentPath?: string | null) => Promise<void>;
   removeGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
   moveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
   renameGroup: (path: string, name: string) => Promise<void>;
@@ -652,6 +652,7 @@ interface AppStateParts {
   ) => Promise<void>;
   duplicateHosts: (hostIds: string[]) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
+  setHostFavorite: (hostId: string, favorite: boolean) => Promise<void>;
   removeHost: (hostId: string) => Promise<void>;
   openLocalTerminal: (cols: number, rows: number) => Promise<void>;
   connectHost: (
@@ -1057,6 +1058,7 @@ export type CatalogSlice = Pick<
   | "saveHost"
   | "duplicateHosts"
   | "moveHostToGroup"
+  | "setHostFavorite"
   | "removeHost"
 >;
 

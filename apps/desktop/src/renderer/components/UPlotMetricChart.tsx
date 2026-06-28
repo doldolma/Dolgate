@@ -309,7 +309,7 @@ export function UPlotMetricChart({
   }, [chartData]);
 
   return (
-    <div className="flex flex-col gap-[0.8rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-4 py-4">
+    <div className="flex flex-col gap-[0.9rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-4 py-4">
       <div className="flex items-baseline justify-between gap-3">
         <strong className="text-[var(--text)]">{title}</strong>
         <span className="text-[0.82rem] tabular-nums text-[var(--text-soft)]">
@@ -319,26 +319,26 @@ export function UPlotMetricChart({
       <div className="relative">
         <div
           ref={plotContainerRef}
-          className="min-h-[180px] w-full [&_.u-wrap]:rounded-[14px] [&_.uplot]:w-full [&_.uplot]:font-inherit [&_.uplot]:text-[var(--text-soft)]"
+          className="min-h-[180px] w-full [&_.u-wrap]:rounded-[10px] [&_.uplot]:w-full [&_.uplot]:font-inherit [&_.uplot]:text-[var(--text-soft)]"
           data-metric-plot="true"
           data-testid={`metric-plot:${title}`}
         />
         {tooltip ? (
           <div
-            className="pointer-events-none absolute z-[2] min-w-[152px] max-w-[184px] rounded-[14px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] px-[0.8rem] py-[0.7rem] shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
+            className="pointer-events-none absolute z-[2] min-w-[152px] max-w-[184px] rounded-[10px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_95%,transparent_5%)] px-[0.9rem] py-[0.7rem] shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
             style={{
               left: `${tooltip.left}px`,
               top: `${tooltip.top}px`,
             }}
           >
-            <strong className="mb-[0.45rem] block text-[0.78rem] tabular-nums">
+            <strong className="mb-[0.4rem] block text-[0.76rem] tabular-nums">
               {formatMetricsTooltipTime(tooltip.timestamp)}
             </strong>
-            <div className="grid gap-[0.35rem]">
+            <div className="grid gap-[0.4rem]">
               {tooltip.rows.map((row) => (
                 <div
                   key={`${row.label}:${row.value}`}
-                  className="grid grid-cols-[auto_1fr_auto] items-center gap-[0.45rem] text-[0.78rem]"
+                  className="grid grid-cols-[auto_1fr_auto] items-center gap-[0.4rem] text-[0.76rem]"
                 >
                   <span
                     className={cn(

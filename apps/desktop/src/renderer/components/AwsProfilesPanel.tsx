@@ -233,7 +233,7 @@ function ProfileField({
   value?: string | null
 }) {
   return (
-    <div className="grid gap-1 rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
+    <div className="grid gap-1 rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.9rem]">
       <dt className="text-[0.82rem] text-[var(--text-soft)]">{label}</dt>
       <dd className="m-0 break-all text-[var(--text)]">{value?.trim() ? value : '—'}</dd>
     </div>
@@ -643,7 +643,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
         <div>
           <SectionLabel>AWS</SectionLabel>
           <h3 className="m-0">Profiles</h3>
-          <p className="mb-0 mt-2 text-[0.92rem] text-[var(--text-soft)]">
+          <p className="mb-0 mt-2 text-[0.9rem] text-[var(--text-soft)]">
             앱 전용 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다. 기존 로컬 AWS CLI 프로필은 가져오기 후 사용할 수 있습니다.
           </p>
         </div>
@@ -714,7 +714,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-        <section className="grid content-start gap-3 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.25rem] shadow-[var(--shadow-soft)]">
+        <section className="grid content-start gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.3rem] shadow-[var(--shadow-soft)]">
           <div className="flex items-center justify-between gap-3">
             <strong>AWS Profiles</strong>
             <Badge tone="neutral">{profiles.length}</Badge>
@@ -741,7 +741,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   key={profile.name}
                   type="button"
                   className={cn(
-                    'grid min-h-[9.25rem] gap-3 rounded-[24px] border px-4 py-4 text-left transition-[border-color,background-color,box-shadow] duration-150',
+                    'grid min-h-[9.25rem] gap-3 rounded-[12px] border px-4 py-4 text-left transition-[border-color,background-color,box-shadow] duration-150',
                     isSelected
                       ? 'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border)_66%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface))] shadow-[0_14px_28px_rgba(16,26,42,0.08)]'
                       : 'border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_84%,transparent_16%)]',
@@ -749,7 +749,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   onClick={() => setSelectedProfileName(profile.name)}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <strong className="min-w-0 break-all pr-2 text-[1.02rem] leading-[1.35] text-[var(--text)]">
+                    <strong className="min-w-0 break-all pr-2 text-[1rem] leading-[1.35] text-[var(--text)]">
                       {profile.name}
                     </strong>
                     {details ? (
@@ -762,12 +762,12 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                     ) : null}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2.5 text-[0.85rem] text-[var(--text-soft)]">
+                  <div className="flex flex-wrap items-center gap-2.5 text-[0.82rem] text-[var(--text-soft)]">
                     <StatusBadge tone={getAwsProfileStatusTone(details, Boolean(detailError))}>
                       {getAwsProfileStatusLabel(details, Boolean(detailError))}
                     </StatusBadge>
 
-                    <span className="rounded-full border border-[color-mix(in_srgb,var(--border)_78%,white_22%)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-[0.78rem] py-[0.34rem] text-[0.8rem] font-medium text-[var(--text-soft)]">
+                    <span className="rounded-full border border-[color-mix(in_srgb,var(--border)_78%,white_22%)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.82rem] font-medium text-[var(--text-soft)]">
                       {detailError ? '조회 실패' : details?.configuredRegion ?? 'Region 없음'}
                     </span>
                   </div>
@@ -776,7 +776,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                     <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[var(--text-soft)]">
                       Account
                     </span>
-                    <span className="break-all text-[0.92rem] font-medium text-[var(--text-soft)]">
+                    <span className="break-all text-[0.9rem] font-medium text-[var(--text-soft)]">
                       {detailError ? '조회 실패' : details?.accountId ?? '인증 후 확인 가능'}
                     </span>
                   </div>
@@ -786,7 +786,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           </div>
         </section>
 
-        <section className="grid content-start gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.35rem] shadow-[var(--shadow-soft)]">
+        <section className="grid content-start gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.3rem] shadow-[var(--shadow-soft)]">
           {!selectedProfileName ? (
             <EmptyState
               title="선택된 프로필이 없습니다."
@@ -817,7 +817,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       {getAwsProfileStatusLabel(selectedDetails)}
                     </StatusBadge>
                   </div>
-                  <p className="m-0 text-[0.92rem] text-[var(--text-soft)]">
+                  <p className="m-0 text-[0.9rem] text-[var(--text-soft)]">
                     {selectedDetails.isAuthenticated
                       ? '현재 AWS CLI 기준으로 인증 가능한 상태입니다.'
                       : selectedDetails.errorMessage ?? '추가 로그인이 필요하거나 자격 증명을 다시 확인해야 합니다.'}

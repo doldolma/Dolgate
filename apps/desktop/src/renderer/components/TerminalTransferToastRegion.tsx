@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TransferJob } from "@shared";
 import { cn } from "../lib/cn";
+import { ArrowDown, ArrowUp, X } from "../ui/icons";
 import { useAppStore } from "../store/appStore";
 import { revealPath } from "../services/desktop/files";
 import { isTerminalUploadJob } from "../lib/terminal-upload-registry";
@@ -149,7 +150,11 @@ export function TerminalTransferToastRegion() {
                 className="text-xs font-semibold text-[var(--text-soft)]"
                 aria-hidden
               >
-                {kind === "zmodem" ? "↓" : "↑"}
+                {kind === "zmodem" ? (
+                  <ArrowDown className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowUp className="h-3.5 w-3.5" />
+                )}
               </span>
               <span className="flex-1 truncate text-sm font-medium text-[var(--text)]">
                 {buildTransferCardTitle(job)}
@@ -176,7 +181,7 @@ export function TerminalTransferToastRegion() {
                   onClick={() => hideRow(job.id)}
                   aria-label="닫기"
                 >
-                  ✕
+                  <X className="h-3.5 w-3.5" />
                 </button>
               ) : null}
             </div>

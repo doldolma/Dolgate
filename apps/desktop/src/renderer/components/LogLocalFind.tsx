@@ -165,26 +165,26 @@ export function LogLocalFindBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-2 rounded-[16px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,var(--surface)_16%)] px-3 py-2 shadow-none",
+        "flex flex-wrap items-center gap-2 rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,var(--surface)_16%)] px-3 py-2 shadow-none",
         className,
       )}
       data-testid="log-local-find-bar"
     >
-      <span className="text-[0.78rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
+      <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
         Find
       </span>
       <Input
         ref={inputRef}
         type="search"
         aria-label="현재 로그에서 찾기"
-        className="min-h-9 min-w-[12rem] flex-1 rounded-[12px] px-3 py-2 text-[0.9rem]"
+        className="min-h-9 min-w-[12rem] flex-1 rounded-[10px] px-3 py-2 text-[0.9rem]"
         value={query}
         placeholder="현재 로그에서 찾기"
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <span
-        className="min-w-[3.5rem] text-center text-[0.84rem] font-semibold text-[var(--text-soft)]"
+        className="min-w-[3.5rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]"
         aria-live="polite"
       >
         {matchLabel}

@@ -7,6 +7,11 @@
     box-sizing: border-box;
   }
 
+  html {
+    /* 전반적인 글씨 크기를 기본 16px에서 한 단계 낮춤(rem 기반 UI가 비례 축소). */
+    font-size: 15px;
+  }
+
   html,
   body,
   #root {
@@ -19,6 +24,24 @@
   body {
     background: var(--app-bg);
     color: var(--text);
+    /* 데스크톱 앱처럼 UI 크롬은 드래그 선택을 막는다. 실제로 복사·편집이 필요한
+       곳(입력/터미널/에디터/opt-in)만 아래에서 다시 켠다. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"]),
+  .cm-editor,
+  .cm-content,
+  .xterm,
+  .xterm-rows,
+  [data-selectable="true"],
+  .select-text {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   * {
@@ -191,8 +214,8 @@
   textarea {
     width: 100%;
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 0.95rem 1rem;
+    border-radius: 10px;
+    padding: 0.7rem 0.85rem;
     background: var(--surface-strong);
     color: var(--text);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);

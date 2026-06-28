@@ -12,6 +12,9 @@ vi.mock('electron', () => ({
   clipboard: {
     writeText: electronMocks.clipboardWriteText,
   },
+  BrowserWindow: {
+    getAllWindows: vi.fn(() => []),
+  },
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: any[]) => any) => {
       electronMocks.ipcHandlers.set(channel, handler);
@@ -246,6 +249,36 @@ describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
         hasManagedPrivateKey: true,
         hasCertificate: false,
       }),
+    );
+  });
+
+  it('logs a connection failure when the host key probe fails', async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: 'host-1',
+      kind: 'ssh',
+      label: 'Unreachable',
+      secretRef: null,
+    });
+    ctx.resolveJumpHostTarget = vi.fn().mockResolvedValue(undefined);
+    ctx.buildHostKeyProbeResult.mockRejectedValue(
+      new Error('dial tcp 100.64.0.2:22: i/o timeout'),
+    );
+
+    registerKnownHostsLogsKeychainIpcHandlers(ctx);
+
+    const probeHandler = ipcHandlers.get(ipcChannels.knownHosts.probeHost);
+    expect(probeHandler).toBeTypeOf('function');
+
+    await expect(probeHandler?.(null, { hostId: 'host-1' })).rejects.toThrow(
+      'i/o timeout',
+    );
+
+    expect(ctx.activityLogs.append).toHaveBeenCalledWith(
+      'error',
+      'session',
+      '호스트 연결에 실패했습니다.',
+      expect.objectContaining({ hostId: 'host-1', hostLabel: 'Unreachable' }),
     );
   });
 

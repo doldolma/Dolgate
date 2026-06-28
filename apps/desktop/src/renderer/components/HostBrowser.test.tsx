@@ -278,6 +278,7 @@ function renderBrowser({
       onEditHost={vi.fn()}
       onDuplicateHosts={onDuplicateHosts}
       onMoveHostToGroup={onMoveHostToGroup}
+      onSetHostFavorite={vi.fn()}
       onRemoveHost={onRemoveHost}
       onRemoveSecret={onRemoveSecret}
       onConnectHost={onConnectHost}
@@ -417,8 +418,8 @@ describe('HostBrowser helpers', () => {
     fireEvent.click(appCard);
     expect(appCard.dataset.hostCardState).toBe('selected');
 
-    fireEvent.click(within(appCard).getByRole('button', { name: /Tags \(1\)/ }));
-    expect(appCard.className).toContain('h-auto');
+    // Tags now render inline on the card (no expand toggle).
+    expect(within(appCard).getByText('app')).toBeInTheDocument();
   });
 
   it('defines import actions for the split-button menu in the expected order', () => {
@@ -579,7 +580,7 @@ describe('HostBrowser dialogs', () => {
     const groupTree = screen.getByLabelText('Group tree');
     const treeQueries = within(groupTree);
     expect(groupTree).toBeInTheDocument();
-    expect(treeQueries.getByRole('button', { name: /All Groups/ })).toBeInTheDocument();
+    expect(treeQueries.getByRole('button', { name: /All Hosts/ })).toBeInTheDocument();
     expect(treeQueries.getByRole('button', { name: /Servers/ })).toBeInTheDocument();
     expect(treeQueries.getByRole('button', { name: /Nested/ })).toBeInTheDocument();
 
@@ -591,7 +592,7 @@ describe('HostBrowser dialogs', () => {
   it('keeps the root group selection tint-based without drag shadows', () => {
     renderBrowser();
 
-    const rootButton = screen.getByRole('button', { name: /All Groups/ });
+    const rootButton = screen.getByRole('button', { name: /All Hosts/ });
     expect(rootButton.className).toContain('bg-[var(--selection-tint)]');
     expect(rootButton.className).toContain('border-[var(--selection-border)]');
     expect(rootButton.className).not.toContain('shadow-[0_0_0_2px');
@@ -634,7 +635,7 @@ describe('HostBrowser dialogs', () => {
 
     const groupTree = within(screen.getByLabelText('Group tree'));
     const nestedRow = groupTree.getByRole('button', { name: /Nested/ });
-    const rootRow = groupTree.getByRole('button', { name: /All Groups/ });
+    const rootRow = groupTree.getByRole('button', { name: /All Hosts/ });
     const dataTransfer = createDataTransfer();
 
     fireEvent.dragStart(nestedRow, { dataTransfer });

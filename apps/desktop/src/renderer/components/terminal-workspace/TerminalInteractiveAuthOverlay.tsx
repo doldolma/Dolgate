@@ -22,7 +22,7 @@ export function TerminalInteractiveAuthOverlay({
 }: TerminalInteractiveAuthOverlayProps) {
   if (interactiveAuth.provider === 'warpgate') {
     return (
-      <div className="grid max-w-[28rem] gap-3 rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
+      <div className="grid max-w-[28rem] gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
         <SectionLabel>
           Warpgate Approval
         </SectionLabel>
@@ -58,7 +58,7 @@ export function TerminalInteractiveAuthOverlay({
             닫기
           </Button>
         </div>
-        <pre className="rounded-[12px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.84rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
+        <pre className="rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.82rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
           {interactiveAuth.instruction}
         </pre>
       </div>
@@ -66,7 +66,7 @@ export function TerminalInteractiveAuthOverlay({
   }
 
   return (
-    <div className="grid max-w-[28rem] gap-4 rounded-[20px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
+    <div className="grid max-w-[28rem] gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
       <form
         className="grid gap-4"
         onSubmit={(event) => {

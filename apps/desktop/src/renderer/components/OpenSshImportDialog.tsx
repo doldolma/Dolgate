@@ -287,7 +287,7 @@ export function OpenSshImportDialog({
                 </div>
               </FilterRow>
 
-              <div className="flex flex-wrap items-center gap-3 text-[0.84rem] font-medium text-[var(--text-soft)]">
+              <div className="flex flex-wrap items-center gap-3 text-[0.82rem] font-medium text-[var(--text-soft)]">
                 <span>소스 {probe.sources.length}</span>
                 <span>가져올 호스트 {probe.hosts.length}</span>
                 <span>선택한 호스트 {selectedHostKeys.length}</span>
@@ -312,13 +312,13 @@ export function OpenSshImportDialog({
                     }
                   />
                 ) : (
-                  <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
+                  <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                     {visibleHosts.map((host) => {
                       const checked = selectedHostKeys.includes(host.key);
                       return (
                         <label
                           key={host.key}
-                          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
+                          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.9rem] py-[0.7rem]"
                         >
                           <input
                             type="checkbox"
@@ -333,15 +333,15 @@ export function OpenSshImportDialog({
                           />
                           <div className="min-w-0">
                             <strong>{host.alias}</strong>
-                            <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">
+                            <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                               {host.username}@{host.hostname}:{host.port}
                             </span>
                             {host.identityFilePath ? (
-                              <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{host.identityFilePath}</small>
+                              <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{host.identityFilePath}</small>
                             ) : (
-                              <small className="block text-[0.8rem] text-[var(--text-soft)]">비밀번호 인증</small>
+                              <small className="block text-[0.82rem] text-[var(--text-soft)]">비밀번호 인증</small>
                             )}
-                            <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">
+                            <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                               {host.sourceFilePath}:{host.sourceLine}
                             </small>
                           </div>

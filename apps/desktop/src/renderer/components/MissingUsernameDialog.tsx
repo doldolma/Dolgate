@@ -63,7 +63,7 @@ export function MissingUsernameDialog({
           </div>
         </ModalHeader>
         <ModalBody className="grid gap-4">
-          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
+          <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
             {resolveMessage(request.source)}
           </p>
           <FieldGroup label="SSH Username">

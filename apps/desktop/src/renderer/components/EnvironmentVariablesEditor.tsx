@@ -35,7 +35,7 @@ export function EnvironmentVariablesEditor({
       {variables.map((variable, index) => (
         <div
           key={index}
-          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] items-center gap-[0.5rem]"
+          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] items-center gap-[0.55rem]"
         >
           <Input
             aria-label="환경변수 이름"

@@ -244,7 +244,7 @@ export function AwsProfileCreateWizard({
         <div className="grid gap-1.5">
           {showTitle ? <strong>{title}</strong> : null}
           {descriptions.length > 0 ? (
-            <div className="flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
+            <div className="flex flex-wrap gap-[0.9rem] text-[0.9rem] text-[var(--text-soft)]">
               {descriptions.map((description) => (
                 <span key={description}>{description}</span>
               ))}

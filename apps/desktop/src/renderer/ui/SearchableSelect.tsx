@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/cn';
 import { Badge } from './Badge';
+import { ChevronDown } from './icons';
 import { Input } from './Input';
 
 export interface SearchableSelectOption {
@@ -124,7 +125,7 @@ export function SearchableSelect({
           }
         }}
         className={cn(
-          'flex w-full items-center justify-between gap-[0.85rem] rounded-[16px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-[0.95rem] py-[0.7rem] text-left text-[var(--text)] transition-[border-color,box-shadow] duration-150',
+          'flex w-full items-center justify-between gap-[0.9rem] rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-[border-color,box-shadow] duration-150',
           isOpen
             ? 'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%)]'
             : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))]',
@@ -132,9 +133,9 @@ export function SearchableSelect({
         )}
       >
         {selected ? (
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-[0.75rem]">
-            <div className="grid min-w-0 gap-[0.15rem]">
-              <span className="truncate text-[0.95rem] text-[var(--text)]">{selected.label}</span>
+          <div className="flex min-w-0 flex-1 items-center justify-between gap-[0.7rem]">
+            <div className="grid min-w-0 gap-[0.25rem]">
+              <span className="truncate text-[0.9rem] text-[var(--text)]">{selected.label}</span>
               {selected.description ? (
                 <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
                   {selected.description}
@@ -144,17 +145,18 @@ export function SearchableSelect({
             {selected.badge ? <Badge className="shrink-0">{selected.badge}</Badge> : null}
           </div>
         ) : (
-          <span className="truncate text-[0.95rem] text-[var(--text-soft)]">{placeholder}</span>
+          <span className="truncate text-[0.9rem] text-[var(--text-soft)]">{placeholder}</span>
         )}
-        <span className="shrink-0 text-[0.85rem] text-[var(--text-soft)]" aria-hidden="true">
-          ▾
-        </span>
+        <ChevronDown
+          className="h-[0.9rem] w-[0.9rem] shrink-0 text-[var(--text-soft)]"
+          aria-hidden="true"
+        />
       </button>
       {isOpen ? (
         <div
           role="listbox"
           aria-label={`${ariaLabel} options`}
-          className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[5] grid max-h-[280px] gap-[0.45rem] overflow-y-auto rounded-[16px] border border-[var(--border)] bg-[var(--dialog-surface)] p-[0.6rem] shadow-[0_18px_42px_rgba(16,26,40,0.18)]"
+          className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[5] grid max-h-[280px] gap-[0.4rem] overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] p-[0.55rem] shadow-[0_18px_42px_rgba(16,26,40,0.18)]"
         >
           <Input
             ref={searchInputRef}
@@ -162,7 +164,7 @@ export function SearchableSelect({
             placeholder={searchPlaceholder}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="min-h-9 rounded-[12px] px-[0.75rem] py-[0.5rem] text-[0.9rem]"
+            className="min-h-9 rounded-[10px] px-[0.7rem] py-[0.55rem] text-[0.9rem]"
           />
           {visibleOptions.length > 0 ? (
             visibleOptions.map((option) => (
@@ -177,15 +179,15 @@ export function SearchableSelect({
                 }}
                 onClick={() => choose(option.value)}
                 className={cn(
-                  'flex w-full items-center justify-between gap-[0.85rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.85rem] py-[0.6rem] text-left transition-[border-color,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
+                  'flex w-full items-center justify-between gap-[0.9rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.55rem] text-left transition-[border-color,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
                   option.value === value &&
                     'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)]',
                 )}
               >
-                <div className="grid min-w-0 gap-[0.12rem]">
-                  <span className="truncate text-[0.93rem] text-[var(--text)]">{option.label}</span>
+                <div className="grid min-w-0 gap-[0.25rem]">
+                  <span className="truncate text-[0.9rem] text-[var(--text)]">{option.label}</span>
                   {option.description ? (
-                    <span className="truncate text-[0.8rem] text-[var(--text-soft)]">
+                    <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
                       {option.description}
                     </span>
                   ) : null}
@@ -196,7 +198,7 @@ export function SearchableSelect({
           ) : (
             <div
               role="status"
-              className="rounded-[12px] border border-dashed border-[var(--border)] px-[0.85rem] py-[0.6rem] text-[0.88rem] text-[var(--text-soft)]"
+              className="rounded-[10px] border border-dashed border-[var(--border)] px-[0.9rem] py-[0.55rem] text-[0.9rem] text-[var(--text-soft)]"
             >
               {emptyText}
             </div>

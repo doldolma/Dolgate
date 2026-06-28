@@ -358,7 +358,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
   );
 
   return (
-    <div className="flex flex-col gap-[1.05rem]">
+    <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
           <SectionLabel>Diagnostics</SectionLabel>
@@ -370,8 +370,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
       </div>
 
       <Toolbar>
-        <label className="flex w-full max-w-[220px] flex-col gap-[0.45rem]">
-          <span className="text-[0.88rem] text-[var(--text-soft)]">Category</span>
+        <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+          <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
           <SelectField
             value={category}
             onChange={(event) =>
@@ -384,8 +384,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
           </SelectField>
         </label>
 
-        <label className="flex w-full max-w-[220px] flex-col gap-[0.45rem]">
-          <span className="text-[0.88rem] text-[var(--text-soft)]">Level</span>
+        <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
+          <span className="text-[0.9rem] text-[var(--text-soft)]">Level</span>
           <SelectField
             value={level}
             onChange={(event) =>
@@ -441,7 +441,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <div>
                       <strong>{containerLifecycleMetadata.hostLabel}</strong>
-                      <div className="text-[0.92rem] text-[var(--text-soft)]">
+                      <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? 'ECS cluster' : 'Host containers'}
                       </div>
                     </div>
@@ -457,39 +457,39 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>탐색 시작</span>
                       <strong>{formatLogTimestamp(containerLifecycleMetadata.startedAt)}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>탐색 종료</span>
                       <strong>{containerLifecycleMetadata.endedAt ? formatLogTimestamp(containerLifecycleMetadata.endedAt) : '연결 중'}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>유지 시간</span>
                       <strong>{formatSessionLifecycleDuration(containerLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
-                  <div className="mt-[0.75rem] flex flex-wrap gap-[0.45rem]">
+                  <div className="mt-[0.7rem] flex flex-wrap gap-[0.4rem]">
                     {typeof containerLifecycleMetadata.resourceCount === 'number' ? (
-                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
                         {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? '서비스' : '컨테이너'} {containerLifecycleMetadata.resourceCount}개
                       </span>
                     ) : null}
                     {containerLifecycleMetadata.refreshCount > 0 ? (
-                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
                         새로고침 {containerLifecycleMetadata.refreshCount}회
                       </span>
                     ) : null}
                     {containerLifecycleMetadata.errorCount > 0 ? (
-                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                      <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
                         오류 {containerLifecycleMetadata.errorCount}회
                       </span>
                     ) : null}
                   </div>
                   {containerLifecycleMetadata.lastError || containerLifecycleMetadata.endReason ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">
                       {containerLifecycleMetadata.lastError ?? containerLifecycleMetadata.endReason}
                     </div>
                   ) : null}
@@ -501,7 +501,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <div>
                       <strong>{containerActionMetadata.containerName || containerActionMetadata.containerId}</strong>
-                      <div className="text-[0.92rem] text-[var(--text-soft)]">{containerActionMetadata.hostLabel}</div>
+                      <div className="text-[0.9rem] text-[var(--text-soft)]">{containerActionMetadata.hostLabel}</div>
                       {containerActionMetadata.containerName ? (
                         <div className="text-[0.82rem] text-[var(--text-soft)]">{containerActionMetadata.containerId}</div>
                       ) : null}
@@ -516,18 +516,18 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-2">
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-2">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>실행 시각</span>
                       <strong>{formatLogTimestamp(containerActionMetadata.startedAt)}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>실행 시간</span>
                       <strong>{formatSessionLifecycleDuration(containerActionMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {containerActionMetadata.errorMessage ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">
                       {containerActionMetadata.errorMessage}
                     </div>
                   ) : null}
@@ -540,7 +540,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     <div>
                       <strong>{sessionLifecycleMetadata.hostLabel}</strong>
                       {getSessionLifecycleSubtitle(sessionLifecycleMetadata) ? (
-                        <div className="text-[0.92rem] text-[var(--text-soft)]">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
+                        <div className="text-[0.9rem] text-[var(--text-soft)]">{getSessionLifecycleSubtitle(sessionLifecycleMetadata)}</div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
@@ -557,22 +557,22 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 시작</span>
                       <strong>{formatLogTimestamp(sessionLifecycleMetadata.connectedAt)}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 종료</span>
                       <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : '연결 중'}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 시간</span>
                       <strong>{formatSessionLifecycleDuration(sessionLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {sessionLifecycleMetadata.disconnectReason ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{sessionLifecycleMetadata.disconnectReason}</div>
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">{sessionLifecycleMetadata.disconnectReason}</div>
                   ) : null}
                 </CardMain>
               </Card>
@@ -583,7 +583,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                     <div>
                       <strong>{sftpLifecycleMetadata.hostLabel}</strong>
                       {sftpLifecycleMetadata.title.trim() && sftpLifecycleMetadata.title.trim() !== sftpLifecycleMetadata.hostLabel.trim() ? (
-                        <div className="text-[0.92rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.title}</div>
+                        <div className="text-[0.9rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.title}</div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
@@ -593,40 +593,40 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 시작</span>
                       <strong>{formatLogTimestamp(sftpLifecycleMetadata.connectedAt ?? sftpLifecycleMetadata.startedAt)}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 종료</span>
                       <strong>{sftpLifecycleMetadata.endedAt ? formatLogTimestamp(sftpLifecycleMetadata.endedAt) : '연결 중'}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>연결 시간</span>
                       <strong>{formatSessionLifecycleDuration(sftpLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {getSftpSummaryItems(sftpLifecycleMetadata).length > 0 ? (
-                    <div className="mt-[0.75rem] flex flex-wrap gap-[0.45rem]">
+                    <div className="mt-[0.7rem] flex flex-wrap gap-[0.4rem]">
                       {getSftpSummaryItems(sftpLifecycleMetadata).map((item) => (
-                        <span key={item} className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.75rem] py-[0.42rem] text-[0.88rem] text-[var(--text-soft)]">
+                        <span key={item} className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
                           {item}
                         </span>
                       ))}
                     </div>
                   ) : null}
                   {sftpLifecycleMetadata.lastPath ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">
                       마지막 경로: {sftpLifecycleMetadata.lastPath}
                     </div>
                   ) : null}
                   {sftpLifecycleMetadata.endReason ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.endReason}</div>
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">{sftpLifecycleMetadata.endReason}</div>
                   ) : null}
-                  <details className="mt-[0.75rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <details className="mt-[0.7rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                     <summary>Metadata</summary>
-                    <pre className="mt-[0.6rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[12px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
+                    <pre className="mt-[0.55rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
                   </details>
                 </CardMain>
               </Card>
@@ -636,8 +636,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   <div className="flex flex-wrap items-center gap-[0.7rem]">
                     <div>
                       <strong>{portForwardLifecycleMetadata.ruleLabel}</strong>
-                      <div className="text-[0.92rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.hostLabel}</div>
-                      <div className="text-[0.92rem] text-[var(--text-soft)]">
+                      <div className="text-[0.9rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.hostLabel}</div>
+                      <div className="text-[0.9rem] text-[var(--text-soft)]">
                         {`${portForwardLifecycleMetadata.bindAddress}:${portForwardLifecycleMetadata.bindPort} -> ${portForwardLifecycleMetadata.targetSummary}`}
                       </div>
                     </div>
@@ -650,22 +650,22 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       </Badge>
                     </div>
                   </div>
-                  <div className="mt-[0.85rem] grid gap-[0.75rem] md:grid-cols-3">
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                  <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>포워딩 시작</span>
                       <strong>{formatLogTimestamp(portForwardLifecycleMetadata.startedAt)}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>포워딩 종료</span>
                       <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : '포워딩 중'}</strong>
                     </div>
-                    <div className="grid gap-[0.25rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <span>유지 시간</span>
                       <strong>{formatSessionLifecycleDuration(portForwardLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   {portForwardLifecycleMetadata.endReason ? (
-                    <div className="mt-[0.75rem] rounded-[14px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.75rem] text-[0.92rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.endReason}</div>
+                    <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">{portForwardLifecycleMetadata.endReason}</div>
                   ) : null}
                 </CardMain>
               </Card>
@@ -678,14 +678,14 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       {log.level.toUpperCase()}
                     </Badge>
                   </div>
-                  <div className="mt-[0.45rem] flex flex-wrap gap-[0.8rem] text-[0.92rem] text-[var(--text-soft)]">
+                  <div className="mt-[0.4rem] flex flex-wrap gap-[0.9rem] text-[0.9rem] text-[var(--text-soft)]">
                     <span>{log.category}</span>
                     <span>{formatLogTimestamp(log.createdAt)}</span>
                   </div>
                   {log.metadata ? (
-                    <details className="mt-[0.75rem] rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]">
+                    <details className="mt-[0.7rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
                       <summary>Metadata</summary>
-                      <pre className="mt-[0.6rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[12px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
+                      <pre className="mt-[0.55rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-3 py-3 text-[0.82rem] leading-[1.55]">{JSON.stringify(log.metadata, null, 2)}</pre>
                     </details>
                   ) : null}
                 </CardMain>

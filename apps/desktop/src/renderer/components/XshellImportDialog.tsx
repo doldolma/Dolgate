@@ -453,7 +453,7 @@ function renderProbeSummary(
 
   return (
     <div className="grid gap-3">
-      <div className="rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
+      <div className="rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
         <div
           className={cn(
             'grid items-center gap-3 text-[0.9rem] leading-[1.6] text-[var(--text-soft)]',
@@ -463,7 +463,7 @@ function renderProbeSummary(
           )}
         >
           <strong className="text-[var(--text)]">세션 소스 {sources.length}개</strong>
-          <code className="min-w-0 truncate text-[0.84rem]" title={primarySource.folderPath}>
+          <code className="min-w-0 truncate text-[0.82rem]" title={primarySource.folderPath}>
             {primarySource.folderPath}
           </code>
           {additionalSources.length > 0 ? <span className="shrink-0">외 {additionalSources.length}개</span> : null}
@@ -471,7 +471,7 @@ function renderProbeSummary(
       </div>
 
       {disclosureSummary ? (
-        <details className="rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
+        <details className="rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-4 py-3">
           <summary className="cursor-pointer text-[0.9rem] font-medium leading-[1.6] text-[var(--text-soft)]">
             {disclosureSummary}
           </summary>
@@ -500,7 +500,7 @@ function renderProbeSummary(
                 {additionalSources.map((source) => (
                   <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
                     <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong>{' '}
-                    <code className="break-all text-[0.84rem]">{source.folderPath}</code>
+                    <code className="break-all text-[0.82rem]">{source.folderPath}</code>
                   </p>
                 ))}
               </div>
@@ -541,9 +541,9 @@ function XshellTreeRenderer({
       const disabled = inheritedSelection;
 
       return (
-        <div key={node.id} className="grid gap-[0.45rem]">
+        <div key={node.id} className="grid gap-[0.4rem]">
           <div
-            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
+            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.9rem] py-[0.7rem]"
             style={{ paddingLeft: `${depth * 1.1}rem` }}
           >
             <span className="h-[1.8rem] w-[1.8rem] shrink-0" aria-hidden="true" />
@@ -557,12 +557,12 @@ function XshellTreeRenderer({
               />
               <div className="min-w-0">
                 <strong>{node.host.label}</strong>
-                <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">
+                <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                   {node.host.username}@{node.host.hostname}:{node.host.port}
                 </span>
-                <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
-                <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.sourceFilePath}</small>
-                {node.host.privateKeyPath ? <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.host.privateKeyPath}</small> : null}
+                <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
+                <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.sourceFilePath}</small>
+                {node.host.privateKeyPath ? <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.privateKeyPath}</small> : null}
               </div>
             </label>
             <div className="flex flex-wrap items-center gap-2">
@@ -592,14 +592,14 @@ function XshellTreeRenderer({
     const isExpanded = Boolean(searchQuery) || expandedGroupPaths.has(node.path);
 
     return (
-      <div key={node.id} className="grid gap-[0.45rem]">
+      <div key={node.id} className="grid gap-[0.4rem]">
         <div
-          className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_80%,var(--accent-surface)_20%)] px-[0.8rem] py-[0.75rem]"
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_80%,var(--accent-surface)_20%)] px-[0.9rem] py-[0.7rem]"
           style={{ paddingLeft: `${depth * 1.1}rem` }}
         >
           <button
             type="button"
-            className={`inline-grid h-[1.8rem] w-[1.8rem] min-w-[1.8rem] place-items-center rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] text-[0.8rem] transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
+            className={`inline-grid h-[1.8rem] w-[1.8rem] min-w-[1.8rem] place-items-center rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] text-[0.82rem] transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
             onClick={() => onToggleExpanded(node.path)}
             aria-label={`${node.name} 그룹 ${isExpanded ? '접기' : '펼치기'}`}
           >
@@ -620,13 +620,13 @@ function XshellTreeRenderer({
             />
             <div className="min-w-0">
               <strong>{node.name}</strong>
-              <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">{node.path}</span>
-              <small className="block text-[0.8rem] text-[var(--text-soft)]">{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
+              <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.path}</span>
+              <small className="block text-[0.82rem] text-[var(--text-soft)]">{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
             </div>
           </label>
         </div>
         {isExpanded ? (
-          <div className="grid gap-[0.45rem]">
+          <div className="grid gap-[0.4rem]">
             {node.children.length > 0 ? (
               node.children.map((child) => renderNode(child, depth + 1, checked))
             ) : (
@@ -862,7 +862,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 </div>
               </FilterRow>
 
-              <div className="flex flex-wrap items-center gap-3 text-[0.84rem] font-medium text-[var(--text-soft)]">
+              <div className="flex flex-wrap items-center gap-3 text-[0.82rem] font-medium text-[var(--text-soft)]">
                 <span>소스 {probe.sources.length}</span>
                 <span>트리 항목 {probe.groups.length + probe.hosts.length}</span>
                 <span>선택 항목 {selectedItemCount}</span>
@@ -885,7 +885,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                   />
                 ) : (
                   <div
-                    className="grid gap-2 rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.45rem]"
+                    className="grid gap-2 rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.4rem]"
                     role="tree"
                     aria-label="Xshell 가져오기 항목"
                   >

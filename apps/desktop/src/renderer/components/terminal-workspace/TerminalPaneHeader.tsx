@@ -39,7 +39,7 @@ export function TerminalPaneHeader({
   return (
     <div
       className={cn(
-        'flex cursor-grab select-none items-center justify-between gap-2 rounded-t-[6px] border border-b-0 border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.55rem] pb-[0.4rem] pt-[0.45rem]',
+        'flex cursor-grab select-none items-center justify-between gap-2 rounded-t-[6px] border border-b-0 border-[color-mix(in_srgb,var(--border)_88%,transparent_12%)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.55rem] pb-[0.4rem] pt-[0.4rem]',
         active &&
           'bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-muted)_88%)]',
       )}
@@ -77,7 +77,7 @@ export function TerminalPaneHeader({
           aria-label={`${title} 세션 종료`}
           tone="ghost"
           size="sm"
-          className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.95rem] text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
+          className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
           onClick={onClose}
           disabled={closingDisabled}
         >
@@ -112,7 +112,7 @@ export function TerminalSplitButtons({
         title="좌우 분할 (Ctrl-b %)"
         tone="ghost"
         size="sm"
-        className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.95rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
+        className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
         draggable={false}
         onMouseDown={stop}
         onClick={(event) => {
@@ -127,7 +127,7 @@ export function TerminalSplitButtons({
         title='상하 분할 (Ctrl-b ")'
         tone="ghost"
         size="sm"
-        className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.95rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
+        className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
         draggable={false}
         onMouseDown={stop}
         onClick={(event) => {

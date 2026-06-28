@@ -25,7 +25,7 @@ export function TerminalSearchOverlay({
   return (
     <Card
       as="div"
-      className="absolute right-4 top-4 z-[6] flex w-[min(26rem,calc(100%-2rem))] flex-wrap items-center justify-start gap-2 rounded-[20px] p-3 max-[760px]:left-3 max-[760px]:right-3"
+      className="absolute right-4 top-4 z-[6] flex w-[min(26rem,calc(100%-2rem))] flex-wrap items-center justify-start gap-2 rounded-[12px] p-3 max-[760px]:left-3 max-[760px]:right-3"
       onMouseDown={(event) => event.stopPropagation()}
     >
       <Input

@@ -171,6 +171,7 @@ interface HostBaseRecord {
   groupName?: string | null;
   tags?: string[];
   terminalThemeId?: TerminalThemeId | null;
+  favorite?: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -199,6 +200,11 @@ export interface SshHostRecord extends HostBaseRecord {
   useMosh?: boolean | null;
   /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
   agentForwarding?: boolean | null;
+  /**
+   * 연결 시 셸에 주입할 환경변수. 자격증명(secretRef)이 아니라 호스트 자체 속성이라
+   * 호스트마다 독립적이다(시크릿 공유로 번지지 않는다). 시작 명령과 동일하게 호스트 레코드에 저장.
+   */
+  env?: HostEnvVar[] | null;
 }
 
 export interface SshHostDraft extends HostBaseDraft {
@@ -217,6 +223,8 @@ export interface SshHostDraft extends HostBaseDraft {
   useMosh?: boolean | null;
   /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
   agentForwarding?: boolean | null;
+  /** 연결 시 셸에 주입할 환경변수(호스트 속성, 자격증명과 분리). [[SshHostRecord]] 참고. */
+  env?: HostEnvVar[] | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
@@ -2159,6 +2167,10 @@ export interface ManagedSecretPayload {
   privateKeyKdfRounds?: number;
   passphraseSaved?: boolean;
   generatedByApp?: boolean;
+  /**
+   * @deprecated 환경변수는 이제 호스트 레코드([[SshHostRecord]].env)에 저장된다. 시크릿 공유 시
+   * 다른 호스트로 번지던 문제 때문에 분리했다. 이 필드는 구버전 데이터의 읽기 폴백/마이그레이션용으로만 남긴다.
+   */
   env?: HostEnvVar[];
   updatedAt: string;
 }

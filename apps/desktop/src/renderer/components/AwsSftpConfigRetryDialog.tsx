@@ -44,7 +44,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
           </div>
         </ModalHeader>
         <ModalBody className="grid gap-4">
-          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">{request.message}</p>
+          <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">{request.message}</p>
           <FieldGroup label="SSH Username">
             <Input
               type="text"
@@ -59,7 +59,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
           </FieldGroup>
           <button
             type="button"
-            className="self-start border-0 bg-transparent p-0 text-[0.92rem] font-semibold text-[var(--accent-strong)]"
+            className="self-start border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
             onClick={() => setShowAdvanced((current) => !current)}
           >
             {showAdvanced ? '고급 옵션 숨기기' : '고급 옵션'}

@@ -66,7 +66,7 @@ export function SplitButtonMenu({
   return (
     <div
       className={cn(
-        'absolute right-0 top-[calc(100%+0.45rem)] z-[3] min-w-[14rem] rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface)] p-2 shadow-[var(--shadow-floating)]',
+        'absolute right-0 top-[calc(100%+0.45rem)] z-[3] min-w-[14rem] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] p-2 shadow-[var(--shadow-floating)]',
         className,
       )}
       {...props}
@@ -82,7 +82,7 @@ export function SplitButtonMenuItem({
     <Button
       variant="ghost"
       fullWidth
-      className={cn('justify-start rounded-[14px] px-3 py-2.5 font-medium text-[var(--text)]', className)}
+      className={cn('justify-start rounded-[10px] px-3 py-2.5 font-medium text-[var(--text)]', className)}
       {...props}
     />
   );

@@ -81,8 +81,8 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-[1.1rem] overflow-auto px-[1.6rem] py-[1.4rem]">
-      <header className="flex flex-wrap items-center justify-between gap-[0.85rem]">
+    <section className="flex min-h-0 flex-1 flex-col gap-[1.1rem] overflow-auto px-[1.6rem] py-[1.3rem]">
+      <header className="flex flex-wrap items-center justify-between gap-[0.9rem]">
         <div className="grid gap-[0.25rem]">
           <h2 className="text-[1.35rem] font-semibold text-[var(--text)]">Snippets</h2>
           <p className="text-[0.9rem] text-[var(--text-soft)]">
@@ -95,8 +95,8 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
       </header>
 
       {isFormOpen ? (
-        <div className="grid gap-[0.85rem] rounded-[20px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[1.1rem]">
-          <div className="grid gap-[0.75rem] md:grid-cols-[minmax(0,260px)_minmax(0,220px)]">
+        <div className="grid gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[1.1rem]">
+          <div className="grid gap-[0.7rem] md:grid-cols-[minmax(0,260px)_minmax(0,220px)]">
             <FieldGroup label="Label">
               <Input
                 aria-label="Snippet label"
@@ -114,7 +114,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
               />
             </FieldGroup>
           </div>
-          <label className="grid gap-[0.45rem]">
+          <label className="grid gap-[0.4rem]">
             <span className={fieldLabelClassName}>Command</span>
             <Textarea
               aria-label="Snippet command"
@@ -137,9 +137,9 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
             </div>
           ) : null}
           {error ? (
-            <p className="text-[0.85rem] text-[var(--danger-text)]">{error}</p>
+            <p className="text-[0.82rem] text-[var(--danger-text)]">{error}</p>
           ) : null}
-          <div className="flex justify-end gap-[0.6rem]">
+          <div className="flex justify-end gap-[0.55rem]">
             <Button variant="secondary" onClick={() => setIsFormOpen(false)} disabled={isSubmitting}>
               취소
             </Button>
@@ -171,19 +171,19 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
             return (
               <article
                 key={snippet.id}
-                className="grid gap-[0.55rem] rounded-[18px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[1rem]"
+                className="grid gap-[0.55rem] rounded-[12px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.9rem]"
               >
-                <div className="flex flex-wrap items-center justify-between gap-[0.6rem]">
-                  <div className="flex min-w-0 flex-wrap items-center gap-[0.5rem]">
+                <div className="flex flex-wrap items-center justify-between gap-[0.55rem]">
+                  <div className="flex min-w-0 flex-wrap items-center gap-[0.55rem]">
                     <strong className="text-[1rem] text-[var(--text)]">{snippet.label}</strong>
                     {snippet.keyword ? <Badge>{snippet.keyword}</Badge> : null}
                     {variables.length > 0 ? (
-                      <span className="text-[0.78rem] text-[var(--text-soft)]">
+                      <span className="text-[0.76rem] text-[var(--text-soft)]">
                         {variables.length}개 변수
                       </span>
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 items-center gap-[0.45rem]">
+                  <div className="flex shrink-0 items-center gap-[0.4rem]">
                     {onInsert ? (
                       <Button variant="secondary" onClick={() => onInsert(snippet)}>
                         삽입
@@ -197,7 +197,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
                     </Button>
                   </div>
                 </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-[12px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.8rem] py-[0.6rem] font-mono text-[0.85rem] text-[var(--text)]">
+                <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.9rem] py-[0.55rem] font-mono text-[0.82rem] text-[var(--text)]">
                   {snippet.command}
                 </pre>
               </article>

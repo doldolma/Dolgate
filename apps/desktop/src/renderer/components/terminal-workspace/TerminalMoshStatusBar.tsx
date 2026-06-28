@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { cn } from '../../lib/cn';
+import { Circle, RefreshCw, type LucideIcon } from '../../ui/icons';
 
 type MoshConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
@@ -10,16 +11,16 @@ interface TerminalMoshStatusBarProps {
 
 const STATE_META: Record<
   MoshConnectionState,
-  { icon: string; label: string; color: string; spin?: boolean }
+  { Icon: LucideIcon; label: string; color: string; spin?: boolean; fill?: boolean }
 > = {
-  connected: { icon: '●', label: '연결됨', color: 'var(--success-text)' },
+  connected: { Icon: Circle, label: '연결됨', color: 'var(--success-text)', fill: true },
   reconnecting: {
-    icon: '⟳',
+    Icon: RefreshCw,
     label: '재연결 중',
-    color: 'var(--warning, #d9a441)',
+    color: 'var(--warning-text)',
     spin: true,
   },
-  disconnected: { icon: '●', label: '끊김', color: 'var(--danger-text)' },
+  disconnected: { Icon: Circle, label: '끊김', color: 'var(--danger-text)', fill: true },
 };
 
 function formatAgo(lastResponseAt: string | null, now: number): string | null {
@@ -66,16 +67,16 @@ export function TerminalMoshStatusBar({
 
   return (
     <div
-      className="mx-[0.55rem] mb-[0.55rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.28rem] text-[0.7rem] text-[var(--text-muted)]"
+      className="mx-[0.55rem] mb-[0.55rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
       role="status"
       aria-live="polite"
     >
       <span
-        className={cn('leading-none', meta.spin && 'animate-spin')}
+        className={cn('inline-flex leading-none', meta.spin && 'animate-spin')}
         style={{ color: meta.color }}
         aria-hidden
       >
-        {meta.icon}
+        <meta.Icon className="h-3 w-3" fill={meta.fill ? 'currentColor' : 'none'} />
       </span>
       <span className="font-medium text-[var(--text)]">Mosh</span>
       <span aria-hidden>·</span>

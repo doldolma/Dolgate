@@ -23,7 +23,8 @@ export const ipcChannels = {
     list: 'hosts:list',
     create: 'hosts:create',
     update: 'hosts:update',
-    remove: 'hosts:remove'
+    remove: 'hosts:remove',
+    setFavorite: 'hosts:set-favorite'
   },
   groups: {
     list: 'groups:list',

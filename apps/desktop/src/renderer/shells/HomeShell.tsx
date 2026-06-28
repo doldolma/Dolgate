@@ -7,11 +7,9 @@ import {
   isSshHostRecord,
   normalizeGroupPath,
   type AuthState,
-  type HostEnvVar,
   type SshKeyGenerateInput,
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
-import { HomeNavigation } from '../components/HomeNavigation';
 import { HostBrowser } from '../components/HostBrowser';
 import { HostDrawer } from '../components/HostDrawer';
 import { getJumpHostCandidates } from '../components/HostForm';
@@ -24,10 +22,11 @@ import { SettingsPanel } from '../components/SettingsPanel';
 import { TermiusImportDialog } from '../components/TermiusImportDialog';
 import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
 import { XshellImportDialog } from '../components/XshellImportDialog';
+import { cn } from '../lib/cn';
+import { ArrowLeft } from '../ui/icons';
 import type { useLoginController } from '../controllers/useLoginController';
 import { useSettingsViewModel } from '../view-models/appViewModels';
 import { openSessionReplay } from '../services/desktop/session-replays';
-import { loadSavedCredential } from '../services/desktop/settings';
 import type {
   useAppModalViewModel,
   useContainersViewModel,
@@ -65,6 +64,7 @@ export function HomeShell({
 }: HomeShellProps) {
   const settingsViewModel = useSettingsViewModel();
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<'overview' | 'connection'>('overview');
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
   const [isOpenSshImportOpen, setIsOpenSshImportOpen] = useState(false);
   const [isXshellImportOpen, setIsXshellImportOpen] = useState(false);
@@ -81,6 +81,25 @@ export function HomeShell({
       setSelectedHostId(null);
     }
   }, [homeViewModel.hosts, selectedHostId]);
+
+  // ⌘K / Ctrl+K로 호스트 검색에 포커스. 홈의 hosts 화면이 활성일 때만 동작(터미널 등과 충돌 방지).
+  useEffect(() => {
+    if (!active || homeViewModel.homeSection !== 'hosts') {
+      return;
+    }
+    function handleSearchShortcut(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
+        const input = document.getElementById('host-search');
+        if (input instanceof HTMLInputElement) {
+          event.preventDefault();
+          input.focus();
+          input.select();
+        }
+      }
+    }
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
+  }, [active, homeViewModel.homeSection]);
 
   const editingHostId =
     homeViewModel.hostDrawer.mode === 'edit'
@@ -112,6 +131,14 @@ export function HomeShell({
     homeViewModel.homeSection === 'hosts' &&
     homeViewModel.hostDrawer.mode !== 'closed';
   const highlightedHostId = editingHostId ?? selectedHostId;
+  const sectionTitle =
+    homeViewModel.homeSection === 'portForwarding'
+      ? 'Port Forwarding'
+      : homeViewModel.homeSection === 'snippets'
+        ? 'Snippets'
+        : homeViewModel.homeSection === 'logs'
+          ? 'Logs'
+          : 'Settings';
 
   function resetHostBrowserMessages() {
     setHostBrowserError(null);
@@ -139,11 +166,13 @@ export function HomeShell({
   }
 
   function handleSelectHost(hostId: string) {
+    // 편집/생성 중에는 다른 호스트를 눌러도 이동/전환하지 않는다(작업 중 실수로 벗어나는 것 방지).
+    // 다른 호스트로 가려면 먼저 편집 폼을 닫거나, 우클릭 → 수정으로 명시적으로 전환한다.
+    if (homeViewModel.hostDrawer.mode !== 'closed') {
+      return;
+    }
     resetHostBrowserMessages();
     setSelectedHostId(hostId);
-    if (homeViewModel.hostDrawer.mode === 'edit') {
-      homeViewModel.openEditHostDrawer(hostId);
-    }
   }
 
   function handleEditHost(hostId: string) {
@@ -169,20 +198,6 @@ export function HomeShell({
         .map(toLinkedHostSummary),
       initialMode: 'clone-for-host',
       initialHostId: currentHost.id,
-    });
-  }
-
-  // 기존 호스트의 환경변수 인라인 편집 저장: 현재 시크릿 번들을 복호화해
-  // 자격증명은 보존한 채 env만 교체해 같은 secretRef로 재저장한다(호스트 레코드
-  // 미변경 → 폼 재hydrate 루프 없음).
-  async function handlePersistEnv(secretRef: string, env: HostEnvVar[]) {
-    const loaded = await loadSavedCredential(secretRef);
-    await settingsViewModel.updateKeychainSecret(secretRef, {
-      password: loaded?.password,
-      passphrase: loaded?.passphrase,
-      privateKeyPem: loaded?.privateKeyPem,
-      certificateText: loaded?.certificateText,
-      env,
     });
   }
 
@@ -245,34 +260,71 @@ export function HomeShell({
     setHostBrowserStatus(`${host.label} 호스트가 새 SSH 키를 사용하도록 전환되었습니다.`);
   }
 
+  // 호스트 편집/생성 폼은 별도 오버레이가 아니라 우측 상세 영역(HostBrowser aside) 안에 표시한다.
+  const hostEditor = isDrawerOpen ? (
+    <HostDrawer
+      open={isDrawerOpen}
+      mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
+      host={currentHost}
+      keychainEntries={settingsViewModel.keychainEntries}
+      groupOptions={groupOptions}
+      jumpHostOptions={jumpHostOptions}
+      snippets={homeViewModel.snippets}
+      defaultGroupPath={
+        homeViewModel.hostDrawer.mode === 'create'
+          ? homeViewModel.hostDrawer.defaultGroupPath
+          : homeViewModel.currentGroupPath
+      }
+      createKind={
+        homeViewModel.hostDrawer.mode === 'create'
+          ? homeViewModel.hostDrawer.kind
+          : 'ssh'
+      }
+      desktopPlatform={desktopPlatform}
+      onClose={homeViewModel.closeHostDrawer}
+      onSubmit={async (draft, secrets) => {
+        await homeViewModel.saveHost(
+          homeViewModel.hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null,
+          draft,
+          secrets,
+        );
+      }}
+      onConnect={
+        currentHost
+          ? async (hostId) => {
+              await homeViewModel.connectHost(hostId, 120, 32);
+              homeViewModel.closeHostDrawer();
+            }
+          : undefined
+      }
+      onEditExistingSecret={openHostSecretEditor}
+      onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
+    />
+  ) : null;
+
   return (
     <section
-      className={[
-        'absolute inset-0 grid min-h-0 gap-0 transition-[opacity,transform] duration-180',
-        active ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-[0.995]',
-        isDrawerOpen
-          ? 'grid-cols-[220px_minmax(0,1fr)_380px] max-[1320px]:grid-cols-[200px_minmax(0,1fr)_340px] max-[1040px]:grid-cols-1'
-          : 'grid-cols-[220px_minmax(0,1fr)_0] max-[1320px]:grid-cols-[200px_minmax(0,1fr)_0] max-[1040px]:grid-cols-1',
-      ].join(' ')}
+      className={cn(
+        'absolute inset-0 flex min-h-0 flex-col transition-[opacity,transform] duration-180',
+        active
+          ? 'pointer-events-auto opacity-100 scale-100'
+          : 'pointer-events-none opacity-0 scale-[0.995]',
+      )}
     >
-      <HomeNavigation
-        activeSection={homeViewModel.homeSection}
-        onSelectSection={homeViewModel.openHomeSection}
-      />
+      {authState.status === 'offline-authenticated' && authState.offline ? (
+        <OfflineModeBanner
+          expiryLabel={offlineLeaseExpiryLabel}
+          isRetrying={loginController.isRetryingOnline}
+          onRetry={() => {
+            void loginController.retryOnline();
+          }}
+        />
+      ) : null}
 
-      <main className="flex min-h-0 min-w-0 flex-col overflow-auto px-[1.2rem] pb-[1.25rem] pt-[1.15rem]">
-        {authState.status === 'offline-authenticated' && authState.offline ? (
-          <OfflineModeBanner
-            expiryLabel={offlineLeaseExpiryLabel}
-            isRetrying={loginController.isRetryingOnline}
-            onRetry={() => {
-              void loginController.retryOnline();
-            }}
-          />
-        ) : null}
-
+      <div className="relative min-h-0 flex-1">
         {homeViewModel.homeSection === 'hosts' ? (
           <HostBrowser
+            hostEditor={hostEditor}
             desktopPlatform={desktopPlatform}
             hosts={homeViewModel.hosts}
             groups={homeViewModel.groups}
@@ -393,6 +445,7 @@ export function HomeShell({
               }
             }}
             onMoveHostToGroup={homeViewModel.moveHostToGroup}
+            onSetHostFavorite={homeViewModel.setHostFavorite}
             onRemoveHost={homeViewModel.removeHost}
             onRemoveSecret={settingsViewModel.removeKeychainSecret}
             onConnectHost={async (hostId) => {
@@ -434,10 +487,42 @@ export function HomeShell({
                 );
               }
             }}
+            activityLogs={settingsViewModel.activityLogs}
+            snippets={homeViewModel.snippets}
+            onOpenSftp={(hostId) => {
+              resetHostBrowserMessages();
+              setSelectedHostId(hostId);
+              void homeViewModel.connectSftpHost('right', hostId).catch((error) => {
+                setHostBrowserError(
+                  error instanceof Error ? error.message : 'SFTP를 열지 못했습니다.',
+                );
+              });
+            }}
+            onSelectSection={homeViewModel.openHomeSection}
+            detailTab={detailTab}
+            onDetailTabChange={setDetailTab}
+            onOpenReplay={openSessionReplay}
+            onGenerateAndInstallSshKey={handleGenerateAndInstallSshKey}
+            onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
           />
-        ) : null}
-
-        {homeViewModel.homeSection === 'portForwarding' ? (
+        ) : (
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex items-center gap-3 border-b border-[var(--border)] px-[1.1rem] py-[0.9rem]">
+              <button
+                type="button"
+                onClick={() => homeViewModel.openHomeSection('hosts')}
+                className="group inline-flex items-center gap-[0.4rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-elevated)] py-[0.5rem] pl-[0.65rem] pr-[0.9rem] text-[0.82rem] font-semibold text-[var(--text-soft)] transition-[color,border-color,background-color] duration-140 hover:border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border)_62%)] hover:bg-[var(--selection-tint)] hover:text-[var(--accent-strong)]"
+              >
+                <ArrowLeft
+                  className="h-[0.95rem] w-[0.95rem] transition-transform duration-140 group-hover:-translate-x-[2px]"
+                  aria-hidden="true"
+                />
+                Hosts
+              </button>
+              <h2 className="text-[1rem] font-bold text-[var(--text)]">{sectionTitle}</h2>
+            </div>
+            <main className="min-h-0 flex-1 overflow-auto px-[1.1rem] pb-[1.3rem] pt-[1.1rem]">
+              {homeViewModel.homeSection === 'portForwarding' ? (
           <PortForwardingPanel
             hosts={homeViewModel.hosts}
             containerTabs={containersViewModel.containerTabs}
@@ -507,45 +592,11 @@ export function HomeShell({
             onLogout={loginController.logout}
           />
         ) : null}
-      </main>
+            </main>
+          </div>
+        )}
 
-      <HostDrawer
-        open={isDrawerOpen}
-        mode={homeViewModel.hostDrawer.mode === 'create' ? 'create' : 'edit'}
-        host={currentHost}
-        keychainEntries={settingsViewModel.keychainEntries}
-        groupOptions={groupOptions}
-        jumpHostOptions={jumpHostOptions}
-        snippets={homeViewModel.snippets}
-        defaultGroupPath={
-          homeViewModel.hostDrawer.mode === 'create'
-            ? homeViewModel.hostDrawer.defaultGroupPath
-            : homeViewModel.currentGroupPath
-        }
-        createKind={homeViewModel.hostDrawer.mode === 'create' ? homeViewModel.hostDrawer.kind : 'ssh'}
-        desktopPlatform={desktopPlatform}
-        onClose={homeViewModel.closeHostDrawer}
-        onSubmit={async (draft, secrets) => {
-          await homeViewModel.saveHost(
-            homeViewModel.hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null,
-            draft,
-            secrets,
-          );
-        }}
-        onConnect={
-          currentHost
-            ? async (hostId) => {
-                await homeViewModel.connectHost(hostId, 120, 32);
-                homeViewModel.closeHostDrawer();
-              }
-            : undefined
-        }
-        onEditExistingSecret={openHostSecretEditor}
-        onPersistEnv={handlePersistEnv}
-        onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
-        onGenerateAndInstallSshKey={handleGenerateAndInstallSshKey}
-        onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
-      />
+      </div>
 
       <AwsImportDialog
         open={isAwsImportOpen}

@@ -19,7 +19,7 @@ interface KnownHostsPanelProps {
 
 export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
   return (
-    <div className="flex flex-col gap-[1.05rem]">
+    <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
           <SectionLabel>Security</SectionLabel>

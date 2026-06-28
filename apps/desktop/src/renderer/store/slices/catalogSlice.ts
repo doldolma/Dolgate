@@ -384,8 +384,11 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               activityLogs: [],
               keychainEntries: [],
             }),
-    createGroup: async (name) => {
-            const next = await api.groups.create(name, get().currentGroupPath);
+    createGroup: async (name, parentPath) => {
+            const next = await api.groups.create(
+              name,
+              parentPath !== undefined ? parentPath : get().currentGroupPath,
+            );
             set((state) => ({
               groups: sortGroups([
                 ...state.groups.filter((group) => group.id !== next.id),
@@ -508,6 +511,19 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               groupName: groupPath,
             });
     
+            set((state) => ({
+              hosts: sortHosts([
+                ...state.hosts.filter((host) => host.id !== next.id),
+                next,
+              ]),
+            }));
+            await syncOperationalData(set);
+          },
+    setHostFavorite: async (hostId, favorite) => {
+            const next = await api.hosts.setFavorite(hostId, favorite);
+            if (!next) {
+              return;
+            }
             set((state) => ({
               hosts: sortHosts([
                 ...state.hosts.filter((host) => host.id !== next.id),

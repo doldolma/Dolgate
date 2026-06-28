@@ -21,7 +21,6 @@ const semanticClassFreeFiles = [
   'components/HostBrowser.tsx',
   'components/HostDrawer.tsx',
   'components/HostForm.tsx',
-  'components/HomeNavigation.tsx',
   'components/SettingsPanel.tsx',
   'components/LogsPanel.tsx',
   'components/SessionReplayWindow.tsx',
@@ -39,7 +38,6 @@ const phaseSevenZeroLegacyFiles = [
   'components/AwsImportDialog.tsx',
   'components/AwsSftpConfigRetryDialog.tsx',
   'components/CredentialRetryDialog.tsx',
-  'components/HomeNavigation.tsx',
   'components/HostBrowser.tsx',
   'components/HostDrawer.tsx',
   'components/HostForm.tsx',
@@ -573,10 +571,6 @@ describe('renderer style boundaries', () => {
       path.join(rendererDir, 'components', 'AppTitleBar.tsx'),
       'utf8',
     );
-    const homeNavigationSource = fs.readFileSync(
-      path.join(rendererDir, 'components', 'HomeNavigation.tsx'),
-      'utf8',
-    );
     const loginGateSource = fs.readFileSync(
       path.join(rendererDir, 'components', 'LoginGate.tsx'),
       'utf8',
@@ -584,7 +578,6 @@ describe('renderer style boundaries', () => {
 
     expect(appTitleBarSource).not.toContain('shadow-[0_14px_34px_rgba(10,18,30,0.18)]');
     expect(appTitleBarSource).not.toContain('shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]');
-    expect(homeNavigationSource).not.toContain('shadow-[var(--shadow-soft)]');
     expect(loginGateSource).not.toContain('shadow-[0_28px_70px_rgba(8,16,30,0.18),inset_0_1px_0_rgba(255,255,255,0.08)]');
   });
 

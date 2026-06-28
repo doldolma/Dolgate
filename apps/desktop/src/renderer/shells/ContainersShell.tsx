@@ -11,6 +11,7 @@ import { AwsEcsWorkspace } from '../components/AwsEcsWorkspace';
 import { ContainersWorkspace } from '../components/ContainersWorkspace';
 import { cn } from '../lib/cn';
 import { Badge, EmptyState, IconButton } from '../ui';
+import { X } from '../ui/icons';
 import type { useLoginController } from '../controllers/useLoginController';
 import type {
   useAppModalViewModel,
@@ -51,17 +52,17 @@ export function ContainersShell({
   const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
   const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
   const hostTabShellBaseClass =
-    'group relative inline-flex min-w-0 flex-none items-center gap-[0.24rem] rounded-[18px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.24rem] shadow-none transition-[border-color,background-color] duration-200';
+    'group relative inline-flex min-w-0 flex-none items-center gap-[0.25rem] rounded-[12px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.25rem] shadow-none transition-[border-color,background-color] duration-200';
   const hostTabShellActiveClass =
     'border-[var(--selection-border)] bg-[var(--selection-tint)] shadow-none';
   const hostTabButtonBaseClass =
-    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[16px] px-[0.92rem] py-[0.72rem] text-left transition-[background-color,color] duration-200';
+    'inline-flex min-w-0 max-w-[min(260px,42vw)] items-center gap-[0.55rem] rounded-[10px] px-[0.9rem] py-[0.7rem] text-left transition-[background-color,color] duration-200';
   const hostTabButtonActiveClass =
     'bg-[var(--surface-strong)] text-[var(--text)] shadow-none';
   const hostTabButtonInactiveClass =
     'bg-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_82%,transparent_18%)] hover:text-[var(--text)]';
   const hostTabBadgeBaseClass =
-    'min-h-6 px-[0.52rem] py-[0.14rem] text-[0.72rem] transition-[border-color,background-color,color] duration-200';
+    'min-h-6 px-[0.55rem] py-[0.25rem] text-[0.7rem] transition-[border-color,background-color,color] duration-200';
   const hostTabBadgeActiveClass =
     'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]';
   const hostTabCloseButtonBaseClass =
@@ -205,18 +206,18 @@ export function ContainersShell({
         {showLeftTabStripFade ? (
           <div
             data-testid="containers-host-tab-fade-left"
-            className="pointer-events-none absolute inset-y-[0.2rem] left-0 z-[1] w-10 rounded-l-[22px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
+            className="pointer-events-none absolute inset-y-[0.2rem] left-0 z-[1] w-10 rounded-l-[12px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
           />
         ) : null}
         {showRightTabStripFade ? (
           <div
             data-testid="containers-host-tab-fade-right"
-            className="pointer-events-none absolute inset-y-[0.2rem] right-0 z-[1] w-10 rounded-r-[22px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
+            className="pointer-events-none absolute inset-y-[0.2rem] right-0 z-[1] w-10 rounded-r-[12px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--app-bg)_96%,transparent_4%),transparent)]"
           />
         ) : null}
         <div
           ref={containerTabStripRef}
-          className="flex min-w-0 items-stretch gap-[0.55rem] overflow-x-auto px-[0.1rem] py-[0.2rem]"
+          className="flex min-w-0 items-stretch gap-[0.55rem] overflow-x-auto px-[0.25rem] py-[0.25rem]"
           role="tablist"
           aria-label="Containers hosts"
           aria-orientation="horizontal"
@@ -370,13 +371,13 @@ export function ContainersShell({
                     await containersViewModel.closeHostContainersTab(tab.hostId);
                   }}
                 >
-                  ×
+                  <X className="h-[1rem] w-[1rem]" aria-hidden="true" />
                 </IconButton>
               </div>
               );
             })
           ) : (
-            <div className="inline-flex min-h-12 items-center px-[0.2rem] text-[0.92rem] text-[var(--text-soft)]">
+            <div className="inline-flex min-h-12 items-center px-[0.25rem] text-[0.9rem] text-[var(--text-soft)]">
               열린 컨테이너 화면이 없습니다.
             </div>
           )}

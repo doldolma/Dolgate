@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceTab } from '../../store/types';
 import { cn } from '../../lib/cn';
+import { Columns2, Plus, Rows2, X } from '../../ui/icons';
 
 interface TmuxWindowBarProps {
   /** 같은 tmux 세션(control)의 window WorkspaceTab 들. index 순 정렬되어 들어온다. */
@@ -69,7 +70,7 @@ export function TmuxWindowBar({
             <input
               key={workspace.id}
               ref={inputRef}
-              className="w-28 rounded-[4px] border border-[var(--accent)] bg-[var(--surface)] px-1.5 py-0.5 text-[0.72rem] text-[var(--text)] outline-none"
+              className="w-28 rounded-[4px] border border-[var(--accent)] bg-[var(--surface)] px-1.5 py-0.5 text-[0.7rem] text-[var(--text)] outline-none"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onBlur={commitRename}
@@ -92,7 +93,7 @@ export function TmuxWindowBar({
             aria-selected={active}
             tabIndex={0}
             className={cn(
-              'group flex shrink-0 items-center gap-1 rounded-[4px] border px-2 py-0.5 text-[0.72rem] transition-colors',
+              'group flex shrink-0 items-center gap-1 rounded-[4px] border px-2 py-0.5 text-[0.7rem] transition-colors',
               active
                 ? 'border-[var(--accent)] bg-[var(--surface)] text-[var(--accent)]'
                 : 'border-transparent text-[var(--text-muted)] hover:border-[var(--border)] hover:text-[var(--text)]',
@@ -117,37 +118,43 @@ export function TmuxWindowBar({
                 onClose(workspace.id);
               }}
             >
-              ✕
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
         );
       })}
       <button
         type="button"
-        className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[0.85rem] leading-none text-[var(--text-muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--text)]"
+        className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[0.82rem] leading-none text-[var(--text-muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--text)]"
         title="새 tmux 윈도우 (Ctrl-b c)"
         onClick={onNewWindow}
       >
-        ＋
+        <Plus className="h-3.5 w-3.5" />
       </button>
 
       {/* 활성 pane 분할 — 오른쪽에 라벨이 있는 명확한 버튼으로(기존 헷갈리던 │ 대체). */}
       <span className="mx-1 h-3.5 w-px shrink-0 bg-[var(--border)]" aria-hidden />
       <button
         type="button"
-        className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.72rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.7rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
         title="활성 pane 좌우 분할 (Ctrl-b %)"
         onClick={onSplitHorizontal}
       >
-        ⊟ 좌우 분할
+        <span className="inline-flex items-center gap-1">
+          <Columns2 className="h-3.5 w-3.5" />
+          좌우 분할
+        </span>
       </button>
       <button
         type="button"
-        className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.72rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.7rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
         title='활성 pane 상하 분할 (Ctrl-b ")'
         onClick={onSplitVertical}
       >
-        ⊞ 상하 분할
+        <span className="inline-flex items-center gap-1">
+          <Rows2 className="h-3.5 w-3.5" />
+          상하 분할
+        </span>
       </button>
     </div>
   );

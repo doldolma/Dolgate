@@ -43,7 +43,7 @@ export function LoginShell({
 
   return (
     <div className="relative flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--shell-background)]">
-      <div className="flex min-h-16 items-center justify-end px-[1.05rem] pb-0 pt-[0.95rem] [-webkit-app-region:drag]">
+      <div className="flex min-h-16 items-center justify-end px-[1.1rem] pb-0 pt-[0.9rem] [-webkit-app-region:drag]">
         <div className="flex-1" />
         <DesktopWindowControls
           desktopPlatform={desktopPlatform}

@@ -139,34 +139,34 @@ interface ShellPickerState {
 }
 
 const ecsSummaryCardClass =
-  "grid gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
+  "grid gap-[0.4rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem]";
 const ecsSectionCardClass =
-  "grid gap-[0.8rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] px-[1rem] py-[0.95rem] shadow-none";
+  "grid gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] px-[0.9rem] py-[0.9rem] shadow-none";
 const ecsEmptyDetailClass =
-  "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
+  "rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const ecsLogsOutputClass =
-  "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+  "grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
 const ecsLogsOverlayChipClass =
-  "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.45rem] rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_76%,var(--accent-strong)_24%)] px-[0.95rem] py-[0.42rem] text-[0.8rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[var(--shadow)] backdrop-blur-[10px]";
+  "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_76%,var(--accent-strong)_24%)] px-[0.9rem] py-[0.4rem] text-[0.82rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[var(--shadow)] backdrop-blur-[10px]";
 const ecsFactsGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem_1rem] max-[760px]:grid-cols-1";
-const ecsFactsItemClass = "grid gap-[0.2rem]";
+const ecsFactsItemClass = "grid gap-[0.25rem]";
 const ecsFactsLabelClass =
   "m-0 text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]";
 const ecsFactsValueClass =
-  "m-0 text-[0.98rem] font-semibold text-[var(--text)]";
+  "m-0 text-[1rem] font-semibold text-[var(--text)]";
 const ecsTimelineClass = "grid gap-[0.7rem]";
 const ecsTimelineItemClass =
-  "grid gap-[0.55rem] rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-[0.95rem] py-[0.85rem]";
+  "grid gap-[0.55rem] rounded-[10px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-[0.9rem] py-[0.9rem]";
 const ecsLogsMetaClass = "mt-[-0.2rem]";
 const ecsTunnelFormClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.8rem_0.9rem] max-[760px]:grid-cols-1";
 const ecsTunnelRuntimeCardClass =
-  "grid gap-[0.85rem] rounded-[18px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-[1rem] py-[0.9rem] shadow-none";
+  "grid gap-[0.9rem] rounded-[12px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-[0.9rem] py-[0.9rem] shadow-none";
 const ecsTunnelRuntimeGridClass =
   "grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1";
 const ecsDetailTabsClass =
-  "gap-[0.55rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.35rem] shadow-none";
+  "gap-[0.55rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.4rem] shadow-none";
 const ecsDetailTabButtonBaseClass =
   "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
 const ecsDetailTabButtonActiveClass =
@@ -624,7 +624,7 @@ function MetricsPanel({
 
   return (
     <div className="grid min-h-0 gap-[0.9rem] overflow-y-auto pr-px">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-[0.8rem]">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-[0.9rem]">
         <div className={ecsSummaryCardClass}>
           <span className="text-[0.82rem] text-[var(--text-soft)]">CPU</span>
           <strong>{formatChartPercent(service.cpuUtilizationPercent)}</strong>
@@ -634,7 +634,7 @@ function MetricsPanel({
           <strong>{formatChartPercent(service.memoryUtilizationPercent)}</strong>
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.85rem]">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.9rem]">
         {cpuChart.timestamps.length > 0 ? (
           <UPlotMetricChart
             title="CPU"
@@ -1878,7 +1878,7 @@ export function AwsEcsWorkspace({
     { requireExec: true },
   );
   const ssoActionError = ssoLoginActionState.error ? (
-    <p className="text-[0.86rem] font-semibold text-[var(--danger-text)]">
+    <p className="text-[0.82rem] font-semibold text-[var(--danger-text)]">
       {ssoLoginActionState.error}
     </p>
   ) : null;
@@ -1902,7 +1902,7 @@ export function AwsEcsWorkspace({
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-3">
       {!logsFocusModeActive ? (
-        <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
+        <Toolbar className="justify-between gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.1rem] py-[1.1rem]">
           <div>
             <div className="flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
               <span>{getHostBadgeLabel(host)}</span>
@@ -1983,7 +1983,7 @@ export function AwsEcsWorkspace({
         <div
           className={cn(
             "flex min-h-0 flex-1 flex-col",
-            logsFocusModeActive ? "gap-2" : "gap-[0.95rem]",
+            logsFocusModeActive ? "gap-2" : "gap-[0.9rem]",
           )}
         >
           {!logsFocusModeActive ? (
@@ -2033,7 +2033,7 @@ export function AwsEcsWorkspace({
           >
             {!logsFocusModeActive ? (
               <aside
-                className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]"
+                className="flex min-h-0 flex-col gap-4 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.1rem]"
                 data-testid="ecs-services-sidebar"
               >
                 <div className="flex items-center justify-between gap-3">
@@ -2052,7 +2052,7 @@ export function AwsEcsWorkspace({
                           key={service.serviceArn}
                           data-testid="ecs-service-row"
                           className={cn(
-                            "shrink-0 overflow-hidden rounded-[18px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-none transition-[border-color,background-color] duration-150",
+                            "shrink-0 overflow-hidden rounded-[12px] border bg-[color-mix(in_srgb,var(--surface)_92%,transparent_8%)] shadow-none transition-[border-color,background-color] duration-150",
                             "border-[var(--border)]",
                             isSelected
                               ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
@@ -2061,7 +2061,7 @@ export function AwsEcsWorkspace({
                         >
                           <button
                             type="button"
-                            className="grid w-full min-w-0 content-start gap-[0.34rem] border-0 bg-transparent px-[0.95rem] py-[0.72rem] text-left text-inherit"
+                            className="grid w-full min-w-0 content-start gap-[0.4rem] border-0 bg-transparent px-[0.9rem] py-[0.7rem] text-left text-inherit"
                             onClick={() => {
                               handleSelectService(service.serviceName);
                             }}
@@ -2069,23 +2069,23 @@ export function AwsEcsWorkspace({
                             <strong className="block min-w-0 overflow-wrap-anywhere leading-[1.35]">
                               {service.serviceName}
                             </strong>
-                            <div className="flex flex-wrap gap-[0.45rem]">
+                            <div className="flex flex-wrap gap-[0.4rem]">
                               <StatusBadge
                                 tone={getServiceStatusTone(service)}
-                                className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
+                                className="min-h-[1.55rem] px-[0.55rem] py-[0.25rem] text-[0.7rem]"
                               >
                                 {service.status}
                               </StatusBadge>
                               {service.rolloutState ? (
                                 <StatusBadge
                                   tone={getRolloutTone(service.rolloutState)}
-                                  className="min-h-[1.55rem] px-[0.62rem] py-[0.14rem] text-[0.72rem]"
+                                  className="min-h-[1.55rem] px-[0.55rem] py-[0.25rem] text-[0.7rem]"
                                 >
                                   {service.rolloutState}
                                 </StatusBadge>
                               ) : null}
                             </div>
-                            <div className="flex flex-wrap gap-[0.55rem_0.8rem] text-[0.84rem] text-[var(--text-soft)]">
+                            <div className="flex flex-wrap gap-[0.55rem_0.8rem] text-[0.82rem] text-[var(--text-soft)]">
                               <span>CPU {formatPercent(service.cpuUtilizationPercent)}</span>
                               <span>
                                 Memory {formatPercent(service.memoryUtilizationPercent)}
@@ -2104,10 +2104,10 @@ export function AwsEcsWorkspace({
               className={cn(
                 "flex min-h-0 flex-col overflow-hidden border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)]",
                 logsFocusModeActive
-                  ? "gap-2 rounded-[20px] p-[0.8rem]"
+                  ? "gap-2 rounded-[12px] p-[0.9rem]"
                   : isLogsPanel
-                    ? "gap-3 rounded-[24px] p-[0.95rem]"
-                    : "gap-4 rounded-[24px] p-[1.15rem]",
+                    ? "gap-3 rounded-[12px] p-[0.9rem]"
+                    : "gap-4 rounded-[12px] p-[1.1rem]",
               )}
             >
               {selectedService ? (
@@ -2116,7 +2116,7 @@ export function AwsEcsWorkspace({
                     className={cn(
                       "shrink-0",
                       logsFocusModeActive
-                        ? "flex flex-wrap items-center justify-between gap-2 rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
+                        ? "flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
                         : "grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto]",
                     )}
                   >
@@ -2155,7 +2155,7 @@ export function AwsEcsWorkspace({
                             <Badge
                               key={`${selectedService.serviceArn}:${label}`}
                               tone="neutral"
-                              className="min-h-[1.42rem] border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] px-[0.48rem] py-[0.04rem] text-[0.74rem] font-semibold text-[var(--text-soft)]"
+                              className="min-h-[1.42rem] border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)] px-[0.55rem] py-[0.25rem] text-[0.76rem] font-semibold text-[var(--text-soft)]"
                             >
                               {label}
                             </Badge>
@@ -2277,7 +2277,7 @@ export function AwsEcsWorkspace({
                     )}
                   >
                     {activePanel === "overview" ? (
-                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.1rem]">
+                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.25rem]">
                         <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[1180px]:grid-cols-1">
                           <section className={ecsSectionCardClass}>
                             <div className="flex items-center justify-between gap-3">
@@ -2431,13 +2431,13 @@ export function AwsEcsWorkspace({
                       <div
                         className={cn(
                           "grid min-h-0 flex-1 grid-rows-[auto_auto_auto_auto_1fr]",
-                          logsFocusModeActive ? "gap-[0.45rem]" : "gap-[0.9rem]",
+                          logsFocusModeActive ? "gap-[0.4rem]" : "gap-[0.9rem]",
                         )}
                       >
                         <FilterRow
                           className={cn(
                             "items-center justify-between",
-                            logsFocusModeActive ? "gap-2 rounded-[16px]" : "",
+                            logsFocusModeActive ? "gap-2 rounded-[10px]" : "",
                           )}
                           style={logsFocusModeActive ? { padding: "0.55rem" } : undefined}
                         >
@@ -2549,7 +2549,7 @@ export function AwsEcsWorkspace({
                         </FilterRow>
 
                         {trimmedLogsSearchQuery ? (
-                          <div className="text-[0.84rem] text-[var(--text-soft)]">
+                          <div className="text-[0.82rem] text-[var(--text-soft)]">
                             현재 버퍼에서 {logMatchCount}건 일치
                           </div>
                         ) : null}
@@ -2700,7 +2700,7 @@ export function AwsEcsWorkspace({
                     ) : null}
 
                     {activePanel === "tunnel" ? (
-                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.1rem]">
+                      <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.25rem]">
                         {serviceContextState?.loading && !selectedContext ? (
                           <NoticeCard title="터널 대상을 준비하는 중입니다." />
                         ) : null}
@@ -2836,7 +2836,7 @@ export function AwsEcsWorkspace({
                               />
                               <Input
                                 type="number"
-                                className="min-h-[2.35rem] rounded-[12px] bg-[var(--surface)] px-[0.7rem] py-[0.45rem]"
+                                className="min-h-[2.35rem] rounded-[10px] bg-[var(--surface)] px-[0.7rem] py-[0.4rem]"
                                 value={tunnelState.bindPort}
                                 placeholder="0"
                                 disabled={
@@ -2864,7 +2864,7 @@ export function AwsEcsWorkspace({
                               </StatusBadge>
                             </div>
                             <div className={ecsTunnelRuntimeGridClass}>
-                              <div className="grid gap-[0.22rem]">
+                              <div className="grid gap-[0.25rem]">
                                 <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
                                   Local
                                 </span>
@@ -2872,7 +2872,7 @@ export function AwsEcsWorkspace({
                                   {tunnelRuntimeLocalEndpoint}
                                 </strong>
                               </div>
-                              <div className="grid gap-[0.22rem]">
+                              <div className="grid gap-[0.25rem]">
                                 <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
                                   Remote
                                 </span>
@@ -2890,7 +2890,7 @@ export function AwsEcsWorkspace({
                           </NoticeCard>
                         ) : null}
 
-                        <div className="flex justify-end gap-[0.6rem]">
+                        <div className="flex justify-end gap-[0.55rem]">
                           {tunnelState.runtime ? (
                             <Button
                               variant="secondary"

@@ -12,6 +12,7 @@ import {
   resolveGlobalTerminalThemeId,
 } from "../lib/terminal-presets";
 import { Badge, Button, EmptyState, SectionLabel } from '../ui';
+import { ChevronDown } from '../ui/icons';
 
 const MIN_REPLAY_ZOOM_PERCENT = 60;
 const MAX_REPLAY_ZOOM_PERCENT = 180;
@@ -570,13 +571,13 @@ export function SessionReplayWindow({
   }, []);
 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[0.95rem] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
+    <div className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[0.9rem] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-elevated)_97%,white_3%),color-mix(in_srgb,var(--surface)_96%,var(--app-bg)_4%))] p-[1.1rem] text-[var(--text)]">
       <header className="flex items-start justify-between gap-4">
         <div>
           <SectionLabel>Session Replay</SectionLabel>
           <strong>{recording?.hostLabel || "세션 Replay"}</strong>
           {recording?.connectionDetails ? (
-            <div className="mt-[0.3rem] text-[0.9rem] text-[var(--text-soft)]">
+            <div className="mt-[0.25rem] text-[0.9rem] text-[var(--text-soft)]">
               {recording.connectionDetails}
             </div>
           ) : null}
@@ -605,22 +606,22 @@ export function SessionReplayWindow({
 
       {recording ? (
         <>
-          <section className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.85rem]">
-            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
-              <span className="text-[0.8rem] text-[var(--text-soft)]">연결 시작</span>
+          <section className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.9rem]">
+            <div className="flex flex-col gap-[0.25rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.9rem]">
+              <span className="text-[0.82rem] text-[var(--text-soft)]">연결 시작</span>
               <strong>{formatTimestamp(recording.connectedAt)}</strong>
             </div>
-            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
-              <span className="text-[0.8rem] text-[var(--text-soft)]">연결 종료</span>
+            <div className="flex flex-col gap-[0.25rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.9rem]">
+              <span className="text-[0.82rem] text-[var(--text-soft)]">연결 종료</span>
               <strong>{formatTimestamp(recording.disconnectedAt)}</strong>
             </div>
-            <div className="flex flex-col gap-[0.22rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.8rem]">
-              <span className="text-[0.8rem] text-[var(--text-soft)]">총 재생 길이</span>
+            <div className="flex flex-col gap-[0.25rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.9rem]">
+              <span className="text-[0.82rem] text-[var(--text-soft)]">총 재생 길이</span>
               <strong>{formatPlaybackDuration(recording.durationMs)}</strong>
             </div>
           </section>
 
-          <section className="flex flex-wrap items-center gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-muted)_96%,white_4%),color-mix(in_srgb,var(--surface)_94%,transparent_6%))] px-[1.05rem] py-4 shadow-[inset_0_1px_0_color-mix(in_srgb,white_8%,transparent_92%),0_14px_30px_color-mix(in_srgb,black_10%,transparent_90%)]">
+          <section className="flex flex-wrap items-center gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[linear-gradient(180deg,color-mix(in_srgb,var(--surface-muted)_96%,white_4%),color-mix(in_srgb,var(--surface)_94%,transparent_6%))] px-[1.1rem] py-4 shadow-[inset_0_1px_0_color-mix(in_srgb,white_8%,transparent_92%),0_14px_30px_color-mix(in_srgb,black_10%,transparent_90%)]">
             <Button
               variant="secondary"
               className="w-[6.25rem] shrink-0 justify-center px-0 font-bold"
@@ -648,12 +649,12 @@ export function SessionReplayWindow({
                 }}
               />
             </div>
-            <div className="inline-flex shrink-0 items-center gap-[0.35rem] whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.8rem] py-[0.55rem] text-[0.84rem] text-[var(--text-soft)] [font-variant-numeric:tabular-nums]">
+            <div className="inline-flex shrink-0 items-center gap-[0.4rem] whitespace-nowrap rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.9rem] py-[0.55rem] text-[0.82rem] text-[var(--text-soft)] [font-variant-numeric:tabular-nums]">
               <span>{formatPlaybackDuration(positionMs)}</span>
               <span>/</span>
               <span>{formatPlaybackDuration(totalDurationMs)}</span>
             </div>
-            <div className="inline-flex shrink-0 items-center gap-[0.45rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.45rem] py-[0.35rem]" aria-label="Replay zoom controls">
+            <div className="inline-flex shrink-0 items-center gap-[0.4rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.4rem] py-[0.4rem]" aria-label="Replay zoom controls">
               <button
                 type="button"
                 className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)] text-base font-bold leading-none text-[var(--text)] disabled:cursor-default disabled:opacity-45"
@@ -674,8 +675,8 @@ export function SessionReplayWindow({
                 +
               </button>
             </div>
-            <label className="inline-flex shrink-0 items-center gap-[0.5rem] text-[0.84rem] text-[var(--text-soft)]">
-              <span className="whitespace-nowrap text-[0.8rem] font-semibold tracking-[0.01em]">속도</span>
+            <label className="inline-flex shrink-0 items-center gap-[0.55rem] text-[0.82rem] text-[var(--text-soft)]">
+              <span className="whitespace-nowrap text-[0.82rem] font-semibold tracking-[0.01em]">속도</span>
               <span className="relative inline-flex focus-within:rounded-full focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent-strong)_16%,transparent)] focus-within:ring-offset-2 focus-within:ring-offset-[var(--app-bg)]">
                 <select
                   aria-label="Replay speed"
@@ -693,16 +694,16 @@ export function SessionReplayWindow({
                 </select>
                 <span
                   aria-hidden="true"
-                  className="inline-flex h-[2.8rem] min-w-[5.35rem] items-center justify-between gap-[0.6rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.95rem] pr-[0.85rem] text-[0.88rem] font-semibold text-[var(--text)] shadow-[inset_0_1px_0_color-mix(in_srgb,white_5%,transparent_95%)]"
+                  className="inline-flex h-[2.8rem] min-w-[5.35rem] items-center justify-between gap-[0.55rem] rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.9rem] pr-[0.9rem] text-[0.9rem] font-semibold text-[var(--text)] shadow-[inset_0_1px_0_color-mix(in_srgb,white_5%,transparent_95%)]"
                 >
                   <span>{playbackSpeed}x</span>
-                  <span className="text-[0.72rem] text-[var(--text-soft)]">▾</span>
+                  <ChevronDown className="h-[0.7rem] w-[0.7rem] text-[var(--text-soft)]" aria-hidden="true" />
                 </span>
               </span>
             </label>
           </section>
 
-          <div className="min-h-0 overflow-auto rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent_6%)] p-4">
+          <div className="min-h-0 overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent_6%)] p-4">
             <div
               data-testid="session-replay-terminal"
               className="min-h-full min-w-full [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent"

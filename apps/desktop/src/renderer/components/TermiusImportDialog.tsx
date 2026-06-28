@@ -247,7 +247,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 </div>
               </FilterRow>
 
-              <div className="flex flex-wrap items-center gap-3 text-[0.84rem] font-medium text-[var(--text-soft)]">
+              <div className="flex flex-wrap items-center gap-3 text-[0.82rem] font-medium text-[var(--text-soft)]">
                 <span>Selected groups {selectedGroupPaths.length}</span>
                 <span>Selected hosts {selectedHostKeys.length}</span>
                 <span>Effective hosts {effectiveSelectedHostCount}</span>
@@ -259,13 +259,13 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                   {visibleGroups.length === 0 ? (
                     <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">검색에 맞는 그룹이 없습니다.</div>
                   ) : (
-                    <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
+                    <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                       {visibleGroups.map((group) => {
                         const checked = selectedGroupPaths.includes(group.path);
                         return (
                           <label
                             key={group.path}
-                            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
+                            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.9rem] py-[0.7rem]"
                           >
                             <input
                               type="checkbox"
@@ -278,9 +278,9 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                             />
                             <div className="min-w-0">
                               <strong>{group.name}</strong>
-                              <span className="block text-[0.8rem] text-[var(--text-soft)]">{group.path}</span>
+                              <span className="block text-[0.82rem] text-[var(--text-soft)]">{group.path}</span>
                             </div>
-                            <small className="text-[0.8rem] text-[var(--text-soft)]">{group.hostCount} hosts</small>
+                            <small className="text-[0.82rem] text-[var(--text-soft)]">{group.hostCount} hosts</small>
                           </label>
                         );
                       })}
@@ -293,13 +293,13 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                   {visibleHosts.length === 0 ? (
                     <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">검색에 맞는 호스트가 없습니다.</div>
                   ) : (
-                    <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[18px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
+                    <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                       {visibleHosts.map((host) => {
                         const checked = selectedHostKeys.includes(host.key);
                         return (
                           <label
                             key={host.key}
-                            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.8rem] py-[0.75rem]"
+                            className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] px-[0.9rem] py-[0.7rem]"
                           >
                             <input
                               type="checkbox"
@@ -312,12 +312,12 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                             />
                             <div className="min-w-0">
                               <strong>{host.name}</strong>
-                              <span className="block truncate text-[0.8rem] text-[var(--text-soft)]">
+                              <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                                 {host.address ?? 'Unknown address'}
                                 {host.port ? `:${host.port}` : ''}
                                 {host.username ? ` · ${host.username}` : ''}
                               </span>
-                              {host.groupPath ? <small className="block truncate text-[0.8rem] text-[var(--text-soft)]">{host.groupPath}</small> : null}
+                              {host.groupPath ? <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{host.groupPath}</small> : null}
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                               {host.hasPrivateKey ? <StatusBadge>Key</StatusBadge> : null}

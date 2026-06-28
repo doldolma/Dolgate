@@ -51,10 +51,10 @@ export function SnippetVariablesDialog({
     <DialogBackdrop dismissOnBackdrop={false}>
       <ModalShell>
         <ModalHeader>
-          <h3 className="text-[1.05rem] font-semibold text-[var(--text)]">{title}</h3>
+          <h3 className="text-[1rem] font-semibold text-[var(--text)]">{title}</h3>
         </ModalHeader>
         <ModalBody>
-          <pre className="mb-[0.9rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.8rem] py-[0.6rem] font-mono text-[0.82rem] text-[var(--text-soft)]">
+          <pre className="mb-[0.9rem] overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] bg-[color-mix(in_srgb,var(--app-bg)_60%,transparent_40%)] px-[0.9rem] py-[0.55rem] font-mono text-[0.82rem] text-[var(--text-soft)]">
             {pending.command}
           </pre>
           <form
@@ -65,7 +65,7 @@ export function SnippetVariablesDialog({
             }}
           >
             {pending.variables.map((variable, index) => (
-              <label key={variable.name} className="grid gap-[0.35rem]">
+              <label key={variable.name} className="grid gap-[0.4rem]">
                 <span className="text-[0.82rem] font-semibold text-[var(--text-soft)]">
                   {variable.name}
                 </span>

@@ -52,10 +52,10 @@ export function HostDeleteConfirmDialog({
               : '연결된 저장된 인증 정보는 유지됩니다.'}
           </p>
           {unusedLocalSecretCount > 0 ? (
-            <label className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--surface-muted)] px-[0.95rem] py-[0.8rem] text-[0.92rem] text-[var(--text)]">
+            <label className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] px-[0.9rem] py-[0.9rem] text-[0.9rem] text-[var(--text)]">
               <input
                 type="checkbox"
-                className="mt-[0.15rem] h-4 w-4 accent-[var(--accent-strong)]"
+                className="mt-[0.25rem] h-4 w-4 accent-[var(--accent-strong)]"
                 checked={removeUnusedSecrets}
                 onChange={(event) => onToggleRemoveUnusedSecrets(event.target.checked)}
                 aria-label={formatUnusedSecretLabel(unusedLocalSecretCount)}

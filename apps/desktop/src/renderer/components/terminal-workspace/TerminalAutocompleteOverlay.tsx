@@ -94,13 +94,13 @@ export function TerminalAutocompleteOverlay({
               <span>{suffix}</span>
             </span>
             {suggestion.description ? (
-              <span className="min-w-0 flex-1 truncate text-[0.72rem] text-[var(--text-soft)]">
+              <span className="min-w-0 flex-1 truncate text-[0.7rem] text-[var(--text-soft)]">
                 {suggestion.description}
               </span>
             ) : (
               <span className="flex-1" />
             )}
-            <span className="shrink-0 text-[0.68rem] text-[var(--text-soft)]">
+            <span className="shrink-0 text-[0.7rem] text-[var(--text-soft)]">
               {sourceLabel(suggestion.source)}
             </span>
           </button>

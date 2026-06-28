@@ -157,13 +157,13 @@ export function CredentialRetryDialog({
         </ModalHeader>
         <ModalBody className="grid gap-4">
           {displayMessage ? (
-            <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
+            <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
               {displayMessage}
             </p>
           ) : null}
           {visibleCertificateSummary ? (
             <div
-              className={`rounded-[16px] border px-[1rem] py-[0.9rem] text-[0.95rem] leading-[1.6] ${
+              className={`rounded-[10px] border px-[0.9rem] py-[0.9rem] text-[0.9rem] leading-[1.6] ${
                 visibleCertificateSummary.tone === "danger"
                   ? "border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]"
                   : visibleCertificateSummary.tone === "warning"
@@ -205,7 +205,7 @@ export function CredentialRetryDialog({
 
           {requiresPrivateKey ? (
             <FieldGroup label="Private key file">
-              <div className="flex gap-[0.75rem]">
+              <div className="flex gap-[0.7rem]">
                 <Input
                   readOnly
                   value={privateKeyFile?.name ?? ""}
@@ -233,7 +233,7 @@ export function CredentialRetryDialog({
 
           {requiresCertificate ? (
             <FieldGroup label="SSH certificate file">
-              <div className="flex gap-[0.75rem]">
+              <div className="flex gap-[0.7rem]">
                 <Input
                   readOnly
                   value={certificateFile?.name ?? ""}

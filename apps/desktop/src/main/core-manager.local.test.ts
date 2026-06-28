@@ -1384,4 +1384,56 @@ describe("CoreManager local shell sessions", () => {
     expect(metadata.connectedAt).toBeTypeOf("string");
     expect(metadata.disconnectedAt).toBeTypeOf("string");
   });
+
+  it("records a pre-connect SSH host failure as an error lifecycle log", async () => {
+    const logs: ActivityLogRecord[] = [];
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager(undefined, (record) => {
+      const currentIndex = logs.findIndex((entry) => entry.id === record.id);
+      if (currentIndex >= 0) {
+        logs[currentIndex] = record;
+        return;
+      }
+      logs.push(record);
+    });
+
+    const { sessionId } = await manager.connect({
+      host: "10.0.0.9",
+      port: 22,
+      username: "root",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "Unreachable",
+      hostId: "host-unreachable",
+      hostLabel: "Unreachable",
+      transport: "ssh",
+    });
+
+    // 연결 성공(connected) 없이 곧바로 실패: error → closed.
+    fakeProcess.emitControl({
+      type: "error",
+      sessionId,
+      payload: { message: "dial tcp 10.0.0.9:22: connect: connection refused" },
+    });
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId,
+      payload: { message: "ssh-core exited" },
+    });
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.kind).toBe("session-lifecycle");
+    expect(logs[0]?.level).toBe("error");
+    const metadata = logs[0]?.metadata as unknown as SessionLifecycleLogMetadata;
+    expect(metadata.hostId).toBe("host-unreachable");
+    expect(metadata.status).toBe("error");
+    expect(metadata.disconnectReason).toBe(
+      "dial tcp 10.0.0.9:22: connect: connection refused",
+    );
+  });
 });

@@ -45,7 +45,7 @@ export const TagInputField = forwardRef<HTMLInputElement, TagInputFieldProps>(
         data-tag-input-shell="true"
         data-testid="tag-input-shell"
         className={cn(
-          'flex min-h-11 w-full flex-wrap items-center gap-[0.5rem] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-[0.9rem] text-[var(--text)] shadow-none transition-[border-color,box-shadow,background-color] duration-150 focus-within:border-[var(--selection-border)] focus-within:outline-none focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent-strong)_10%,transparent)]',
+          'flex min-h-11 w-full flex-wrap items-center gap-[0.55rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] px-4 py-[0.9rem] text-[var(--text)] shadow-none transition-[border-color,box-shadow,background-color] duration-150 focus-within:border-[var(--selection-border)] focus-within:outline-none focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent-strong)_10%,transparent)]',
           disabled && 'cursor-default opacity-70',
           !disabled && 'cursor-text',
           shellClassName,
@@ -56,7 +56,7 @@ export const TagInputField = forwardRef<HTMLInputElement, TagInputFieldProps>(
         {tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex min-h-[1.8rem] items-center gap-[0.35rem] rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.62rem] py-[0.24rem] text-[0.88rem] leading-[1.2] text-[var(--text)]"
+            className="inline-flex min-h-[1.8rem] items-center gap-[0.4rem] rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_24%,var(--border)_76%)] bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.55rem] py-[0.25rem] text-[0.9rem] leading-[1.2] text-[var(--text)]"
           >
             <span>{tag}</span>
             <button
@@ -79,7 +79,7 @@ export const TagInputField = forwardRef<HTMLInputElement, TagInputFieldProps>(
         <input
           ref={inputRef}
           className={cn(
-            'block min-h-[1.35rem] min-w-[8rem] flex-[1_1_8rem] p-0 text-[0.95rem] leading-[1.35] text-[var(--text)] placeholder:text-[var(--text-soft)] focus:outline-none',
+            'block min-h-[1.35rem] min-w-[8rem] flex-[1_1_8rem] p-0 text-[0.9rem] leading-[1.35] text-[var(--text)] placeholder:text-[var(--text-soft)] focus:outline-none',
             inputClassName,
           )}
           style={{

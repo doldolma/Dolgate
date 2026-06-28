@@ -1,33 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import Fuse from 'fuse.js';
-import {
-  collectGroupPaths,
-  countHostsInGroupTree,
-  filterHostsInGroupTree,
-  getGroupDeleteDialogVariant,
-  getGroupLabel,
-  getParentGroupPath,
-  getHostBadgeLabel,
-  getHostSearchText,
-  getHostSubtitle,
-  getHostTagsToggleLabel,
-  isGroupWithinPath,
-  normalizeGroupPath,
-  rebaseGroupPath
-} from '@shared';
-import type { GroupRecord, GroupRemoveMode, HostRecord, SecretMetadataRecord } from '@shared';
-import { getUnusedSavedCredentialsAfterHostDeletion } from '../lib/host-secret-cleanup';
-import { getKeyboardLayoutSearchQueries } from '../lib/keyboard-layout-search';
-import { useResponsiveCardGrid } from '../lib/useResponsiveCardGrid';
+import { getParentGroupPath, isAwsEcsHostRecord, normalizeGroupPath } from '@shared';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
 import { HostDeleteConfirmDialog } from './HostDeleteConfirmDialog';
-import { HostCard } from './HostCard';
-import type { DesktopPlatform } from './DesktopWindowControls';
 import {
   Button,
-  EmptyState,
   Input,
   ModalBody,
   ModalFooter,
@@ -35,13 +13,25 @@ import {
   ModalShell,
   NoticeCard,
   SectionLabel,
-  SplitButton,
-  SplitButtonMain,
-  SplitButtonMenu,
-  SplitButtonMenuItem,
-  SplitButtonToggle,
 } from '../ui';
+import { Columns2, Container, Copy, Folder, Pencil, SquareTerminal, Trash2 } from '../ui/icons';
+import { HomeSidebar } from './host-browser/HomeSidebar';
+import { HostListPanel } from './host-browser/HostListPanel';
+import { HostDetailPanel } from './host-browser/HostDetailPanel';
+import {
+  getHostBrowserEmptyCalloutMessage,
+  getHostBrowserVisibleImportMenuLabels,
+  HOST_BROWSER_IMPORT_MENU_LABELS,
+  useHostBrowser,
+  type UseHostBrowserParams,
+} from './host-browser/useHostBrowser';
 
+// 외부(테스트/SftpWorkspace)에서 쓰던 헬퍼 재노출 — import 경로 호환 유지.
+export {
+  getHostBrowserEmptyCalloutMessage,
+  getHostBrowserVisibleImportMenuLabels,
+  HOST_BROWSER_IMPORT_MENU_LABELS,
+};
 export {
   buildVisibleGroups,
   collectGroupPaths,
@@ -53,1236 +43,242 @@ export {
   isDirectHostChild,
   isGroupWithinPath,
   normalizeGroupPath,
-  rebaseGroupPath
+  rebaseGroupPath,
 } from '@shared';
 
-export const HOST_BROWSER_IMPORT_MENU_LABELS = [
-  'Import OpenSSH',
-  'Import Serial',
-  'Import from Termius',
-  'Import from Xshell',
-  'Import from Warpgate',
-  'Import via AWS SSM',
-] as const;
-
-export function getHostBrowserVisibleImportMenuLabels(desktopPlatform: DesktopPlatform): string[] {
-  return desktopPlatform === 'win32'
-    ? [...HOST_BROWSER_IMPORT_MENU_LABELS]
-    : HOST_BROWSER_IMPORT_MENU_LABELS.filter((label) => label !== 'Import from Xshell');
-}
-
-export function getHostBrowserEmptyCalloutMessage(hostCount: number, searchQuery: string): string {
-  return hostCount === 0
-    ? 'New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.'
-    : searchQuery
-      ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
-      : 'New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.';
-}
-
-const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
-const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
-const HOME_BROWSER_CARD_GAP_PX = 13.6;
-const HOST_DRAG_MIME_TYPE = 'application/x-dolssh-host-id';
-const HOSTS_DRAG_MIME_TYPE = 'application/x-dolssh-host-ids';
-
-interface GroupDeleteTarget {
-  paths: string[];
-  groupCount: number;
-  title: string;
-  hostCount: number;
-  childGroupCount: number;
-}
-
-interface HostDeleteTarget {
-  hostIds: string[];
-  title: string;
-  hostCount: number;
-}
-
-interface HostContextMenuState {
-  kind: 'host';
-  hostIds: string[];
-  x: number;
-  y: number;
-}
-
-interface GroupContextMenuState {
-  kind: 'group';
-  groupPaths: string[];
-  x: number;
-  y: number;
-}
-
-type ContextMenuState = HostContextMenuState | GroupContextMenuState;
-
-type GroupModalState =
-  | { mode: 'create' }
-  | { mode: 'rename'; path: string };
-
-interface GroupTreeRow {
-  path: string;
-  label: string;
-  depth: number;
-  parentPath: string | null;
-  hasChildren: boolean;
-  hostCount: number;
-}
-
-function buildGroupTreeRows(
-  groupPaths: string[],
-  groups: GroupRecord[],
-  hosts: HostRecord[],
-): GroupTreeRow[] {
-  const explicitGroupMap = new Map(groups.map((group) => [group.path, group]));
-  const groupPathSet = new Set(groupPaths);
-  return groupPaths.map((path) => ({
-    path,
-    label: explicitGroupMap.get(path)?.name ?? getGroupLabel(path),
-    depth: Math.max(0, path.split('/').length - 1),
-    parentPath: normalizeGroupPath(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : null),
-    hasChildren: [...groupPathSet].some((candidate) => candidate.startsWith(`${path}/`)),
-    hostCount: countHostsInGroupTree(hosts, path),
-  }));
-}
-
-function isAdditiveSelectionEvent(event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'> | Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>): boolean {
-  return event.ctrlKey || event.metaKey;
-}
-
-function getSelectionRange<T extends string>(items: T[], anchor: T | null, target: T): T[] {
-  const targetIndex = items.indexOf(target);
-  if (targetIndex < 0) {
-    return [target];
-  }
-
-  const anchorIndex = anchor ? items.indexOf(anchor) : -1;
-  if (anchorIndex < 0) {
-    return [target];
-  }
-
-  const start = Math.min(anchorIndex, targetIndex);
-  const end = Math.max(anchorIndex, targetIndex);
-  return items.slice(start, end + 1);
-}
-
-function normalizeGroupSelectionForDelete(groupPaths: string[]): string[] {
-  return [...groupPaths]
-    .filter((path) => !groupPaths.some((candidate) => candidate !== path && isGroupWithinPath(path, candidate)))
-    .sort((left, right) => left.split('/').length - right.split('/').length || left.localeCompare(right));
-}
-
-function buildNextGroupPath(groupPath: string, targetParentPath: string | null): string | null {
-  const normalizedGroupPath = normalizeGroupPath(groupPath);
-  if (!normalizedGroupPath) {
-    return null;
-  }
-  const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
-  return normalizeGroupPath(
-    normalizedTargetParentPath ? `${normalizedTargetParentPath}/${getGroupLabel(normalizedGroupPath)}` : getGroupLabel(normalizedGroupPath)
-  );
-}
-
-function canReparentGroup(groupPath: string, targetParentPath: string | null): boolean {
-  const normalizedGroupPath = normalizeGroupPath(groupPath);
-  const normalizedTargetParentPath = normalizeGroupPath(targetParentPath);
-  if (!normalizedGroupPath) {
-    return false;
-  }
-  if (normalizedTargetParentPath && isGroupWithinPath(normalizedTargetParentPath, normalizedGroupPath)) {
-    return false;
-  }
-  const nextGroupPath = buildNextGroupPath(normalizedGroupPath, normalizedTargetParentPath);
-  return Boolean(nextGroupPath && nextGroupPath !== normalizedGroupPath);
-}
-
-function parseHostDragIds(payload: string): string[] {
-  if (!payload) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(payload);
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (entry): entry is string => typeof entry === 'string' && entry.length > 0,
-        )
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-interface HostBrowserProps {
-  desktopPlatform: DesktopPlatform;
-  hosts: HostRecord[];
-  groups: GroupRecord[];
-  keychainEntries: SecretMetadataRecord[];
-  currentGroupPath: string | null;
-  searchQuery: string;
-  selectedHostId: string | null;
-  errorMessage?: string | null;
-  statusMessage?: string | null;
-  onSearchChange: (query: string) => void;
-  onOpenLocalTerminal: () => void;
-  onCreateHost: () => void;
-  onOpenSerialImport: () => void;
-  onOpenAwsImport: () => void;
-  onOpenOpenSshImport: () => void;
-  onOpenXshellImport: () => void;
-  onOpenTermiusImport: () => void;
-  onOpenWarpgateImport: () => void;
-  onCreateGroup: (name: string) => Promise<void>;
-  onRemoveGroup: (path: string, mode: GroupRemoveMode) => Promise<void>;
-  onMoveGroup: (path: string, targetParentPath: string | null) => Promise<void>;
-  onRenameGroup: (path: string, name: string) => Promise<void>;
-  onNavigateGroup: (path: string | null) => void;
-  onClearHostSelection: () => void;
-  onSelectHost: (hostId: string) => void;
-  onEditHost: (hostId: string) => void;
-  onDuplicateHosts: (hostIds: string[]) => Promise<void>;
-  onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
-  onRemoveHost: (hostId: string) => Promise<void>;
-  onRemoveSecret: (secretRef: string) => Promise<void>;
-  onConnectHost: (hostId: string) => Promise<void>;
-  onConnectHostTmux?: (hostId: string) => Promise<void>;
-  onOpenHostContainers: (hostId: string) => Promise<void>;
-}
-
-export function HostBrowser({
-  desktopPlatform,
-  hosts,
-  groups,
-  keychainEntries,
-  currentGroupPath,
-  searchQuery,
-  selectedHostId,
-  errorMessage = null,
-  statusMessage = null,
-  onSearchChange,
-  onOpenLocalTerminal,
-  onCreateHost,
-  onOpenSerialImport,
-  onOpenAwsImport,
-  onOpenOpenSshImport,
-  onOpenXshellImport,
-  onOpenTermiusImport,
-  onOpenWarpgateImport,
-  onCreateGroup,
-  onRemoveGroup,
-  onMoveGroup,
-  onRenameGroup,
-  onNavigateGroup,
-  onClearHostSelection,
-  onSelectHost,
-  onEditHost,
-  onDuplicateHosts,
-  onMoveHostToGroup,
-  onRemoveHost,
-  onRemoveSecret,
-  onConnectHost,
-  onConnectHostTmux,
-  onOpenHostContainers
-}: HostBrowserProps) {
-  const [groupModalState, setGroupModalState] = useState<GroupModalState | null>(null);
-  const [newGroupName, setNewGroupName] = useState('');
-  const [groupError, setGroupError] = useState<string | null>(null);
-  const [selectedHostIds, setSelectedHostIds] = useState<string[]>([]);
-  const [selectedGroupPaths, setSelectedGroupPaths] = useState<string[]>([]);
-  const [hostSelectionAnchor, setHostSelectionAnchor] = useState<string | null>(null);
-  const [groupSelectionAnchor, setGroupSelectionAnchor] = useState<string | null>(null);
-  const [groupDeleteTarget, setGroupDeleteTarget] = useState<GroupDeleteTarget | null>(null);
-  const [groupDeleteError, setGroupDeleteError] = useState<string | null>(null);
-  const [isRemovingGroup, setIsRemovingGroup] = useState(false);
-  const [hostDeleteTarget, setHostDeleteTarget] = useState<HostDeleteTarget | null>(null);
-  const [hostDeleteError, setHostDeleteError] = useState<string | null>(null);
-  const [isRemovingHost, setIsRemovingHost] = useState(false);
-  const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] = useState(true);
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
-  const [draggedHostIds, setDraggedHostIds] = useState<string[]>([]);
-  const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
-  const [isRootDragTarget, setIsRootDragTarget] = useState(false);
-  const [expandedHostTags, setExpandedHostTags] = useState<string[]>([]);
-  const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
-  const [collapsedTreeGroupPaths, setCollapsedTreeGroupPaths] = useState<string[]>([]);
-  const importMenuRef = useRef<HTMLDivElement | null>(null);
-  const importMenuItems = useMemo(
-    () =>
-      [
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: onOpenOpenSshImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: onOpenSerialImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: onOpenTermiusImport },
-        ...(desktopPlatform === 'win32'
-          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: onOpenXshellImport }]
-          : []),
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: onOpenWarpgateImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: onOpenAwsImport }
-      ],
-    [desktopPlatform, onOpenAwsImport, onOpenOpenSshImport, onOpenSerialImport, onOpenTermiusImport, onOpenWarpgateImport, onOpenXshellImport]
-  );
-
-  useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-
-    const close = () => {
-      setContextMenu(null);
-    };
-
-    window.addEventListener('click', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [contextMenu]);
-
-  // 현재 그룹 안에서는 그 하위 트리만 검색하고, 루트에서는 전체 호스트를 그대로 보여준다.
-  const scopedHosts = useMemo(() => filterHostsInGroupTree(hosts, currentGroupPath), [currentGroupPath, hosts]);
-
-  const searchableHosts = useMemo(
-    () =>
-      scopedHosts.map((host) => ({
-        ...host,
-        searchText: getHostSearchText(host).join(' ')
-      })),
-    [scopedHosts]
-  );
-
-  const fuse = useMemo(
-    () =>
-      new Fuse(searchableHosts, {
-        keys: ['label', 'groupName', 'searchText'],
-        threshold: 0.32
-      }),
-    [searchableHosts]
-  );
-  const searchQueries = useMemo(() => getKeyboardLayoutSearchQueries(searchQuery), [searchQuery]);
-
-  const visibleHosts = useMemo(() => {
-    if (searchQueries.length > 0) {
-      const seenHostIds = new Set<string>();
-      return searchQueries.flatMap((query) =>
-        fuse.search(query).flatMap((result) => {
-          if (seenHostIds.has(result.item.id)) {
-            return [];
-          }
-          seenHostIds.add(result.item.id);
-          const { searchText: _searchText, ...host } = result.item;
-          return [host];
-        }),
-      );
-    }
-    return searchableHosts;
-  }, [fuse, searchableHosts, searchQueries]);
-
-  const allGroupPaths = useMemo(() => collectGroupPaths(groups, hosts), [groups, hosts]);
-  const groupTreeRows = useMemo(() => buildGroupTreeRows(allGroupPaths, groups, hosts), [allGroupPaths, groups, hosts]);
-  const collapsedTreeGroupPathSet = useMemo(() => new Set(collapsedTreeGroupPaths), [collapsedTreeGroupPaths]);
-  const visibleGroupTreeRows = useMemo(
-    () =>
-      groupTreeRows.filter((group) => {
-        let ancestorPath = group.parentPath;
-        while (ancestorPath) {
-          if (collapsedTreeGroupPathSet.has(ancestorPath)) {
-            return false;
-          }
-          ancestorPath = normalizeGroupPath(ancestorPath.includes('/') ? ancestorPath.slice(0, ancestorPath.lastIndexOf('/')) : null);
-        }
-        return true;
-      }),
-    [collapsedTreeGroupPathSet, groupTreeRows]
-  );
-  const visibleHostIds = useMemo(() => visibleHosts.map((host) => host.id), [visibleHosts]);
-  const visibleGroupPaths = useMemo(() => visibleGroupTreeRows.map((group) => group.path), [visibleGroupTreeRows]);
-  const { ref: hostGridRef, style: hostGridStyle, layout: hostGridLayout } = useResponsiveCardGrid({
-    itemCount: visibleHosts.length,
-    minWidth: HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
-    maxWidth: HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
-    gap: HOME_BROWSER_CARD_GAP_PX
-  });
-  const clampedHostCardStyle =
-    hostGridLayout.justifyContent === 'start' && hostGridLayout.cardWidth
-      ? { width: '100%', maxWidth: `${hostGridLayout.cardWidth}px` }
-      : undefined;
-  const currentGroupPathLabel = currentGroupPath ? currentGroupPath.split('/').join(' / ') : 'All Groups';
-  const searchPlaceholder = currentGroupPath ? `Search hosts inside ${currentGroupPathLabel}` : 'Search hosts or instances';
-  const emptyMessage = hosts.length === 0 ? '아직 등록된 호스트가 없습니다.' : searchQuery ? '검색 결과가 없습니다.' : '이 위치에는 아직 호스트가 없습니다.';
-  const groupDeleteDialogVariant = groupDeleteTarget
-    ? getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount)
-    : null;
-  const hostDeleteUnusedLocalSecretRefs = useMemo(
-    () =>
-      hostDeleteTarget
-        ? getUnusedSavedCredentialsAfterHostDeletion(hosts, keychainEntries, hostDeleteTarget.hostIds)
-        : [],
-    [hostDeleteTarget, hosts, keychainEntries],
-  );
-  const contextMenuStyle = contextMenu
-    ? {
-        left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 172))}px`,
-        top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 72))}px`
-      }
-    : null;
-
-  useEffect(() => {
-    setCollapsedTreeGroupPaths((current) => current.filter((path) => allGroupPaths.includes(path)));
-  }, [allGroupPaths]);
-
-  useEffect(() => {
-    setSelectedHostIds((current) => current.filter((hostId) => visibleHostIds.includes(hostId)));
-  }, [visibleHostIds]);
-
-  useEffect(() => {
-    setSelectedGroupPaths((current) => current.filter((groupPath) => visibleGroupPaths.includes(groupPath)));
-  }, [visibleGroupPaths]);
-
-  useEffect(() => {
-    if (hostSelectionAnchor && !visibleHostIds.includes(hostSelectionAnchor)) {
-      setHostSelectionAnchor(null);
-    }
-  }, [hostSelectionAnchor, visibleHostIds]);
-
-  useEffect(() => {
-    if (groupSelectionAnchor && !visibleGroupPaths.includes(groupSelectionAnchor)) {
-      setGroupSelectionAnchor(null);
-    }
-  }, [groupSelectionAnchor, visibleGroupPaths]);
-
-  useEffect(() => {
-    setExpandedHostTags((current) => current.filter((hostId) => hosts.some((host) => host.id === hostId && (host.tags?.length ?? 0) > 0)));
-  }, [hosts]);
-
-  useEffect(() => {
-    setRemoveUnusedSecretsOnHostDelete(hostDeleteUnusedLocalSecretRefs.length > 0);
-  }, [hostDeleteTarget, hostDeleteUnusedLocalSecretRefs.length]);
-
-  useEffect(() => {
-    if (!isImportMenuOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!importMenuRef.current?.contains(event.target as Node)) {
-        setIsImportMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsImportMenuOpen(false);
-      }
-    };
-
-    const handleResize = () => {
-      setIsImportMenuOpen(false);
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [isImportMenuOpen]);
-
-  function clearSelections() {
-    setSelectedHostIds([]);
-    setSelectedGroupPaths([]);
-    setHostSelectionAnchor(null);
-    setGroupSelectionAnchor(null);
-    setContextMenu(null);
-    onClearHostSelection();
-  }
-
-  function buildGroupDeleteTarget(groupPaths: string[]): GroupDeleteTarget {
-    const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
-    const normalizedPathSet = new Set(normalizedPaths);
-    const hostCount = hosts.filter((host) =>
-      normalizedPaths.some((path) => isGroupWithinPath(normalizeGroupPath(host.groupName), path))
-    ).length;
-    const childGroupCount = allGroupPaths.filter(
-      (candidatePath) =>
-        !normalizedPathSet.has(candidatePath) &&
-        normalizedPaths.some((path) => candidatePath.startsWith(`${path}/`))
-    ).length;
-
-    return {
-      paths: normalizedPaths,
-      groupCount: normalizedPaths.length,
-      title:
-        normalizedPaths.length === 1
-          ? groups.find((group) => group.path === normalizedPaths[0])?.name ?? normalizedPaths[0]
-          : `${normalizedPaths.length} groups`,
-      hostCount,
-      childGroupCount
-    };
-  }
-
-  function buildHostDeleteTarget(hostIds: string[]): HostDeleteTarget {
-    const orderedHostIds = getOrderedSelectedHostIds(hostIds);
-    const targetHosts = orderedHostIds
-      .map((hostId) => hosts.find((host) => host.id === hostId))
-      .filter((host): host is HostRecord => Boolean(host));
-
-    return {
-      hostIds: targetHosts.map((host) => host.id),
-      hostCount: targetHosts.length,
-      title:
-        targetHosts.length === 1
-          ? targetHosts[0].label
-          : `선택한 ${targetHosts.length}개 호스트`
-    };
-  }
-
-  function selectHostRange(hostId: string) {
-    setSelectedHostIds(getSelectionRange(visibleHostIds, hostSelectionAnchor, hostId));
-    setHostSelectionAnchor(hostId);
-  }
-
-  function toggleHostSelection(hostId: string) {
-    setSelectedHostIds((current) => {
-      const next = current.includes(hostId) ? current.filter((entry) => entry !== hostId) : [...current, hostId];
-      if (next.length === 0) {
-        onClearHostSelection();
-      }
-      return next;
-    });
-    setHostSelectionAnchor(hostId);
-  }
-
-  function selectSingleHost(hostId: string) {
-    setSelectedHostIds([hostId]);
-    setSelectedGroupPaths([]);
-    setHostSelectionAnchor(hostId);
-    setGroupSelectionAnchor(null);
-    onSelectHost(hostId);
-  }
-
-  function handleHostSelection(hostId: string, event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>) {
-    setContextMenu(null);
-    if (event.shiftKey) {
-      selectHostRange(hostId);
-      return;
-    }
-    if (isAdditiveSelectionEvent(event)) {
-      toggleHostSelection(hostId);
-      return;
-    }
-    selectSingleHost(hostId);
-  }
-
-  function selectGroupRange(groupPath: string) {
-    setSelectedGroupPaths(getSelectionRange(visibleGroupPaths, groupSelectionAnchor, groupPath));
-    setGroupSelectionAnchor(groupPath);
-  }
-
-  function toggleGroupSelection(groupPath: string) {
-    setSelectedGroupPaths((current) =>
-      current.includes(groupPath) ? current.filter((entry) => entry !== groupPath) : [...current, groupPath]
-    );
-    setGroupSelectionAnchor(groupPath);
-  }
-
-  function selectSingleGroup(groupPath: string) {
-    setSelectedGroupPaths([groupPath]);
-    setSelectedHostIds([]);
-    setGroupSelectionAnchor(groupPath);
-    setHostSelectionAnchor(null);
-    onClearHostSelection();
-  }
-
-  function handleGroupSelection(groupPath: string, event: Pick<MouseEvent, 'shiftKey' | 'ctrlKey' | 'metaKey'>) {
-    setContextMenu(null);
-    if (event.shiftKey) {
-      selectGroupRange(groupPath);
-      return;
-    }
-    if (isAdditiveSelectionEvent(event)) {
-      toggleGroupSelection(groupPath);
-      return;
-    }
-    selectSingleGroup(groupPath);
-    onNavigateGroup(groupPath);
-  }
-
-  function handleNavigateRoot() {
-    setContextMenu(null);
-    setSelectedGroupPaths([]);
-    setSelectedHostIds([]);
-    setGroupSelectionAnchor(null);
-    setHostSelectionAnchor(null);
-    onClearHostSelection();
-    onNavigateGroup(null);
-  }
-
-  function handleToggleGroupBranch(groupPath: string) {
-    setCollapsedTreeGroupPaths((current) =>
-      current.includes(groupPath) ? current.filter((path) => path !== groupPath) : [...current, groupPath]
-    );
-  }
-
-  function getOrderedSelectedHostIds(hostIds: string[]): string[] {
-    const selectedHostIdSet = new Set(hostIds);
-    return visibleHostIds.filter((hostId) => selectedHostIdSet.has(hostId));
-  }
-
-  async function runForOrderedHosts(
-    hostIds: string[],
-    action: (hostId: string) => Promise<void>,
-  ) {
-    const orderedHostIds = getOrderedSelectedHostIds(hostIds);
-    setContextMenu(null);
-    for (const hostId of orderedHostIds) {
-      await action(hostId);
-    }
-  }
-
-  function handleBrowserBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
-    const target = event.target as HTMLElement;
-    if (
-      target.closest('[data-host-card="true"]') ||
-      target.closest('[data-group-card="true"]') ||
-      target.closest('[role="menu"]') ||
-      target.closest('button') ||
-      target.closest('input') ||
-      target.closest('[data-host-browser-modal="true"]')
-    ) {
-      return;
-    }
-    clearSelections();
-  }
-
-  function applyGroupPathUiMutation(previousGroupPath: string, nextGroupPath: string) {
-    setSelectedGroupPaths((current) => {
-      const nextSelected = current
-        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
-        .filter((groupPath): groupPath is string => Boolean(groupPath));
-      return [...new Set(nextSelected)];
-    });
-    setGroupSelectionAnchor((current) => rebaseGroupPath(current, previousGroupPath, nextGroupPath));
-    setCollapsedTreeGroupPaths((current) => {
-      const nextCollapsed = current
-        .map((groupPath) => rebaseGroupPath(groupPath, previousGroupPath, nextGroupPath))
-        .filter((groupPath): groupPath is string => Boolean(groupPath));
-      return [...new Set(nextCollapsed)];
-    });
-  }
-
-  function openCreateGroupModal() {
-    setGroupModalState({ mode: 'create' });
-    setNewGroupName('');
-    setGroupError(null);
-  }
-
-  function openRenameGroupModal(groupPath: string) {
-    setGroupModalState({ mode: 'rename', path: groupPath });
-    setNewGroupName(getGroupLabel(groupPath));
-    setGroupError(null);
-  }
-
-  function closeGroupModal() {
-    setGroupModalState(null);
-    setNewGroupName('');
-    setGroupError(null);
-  }
-
-  function clearDragState() {
-    setDragTargetGroupPath(null);
-    setDraggedHostIds([]);
-    setDraggedGroupPath(null);
-    setIsRootDragTarget(false);
-  }
-
-  const selectedHostIdSet = new Set(selectedHostIds);
-  const selectedGroupPathSet = new Set(selectedGroupPaths);
-
-  function getActiveDraggedHostIds(dataTransfer: DataTransfer): string[] {
-    const stateHostIds = getOrderedSelectedHostIds(draggedHostIds);
-    if (stateHostIds.length > 0) {
-      return stateHostIds;
-    }
-
-    const payloadHostIds = getOrderedSelectedHostIds(
-      parseHostDragIds(dataTransfer.getData(HOSTS_DRAG_MIME_TYPE)),
-    );
-    if (payloadHostIds.length > 0) {
-      return payloadHostIds;
-    }
-
-    const singleHostId = dataTransfer.getData(HOST_DRAG_MIME_TYPE);
-    return singleHostId ? getOrderedSelectedHostIds([singleHostId]) : [];
-  }
-
-  function getNextDraggedHostIds(host: HostRecord): string[] {
-    if (!selectedHostIdSet.has(host.id)) {
-      return [host.id];
-    }
-    const orderedSelectedHostIds = getOrderedSelectedHostIds(selectedHostIds);
-    return orderedSelectedHostIds.length > 0 ? orderedSelectedHostIds : [host.id];
-  }
+export type HostBrowserProps = UseHostBrowserParams & {
+  /** 편집/생성 중일 때 우측 상세 영역에 detail 대신 표시할 에디터(HostDrawer). */
+  hostEditor?: ReactNode;
+};
+
+// 우클릭 컨텍스트 메뉴 아이템 공통 스타일(아이콘+라벨, 그룹 사이 divider).
+const CTX_ITEM =
+  'flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.6rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent';
+const CTX_DANGER =
+  'flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.6rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent';
+const CTX_ICON = 'h-[1.05rem] w-[1.05rem] shrink-0 text-[var(--text-soft)]';
+
+export function HostBrowser({ hostEditor, ...props }: HostBrowserProps) {
+  const hb = useHostBrowser(props);
+  const { contextMenu, contextMenuStyle, groupModalState, groupDeleteTarget, hostDeleteTarget } =
+    hb;
+  // ECS 호스트는 SFTP/tmux/컨테이너를 지원하지 않아 컨텍스트 메뉴에서 숨긴다(단일 선택 기준).
+  const contextMenuHost =
+    contextMenu?.kind === 'host' && contextMenu.hostIds.length === 1
+      ? hb.hosts.find((entry) => entry.id === contextMenu.hostIds[0]) ?? null
+      : null;
+  const contextMenuIsEcs = contextMenuHost ? isAwsEcsHostRecord(contextMenuHost) : false;
 
   return (
-    <div
-      className="relative flex min-h-full flex-1 flex-col gap-5 [--home-browser-card-min-width:280px] [--home-browser-tree-width:clamp(10.5rem,14vw,12.5rem)]"
-      onClickCapture={handleBrowserBackgroundClick}
-    >
-      <div className="flex items-end gap-4 pb-[0.8rem] pt-[0.2rem] max-[760px]:flex-col max-[760px]:items-stretch">
-        <div className="flex-1">
-          <input
-            id="host-search"
-            value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={searchPlaceholder}
-            aria-label="Search hosts"
-          />
-        </div>
-        <div className="flex flex-wrap justify-end gap-3">
-          <Button
-            variant="primary"
-            onClick={() => {
-              setIsImportMenuOpen(false);
-              onCreateHost();
-            }}
-          >
-            New Host
-          </Button>
-          <SplitButton ref={importMenuRef}>
-            <SplitButtonMain
-              variant="secondary"
-              onClick={() => {
-                setIsImportMenuOpen(false);
-                onOpenOpenSshImport();
-              }}
-            >
-              Import
-            </SplitButtonMain>
-            <SplitButtonToggle
-              variant="secondary"
-              aria-label="Open import menu"
-              aria-expanded={isImportMenuOpen}
-              aria-haspopup="menu"
-              onClick={() => {
-                setIsImportMenuOpen((current) => !current);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  setIsImportMenuOpen((current) => !current);
-                }
-              }}
-            >
-              <span
-                className={cn(
-                  'inline-grid h-[0.72rem] w-[0.98rem] place-items-center transition-transform duration-140',
-                  isImportMenuOpen && 'rotate-180',
-                )}
-                aria-hidden="true"
-              >
-                <svg viewBox="0 0 12 8" focusable="false" className="block h-full w-full">
-                  <path d="M1 1.25 6 6.25 11 1.25" />
-                </svg>
-              </span>
-            </SplitButtonToggle>
-            {isImportMenuOpen ? (
-              <SplitButtonMenu role="menu" aria-label="Import host menu">
-                {importMenuItems.map((item) => (
-                  <SplitButtonMenuItem
-                    key={item.label}
-                    role="menuitem"
-                    onClick={() => {
-                      setIsImportMenuOpen(false);
-                      item.onSelect();
-                    }}
-                  >
-                    {item.label}
-                  </SplitButtonMenuItem>
-                ))}
-              </SplitButtonMenu>
-            ) : null}
-          </SplitButton>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setIsImportMenuOpen(false);
-              onOpenLocalTerminal();
-            }}
-          >
-            Local Terminal
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setIsImportMenuOpen(false);
-              openCreateGroupModal();
-            }}
-          >
-            New Group
-          </Button>
-        </div>
+    <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)_minmax(360px,400px)] max-[1320px]:grid-cols-[220px_minmax(0,1fr)_340px] max-[1040px]:grid-cols-1">
+      <HomeSidebar hb={hb} />
+
+      <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+        {hb.statusMessage ? (
+          <NoticeCard tone="info" className="mx-[1.1rem] mt-[0.9rem]">
+            {hb.statusMessage}
+          </NoticeCard>
+        ) : null}
+        {hb.errorMessage ? (
+          <NoticeCard tone="danger" className="mx-[1.1rem] mt-[0.9rem]" role="alert">
+            {hb.errorMessage}
+          </NoticeCard>
+        ) : null}
+        <HostListPanel hb={hb} />
       </div>
 
-      {statusMessage ? (
-        <NoticeCard tone="info" className="mb-4">
-          {statusMessage}
-        </NoticeCard>
-      ) : null}
-      {errorMessage ? (
-        <NoticeCard tone="danger" className="mb-4" role="alert">
-          {errorMessage}
-        </NoticeCard>
-      ) : null}
+      <aside
+        className={cn(
+          'min-h-0',
+          hostEditor
+            ? 'max-[1040px]:fixed max-[1040px]:inset-0 max-[1040px]:z-[20]'
+            : 'border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--app-bg)_8%)] max-[1040px]:hidden',
+        )}
+      >
+        {hostEditor ?? <HostDetailPanel hb={hb} />}
+      </aside>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,var(--home-browser-tree-width))_minmax(0,1fr)] items-stretch gap-[1.3rem] min-[0px]:min-w-0 max-[1040px]:grid-cols-1">
-        <aside className="flex min-h-0 flex-col gap-[0.85rem] pt-[0.15rem]" aria-label="Group tree">
-          <div className="flex items-center justify-between text-[0.75rem] font-bold uppercase tracking-[0.08em] text-[var(--text-soft)]">
-            <span>Group Tree</span>
-          </div>
-          <button
-            type="button"
-            className={cn(
-              'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
-              currentGroupPath === null &&
-                'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
-              isRootDragTarget &&
-                'border-[var(--selection-border)] bg-[var(--selection-tint-strong)]',
-            )}
-            onClick={handleNavigateRoot}
-            onDragOver={(event) => {
-              const activeDraggedGroupPath =
-                draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
-              if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, null)) {
-                return;
-              }
-              event.preventDefault();
-              event.dataTransfer.dropEffect = 'move';
-              setIsRootDragTarget(true);
-            }}
-            onDragLeave={(event) => {
-              const nextTarget = event.relatedTarget;
-              if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                return;
-              }
-              setIsRootDragTarget(false);
-            }}
-            onDrop={async (event) => {
-              const activeDraggedGroupPath =
-                draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
-              setIsRootDragTarget(false);
-              if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, null)) {
-                return;
-              }
-              event.preventDefault();
-              const nextGroupPath = buildNextGroupPath(activeDraggedGroupPath, null);
-              if (!nextGroupPath) {
-                return;
-              }
-              try {
-                await onMoveGroup(activeDraggedGroupPath, null);
-                applyGroupPathUiMutation(activeDraggedGroupPath, nextGroupPath);
-              } catch {
-                // HomeShell surfaces the error through the shared notice area.
-              } finally {
-                clearDragState();
-              }
-            }}
-          >
-            <span>All Groups</span>
-            <span className="shrink-0 text-[0.74rem] font-semibold text-[var(--text-muted)]">{hosts.length}</span>
-          </button>
-          {groupTreeRows.length === 0 ? (
-            <div className="px-[0.2rem] py-[0.75rem] text-[0.8rem] leading-[1.45] text-[var(--text-soft)]">
-              아직 만든 그룹이 없습니다.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-[0.15rem]">
-              {visibleGroupTreeRows.map((group) => (
-                <div
-                  key={group.path}
-                  className="flex min-w-0 items-center gap-[0.1rem]"
-                  style={{ paddingLeft: `calc(${group.depth} * 1rem)` }}
-                >
-                  {group.hasChildren ? (
+      {contextMenu
+        ? createPortal(
+            <div
+              className="fixed z-[24] min-w-[148px] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.4rem] shadow-[var(--shadow-floating)]"
+              style={contextMenuStyle ?? undefined}
+              role="menu"
+            >
+              {contextMenu.kind === 'host' ? (
+                <>
+                  {/* 연결류 */}
+                  <button
+                    type="button"
+                    className={CTX_ITEM}
+                    onClick={async () => {
+                      await hb.runForOrderedHosts(contextMenu.hostIds, hb.onConnectHost);
+                    }}
+                  >
+                    <SquareTerminal className={CTX_ICON} aria-hidden />
+                    {contextMenu.hostIds.length === 1
+                      ? '연결'
+                      : `연결 (${contextMenu.hostIds.length}개)`}
+                  </button>
+                  {!contextMenuIsEcs && hb.onOpenSftp ? (
                     <button
                       type="button"
-                      className="inline-grid h-4 w-4 shrink-0 place-items-center rounded-full text-[0.8rem] leading-none text-[var(--text-muted)] hover:text-[var(--text)]"
-                      aria-label={collapsedTreeGroupPathSet.has(group.path) ? 'Expand subgroup' : 'Collapse subgroup'}
+                      className={CTX_ITEM}
+                      disabled={contextMenu.hostIds.length !== 1}
                       onClick={() => {
-                        handleToggleGroupBranch(group.path);
+                        const targetHostId = contextMenu.hostIds[0];
+                        hb.setContextMenu(null);
+                        if (!targetHostId) {
+                          return;
+                        }
+                        void hb.onOpenSftp?.(targetHostId);
                       }}
                     >
-                      <span aria-hidden="true">{collapsedTreeGroupPathSet.has(group.path) ? '▸' : '▾'}</span>
+                      <Folder className={CTX_ICON} aria-hidden />
+                      SFTP 연결
                     </button>
-                  ) : (
-                    <span className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  )}
+                  ) : null}
+                  {!contextMenuIsEcs && hb.onConnectHostTmux ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={async () => {
+                        await hb.runForOrderedHosts(contextMenu.hostIds, hb.onConnectHostTmux!);
+                      }}
+                    >
+                      <Columns2 className={CTX_ICON} aria-hidden />
+                      {contextMenu.hostIds.length === 1
+                        ? 'tmux로 연결'
+                        : `tmux로 연결 (${contextMenu.hostIds.length}개)`}
+                    </button>
+                  ) : null}
+                  {!contextMenuIsEcs ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={async () => {
+                        await hb.runForOrderedHosts(contextMenu.hostIds, hb.onOpenHostContainers);
+                      }}
+                    >
+                      <Container className={CTX_ICON} aria-hidden />
+                      {contextMenu.hostIds.length === 1
+                        ? '컨테이너'
+                        : `컨테이너 (${contextMenu.hostIds.length}개)`}
+                    </button>
+                  ) : null}
+
+                  <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
+
+                  {/* 관리 */}
                   <button
                     type="button"
-                    className={cn(
-                      'flex w-full min-w-0 items-center justify-between gap-3 rounded-[18px] border border-transparent bg-transparent px-[0.4rem] py-[0.45rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color,box-shadow] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
-                      currentGroupPath === group.path &&
-                        'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]',
-                      !currentGroupPath && selectedGroupPathSet.has(group.path) && 'text-[var(--text)]',
-                      selectedGroupPathSet.has(group.path) &&
-                        currentGroupPath !== group.path &&
-                        'bg-[color-mix(in_srgb,var(--surface-elevated)_66%,transparent_34%)]',
-                      dragTargetGroupPath === group.path &&
-                        'border-[var(--selection-border)] bg-[var(--selection-tint-strong)]',
-                    )}
-                    data-group-tree-state={selectedGroupPathSet.has(group.path) ? 'selected' : 'idle'}
-                    draggable
-                    onClick={(event) => handleGroupSelection(group.path, event)}
-                    onDragStart={(event) => {
-                      selectSingleGroup(group.path);
-                      setDraggedHostIds([]);
-                      setDraggedGroupPath(group.path);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('application/x-dolssh-group-path', group.path);
-                      event.dataTransfer.setData('text/plain', group.label);
-                    }}
-                    onDragEnd={() => {
-                      clearDragState();
-                    }}
-                    onDoubleClick={() => {
-                      if (group.hasChildren) {
-                        handleToggleGroupBranch(group.path);
-                      }
-                    }}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      const nextGroupPaths = selectedGroupPathSet.has(group.path)
-                        ? selectedGroupPaths
-                        : [group.path];
-                      if (!selectedGroupPathSet.has(group.path)) {
-                        setSelectedGroupPaths([group.path]);
-                        setSelectedHostIds([]);
-                        setGroupSelectionAnchor(group.path);
-                        setHostSelectionAnchor(null);
-                        onClearHostSelection();
-                      }
-                      setContextMenu({
-                        kind: 'group',
-                        groupPaths: normalizeGroupSelectionForDelete(nextGroupPaths),
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                    onDragOver={(event) => {
-                      const activeDraggedHostIds = getActiveDraggedHostIds(event.dataTransfer);
-                      const activeDraggedGroupPath =
-                        draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
-                      if (
-                        activeDraggedHostIds.length === 0 &&
-                        (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path))
-                      ) {
+                    className={CTX_ITEM}
+                    disabled={contextMenu.hostIds.length !== 1}
+                    onClick={() => {
+                      const targetHostId = contextMenu.hostIds[0];
+                      hb.setContextMenu(null);
+                      if (!targetHostId) {
                         return;
                       }
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = 'move';
-                      setIsRootDragTarget(false);
-                      setDragTargetGroupPath(group.path);
-                    }}
-                    onDragLeave={(event) => {
-                      const nextTarget = event.relatedTarget;
-                      if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
-                        return;
-                      }
-                      setDragTargetGroupPath((current) => (current === group.path ? null : current));
-                    }}
-                    onDrop={async (event) => {
-                      const activeDraggedHostIds = getActiveDraggedHostIds(event.dataTransfer);
-                      const activeDraggedGroupPath =
-                        draggedGroupPath ?? normalizeGroupPath(event.dataTransfer.getData('application/x-dolssh-group-path'));
-                      setDragTargetGroupPath(null);
-                      setIsRootDragTarget(false);
-                      if (activeDraggedHostIds.length > 0) {
-                        event.preventDefault();
-                        try {
-                          for (const hostId of activeDraggedHostIds) {
-                            await onMoveHostToGroup(hostId, group.path);
-                          }
-                        } finally {
-                          clearDragState();
-                        }
-                        return;
-                      }
-                      if (!activeDraggedGroupPath || !canReparentGroup(activeDraggedGroupPath, group.path)) {
-                        return;
-                      }
-                      event.preventDefault();
-                      const nextGroupPath = buildNextGroupPath(activeDraggedGroupPath, group.path);
-                      if (!nextGroupPath) {
-                        return;
-                      }
-                      try {
-                        await onMoveGroup(activeDraggedGroupPath, group.path);
-                        applyGroupPathUiMutation(activeDraggedGroupPath, nextGroupPath);
-                        setCollapsedTreeGroupPaths((current) => current.filter((path) => path !== group.path));
-                      } catch {
-                        // HomeShell surfaces the error through the shared notice area.
-                      } finally {
-                        clearDragState();
-                      }
+                      hb.onEditHost(targetHostId);
                     }}
                   >
-                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold">{group.label}</span>
-                    <span className="shrink-0 text-[0.74rem] font-semibold text-[var(--text-muted)]">{group.hostCount}</span>
+                    <Pencil className={CTX_ICON} aria-hidden />
+                    수정
                   </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
-
-        <div className="flex min-w-0 flex-col gap-[0.85rem]" data-testid="host-browser-content">
-          <div className="flex flex-col gap-4">
-            <div
-              data-host-grid="true"
-              className="grid content-start gap-[0.85rem]"
-              ref={hostGridRef}
-              style={hostGridStyle}
-            >
-              {visibleHosts.length === 0 ? (
-                <EmptyState
-                  title={emptyMessage}
-                  description={getHostBrowserEmptyCalloutMessage(hosts.length, searchQuery)}
-                />
-              ) : (
-                visibleHosts.map((host) => {
-                  const isTagsExpanded = expandedHostTags.includes(host.id);
-                  const badgeLabel = getHostBadgeLabel(host);
-                  return (
-                    <HostCard
-                      key={host.id}
-                      selected={
-                        selectedHostIdSet.has(host.id) ||
-                        (selectedHostIds.length === 0 && selectedGroupPaths.length === 0 && selectedHostId === host.id)
-                      }
-                      expanded={isTagsExpanded}
-                      badgeLabel={badgeLabel}
-                      title={host.label}
-                      subtitle={getHostSubtitle(host)}
-                      groupLabel={normalizeGroupPath(host.groupName) ?? 'Ungrouped'}
-                      compact
-                      style={clampedHostCardStyle}
-                      draggable
-                      onClick={(event) => {
-                        handleHostSelection(host.id, event);
-                      }}
-                      onDragStart={(event) => {
-                        const nextDraggedHostIds = getNextDraggedHostIds(host);
-                        if (!selectedHostIdSet.has(host.id)) {
-                          selectSingleHost(host.id);
-                        }
-                        setDraggedGroupPath(null);
-                        setDraggedHostIds(nextDraggedHostIds);
-                        event.dataTransfer.effectAllowed = 'move';
-                        event.dataTransfer.setData(HOST_DRAG_MIME_TYPE, nextDraggedHostIds[0] ?? host.id);
-                        event.dataTransfer.setData(HOSTS_DRAG_MIME_TYPE, JSON.stringify(nextDraggedHostIds));
-                        event.dataTransfer.setData(
-                          'text/plain',
-                          nextDraggedHostIds.length === 1 ? host.label : `${nextDraggedHostIds.length} hosts`,
-                        );
-                      }}
-                      onDragEnd={() => {
-                        clearDragState();
-                      }}
-                      onDoubleClick={async () => {
-                        await onConnectHost(host.id);
-                      }}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        const nextHostIds = selectedHostIdSet.has(host.id) ? getOrderedSelectedHostIds(selectedHostIds) : [host.id];
-                        if (!selectedHostIdSet.has(host.id)) {
-                          setSelectedHostIds([host.id]);
-                          setSelectedGroupPaths([]);
-                          setHostSelectionAnchor(host.id);
-                          setGroupSelectionAnchor(null);
-                          onSelectHost(host.id);
-                        }
-                        setContextMenu({
-                          kind: 'host',
-                          hostIds: nextHostIds,
-                          x: event.clientX,
-                          y: event.clientY
-                        });
-                      }}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          void (async () => {
-                            await onConnectHost(host.id);
-                          })();
-                        }
-                      }}
-                      actions={
-                        <div className="flex flex-col items-end gap-[0.3rem]">
-                          <button
-                            type="button"
-                            className="inline-grid h-[1.75rem] w-[1.75rem] shrink-0 place-items-center rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] text-[0.76rem] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
-                            aria-label={`${host.label} 수정`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectSingleHost(host.id);
-                              onEditHost(host.id);
-                            }}
-                          >
-                            ✎
-                          </button>
-                          {host.tags && host.tags.length > 0 ? (
-                            <button
-                              type="button"
-                              className="rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.4rem] py-[0.2rem] text-[0.66rem] leading-[1.1] text-[var(--text-soft)] hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] hover:text-[var(--text)]"
-                              aria-expanded={isTagsExpanded}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setExpandedHostTags((current) =>
-                                  current.includes(host.id) ? current.filter((entry) => entry !== host.id) : [...current, host.id]
-                                );
-                              }}
-                            >
-                              {getHostTagsToggleLabel(isTagsExpanded, host.tags.length)}
-                            </button>
-                          ) : null}
-                        </div>
-                      }
-                      footer={
-                        host.tags && host.tags.length > 0 && isTagsExpanded ? (
-                          <>
-                            {host.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.46rem] py-[0.18rem] text-[0.7rem] leading-[1.2] text-[var(--text-soft)]"
-                              >
-                                #{tag}
-                              </span>
-                            ))}
-                          </>
-                        ) : null
-                      }
-                    />
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {contextMenu ? (
-        createPortal(
-          <div
-            className="fixed z-[24] min-w-[148px] rounded-[16px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.45rem] shadow-[var(--shadow-floating)]"
-            style={contextMenuStyle ?? undefined}
-            role="menu"
-          >
-            {contextMenu.kind === 'host' ? (
-              <>
-                <button
-                  type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                  onClick={async () => {
-                    await runForOrderedHosts(contextMenu.hostIds, onConnectHost);
-                  }}
-                >
-                  {contextMenu.hostIds.length === 1 ? '연결' : `연결 (${contextMenu.hostIds.length}개)`}
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                  onClick={async () => {
-                    await runForOrderedHosts(contextMenu.hostIds, onOpenHostContainers);
-                  }}
-                >
-                  {contextMenu.hostIds.length === 1 ? '컨테이너' : `컨테이너 (${contextMenu.hostIds.length}개)`}
-                </button>
-                {onConnectHostTmux ? (
                   <button
                     type="button"
-                    className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                    className={CTX_ITEM}
                     onClick={async () => {
-                      await runForOrderedHosts(contextMenu.hostIds, onConnectHostTmux);
+                      hb.setContextMenu(null);
+                      await hb.onDuplicateHosts(hb.getOrderedSelectedHostIds(contextMenu.hostIds));
                     }}
                   >
-                    {contextMenu.hostIds.length === 1 ? 'tmux로 연결' : `tmux로 연결 (${contextMenu.hostIds.length}개)`}
+                    <Copy className={CTX_ICON} aria-hidden />
+                    {contextMenu.hostIds.length === 1
+                      ? '복사'
+                      : `복사 (${contextMenu.hostIds.length}개)`}
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                  onClick={async () => {
-                    setContextMenu(null);
-                    await onDuplicateHosts(getOrderedSelectedHostIds(contextMenu.hostIds));
-                  }}
-                >
-                  {contextMenu.hostIds.length === 1 ? '복사' : `복사 (${contextMenu.hostIds.length}개)`}
-                </button>
-                <button
-                type="button"
-                className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                onClick={async () => {
-                  const orderedHostIds = getOrderedSelectedHostIds(contextMenu.hostIds);
-                  setContextMenu(null);
-                  if (orderedHostIds.length === 0) {
-                    return;
-                  }
-                  setHostDeleteTarget(buildHostDeleteTarget(orderedHostIds));
-                  setHostDeleteError(null);
-                }}
-              >
-                삭제
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
-                  disabled={contextMenu.groupPaths.length !== 1}
-                  onClick={() => {
-                    const targetGroupPath = contextMenu.groupPaths[0];
-                    setContextMenu(null);
-                    if (!targetGroupPath) {
-                      return;
-                    }
-                    openRenameGroupModal(targetGroupPath);
-                  }}
-                >
-                  이름 변경
-                </button>
-                <button
-                  type="button"
-                  className="flex w-full items-center rounded-[12px] px-[0.8rem] py-[0.75rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
-                  onClick={() => {
-                    setGroupDeleteTarget(buildGroupDeleteTarget(contextMenu.groupPaths));
-                    setGroupDeleteError(null);
-                    setContextMenu(null);
-                  }}
-                >
-                  삭제
-                </button>
-              </>
-            )}
-          </div>,
-          document.body
-        )
-      ) : null}
+
+                  <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
+
+                  {/* 삭제 */}
+                  <button
+                    type="button"
+                    className={CTX_DANGER}
+                    onClick={async () => {
+                      const orderedHostIds = hb.getOrderedSelectedHostIds(contextMenu.hostIds);
+                      hb.setContextMenu(null);
+                      if (orderedHostIds.length === 0) {
+                        return;
+                      }
+                      hb.setHostDeleteTarget(hb.buildHostDeleteTarget(orderedHostIds));
+                      hb.setHostDeleteError(null);
+                    }}
+                  >
+                    <Trash2 className="h-[1.05rem] w-[1.05rem] shrink-0" aria-hidden />
+                    삭제
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                    disabled={contextMenu.groupPaths.length !== 1}
+                    onClick={() => {
+                      const targetGroupPath = contextMenu.groupPaths[0];
+                      hb.setContextMenu(null);
+                      if (!targetGroupPath) {
+                        return;
+                      }
+                      hb.openCreateSubgroupModal(targetGroupPath);
+                    }}
+                  >
+                    하위 그룹 생성
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                    disabled={contextMenu.groupPaths.length !== 1}
+                    onClick={() => {
+                      const targetGroupPath = contextMenu.groupPaths[0];
+                      hb.setContextMenu(null);
+                      if (!targetGroupPath) {
+                        return;
+                      }
+                      hb.openRenameGroupModal(targetGroupPath);
+                    }}
+                  >
+                    이름 변경
+                  </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"
+                    onClick={() => {
+                      hb.setGroupDeleteTarget(hb.buildGroupDeleteTarget(contextMenu.groupPaths));
+                      hb.setGroupDeleteError(null);
+                      hb.setContextMenu(null);
+                    }}
+                  >
+                    삭제
+                  </button>
+                </>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
 
       {groupModalState ? (
-        <DialogBackdrop data-testid="host-browser-modal-backdrop" onDismiss={closeGroupModal}>
+        <DialogBackdrop data-testid="host-browser-modal-backdrop" onDismiss={hb.closeGroupModal}>
           <ModalShell
             data-host-browser-modal="true"
             role="dialog"
             aria-modal="true"
-            aria-labelledby={groupModalState.mode === 'create' ? 'new-group-title' : 'rename-group-title'}
+            aria-labelledby={
+              groupModalState.mode === 'create' ? 'new-group-title' : 'rename-group-title'
+            }
           >
             <ModalHeader className="block">
               <SectionLabel>{groupModalState.mode === 'create' ? 'Create' : 'Rename'}</SectionLabel>
@@ -1291,19 +287,21 @@ export function HostBrowser({
               </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-            <Input
-              value={newGroupName}
-              onChange={(event) => {
-                setNewGroupName(event.target.value);
-                setGroupError(null);
-              }}
-              placeholder="Group name"
-              autoFocus
-            />
-            {groupError ? <p className="text-sm text-[var(--danger-text)]">{groupError}</p> : null}
+              <Input
+                value={hb.newGroupName}
+                onChange={(event) => {
+                  hb.setNewGroupName(event.target.value);
+                  hb.setGroupError(null);
+                }}
+                placeholder="Group name"
+                autoFocus
+              />
+              {hb.groupError ? (
+                <p className="text-sm text-[var(--danger-text)]">{hb.groupError}</p>
+              ) : null}
             </ModalBody>
             <ModalFooter>
-              <Button variant="secondary" onClick={closeGroupModal}>
+              <Button variant="secondary" onClick={hb.closeGroupModal}>
                 Cancel
               </Button>
               <Button
@@ -1311,26 +309,28 @@ export function HostBrowser({
                 onClick={async () => {
                   try {
                     if (groupModalState.mode === 'create') {
-                      await onCreateGroup(newGroupName);
+                      // parentPath 미지정(루트 + 버튼)이면 store가 currentGroupPath를 쓰고,
+                      // 그룹 우클릭 "하위 그룹 생성"이면 그 그룹 아래에 만든다.
+                      await hb.onCreateGroup(hb.newGroupName, groupModalState.parentPath);
                     } else {
                       const nextGroupPath = normalizeGroupPath(
                         getParentGroupPath(groupModalState.path)
-                          ? `${getParentGroupPath(groupModalState.path)}/${newGroupName.trim()}`
-                          : newGroupName.trim()
+                          ? `${getParentGroupPath(groupModalState.path)}/${hb.newGroupName.trim()}`
+                          : hb.newGroupName.trim(),
                       );
-                      await onRenameGroup(groupModalState.path, newGroupName);
+                      await hb.onRenameGroup(groupModalState.path, hb.newGroupName);
                       if (nextGroupPath) {
-                        applyGroupPathUiMutation(groupModalState.path, nextGroupPath);
+                        hb.applyGroupPathUiMutation(groupModalState.path, nextGroupPath);
                       }
                     }
-                    closeGroupModal();
+                    hb.closeGroupModal();
                   } catch (error) {
-                    setGroupError(
+                    hb.setGroupError(
                       error instanceof Error
                         ? error.message
                         : groupModalState.mode === 'create'
                           ? '그룹을 만들지 못했습니다.'
-                          : '그룹 이름을 변경하지 못했습니다.'
+                          : '그룹 이름을 변경하지 못했습니다.',
                     );
                   }
                 }}
@@ -1351,42 +351,48 @@ export function HostBrowser({
               ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
               : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`
           }
-          unusedLocalSecretCount={hostDeleteUnusedLocalSecretRefs.length}
-          removeUnusedSecrets={removeUnusedSecretsOnHostDelete}
-          onToggleRemoveUnusedSecrets={setRemoveUnusedSecretsOnHostDelete}
-          errorMessage={hostDeleteError}
-          isDeleting={isRemovingHost}
+          unusedLocalSecretCount={hb.hostDeleteUnusedLocalSecretRefs.length}
+          removeUnusedSecrets={hb.removeUnusedSecretsOnHostDelete}
+          onToggleRemoveUnusedSecrets={hb.setRemoveUnusedSecretsOnHostDelete}
+          errorMessage={hb.hostDeleteError}
+          isDeleting={hb.isRemovingHost}
           onClose={() => {
-            if (isRemovingHost) {
+            if (hb.isRemovingHost) {
               return;
             }
-            setHostDeleteTarget(null);
-            setHostDeleteError(null);
+            hb.setHostDeleteTarget(null);
+            hb.setHostDeleteError(null);
           }}
           onConfirm={async () => {
             try {
-              setIsRemovingHost(true);
+              hb.setIsRemovingHost(true);
               for (const hostId of hostDeleteTarget.hostIds) {
-                await onRemoveHost(hostId);
+                await hb.onRemoveHost(hostId);
               }
             } catch (error) {
-              setHostDeleteError(error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.');
+              hb.setHostDeleteError(
+                error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.',
+              );
               return;
             }
 
             try {
-              if (removeUnusedSecretsOnHostDelete) {
-                for (const secretRef of hostDeleteUnusedLocalSecretRefs) {
-                  await onRemoveSecret(secretRef);
+              if (hb.removeUnusedSecretsOnHostDelete) {
+                for (const secretRef of hb.hostDeleteUnusedLocalSecretRefs) {
+                  await hb.onRemoveSecret(secretRef);
                 }
               }
-              clearSelections();
-              setHostDeleteTarget(null);
-              setHostDeleteError(null);
+              hb.clearSelections();
+              hb.setHostDeleteTarget(null);
+              hb.setHostDeleteError(null);
             } catch (error) {
-              setHostDeleteError(error instanceof Error ? error.message : '사용하지 않는 secret을 삭제하지 못했습니다.');
+              hb.setHostDeleteError(
+                error instanceof Error
+                  ? error.message
+                  : '사용하지 않는 secret을 삭제하지 못했습니다.',
+              );
             } finally {
-              setIsRemovingHost(false);
+              hb.setIsRemovingHost(false);
             }
           }}
         />
@@ -1394,56 +400,80 @@ export function HostBrowser({
 
       {groupDeleteTarget ? (
         <DialogBackdrop data-testid="host-browser-modal-backdrop">
-          <ModalShell data-host-browser-modal="true" role="dialog" aria-modal="true" aria-labelledby="delete-group-title">
+          <ModalShell
+            data-host-browser-modal="true"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-group-title"
+          >
             <ModalHeader className="block">
-            <SectionLabel>Delete</SectionLabel>
-            <h3 id="delete-group-title">
-              {groupDeleteTarget.groupCount === 1
-                ? `${groupDeleteTarget.title} 그룹을 삭제할까요?`
-                : `선택한 ${groupDeleteTarget.groupCount}개 그룹을 삭제할까요?`}
-            </h3>
+              <SectionLabel>Delete</SectionLabel>
+              <h3 id="delete-group-title">
+                {groupDeleteTarget.groupCount === 1
+                  ? `${groupDeleteTarget.title} 그룹을 삭제할까요?`
+                  : `선택한 ${groupDeleteTarget.groupCount}개 그룹을 삭제할까요?`}
+              </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-            {groupDeleteDialogVariant === 'with-descendants' ? (
-              <p className="text-sm leading-6 text-[var(--text-soft)]">
-                하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트 {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
-              </p>
-            ) : (
-              <p className="text-sm leading-6 text-[var(--text-soft)]">이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.</p>
-            )}
-            {groupDeleteError ? <p className="text-sm text-[var(--danger-text)]">{groupDeleteError}</p> : null}
+              {hb.groupDeleteDialogVariant === 'with-descendants' ? (
+                <p className="text-sm leading-6 text-[var(--text-soft)]">
+                  하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트{' '}
+                  {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
+                </p>
+              ) : (
+                <p className="text-sm leading-6 text-[var(--text-soft)]">
+                  이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.
+                </p>
+              )}
+              {hb.groupDeleteError ? (
+                <p className="text-sm text-[var(--danger-text)]">{hb.groupDeleteError}</p>
+              ) : null}
             </ModalBody>
-            <ModalFooter className={groupDeleteDialogVariant === 'with-descendants' ? 'flex-nowrap gap-[0.85rem]' : undefined}>
+            <ModalFooter
+              className={
+                hb.groupDeleteDialogVariant === 'with-descendants'
+                  ? 'flex-nowrap gap-[0.9rem]'
+                  : undefined
+              }
+            >
               <Button
                 variant="secondary"
-                className={groupDeleteDialogVariant === 'with-descendants' ? 'shrink-0 whitespace-nowrap' : undefined}
+                className={
+                  hb.groupDeleteDialogVariant === 'with-descendants'
+                    ? 'shrink-0 whitespace-nowrap'
+                    : undefined
+                }
                 onClick={() => {
-                  setGroupDeleteTarget(null);
-                  setGroupDeleteError(null);
+                  hb.setGroupDeleteTarget(null);
+                  hb.setGroupDeleteError(null);
                 }}
-                disabled={isRemovingGroup}
+                disabled={hb.isRemovingGroup}
               >
                 취소
               </Button>
-              {groupDeleteDialogVariant === 'with-descendants' ? (
+              {hb.groupDeleteDialogVariant === 'with-descendants' ? (
                 <>
                   <Button
                     variant="secondary"
                     className="min-w-0 flex-1 whitespace-nowrap"
-                    disabled={isRemovingGroup}
+                    disabled={hb.isRemovingGroup}
                     onClick={async () => {
                       try {
-                        setIsRemovingGroup(true);
+                        hb.setIsRemovingGroup(true);
                         for (const path of groupDeleteTarget.paths) {
-                          await onRemoveGroup(path, 'reparent-descendants');
+                          await hb.onRemoveGroup(path, 'reparent-descendants');
                         }
-                        setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
-                        setGroupDeleteTarget(null);
-                        setGroupDeleteError(null);
+                        hb.setSelectedGroupPaths((current) =>
+                          current.filter((path) => !groupDeleteTarget.paths.includes(path)),
+                        );
+                        hb.setGroupDeleteTarget(null);
+                        hb.setGroupDeleteError(null);
                       } catch (error) {
-                        setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                        hb.setGroupDeleteError(
+                          error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                        );
                       } finally {
-                        setIsRemovingGroup(false);
+                        hb.setIsRemovingGroup(false);
                       }
                     }}
                   >
@@ -1452,24 +482,25 @@ export function HostBrowser({
                   <Button
                     variant="danger"
                     className="min-w-0 flex-1 whitespace-nowrap"
-                    disabled={isRemovingGroup}
+                    disabled={hb.isRemovingGroup}
                     onClick={async () => {
                       try {
-                        setIsRemovingGroup(true);
-                        await onRemoveGroup(
-                          groupDeleteTarget.paths[0],
-                          'delete-subtree'
-                        );
+                        hb.setIsRemovingGroup(true);
+                        await hb.onRemoveGroup(groupDeleteTarget.paths[0], 'delete-subtree');
                         for (const path of groupDeleteTarget.paths.slice(1)) {
-                          await onRemoveGroup(path, 'delete-subtree');
+                          await hb.onRemoveGroup(path, 'delete-subtree');
                         }
-                        setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
-                        setGroupDeleteTarget(null);
-                        setGroupDeleteError(null);
+                        hb.setSelectedGroupPaths((current) =>
+                          current.filter((path) => !groupDeleteTarget.paths.includes(path)),
+                        );
+                        hb.setGroupDeleteTarget(null);
+                        hb.setGroupDeleteError(null);
                       } catch (error) {
-                        setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                        hb.setGroupDeleteError(
+                          error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                        );
                       } finally {
-                        setIsRemovingGroup(false);
+                        hb.setIsRemovingGroup(false);
                       }
                     }}
                   >
@@ -1479,21 +510,25 @@ export function HostBrowser({
               ) : (
                 <Button
                   variant="danger"
-                  disabled={isRemovingGroup}
+                  disabled={hb.isRemovingGroup}
                   onClick={async () => {
                     try {
-                      setIsRemovingGroup(true);
-                      await onRemoveGroup(groupDeleteTarget.paths[0], 'reparent-descendants');
+                      hb.setIsRemovingGroup(true);
+                      await hb.onRemoveGroup(groupDeleteTarget.paths[0], 'reparent-descendants');
                       for (const path of groupDeleteTarget.paths.slice(1)) {
-                        await onRemoveGroup(path, 'reparent-descendants');
+                        await hb.onRemoveGroup(path, 'reparent-descendants');
                       }
-                      setSelectedGroupPaths((current) => current.filter((path) => !groupDeleteTarget.paths.includes(path)));
-                      setGroupDeleteTarget(null);
-                      setGroupDeleteError(null);
+                      hb.setSelectedGroupPaths((current) =>
+                        current.filter((path) => !groupDeleteTarget.paths.includes(path)),
+                      );
+                      hb.setGroupDeleteTarget(null);
+                      hb.setGroupDeleteError(null);
                     } catch (error) {
-                      setGroupDeleteError(error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.');
+                      hb.setGroupDeleteError(
+                        error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                      );
                     } finally {
-                      setIsRemovingGroup(false);
+                      hb.setIsRemovingGroup(false);
                     }
                   }}
                 >

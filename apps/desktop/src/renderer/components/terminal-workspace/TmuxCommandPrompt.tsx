@@ -63,7 +63,7 @@ export function TmuxCommandPrompt() {
   };
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t border-[var(--accent)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-3 py-2 text-[0.8rem]">
+    <div className="absolute inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t border-[var(--accent)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-3 py-2 text-[0.82rem]">
       <span className="shrink-0 font-medium text-[var(--accent)]">
         {PROMPT_LABEL[prompt.mode] ?? 'tmux'}:
       </span>

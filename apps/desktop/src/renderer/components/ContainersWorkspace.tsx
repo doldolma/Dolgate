@@ -12,6 +12,8 @@ import {
 import { getHostBadgeLabel } from "@shared";
 import type { HostContainerDetails, HostRecord } from "@shared";
 import { cn } from "../lib/cn";
+import { RefreshCw } from "../ui/icons";
+import { getHostBadgeTone, getHostTypeLabel } from "./host-browser/hostDisplay";
 import { formatConnectionProgressStageLabel } from "../lib/connection-progress";
 import type {
   ContainerTunnelTabState,
@@ -205,17 +207,17 @@ const ansiToneClasses: Record<AnsiForegroundTone, string> = {
 };
 
 const detailCardClass =
-  "grid gap-[0.8rem] rounded-[20px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[1rem]";
+  "grid gap-[0.9rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem]";
 const summaryGridClass =
-  "grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[0.8rem]";
+  "grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-[0.9rem]";
 const summaryCardClass =
-  "grid min-w-0 gap-[0.35rem] rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[1rem] py-[0.95rem]";
+  "grid min-w-0 gap-[0.4rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_90%,transparent_10%)] px-[0.9rem] py-[0.9rem]";
 const emptyDetailClass =
-  "rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
+  "rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const logsOutputClass =
-  "grid min-h-0 flex-1 content-start gap-[0.35rem] overflow-auto rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.05rem] py-4 text-[rgba(226,234,255,0.92)]";
+  "grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
 const detailPanelTabsClass =
-  "gap-[0.55rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.35rem] shadow-none";
+  "gap-[0.55rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.4rem] shadow-none";
 const detailPanelTabButtonBaseClass =
   "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
 const detailPanelTabButtonActiveClass =
@@ -244,7 +246,7 @@ function formatKeyValuePairs(
       {pairs.map((pair) => (
         <div
           key={`${pair.key}:${pair.value}`}
-          className="grid gap-[0.3rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.8rem]"
+          className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]"
         >
           <dt className="text-[0.82rem] text-[var(--text-soft)]">{pair.key}</dt>
           <dd className="m-0 break-words whitespace-pre-wrap">
@@ -901,7 +903,7 @@ function ContainerTunnelPanel({
 
   return (
     <PanelSection className="min-h-0 overflow-y-auto pr-px">
-      <div className="grid gap-[0.8rem] md:grid-cols-2">
+      <div className="grid gap-[0.9rem] md:grid-cols-2">
         <FieldGroup label="Network">
           <SelectField
             value={tunnelState.networkName}
@@ -967,7 +969,7 @@ function ContainerTunnelPanel({
             />
             <Input
               type="number"
-              className="min-h-[2.35rem] rounded-[12px] bg-[var(--surface)] px-[0.7rem] py-[0.45rem]"
+              className="min-h-[2.35rem] rounded-[10px] bg-[var(--surface)] px-[0.7rem] py-[0.4rem]"
               value={tunnelState.bindPort}
               placeholder="0"
               disabled={isTunnelFormDisabled || tunnelState.autoLocalPort}
@@ -983,7 +985,7 @@ function ContainerTunnelPanel({
       </div>
 
       {tunnelState.runtime ? (
-        <div className="grid gap-[0.85rem] rounded-[18px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-4 py-[0.9rem] shadow-none">
+        <div className="grid gap-[0.9rem] rounded-[12px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-4 py-[0.9rem] shadow-none">
           <div className="flex items-center justify-between gap-3">
             <strong>터널 상태</strong>
             <StatusBadge tone={tunnelState.runtime.status === "running" ? "running" : "stopped"}>
@@ -993,7 +995,7 @@ function ContainerTunnelPanel({
             </StatusBadge>
           </div>
           <div className="grid gap-[0.9rem] md:grid-cols-2">
-            <div className="grid gap-[0.22rem]">
+            <div className="grid gap-[0.25rem]">
               <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
                 Local
               </span>
@@ -1001,7 +1003,7 @@ function ContainerTunnelPanel({
                 {tunnelRuntimeLocalEndpoint}
               </strong>
             </div>
-            <div className="grid gap-[0.22rem]">
+            <div className="grid gap-[0.25rem]">
               <span className="text-[0.76rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-soft)]">
                 Remote
               </span>
@@ -1019,7 +1021,7 @@ function ContainerTunnelPanel({
         </NoticeCard>
       ) : null}
 
-      <div className="flex justify-end gap-[0.6rem]">
+      <div className="flex justify-end gap-[0.55rem]">
         {tunnelState.runtime ? (
           <Button type="button" variant="secondary" disabled={tunnelState.loading} onClick={onStopTunnel}>
             {tunnelState.loading ? "정지 중..." : "Stop"}
@@ -1100,12 +1102,12 @@ function OverviewSection({
         <div className="flex items-center justify-between gap-3">
           <h3>실행 정보</h3>
         </div>
-        <dl className="grid gap-[0.85rem]">
-          <div className="grid gap-[0.3rem]">
+        <dl className="grid gap-[0.9rem]">
+          <div className="grid gap-[0.25rem]">
             <dt className="text-[0.82rem] text-[var(--text-soft)]">Entrypoint</dt>
             <dd className="m-0 break-words whitespace-pre-wrap">{details.entrypoint || "-"}</dd>
           </div>
-          <div className="grid gap-[0.3rem]">
+          <div className="grid gap-[0.25rem]">
             <dt className="text-[0.82rem] text-[var(--text-soft)]">Command</dt>
             <dd className="m-0 break-words whitespace-pre-wrap">{details.command || "-"}</dd>
           </div>
@@ -1123,7 +1125,7 @@ function OverviewSection({
             {details.mounts.map((mount) => (
               <div
                 key={`${mount.source}:${mount.destination}`}
-                className="grid gap-[0.2rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.85rem]"
+                className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]"
               >
                 <strong className="break-words">{mount.destination}</strong>
                 <span className="text-[var(--text-soft)]">{mount.source}</span>
@@ -1149,7 +1151,7 @@ function OverviewSection({
             {details.networks.map((network) => (
               <div
                 key={network.name}
-                className="grid gap-[0.2rem] rounded-[16px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.85rem]"
+                className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]"
               >
                 <strong className="break-words">{network.name}</strong>
                 <span className="text-[var(--text-soft)]">{network.ipAddress || "IP 없음"}</span>
@@ -1307,7 +1309,7 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
           </strong>
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.85rem]">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[0.9rem]">
         <UPlotMetricChart
           title="CPU"
           currentLabel={formatPercentValue(latest.cpuPercent)}
@@ -2155,15 +2157,30 @@ export function ContainersWorkspace({
   return (
     <div className="relative flex h-full min-h-0 flex-col gap-4">
       {!logsFocusModeActive ? (
-        <Toolbar className="justify-between gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.15rem] py-[1.1rem]">
-          <div>
-            <SectionLabel>Host Containers</SectionLabel>
-            <h2>{host.label}</h2>
-            <div className="mt-2 flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
-              <span>{getHostBadgeLabel(host)}</span>
-              {tab.runtime ? (
-                <span>{tab.runtime === "docker" ? "Docker" : "Podman"}</span>
-              ) : null}
+        <Toolbar className="justify-between gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-[1.1rem] py-[1.1rem]">
+          <div className="flex min-w-0 items-center gap-[0.85rem]">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "inline-grid h-[2.7rem] min-w-[3.1rem] shrink-0 place-items-center rounded-[11px] px-[0.4rem] text-[0.9rem] font-bold tracking-[-0.01em]",
+                getHostBadgeTone(host),
+              )}
+            >
+              {getHostBadgeLabel(host)}
+            </span>
+            <div className="min-w-0">
+              <SectionLabel>Host Containers</SectionLabel>
+              <h2 className="truncate text-[1.1rem] font-bold leading-tight text-[var(--text)]">
+                {host.label}
+              </h2>
+              <div className="mt-[0.3rem] flex flex-wrap items-center gap-[0.4rem] text-[0.78rem] text-[var(--text-soft)]">
+                <span className="font-medium">{getHostTypeLabel(host)}</span>
+                {tab.runtime ? (
+                  <span className="inline-flex items-center rounded-full border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_80%,transparent_20%)] px-[0.5rem] py-[0.08rem] text-[0.72rem] font-semibold text-[var(--text-soft)]">
+                    {tab.runtime === "docker" ? "Docker" : "Podman"}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
           <Button
@@ -2173,7 +2190,12 @@ export function ContainersWorkspace({
               void onRefresh(host.id);
             }}
             disabled={tab.isLoading}
+            className="inline-flex shrink-0 items-center gap-[0.4rem]"
           >
+            <RefreshCw
+              className={cn("h-[0.95rem] w-[0.95rem]", tab.isLoading && "animate-spin")}
+              aria-hidden="true"
+            />
             {tab.isLoading ? "새로고침 중..." : "새로고침"}
           </Button>
         </Toolbar>
@@ -2199,12 +2221,14 @@ export function ContainersWorkspace({
         >
           {!logsFocusModeActive ? (
             <aside
-              className="flex min-h-0 flex-col gap-4 rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.15rem]"
+              className="flex min-h-0 flex-col gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.1rem]"
               data-testid="containers-sidebar"
             >
               <div className="flex items-center justify-between gap-3">
-                <strong>컨테이너</strong>
-                <span>{tab.items.length}</span>
+                <span className="text-[0.82rem] font-bold text-[var(--text)]">컨테이너</span>
+                <span className="inline-flex min-w-[1.6rem] items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_80%,transparent_20%)] px-[0.45rem] py-[0.1rem] text-[0.72rem] font-semibold tabular-nums text-[var(--text-soft)]">
+                  {tab.items.length}
+                </span>
               </div>
               {tab.errorMessage ? (
                 <NoticeCard tone="danger" role="alert">
@@ -2236,16 +2260,16 @@ export function ContainersWorkspace({
             className={cn(
               "flex min-h-0 flex-col border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)]",
               logsFocusModeActive
-                ? "gap-2 rounded-[20px] p-[0.8rem]"
+                ? "gap-2 rounded-[12px] p-[0.9rem]"
                 : isLogsPanel
-                  ? "gap-3 rounded-[24px] p-[0.95rem]"
-                  : "gap-4 rounded-[24px] p-[1.15rem]",
+                  ? "gap-3 rounded-[12px] p-[0.9rem]"
+                  : "gap-4 rounded-[12px] p-[1.1rem]",
             )}
           >
             <div
               className={cn(
                 logsFocusModeActive
-                  ? "flex flex-wrap items-center justify-between gap-2 rounded-[16px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
+                  ? "flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] px-3 py-2"
                   : "flex flex-wrap items-start justify-between gap-4",
               )}
             >
@@ -2256,9 +2280,13 @@ export function ContainersWorkspace({
                     : "",
                 )}
               >
-                <h3>{selectedContainer?.name ?? "컨테이너를 선택하세요"}</h3>
+                <h3 className="text-[1rem] font-bold text-[var(--text)]">
+                  {selectedContainer?.name ?? "컨테이너를 선택하세요"}
+                </h3>
                 {selectedContainer && !logsFocusModeActive ? (
-                  <p>{selectedContainer.image}</p>
+                  <p className="mt-[0.15rem] text-[0.8rem] text-[var(--text-soft)]">
+                    {selectedContainer.image}
+                  </p>
                 ) : null}
               </div>
               <div
@@ -2489,12 +2517,12 @@ export function ContainersWorkspace({
               </ContainerTunnelErrorBoundary>
             ) : (
               <PanelSection
-                className={cn("min-h-0", logsFocusModeActive ? "gap-[0.45rem]" : "")}
+                className={cn("min-h-0", logsFocusModeActive ? "gap-[0.4rem]" : "")}
               >
                 <FilterRow
                   className={cn(
                     "items-center justify-between",
-                    logsFocusModeActive ? "gap-2 rounded-[16px]" : "",
+                    logsFocusModeActive ? "gap-2 rounded-[10px]" : "",
                   )}
                   style={logsFocusModeActive ? { padding: "0.55rem" } : undefined}
                 >
@@ -2579,7 +2607,7 @@ export function ContainersWorkspace({
                   </Button>
                 </FilterRow>
                 {trimmedLogsSearchQuery ? (
-                  <div className="text-[0.84rem] text-[var(--text-soft)]">
+                  <div className="text-[0.82rem] text-[var(--text-soft)]">
                     {tab.logsSearchMode === "remote"
                       ? `원격 검색 결과 ${logMatchCount}건`
                       : `현재 버퍼에서 ${logMatchCount}건 일치`}
@@ -2596,7 +2624,7 @@ export function ContainersWorkspace({
                   </NoticeCard>
                 ) : null}
                 {tab.logs && tab.logsState === "ready" ? (
-                  <div className="mt-[-0.2rem] flex flex-wrap gap-3 text-[0.84rem] text-[var(--text-soft)]">
+                  <div className="mt-[-0.2rem] flex flex-wrap gap-3 text-[0.82rem] text-[var(--text-soft)]">
                     <span>{logsRangeLabel}</span>
                     <span>{effectiveLogLines.length} lines</span>
                   </div>
@@ -2652,7 +2680,7 @@ export function ContainersWorkspace({
                             className={cn(
                               "grid grid-cols-[minmax(0,1fr)] items-start gap-[0.9rem]",
                               isMatch
-                                ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.35rem] py-[0.22rem]"
+                                ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.4rem] py-[0.25rem]"
                                 : "",
                             )}
                             data-log-match={isMatch ? "true" : undefined}
@@ -2679,7 +2707,7 @@ export function ContainersWorkspace({
                           className={cn(
                             "grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]",
                             isMatch
-                              ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.35rem] py-[0.22rem]"
+                              ? "mx-[-0.35rem] rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_16%,transparent_84%)] px-[0.4rem] py-[0.25rem]"
                               : "",
                           )}
                           data-log-match={isMatch ? "true" : undefined}
@@ -2745,7 +2773,7 @@ export function ContainersWorkspace({
 
       {matchingInteractiveAuth ? (
         <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="Container interactive authentication required"
@@ -2791,12 +2819,12 @@ export function ContainersWorkspace({
         />
       ) : shouldShowConnectingOverlay ? (
         <div
-          className="absolute inset-0 z-[3] grid place-items-center rounded-[20px] bg-[rgba(12,20,32,0.18)]"
+          className="absolute inset-0 z-[3] grid place-items-center rounded-[12px] bg-[rgba(12,20,32,0.18)]"
           role="status"
           aria-live="polite"
           aria-label="Container connection in progress"
         >
-          <Card className="grid max-w-[20rem] justify-items-center gap-[0.45rem] px-[1.1rem] py-4 text-center">
+          <Card className="grid max-w-[20rem] justify-items-center gap-[0.4rem] px-[1.1rem] py-4 text-center">
             <div
               aria-hidden="true"
               className="h-5 w-5 animate-[sftp-spinner_0.8s_linear_infinite] rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
@@ -2879,7 +2907,7 @@ function ContainerListItem({
     <button
       type="button"
       className={cn(
-        "flex w-full flex-col items-stretch gap-2 rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-4 py-[0.95rem] text-left text-[var(--text)] transition-[border-color,background-color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_88%,var(--accent-strong)_12%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)]",
+        "flex w-full flex-col items-stretch gap-2 rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_84%,transparent_16%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,background-color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] hover:bg-[color-mix(in_srgb,var(--surface-strong)_88%,var(--accent-strong)_12%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_12%,transparent)]",
         isActive
           ? "border-[var(--selection-border)] bg-[var(--selection-tint)]"
           : "",
@@ -2894,7 +2922,7 @@ function ContainerListItem({
         </strong>
         <StatusBadge
           tone={statusPresentation.tone}
-          className="min-h-[1.55rem] shrink-0 px-[0.58rem] py-[0.2rem] text-[0.74rem]"
+          className="min-h-[1.55rem] shrink-0 px-[0.55rem] py-[0.25rem] text-[0.76rem]"
           title={status}
         >
           {statusPresentation.label}

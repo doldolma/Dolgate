@@ -29,7 +29,7 @@ export function TerminalTmuxStatusBar({
 
   return (
     <div
-      className="mx-[0.55rem] mb-[0.55rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.28rem] text-[0.7rem] text-[var(--text-muted)]"
+      className="mx-[0.55rem] mb-[0.55rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
       role="status"
     >
       <span
@@ -53,7 +53,7 @@ export function TerminalTmuxStatusBar({
       <button
         type="button"
         onClick={onOpen}
-        className="ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.5rem] py-[0.1rem] text-[0.68rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
+        className="ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
       >
         열기
       </button>

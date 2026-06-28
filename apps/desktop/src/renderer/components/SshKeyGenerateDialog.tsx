@@ -76,14 +76,14 @@ function SegmentedControl<T extends string | number>({
   return (
     <div className="grid gap-2">
       <span className="text-sm font-semibold text-[var(--accent-strong)]">{label}</span>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-2 rounded-[16px] border border-[var(--border)] bg-[var(--surface-muted)] p-1">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] p-1">
         {options.map((option) => (
           <Button
             key={String(option.value)}
             variant="ghost"
             active={option.value === value}
             onClick={() => onChange(option.value)}
-            className="rounded-[12px] border-transparent"
+            className="rounded-[10px] border-transparent"
           >
             {option.label}
           </Button>
@@ -126,7 +126,7 @@ export function SshKeyGenerateDialog({
           <h3 id="generate-ssh-key-title">{title}</h3>
         </ModalHeader>
         <ModalBody className="grid gap-5">
-          <div className="grid gap-4 rounded-[18px] bg-[var(--surface-elevated)] p-4">
+          <div className="grid gap-4 rounded-[12px] bg-[var(--surface-elevated)] p-4">
             <label className="grid gap-2">
               <span className="text-sm font-semibold">Label</span>
               <Input
@@ -172,7 +172,7 @@ export function SshKeyGenerateDialog({
             </label>
           </div>
 
-          <div className="grid gap-4 rounded-[18px] bg-[var(--surface-elevated)] p-4">
+          <div className="grid gap-4 rounded-[12px] bg-[var(--surface-elevated)] p-4">
             <label className="grid gap-2">
               <span className="text-sm font-semibold">Passphrase</span>
               <Input

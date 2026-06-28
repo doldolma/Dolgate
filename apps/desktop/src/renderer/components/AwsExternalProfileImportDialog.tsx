@@ -208,7 +208,7 @@ export function AwsExternalProfileImportDialog({
         </ModalHeader>
 
         <ModalBody className="grid gap-4">
-          <div className="grid gap-1.5 text-[0.95rem] text-[var(--text-soft)]">
+          <div className="grid gap-1.5 text-[0.9rem] text-[var(--text-soft)]">
             <span>현재 PC의 <code>~/.aws</code> 설정에서 프로필을 읽어 앱 전용 프로필로 복사합니다.</span>
             <span>SSO 프로필은 설정만 가져오며 로그인 상태와 캐시는 가져오지 않습니다.</span>
           </div>
@@ -219,7 +219,7 @@ export function AwsExternalProfileImportDialog({
             </NoticeCard>
           ) : null}
 
-          <div className="grid min-h-0 gap-3 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="grid min-h-0 gap-3 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] p-4">
             <div className="flex items-center justify-between gap-3">
               <strong>외부 프로필</strong>
               <Badge tone="neutral">{selectedCountLabel}</Badge>
@@ -238,7 +238,7 @@ export function AwsExternalProfileImportDialog({
                   return (
                     <label
                       key={profile.name}
-                      className={`block w-full cursor-pointer rounded-[18px] border px-4 py-3 transition ${
+                      className={`block w-full cursor-pointer rounded-[12px] border px-4 py-3 transition ${
                         isSelected
                           ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_78%,white_22%)]'
                           : 'border-[var(--border)] bg-[var(--surface-muted)] hover:border-[var(--accent)]'
@@ -254,7 +254,7 @@ export function AwsExternalProfileImportDialog({
 
                         <div className="grid min-w-0 flex-1 gap-2">
                           <div className="flex items-start justify-between gap-3">
-                            <strong className="break-all text-[0.98rem] leading-[1.35] text-[var(--text)]">
+                            <strong className="break-all text-[1rem] leading-[1.35] text-[var(--text)]">
                               {profile.name}
                             </strong>
                             {details ? (

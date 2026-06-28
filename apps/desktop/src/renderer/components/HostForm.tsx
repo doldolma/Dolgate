@@ -1,9 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MAX_HOST_STARTUP_COMMAND_LENGTH, getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, SshKeyGenerateInput, SshKeyInstallInput, SshKeyInstallResult, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
-import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
@@ -136,6 +135,8 @@ export interface HostFormActionState {
 
 export interface HostFormHandle {
   submitCreate: () => Promise<boolean>;
+  /** 편집 폼을 명시적으로 저장(연결하지 않음). 호스트 필드 + 환경변수 모두 반영. */
+  submit: () => Promise<boolean>;
   submitAndConnect: () => Promise<boolean>;
 }
 
@@ -153,10 +154,7 @@ export interface HostFormProps {
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string) => void;
-  onPersistEnv?: (secretRef: string, env: HostEnvVar[]) => Promise<void>;
   onOpenSecrets?: () => void;
-  onGenerateAndInstallSshKey?: (hostId: string, input: SshKeyGenerateInput) => Promise<void>;
-  onInstallSshPublicKey?: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
   onActionStateChange?: (state: HostFormActionState) => void;
 }
 
@@ -291,7 +289,9 @@ function buildHostFormSubmission(input: {
     tags: nextTags,
     secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null,
     privateKeyPath: null,
-    certificatePath: null
+    certificatePath: null,
+    // env는 자격증명이 아니라 호스트 속성 — 자격증명 모드와 무관하게 항상 드래프트(=호스트 레코드)에 저장.
+    env: normalizeHostEnvVars(input.env)
   };
 
   if (input.credentialMode !== 'new') {
@@ -300,13 +300,11 @@ function buildHostFormSubmission(input: {
     };
   }
 
-  const normalizedEnv = normalizeHostEnvVars(input.env);
   const nextSecrets = {
     password: input.password || undefined,
     passphrase: input.passphrase || undefined,
     privateKeyPem: input.privateKeyPem || undefined,
-    certificateText: input.certificateText || undefined,
-    env: normalizedEnv.length > 0 ? normalizedEnv : undefined
+    certificateText: input.certificateText || undefined
   };
 
   return {
@@ -315,8 +313,7 @@ function buildHostFormSubmission(input: {
       nextSecrets.password ||
       nextSecrets.passphrase ||
       nextSecrets.privateKeyPem ||
-      nextSecrets.certificateText ||
-      nextSecrets.env
+      nextSecrets.certificateText
         ? nextSecrets
         : undefined
   };
@@ -338,7 +335,7 @@ function renderTerminalThemeField(
   onChange: (value: TerminalThemeId | null) => void
 ) {
   return (
-    <label className="flex flex-col gap-[0.45rem] text-[var(--text)]">
+    <label className="flex flex-col gap-[0.4rem] text-[var(--text)]">
       <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
         Terminal Theme
       </span>
@@ -359,22 +356,20 @@ function renderTerminalThemeField(
 
 interface FormSectionProps {
   title: string;
-  description: string;
+  // 섹션 부제목은 표시하지 않는다(길어지기만 하고 의미가 적음). prop은 호환을 위해 optional로 유지.
+  description?: string;
   testId?: string;
   children: ReactNode;
 }
 
-function FormSection({ title, description, testId, children }: FormSectionProps) {
+function FormSection({ title, testId, children }: FormSectionProps) {
   return (
     <section
       data-testid={testId}
-      className="grid gap-[0.95rem] rounded-[20px] border border-[var(--border)] bg-[var(--surface-muted)] px-[1rem] py-[1rem]"
+      className="grid gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] px-[0.9rem] py-[0.9rem]"
     >
-      <div className="grid gap-[0.3rem]">
-        <h3 className="text-[0.95rem] font-semibold tracking-[-0.01em] text-[var(--text)]">{title}</h3>
-        <p className="text-[0.84rem] leading-[1.45] text-[var(--text-soft)]">{description}</p>
-      </div>
-      <div className="grid gap-[0.95rem]">{children}</div>
+      <h3 className="text-[0.9rem] font-semibold tracking-[-0.01em] text-[var(--text)]">{title}</h3>
+      <div className="grid gap-[0.9rem]">{children}</div>
     </section>
   );
 }
@@ -392,17 +387,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onPersistEnv,
   onOpenSecrets,
-  onGenerateAndInstallSshKey,
-  onInstallSshPublicKey,
   onActionStateChange
 }: HostFormProps, ref) {
   const jumpHostSelectOptions = useMemo<SearchableSelectOption[]>(
     () => [{ value: '', label: 'None (direct)' }, ...jumpHostOptions],
     [jumpHostOptions],
   );
-  const fieldClassName = 'flex flex-col gap-[0.45rem] text-[var(--text)]';
+  const fieldClassName = 'flex flex-col gap-[0.4rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
   const {
@@ -437,21 +429,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const [serialPorts, setSerialPorts] = useState<SerialPortSummary[]>([]);
   const [isLoadingSerialPorts, setIsLoadingSerialPorts] = useState(false);
   const [serialPortsError, setSerialPortsError] = useState<string | null>(null);
-  const [sshKeyInstallBusy, setSshKeyInstallBusy] = useState(false);
-  const [sshKeyInstallMessage, setSshKeyInstallMessage] = useState<{
-    tone: 'success' | 'danger';
-    text: string;
-  } | null>(null);
-  const [sshKeyGenerateOpen, setSshKeyGenerateOpen] = useState(false);
-  const [sshKeyGenerateError, setSshKeyGenerateError] = useState<string | null>(null);
-  const [existingKeyInstallPassphrase, setExistingKeyInstallPassphrase] = useState('');
 
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
-  const canGenerateAndInstallSshKey =
-    Boolean(host && isSshHostRecord(host) && onGenerateAndInstallSshKey);
   const isAwsEc2Draft = draft.kind === 'aws-ec2';
   const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const isAwsDraft = isAwsEc2Draft || isAwsEcsDraft;
@@ -496,23 +478,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return entry.hasManagedPrivateKey;
     });
   }, [keychainEntries, sshDraft]);
-  const selectedCredential = useMemo(
-    () =>
-      selectedSecretRef
-        ? keychainEntries.find((entry) => entry.secretRef === selectedSecretRef) ?? null
-        : null,
-    [keychainEntries, selectedSecretRef],
-  );
-  const canInstallSelectedSshKey = Boolean(
-    host &&
-      isSshHostRecord(host) &&
-      onInstallSshPublicKey &&
-      credentialMode === 'existing' &&
-      selectedCredential?.hasManagedPrivateKey,
-  );
-  const selectedCredentialNeedsPassphrase = Boolean(
-    selectedCredential?.privateKeyEncrypted && !selectedCredential.passphraseSaved,
-  );
   const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
     if (!isAwsDraft) {
       return [];
@@ -560,6 +525,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setCredentialMode('new');
       setPrivateKeyFile(null);
       setCertificateFile(null);
+      setEnvVars([]);
+      envLoadedSecretRef.current = null;
+      loadedEnvSnapshotRef.current = '';
       setTagTokens([]);
       setTagInput('');
       setSaveStatus('idle');
@@ -585,6 +553,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     let nextPassphrase = '';
     let nextPrivateKeyFile: ImportedShellCredentialFile | null = null;
     let nextCertificateFile: ImportedShellCredentialFile | null = null;
+    let nextEnvVars: HostEnvVar[] = [];
 
     if (isAwsEc2HostRecord(host)) {
       nextDraft = {
@@ -676,10 +645,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         terminalThemeId: host.terminalThemeId ?? null,
         startupCommand: host.startupCommand ?? null,
         useMosh: host.useMosh ?? null,
-        agentForwarding: host.agentForwarding ?? null
+        agentForwarding: host.agentForwarding ?? null,
+        env: normalizeHostEnvVars(host.env)
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
+      nextEnvVars = normalizeHostEnvVars(host.env);
     }
 
     const nextTagTokens = dedupeTags(host.tags ?? []);
@@ -701,9 +672,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setCredentialMode(nextCredentialMode);
     setPrivateKeyFile(nextPrivateKeyFile);
     setCertificateFile(nextCertificateFile);
-    setEnvVars([]);
+    setEnvVars(nextEnvVars);
     envLoadedSecretRef.current = null;
-    loadedEnvSnapshotRef.current = '';
+    loadedEnvSnapshotRef.current = JSON.stringify(nextEnvVars);
     setTagTokens(nextTagTokens);
     setTagInput('');
     setSaveStatus('idle');
@@ -713,10 +684,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     lastHydratedHostKeyRef.current = nextHydrationKey;
   }, [createKind, defaultGroupPath, host, isEditDirty, saveInFlight]);
 
-  // 기존 호스트(저장된 인증 정보 보유)의 환경변수는 암호화 시크릿 번들에 있으므로
-  // 폼에서 보여주려면 복호화해 읽어온다. snapshot은 변경 감지(저장 트리거)용 기준값.
+  // 구버전 호스트(env가 아직 시크릿 번들에만 있는 경우)용 폴백: 호스트 레코드에 env가 없을 때만
+  // 시크릿을 복호화해 읽어와 보여준다. 저장하면 호스트 레코드(드래프트)로 이전된다.
   useEffect(() => {
     if (!sshDraft || credentialMode !== 'existing' || !selectedSecretRef) {
+      return;
+    }
+    if (host && host.kind === 'ssh' && Array.isArray(host.env) && host.env.length > 0) {
       return;
     }
     if (envLoadedSecretRef.current === selectedSecretRef) {
@@ -742,29 +716,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     return () => {
       cancelled = true;
     };
-  }, [sshDraft, credentialMode, selectedSecretRef]);
+  }, [host, sshDraft, credentialMode, selectedSecretRef]);
 
-  // 기존 호스트의 환경변수 인라인 편집 저장. 호스트 레코드가 아니라 암호화 시크릿
-  // 번들만 갱신(updateKeychainSecret)하므로 폼 재hydrate 루프가 없다. 디바운스 적용.
-  useEffect(() => {
-    if (
-      credentialMode !== 'existing' ||
-      !selectedSecretRef ||
-      !onPersistEnv ||
-      envLoadedSecretRef.current !== selectedSecretRef
-    ) {
-      return;
-    }
-    const serialized = JSON.stringify(envVars);
-    if (serialized === loadedEnvSnapshotRef.current) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      loadedEnvSnapshotRef.current = serialized;
-      void onPersistEnv(selectedSecretRef, envVars);
-    }, 700);
-    return () => clearTimeout(timer);
-  }, [envVars, credentialMode, selectedSecretRef, onPersistEnv]);
+  // 환경변수도 자동저장하지 않는다 — submit()에서 명시적으로 저장할 때 시크릿 번들에 함께 반영한다.
 
   useEffect(() => {
     if (!sshDraft) {
@@ -776,10 +730,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setCredentialMode('new');
     }
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
-
-  useEffect(() => {
-    setExistingKeyInstallPassphrase('');
-  }, [selectedSecretRef]);
 
   const refreshSerialPorts = useCallback(async () => {
     setIsLoadingSerialPorts(true);
@@ -1075,27 +1025,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     ]
   );
 
-  useEffect(() => {
-    if (!isEditMode || saveInFlight || !isEditDirty || !isFormValid(draft)) {
-      if (saveTimerRef.current !== null) {
-        window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-      return;
-    }
-
-    saveTimerRef.current = window.setTimeout(() => {
-      saveTimerRef.current = null;
-      void persistChanges({ commitPendingTag: false }).catch(() => undefined);
-    }, 800);
-
-    return () => {
-      if (saveTimerRef.current !== null) {
-        window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-    };
-  }, [draft, isEditDirty, isEditMode, isFormValid, persistChanges, saveInFlight]);
+  // 호스트 필드 자동저장 제거 — submit()로 명시적으로 저장(하단 "저장" 버튼)할 때만 반영한다.
 
   const saveStatusText =
     saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
@@ -1230,7 +1160,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               updateStartupCommand({ type: 'command', command: event.target.value })
             }
           />
-          <span className="text-[0.78rem] text-[var(--text-soft)]">
+          <span className="text-[0.76rem] text-[var(--text-soft)]">
             연결 직후 명령과 Enter를 자동으로 전송합니다.
           </span>
         </div>
@@ -1249,11 +1179,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             }
           />
           {selectedStartupSnippet ? (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-[6px] border border-[var(--border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-[0.78rem] text-[var(--text-soft)]">
+            <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-[6px] border border-[var(--border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-[0.76rem] text-[var(--text-soft)]">
               {selectedStartupSnippet.command}
             </pre>
           ) : startupCommand.snippetId ? (
-            <span className="text-[0.8rem] text-[var(--danger-text)]">
+            <span className="text-[0.82rem] text-[var(--danger-text)]">
               선택한 Snippet을 찾을 수 없습니다. 연결 시 Startup Command를 건너뜁니다.
             </span>
           ) : null}
@@ -1336,10 +1266,26 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     return true;
   }, [host, isEditMode, onConnect, persistChanges, reportCurrentValidity]);
 
+  const submit = useCallback(async () => {
+    if (!isEditMode) {
+      return false;
+    }
+    if (!reportCurrentValidity()) {
+      return false;
+    }
+    const didSave = await persistChanges({ commitPendingTag: true }).catch(() => false);
+    if (!didSave) {
+      return false;
+    }
+    // env는 호스트 레코드(드래프트)에 포함돼 persistChanges에서 함께 저장된다(시크릿과 분리).
+    return true;
+  }, [isEditMode, reportCurrentValidity, persistChanges]);
+
   useImperativeHandle(ref, () => ({
     submitCreate,
+    submit,
     submitAndConnect
-  }), [submitAndConnect, submitCreate]);
+  }), [submit, submitAndConnect, submitCreate]);
 
   useEffect(() => {
     onActionStateChange?.({
@@ -1352,7 +1298,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     <>
     <form
       ref={formRef}
-      className="flex flex-col gap-[0.95rem]"
+      className="flex flex-col gap-[0.9rem]"
       onSubmit={async (event) => {
         event.preventDefault();
         await submitCreate();
@@ -1412,7 +1358,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             <span className={fieldLabelClassName}>State</span>
             <Input value={draft.awsState ?? ''} readOnly />
           </label>
-          <div className="flex flex-col gap-[0.35rem] rounded-[14px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.95rem] py-[0.85rem]">
+          <div className="flex flex-col gap-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.9rem] py-[0.9rem]">
             <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? 'SSH 설정 대기 중'}</strong>
             <span className="text-[var(--text-soft)] leading-[1.5]">
               {draft.awsSshMetadataError
@@ -1422,7 +1368,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   : '필요하면 아래 값만 수동으로 수정하면 됩니다.'}
             </span>
           </div>
-          <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+          <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
             <label className={fieldClassName}>
               <span className={fieldLabelClassName}>SSH Port</span>
               <Input
@@ -1568,7 +1514,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 required
               />
             </label>
-            <div className="grid gap-[0.75rem] md:grid-cols-[120px_minmax(0,1fr)]">
+            <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
               <label className={fieldClassName}>
                 <span className={fieldLabelClassName}>Port</span>
                 <Input
@@ -1632,7 +1578,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <>
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>Private key file</span>
-                  <div className="flex gap-[0.75rem]">
+                  <div className="flex gap-[0.7rem]">
                     <Input
                       readOnly
                       value={privateKeyFile?.name ?? ''}
@@ -1646,7 +1592,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 {sshDraft.authType === 'certificate' ? (
                   <label className={fieldClassName}>
                     <span className={fieldLabelClassName}>SSH certificate file</span>
-                    <div className="flex gap-[0.75rem]">
+                    <div className="flex gap-[0.7rem]">
                       <Input
                         readOnly
                         value={certificateFile?.name ?? ''}
@@ -1678,7 +1624,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 {onOpenSecrets && keychainEntries.length > 0 ? (
                   <button
                     type="button"
-                    className="border-0 bg-transparent p-0 text-[0.88rem] font-semibold text-[var(--accent-strong)]"
+                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
                     onClick={onOpenSecrets}
                   >
                     Manage
@@ -1710,96 +1656,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </SelectField>
             </div>
 
-            {canGenerateAndInstallSshKey && host && isSshHostRecord(host) ? (
-              <div className="grid gap-[0.55rem] rounded-[16px] border border-[var(--border)] p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className={fieldLabelClassName}>SSH Key</span>
-                  <Button
-                    variant="secondary"
-                    disabled={sshKeyInstallBusy}
-                    onClick={() => {
-                      setSshKeyGenerateError(null);
-                      setSshKeyGenerateOpen(true);
-                    }}
-                  >
-                    {sshKeyInstallBusy ? '설치 중...' : 'Generate and install SSH key'}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
             {credentialMode === 'existing' ? (
               <div className="grid gap-[0.55rem]">
-                {canInstallSelectedSshKey ? (
-                  <div className="grid gap-[0.55rem] rounded-[16px] border border-[var(--border)] p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className={fieldLabelClassName}>Selected SSH Key</span>
-                      <Button
-                        variant="secondary"
-                        disabled={
-                          sshKeyInstallBusy ||
-                          (selectedCredentialNeedsPassphrase &&
-                            existingKeyInstallPassphrase.trim().length === 0)
-                        }
-                        onClick={async () => {
-                          if (!host || !isSshHostRecord(host) || !selectedSecretRef) {
-                            return;
-                          }
-                          setSshKeyInstallBusy(true);
-                          setSshKeyGenerateError(null);
-                          setSshKeyInstallMessage(null);
-                          try {
-                            const result = await onInstallSshPublicKey?.({
-                              secretRef: selectedSecretRef,
-                              hostIds: [host.id],
-                              mode: 'installAndUse',
-                              passphraseOverride: selectedCredentialNeedsPassphrase
-                                ? existingKeyInstallPassphrase
-                                : undefined,
-                            });
-                            const failed = result?.results.find(
-                              (entry) => entry.status === 'failed',
-                            );
-                            if (failed) {
-                              throw new Error(
-                                failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.',
-                              );
-                            }
-                            setSshKeyInstallMessage({
-                              tone: 'success',
-                              text: '선택한 SSH 키를 호스트에 설치하고 인증 정보로 전환했습니다.',
-                            });
-                          } catch (error) {
-                            setSshKeyInstallMessage({
-                              tone: 'danger',
-                              text:
-                                error instanceof Error && error.message.trim()
-                                  ? error.message
-                                  : 'SSH 키를 설치하지 못했습니다.',
-                            });
-                          } finally {
-                            setSshKeyInstallBusy(false);
-                          }
-                        }}
-                      >
-                        {sshKeyInstallBusy ? '설치 중...' : 'Install selected key'}
-                      </Button>
-                    </div>
-                    {selectedCredentialNeedsPassphrase ? (
-                      <label className={fieldClassName}>
-                        <span className={fieldLabelClassName}>Key passphrase</span>
-                        <Input
-                          type="password"
-                          value={existingKeyInstallPassphrase}
-                          onChange={(event) =>
-                            setExistingKeyInstallPassphrase(event.target.value)
-                          }
-                          placeholder="Required for encrypted private key"
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                ) : null}
                 {host && isSshHostRecord(host) && selectedSecretRef && onEditExistingSecret ? (
                   <Button
                     variant="secondary"
@@ -1809,18 +1667,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   </Button>
                 ) : null}
               </div>
-            ) : null}
-
-            {sshKeyInstallMessage ? (
-              <p
-                className={
-                  sshKeyInstallMessage.tone === 'danger'
-                    ? 'm-0 text-sm text-[var(--danger-text)]'
-                    : 'm-0 text-sm text-[var(--success-text)]'
-                }
-              >
-                {sshKeyInstallMessage.text}
-              </p>
             ) : null}
 
             <label className={fieldClassName}>
@@ -1837,7 +1683,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 }
               />
               <span className="text-[0.82rem] text-[var(--text-soft)]">
-                Connect through another saved SSH host (bastion / ProxyJump).
+                다른 SSH 호스트를 거쳐 연결합니다 (배스천).
               </span>
             </label>
             <div className={fieldClassName}>
@@ -1846,7 +1692,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 description={
                   sshDraft.jumpHostId
                     ? 'jump host와 함께 쓸 수 없습니다.'
-                    : '원격 서버에 mosh 패키지가 설치돼 있어야 합니다. 네트워크가 끊기거나 절전에서 복귀해도 세션이 유지됩니다.'
+                    : '네트워크가 끊겨도 세션이 유지됩니다 (서버에 mosh 필요).'
                 }
                 checked={sshDraft.useMosh === true && !sshDraft.jumpHostId}
                 disabled={Boolean(sshDraft.jumpHostId)}
@@ -1868,7 +1714,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 description={
                   sshDraft.useMosh === true
                     ? 'mosh 세션에서는 지원하지 않습니다.'
-                    : '원격 서버가 이 세션 동안 로컬 SSH agent에 서명 요청을 보낼 수 있습니다. 신뢰하는 호스트에서만 켜세요.'
+                    : '로컬 SSH 키를 원격에서 쓸 수 있게 합니다. 신뢰하는 호스트만 켜세요.'
                 }
                 checked={
                   sshDraft.agentForwarding === true &&
@@ -1906,7 +1752,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 variables={envVars}
                 onChange={setEnvVars}
               />
-              <span className="text-[0.78rem] leading-[1.45] text-[var(--text-soft)]">
+              <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                 연결 시 셸에 주입됩니다(SetEnv→export 폴백). 값은 비밀번호처럼 암호화되어 저장·동기화됩니다.
               </span>
             </div>
@@ -1981,7 +1827,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 </label>
               </>
             ) : (
-              <div className="grid gap-[0.75rem] md:grid-cols-[minmax(0,1fr)_120px]">
+              <div className="grid gap-[0.7rem] md:grid-cols-[minmax(0,1fr)_120px]">
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>Remote Host</span>
                   <Input
@@ -2007,7 +1853,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             {serialDraft.transport !== 'raw-tcp' ? (
               <>
-                <div className="grid gap-[0.75rem] md:grid-cols-2">
+                <div className="grid gap-[0.7rem] md:grid-cols-2">
                   <label className={fieldClassName}>
                     <span className={fieldLabelClassName}>Baud Rate</span>
                     <Input
@@ -2075,7 +1921,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </>
             ) : null}
 
-            <div className="grid gap-[0.75rem]">
+            <div className="grid gap-[0.7rem]">
               <ToggleSwitch
                 checked={serialDraft.localEcho}
                 label="Local Echo"
@@ -2128,44 +1974,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : null}
 
     </form>
-    {sshKeyGenerateOpen && host && isSshHostRecord(host) ? (
-      <SshKeyGenerateDialog
-        title="Generate and Install SSH Key"
-        initialLabel={`${host.label || `${host.username}@${host.hostname}`} SSH Key`}
-        initialComment={`${host.username}@${host.hostname}`}
-        submitLabel="Generate & install"
-        busy={sshKeyInstallBusy}
-        error={sshKeyGenerateError}
-        onDismiss={() => {
-          if (sshKeyInstallBusy) {
-            return;
-          }
-          setSshKeyGenerateOpen(false);
-          setSshKeyGenerateError(null);
-        }}
-        onSubmit={async (input) => {
-          setSshKeyInstallBusy(true);
-          setSshKeyGenerateError(null);
-          setSshKeyInstallMessage(null);
-          try {
-            await onGenerateAndInstallSshKey?.(host.id, input);
-            setSshKeyGenerateOpen(false);
-            setSshKeyInstallMessage({
-              tone: 'success',
-              text: '새 SSH 키를 생성하고 호스트에 설치했습니다.',
-            });
-          } catch (error) {
-            setSshKeyGenerateError(
-              error instanceof Error && error.message.trim()
-                ? error.message
-                : 'SSH 키를 설치하지 못했습니다.',
-            );
-          } finally {
-            setSshKeyInstallBusy(false);
-          }
-        }}
-      />
-    ) : null}
     </>
   );
 });

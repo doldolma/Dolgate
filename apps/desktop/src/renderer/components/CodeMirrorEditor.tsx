@@ -89,7 +89,7 @@ export default function CodeMirrorEditor({
           }
         }}
       />
-      <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--surface-secondary)] px-3 py-[0.3rem] text-[0.72rem] text-[var(--text-soft)]">
+      <div className="flex shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--surface-secondary)] px-3 py-[0.25rem] text-[0.7rem] text-[var(--text-soft)]">
         <span>{languageName}</span>
         <span>
           Ln {cursor.line}, Col {cursor.col} · UTF-8

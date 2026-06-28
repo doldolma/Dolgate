@@ -247,7 +247,7 @@ export function SecretEditDialog({
           </IconButton>
         </ModalHeader>
         <ModalBody>
-          <p className="text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">
+          <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
             <strong>{activeRequest.label}</strong> 저장된 인증 정보 전체를 수정합니다.
           </p>
 
@@ -288,8 +288,8 @@ export function SecretEditDialog({
           {loadError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{loadError}</p> : null}
 
           {!loading && !loadError ? (
-            <div className="grid gap-[1rem]">
-              <label className="grid gap-[0.45rem] text-[var(--text)]">
+            <div className="grid gap-[0.9rem]">
+              <label className="grid gap-[0.4rem] text-[var(--text)]">
                 <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                   Auth Type
                 </span>
@@ -315,7 +315,7 @@ export function SecretEditDialog({
 
               {certificateSummary ? (
                 <div
-                  className={`rounded-[16px] border px-[1rem] py-[0.9rem] text-[0.95rem] leading-[1.6] ${
+                  className={`rounded-[10px] border px-[0.9rem] py-[0.9rem] text-[0.9rem] leading-[1.6] ${
                     certificateSummary.tone === 'danger'
                       ? 'border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] text-[var(--danger-text)]'
                       : certificateSummary.tone === 'warning'
@@ -329,7 +329,7 @@ export function SecretEditDialog({
               ) : null}
 
               {authType === 'password' ? (
-                <label className="grid gap-[0.45rem] text-[var(--text)]">
+                <label className="grid gap-[0.4rem] text-[var(--text)]">
                   <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                     Password
                   </span>
@@ -347,11 +347,11 @@ export function SecretEditDialog({
 
               {authType === 'privateKey' || authType === 'certificate' ? (
                 <>
-                  <label className="grid gap-[0.45rem] text-[var(--text)]">
+                  <label className="grid gap-[0.4rem] text-[var(--text)]">
                     <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                       Private key
                     </span>
-                    <div className="flex gap-[0.75rem]">
+                    <div className="flex gap-[0.7rem]">
                       <Input readOnly value={privateKeyFileName} placeholder="파일을 가져오면 이름이 표시됩니다" />
                       <Button variant="secondary" onClick={() => void importPrivateKey()}>
                         Import
@@ -370,11 +370,11 @@ export function SecretEditDialog({
                   </label>
 
                   {authType === 'certificate' ? (
-                    <label className="grid gap-[0.45rem] text-[var(--text)]">
+                    <label className="grid gap-[0.4rem] text-[var(--text)]">
                       <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                         SSH certificate
                       </span>
-                      <div className="flex gap-[0.75rem]">
+                      <div className="flex gap-[0.7rem]">
                         <Input readOnly value={certificateFileName} placeholder="파일을 가져오면 이름이 표시됩니다" />
                         <Button variant="secondary" onClick={() => void importCertificate()}>
                           Import
@@ -394,7 +394,7 @@ export function SecretEditDialog({
                     </label>
                   ) : null}
 
-                  <label className="grid gap-[0.45rem] text-[var(--text)]">
+                  <label className="grid gap-[0.4rem] text-[var(--text)]">
                     <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                       Passphrase
                     </span>
@@ -420,7 +420,7 @@ export function SecretEditDialog({
                 onChange={setEnvVars}
                 disabled={isSubmitting}
               />
-              <p className="text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
+              <p className="text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
                 연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.
               </p>
             </FieldGroup>

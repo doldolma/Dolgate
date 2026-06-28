@@ -106,7 +106,7 @@ export function DesktopWindowControls({
   }
 
   return (
-    <div className="ml-[0.22rem] flex items-center gap-[0.16rem] [-webkit-app-region:no-drag]" aria-label="윈도우 창 제어">
+    <div className="ml-[0.25rem] flex items-center gap-[0.25rem] [-webkit-app-region:no-drag]" aria-label="윈도우 창 제어">
       {controls.map((control) => (
         <button
           key={control.key}

@@ -54,7 +54,7 @@ export function TerminalSharePopover({
         Share
       </Button>
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[24px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-soft)]">
+        <div className="absolute right-0 top-[calc(100%+0.6rem)] z-30 grid min-w-0 w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] gap-3 overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-soft)]">
           {shareState?.status === 'inactive' || !shareState ? (
             <>
               <SectionLabel className="mb-2">Session Share</SectionLabel>
@@ -85,7 +85,7 @@ export function TerminalSharePopover({
               {shareState.shareUrl ? (
                 <button
                   type="button"
-                  className="mt-3 flex min-w-0 w-full items-center justify-between gap-3 rounded-[18px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-4 py-3 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)]"
+                  className="mt-3 flex min-w-0 w-full items-center justify-between gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-4 py-3 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)]"
                   onClick={onCopyShareUrl}
                   aria-label="공유 링크 복사"
                   title="클릭하여 링크 복사"

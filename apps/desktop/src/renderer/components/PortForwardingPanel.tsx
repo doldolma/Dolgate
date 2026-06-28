@@ -1,4 +1,5 @@
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown } from '../ui/icons';
 import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
@@ -588,7 +589,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               <p>이 Warpgate challenge는 자동 입력 형식과 다릅니다. 아래 prompt에 직접 응답해 주세요.</p>
             </NoticeCard>
           )}
-          <pre className="mt-3 rounded-[12px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.84rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
+          <pre className="mt-3 rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.82rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
             {auth.instruction || '추가 인증이 필요합니다.'}
           </pre>
         </>
@@ -671,7 +672,7 @@ function PickerField({
       <button
         type="button"
         className={cn(
-          'flex w-full min-h-[var(--port-forward-field-height,88px)] items-center justify-between gap-[0.9rem] rounded-[var(--port-forward-field-radius,20px)] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-[1.05rem] py-4 text-left text-[var(--text)] transition-[border-color,box-shadow,transform] duration-150',
+          'flex w-full min-h-[var(--port-forward-field-height,88px)] items-center justify-between gap-[0.9rem] rounded-[var(--port-forward-field-radius,20px)] border border-[var(--border)] bg-[var(--dialog-surface-muted)] px-[1.1rem] py-4 text-left text-[var(--text)] transition-[border-color,box-shadow,transform] duration-150',
           isOpen
             ? 'border-[color-mix(in_srgb,var(--accent-strong)_34%,var(--border))] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_20%,transparent_80%)]'
             : 'hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] hover:shadow-[0_10px_24px_rgba(16,26,40,0.08)]',
@@ -688,13 +689,14 @@ function PickerField({
         ) : (
           <div className="text-[var(--text-soft)]">{placeholder}</div>
         )}
-        <span className="shrink-0 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
-          ▾
-        </span>
+        <ChevronDown
+          className="h-[0.9rem] w-[0.9rem] shrink-0 text-[var(--text-soft)]"
+          aria-hidden="true"
+        />
       </button>
       {isOpen ? (
         <div
-          className="absolute left-0 right-0 top-[calc(100%+0.45rem)] z-[4] grid max-h-[288px] gap-[0.55rem] overflow-y-auto rounded-[22px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_94%,transparent_6%)] p-[0.7rem] shadow-[0_20px_48px_rgba(16,26,40,0.18)]"
+          className="absolute left-0 right-0 top-[calc(100%+0.45rem)] z-[4] grid max-h-[288px] gap-[0.55rem] overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface)_94%,transparent_6%)] p-[0.7rem] shadow-[0_20px_48px_rgba(16,26,40,0.18)]"
           role="listbox"
           aria-label={`${label} options`}
         >
@@ -1877,11 +1879,11 @@ export function PortForwardingPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-[28px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-6 py-5 shadow-[var(--shadow-soft)]">
+      <div className="flex flex-wrap items-start justify-between gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-6 py-5 shadow-[var(--shadow-soft)]">
         <div>
           <SectionLabel>Forwarding</SectionLabel>
           <h2 className="mt-2 text-[1.35rem] font-semibold tracking-[-0.02em] text-[var(--text)]">Port Forwarding</h2>
-          <p className="mt-2 max-w-[46rem] text-[0.95rem] leading-[1.6] text-[var(--text-soft)]">SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
+          <p className="mt-2 max-w-[46rem] text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
         </div>
         <Button type="button" variant="primary" onClick={() => openCreate(activeTab)}>
           {createButtonLabel(activeTab)}
@@ -2128,7 +2130,7 @@ export function PortForwardingPanel({
                     </>
                   )}
 
-                  {error ? <p className="text-[0.88rem] text-[var(--danger-text)]">{error}</p> : null}
+                  {error ? <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p> : null}
                 </>
               ) : (
                 <>
@@ -2222,12 +2224,12 @@ export function PortForwardingPanel({
                       }}
                       selectedContent={
                         selectedContainerSummary ? (
-                          <div className="flex min-w-0 items-center justify-between gap-[0.85rem]">
-                            <div className="min-w-0 grid gap-[0.18rem]">
+                          <div className="flex min-w-0 items-center justify-between gap-[0.9rem]">
+                            <div className="min-w-0 grid gap-[0.25rem]">
                               <strong className="text-[1rem] text-[var(--text)]">
                                 {selectedContainerSummary.name}
                               </strong>
-                              <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                              <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
                                 {shortenContainerImage(selectedContainerSummary.image)}
                               </span>
                             </div>
@@ -2250,7 +2252,7 @@ export function PortForwardingPanel({
                             role="option"
                             aria-selected={draft.containerId === container.id}
                             className={cn(
-                              'flex w-full items-center justify-between gap-[0.85rem] rounded-[18px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.95rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
+                              'flex w-full items-center justify-between gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.9rem] text-left transition-[border-color,background,transform] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border))] hover:bg-[color-mix(in_srgb,var(--dialog-surface)_84%,var(--accent-strong)_16%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_45%,white_55%)] focus-visible:outline-offset-2',
                               draft.containerId === container.id &&
                                 'border-[color-mix(in_srgb,var(--accent-strong)_38%,var(--border))] bg-[color-mix(in_srgb,var(--dialog-surface)_76%,var(--accent-strong)_24%)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--accent-strong)_18%,transparent_82%)]',
                             )}
@@ -2268,11 +2270,11 @@ export function PortForwardingPanel({
                               );
                             }}
                           >
-                            <div className="min-w-0 grid gap-[0.18rem]">
+                            <div className="min-w-0 grid gap-[0.25rem]">
                               <strong className="text-[1rem] text-[var(--text)]">
                                 {container.name}
                               </strong>
-                              <span className="truncate text-[0.84rem] text-[var(--text-soft)]">
+                              <span className="truncate text-[0.82rem] text-[var(--text-soft)]">
                                 {shortenContainerImage(container.image)}
                               </span>
                             </div>
@@ -2292,7 +2294,7 @@ export function PortForwardingPanel({
                     <FieldGroup label="Network">
                       <div className="relative">
                         <SelectField
-                          className="min-h-[5.5rem] rounded-[20px] bg-[var(--dialog-surface-muted)] px-[1.05rem] pr-11"
+                          className="min-h-[5.5rem] rounded-[12px] bg-[var(--dialog-surface-muted)] px-[1.1rem] pr-11"
                           value={draft.networkName}
                           onChange={(event) =>
                             setDraft((current) =>
@@ -2313,9 +2315,10 @@ export function PortForwardingPanel({
                             </option>
                           ))}
                         </SelectField>
-                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
-                          ▾
-                        </span>
+                        <ChevronDown
+                          className="pointer-events-none absolute right-4 top-1/2 h-[0.9rem] w-[0.9rem] -translate-y-1/2 text-[var(--text-soft)]"
+                          aria-hidden="true"
+                        />
                       </div>
                     </FieldGroup>
                   ) : null}
@@ -2323,7 +2326,7 @@ export function PortForwardingPanel({
                   <FieldGroup label="Container port">
                     <div className="relative">
                       <SelectField
-                        className="min-h-[5.5rem] rounded-[20px] bg-[var(--dialog-surface-muted)] px-[1.05rem] pr-11"
+                        className="min-h-[5.5rem] rounded-[12px] bg-[var(--dialog-surface-muted)] px-[1.1rem] pr-11"
                         value={draft.targetPort || ''}
                         onChange={(event) =>
                           setDraft((current) =>
@@ -2344,9 +2347,10 @@ export function PortForwardingPanel({
                           </option>
                         ))}
                       </SelectField>
-                      <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-[0.9rem] text-[var(--text-soft)]" aria-hidden="true">
-                        ▾
-                      </span>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-4 top-1/2 h-[0.9rem] w-[0.9rem] -translate-y-1/2 text-[var(--text-soft)]"
+                        aria-hidden="true"
+                      />
                     </div>
                   </FieldGroup>
 
@@ -2358,7 +2362,7 @@ export function PortForwardingPanel({
                         aria-checked={isAutoLocalPort}
                         aria-label="Auto (random)"
                         className={cn(
-                          'flex w-full items-center gap-[0.9rem] rounded-[20px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
+                          'flex w-full items-center gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
                           isAutoLocalPort &&
                             'border-[color-mix(in_srgb,var(--accent-strong)_32%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_11%,var(--dialog-surface-muted)_89%)]',
                         )}
@@ -2389,11 +2393,11 @@ export function PortForwardingPanel({
                             )}
                           />
                         </span>
-                        <span className="grid gap-[0.18rem]">
-                          <strong className="text-[0.94rem] text-[var(--text)]">
+                        <span className="grid gap-[0.25rem]">
+                          <strong className="text-[0.9rem] text-[var(--text)]">
                             Auto (random)
                           </strong>
-                          <span className="text-[0.81rem] leading-[1.45] text-[var(--text-soft)]">
+                          <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
                             사용 가능한 로컬 포트를 자동으로 할당합니다.
                           </span>
                         </span>
@@ -2418,7 +2422,7 @@ export function PortForwardingPanel({
                     </div>
                   </FieldGroup>
 
-                  {discoveryError ? <p className="text-[0.88rem] text-[var(--danger-text)]">{discoveryError}</p> : null}
+                  {discoveryError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{discoveryError}</p> : null}
                   {discoveryDetailsLoading ? (
                     <NoticeCard>
                       <p>컨테이너 상세 정보를 불러오는 중입니다.</p>
@@ -2562,7 +2566,7 @@ export function PortForwardingPanel({
                         aria-checked={isAutoEcsLocalPort}
                         aria-label="Auto (random)"
                         className={cn(
-                          'flex w-full items-center gap-[0.9rem] rounded-[20px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
+                          'flex w-full items-center gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--dialog-surface-muted)_88%,transparent_12%)] px-4 py-[0.9rem] text-left text-[var(--text)] transition-[border-color,box-shadow,background] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color-mix(in_srgb,var(--accent-strong)_50%,white_50%)] focus-visible:outline-offset-2',
                           isAutoEcsLocalPort &&
                             'border-[color-mix(in_srgb,var(--accent-strong)_32%,var(--border))] bg-[color-mix(in_srgb,var(--accent-strong)_11%,var(--dialog-surface-muted)_89%)]',
                         )}
@@ -2593,11 +2597,11 @@ export function PortForwardingPanel({
                             )}
                           />
                         </span>
-                        <span className="grid gap-[0.18rem]">
-                          <strong className="text-[0.94rem] text-[var(--text)]">
+                        <span className="grid gap-[0.25rem]">
+                          <strong className="text-[0.9rem] text-[var(--text)]">
                             Auto (random)
                           </strong>
-                          <span className="text-[0.81rem] leading-[1.45] text-[var(--text-soft)]">
+                          <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
                             사용 가능한 로컬 포트를 자동으로 할당합니다.
                           </span>
                         </span>
@@ -2627,7 +2631,7 @@ export function PortForwardingPanel({
                       <p>{selectedEcsHost.awsProfileName} / {selectedEcsHost.awsRegion}</p>
                     </NoticeCard>
                   ) : null}
-                  {ecsServicesError ? <p className="text-[0.88rem] text-[var(--danger-text)]">{ecsServicesError}</p> : null}
+                  {ecsServicesError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{ecsServicesError}</p> : null}
                   {ecsServicesLoading ? <NoticeCard><p>ECS 서비스 목록을 불러오는 중입니다.</p></NoticeCard> : null}
                   {ecsServiceDetailsLoading ? <NoticeCard><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></NoticeCard> : null}
                   {!ecsServicesLoading && draft.hostId && ecsServices.length === 0 && !ecsServicesError ? (
@@ -2762,7 +2766,7 @@ export function PortForwardingPanel({
                 </>
               ) : null}
 
-              {error ? <p className="text-[0.88rem] text-[var(--danger-text)]">{error}</p> : null}
+              {error ? <p className="text-[0.9rem] text-[var(--danger-text)]">{error}</p> : null}
                 </>
               )}
             </ModalBody>

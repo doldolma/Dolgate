@@ -280,7 +280,7 @@ export function WarpgateImportDialog({
           </FieldGroup>
 
           {connectionInfo ? (
-            <p className="text-[0.92rem] leading-[1.6] text-[var(--text-soft)]">
+            <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
               SSH endpoint는 <code>{connectionInfo.sshHost}:{connectionInfo.sshPort}</code>
               로 감지되었습니다.
               {connectionInfo.username ? (

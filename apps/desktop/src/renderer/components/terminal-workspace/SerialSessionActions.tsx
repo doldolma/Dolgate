@@ -101,7 +101,7 @@ export function SerialSessionActions({
         variant="secondary"
         size="sm"
         active={open}
-        className="min-h-9 rounded-full px-3.5 text-[0.92rem]"
+        className="min-h-9 rounded-full px-3.5 text-[0.9rem]"
         onClick={() => setOpen((current) => !current)}
       >
         Control
@@ -111,7 +111,7 @@ export function SerialSessionActions({
           role="menu"
           aria-label="Serial session actions menu"
           className={cn(
-            'absolute right-0 top-[calc(100%+0.45rem)] z-[8] grid min-w-[11rem] gap-[0.35rem] rounded-[18px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.45rem] shadow-[var(--shadow-soft)]',
+            'absolute right-0 top-[calc(100%+0.45rem)] z-[8] grid min-w-[11rem] gap-[0.4rem] rounded-[12px] border border-[var(--border)] bg-[var(--surface-elevated)] p-[0.4rem] shadow-[var(--shadow-soft)]',
           )}
         >
           {menuItems.map((item) => (
@@ -120,7 +120,7 @@ export function SerialSessionActions({
               role="menuitem"
               variant="ghost"
               size="sm"
-              className="justify-start rounded-[12px] px-3 text-left"
+              className="justify-start rounded-[10px] px-3 text-left"
               disabled={pendingKey !== null}
               onClick={() => {
                 void handleAction(item);

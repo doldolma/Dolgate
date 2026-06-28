@@ -1,7 +1,15 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRef, type RefObject } from 'react';
 import type { AwsEc2HostRecord, SecretMetadataRecord, SnippetRecord, SshHostRecord } from '@shared';
-import { HostForm, getJumpHostCandidates } from './HostForm';
+import { HostForm, getJumpHostCandidates, type HostFormHandle } from './HostForm';
+
+// 편집 폼은 자동저장하지 않으므로, 명시적 저장(submit)을 ref로 트리거한다.
+async function saveEdit(ref: RefObject<HostFormHandle | null>) {
+  await act(async () => {
+    await ref.current?.submit();
+  });
+}
 import { listAwsProfiles } from '../services/desktop/imports';
 import { useHostFormController } from '../controllers/useHostFormController';
 
@@ -139,12 +147,14 @@ describe('HostForm', () => {
     pickSshCertificateMock.mockReset();
   });
 
-  it('auto-saves edit-mode changes after the debounce window', async () => {
+  it('saves edit-mode changes only on explicit save', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onActionStateChange = vi.fn();
+    const ref = createRef<HostFormHandle>();
 
     render(
       <HostForm
+        ref={ref}
         host={createHost()}
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
@@ -155,10 +165,11 @@ describe('HostForm', () => {
 
     fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod API' } });
 
+    // 자동저장 없음 — 명시적 저장 전에는 호출되지 않는다.
     await wait(250);
     expect(onSubmit).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), { timeout: 1200 });
+    await saveEdit(ref);
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith(
@@ -178,8 +189,10 @@ describe('HostForm', () => {
 
   it('configures a direct startup command for an SSH host', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
     render(
       <HostForm
+        ref={ref}
         host={createHost()}
         snippets={snippets}
         keychainEntries={keychainEntries}
@@ -193,7 +206,7 @@ describe('HostForm', () => {
       target: { value: 'cd /srv/app && clear' },
     });
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 1200 });
+    await saveEdit(ref);
     expect(onSubmit).toHaveBeenLastCalledWith(
       expect.objectContaining({
         startupCommand: {
@@ -205,10 +218,12 @@ describe('HostForm', () => {
     );
   });
 
-  it('auto-saves the SSH agent forwarding toggle for an SSH host', async () => {
+  it('saves the SSH agent forwarding toggle on explicit save', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
     render(
       <HostForm
+        ref={ref}
         host={createHost()}
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
@@ -218,7 +233,7 @@ describe('HostForm', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: 'SSH Agent Forwarding' }));
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled(), { timeout: 1200 });
+    await saveEdit(ref);
     expect(onSubmit).toHaveBeenLastCalledWith(
       expect.objectContaining({
         agentForwarding: true,
@@ -423,44 +438,6 @@ describe('HostForm', () => {
     expect(onEditExistingSecret).toHaveBeenCalledWith('secret-certificate');
   });
 
-  it('installs a selected existing private key to the edited host', async () => {
-    const onInstallSshPublicKey = vi.fn().mockResolvedValue({
-      secretRef: 'secret-private-key',
-      mode: 'installAndUse',
-      results: [{ hostId: 'host-1', hostLabel: 'Prod', status: 'installed' }],
-    });
-
-    render(
-      <HostForm
-        host={createHost()}
-        keychainEntries={reusableKeychainEntries}
-        groupOptions={groupOptions}
-        onSubmit={vi.fn().mockResolvedValue(undefined)}
-        onInstallSshPublicKey={onInstallSshPublicKey}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText('Auth Type'), {
-      target: { value: 'privateKey' },
-    });
-    fireEvent.change(screen.getByLabelText('Saved Credentials'), {
-      target: { value: 'existing:secret-private-key' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Install selected key' }));
-
-    await waitFor(() =>
-      expect(onInstallSshPublicKey).toHaveBeenCalledWith({
-        secretRef: 'secret-private-key',
-        hostIds: ['host-1'],
-        mode: 'installAndUse',
-        passphraseOverride: undefined,
-      }),
-    );
-    expect(
-      await screen.findByText('선택한 SSH 키를 호스트에 설치하고 인증 정보로 전환했습니다.'),
-    ).toBeInTheDocument();
-  });
-
   it('falls back to creating a new password secret when the selected saved secret disappears', async () => {
     const { rerender } = render(
       <HostForm
@@ -641,13 +618,13 @@ describe('HostForm', () => {
     const tagShell = screen.getByTestId('tag-input-shell');
 
     expect(hostnameInput.className).toContain('min-h-11');
-    expect(hostnameInput.className).toContain('rounded-[16px]');
+    expect(hostnameInput.className).toContain('rounded-[10px]');
     expect(hostnameInput.className).toContain('border-[var(--border)]');
     expect(hostnameInput.className).toContain('focus:border-[var(--selection-border)]');
     expect(hostnameInput.className).toContain('focus:ring-4');
 
     expect(tagShell.className).toContain('min-h-11');
-    expect(tagShell.className).toContain('rounded-[16px]');
+    expect(tagShell.className).toContain('rounded-[10px]');
     expect(tagShell.className).toContain('border-[var(--border)]');
     expect(tagShell.className).toContain('focus-within:border-[var(--selection-border)]');
     expect(tagShell.className).toContain('focus-within:ring-4');
@@ -710,11 +687,13 @@ describe('HostForm', () => {
     expect(connectionSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('renders AWS SSH metadata fields and auto-saves edited username and port', async () => {
+  it('renders AWS SSH metadata fields and saves edited username and port', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
 
     render(
       <HostForm
+        ref={ref}
         host={createAwsHost()}
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
@@ -732,9 +711,7 @@ describe('HostForm', () => {
       target: { value: '2222' }
     });
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
-      timeout: 1200
-    });
+    await saveEdit(ref);
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -748,9 +725,11 @@ describe('HostForm', () => {
 
   it('allows changing the AWS profile for an existing AWS host', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
 
     render(
       <HostForm
+        ref={ref}
         host={createAwsHost()}
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
@@ -764,9 +743,7 @@ describe('HostForm', () => {
       target: { value: 'profile-prod' },
     });
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
-      timeout: 1200,
-    });
+    await saveEdit(ref);
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -778,11 +755,13 @@ describe('HostForm', () => {
     );
   });
 
-  it('auto-saves the AWS SSM server proxy toggle for an existing AWS host', async () => {
+  it('saves the AWS SSM server proxy toggle on explicit save', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
 
     render(
       <HostForm
+        ref={ref}
         host={createAwsHost()}
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
@@ -792,9 +771,7 @@ describe('HostForm', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: /서버 프록시 사용/ }));
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1), {
-      timeout: 1200,
-    });
+    await saveEdit(ref);
 
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({

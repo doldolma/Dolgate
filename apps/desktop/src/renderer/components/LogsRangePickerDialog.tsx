@@ -194,12 +194,12 @@ export function LogsRangePickerDialog({
                       <header className="flex min-h-8 items-center justify-center">
                         <strong>{formatRangeMonthLabel(month)}</strong>
                       </header>
-                      <div className="grid grid-cols-7 gap-[0.35rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]">
+                      <div className="grid grid-cols-7 gap-[0.4rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]">
                         {LOGS_RANGE_WEEKDAY_LABELS.map((label) => (
                           <span key={`${monthKey}:${label}`}>{label}</span>
                         ))}
                       </div>
-                      <div className="grid grid-cols-7 gap-[0.28rem]">
+                      <div className="grid grid-cols-7 gap-[0.25rem]">
                         {buildRangeCalendarDays(month).map((day) => {
                           const dayValue = formatRangeDayValue(day);
                           const isCurrentMonth = day.getMonth() === monthValue;
@@ -212,7 +212,7 @@ export function LogsRangePickerDialog({
                               key={`${monthKey}:${dayValue}`}
                               type="button"
                               className={cn(
-                                "min-h-[2.6rem] rounded-[12px] border border-transparent bg-transparent font-semibold text-[var(--text)] transition-[background,border-color,color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
+                                "min-h-[2.6rem] rounded-[10px] border border-transparent bg-transparent font-semibold text-[var(--text)] transition-[background,border-color,color] duration-150 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_10%,transparent_90%)]",
                                 !isCurrentMonth
                                   ? "text-[color-mix(in_srgb,var(--text-soft)_78%,transparent_22%)]"
                                   : "",
@@ -299,7 +299,7 @@ export function LogsRangePickerDialog({
                 />
               </FieldGroup>
             </div>
-            <p className="mt-3 text-[0.84rem] leading-[1.6] text-[var(--text-soft)]">
+            <p className="mt-3 text-[0.82rem] leading-[1.6] text-[var(--text-soft)]">
               날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.
             </p>
           </ModalBody>
@@ -309,7 +309,7 @@ export function LogsRangePickerDialog({
               {LOGS_RELATIVE_RANGE_PRESET_OPTIONS.map((option) => (
                 <label
                   key={option.key}
-                  className="grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]"
+                  className="grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.9rem] text-[1rem] font-semibold text-[var(--text)]"
                 >
                   <input
                     type="radio"
@@ -327,7 +327,7 @@ export function LogsRangePickerDialog({
                   <span className="whitespace-nowrap leading-none">{option.label}</span>
                 </label>
               ))}
-              <label className="mt-1 grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.85rem] text-[0.98rem] font-semibold text-[var(--text)]">
+              <label className="mt-1 grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.9rem] text-[1rem] font-semibold text-[var(--text)]">
                 <input
                   type="radio"
                   name="logs-relative-range"
@@ -379,7 +379,7 @@ export function LogsRangePickerDialog({
                 </SelectField>
               </FieldGroup>
             </div>
-            <p className="text-[0.84rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
+            <p className="text-[0.82rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
               상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.
             </p>
           </ModalBody>
