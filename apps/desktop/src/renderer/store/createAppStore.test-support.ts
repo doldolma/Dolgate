@@ -804,6 +804,7 @@ export function createMockApi(): DesktopApi {
     settings: {
       get: vi.fn().mockResolvedValue({
         theme: "system",
+        homeHostViewMode: "grid",
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -825,6 +826,7 @@ export function createMockApi(): DesktopApi {
       }),
       update: vi.fn().mockImplementation(async (input) => ({
         theme: input.theme ?? "system",
+        homeHostViewMode: input.homeHostViewMode ?? "grid",
         globalTerminalThemeId: input.globalTerminalThemeId ?? "dolssh-dark",
         terminalFontFamily: input.terminalFontFamily ?? "sf-mono",
         terminalFontSize: input.terminalFontSize ?? 13,

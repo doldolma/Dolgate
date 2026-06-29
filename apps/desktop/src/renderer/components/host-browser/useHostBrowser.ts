@@ -15,6 +15,7 @@ import type {
   ActivityLogRecord,
   GroupRecord,
   GroupRemoveMode,
+  HomeHostViewMode,
   HostRecord,
   SecretMetadataRecord,
   SnippetRecord,
@@ -67,7 +68,7 @@ export type HostSortKey = 'name' | 'recent' | 'group' | 'lastConnected';
 
 // 그룹 사이드바 정렬: 이름순 / 최근 사용순 / 호스트 많은 순.
 export type GroupSortKey = 'name' | 'recent' | 'count';
-export type HostViewMode = 'grid' | 'list';
+export type HostViewMode = HomeHostViewMode;
 
 export interface GroupDeleteTarget {
   paths: string[];
@@ -305,6 +306,7 @@ export interface UseHostBrowserParams {
   keychainEntries: SecretMetadataRecord[];
   currentGroupPath: string | null;
   searchQuery: string;
+  hostViewMode?: HostViewMode;
   selectedHostId: string | null;
   activityLogs?: ActivityLogRecord[];
   snippets?: SnippetRecord[];
@@ -312,6 +314,7 @@ export interface UseHostBrowserParams {
   errorMessage?: string | null;
   statusMessage?: string | null;
   onSearchChange: (query: string) => void;
+  onHostViewModeChange?: (mode: HostViewMode) => void | Promise<void>;
   onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
   onOpenSerialImport: () => void;
@@ -409,7 +412,9 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }
   const [groupSortKey, setGroupSortKey] = useState<GroupSortKey>('name');
   const [hideEmptyGroups, setHideEmptyGroups] = useState(false);
-  const [viewMode, setViewMode] = useState<HostViewMode>('grid');
+  const viewMode = params.hostViewMode ?? 'grid';
+  const setViewMode: (mode: HostViewMode) => void | Promise<void> =
+    params.onHostViewModeChange ?? (() => undefined);
   const importMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

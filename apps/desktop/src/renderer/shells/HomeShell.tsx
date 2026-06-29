@@ -7,6 +7,7 @@ import {
   isSshHostRecord,
   normalizeGroupPath,
   type AuthState,
+  type HomeHostViewMode,
   type SshKeyGenerateInput,
 } from '@shared';
 import { AwsImportDialog } from '../components/AwsImportDialog';
@@ -143,6 +144,16 @@ export function HomeShell({
   function resetHostBrowserMessages() {
     setHostBrowserError(null);
     setHostBrowserStatus(null);
+  }
+
+  function handleHostViewModeChange(mode: HomeHostViewMode) {
+    void settingsViewModel.updateSettings({ homeHostViewMode: mode }).catch((error) => {
+      setHostBrowserError(
+        error instanceof Error
+          ? error.message
+          : '호스트 레이아웃 설정을 저장하지 못했습니다.',
+      );
+    });
   }
 
   function buildMovedGroupPath(path: string, targetParentPath: string | null): string | null {
@@ -331,10 +342,12 @@ export function HomeShell({
             keychainEntries={settingsViewModel.keychainEntries}
             currentGroupPath={homeViewModel.currentGroupPath}
             searchQuery={homeViewModel.searchQuery}
+            hostViewMode={settingsViewModel.settings.homeHostViewMode ?? 'grid'}
             selectedHostId={highlightedHostId}
             errorMessage={hostBrowserError}
             statusMessage={hostBrowserStatus}
             onSearchChange={homeViewModel.setSearchQuery}
+            onHostViewModeChange={handleHostViewModeChange}
             onOpenLocalTerminal={() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);

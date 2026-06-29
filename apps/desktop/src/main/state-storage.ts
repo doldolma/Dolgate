@@ -25,6 +25,7 @@ import type {
   StaticDnsOverrideRecord,
   GlobalTerminalThemeId,
   GroupRecord,
+  HomeHostViewMode,
   HostRecord,
   HostStartupCommand,
   HostEnvVar,
@@ -80,6 +81,7 @@ export interface DesktopStateFile {
   schemaVersion: number;
   settings: {
     theme: AppTheme;
+    homeHostViewMode: HomeHostViewMode;
     sftpBrowserColumnWidths: SftpBrowserColumnWidths;
     sftpConflictPolicy: SftpConflictPolicy;
     sftpPreserveMtime: boolean;
@@ -294,6 +296,10 @@ function normalizeSftpConflictPolicy(value: unknown): SftpConflictPolicy {
     : 'ask';
 }
 
+function normalizeHomeHostViewMode(value: unknown): HomeHostViewMode {
+  return value === 'list' ? 'list' : 'grid';
+}
+
 function normalizeSessionReplayRetentionCount(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return DEFAULT_SESSION_REPLAY_RETENTION_COUNT;
@@ -469,6 +475,7 @@ function createDefaultStateFile(): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: 'system',
+      homeHostViewMode: 'grid',
       sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
       sftpConflictPolicy: 'ask',
       sftpPreserveMtime: true,
@@ -853,6 +860,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
+      homeHostViewMode: normalizeHomeHostViewMode(settings.homeHostViewMode),
       sftpBrowserColumnWidths: normalizeSftpBrowserColumnWidths(
         isObject(settings.sftpBrowserColumnWidths) ? settings.sftpBrowserColumnWidths : null
       ),

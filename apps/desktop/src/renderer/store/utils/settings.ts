@@ -70,6 +70,7 @@ export function resolveRendererDefaultTerminalFontFamily(): TerminalFontFamilyId
 
 export const defaultSettings: AppSettings = {
   theme: "system",
+  homeHostViewMode: "grid",
   globalTerminalThemeId: "dolssh-dark",
   terminalFontFamily: resolveRendererDefaultTerminalFontFamily(),
   terminalFontSize: 13,

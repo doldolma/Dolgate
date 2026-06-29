@@ -196,6 +196,7 @@ interface RenderBrowserOptions {
   keychainEntries?: SecretMetadataRecord[];
   currentGroupPath?: string | null;
   searchQuery?: string;
+  hostViewMode?: 'grid' | 'list';
   selectedHostId?: string | null;
   onClearHostSelection?: ReturnType<typeof vi.fn>;
   onSelectHost?: ReturnType<typeof vi.fn>;
@@ -210,6 +211,7 @@ interface RenderBrowserOptions {
   onConnectHostTmux?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
   onNavigateGroup?: ReturnType<typeof vi.fn>;
+  onHostViewModeChange?: ReturnType<typeof vi.fn>;
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
   onCreateHost?: ReturnType<typeof vi.fn>;
   onOpenSerialImport?: ReturnType<typeof vi.fn>;
@@ -227,6 +229,7 @@ function renderBrowser({
   keychainEntries: keychainEntriesOverride = keychainEntries,
   currentGroupPath = null,
   searchQuery = '',
+  hostViewMode = 'grid',
   selectedHostId = null,
   onClearHostSelection = vi.fn(),
   onSelectHost = vi.fn(),
@@ -241,6 +244,7 @@ function renderBrowser({
   onConnectHostTmux,
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
   onNavigateGroup = vi.fn(),
+  onHostViewModeChange = vi.fn(),
   onOpenLocalTerminal = vi.fn(),
   onCreateHost = vi.fn(),
   onOpenSerialImport = vi.fn(),
@@ -258,8 +262,10 @@ function renderBrowser({
       keychainEntries={keychainEntriesOverride}
       currentGroupPath={currentGroupPath}
       searchQuery={searchQuery}
+      hostViewMode={hostViewMode}
       selectedHostId={selectedHostId}
       onSearchChange={vi.fn()}
+      onHostViewModeChange={onHostViewModeChange}
       onOpenLocalTerminal={onOpenLocalTerminal}
       onCreateHost={onCreateHost}
       onOpenSerialImport={onOpenSerialImport}
@@ -420,6 +426,30 @@ describe('HostBrowser helpers', () => {
 
     // Tags now render inline on the card (no expand toggle).
     expect(within(appCard).getByText('app')).toBeInTheDocument();
+  });
+
+  it('renders the persisted list view mode when provided by settings', () => {
+    const { container } = renderBrowser({ hostViewMode: 'list' });
+
+    expect(screen.getByRole('button', { name: '목록 보기' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: '격자 보기' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(screen.getByRole('row')).toBeInTheDocument();
+    expect(container.querySelector('[data-host-grid="true"]')).toBeNull();
+  });
+
+  it('requests a settings update when the host layout toggle changes', () => {
+    const onHostViewModeChange = vi.fn();
+    renderBrowser({ onHostViewModeChange });
+
+    fireEvent.click(screen.getByRole('button', { name: '목록 보기' }));
+
+    expect(onHostViewModeChange).toHaveBeenCalledWith('list');
   });
 
   it('defines import actions for the split-button menu in the expected order', () => {

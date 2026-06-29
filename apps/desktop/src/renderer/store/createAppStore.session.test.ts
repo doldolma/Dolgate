@@ -1241,6 +1241,20 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().settings.theme).toBe("dark");
   });
 
+  it("stores the home host layout preference locally without sync", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().updateSettings({ homeHostViewMode: "list" });
+
+    expect(api.settings.update).toHaveBeenCalledWith({
+      homeHostViewMode: "list",
+    });
+    expect(api.sync.pushDirty).not.toHaveBeenCalled();
+    expect(store.getState().settings.homeHostViewMode).toBe("list");
+  });
+
   it("syncs the global terminal system theme mode through the desktop api", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

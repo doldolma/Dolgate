@@ -889,6 +889,28 @@ describe('SettingsRepository', () => {
     });
   });
 
+  it('persists the home host view mode locally and ignores invalid updates', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.get().homeHostViewMode).toBe('grid');
+
+    const updated = settings.update({ homeHostViewMode: 'list' });
+    expect(updated.homeHostViewMode).toBe('list');
+    expect(settings.get().homeHostViewMode).toBe('list');
+
+    const invalid = settings.update({ homeHostViewMode: 'table' as never });
+    expect(invalid.homeHostViewMode).toBe('list');
+  });
+
   it('restores missing or invalid SFTP browser widths from the stored state file', async () => {
     const { SettingsRepository } = await loadRepositoriesWithStateFile({
       schemaVersion: 1,
@@ -920,6 +942,31 @@ describe('SettingsRepository', () => {
       name: 512,
       kind: 72
     });
+  });
+
+  it('restores invalid persisted home host view mode to grid', async () => {
+    const { SettingsRepository } = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      settings: {
+        theme: 'system',
+        homeHostViewMode: 'table',
+        sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
+        sessionReplayRetentionCount: 100,
+        serverUrlOverride: null,
+        updatedAt: '2026-03-26T00:00:00.000Z'
+      }
+    });
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.get().homeHostViewMode).toBe('grid');
   });
 });
 

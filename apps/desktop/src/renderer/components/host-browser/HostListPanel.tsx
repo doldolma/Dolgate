@@ -273,7 +273,9 @@ export function HostListPanel({ hb }: HostListPanelProps) {
                   ? 'bg-[var(--selection-tint)] text-[var(--accent-strong)]'
                   : 'text-[var(--text-soft)] hover:text-[var(--text)]',
               )}
-              onClick={() => hb.setViewMode('grid')}
+              onClick={() => {
+                void hb.setViewMode('grid');
+              }}
             >
               <LayoutGrid className="h-[1rem] w-[1rem]" aria-hidden="true" />
             </button>
@@ -287,7 +289,9 @@ export function HostListPanel({ hb }: HostListPanelProps) {
                   ? 'bg-[var(--selection-tint)] text-[var(--accent-strong)]'
                   : 'text-[var(--text-soft)] hover:text-[var(--text)]',
               )}
-              onClick={() => hb.setViewMode('list')}
+              onClick={() => {
+                void hb.setViewMode('list');
+              }}
             >
               <List className="h-[1rem] w-[1rem]" aria-hidden="true" />
             </button>

@@ -54,6 +54,7 @@ import type {
   GroupRecord,
   GroupRemoveMode,
   GroupRemoveResult,
+  HomeHostViewMode,
   HostDraft,
   HostRecord,
   HostStartupCommand,
@@ -297,6 +298,10 @@ function clampSessionReplayRetentionCount(value: number): number {
     MAX_SESSION_REPLAY_RETENTION_COUNT,
     Math.max(MIN_SESSION_REPLAY_RETENTION_COUNT, Math.round(value)),
   );
+}
+
+function normalizeHomeHostViewMode(value: unknown): HomeHostViewMode {
+  return value === 'list' ? 'list' : 'grid';
 }
 
 function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
@@ -1198,6 +1203,7 @@ export class SettingsRepository {
     const serverUrlOverride = state.settings.serverUrlOverride ?? null;
     return {
       theme: state.settings.theme,
+      homeHostViewMode: normalizeHomeHostViewMode(state.settings.homeHostViewMode),
       globalTerminalThemeId: state.terminal.globalThemeId,
       terminalFontFamily: state.terminal.fontFamily,
       terminalFontSize: state.terminal.fontSize,
@@ -1282,9 +1288,15 @@ export class SettingsRepository {
       const hasSftpConflictPolicyInput = Object.prototype.hasOwnProperty.call(input, 'sftpConflictPolicy');
       const hasSftpPreserveMtimeInput = Object.prototype.hasOwnProperty.call(input, 'sftpPreserveMtime');
       const hasSftpPreservePermissionsInput = Object.prototype.hasOwnProperty.call(input, 'sftpPreservePermissions');
+      const hasHomeHostViewModeInput = Object.prototype.hasOwnProperty.call(input, 'homeHostViewMode');
 
       if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
         state.settings.theme = input.theme;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (input.homeHostViewMode === 'grid' || input.homeHostViewMode === 'list') {
+        state.settings.homeHostViewMode = input.homeHostViewMode;
         state.settings.updatedAt = nowIso();
       }
 
@@ -1471,6 +1483,7 @@ export class SettingsRepository {
         !hasSftpConflictPolicyInput &&
         !hasSftpPreserveMtimeInput &&
         !hasSftpPreservePermissionsInput &&
+        !hasHomeHostViewModeInput &&
         input.sessionReplayRetentionCount == null &&
         input.theme == null &&
         input.globalTerminalThemeId == null &&
@@ -1485,6 +1498,7 @@ export class SettingsRepository {
         input.terminalAutocompleteEnabled == null
       ) {
         state.settings.theme = current.theme as AppTheme;
+        state.settings.homeHostViewMode = normalizeHomeHostViewMode(current.homeHostViewMode);
         state.settings.sftpBrowserColumnWidths = { ...current.sftpBrowserColumnWidths };
         state.settings.sftpConflictPolicy = current.sftpConflictPolicy ?? 'ask';
         state.settings.sftpPreserveMtime = current.sftpPreserveMtime ?? true;

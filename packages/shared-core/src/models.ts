@@ -1000,8 +1000,11 @@ export function normalizeSftpBrowserColumnWidths(
   );
 }
 
+export type HomeHostViewMode = 'grid' | 'list';
+
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
+  homeHostViewMode?: HomeHostViewMode;
   sftpBrowserColumnWidths: SftpBrowserColumnWidths;
   sftpConflictPolicy?: SftpConflictPolicy;
   sftpPreserveMtime?: boolean;
