@@ -60,12 +60,14 @@ test.describe("desktop replay regression", () => {
 
       await page.getByRole("button", { name: /Smoke AWS 세션 종료/ }).click();
 
-      await page
-        .getByRole("navigation", { name: "Home navigation" })
-        .getByRole("button", { name: "☰ Logs" })
-        .click();
+      // 세션 종료 후 홈(타이틀바 탭)으로 돌아와 좌측 사이드바 푸터의 Logs 섹션으로 이동한다.
+      // (구 "Home navigation" 레일은 Host 화면 재구성으로 제거됨.)
+      await page.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "Logs", exact: true }).click();
 
-      await expect(page.getByRole("heading", { name: "Logs" })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Logs" }).first(),
+      ).toBeVisible();
       await expect(page.getByTestId("logs-lifecycle-card").filter({ hasText: "Smoke AWS" }).first()).toBeVisible();
       await expect(page.getByText("AWS SSM")).toBeVisible();
       await expect(page.getByText("default · ap-northeast-2 · i-smoke-test")).toBeVisible();

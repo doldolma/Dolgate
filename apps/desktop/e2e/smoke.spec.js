@@ -50,41 +50,45 @@ test.describe("desktop smoke", () => {
 
     try {
       const page = await app.firstWindow();
-      const homeNavigation = page.getByRole("navigation", {
-        name: "Home navigation",
+      // 새 홈은 좌측 사이드바 푸터의 섹션 아이콘 버튼(aria-label)으로 섹션을 전환한다.
+      // (구 "Home navigation" 레일과 글리프 버튼은 Host 화면 재구성으로 제거됨.)
+      const awsCard = page
+        .locator('[data-host-card="true"]')
+        .filter({ hasText: "Smoke AWS" })
+        .first();
+      const portForwardingNav = page.getByRole("button", {
+        name: "Port Forwarding",
+        exact: true,
       });
+      const settingsNav = page.getByRole("button", {
+        name: "Settings",
+        exact: true,
+      });
+      const hostsBack = page.getByRole("button", { name: "Hosts", exact: true });
 
-      await expect(
-        homeNavigation.getByRole("button", { name: "▣ Hosts" }),
-      ).toBeVisible();
-      await expect(
-        page
-          .locator('[data-host-card="true"]')
-          .filter({ hasText: "Smoke AWS" })
-          .first(),
-      ).toBeVisible();
+      await expect(portForwardingNav).toBeVisible();
+      await expect(awsCard).toBeVisible();
 
-      await homeNavigation
-        .getByRole("button", { name: "⇄ Port Forwarding" })
-        .click();
+      // Hosts → Port Forwarding. 섹션 화면은 "Hosts" 뒤로가기 버튼 + 섹션 제목 헤딩으로 구성된다.
+      await portForwardingNav.click();
       await expect(
-        page.getByRole("heading", { name: "Port Forwarding" }),
+        page.getByRole("heading", { name: "Port Forwarding" }).first(),
       ).toBeVisible();
 
-      await homeNavigation.getByRole("button", { name: "◌ Settings" }).click();
+      // 섹션 간 직접 이동은 없으므로 Hosts로 돌아온 뒤 다음 섹션으로 전환한다.
+      await hostsBack.click();
+      await expect(awsCard).toBeVisible();
+
+      await settingsNav.click();
       await expect(
-        page.getByRole("heading", { name: "Settings" }),
+        page.getByRole("heading", { name: "Settings" }).first(),
       ).toBeVisible();
 
-      await homeNavigation.getByRole("button", { name: "▣ Hosts" }).click();
-      await expect(
-        page
-          .locator('[data-host-card="true"]')
-          .filter({ hasText: "Smoke AWS" })
-          .first(),
-      ).toBeVisible();
+      await hostsBack.click();
+      await expect(awsCard).toBeVisible();
 
-      await page.getByRole("button", { name: "SFTP" }).click();
+      // SFTP 워크스페이스는 상단 타이틀바 탭으로 전환한다. 우측 pane은 기본적으로 호스트 피커를 띄운다.
+      await page.getByRole("button", { name: "SFTP", exact: true }).click();
       await expect(
         page.getByRole("heading", { name: "Host", exact: true }),
       ).toBeVisible();
@@ -112,7 +116,7 @@ test.describe("desktop smoke", () => {
     }
   });
 
-  test("opens a working local terminal from the TERMINAL button on Windows", async () => {
+  test("opens a working local terminal from the Local Terminal button on Windows", async () => {
     test.skip(process.platform !== "win32", "Windows-only local terminal smoke");
 
     const userDataDir = await mkdtemp(
@@ -129,7 +133,11 @@ test.describe("desktop smoke", () => {
 
     try {
       const page = await app.firstWindow();
-      const terminalButton = page.getByRole("button", { name: "TERMINAL" });
+      // 새 홈 툴바의 로컬 터미널 버튼(구 "TERMINAL" → "Local Terminal").
+      const terminalButton = page.getByRole("button", {
+        name: "Local Terminal",
+        exact: true,
+      });
 
       await expect(terminalButton).toBeVisible();
       await terminalButton.click();
