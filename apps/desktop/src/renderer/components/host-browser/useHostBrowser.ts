@@ -29,7 +29,7 @@ import { getKeyboardLayoutSearchQueries } from '../../lib/keyboard-layout-search
 import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
 import type { DesktopPlatform } from '../DesktopWindowControls';
 
-export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 280;
+export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 235;
 export const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
 export const HOME_BROWSER_CARD_GAP_PX = 13.6;
 export const HOST_DRAG_MIME_TYPE = 'application/x-dolssh-host-id';

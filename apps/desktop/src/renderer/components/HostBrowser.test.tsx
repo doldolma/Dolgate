@@ -18,6 +18,11 @@ import {
   HOST_BROWSER_IMPORT_MENU_LABELS
 } from './HostBrowser';
 import { resolveResponsiveCardGridLayout } from '../lib/responsive-card-grid';
+import {
+  HOME_BROWSER_CARD_GAP_PX,
+  HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
+  HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
+} from './host-browser/useHostBrowser';
 
 const resizeObserverInstances: MockResizeObserver[] = [];
 
@@ -562,9 +567,9 @@ describe('HostBrowser helpers', () => {
     const expectedLayout = resolveResponsiveCardGridLayout({
       containerWidth: 1200,
       itemCount: 3,
-      minWidth: 280,
-      maxWidth: 460,
-      gap: 13.6
+      minWidth: HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
+      maxWidth: HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
+      gap: HOME_BROWSER_CARD_GAP_PX,
     });
 
     await waitFor(() => {
