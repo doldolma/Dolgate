@@ -457,6 +457,30 @@ func resolveKeyboardInteractiveAuthMethod(responder InteractiveResponder) ssh.Au
 	})
 }
 
+// resolvePasswordPromptAuthMethod는 다단계 인증에서 publickey 등으로 1차를 통과한 뒤 서버가
+// password 메서드를 추가로 요구할 때(AuthenticationMethods publickey,password), 연결 시점에
+// 사용자에게 비밀번호를 물어 2차 요소를 충족시킨다. keyboard-interactive와 동일한
+// responder(인터랙티브 오버레이) 경로를 쓰며, 서버가 password를 요구할 때만 호출된다.
+func resolvePasswordPromptAuthMethod(responder InteractiveResponder) ssh.AuthMethod {
+	return ssh.PasswordCallback(func() (string, error) {
+		if responder == nil {
+			return "", fmt.Errorf("password responder is not configured")
+		}
+		responses, err := responder(InteractiveChallenge{
+			Prompts: []InteractivePrompt{
+				{Label: "Password", Echo: false},
+			},
+		})
+		if err != nil {
+			return "", err
+		}
+		if len(responses) == 0 {
+			return "", fmt.Errorf("no password provided")
+		}
+		return responses[0], nil
+	})
+}
+
 func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.AuthMethod, error) {
 	switch target.AuthType {
 	case "password":
@@ -472,8 +496,11 @@ func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.Au
 		if err != nil {
 			return nil, err
 		}
+		// publickey 외에 password 프롬프트도 함께 제시 — 서버가 publickey 다음 password를
+		// 요구하는 다단계 인증을 만족시킨다. publickey만으로 끝나는 서버에선 호출되지 않는다.
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
+			resolvePasswordPromptAuthMethod(responder),
 			resolveKeyboardInteractiveAuthMethod(responder),
 		}, nil
 	case "certificate":
@@ -491,6 +518,7 @@ func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.Au
 		}
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(certSigner),
+			resolvePasswordPromptAuthMethod(responder),
 			resolveKeyboardInteractiveAuthMethod(responder),
 		}, nil
 	case "keyboardInteractive":

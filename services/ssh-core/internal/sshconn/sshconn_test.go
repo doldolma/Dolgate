@@ -120,8 +120,8 @@ func TestResolveAuthMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveAuthMethods(privateKey) error = %v", err)
 	}
-	if len(privateKeyMethods) != 2 {
-		t.Fatalf("len(privateKeyMethods) = %d, want 2", len(privateKeyMethods))
+	if len(privateKeyMethods) != 3 {
+		t.Fatalf("len(privateKeyMethods) = %d, want 3", len(privateKeyMethods))
 	}
 
 	certificateMethods, err := resolveAuthMethods(Target{
@@ -132,8 +132,8 @@ func TestResolveAuthMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveAuthMethods(certificate) error = %v", err)
 	}
-	if len(certificateMethods) != 2 {
-		t.Fatalf("len(certificateMethods) = %d, want 2", len(certificateMethods))
+	if len(certificateMethods) != 3 {
+		t.Fatalf("len(certificateMethods) = %d, want 3", len(certificateMethods))
 	}
 
 	keyboardMethods, err := resolveAuthMethods(Target{

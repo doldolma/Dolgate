@@ -1305,13 +1305,15 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
-      {sshDraft || serialDraft ? null : metadataFields}
+      {sshDraft || serialDraft || isAwsEc2Draft || isAwsEcsDraft ? null : metadataFields}
 
       {isAwsEc2Draft ? (
         <>
-          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
-          {startupCommandField}
-
+          <FormSection
+            title="Connection"
+            description="Required to connect."
+            testId="hostform-section-connection"
+          >
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
             <SelectField
@@ -1422,11 +1424,32 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   )
               }
           />
+          </FormSection>
+
+          <FormSection
+            title="Details"
+            description="How this host appears in the app."
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title="Preferences"
+            description="Optional local preference."
+            testId="hostform-section-preferences"
+          >
+            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+            {startupCommandField}
+          </FormSection>
         </>
       ) : isAwsEcsDraft ? (
         <>
-          {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
-
+          <FormSection
+            title="Connection"
+            description="Required to connect."
+            testId="hostform-section-connection"
+          >
           <label className={fieldClassName}>
             <span className={fieldLabelClassName}>AWS Profile</span>
             <SelectField
@@ -1457,6 +1480,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             <span className={fieldLabelClassName}>Cluster ARN</span>
             <Input value={draft.awsEcsClusterArn} readOnly />
           </label>
+          </FormSection>
+
+          <FormSection
+            title="Details"
+            description="How this host appears in the app."
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title="Preferences"
+            description="Optional local preference."
+            testId="hostform-section-preferences"
+          >
+            {renderTerminalThemeField(draft.terminalThemeId ?? null, (terminalThemeId) => setDraft((current) => ({ ...current, terminalThemeId })))}
+          </FormSection>
         </>
       ) : draft.kind === 'warpgate-ssh' ? (
         <>
