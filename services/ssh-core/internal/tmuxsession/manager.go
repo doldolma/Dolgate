@@ -148,7 +148,7 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config sshses
 		config.TCPKeepAliveInterval = 30 * time.Second
 	}
 	if config.SSHKeepAliveInterval == 0 {
-		config.SSHKeepAliveInterval = 30 * time.Second
+		config.SSHKeepAliveInterval = 10 * time.Second
 	}
 	if config.SSHKeepAliveMaxFailures <= 0 {
 		config.SSHKeepAliveMaxFailures = 3

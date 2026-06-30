@@ -58,7 +58,7 @@ type ManagerConfig struct {
 var defaultManagerConfig = ManagerConfig{
 	TCPDialTimeout:           10 * time.Second,
 	TCPKeepAliveInterval:     30 * time.Second,
-	SSHKeepAliveInterval:     30 * time.Second,
+	SSHKeepAliveInterval:     10 * time.Second,
 	SSHKeepAliveMaxFailures:  3,
 	SSHKeepAliveProbeTimeout: 10 * time.Second,
 }

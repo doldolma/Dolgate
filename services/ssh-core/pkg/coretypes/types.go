@@ -703,7 +703,7 @@ type MoshStatePayload struct {
 }
 
 // LatencyPayload는 keepalive probe의 round-trip 시간(ms)을 renderer에 알린다. 탭
-// 인디케이터가 활성 탭에 RTT를 표시하는 데 쓴다. keepalive 주기(기본 30s)마다 갱신.
+// 인디케이터가 활성 탭에 RTT를 표시하는 데 쓴다. keepalive 주기(기본 10s)마다 갱신.
 type LatencyPayload struct {
 	RoundTripMs int `json:"roundTripMs"`
 }
