@@ -88,8 +88,15 @@ function getReplayRecordingId(log: ActivityLogRecord): string | null {
   if (log.kind !== 'session-lifecycle') {
     return null;
   }
-  const metadata = log.metadata as { hasReplay?: boolean; recordingId?: string } | null;
-  return metadata?.hasReplay === true && typeof metadata.recordingId === 'string'
+  const metadata = log.metadata as {
+    hasReplay?: boolean;
+    recordingId?: string;
+    status?: string;
+  } | null;
+  // 진행 중(connected) 세션은 녹화가 아직 finalize되지 않아(메타 파일 없음) 재생할 수 없다.
+  // 종료된 세션(closed/error)만 Replay 버튼을 노출한다.
+  const finished = metadata?.status === 'closed' || metadata?.status === 'error';
+  return finished && metadata?.hasReplay === true && typeof metadata.recordingId === 'string'
     ? metadata.recordingId
     : null;
 }

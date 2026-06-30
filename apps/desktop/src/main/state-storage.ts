@@ -1136,6 +1136,43 @@ class DesktopStateStorage {
     this.rewriteLogsFile();
   }
 
+  // 녹화 파일이 더 이상 없는(보존 한도로 prune된) 세션 로그의 hasReplay를 끈다.
+  // 활동 로그는 녹화보다 훨씬 오래 보존돼서, 옛 로그가 이미 삭제된 녹화를 가리키면
+  // Replay 버튼이 떠도 눌러지지 않는다 → 실제 존재하는 녹화만 hasReplay를 유지한다.
+  reconcileReplayFlags(existingRecordingIds: ReadonlySet<string>): number {
+    this.ensureLoaded();
+    if (!this.activityLogFilePath) {
+      return 0;
+    }
+    let changed = 0;
+    for (let index = 0; index < this.activityLogs.length; index += 1) {
+      const record = this.activityLogs[index];
+      if (record.kind !== 'session-lifecycle') {
+        continue;
+      }
+      const metadata = record.metadata as
+        | { hasReplay?: boolean; recordingId?: string }
+        | null;
+      if (!metadata || metadata.hasReplay !== true) {
+        continue;
+      }
+      const recordingId =
+        typeof metadata.recordingId === 'string' ? metadata.recordingId : null;
+      if (recordingId && existingRecordingIds.has(recordingId)) {
+        continue;
+      }
+      this.activityLogs[index] = {
+        ...record,
+        metadata: { ...metadata, hasReplay: false },
+      };
+      changed += 1;
+    }
+    if (changed > 0) {
+      this.rewriteLogsFile();
+    }
+    return changed;
+  }
+
   readSecureValue(account: string): StoredEncryptedValue | null {
     this.ensureLoaded();
     if (account === 'auth:refresh-token') {

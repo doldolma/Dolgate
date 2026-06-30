@@ -208,6 +208,23 @@ if (termiusHelperArgIndex >= 0) {
   );
   const sessionShareService = new SessionShareService(authService, coreManager);
   const sessionReplayService = new SessionReplayService(settingsRepository, coreManager);
+  // 녹화가 보존 한도로 prune되거나(또는 로그인 시 재조정) 하면, 더 이상 파일이 없는 세션 로그의
+  // hasReplay를 꺼서 "Replay 버튼은 뜨는데 눌러도 무반응"이던 문제를 막는다. 변경분은 렌더러에
+  // 통지해 버튼이 즉시 사라지게 한다.
+  const reconcileReplayLogFlags = () => {
+    const changed = activityLogRepository.reconcileReplayFlags(
+      sessionReplayService.listExistingRecordingIds(),
+    );
+    if (changed === 0) {
+      return;
+    }
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.logs.changed);
+      }
+    }
+  };
+  sessionReplayService.setOnRecordingsPruned(reconcileReplayLogFlags);
   const updateService = new UpdateService(settingsRepository);
   const notificationService = new NotificationService();
   let isQuitting = false;

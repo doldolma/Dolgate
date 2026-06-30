@@ -118,6 +118,7 @@ export class SessionReplayService {
   >();
   private readonly replayWindows = new Map<string, BrowserWindow>();
   private activeScope: LocalHistoryScope | null = null;
+  private onRecordingsPruned: (() => void) | null = null;
 
   constructor(
     private readonly settingsRepository: SettingsRepository,
@@ -296,6 +297,31 @@ export class SessionReplayService {
         force: true,
       });
     }
+    // 녹화가 사라졌으니(또는 활성화 시 재조정 시점) 활동 로그의 hasReplay를 실제 파일 기준으로
+    // 맞춰, 더 이상 없는 녹화에 Replay 버튼이 남지 않게 한다.
+    this.onRecordingsPruned?.();
+  }
+
+  // 현재 scope에 실제로 존재하는(재생 가능한) 녹화 id 집합. 진행 중 녹화는 아직 메타 파일이
+  // 없으므로(종료 시 기록됨) 별도로 포함해 hasReplay가 성급히 꺼지지 않게 한다.
+  listExistingRecordingIds(): Set<string> {
+    const ids = new Set<string>();
+    const scope = this.activeScope;
+    if (scope && existsSync(scope.replayDirectoryPath)) {
+      for (const fileName of readdirSync(scope.replayDirectoryPath)) {
+        if (fileName.endsWith(META_SUFFIX)) {
+          ids.add(fileName.slice(0, -META_SUFFIX.length));
+        }
+      }
+    }
+    for (const active of this.activeRecordings.values()) {
+      ids.add(active.recordingId);
+    }
+    return ids;
+  }
+
+  setOnRecordingsPruned(handler: () => void): void {
+    this.onRecordingsPruned = handler;
   }
 
   private startRecording(sessionId: string): void {

@@ -1059,6 +1059,50 @@ describe('ActivityLogRepository', () => {
     expect(logs.list()).toEqual([]);
   });
 
+  it('clears hasReplay for session logs whose recording no longer exists', async () => {
+    const { ActivityLogRepository } = await loadRepositories();
+    const logs = new ActivityLogRepository();
+
+    logs.upsert({
+      id: 'log-keep',
+      level: 'info',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'ssh 세션',
+      metadata: { recordingId: 'rec-keep', hasReplay: true, status: 'closed' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    logs.upsert({
+      id: 'log-gone',
+      level: 'info',
+      category: 'session',
+      kind: 'session-lifecycle',
+      message: 'ssh 세션',
+      metadata: { recordingId: 'rec-gone', hasReplay: true, status: 'closed' },
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+
+    // 존재하는 녹화(rec-keep)만 전달 → 파일이 없는 rec-gone의 hasReplay만 꺼진다.
+    expect(logs.reconcileReplayFlags(new Set(['rec-keep']))).toBe(1);
+
+    const byId = new Map(logs.list().map((entry) => [entry.id, entry] as const));
+    expect((byId.get('log-keep')?.metadata as { hasReplay?: boolean }).hasReplay).toBe(true);
+    const goneMeta = byId.get('log-gone')?.metadata as {
+      hasReplay?: boolean;
+      recordingId?: string;
+      status?: string;
+    };
+    expect(goneMeta.hasReplay).toBe(false);
+    // 나머지 메타데이터(recordingId/status 등)는 보존한다.
+    expect(goneMeta.recordingId).toBe('rec-gone');
+    expect(goneMeta.status).toBe('closed');
+
+    // 멱등 — 다시 호출해도 추가 변경 없음.
+    expect(logs.reconcileReplayFlags(new Set(['rec-keep']))).toBe(0);
+  });
+
   it('migrates and merges legacy unscoped logs into the first activated account', async () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
     process.env.DOLSSH_USER_DATA_DIR = tempDir;

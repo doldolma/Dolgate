@@ -722,6 +722,8 @@ const stateStorage = {
   ) => getDesktopStateStorage().upsertActivityLog(record),
   listActivityLogs: () => getDesktopStateStorage().listActivityLogs(),
   clearActivityLogs: () => getDesktopStateStorage().clearActivityLogs(),
+  reconcileReplayFlags: (existingRecordingIds: ReadonlySet<string>) =>
+    getDesktopStateStorage().reconcileReplayFlags(existingRecordingIds),
 };
 
 function clampInteger(value: number, min: number, max: number): number {
@@ -1949,6 +1951,10 @@ export class ActivityLogRepository {
 
   clear(): void {
     stateStorage.clearActivityLogs();
+  }
+
+  reconcileReplayFlags(existingRecordingIds: ReadonlySet<string>): number {
+    return stateStorage.reconcileReplayFlags(existingRecordingIds);
   }
 }
 

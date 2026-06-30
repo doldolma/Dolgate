@@ -428,8 +428,12 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
               log.kind === 'container-action' && isContainerActionMetadata(log.metadata)
                 ? log.metadata
                 : null;
+            // 진행 중(connected) 세션은 녹화가 아직 finalize되지 않아 재생 불가 →
+            // 종료된 세션(closed/error)만 Replay 버튼을 노출한다.
             const replayRecordingId =
               sessionLifecycleMetadata != null &&
+              (sessionLifecycleMetadata.status === 'closed' ||
+                sessionLifecycleMetadata.status === 'error') &&
               sessionLifecycleMetadata.hasReplay === true &&
               typeof sessionLifecycleMetadata.recordingId === 'string'
                 ? sessionLifecycleMetadata.recordingId
