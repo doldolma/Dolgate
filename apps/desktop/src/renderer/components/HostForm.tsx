@@ -366,9 +366,9 @@ function FormSection({ title, testId, children }: FormSectionProps) {
   return (
     <section
       data-testid={testId}
-      className="grid gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[var(--surface-muted)] px-[0.9rem] py-[0.9rem]"
+      className="grid gap-[0.9rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[0.9rem] py-[0.8rem]"
     >
-      <h3 className="text-[0.9rem] font-semibold tracking-[-0.01em] text-[var(--text)]">{title}</h3>
+      <h3 className="text-[0.9rem] font-bold text-[var(--text)]">{title}</h3>
       <div className="grid gap-[0.9rem]">{children}</div>
     </section>
   );

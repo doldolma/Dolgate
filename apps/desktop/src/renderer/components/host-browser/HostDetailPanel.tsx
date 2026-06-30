@@ -848,9 +848,7 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
       hb.onInstallSshPublicKey ? (
         <SshKeyInstallDialog
           host={host}
-          credential={
-            hb.keychainEntries.find((entry) => entry.secretRef === host.secretRef) ?? null
-          }
+          keychainEntries={hb.keychainEntries}
           onGenerateAndInstallSshKey={hb.onGenerateAndInstallSshKey}
           onInstallSshPublicKey={hb.onInstallSshPublicKey}
           onClose={() => setKeyInstallOpen(false)}

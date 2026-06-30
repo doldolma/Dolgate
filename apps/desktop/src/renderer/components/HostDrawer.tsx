@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
+import { getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
-import { Button, CloseIcon, IconButton, SectionLabel } from '../ui';
+import { Button } from '../ui';
+import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 
 interface HostDrawerProps {
@@ -49,6 +51,13 @@ export function HostDrawer({
   });
   const isFooterBusy = isActionInFlight || formActionState.saveInFlight;
   const formHost = host;
+  // Overview(HostDetailPanel) 헤더와 같은 뱃지 로직을 써서 편집 헤더도 동일한 모양으로 맞춘다.
+  // 생성 모드는 아직 호스트가 없으므로 createKind 기준 대체 라벨을 보여준다.
+  const headerBadgeLabel = formHost
+    ? getHostBadgeLabel(formHost)
+    : createKind === 'serial'
+      ? 'SER'
+      : 'S';
 
   async function handlePrimaryAction() {
     if (!hostFormRef.current) {
@@ -75,22 +84,35 @@ export function HostDrawer({
   return (
     <aside
       ref={drawerRef}
-      className="flex min-w-0 min-h-0 h-full flex-col overflow-hidden border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_96%,transparent_4%)]"
+      className="flex min-w-0 min-h-0 h-full flex-col overflow-hidden border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--app-bg)_8%)]"
       aria-hidden={!open}
     >
-      <div className="flex items-center justify-between gap-4 border-b border-[var(--border)] px-[1.3rem] pb-[0.9rem] pt-[1.3rem]">
-        <div>
-          <SectionLabel>{mode === 'create' ? 'Create' : 'Edit'}</SectionLabel>
-          <h2>{mode === 'create' ? 'New Host' : formHost?.label ?? 'Host'}</h2>
+      <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-[0.7rem] pb-[0.7rem] pt-[0.9rem]">
+        <div className="flex min-w-0 items-center gap-[0.55rem]">
+          <span
+            className="inline-grid h-[2rem] min-w-[2rem] place-items-center rounded-[10px] bg-[color-mix(in_srgb,var(--accent-strong)_68%,var(--chrome-bg)_32%)] px-[0.4rem] text-[0.7rem] font-bold text-white"
+            aria-hidden="true"
+          >
+            {headerBadgeLabel}
+          </span>
+          <h2 className="min-w-0 truncate text-[1rem] font-bold text-[var(--text)]">
+            {mode === 'create' ? 'New Host' : formHost?.label ?? 'Host'}
+          </h2>
         </div>
-        <IconButton onClick={onClose} aria-label="Close host editor">
-          <CloseIcon />
-        </IconButton>
+        {/* Overview(HostDetailPanel) 상세 닫기와 동일한 고스트 스타일 X 버튼으로 맞춘다. */}
+        <button
+          type="button"
+          aria-label="Close host editor"
+          className="inline-grid h-[1.9rem] w-[1.9rem] place-items-center rounded-[10px] text-[var(--text-muted)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]"
+          onClick={onClose}
+        >
+          <X className="h-[1.05rem] w-[1.05rem]" />
+        </button>
       </div>
 
       <div
         data-testid="drawer-scroll-body"
-        className="min-h-0 flex-1 overflow-y-auto px-[1.3rem] pb-[1.3rem] pt-[1.1rem]"
+        className="min-h-0 flex-1 overflow-y-auto px-[0.7rem] pb-[1.3rem] pt-[1.1rem]"
       >
         <HostForm
           ref={hostFormRef}
@@ -113,7 +135,7 @@ export function HostDrawer({
 
       <div
         data-testid="drawer-footer"
-        className="shrink-0 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-strong)_98%,transparent_2%)] px-[1.3rem] pb-[1.3rem] pt-[0.9rem]"
+        className="shrink-0 border-t border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--app-bg)_8%)] px-[0.7rem] pb-[1.3rem] pt-[0.9rem]"
       >
         <div className="flex gap-[0.7rem]">
           <Button
