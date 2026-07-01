@@ -467,6 +467,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
             });
             await refreshHostAndKeychainState(set);
             await syncOperationalData(set);
+            return next;
           },
     duplicateHosts: async (hostIds) => {
             if (hostIds.length === 0) {

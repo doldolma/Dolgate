@@ -1148,8 +1148,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               }
               return;
             }
-            // 가시 탭 순서: 고정(home/sftp/containers) + 동적(tabStrip) 좌→우.
-            const order: string[] = ["home", "sftp", "containers"];
+            // 가시 탭 순서: 고정(home/sftp) + 열린 컨테이너가 있을 때만 containers + 동적(tabStrip) 좌→우.
+            // Containers 탭은 containerTabs가 있을 때만 표시되므로(AppTitleBar hasOpenContainers), 순환
+            // 순서도 같게 맞춰 숨겨진(없는) 컨테이너 탭으로 이동하지 않게 한다.
+            const order: string[] = ["home", "sftp"];
+            if (get().containerTabs.length > 0) {
+              order.push("containers");
+            }
             for (const item of get().tabStrip) {
               if (item.kind === "session") {
                 order.push(asSessionTabId(item.sessionId));

@@ -7,6 +7,7 @@ import {
   isSshHostRecord,
   normalizeGroupPath,
   type AuthState,
+  type HostDraft,
   type HomeHostViewMode,
   type SshKeyGenerateInput,
 } from '@shared';
@@ -24,6 +25,11 @@ import { TermiusImportDialog } from '../components/TermiusImportDialog';
 import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
 import { XshellImportDialog } from '../components/XshellImportDialog';
 import { cn } from '../lib/cn';
+import {
+  buildQuickSshHostLabel,
+  findExistingQuickSshHost,
+  type ParsedQuickSshCommand,
+} from '../lib/quick-connect';
 import { ArrowLeft } from '../ui/icons';
 import type { useLoginController } from '../controllers/useLoginController';
 import { useSettingsViewModel } from '../view-models/appViewModels';
@@ -154,6 +160,47 @@ export function HomeShell({
           : '호스트 레이아웃 설정을 저장하지 못했습니다.',
       );
     });
+  }
+
+  async function handleQuickConnectSsh(input: ParsedQuickSshCommand) {
+    resetHostBrowserMessages();
+    const existing = findExistingQuickSshHost(input, homeViewModel.hosts);
+    if (existing) {
+      setSelectedHostId(existing.id);
+      await homeViewModel.connectHost(existing.id, 120, 32);
+      return;
+    }
+
+    const draft: Extract<HostDraft, { kind: 'ssh' }> = {
+      kind: 'ssh',
+      label: buildQuickSshHostLabel(
+        input,
+        homeViewModel.hosts,
+        homeViewModel.currentGroupPath,
+      ),
+      groupName: homeViewModel.currentGroupPath,
+      tags: [],
+      terminalThemeId: null,
+      hostname: input.hostname,
+      port: input.port,
+      username: input.username,
+      authType: 'password',
+      privateKeyPath: null,
+      certificatePath: null,
+      secretRef: null,
+      jumpHostId: null,
+      jumpHostIds: [],
+      startupCommand: null,
+      useMosh: null,
+      agentForwarding: null,
+      env: [],
+    };
+
+    const created = await homeViewModel.saveHost(null, draft);
+    homeViewModel.closeHostDrawer();
+    setSelectedHostId(created.id);
+    setHostBrowserStatus(`Saved ${created.label}. Connecting...`);
+    await homeViewModel.connectHost(created.id, 120, 32);
   }
 
   function buildMovedGroupPath(path: string, targetParentPath: string | null): string | null {
@@ -502,6 +549,20 @@ export function HomeShell({
             }}
             activityLogs={settingsViewModel.activityLogs}
             snippets={homeViewModel.snippets}
+            onActivateSftp={homeViewModel.activateSftp}
+            onActivateContainers={homeViewModel.activateContainers}
+            onOpenSettingsSection={homeViewModel.openSettingsSection}
+            onQuickConnectSsh={async (input) => {
+              try {
+                await handleQuickConnectSsh(input);
+              } catch (error) {
+                setHostBrowserError(
+                  error instanceof Error
+                    ? error.message
+                    : 'Quick Connect를 시작하지 못했습니다.',
+                );
+              }
+            }}
             onOpenSftp={(hostId) => {
               resetHostBrowserMessages();
               setSelectedHostId(hostId);

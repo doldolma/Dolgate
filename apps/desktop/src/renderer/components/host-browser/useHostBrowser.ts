@@ -23,10 +23,11 @@ import type {
   SshKeyInstallInput,
   SshKeyInstallResult,
 } from '@shared';
-import type { HomeSection } from '../../store/types';
+import type { HomeSection, SettingsSection } from '../../store/types';
 import { getUnusedSavedCredentialsAfterHostDeletion } from '../../lib/host-secret-cleanup';
 import { getKeyboardLayoutSearchQueries } from '../../lib/keyboard-layout-search';
 import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
+import type { ParsedQuickSshCommand } from '../../lib/quick-connect';
 import type { DesktopPlatform } from '../DesktopWindowControls';
 
 export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 235;
@@ -340,6 +341,10 @@ export interface UseHostBrowserParams {
   onOpenHostContainers: (hostId: string) => Promise<void>;
   onOpenSftp?: (hostId: string) => void | Promise<void>;
   onSelectSection?: (section: HomeSection) => void;
+  onActivateSftp?: () => void | Promise<void>;
+  onActivateContainers?: () => void | Promise<void>;
+  onOpenSettingsSection?: (section: SettingsSection) => void | Promise<void>;
+  onQuickConnectSsh?: (input: ParsedQuickSshCommand) => Promise<void>;
   detailTab?: 'overview' | 'connection';
   onDetailTabChange?: (tab: 'overview' | 'connection') => void;
   onOpenReplay?: (recordingId: string) => void | Promise<void>;

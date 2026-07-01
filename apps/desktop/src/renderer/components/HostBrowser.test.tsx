@@ -10,7 +10,13 @@ import {
   isGroupWithinPath,
   normalizeGroupPath
 } from '@shared';
-import type { GroupRecord, HostRecord, SecretMetadataRecord, SshHostRecord } from '@shared';
+import type {
+  ActivityLogRecord,
+  GroupRecord,
+  HostRecord,
+  SecretMetadataRecord,
+  SshHostRecord,
+} from '@shared';
 import {
   HostBrowser,
   getHostBrowserEmptyCalloutMessage,
@@ -203,6 +209,7 @@ interface RenderBrowserOptions {
   searchQuery?: string;
   hostViewMode?: 'grid' | 'list';
   selectedHostId?: string | null;
+  activityLogs?: ActivityLogRecord[];
   onClearHostSelection?: ReturnType<typeof vi.fn>;
   onSelectHost?: ReturnType<typeof vi.fn>;
   onDuplicateHosts?: ReturnType<typeof vi.fn>;
@@ -215,6 +222,11 @@ interface RenderBrowserOptions {
   onConnectHost?: ReturnType<typeof vi.fn>;
   onConnectHostTmux?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
+  onActivateSftp?: ReturnType<typeof vi.fn>;
+  onActivateContainers?: ReturnType<typeof vi.fn>;
+  onOpenSettingsSection?: ReturnType<typeof vi.fn>;
+  onQuickConnectSsh?: ReturnType<typeof vi.fn>;
+  onSelectSection?: ReturnType<typeof vi.fn>;
   onNavigateGroup?: ReturnType<typeof vi.fn>;
   onHostViewModeChange?: ReturnType<typeof vi.fn>;
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
@@ -236,6 +248,7 @@ function renderBrowser({
   searchQuery = '',
   hostViewMode = 'grid',
   selectedHostId = null,
+  activityLogs = [],
   onClearHostSelection = vi.fn(),
   onSelectHost = vi.fn(),
   onDuplicateHosts = vi.fn().mockResolvedValue(undefined),
@@ -248,6 +261,11 @@ function renderBrowser({
   onConnectHost = vi.fn().mockResolvedValue(undefined),
   onConnectHostTmux,
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
+  onActivateSftp = vi.fn(),
+  onActivateContainers = vi.fn(),
+  onOpenSettingsSection = vi.fn(),
+  onQuickConnectSsh = vi.fn().mockResolvedValue(undefined),
+  onSelectSection = vi.fn(),
   onNavigateGroup = vi.fn(),
   onHostViewModeChange = vi.fn(),
   onOpenLocalTerminal = vi.fn(),
@@ -269,6 +287,7 @@ function renderBrowser({
       searchQuery={searchQuery}
       hostViewMode={hostViewMode}
       selectedHostId={selectedHostId}
+      activityLogs={activityLogs}
       onSearchChange={vi.fn()}
       onHostViewModeChange={onHostViewModeChange}
       onOpenLocalTerminal={onOpenLocalTerminal}
@@ -295,6 +314,11 @@ function renderBrowser({
       onConnectHost={onConnectHost}
       onConnectHostTmux={onConnectHostTmux}
       onOpenHostContainers={onOpenHostContainers}
+      onActivateSftp={onActivateSftp}
+      onActivateContainers={onActivateContainers}
+      onOpenSettingsSection={onOpenSettingsSection}
+      onQuickConnectSsh={onQuickConnectSsh}
+      onSelectSection={onSelectSection}
     />
   );
 }
@@ -413,6 +437,100 @@ describe('HostBrowser helpers', () => {
     });
 
     expect(screen.getByText('아산')).toBeInTheDocument();
+  });
+
+  it('opens the command palette from the host search field and runs navigation actions', () => {
+    const onSelectSection = vi.fn();
+    const onActivateSftp = vi.fn();
+    renderBrowser({ onSelectSection, onActivateSftp });
+
+    fireEvent.focus(screen.getByLabelText('Search hosts'));
+
+    expect(screen.getByRole('listbox', { name: 'Command Palette' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /SFTP.*파일 전송/i }));
+    expect(onActivateSftp).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(screen.getByLabelText('Search hosts'));
+    fireEvent.click(screen.getByRole('option', { name: /로그.*활동 기록/i }));
+    expect(onSelectSection).toHaveBeenCalledWith('logs');
+  });
+
+  it('shows settings sections in the command palette', () => {
+    const onOpenSettingsSection = vi.fn();
+    renderBrowser({ searchQuery: 'credentials', onOpenSettingsSection });
+
+    fireEvent.focus(screen.getByLabelText('Search hosts'));
+    fireEvent.click(screen.getByRole('option', { name: /저장된 인증 정보/i }));
+
+    expect(onOpenSettingsSection).toHaveBeenCalledWith('secrets');
+  });
+
+  it('uses recent activity logs for empty command palette host reconnect suggestions', () => {
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      onConnectHost,
+      activityLogs: [
+        {
+          id: 'log-old',
+          level: 'info',
+          category: 'session',
+          kind: 'session-lifecycle',
+          message: 'connected',
+          metadata: { hostId: 'host-1' },
+          createdAt: '2025-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'log-new',
+          level: 'info',
+          category: 'session',
+          kind: 'session-lifecycle',
+          message: 'connected',
+          metadata: { hostId: 'host-2' },
+          createdAt: '2025-01-02T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const input = screen.getByLabelText('Search hosts');
+    fireEvent.focus(input);
+
+    const options = screen.getAllByRole('option').map((option) => option.textContent ?? '');
+    expect(options.findIndex((text) => text.includes('DB 연결'))).toBeLessThan(
+      options.findIndex((text) => text.includes('App 연결')),
+    );
+    expect(screen.queryByRole('option', { name: /DB SFTP/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: /DB 연결/i }));
+    expect(onConnectHost).toHaveBeenCalledWith('host-2');
+  });
+
+  it('runs the first host palette result with Enter', () => {
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ searchQuery: 'app', onConnectHost });
+
+    const input = screen.getByLabelText('Search hosts');
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onConnectHost).toHaveBeenCalledWith('host-1');
+  });
+
+  it('offers Quick Connect for ssh commands and passes parsed input', () => {
+    const onQuickConnectSsh = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      searchQuery: 'ssh gridwiz@192.168.0.13',
+      onQuickConnectSsh,
+    });
+
+    const input = screen.getByLabelText('Search hosts');
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onQuickConnectSsh).toHaveBeenCalledWith({
+      username: 'gridwiz',
+      hostname: '192.168.0.13',
+      port: 22,
+    });
   });
 
   it('keeps tags hidden until the toggle is pressed', () => {

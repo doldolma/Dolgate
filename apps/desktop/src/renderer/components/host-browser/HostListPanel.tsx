@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
+import { CommandPalette, type CommandPaletteItem } from '../CommandPalette';
 import { ChevronDown, LayoutGrid, List, Search } from '../../ui/icons';
 import { HostListCard } from './HostListCard';
 import { HostListTable } from './HostListTable';
+import { buildHostBrowserCommandPaletteItems } from './commandPaletteItems';
 import {
   Button,
   EmptyState,
@@ -51,6 +53,9 @@ export function HostListPanel({ hb }: HostListPanelProps) {
   } = hb;
 
   const shortcutLabel = desktopPlatform === 'darwin' ? '⌘K' : 'Ctrl K';
+  const paletteRootRef = useRef<HTMLDivElement | null>(null);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [activePaletteIndex, setActivePaletteIndex] = useState(0);
 
   const importMenuItems = useMemo(
     () =>
@@ -74,6 +79,42 @@ export function HostListPanel({ hb }: HostListPanelProps) {
       hb.onOpenXshellImport,
     ],
   );
+
+  const paletteItems = buildHostBrowserCommandPaletteItems(hb);
+
+  const clampedActivePaletteIndex =
+    paletteItems.length === 0
+      ? 0
+      : Math.min(activePaletteIndex, paletteItems.length - 1);
+
+  useEffect(() => {
+    if (!isPaletteOpen) {
+      return;
+    }
+    setActivePaletteIndex(0);
+  }, [isPaletteOpen, searchQuery]);
+
+  useEffect(() => {
+    if (!isPaletteOpen) {
+      return;
+    }
+    function handlePointerDown(event: MouseEvent) {
+      if (paletteRootRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setIsPaletteOpen(false);
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isPaletteOpen]);
+
+  function runPaletteItem(item: CommandPaletteItem) {
+    if (item.disabledReason) {
+      return;
+    }
+    setIsPaletteOpen(false);
+    void Promise.resolve(item.run());
+  }
 
   function handleBackgroundClick(event: React.MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
@@ -169,7 +210,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
     >
       {/* Toolbar row: search + actions */}
       <div className="flex items-center gap-3 px-[1.1rem] pb-[0.7rem] pt-[1.1rem] max-[760px]:flex-col max-[760px]:items-stretch">
-        <div className="relative min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1" ref={paletteRootRef}>
           <Search
             className="pointer-events-none absolute left-[0.75rem] top-1/2 h-[1rem] w-[1rem] -translate-y-1/2 text-[var(--text-muted)]"
             aria-hidden="true"
@@ -177,14 +218,58 @@ export function HostListPanel({ hb }: HostListPanelProps) {
           <input
             id="host-search"
             value={searchQuery}
-            onChange={(event) => onSearchChange(event.target.value)}
+            onFocus={() => setIsPaletteOpen(true)}
+            onChange={(event) => {
+              onSearchChange(event.target.value);
+              setIsPaletteOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (!isPaletteOpen) {
+                if (event.key === 'ArrowDown') {
+                  setIsPaletteOpen(true);
+                  event.preventDefault();
+                }
+                return;
+              }
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setActivePaletteIndex((current) =>
+                  paletteItems.length === 0
+                    ? 0
+                    : Math.min(current + 1, paletteItems.length - 1),
+                );
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActivePaletteIndex((current) => Math.max(current - 1, 0));
+              } else if (event.key === 'Enter') {
+                const item = paletteItems[clampedActivePaletteIndex];
+                if (item) {
+                  event.preventDefault();
+                  runPaletteItem(item);
+                }
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                setIsPaletteOpen(false);
+              }
+            }}
             placeholder={searchPlaceholder}
             aria-label="Search hosts"
+            aria-expanded={isPaletteOpen}
+            aria-controls="command-palette-results"
+            aria-haspopup="listbox"
             className="pl-[2.4rem] pr-[3.4rem]"
           />
           <kbd className="pointer-events-none absolute right-[0.6rem] top-1/2 inline-flex -translate-y-1/2 items-center rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] px-[0.4rem] py-[0.1rem] text-[0.7rem] font-medium text-[var(--text-muted)]">
             {shortcutLabel}
           </kbd>
+          {isPaletteOpen ? (
+            <CommandPalette
+              items={paletteItems}
+              activeIndex={clampedActivePaletteIndex}
+              onActiveIndexChange={setActivePaletteIndex}
+              onRunItem={runPaletteItem}
+            />
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button

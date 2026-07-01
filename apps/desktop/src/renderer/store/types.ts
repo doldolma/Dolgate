@@ -654,7 +654,7 @@ interface AppStateParts {
     hostId: string | null,
     draft: HostDraft,
     secrets?: HostSecretInput,
-  ) => Promise<void>;
+  ) => Promise<HostRecord>;
   duplicateHosts: (hostIds: string[]) => Promise<void>;
   moveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   setHostFavorite: (hostId: string, favorite: boolean) => Promise<void>;

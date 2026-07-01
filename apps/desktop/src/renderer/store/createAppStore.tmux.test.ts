@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CoreEvent, HostRecord } from "@shared";
+import type { HostContainersTabState } from "./types";
 import { createAppStore } from "./createAppStore";
 import { createMockApi } from "./createAppStore.test-support";
 import { asWorkspaceTabId } from "./utils";
@@ -578,7 +579,8 @@ describe("createAppStore tmux session grouping", () => {
 
   it("runTabCommand navigates the visible tab strip (next/prev/index/last/wrap)", () => {
     const store = createAppStore(createMockApi());
-    // 가시 순서: home, sftp, containers, session:s1, session:s2, tmuxgrp:g1
+    // 가시 순서: home, sftp, session:s1, session:s2, tmuxgrp:g1
+    // (컨테이너 탭이 없으므로 containers는 순서에서 제외 — 실제 탭 표시와 일치)
     store.setState({
       tabStrip: [
         { kind: "session", sessionId: "s1" },
@@ -601,13 +603,30 @@ describe("createAppStore tmux session grouping", () => {
     store.getState().runTabCommand({ kind: "last" });
     expect(store.getState().activeWorkspaceTab).toBe("tmuxgrp:g1");
 
-    store.getState().runTabCommand({ kind: "index", index: 4 });
+    // 컨테이너 탭이 없어 순서에서 containers가 빠지므로 index 3 = 첫 세션.
+    store.getState().runTabCommand({ kind: "index", index: 3 });
     expect(store.getState().activeWorkspaceTab).toBe("session:s1");
 
     // 맨 앞(home)에서 이전 → 마지막으로 순환.
     store.getState().runTabCommand({ kind: "index", index: 1 });
     store.getState().runTabCommand({ kind: "prev" });
     expect(store.getState().activeWorkspaceTab).toBe("tmuxgrp:g1");
+  });
+
+  it("includes the Containers tab in the cycle order only when container tabs exist", () => {
+    const store = createAppStore(createMockApi());
+    store.setState({
+      tabStrip: [{ kind: "session", sessionId: "s1" }],
+      // 최소 컨테이너 탭 하나(순서 포함 여부만 검증 — activateContainers는 hostId만 읽음).
+      containerTabs: [{ hostId: "h1" } as unknown as HostContainersTabState],
+    });
+
+    // 순서: home, sftp, containers, session:s1 → index 3 = containers, index 4 = 세션.
+    store.getState().runTabCommand({ kind: "index", index: 3 });
+    expect(store.getState().activeWorkspaceTab).toBe("containers");
+
+    store.getState().runTabCommand({ kind: "index", index: 4 });
+    expect(store.getState().activeWorkspaceTab).toBe("session:s1");
   });
 
   it("does NOT steal focus to the new tmux group if the user navigated away (home)", () => {

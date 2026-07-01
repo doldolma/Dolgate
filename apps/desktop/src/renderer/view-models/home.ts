@@ -22,7 +22,10 @@ export function useHomeViewModel() {
   );
   const setSearchQuery = useAppStore((state) => state.setSearchQuery);
   const activateHome = useAppStore((state) => state.activateHome);
+  const activateSftp = useAppStore((state) => state.activateSftp);
+  const activateContainers = useAppStore((state) => state.activateContainers);
   const openHomeSection = useAppStore((state) => state.openHomeSection);
+  const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
   const openCreateSerialDrawer = useAppStore((state) => state.openCreateSerialDrawer);
   const openEditHostDrawer = useAppStore((state) => state.openEditHostDrawer);
@@ -76,7 +79,10 @@ export function useHomeViewModel() {
     clearSyncedWorkspaceData,
     setSearchQuery,
     activateHome,
+    activateSftp,
+    activateContainers,
     openHomeSection,
+    openSettingsSection,
     openCreateHostDrawer,
     openCreateSerialDrawer,
     openEditHostDrawer,
