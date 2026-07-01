@@ -183,7 +183,16 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               };
             }),
     clearHostTagFilter: () => set({ selectedHostTags: [] }),
-    activateHome: () => set({ activeWorkspaceTab: "home" }),
+    activateHome: () => {
+            // 다른 탭에서 오면 홈 탭으로 전환하되 마지막 홈 섹션(로그 등)을 유지한다
+            // (세션 갔다 Home 복귀 시 보던 섹션 보존). 이미 홈 탭인데 다시 Home을 누르면
+            // 홈(호스트) 랜딩으로 리셋한다(홈 섹션에서 Home = 홈으로 가기).
+            if (get().activeWorkspaceTab === "home") {
+              get().openHomeSection("hosts");
+            } else {
+              set({ activeWorkspaceTab: "home" });
+            }
+          },
     activateSftp: () => set({ activeWorkspaceTab: "sftp" }),
     activateSession: (sessionId) =>
             set({ activeWorkspaceTab: asSessionTabId(sessionId) }),

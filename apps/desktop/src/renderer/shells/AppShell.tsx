@@ -179,7 +179,7 @@ export function AppShell({
         draggedSession={draggedSession}
         updateState={updateState}
         windowState={windowState}
-        onSelectHome={() => homeViewModel.openHomeSection("hosts")}
+        onSelectHome={homeViewModel.activateHome}
         onSelectSftp={sftpViewModel.activateSftp}
         onSelectContainers={containersViewModel.activateContainers}
         hasOpenContainers={containersViewModel.containerTabs.length > 0}

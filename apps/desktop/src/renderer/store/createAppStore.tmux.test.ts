@@ -641,3 +641,27 @@ describe("createAppStore tmux session grouping", () => {
     expect(store.getState().activeWorkspaceTab).toBe("home");
   });
 });
+
+describe("createAppStore Home 탭 이동", () => {
+  it("다른 탭에선 마지막 홈 섹션 유지, 이미 홈이면 홈(hosts)으로 리셋", () => {
+    const store = createAppStore(createMockApi());
+    // 로그 섹션 보는 중(홈 탭).
+    store.getState().openHomeSection("logs");
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+    expect(store.getState().homeSection).toBe("logs");
+
+    // 세션 탭으로 이동.
+    store.setState({ tabStrip: [{ kind: "session", sessionId: "s1" }] });
+    store.getState().activateSession("s1");
+    expect(store.getState().activeWorkspaceTab).toBe("session:s1");
+
+    // 다른 탭에서 Home → 홈 탭 전환 + 마지막 섹션(logs) 유지.
+    store.getState().activateHome();
+    expect(store.getState().activeWorkspaceTab).toBe("home");
+    expect(store.getState().homeSection).toBe("logs");
+
+    // 이미 홈에서 다시 Home → 홈(hosts) 랜딩으로 리셋.
+    store.getState().activateHome();
+    expect(store.getState().homeSection).toBe("hosts");
+  });
+});
