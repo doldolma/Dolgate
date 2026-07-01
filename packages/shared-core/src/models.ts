@@ -193,8 +193,14 @@ export interface SshHostRecord extends HostBaseRecord {
   privateKeyPath?: string | null;
   certificatePath?: string | null;
   secretRef?: string | null;
-  /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
+  /** @deprecated 단일 홉 레거시 필드. 다단은 jumpHostIds 사용. 구버전 호환을 위해 유지(=첫 홉). */
   jumpHostId?: string | null;
+  /**
+   * ProxyJump 체인(다단 베스천). 순서 = 첫 홉(클라이언트에서 직접 연결)…마지막 홉(타깃 바로 앞).
+   * `ssh -J J1,J2 target`과 동일. 비었거나 없으면 직접 연결.
+   * 구버전 호환: 이 값이 없고 legacy jumpHostId만 있으면 [jumpHostId]로 취급한다.
+   */
+  jumpHostIds?: string[] | null;
   startupCommand?: HostStartupCommand | null;
   /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
   useMosh?: boolean | null;
@@ -216,8 +222,10 @@ export interface SshHostDraft extends HostBaseDraft {
   privateKeyPath?: string | null;
   certificatePath?: string | null;
   secretRef?: string | null;
-  /** id of another SSH host to tunnel through (ProxyJump / bastion); null = direct. */
+  /** @deprecated 단일 홉 레거시 필드. 다단은 jumpHostIds 사용. 구버전 호환을 위해 유지(=첫 홉). */
   jumpHostId?: string | null;
+  /** ProxyJump 체인(다단). 순서 = 첫 홉…마지막 홉. [[SshHostRecord]] 참고. */
+  jumpHostIds?: string[] | null;
   startupCommand?: HostStartupCommand | null;
   /** mosh(UDP)로 연결한다. jump host와는 상호 배타(UI에서 차단). null/undefined = SSH. */
   useMosh?: boolean | null;
@@ -505,6 +513,31 @@ export function getHostBadgeLabel(host: HostRecord): string {
 
 export function getHostSecretRef(host: HostRecord): string | null {
   return host.kind === 'ssh' ? (host.secretRef ?? null) : null;
+}
+
+/**
+ * ProxyJump 체인을 정규화한다. 신규 jumpHostIds 우선, 없으면 레거시 단일 jumpHostId를 [id]로 본다.
+ * 빈 문자열·중복은 제거하고 순서는 보존한다(첫 홉 = 직접 연결 … 마지막 홉 = 타깃 바로 앞).
+ */
+export function normalizeJumpHostIds(
+  jumpHostIds: readonly (string | null | undefined)[] | null | undefined,
+  legacyJumpHostId?: string | null,
+): string[] {
+  const source =
+    Array.isArray(jumpHostIds) && jumpHostIds.length > 0
+      ? jumpHostIds
+      : legacyJumpHostId
+        ? [legacyJumpHostId]
+        : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of source) {
+    if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
 }
 
 function normalizeAwsPlatform(value?: string | null): string {
@@ -2710,6 +2743,16 @@ export interface TerminalTmuxSessionInfo {
   attached: boolean;
 }
 
+/** 다단 ProxyJump 연결 진행: 각 홉(점프/최종 대상)의 상태. index는 1-based(첫 홉 … count=최종 대상). */
+export interface TerminalConnectionHop {
+  index: number;
+  count: number;
+  label: string;
+  stage: 'connecting' | 'connected' | 'failed';
+  /** 사용자가 붙인 호스트 이름(선택). Go 라벨(user@host:port) 위에 얹어 표시. renderer가 채운다. */
+  name?: string | null;
+}
+
 export interface TerminalTab {
   id: string;
   /**
@@ -2725,6 +2768,8 @@ export interface TerminalTab {
   status: 'pending' | 'connecting' | 'connected' | 'disconnecting' | 'closed' | 'error';
   errorMessage?: string;
   connectionProgress?: TerminalConnectionProgress | null;
+  /** 다단 ProxyJump 연결 중 각 홉의 상태(연결 화면 표시용). 새 연결 시도 시 리셋, 비었으면 미표시. */
+  connectionHops?: TerminalConnectionHop[] | null;
   /** 자동 재연결 진행 중일 때만 채워지는 표시용 상태. 평시엔 null/undefined. */
   reconnect?: TerminalReconnectState | null;
   sessionShare?: SessionShareState | null;

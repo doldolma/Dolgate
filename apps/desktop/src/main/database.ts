@@ -29,6 +29,7 @@ import {
   normalizeServerUrl,
   normalizeGroupPath,
   normalizeHostEnvVars,
+  normalizeJumpHostIds,
   rebaseGroupPath,
   stripRemovedGroupSegment
 } from '@shared';
@@ -478,6 +479,7 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
 }
 
 function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | null, timestamp: string, current?: SshHostRecord): SshHostRecord {
+  const jumpHostIds = normalizeJumpHostIds(draft.jumpHostIds, draft.jumpHostId);
   return {
     id,
     kind: 'ssh',
@@ -489,7 +491,8 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     privateKeyPath: null,
     certificatePath: null,
     secretRef: secretRef ?? draft.secretRef ?? null,
-    jumpHostId: draft.jumpHostId ?? null,
+    jumpHostId: jumpHostIds[0] ?? null,
+    jumpHostIds: jumpHostIds.length > 0 ? jumpHostIds : null,
     useMosh: draft.useMosh ?? null,
     agentForwarding: draft.agentForwarding === true ? true : null,
     groupName: normalizeGroupPath(draft.groupName),
@@ -872,9 +875,21 @@ export class HostRepository {
         .filter((entry) => entry.id !== id)
         // Drop dangling jump-host references so a removed bastion doesn't leave
         // other hosts pointing at a host that no longer exists.
-        .map((entry) =>
-          isSshHostRecord(entry) && entry.jumpHostId === id ? { ...entry, jumpHostId: null } : entry
-        );
+        .map((entry) => {
+          if (!isSshHostRecord(entry)) {
+            return entry;
+          }
+          const currentChain = normalizeJumpHostIds(entry.jumpHostIds, entry.jumpHostId);
+          if (!currentChain.includes(id)) {
+            return entry;
+          }
+          const nextChain = currentChain.filter((jumpId) => jumpId !== id);
+          return {
+            ...entry,
+            jumpHostId: nextChain[0] ?? null,
+            jumpHostIds: nextChain.length > 0 ? nextChain : null,
+          };
+        });
     });
   }
 

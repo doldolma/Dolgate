@@ -246,7 +246,10 @@ func (s *Service) Stop(ruleID, requestID string) error {
 
 func (s *Service) dialTarget(endpointID, requestID string, target sshconn.Target) (*ssh.Client, error) {
 	attempt := 0
-	return sshconn.DialClient(target, sshconn.DefaultConfig, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+	// 홉 진행을 renderer로 방출(EndpointID=ruleID로 포트포워딩에 매핑) — 공통 헬퍼 재사용.
+	config := sshconn.DefaultConfig
+	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
+	return sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
 		responseCh := make(chan []string, 1)

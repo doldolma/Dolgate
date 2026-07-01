@@ -218,6 +218,32 @@ func TestDialClientThroughJumpHost(t *testing.T) {
 	}
 }
 
+// 다단 ProxyJump(`ssh -J jump1,jump2 target`): 클라이언트→jump1(직접)→jump2→target.
+// 중첩 Target.Jump.Jump가 끝까지 터널링돼 TARGET에 착지하는지 검증한다.
+func TestDialClientThroughTwoJumpHops(t *testing.T) {
+	target := newJumpTestServer(t, "tuser", "tpw", "TARGET-OK")
+	jump2 := newJumpTestServer(t, "j2user", "j2pw", "JUMP2-OK")
+	jump1 := newJumpTestServer(t, "j1user", "j1pw", "JUMP1-OK")
+
+	// 중첩: target.Jump = jump2, jump2.Jump = jump1. DialClient은 가장 깊은 .jump(jump1)부터
+	// 직접 연결한 뒤 위로 타고 올라간다.
+	targetTarget := target.target("tuser", "tpw")
+	jump2Target := jump2.target("j2user", "j2pw")
+	jump1Target := jump1.target("j1user", "j1pw")
+	jump2Target.Jump = &jump1Target
+	targetTarget.Jump = &jump2Target
+
+	client, err := DialClient(targetTarget, DefaultConfig, nil)
+	if err != nil {
+		t.Fatalf("DialClient through two jump hops: %v", err)
+	}
+	defer client.Close()
+
+	if got := execBanner(t, client); got != "TARGET-OK" {
+		t.Fatalf("banner = %q, want TARGET-OK (2-hop tunnel landed on the wrong host)", got)
+	}
+}
+
 func TestDialClientJumpHostKeyMismatch(t *testing.T) {
 	target := newJumpTestServer(t, "tuser", "tpw", "TARGET-OK")
 	bastion := newJumpTestServer(t, "buser", "bpw", "BASTION-OK")

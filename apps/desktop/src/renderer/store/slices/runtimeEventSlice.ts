@@ -8,6 +8,7 @@ import type {
 import type {
   KeyboardInteractiveChallenge,
   KeyboardInteractivePrompt,
+  TerminalConnectionHop,
   TerminalTab,
 } from "@shared";
 import {
@@ -156,6 +157,7 @@ import {
   scheduleReconnect,
 } from "../services/reconnect-orchestrator";
 import { classifyReconnect } from "../utils/reconnect-classify";
+import { resolveHopHostNames } from "../../lib/connection-hops";
 import type { CoreEvent, HostRecord } from "@shared";
 
 // AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
@@ -513,6 +515,122 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     : group,
                 ),
               }));
+              return;
+            }
+
+            // 다단 ProxyJump 연결 진행 — 각 홉(점프/최종 대상)의 상태를 해당 연결에 upsert해
+            // 공통 오버레이에 표시. sessionId=터미널/mosh/tmux, endpointId=SFTP pane·컨테이너.
+            // 프로브·실연결 어느 쪽이든 같은 이벤트로 도착하며, hopIndex 1 & connecting = 새 시도
+            // 시작 → 리셋. 가장 깊은 점프부터 순서대로 도착한다.
+            if (event.type === "connectionHopProgress") {
+              const payload = event.payload as {
+                hopLabel?: string;
+                hopIndex?: number;
+                hopCount?: number;
+                stage?: string;
+              };
+              const index =
+                typeof payload.hopIndex === "number" ? payload.hopIndex : 0;
+              if (index <= 0) {
+                return;
+              }
+              const hop: TerminalConnectionHop = {
+                index,
+                count:
+                  typeof payload.hopCount === "number" ? payload.hopCount : index,
+                label: typeof payload.hopLabel === "string" ? payload.hopLabel : "",
+                stage:
+                  payload.stage === "connected" || payload.stage === "failed"
+                    ? payload.stage
+                    : "connecting",
+              };
+              const upsertHop = (
+                existing: readonly TerminalConnectionHop[] | null | undefined,
+                entry: TerminalConnectionHop,
+              ): TerminalConnectionHop[] => {
+                const base =
+                  entry.index === 1 && entry.stage === "connecting"
+                    ? []
+                    : (existing ?? []);
+                const at = base.findIndex((item) => item.index === entry.index);
+                return at >= 0
+                  ? base.map((item, i) => (i === at ? entry : item))
+                  : [...base, entry];
+              };
+              // 홉 라벨(Go: user@host:port) 위에 사용자 지정 호스트 이름을 얹는다. 연결 대상의
+              // jumpHostIds 체인 → 홉 인덱스별 라벨을 해석(첫 홉 … 최종 대상). 공통 헬퍼 재사용해
+              // 터미널·SFTP·컨테이너가 동일하게 이름을 얻는다.
+              const named = (
+                hostId: string | null | undefined,
+                allHosts: readonly HostRecord[],
+              ): TerminalConnectionHop => {
+                const host = hostId
+                  ? allHosts.find((item) => item.id === hostId)
+                  : undefined;
+                return {
+                  ...hop,
+                  name: host
+                    ? (resolveHopHostNames(host, allHosts)[hop.index - 1] ?? null)
+                    : null,
+                };
+              };
+              if (sessionId) {
+                set((state) => ({
+                  tabs: state.tabs.map((tab) =>
+                    tab.sessionId === sessionId
+                      ? {
+                          ...tab,
+                          connectionHops: upsertHop(
+                            tab.connectionHops,
+                            named(tab.hostId, state.hosts),
+                          ),
+                        }
+                      : tab,
+                  ),
+                }));
+                return;
+              }
+              if (endpointId) {
+                set((state) => {
+                  const sftpPaneId = resolveSftpPaneIdByEndpoint(
+                    state,
+                    endpointId,
+                  );
+                  if (sftpPaneId) {
+                    const pane = getPane(state, sftpPaneId);
+                    return {
+                      sftp: updatePaneState(state, sftpPaneId, {
+                        ...pane,
+                        connectionHops: upsertHop(
+                          pane.connectionHops,
+                          named(
+                            pane.connectingHostId ?? pane.selectedHostId,
+                            state.hosts,
+                          ),
+                        ),
+                      }),
+                    };
+                  }
+                  const containerHostId =
+                    resolveContainersHostIdByEndpoint(endpointId);
+                  if (containerHostId) {
+                    const tab = findContainersTab(state, containerHostId);
+                    if (tab) {
+                      return {
+                        containerTabs: upsertContainersTab(state.containerTabs, {
+                          ...tab,
+                          connectionHops: upsertHop(
+                            tab.connectionHops,
+                            named(containerHostId, state.hosts),
+                          ),
+                        }),
+                      };
+                    }
+                  }
+                  return state;
+                });
+                return;
+              }
               return;
             }
 

@@ -90,4 +90,33 @@ describe("resolveConnectionFailurePresentation", () => {
       message: "something odd happened",
     });
   });
+
+  it("names the failing host from an enriched host-key probe error (direct hop)", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        `Error invoking remote method 'known-hosts:probe-host': Error: host-key probe failed for "Lime-GW" [183.99.29.89:2731]: host key probe failed: ssh: handshake failed: read tcp 192.168.0.70:56736->183.99.29.89:2731: read: connection reset by peer`,
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message: "'Lime-GW' (183.99.29.89:2731) 연결이 중간에 끊겼습니다.",
+    });
+  });
+
+  it("names the target and the failing bastion endpoint for a jump-routed probe", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        `host-key probe failed for "lime-dev" [192.168.0.13:22] via-jump: dial through jump host: ssh: handshake failed: read tcp 10.0.0.2:51000->183.99.29.89:2731: read: connection reset by peer`,
+      ).message,
+    ).toBe(
+      "'lime-dev' (192.168.0.13:22) · 점프 경유 183.99.29.89:2731 연결이 중간에 끊겼습니다.",
+    );
+  });
+
+  it("extracts the remote endpoint from a raw read-tcp reset when unenriched", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh: handshake failed: read tcp 192.168.0.70:56736->183.99.29.89:2731: read: connection reset by peer",
+      ).message,
+    ).toBe("183.99.29.89:2731 연결이 중간에 끊겼습니다.");
+  });
 });

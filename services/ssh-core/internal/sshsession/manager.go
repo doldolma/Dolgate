@@ -139,7 +139,7 @@ func buildEnvExportFallback(envVars []protocol.EnvVar) string {
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
 	attempt := 0
-	client, err := sshconn.DialClient(sshconn.Target{
+	target := sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
 		Username:              payload.Username,
@@ -151,9 +151,13 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}, sshconn.Config{
+	}
+	// 다단 ProxyJump 연결 단계 UI: DialClient가 홉마다 보고하는 진행을 공통 헬퍼로 renderer에
+	// 전달한다(세션·SFTP·컨테이너·probe가 전부 동일 방식). SessionID로 해당 터미널 탭에 매핑.
+	client, err := sshconn.DialClient(target, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
+		Progress:             sshconn.HopProgress(target, sessionID, "", m.emit),
 	}, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", sessionID, attempt)

@@ -114,6 +114,44 @@ describe('HostRepository', () => {
     expect(hosts.getById('ssh-startup')).toMatchObject({ startupCommand: null });
   });
 
+  it('persists a multi-hop jump chain and prunes it when a bastion is removed', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const baseDraft = (label: string) => ({
+      kind: 'ssh' as const,
+      label,
+      hostname: `${label}.example.com`,
+      port: 22,
+      username: 'ubuntu',
+      authType: 'password' as const,
+    });
+
+    hosts.create('jump-1', baseDraft('jump1'));
+    hosts.create('jump-2', baseDraft('jump2'));
+    hosts.create('target', { ...baseDraft('target'), jumpHostIds: ['jump-1', 'jump-2'] });
+
+    // 저장: 체인 보존 + 레거시 단일 필드는 첫 홉으로 미러링.
+    expect(hosts.getById('target')).toMatchObject({
+      jumpHostIds: ['jump-1', 'jump-2'],
+      jumpHostId: 'jump-1',
+    });
+
+    // 첫 베스천 삭제 → 체인에서 제거되고 미러도 갱신.
+    hosts.remove('jump-1');
+    expect(hosts.getById('target')).toMatchObject({
+      jumpHostIds: ['jump-2'],
+      jumpHostId: 'jump-2',
+    });
+
+    // 마지막 점프까지 삭제 → 직접 연결(null).
+    hosts.remove('jump-2');
+    expect(hosts.getById('target')).toMatchObject({
+      jumpHostIds: null,
+      jumpHostId: null,
+    });
+  });
+
   it('toggles favorite and preserves it across host edits', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

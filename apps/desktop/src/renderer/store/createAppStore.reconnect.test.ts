@@ -425,3 +425,112 @@ describe("shell-integration command state → tab", () => {
     expect(rttTab()?.commandState ?? null).toBeNull();
   });
 });
+
+describe("connection hop progress (runtimeEventSlice)", () => {
+  // 대상 h1은 [jump-db, jump-gw]를 경유(첫 홉=jump-db … 최종=h1). 핸들러가 각 홉 index를
+  // 이 체인의 호스트 라벨로 매핑해 name을 채운다.
+  const JUMP_DB = {
+    ...SSH_HOST,
+    id: "jump-db",
+    label: "Lime-DB",
+    hostname: "db.internal",
+  } as HostRecord;
+  const JUMP_GW = {
+    ...SSH_HOST,
+    id: "jump-gw",
+    label: "Lime-GW",
+    hostname: "gw.public",
+  } as HostRecord;
+  const TARGET = {
+    ...SSH_HOST,
+    id: "h1",
+    label: "lime-dev",
+    hostname: "dev.internal",
+    jumpHostId: "jump-db",
+    jumpHostIds: ["jump-db", "jump-gw"],
+  } as HostRecord;
+
+  function seedHopStore(tab: TerminalTab) {
+    const store = createAppStore(createMockApi());
+    store.setState({
+      hosts: [JUMP_DB, JUMP_GW, TARGET],
+      tabs: [tab],
+      tabStrip: [{ kind: "session", sessionId: tab.sessionId }],
+    });
+    return store;
+  }
+
+  function hopEvent(
+    payload: {
+      hopIndex: number;
+      hopCount: number;
+      hopLabel: string;
+      stage: "connecting" | "connected" | "failed";
+    },
+    sessionId = "s1",
+  ): CoreEvent {
+    return { type: "connectionHopProgress", sessionId, payload } as CoreEvent;
+  }
+
+  it("upserts each hop and labels it with the friendly host name", () => {
+    const store = seedHopStore(connectedTab({ status: "connecting" }));
+    const hops = () => store.getState().tabs[0]?.connectionHops;
+
+    store
+      .getState()
+      .handleCoreEvent(
+        hopEvent({ hopIndex: 1, hopCount: 3, hopLabel: "me@db.internal:22", stage: "connected" }),
+      );
+    store
+      .getState()
+      .handleCoreEvent(
+        hopEvent({ hopIndex: 2, hopCount: 3, hopLabel: "me@gw.public:22", stage: "connected" }),
+      );
+    store
+      .getState()
+      .handleCoreEvent(
+        hopEvent({ hopIndex: 3, hopCount: 3, hopLabel: "me@dev.internal:22", stage: "connecting" }),
+      );
+
+    // 홉 인덱스별로 체인의 호스트 라벨(name)이 채워진다.
+    expect(hops()).toEqual([
+      { index: 1, count: 3, label: "me@db.internal:22", stage: "connected", name: "Lime-DB" },
+      { index: 2, count: 3, label: "me@gw.public:22", stage: "connected", name: "Lime-GW" },
+      { index: 3, count: 3, label: "me@dev.internal:22", stage: "connecting", name: "lime-dev" },
+    ]);
+  });
+
+  it("resets the chain when a fresh attempt starts at hop 1", () => {
+    const store = seedHopStore(
+      connectedTab({
+        status: "connecting",
+        connectionHops: [
+          { index: 1, count: 3, label: "stale", stage: "failed" },
+          { index: 2, count: 3, label: "stale", stage: "connecting" },
+        ],
+      }),
+    );
+    const hops = () => store.getState().tabs[0]?.connectionHops;
+
+    // hopIndex 1 + connecting은 새 연결 시도의 시작 → 이전 체인을 버린다.
+    store
+      .getState()
+      .handleCoreEvent(
+        hopEvent({ hopIndex: 1, hopCount: 3, hopLabel: "me@db.internal:22", stage: "connecting" }),
+      );
+
+    expect(hops()).toEqual([
+      { index: 1, count: 3, label: "me@db.internal:22", stage: "connecting", name: "Lime-DB" },
+    ]);
+  });
+
+  it("ignores hop events with a non-positive index", () => {
+    const store = seedHopStore(connectedTab({ status: "connecting" }));
+    store
+      .getState()
+      .handleCoreEvent(
+        hopEvent({ hopIndex: 0, hopCount: 0, hopLabel: "", stage: "connecting" }),
+      );
+    expect(store.getState().tabs[0]?.connectionHops ?? null).toBeNull();
+  });
+});

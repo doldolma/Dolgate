@@ -191,7 +191,18 @@ func New(options Options) *Runtime {
 		forwarding.New(emitEvent),
 		ssmforward.New(emitEvent),
 		func(payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error) {
-			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, sshconn.JumpTargetFromCore(payload.Jump), sshconn.DefaultConfig)
+			jump := sshconn.JumpTargetFromCore(payload.Jump)
+			// 프로브도 홉 진행을 방출한다: 점프 체인은 DialClient가, 최종 타깃 홉은 ProbeHostKey가
+			// config.Progress로 보고. 상관 ID는 renderer가 넘긴 sessionId/endpointId를 그대로 사용해
+			// 프로브 홉이 실제 연결과 같은 오버레이에 표시되게 한다.
+			probeConfig := sshconn.DefaultConfig
+			probeConfig.Progress = sshconn.HopProgress(
+				sshconn.Target{Host: payload.Host, Port: payload.Port, Jump: jump},
+				payload.SessionID,
+				payload.EndpointID,
+				emitEvent,
+			)
+			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, jump, probeConfig)
 			if err != nil {
 				return coretypes.HostKeyProbedPayload{}, err
 			}

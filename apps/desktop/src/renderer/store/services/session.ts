@@ -516,6 +516,10 @@ export function createSessionServices(deps: SliceDeps) {
       const targetTrusted = await ensureTrustedHost(set, {
         hostId,
         sessionId,
+        // 이미 신뢰된 타깃은 재-probe하지 않는다. 안 그러면 프로브가 점프 체인을 한 번 더
+        // 순회해(홉 UI가 같은 단계를 반복 표시) 실연결과 합쳐 여러 바퀴처럼 보인다. 키 변경은
+        // 실연결의 strict host-key 검사가 잡으므로 신뢰된 경우 프로브는 불필요하다.
+        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "ssh",
           hostId,
@@ -772,6 +776,9 @@ export function createSessionServices(deps: SliceDeps) {
       const trusted = await ensureTrustedHost(set, {
         hostId,
         sessionId,
+        // 이미 신뢰된 호스트는 프로브를 생략한다(startPendingSessionConnect의 재확인과 겹쳐
+        // 점프 체인을 중복 순회하던 문제 제거 — 홉 UI가 여러 바퀴 도는 원인이었다).
+        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "ssh",
           hostId,

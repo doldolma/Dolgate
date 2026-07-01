@@ -97,7 +97,7 @@ func (s *Service) Shutdown() {
 
 func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPConnectPayload) error {
 	attempt := 0
-	client, err := sshconn.DialClient(sshconn.Target{
+	target := sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
 		Username:              payload.Username,
@@ -109,7 +109,11 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}, sshconn.DefaultConfig, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+	}
+	// 홉 진행을 renderer로 방출(EndpointID로 SFTP pane에 매핑) — 세션·컨테이너·probe와 동일한 공통 헬퍼.
+	config := sshconn.DefaultConfig
+	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
+	client, err := sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
 		responseCh := make(chan []string, 1)

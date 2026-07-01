@@ -277,6 +277,29 @@ function buildCredentialValue(
   return label;
 }
 
+/**
+ * 다단 ProxyJump 체인을 순서대로(첫 홉=클라이언트에서 직접 연결 … 마지막 홉=타깃 바로 앞) 반환.
+ * footgun 회피: shared-core의 신규 value export(normalizeJumpHostIds)를 렌더러에서 직접 import하면
+ * vite dev의 export* 처리로 심볼이 드롭돼 앱이 블랭크가 될 수 있어 동일 로직을 인라인한다.
+ */
+function deriveJumpHostIds(host: SshHostRecord): string[] {
+  const source =
+    Array.isArray(host.jumpHostIds) && host.jumpHostIds.length > 0
+      ? host.jumpHostIds
+      : host.jumpHostId
+        ? [host.jumpHostId]
+        : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of source) {
+    if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+}
+
 function buildConnectionRows(
   host: HostRecord,
   hosts: HostRecord[],
@@ -297,10 +320,30 @@ function buildConnectionRows(
     rows.push({ label: 'Port', value: host.port });
     rows.push({ label: 'Auth', value: host.authType });
     rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
-    if (host.jumpHostId) {
+    const jumpHostIds = deriveJumpHostIds(host);
+    if (jumpHostIds.length > 0) {
       rows.push({
-        label: 'Jump Host',
-        value: hosts.find((entry) => entry.id === host.jumpHostId)?.label ?? host.jumpHostId,
+        label: jumpHostIds.length > 1 ? 'Jump Hosts' : 'Jump Host',
+        value: (
+          <span className="inline-flex flex-wrap items-center justify-end gap-x-1 gap-y-1">
+            {jumpHostIds.map((jumpId, index) => {
+              const jumpLabel =
+                hosts.find((entry) => entry.id === jumpId)?.label ?? jumpId;
+              return (
+                <span key={jumpId} className="inline-flex items-center gap-x-1">
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="text-[var(--text-muted)]">
+                      →
+                    </span>
+                  ) : null}
+                  <span className="rounded-[6px] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[0.78rem] font-medium text-[var(--text)]">
+                    {jumpLabel}
+                  </span>
+                </span>
+              );
+            })}
+          </span>
+        ),
       });
     }
     if (host.useMosh) {

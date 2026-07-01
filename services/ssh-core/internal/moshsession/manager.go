@@ -108,7 +108,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	// 1) SSH bootstrap — mosh-server를 원격에서 띄우기 위한 1회성 SSH 연결.
 	//    인증/jump/known-host 인프라는 sshsession과 동일하게 sshconn으로 재사용한다.
 	attempt := 0
-	client, err := sshconn.DialClient(sshconn.Target{
+	target := sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
 		Username:              payload.Username,
@@ -120,9 +120,12 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}, sshconn.Config{
+	}
+	// bootstrap SSH도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 세션과 동일한 공통 헬퍼.
+	client, err := sshconn.DialClient(target, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
+		Progress:             sshconn.HopProgress(target, sessionID, "", m.emit),
 	}, m.keyboardInteractiveResponder(sessionID, requestID, &attempt))
 	if err != nil {
 		return err

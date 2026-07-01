@@ -805,6 +805,8 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 hostId: currentAttempt.hostId,
                 sessionId: pendingSessionId,
                 endpointId: buildContainersEndpointId(currentAttempt.hostId),
+                // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
+                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "containerShell",
                   hostId: currentAttempt.hostId,

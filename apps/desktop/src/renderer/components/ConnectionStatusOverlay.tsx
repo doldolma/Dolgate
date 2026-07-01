@@ -1,5 +1,7 @@
 import { cn } from '../lib/cn';
 import { Button } from '../ui';
+import type { TerminalConnectionHop } from '@shared';
+import { ConnectionHopSteps } from './ConnectionHopSteps';
 
 export interface ConnectionStatusOverlayProps {
   error: boolean;
@@ -11,6 +13,8 @@ export interface ConnectionStatusOverlayProps {
   /** 자동 재연결 진행 중 표시되는 취소 버튼(에러가 아니어도 상호작용 가능). */
   showCancel?: boolean;
   onCancel?: () => void;
+  /** 다단 ProxyJump 연결 시 각 홉의 진행 상태(비었으면 미표시). name은 사용자 지정 호스트 이름(선택). */
+  steps?: readonly (TerminalConnectionHop & { name?: string | null })[] | null;
 }
 
 export function ConnectionStatusOverlay({
@@ -22,6 +26,7 @@ export function ConnectionStatusOverlay({
   onClose,
   showCancel = false,
   onCancel,
+  steps,
 }: ConnectionStatusOverlayProps) {
   const interactive = error || showCancel;
   return (
@@ -45,6 +50,7 @@ export function ConnectionStatusOverlay({
             {message}
           </p>
         </div>
+        <ConnectionHopSteps steps={steps} />
         {error ? (
           <div className="flex w-full justify-end gap-[0.7rem] pt-[0.4rem]">
             {showRetry ? (

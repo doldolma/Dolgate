@@ -94,6 +94,17 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
             window.webContents.send(ipcChannels.logs.changed);
           }
         }
+        // 실패한 호스트를 라벨+주소로 식별해 다시 던진다(다단 ProxyJump에서 어느 호스트
+        // 에서 끊겼는지 UI가 raw IP 대신 이름으로 보여줄 수 있게). 원본 메시지(reset/timeout
+        // 등)는 뒤에 보존해 렌더러의 실패 분류가 그대로 동작한다. jump가 있으면 타깃을 점프
+        // 경유로 probe한 것이라, 실제 끊긴 지점(베스천 등)은 메시지 내부 주소로 구분된다.
+        if (host && isSshHostRecord(host)) {
+          throw new Error(
+            `host-key probe failed for "${host.label}" [${host.hostname}:${host.port}]${
+              jump ? " via-jump" : ""
+            }: ${reason}`,
+          );
+        }
         throw error;
       }
     },

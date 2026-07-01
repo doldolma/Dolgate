@@ -80,6 +80,7 @@ export {
 } from "../lib/file-drop";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { HostCard } from "./HostCard";
+import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { ArrowLeft, ArrowRight, ArrowUp } from "../ui/icons";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
@@ -2321,6 +2322,7 @@ function HostPicker({
               {pane.connectionProgress?.message ??
                 "원격 파일 목록을 준비하고 있습니다."}
             </span>
+            <ConnectionHopSteps steps={pane.connectionHops} />
           </Card>
         </div>
       ) : null}

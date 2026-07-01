@@ -180,6 +180,7 @@ export type CoreEventType =
   | "error"
   | "closed"
   | "latency"
+  | "connectionHopProgress"
   | "serialPortsListed"
   | "serialControlCompleted"
   | "hostKeyProbed"
@@ -505,6 +506,10 @@ export interface ResolvedHostKeyProbePayload {
   port: number;
   // 베스천 뒤의(직접 닿지 않는) 타깃 호스트 키를 읽을 때, 경유할 점프 호스트.
   jump?: ResolvedJumpHost;
+  // 프로브 중 방출하는 홉 진행(connectionHopProgress)을 해당 연결의 오버레이에 매핑하기 위한
+  // 상관 ID. 세션(터미널 탭)이면 sessionId, SFTP·컨테이너 등이면 endpointId를 채운다.
+  sessionId?: string;
+  endpointId?: string;
 }
 
 export interface ResolvedPortForwardStartPayload {
@@ -651,6 +656,8 @@ export interface HostContainersEphemeralTunnelInput {
 export interface KnownHostProbeInput {
   hostId: string;
   endpointId?: string | null;
+  // 프로브 홉 진행을 활성 오버레이(터미널 탭 등)에 매핑하기 위한 세션 상관 ID.
+  sessionId?: string | null;
 }
 
 // 모든 stdio 요청은 동일한 envelope 구조를 사용한다.

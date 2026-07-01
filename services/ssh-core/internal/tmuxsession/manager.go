@@ -184,7 +184,7 @@ func parsePaneSessionID(sessionID string) (controlID, paneID string, ok bool) {
 
 // Connect 는 tmux -CC control 채널을 연다. sessionID 는 control 세션 id 다.
 func (m *Manager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
-	client, err := sshconn.DialClient(sshconn.Target{
+	target := sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
 		Username:              payload.Username,
@@ -196,9 +196,12 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}, sshconn.Config{
+	}
+	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
+	client, err := sshconn.DialClient(target, sshconn.Config{
 		TCPDialTimeout:       m.config.TCPDialTimeout,
 		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
+		Progress:             sshconn.HopProgress(target, sessionID, "", m.emit),
 	}, func(sshconn.InteractiveChallenge) ([]string, error) {
 		return nil, fmt.Errorf("keyboard-interactive not supported for tmux control mode")
 	})

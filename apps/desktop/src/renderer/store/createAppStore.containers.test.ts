@@ -1239,10 +1239,12 @@ describe("createAppStore containers", () => {
 
     await store.getState().refreshHostContainers("host-1");
 
-    expect(api.knownHosts.probeHost).toHaveBeenCalledWith({
-      hostId: "host-1",
-      endpointId: "containers:host-1",
-    });
+    expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "host-1",
+        endpointId: "containers:host-1",
+      }),
+    );
     expect(api.containers.list).toHaveBeenCalledWith("host-1");
   });
 

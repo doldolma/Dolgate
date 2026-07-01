@@ -7,6 +7,7 @@ import {
   isAwsEcsHostRecord,
   isSshHostRecord,
   isWarpgateSshHostRecord,
+  normalizeJumpHostIds,
 } from "@shared";
 import type {
   AwsSftpDiagnosticDetails,
@@ -405,12 +406,21 @@ export function createHostCoordinator(deps: {
             );
           })();
 
-    const probed = await coreManager.probeHostKey({
-      host: probeHost,
-      port: probePort,
-      // 점프는 SSH 호스트 타깃에만 적용된다(warpgate/aws는 jump 미전달).
-      jump: isSshHostRecord(host) ? jump : undefined,
-    });
+    // 다단 ProxyJump에선 하나의 베스천에 probe·터널·실연결이 짧은 시간에 몰려, 서버측
+    // MaxStartups류 pre-auth 커넥션 제한에 걸려 리셋/EOF/핸드셰이크 실패가 날 수 있다.
+    // 일시적 오류는 짧게 재시도한다(인증 실패·호스트 키 불일치 등 확정 오류는
+    // isTransientAwsSsmSshError가 걸러 즉시 실패). AWS SSM 경로와 동일한 재시도 헬퍼 재사용.
+    const probed = await retryAwsSsmSshOperation(() =>
+      coreManager.probeHostKey({
+        host: probeHost,
+        port: probePort,
+        // 점프는 SSH 호스트 타깃에만 적용된다(warpgate/aws는 jump 미전달).
+        jump: isSshHostRecord(host) ? jump : undefined,
+        // 프로브 홉 진행을 활성 오버레이에 매핑하기 위한 상관 ID(renderer가 넘긴 값 그대로).
+        sessionId: input.sessionId ?? undefined,
+        endpointId: input.endpointId ?? undefined,
+      }),
+    );
     const existing = knownHosts.getByHostPortAlgorithm(
       probeHost,
       probePort,
@@ -443,44 +453,55 @@ export function createHostCoordinator(deps: {
   // 점프(베스천) 호스트를 가리키는 SSH 호스트의 연결/probe 직전에, 그 점프 호스트의
   // 자격증명·신뢰키·인증서를 타깃과 동일한 헬퍼로 해석해 ResolvedJumpHost로 만든다.
   // (점프는 저장된 일반 SSH 호스트만 허용 → 기존 해석 경로를 그대로 재사용.)
-  // v1은 단일 홉이라 점프 호스트 자신의 jumpHostId(체인)는 따라가지 않는다.
+  // jumpHostIds 체인(다단 ProxyJump)을 중첩 ResolvedJumpHost로 빌드한다. chain=[J1…Jn]에서
+  // J1이 첫 홉(클라이언트에서 직접 연결), Jn이 타깃 바로 앞. DialClient는 가장 깊은 .jump부터
+  // 직접 연결하므로 J1을 innermost로 두고 Jn까지 바깥으로 감싼다. 각 점프 호스트 자신의
+  // jumpHostIds는 따르지 않는다(타깃의 체인이 권위 — 점프 호스트가 공유돼도 부작용 없음).
   const resolveJumpHostTarget = async (
     host: SshHostRecord,
   ): Promise<ResolvedJumpHost | undefined> => {
-    const jumpHostId = host.jumpHostId;
-    if (!jumpHostId) {
+    const chain = normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId);
+    if (chain.length === 0) {
       return undefined;
     }
-    if (jumpHostId === host.id) {
-      throw new Error("점프 호스트가 자기 자신을 가리킬 수 없습니다.");
+    const maxChain = 8; // ProxyJump 다단 깊이 상한(안전장치)
+    if (chain.length > maxChain) {
+      throw new Error(`점프 호스트는 최대 ${maxChain}단까지 설정할 수 있습니다.`);
     }
-    const jumpHost = hosts.getById(jumpHostId);
-    if (!jumpHost) {
-      throw new Error(
-        "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
-      );
-    }
-    if (!isSshHostRecord(jumpHost)) {
-      throw new Error("점프 호스트는 일반 SSH 호스트여야 합니다.");
+    if (chain.includes(host.id)) {
+      throw new Error("점프 호스트 체인에 자기 자신을 포함할 수 없습니다.");
     }
 
-    const trustedHostKeysBase64 = requireTrustedHostKeys(jumpHost);
-    const username = requireConfiguredSshUsername(jumpHost);
-    const { secrets } = await resolveRuntimeSshSecrets(jumpHost);
-    await ensureCertificateAuthReady(jumpHost, secrets);
-
-    return {
-      host: jumpHost.hostname,
-      port: jumpHost.port,
-      username,
-      authType: jumpHost.authType,
-      password: secrets.password,
-      privateKeyPem: secrets.privateKeyPem,
-      certificateText: secrets.certificateText,
-      passphrase: secrets.passphrase,
-      trustedHostKeyBase64: trustedHostKeysBase64[0],
-      trustedHostKeysBase64,
-    };
+    let resolved: ResolvedJumpHost | undefined;
+    for (const jumpHostId of chain) {
+      const jumpHost = hosts.getById(jumpHostId);
+      if (!jumpHost) {
+        throw new Error(
+          "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
+        );
+      }
+      if (!isSshHostRecord(jumpHost)) {
+        throw new Error("점프 호스트는 일반 SSH 호스트여야 합니다.");
+      }
+      const trustedHostKeysBase64 = requireTrustedHostKeys(jumpHost);
+      const username = requireConfiguredSshUsername(jumpHost);
+      const { secrets } = await resolveRuntimeSshSecrets(jumpHost);
+      await ensureCertificateAuthReady(jumpHost, secrets);
+      resolved = {
+        host: jumpHost.hostname,
+        port: jumpHost.port,
+        username,
+        authType: jumpHost.authType,
+        password: secrets.password,
+        privateKeyPem: secrets.privateKeyPem,
+        certificateText: secrets.certificateText,
+        passphrase: secrets.passphrase,
+        trustedHostKeyBase64: trustedHostKeysBase64[0],
+        trustedHostKeysBase64,
+        jump: resolved,
+      };
+    }
+    return resolved;
   };
 
   return {

@@ -48,6 +48,7 @@ import type {
   SshKeyInstallResult,
   SshKeyMaterialResult,
   TabCommandPayload,
+  TerminalConnectionHop,
   TerminalReconnectState,
   TerminalTab,
   TransferJob,
@@ -304,6 +305,8 @@ export interface HostContainersTabState {
   runtime: HostContainerRuntime | null;
   unsupportedReason: string | null;
   connectionProgress?: ContainerConnectionProgressEvent | null;
+  // 다단 ProxyJump 연결 시 각 홉 진행(공통 오버레이 스텝). connectionHopProgress가 endpointId로 채운다.
+  connectionHops?: TerminalConnectionHop[] | null;
   items: HostContainerSummary[];
   selectedContainerId: string | null;
   activePanel: ContainersWorkspacePanel;
@@ -355,6 +358,8 @@ export interface SftpPaneState {
   connectingEndpointId?: string | null;
   connectionProgress?: SftpConnectionProgressEvent | null;
   connectionDiagnostic?: SftpConnectionProgressEvent | null;
+  // 다단 ProxyJump 연결 시 각 홉 진행(공통 오버레이 스텝). connectionHopProgress가 endpointId로 채운다.
+  connectionHops?: TerminalConnectionHop[] | null;
   hostGroupPath: string | null;
   currentPath: string;
   lastLocalPath: string;

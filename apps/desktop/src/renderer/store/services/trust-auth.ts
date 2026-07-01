@@ -1,6 +1,7 @@
 import type {
   HostRecord,
   HostSecretInput,
+  SshHostRecord,
   TerminalConnectionProgress,
 } from "@shared";
 import {
@@ -166,6 +167,8 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     const probe = await api.knownHosts.probeHost({
       hostId: input.hostId,
       endpointId: input.endpointId ?? null,
+      // 프로브가 방출하는 홉 진행을 이 연결의 오버레이(터미널 탭 등)에 매핑하기 위한 상관 ID.
+      sessionId: input.sessionId ?? null,
     });
     if (probe.status === "trusted") {
       return true;
@@ -180,33 +183,56 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     return false;
   };
 
+  // 대상의 다단 ProxyJump 체인을 순서대로(첫 홉=클라이언트에서 직접 연결 … 마지막=대상 바로 앞).
+  // footgun 회피: shared-core의 normalizeJumpHostIds(value export)를 직접 import하지 않고 인라인.
+  const deriveJumpChain = (host: SshHostRecord): string[] => {
+    const source =
+      Array.isArray(host.jumpHostIds) && host.jumpHostIds.length > 0
+        ? host.jumpHostIds
+        : host.jumpHostId
+          ? [host.jumpHostId]
+          : [];
+    const seen = new Set<string>();
+    const chain: string[] = [];
+    for (const id of source) {
+      if (typeof id === "string" && id.length > 0 && !seen.has(id)) {
+        seen.add(id);
+        chain.push(id);
+      }
+    }
+    return chain;
+  };
+
   const ensureTrustedHost = (
     set: StoreSetter,
     input: EnsureTrustedHostInput,
   ): Promise<boolean> => {
-    // 타깃이 점프(베스천)를 경유하면, 베스천을 먼저 신뢰해야 main이 그 경유로 타깃 키를
-    // probe할 수 있다. 베스천 자신은 jumpHostId가 없어 직접 probe된다. v1은 단일 홉이라
-    // 한 단계만 선행 신뢰한다(체인/사이클 무한재귀 방지).
-    // 점프가 없는 일반 경로는 inner 프로미스를 그대로 반환해 추가 마이크로태스크 없이
-    // 기존 타이밍을 유지한다.
+    // 타깃이 점프(베스천)를 경유하면, 그 베스천들을 먼저 신뢰해야 main이 경유해 타깃 키를
+    // probe할 수 있다. 다단 ProxyJump는 체인 전체를 첫 홉부터 순서대로 신뢰한다 — 각 홉은
+    // 자신의 설정으로 probe되며, 미신뢰 홉이 있으면 그 홉에서 신뢰 프롬프트가 뜬다(Termius식
+    // 홉별 trust). 이미 신뢰된 홉은 재-probe를 생략(중복 순회·pre-auth 몰림 방지, 실연결의
+    // strict host-key 검사가 안전을 보장). 점프가 없는 일반 경로는 inner 프로미스를 그대로
+    // 반환해 추가 마이크로태스크 없이 기존 타이밍을 유지한다.
     const targetHost = get().hosts.find((item) => item.id === input.hostId);
-    if (
-      targetHost &&
-      isSshHostRecord(targetHost) &&
-      targetHost.jumpHostId &&
-      targetHost.jumpHostId !== input.hostId
-    ) {
-      const jumpHostId = targetHost.jumpHostId;
-      return (async () => {
-        const jumpTrusted = await ensureTrustedHostKey(set, {
-          ...input,
-          hostId: jumpHostId,
-        });
-        if (!jumpTrusted) {
-          return false;
-        }
-        return ensureTrustedHostKey(set, input);
-      })();
+    if (targetHost && isSshHostRecord(targetHost)) {
+      const chain = deriveJumpChain(targetHost).filter(
+        (jumpHostId) => jumpHostId !== input.hostId,
+      );
+      if (chain.length > 0) {
+        return (async () => {
+          for (const jumpHostId of chain) {
+            const jumpTrusted = await ensureTrustedHostKey(set, {
+              ...input,
+              hostId: jumpHostId,
+              skipProbeIfAlreadyTrusted: true,
+            });
+            if (!jumpTrusted) {
+              return false;
+            }
+          }
+          return ensureTrustedHostKey(set, input);
+        })();
+      }
     }
 
     return ensureTrustedHostKey(set, input);

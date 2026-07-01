@@ -252,6 +252,8 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
       trusted = await ensureTrustedHost(set, {
         hostId,
         endpointId: buildContainersEndpointId(hostId),
+        // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
+        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "containers",
           hostId,
@@ -707,6 +709,8 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                 hostId,
                 sessionId,
                 endpointId: buildContainersEndpointId(hostId),
+                // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
+                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "containerShell",
                   hostId,

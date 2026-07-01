@@ -9,6 +9,7 @@ import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
 import { Button, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
 import type { SearchableSelectOption } from '../ui';
+import { ArrowDown, ArrowUp, X } from '../ui/icons';
 
 const defaultSshDraft: SshHostDraft = {
   kind: 'ssh',
@@ -42,6 +43,130 @@ export function getJumpHostCandidates(
       label: host.label?.trim() || host.hostname,
       description: `${host.username ? `${host.username}@` : ''}${host.hostname}:${host.port}`,
     }));
+}
+
+// 드래프트의 ProxyJump 체인을 배열로 정규화(신규 jumpHostIds 우선, 레거시 jumpHostId 폴백).
+// shared-core의 normalizeJumpHostIds와 같은 의미지만, @shared value를 렌더러에서 import하면
+// vite dev의 export* 누락으로 화면이 비는 이슈가 있어 여기 인라인한다(타입 import만 안전).
+function deriveJumpChain(draft: SshHostDraft): string[] {
+  const ids =
+    Array.isArray(draft.jumpHostIds) && draft.jumpHostIds.length > 0
+      ? draft.jumpHostIds
+      : draft.jumpHostId
+        ? [draft.jumpHostId]
+        : [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const id of ids) {
+    if (typeof id === 'string' && id.length > 0 && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  }
+  return result;
+}
+
+// 다단 ProxyJump 체인 편집기. 순서 = 첫 홉(클라이언트에서 직접 연결)…마지막 홉(타깃 바로 앞).
+function JumpHostChainEditor({
+  value,
+  candidates,
+  disabled = false,
+  onChange,
+}: {
+  value: string[];
+  candidates: SearchableSelectOption[];
+  disabled?: boolean;
+  onChange: (ids: string[]) => void;
+}) {
+  const optionsFor = (index: number) =>
+    candidates.filter(
+      (option) =>
+        String(option.value) === value[index] || !value.includes(String(option.value)),
+    );
+  const move = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= value.length) {
+      return;
+    }
+    const next = [...value];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+  const remaining = candidates.filter((option) => !value.includes(String(option.value)));
+  const iconButtonClass =
+    'inline-grid h-[1.9rem] w-[1.9rem] shrink-0 place-items-center rounded-[8px] text-[var(--text-muted)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)] disabled:opacity-40 disabled:hover:bg-transparent';
+  return (
+    <div className="grid gap-[0.4rem]">
+      {value.map((id, index) => (
+        <div key={`${id}-${index}`} className="flex items-center gap-[0.4rem]">
+          <span className="inline-grid h-[1.6rem] w-[1.6rem] shrink-0 place-items-center rounded-[8px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] text-[0.72rem] font-semibold text-[var(--text-soft)]">
+            {index + 1}
+          </span>
+          <div className="min-w-0 flex-1">
+            <SearchableSelect
+              ariaLabel={`Jump host ${index + 1}`}
+              placeholder="점프 호스트 선택"
+              searchPlaceholder="이름, 호스트, 사용자 검색"
+              value={id}
+              options={optionsFor(index)}
+              disabled={disabled}
+              onChange={(next) => {
+                if (!next) {
+                  onChange(value.filter((_, i) => i !== index));
+                  return;
+                }
+                const updated = [...value];
+                updated[index] = next;
+                onChange(updated);
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className={iconButtonClass}
+            aria-label={`${index + 1}번째 점프 위로`}
+            disabled={disabled || index === 0}
+            onClick={() => move(index, -1)}
+          >
+            <ArrowUp className="h-[0.95rem] w-[0.95rem]" />
+          </button>
+          <button
+            type="button"
+            className={iconButtonClass}
+            aria-label={`${index + 1}번째 점프 아래로`}
+            disabled={disabled || index === value.length - 1}
+            onClick={() => move(index, 1)}
+          >
+            <ArrowDown className="h-[0.95rem] w-[0.95rem]" />
+          </button>
+          <button
+            type="button"
+            className={iconButtonClass}
+            aria-label={`${index + 1}번째 점프 제거`}
+            disabled={disabled}
+            onClick={() => onChange(value.filter((_, i) => i !== index))}
+          >
+            <X className="h-[1rem] w-[1rem]" />
+          </button>
+        </div>
+      ))}
+      {remaining.length > 0 ? (
+        <SearchableSelect
+          ariaLabel="점프 호스트 추가"
+          placeholder={value.length === 0 ? 'None (direct)' : '점프 호스트 추가…'}
+          searchPlaceholder="이름, 호스트, 사용자 검색"
+          value=""
+          options={remaining}
+          disabled={disabled}
+          onChange={(next) => {
+            if (next) {
+              onChange([...value, next]);
+            }
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 const defaultSerialDraft: SerialHostDraft = {
@@ -390,10 +515,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onOpenSecrets,
   onActionStateChange
 }: HostFormProps, ref) {
-  const jumpHostSelectOptions = useMemo<SearchableSelectOption[]>(
-    () => [{ value: '', label: 'None (direct)' }, ...jumpHostOptions],
-    [jumpHostOptions],
-  );
   const fieldClassName = 'flex flex-col gap-[0.4rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
@@ -434,6 +555,18 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
+  const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
+  const commitJumpHostChain = (ids: string[]) => {
+    if (!sshDraft) {
+      return;
+    }
+    setDraft({
+      ...sshDraft,
+      jumpHostIds: ids.length > 0 ? ids : null,
+      // 레거시 단일 필드도 첫 홉으로 미러링(구버전 클라이언트 호환).
+      jumpHostId: ids[0] ?? null,
+    });
+  };
   const isAwsEc2Draft = draft.kind === 'aws-ec2';
   const isAwsEcsDraft = draft.kind === 'aws-ecs';
   const isAwsDraft = isAwsEc2Draft || isAwsEcsDraft;
@@ -641,6 +774,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         authType: host.authType,
         secretRef: host.secretRef,
         jumpHostId: host.jumpHostId ?? null,
+        jumpHostIds: host.jumpHostIds ?? (host.jumpHostId ? [host.jumpHostId] : null),
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
         startupCommand: host.startupCommand ?? null,
@@ -1709,33 +1843,29 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </div>
             ) : null}
 
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Jump host</span>
-              <SearchableSelect
-                ariaLabel="Jump host"
-                placeholder="None (direct)"
-                searchPlaceholder="이름, 호스트, 사용자 검색"
-                value={sshDraft.jumpHostId ?? ''}
-                options={jumpHostSelectOptions}
-                disabled={sshDraft.useMosh === true && !sshDraft.jumpHostId}
-                onChange={(value) =>
-                  setDraft({ ...sshDraft, jumpHostId: value || null })
-                }
+            <div className={fieldClassName}>
+              <span className={fieldLabelClassName}>Jump hosts</span>
+              <JumpHostChainEditor
+                value={jumpHostChain}
+                candidates={jumpHostOptions}
+                disabled={sshDraft.useMosh === true && jumpHostChain.length === 0}
+                onChange={commitJumpHostChain}
               />
               <span className="text-[0.82rem] text-[var(--text-soft)]">
-                다른 SSH 호스트를 거쳐 연결합니다 (배스천).
+                다른 SSH 호스트를 거쳐 연결합니다 (배스천). 여러 개면 위에서부터 순서대로 거칩니다
+                — 첫 번째가 클라이언트에서 직접 연결, 마지막이 대상 바로 앞입니다.
               </span>
-            </label>
+            </div>
             <div className={fieldClassName}>
               <ToggleSwitch
                 label="Mosh로 연결"
                 description={
-                  sshDraft.jumpHostId
+                  jumpHostChain.length > 0
                     ? 'jump host와 함께 쓸 수 없습니다.'
                     : '네트워크가 끊겨도 세션이 유지됩니다 (서버에 mosh 필요).'
                 }
-                checked={sshDraft.useMosh === true && !sshDraft.jumpHostId}
-                disabled={Boolean(sshDraft.jumpHostId)}
+                checked={sshDraft.useMosh === true && jumpHostChain.length === 0}
+                disabled={jumpHostChain.length > 0}
                 onClick={() =>
                   setDraft({
                     ...sshDraft,

@@ -22,18 +22,48 @@ export interface ConnectionFailurePresentation {
 }
 
 function extractDialTarget(message: string): string {
-  const match = /\bdial tcp (?:\[[^\]]+\]|[^:\s]+):\d+/iu.exec(message);
-  if (!match) {
-    return "대상 호스트";
+  // 연결 시도 실패는 "dial tcp HOST:PORT", 핸드셰이크 중 리셋 등은
+  // "read/write tcp LOCAL->REMOTE" 형태로 남는다. 둘 다에서 원격 엔드포인트를 뽑아
+  // 어떤 호스트에서 끊겼는지 보여준다(기존엔 dial tcp만 봐서 리셋은 제네릭으로 폴백됐다).
+  const dial = /\bdial tcp (\[[^\]]+\]|[^:\s]+):(\d+)/iu.exec(message);
+  if (dial) {
+    return `${dial[1]}:${dial[2]}`;
   }
-  return match[0].replace(/^dial tcp\s+/iu, "");
+  const rw = /\b(?:read|write) tcp \S+->(\[[^\]]+\]|[^:\s]+):(\d+)/iu.exec(message);
+  if (rw) {
+    return `${rw[1]}:${rw[2]}`;
+  }
+  return "대상 호스트";
+}
+
+// main이 호스트 키 probe 실패에 붙이는 식별자(라벨+주소)를 파싱한다. 다단 ProxyJump에서
+// 어느 호스트에서 끊겼는지 raw IP가 아니라 사용자가 붙인 이름으로 보여주기 위한 것.
+function extractProbeHostIdentity(
+  message: string,
+): { label: string; addr: string; viaJump: boolean } | null {
+  const match =
+    /host-key probe failed for "(.+?)" \[([^\]]+)\](\s+via-jump)?/u.exec(message);
+  if (!match) {
+    return null;
+  }
+  return { label: match[1], addr: match[2], viaJump: Boolean(match[3]) };
 }
 
 export function resolveConnectionFailurePresentation(
   message: string,
 ): ConnectionFailurePresentation {
   const normalized = normalizeRemoteInvokeErrorMessage(message);
-  const target = extractDialTarget(normalized);
+  const dialTarget = extractDialTarget(normalized);
+  const probe = extractProbeHostIdentity(normalized);
+  // probe 식별자가 있으면 '라벨' (주소)로 표기한다. 점프 경유 실패면 실제 끊긴 엔드포인트가
+  // 타깃 주소와 다를 수 있어(예: 베스천에서 리셋) 함께 덧붙인다.
+  const target = probe
+    ? `'${probe.label}' (${probe.addr})${
+        probe.viaJump && dialTarget !== "대상 호스트" && dialTarget !== probe.addr
+          ? ` · 점프 경유 ${dialTarget}`
+          : ""
+      }`
+    : dialTarget;
   const awsSsmExitCodeMatch =
     /^AWS SSM session exited with code\s+(-?\d+)/i.exec(normalized);
   if (awsSsmExitCodeMatch) {

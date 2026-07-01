@@ -53,6 +53,7 @@ import {
   type MetricChartSeriesDefinition,
 } from "./UPlotMetricChart";
 import { ConnectionStatusOverlay } from "./ConnectionStatusOverlay";
+import { ConnectionHopSteps } from "./ConnectionHopSteps";
 import { TerminalInteractiveAuthOverlay } from "./terminal-workspace/TerminalInteractiveAuthOverlay";
 import {
   countLocalFindMatches,
@@ -2837,6 +2838,7 @@ export function ContainersWorkspace({
               {tab.connectionProgress?.message ??
                 "컨테이너 런타임과 연결 상태를 준비하고 있습니다."}
             </span>
+            <ConnectionHopSteps steps={tab.connectionHops} />
           </Card>
         </div>
       ) : null}

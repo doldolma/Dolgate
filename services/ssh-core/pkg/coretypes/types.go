@@ -84,6 +84,7 @@ const (
 	EventError                          EventType = "error"
 	EventClosed                         EventType = "closed"
 	EventLatency                        EventType = "latency"
+	EventConnectionHopProgress          EventType = "connectionHopProgress"
 	EventSerialPortsListed              EventType = "serialPortsListed"
 	EventSerialControlCompleted         EventType = "serialControlCompleted"
 	EventHostKeyProbed                  EventType = "hostKeyProbed"
@@ -441,6 +442,10 @@ type HostKeyProbePayload struct {
 	Port int    `json:"port"`
 	// Jump이 설정되면 그 베스천을 경유해 타깃 호스트 키를 읽는다(베스천 뒤의 타깃 TOFU).
 	Jump *JumpTarget `json:"jump,omitempty"`
+	// SessionID/EndpointID는 renderer가 넘기는 상관 ID로, 프로브 중 방출하는 홉 진행
+	// (ConnectionHopProgressPayload)을 해당 연결의 오버레이에 매핑하는 데 쓴다.
+	SessionID  string `json:"sessionId,omitempty"`
+	EndpointID string `json:"endpointId,omitempty"`
 }
 
 type CertificateInspectPayload struct {
@@ -706,6 +711,19 @@ type MoshStatePayload struct {
 // 인디케이터가 활성 탭에 RTT를 표시하는 데 쓴다. keepalive 주기(기본 10s)마다 갱신.
 type LatencyPayload struct {
 	RoundTripMs int `json:"roundTripMs"`
+}
+
+// ConnectionHopProgressPayload는 다단 ProxyJump 연결 중 각 홉의 진행 상태를 renderer에 알린다.
+// HopIndex는 1-based(가장 깊은 점프=1 … 최종 대상=HopCount). Stage는 connecting|connected|failed.
+// SessionID/EndpointID 중 세팅된 쪽으로 renderer가 해당 연결(터미널 탭·SFTP pane·컨테이너 등)에
+// 매핑한다 — 세션·SFTP·컨테이너·포트포워딩·호스트키 probe가 하나의 공통 오버레이를 공유한다.
+type ConnectionHopProgressPayload struct {
+	SessionID  string `json:"sessionId,omitempty"`
+	EndpointID string `json:"endpointId,omitempty"`
+	HopLabel   string `json:"hopLabel"`
+	HopIndex   int    `json:"hopIndex"`
+	HopCount   int    `json:"hopCount"`
+	Stage      string `json:"stage"`
 }
 
 type SFTPConnectedPayload struct {

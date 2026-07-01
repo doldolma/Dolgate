@@ -61,9 +61,29 @@ func JumpTargetFromCore(jump *coretypes.JumpTarget) *Target {
 	}
 }
 
+// ProgressStage는 한 홉(점프 또는 최종 대상)의 연결 단계다.
+type ProgressStage string
+
+const (
+	ProgressConnecting ProgressStage = "connecting"
+	ProgressConnected  ProgressStage = "connected"
+	ProgressFailed     ProgressStage = "failed"
+)
+
+// ProgressEvent는 DialClient가 각 홉을 연결하며 보고하는 진행 상태다(다단 ProxyJump UI용).
+type ProgressEvent struct {
+	HopLabel string
+	Stage    ProgressStage
+}
+
+type ProgressFunc func(ProgressEvent)
+
 type Config struct {
 	TCPDialTimeout       time.Duration
 	TCPKeepAliveInterval time.Duration
+	// Progress가 설정되면 DialClient가 홉마다 connecting→connected(또는 failed)를 보고한다.
+	// config가 점프 체인 재귀에 전파돼 가장 깊은 점프부터 순서대로 이벤트가 도착한다.
+	Progress ProgressFunc
 }
 
 type HostKeyProbeResult struct {
@@ -127,6 +147,42 @@ var DefaultConfig = Config{
 	TCPKeepAliveInterval: 30 * time.Second,
 }
 
+// HopProgress builds a Config.Progress callback that emits EventConnectionHopProgress for
+// each hop of a (possibly multi-hop ProxyJump) connection, correlated by sessionID and/or
+// endpointID so the renderer attaches it to the right connection's overlay. hopCount is
+// precomputed from target's jump chain; hopIndex advances on each "connecting" (deepest
+// jump arrives first). Reused by EVERY DialClient caller — terminal sessions, sftp,
+// containers, forwarding, mosh, tmux, and the host-key probe — so per-hop progress is
+// uniform across all connection types instead of wired per-path. Returns nil if emit is nil.
+func HopProgress(target Target, sessionID, endpointID string, emit func(coretypes.Event)) ProgressFunc {
+	if emit == nil {
+		return nil
+	}
+	hopCount := 1
+	for jump := target.Jump; jump != nil; jump = jump.Jump {
+		hopCount++
+	}
+	hopIndex := 0
+	return func(ev ProgressEvent) {
+		if ev.Stage == ProgressConnecting {
+			hopIndex++
+		}
+		emit(coretypes.Event{
+			Type:       coretypes.EventConnectionHopProgress,
+			SessionID:  sessionID,
+			EndpointID: endpointID,
+			Payload: coretypes.ConnectionHopProgressPayload{
+				SessionID:  sessionID,
+				EndpointID: endpointID,
+				HopLabel:   ev.HopLabel,
+				HopIndex:   hopIndex,
+				HopCount:   hopCount,
+				Stage:      string(ev.Stage),
+			},
+		})
+	}
+}
+
 func DialClient(target Target, config Config, responder InteractiveResponder) (*ssh.Client, error) {
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
@@ -153,6 +209,12 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 	}
 
 	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
+	hopLabel := fmt.Sprintf("%s@%s:%d", target.Username, target.Host, target.Port)
+	reportProgress := func(stage ProgressStage) {
+		if config.Progress != nil {
+			config.Progress(ProgressEvent{HopLabel: hopLabel, Stage: stage})
+		}
+	}
 
 	// Establish the raw TCP connection to the target — either directly, or, when a
 	// jump host is configured, tunneled through the jump client's connection
@@ -166,30 +228,36 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		if err != nil {
 			return nil, fmt.Errorf("jump host: %w", err)
 		}
+		reportProgress(ProgressConnecting)
 		rawConn, err = jumpClient.Dial("tcp", addr)
 		if err != nil {
+			reportProgress(ProgressFailed)
 			_ = jumpClient.Close()
 			return nil, fmt.Errorf("dial through jump host: %w", err)
 		}
 	} else {
+		reportProgress(ProgressConnecting)
 		dialer := &net.Dialer{
 			Timeout:   config.TCPDialTimeout,
 			KeepAlive: config.TCPKeepAliveInterval,
 		}
 		rawConn, err = dialer.Dial("tcp", addr)
 		if err != nil {
+			reportProgress(ProgressFailed)
 			return nil, fmt.Errorf("dial failed: %w", err)
 		}
 	}
 
 	clientConn, chans, reqs, err := ssh.NewClientConn(rawConn, addr, clientConfig)
 	if err != nil {
+		reportProgress(ProgressFailed)
 		_ = rawConn.Close()
 		if jumpClient != nil {
 			_ = jumpClient.Close()
 		}
 		return nil, fmt.Errorf("ssh handshake failed: %w", err)
 	}
+	reportProgress(ProgressConnected)
 
 	client := ssh.NewClient(clientConn, chans, reqs)
 	if jumpClient != nil {
@@ -219,6 +287,15 @@ func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyPr
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
+	// 최종 대상(점프 뒤의 타깃) 홉은 DialClient 밖에서 열리므로(점프 클라이언트의 Dial),
+	// 그 홉의 connecting/connected/failed를 config.Progress로 직접 보고한다. 이래야 "점프까지는
+	// 됐는데 타깃 포워딩에서 거부(open failed)"처럼 마지막 홉에서 나는 실패가 홉 UI에 보인다.
+	reportTarget := func(stage ProgressStage) {
+		if config.Progress != nil {
+			config.Progress(ProgressEvent{HopLabel: addr, Stage: stage})
+		}
+	}
+
 	var rawConn net.Conn
 	if jump != nil {
 		jumpClient, err := DialClient(*jump, config, nil)
@@ -226,11 +303,14 @@ func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyPr
 			return HostKeyProbeResult{}, fmt.Errorf("jump host: %w", err)
 		}
 		defer jumpClient.Close()
+		reportTarget(ProgressConnecting)
 		rawConn, err = jumpClient.Dial("tcp", addr)
 		if err != nil {
+			reportTarget(ProgressFailed)
 			return HostKeyProbeResult{}, fmt.Errorf("dial through jump host: %w", err)
 		}
 	} else {
+		reportTarget(ProgressConnecting)
 		dialer := &net.Dialer{
 			Timeout:   config.TCPDialTimeout,
 			KeepAlive: config.TCPKeepAliveInterval,
@@ -238,6 +318,7 @@ func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyPr
 		var err error
 		rawConn, err = dialer.Dial("tcp", addr)
 		if err != nil {
+			reportTarget(ProgressFailed)
 			return HostKeyProbeResult{}, fmt.Errorf("dial failed: %w", err)
 		}
 	}
@@ -259,8 +340,10 @@ func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyPr
 
 	_, _, _, err := ssh.NewClientConn(rawConn, addr, clientConfig)
 	if result.PublicKeyBase64 != "" {
+		reportTarget(ProgressConnected)
 		return result, nil
 	}
+	reportTarget(ProgressFailed)
 	if err != nil {
 		return HostKeyProbeResult{}, fmt.Errorf("host key probe failed: %w", err)
 	}

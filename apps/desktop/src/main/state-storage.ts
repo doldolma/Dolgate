@@ -51,6 +51,7 @@ import {
   clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
   normalizeHostEnvVars,
+  normalizeJumpHostIds,
   normalizeSftpBrowserColumnWidths
 } from '@shared';
 import type { SyncKind } from '@shared';
@@ -757,6 +758,11 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     return null;
   }
 
+  const jumpHostIds = normalizeJumpHostIds(
+    value.jumpHostIds as (string | null | undefined)[] | null | undefined,
+    typeof value.jumpHostId === 'string' ? value.jumpHostId : null,
+  );
+
   return {
     id: value.id,
     kind: 'ssh',
@@ -777,7 +783,8 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
     privateKeyPath: typeof value.privateKeyPath === 'string' ? value.privateKeyPath : null,
     certificatePath: typeof value.certificatePath === 'string' ? value.certificatePath : null,
     secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
-    jumpHostId: typeof value.jumpHostId === 'string' ? value.jumpHostId : null,
+    jumpHostId: jumpHostIds[0] ?? null,
+    jumpHostIds: jumpHostIds.length > 0 ? jumpHostIds : null,
     useMosh: value.useMosh === true ? true : null,
     agentForwarding: value.agentForwarding === true ? true : null,
     // env는 호스트 속성으로 저장된다(시크릿 분리). 디스크 리로드 시에도 보존돼야 한다.

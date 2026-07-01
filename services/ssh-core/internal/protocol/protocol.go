@@ -85,6 +85,7 @@ const (
 	EventError                          = coretypes.EventError
 	EventClosed                         = coretypes.EventClosed
 	EventLatency                        = coretypes.EventLatency
+	EventConnectionHopProgress          = coretypes.EventConnectionHopProgress
 	EventSerialPortsListed              = coretypes.EventSerialPortsListed
 	EventSerialControlCompleted         = coretypes.EventSerialControlCompleted
 	EventHostKeyProbed                  = coretypes.EventHostKeyProbed
@@ -152,6 +153,7 @@ type Event = coretypes.Event
 type StreamFrame = coretypes.StreamFrame
 type ConnectPayload = coretypes.ConnectPayload
 type LatencyPayload = coretypes.LatencyPayload
+type ConnectionHopProgressPayload = coretypes.ConnectionHopProgressPayload
 type EnvVar = coretypes.EnvVar
 type AWSConnectPayload = coretypes.AWSConnectPayload
 type LocalConnectPayload = coretypes.LocalConnectPayload

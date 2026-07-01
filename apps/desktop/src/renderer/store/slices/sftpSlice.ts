@@ -372,7 +372,9 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               const trusted = await ensureTrustedHost(set, {
                 hostId,
                 endpointId,
-                skipProbeIfAlreadyTrusted: Boolean(awsHost),
+                // 이미 신뢰된 호스트/베스천은 재-probe 생략(터미널과 동일). 실연결이 strict
+                // host-key 검사를 하므로 안전하고, 다단 ProxyJump에서 프로브+실연결 중복 순회를 막는다.
+                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "sftp",
                   paneId,
