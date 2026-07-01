@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { UpdateState } from '@shared';
 import { AppTitleBar } from './AppTitleBar';
 
+type AppTitleBarPropsForTest = Parameters<typeof AppTitleBar>[0];
+
 function createUpdateState(): UpdateState {
   return {
     enabled: true,
@@ -16,43 +18,57 @@ function createUpdateState(): UpdateState {
   };
 }
 
-function renderTitleBar(updateState: UpdateState = createUpdateState()) {
-  return render(
-    <AppTitleBar
-      desktopPlatform="darwin"
-      tabs={[]}
-      workspaces={[]}
-      tabStrip={[]}
-      activeWorkspaceTab="home"
-      draggedSession={null}
-      updateState={updateState}
-      windowState={{ isMaximized: false }}
-      tmuxGroups={[]}
-      hosts={[]}
-      onSelectTmuxGroup={vi.fn()}
-      onCloseTmuxGroup={vi.fn()}
-      onSelectHome={vi.fn()}
-      onSelectSftp={vi.fn()}
-      onSelectContainers={vi.fn()}
-      onSelectSession={vi.fn()}
-      onSelectWorkspace={vi.fn()}
-      onCloseSession={vi.fn().mockResolvedValue(undefined)}
-      onCloseWorkspace={vi.fn().mockResolvedValue(undefined)}
-      onStartSessionDrag={vi.fn()}
-      onEndSessionDrag={vi.fn()}
-      onDetachSessionToStandalone={vi.fn()}
-      onReorderDynamicTab={vi.fn()}
-      onCheckForUpdates={vi.fn().mockResolvedValue(undefined)}
-      onDownloadUpdate={vi.fn().mockResolvedValue(undefined)}
-      onInstallUpdate={vi.fn().mockResolvedValue(undefined)}
-      onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
-      onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
-      onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-      onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-      onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
-      onCloseWindow={vi.fn().mockResolvedValue(undefined)}
-    />
-  );
+function createSessionTab(id = 'session-1') {
+  return {
+    id: `tab-${id}`,
+    stableId: `tab-${id}`,
+    sessionId: id,
+    source: 'host' as const,
+    hostId: 'host-1',
+    title: 'mqtt/evo-parser',
+    status: 'connected' as const,
+    lastEventAt: new Date().toISOString(),
+  };
+}
+
+function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
+  const props: AppTitleBarPropsForTest = {
+    desktopPlatform: 'darwin',
+    tabs: [],
+    workspaces: [],
+    tabStrip: [],
+    activeWorkspaceTab: 'home',
+    draggedSession: null,
+    updateState: createUpdateState(),
+    windowState: { isMaximized: false },
+    tmuxGroups: [],
+    hosts: [],
+    onSelectTmuxGroup: vi.fn(),
+    onCloseTmuxGroup: vi.fn(),
+    onSelectHome: vi.fn(),
+    onSelectSftp: vi.fn(),
+    onSelectContainers: vi.fn(),
+    onSelectSession: vi.fn(),
+    onSelectWorkspace: vi.fn(),
+    onCloseSession: vi.fn().mockResolvedValue(undefined),
+    onCloseWorkspace: vi.fn().mockResolvedValue(undefined),
+    onStartSessionDrag: vi.fn(),
+    onEndSessionDrag: vi.fn(),
+    onDetachSessionToStandalone: vi.fn(),
+    onReorderDynamicTab: vi.fn(),
+    onCheckForUpdates: vi.fn().mockResolvedValue(undefined),
+    onDownloadUpdate: vi.fn().mockResolvedValue(undefined),
+    onInstallUpdate: vi.fn().mockResolvedValue(undefined),
+    onDismissUpdate: vi.fn().mockResolvedValue(undefined),
+    onOpenReleasePage: vi.fn().mockResolvedValue(undefined),
+    onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
+    onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
+    onRestoreWindow: vi.fn().mockResolvedValue(undefined),
+    onCloseWindow: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+
+  return render(<AppTitleBar {...props} />);
 }
 
 describe('AppTitleBar update popover', () => {
@@ -124,6 +140,36 @@ describe('AppTitleBar update popover', () => {
     expect(sftpButton.className).toContain('text-[rgba(243,247,251,0.74)]');
   });
 
+  it('keeps titlebar chrome draggable while idle on macOS', () => {
+    const { container } = renderTitleBar();
+
+    const tabRegion = screen.getByTestId('titlebar-tab-region');
+    const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
+
+    expect(tabRegion.className).toContain('[-webkit-app-region:drag]');
+    expect(tabStrip?.className).toContain('[-webkit-app-region:drag]');
+  });
+
+  it('keeps fixed workspace tabs outside the scrollable session strip', () => {
+    const tab = createSessionTab();
+    const { container } = renderTitleBar({
+      tabs: [tab],
+      tabStrip: [{ kind: 'session', sessionId: tab.sessionId }],
+    });
+
+    const fixedTabs = screen.getByTestId('titlebar-fixed-tabs');
+    const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
+    const homeButton = screen.getByRole('button', { name: 'Home' });
+    const sftpButton = screen.getByRole('button', { name: 'SFTP' });
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+
+    expect(fixedTabs).toContainElement(homeButton);
+    expect(fixedTabs).toContainElement(sftpButton);
+    expect(tabStrip).not.toContainElement(homeButton);
+    expect(tabStrip).not.toContainElement(sftpButton);
+    expect(tabStrip).toContainElement(sessionButton);
+  });
+
   it('renders dynamic session tabs as a single pill with the close affordance inside', () => {
     const { container } = render(
       <AppTitleBar
@@ -180,8 +226,51 @@ describe('AppTitleBar update popover', () => {
     expect(pill).toBeTruthy();
     // 비활성 세션탭도 옅은 배경+테두리로 경계가 보인다(어디까지 탭인지 알 수 있게).
     expect(pill?.className).toContain('bg-[rgba(255,255,255,0.07)]');
+    expect(pill?.className).toContain('[-webkit-app-region:no-drag]');
     expect(pill?.contains(closeButton)).toBe(true);
     expect(container.querySelectorAll('.group').length).toBeGreaterThan(0);
+  });
+
+  it('temporarily marks the tab region no-drag while reordering a tab', () => {
+    const tab = createSessionTab();
+    const dataTransfer = {
+      effectAllowed: 'move',
+      setData: vi.fn(),
+      getData: vi.fn(),
+    };
+
+    const { container } = renderTitleBar({
+      tabs: [tab],
+      tabStrip: [{ kind: 'session', sessionId: tab.sessionId }],
+    });
+
+    const sessionButton = screen.getByRole('button', { name: 'mqtt/evo-parser' });
+    const pill = sessionButton.closest('.group');
+    expect(pill).toBeTruthy();
+
+    fireEvent.dragStart(pill!, { dataTransfer });
+
+    const tabRegion = screen.getByTestId('titlebar-tab-region');
+    const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
+
+    expect(tabRegion.className).toContain('[-webkit-app-region:no-drag]');
+    expect(tabStrip?.className).toContain('[-webkit-app-region:no-drag]');
+  });
+
+  it('marks the tab region no-drag while a workspace pane can be detached to tabs', () => {
+    const { container } = renderTitleBar({
+      draggedSession: {
+        sessionId: 'session-1',
+        source: 'workspace-pane',
+        workspaceId: 'workspace-1',
+      },
+    });
+
+    const tabRegion = screen.getByTestId('titlebar-tab-region');
+    const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
+
+    expect(tabRegion.className).toContain('[-webkit-app-region:no-drag]');
+    expect(tabStrip?.className).toContain('[-webkit-app-region:no-drag]');
   });
 
   it('makes the active dynamic session tab visually distinct from inactive pills', () => {

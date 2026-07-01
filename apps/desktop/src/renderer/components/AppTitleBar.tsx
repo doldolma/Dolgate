@@ -554,6 +554,14 @@ function getTitlebarCloseButtonClass(active: boolean): string {
   return 'h-8 w-8 rounded-full text-[0.9rem] text-[rgba(243,247,251,0.78)] hover:bg-[rgba(255,255,255,0.12)] hover:text-white';
 }
 
+function isDynamicWorkspaceTab(tabId: WorkspaceTabId): boolean {
+  return (
+    tabId.startsWith('session:') ||
+    tabId.startsWith('workspace:') ||
+    tabId.startsWith('tmuxgrp:')
+  );
+}
+
 export function AppTitleBar({
   desktopPlatform,
   tabs,
@@ -716,6 +724,7 @@ export function AppTitleBar({
       : '앱 업데이트';
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
+  const isTitlebarInternalDragActive = isTabDragging || canDetachToTabs;
 
   const updateTitlebarTabStripFades = useCallback(() => {
     const container = titlebarTabStripRef.current;
@@ -978,7 +987,9 @@ export function AppTitleBar({
       return;
     }
 
-    const activeItem = titlebarTabItemRefs.current[activeWorkspaceTab];
+    const activeItem = isDynamicWorkspaceTab(activeWorkspaceTab)
+      ? titlebarTabItemRefs.current[activeWorkspaceTab]
+      : null;
     if (!activeItem) {
       updateTitlebarTabStripFades();
       return;
@@ -1045,12 +1056,12 @@ export function AppTitleBar({
   return (
     <header
       className={cn(
-        // 헤더/탭/컨트롤은 no-drag + select-none(글자 선택 방지). 창 드래그는 스크롤 영역과
-        // 겹치지 않는 두 드래그 존이 담당한다: ① 좌측 신호등 영역(절대배치 고정 rect),
-        // ② 우측 빈 spacer(self-stretch, 아래 min-w-16 flex-1). 스트립을 drag 영역에 넣지
-        // 않아 스크롤 후 드래그가 죽는 macOS 버그(#40610)도, 풀커버 레이어가 스크롤과 겹쳐
-        // "스크롤 위치에 따라 한쪽만 드래그되던" 버그도 모두 피한다.
-        'relative flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] [-webkit-app-region:no-drag] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem]',
+        // 상단바 chrome 배경은 macOS 에서 창 드래그 영역으로 둔다. 실제 탭/버튼처럼
+        // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
+        'relative flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem]',
+        desktopPlatform === 'darwin'
+          ? '[-webkit-app-region:drag]'
+          : '[-webkit-app-region:no-drag]',
         desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.9rem]',
       )}
     >
@@ -1063,8 +1074,12 @@ export function AppTitleBar({
         />
       ) : null}
       <div
+        data-testid="titlebar-tab-region"
         className={cn(
-          'relative min-w-0 self-stretch transition-[background-color,box-shadow] duration-140 [-webkit-app-region:no-drag]',
+          'relative flex min-w-0 flex-1 self-stretch transition-[background-color,box-shadow] duration-140',
+          desktopPlatform === 'darwin' && !isTitlebarInternalDragActive
+            ? '[-webkit-app-region:drag]'
+            : '[-webkit-app-region:no-drag]',
           isDetachHovering &&
             'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
         )}
@@ -1093,160 +1108,175 @@ export function AppTitleBar({
           onEndSessionDrag();
         }}
       >
-        {showLeftTabStripFade ? (
-          <div
-            data-testid="titlebar-tab-strip-fade-left"
-            className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[12px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
-          />
-        ) : null}
-        {showRightTabStripFade ? (
-          <div
-            data-testid="titlebar-tab-strip-fade-right"
-            className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[12px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
-          />
-        ) : null}
-        <div
-          ref={titlebarTabStripRef}
-          data-titlebar-tab-strip="true"
-          className="flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full"
-          style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
-          onScroll={updateTitlebarTabStripFades}
-          onWheel={(event) => {
-            // 탭이 많아 가로 오버플로우가 있을 때, 마우스 세로 휠을 가로 스크롤로
-            // 변환한다(데스크톱 마우스엔 가로 스크롤 수단이 없어 탭을 못 고르던 문제).
-            // 트랙패드 가로 스와이프(deltaX 우세)는 네이티브로 그대로 두고, 세로 휠
-            // (deltaY 우세)일 때만 가로로 돌린다. preventDefault 없이 scrollLeft 만
-            // 조정해 passive 리스너 경고를 피한다(타이틀바엔 세로 스크롤 대상이 없음).
-            const el = event.currentTarget;
-            if (el.scrollWidth <= el.clientWidth) {
-              return;
-            }
-            if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-              el.scrollLeft += event.deltaY;
-            }
-          }}
-          onDragOver={(event) => {
-            // 탭 재정렬 드래그만 처리. 패널 분할용 세션/페인 드래그(draggedTabRef
-            // 없음)는 그대로 통과시켜 워크스페이스 병합·detach 가 깨지지 않게 한다.
-            if (!draggedTabRef.current) {
-              return;
-            }
-            event.preventDefault();
-            event.dataTransfer.dropEffect = 'move';
-            const drop = computeTabDrop(event.clientX);
-            if (drop) {
-              const targetKey = getTabKey(drop.target);
-              setTabDropPreview((current) =>
-                current &&
-                current.targetKey === targetKey &&
-                current.placement === drop.placement
-                  ? current
-                  : { targetKey, placement: drop.placement },
-              );
-            }
-            updateTabAutoScroll(event.clientX);
-          }}
-          onDragLeave={(event) => {
-            const nextTarget = event.relatedTarget;
-            if (
-              nextTarget instanceof Node &&
-              event.currentTarget.contains(nextTarget)
-            ) {
-              return;
-            }
-            setTabDropPreview(null);
-            stopTabAutoScroll();
-          }}
-          onDrop={(event) => {
-            const payload = parseDraggedTab(
-              event.dataTransfer.getData(TAB_DRAG_MIME),
-            );
-            const sourceTab = payload ?? draggedTabRef.current;
-            stopTabAutoScroll();
-            if (!sourceTab) {
-              return;
-            }
-            const drop = computeTabDrop(event.clientX);
-            if (!drop) {
-              return;
-            }
-            event.preventDefault();
-            setTabDropPreview(null);
-            onReorderDynamicTab(sourceTab, drop.target, drop.placement);
-          }}
+        <Tabs
+          data-testid="titlebar-fixed-tabs"
+          className="flex-none self-stretch items-stretch bg-transparent p-0 shadow-none border-0 gap-0 [-webkit-app-region:no-drag]"
         >
-          <Tabs className="shrink-0 self-stretch items-stretch bg-transparent p-0 shadow-none border-0 gap-0">
+          <div
+            ref={(node) => {
+              titlebarTabItemRefs.current.home = node;
+            }}
+            className="shrink-0 flex"
+          >
+            <TabButton
+              active={activeWorkspaceTab === 'home'}
+              className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
+              onClick={onSelectHome}
+            >
+              <Home className="h-4 w-4 flex-none" aria-hidden />
+              Home
+            </TabButton>
+          </div>
+          <div
+            ref={(node) => {
+              titlebarTabItemRefs.current.sftp = node;
+            }}
+            className="shrink-0 flex"
+          >
+            <TabButton
+              active={activeWorkspaceTab === 'sftp'}
+              className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
+              onClick={onSelectSftp}
+            >
+              <Folder className="h-4 w-4 flex-none" aria-hidden />
+              SFTP
+            </TabButton>
+          </div>
+          {hasOpenContainers || activeWorkspaceTab === 'containers' ? (
             <div
               ref={(node) => {
-                titlebarTabItemRefs.current.home = node;
+                titlebarTabItemRefs.current.containers = node;
               }}
               className="shrink-0 flex"
             >
               <TabButton
-                active={activeWorkspaceTab === 'home'}
-                className={getTitlebarTabClass(activeWorkspaceTab === 'home')}
-                onClick={onSelectHome}
+                active={activeWorkspaceTab === 'containers'}
+                className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
+                onClick={onSelectContainers}
               >
-                <Home className="h-4 w-4 flex-none" aria-hidden />
-                Home
+                <Container className="h-4 w-4 flex-none" aria-hidden />
+                Containers
               </TabButton>
             </div>
+          ) : null}
+        </Tabs>
+        {dynamicItems.length > 0 ? (
+          <div
+            aria-hidden
+            className="mx-1.5 my-[0.7rem] w-px flex-none bg-[rgba(255,255,255,0.12)]"
+          />
+        ) : null}
+        <div className="relative min-w-0 flex-1 self-stretch">
+          {showLeftTabStripFade ? (
             <div
-              ref={(node) => {
-                titlebarTabItemRefs.current.sftp = node;
-              }}
-              className="shrink-0 flex"
-            >
-              <TabButton
-                active={activeWorkspaceTab === 'sftp'}
-                className={getTitlebarTabClass(activeWorkspaceTab === 'sftp')}
-                onClick={onSelectSftp}
-              >
-                <Folder className="h-4 w-4 flex-none" aria-hidden />
-                SFTP
-              </TabButton>
-            </div>
-            {hasOpenContainers || activeWorkspaceTab === 'containers' ? (
-              <div
-                ref={(node) => {
-                  titlebarTabItemRefs.current.containers = node;
-                }}
-                className="shrink-0 flex"
-              >
-                <TabButton
-                  active={activeWorkspaceTab === 'containers'}
-                  className={getTitlebarTabClass(activeWorkspaceTab === 'containers')}
-                  onClick={onSelectContainers}
-                >
-                  <Container className="h-4 w-4 flex-none" aria-hidden />
-                  Containers
-                </TabButton>
-              </div>
-            ) : null}
-          </Tabs>
-          {dynamicItems.map((item, idx) => {
-          const slideX = tabSlideX(idx, dragSourceIndex, dropGap);
-          const isDragSource = idx === dragSourceIndex;
-          // 슬라이드는 컨테이너 className 의 transition 목록에 transform 을 더해 애니메이션.
-          const tabSlideStyle: CSSProperties = {
-            transform: slideX ? `translateX(${slideX}px)` : undefined,
-          };
-          if (item.kind === 'session') {
-            const target = { kind: 'session', sessionId: item.sessionId } as const;
-            const targetKey = getTabKey(target);
-            return (
-              <div
-                key={item.sessionId}
-                ref={(node) => {
-                  titlebarTabItemRefs.current[targetKey] = node;
-                }}
-                style={tabSlideStyle}
-                className={cn(
-                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
-                  getTitlebarDynamicTabContainerClass(item.active),
-                  isDragSource && tabDragSourceHidden && 'opacity-0',
-                )}
-                draggable
+              data-testid="titlebar-tab-strip-fade-left"
+              className="pointer-events-none absolute inset-y-[0.24rem] left-[0.2rem] z-[1] w-11 rounded-l-[12px] bg-[linear-gradient(90deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+            />
+          ) : null}
+          {showRightTabStripFade ? (
+            <div
+              data-testid="titlebar-tab-strip-fade-right"
+              className="pointer-events-none absolute inset-y-[0.24rem] right-[0.2rem] z-[1] w-11 rounded-r-[12px] bg-[linear-gradient(270deg,color-mix(in_srgb,var(--chrome-bg)_92%,rgba(255,255,255,0.08)_8%),transparent)]"
+            />
+          ) : null}
+          <div
+            ref={titlebarTabStripRef}
+            data-titlebar-tab-strip="true"
+            className={cn(
+              'flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full',
+              desktopPlatform === 'darwin' && !isTitlebarInternalDragActive
+                ? '[-webkit-app-region:drag]'
+                : '[-webkit-app-region:no-drag]',
+            )}
+            style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
+            onScroll={updateTitlebarTabStripFades}
+            onWheel={(event) => {
+              // 탭이 많아 가로 오버플로우가 있을 때, 마우스 세로 휠을 가로 스크롤로
+              // 변환한다(데스크톱 마우스엔 가로 스크롤 수단이 없어 탭을 못 고르던 문제).
+              // 트랙패드 가로 스와이프(deltaX 우세)는 네이티브로 그대로 두고, 세로 휠
+              // (deltaY 우세)일 때만 가로로 돌린다. preventDefault 없이 scrollLeft 만
+              // 조정해 passive 리스너 경고를 피한다(타이틀바엔 세로 스크롤 대상이 없음).
+              const el = event.currentTarget;
+              if (el.scrollWidth <= el.clientWidth) {
+                return;
+              }
+              if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+                el.scrollLeft += event.deltaY;
+              }
+            }}
+            onDragOver={(event) => {
+              // 탭 재정렬 드래그만 처리. 패널 분할용 세션/페인 드래그(draggedTabRef
+              // 없음)는 그대로 통과시켜 워크스페이스 병합·detach 가 깨지지 않게 한다.
+              if (!draggedTabRef.current) {
+                return;
+              }
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              const drop = computeTabDrop(event.clientX);
+              if (drop) {
+                const targetKey = getTabKey(drop.target);
+                setTabDropPreview((current) =>
+                  current &&
+                  current.targetKey === targetKey &&
+                  current.placement === drop.placement
+                    ? current
+                    : { targetKey, placement: drop.placement },
+                );
+              }
+              updateTabAutoScroll(event.clientX);
+            }}
+            onDragLeave={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (
+                nextTarget instanceof Node &&
+                event.currentTarget.contains(nextTarget)
+              ) {
+                return;
+              }
+              setTabDropPreview(null);
+              stopTabAutoScroll();
+            }}
+            onDrop={(event) => {
+              const payload = parseDraggedTab(
+                event.dataTransfer.getData(TAB_DRAG_MIME),
+              );
+              const sourceTab = payload ?? draggedTabRef.current;
+              stopTabAutoScroll();
+              if (!sourceTab) {
+                return;
+              }
+              const drop = computeTabDrop(event.clientX);
+              if (!drop) {
+                return;
+              }
+              event.preventDefault();
+              setTabDropPreview(null);
+              onReorderDynamicTab(sourceTab, drop.target, drop.placement);
+            }}
+          >
+            {dynamicItems.map((item, idx) => {
+              const slideX = tabSlideX(idx, dragSourceIndex, dropGap);
+              const isDragSource = idx === dragSourceIndex;
+              // 슬라이드는 컨테이너 className 의 transition 목록에 transform 을 더해 애니메이션.
+              const tabSlideStyle: CSSProperties = {
+                transform: slideX ? `translateX(${slideX}px)` : undefined,
+              };
+              if (item.kind === 'session') {
+                const target = { kind: 'session', sessionId: item.sessionId } as const;
+                const targetKey = getTabKey(target);
+                return (
+                  <div
+                    key={item.sessionId}
+                    ref={(node) => {
+                      titlebarTabItemRefs.current[targetKey] = node;
+                    }}
+                    style={tabSlideStyle}
+                    className={cn(
+                      'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
+                      getTitlebarDynamicTabContainerClass(item.active),
+                      isDragSource && tabDragSourceHidden && 'opacity-0',
+                    )}
+                    draggable
                 onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
                 onMouseLeave={() => hideTabHover(targetKey)}
                 onDragStart={(event) => {
@@ -1318,7 +1348,7 @@ export function AppTitleBar({
                 }}
                 style={tabSlideStyle}
                 className={cn(
-                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                  'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
                   getTitlebarDynamicTabContainerClass(item.active),
                   isDragSource && tabDragSourceHidden && 'opacity-0',
                 )}
@@ -1409,7 +1439,7 @@ export function AppTitleBar({
               }}
               style={tabSlideStyle}
               className={cn(
-                'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150',
+                'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
                 getTitlebarDynamicTabContainerClass(item.active),
                 isDragSource && tabDragSourceHidden && 'opacity-0',
               )}
@@ -1515,6 +1545,7 @@ export function AppTitleBar({
             className={cn('h-10 flex-none', isTabDragging ? 'w-8' : 'w-2')}
           />
         ) : null}
+          </div>
         </div>
       </div>
       {/* ② 우측 드래그 존: 탭과 컨트롤 사이 빈 공간. self-stretch 로 헤더 높이를 채워
@@ -1522,7 +1553,7 @@ export function AppTitleBar({
           항상 드래그 영역이 남는다. 스크롤 스트립과 겹치지 않는 형제라 안전. */}
       <div
         aria-hidden
-        className="min-w-16 flex-1 self-stretch [-webkit-app-region:drag]"
+        className="min-w-16 flex-none self-stretch [-webkit-app-region:drag]"
       />
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
