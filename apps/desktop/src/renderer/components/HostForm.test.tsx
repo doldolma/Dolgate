@@ -739,6 +739,9 @@ describe('HostForm', () => {
     );
 
     await waitFor(() => expect(listAwsProfiles).toHaveBeenCalled());
+    // listAwsProfiles 호출만으론 부족하다: 비동기로 로드된 프로필 옵션이 실제로 렌더되어야
+    // select가 활성화되고 값 변경이 반영된다. 옵션이 뜰 때까지 기다려 CI 타이밍 레이스를 없앤다.
+    await screen.findByRole('option', { name: 'prod-admin' });
 
     fireEvent.change(screen.getByLabelText('AWS Profile'), {
       target: { value: 'profile-prod' },
