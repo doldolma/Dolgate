@@ -1,6 +1,11 @@
 import type { AuthSession } from './api';
 
-export type AuthType = 'password' | 'privateKey' | 'keyboardInteractive' | 'certificate';
+export type AuthType =
+  | 'password'
+  | 'privateKey'
+  | 'keyboardInteractive'
+  | 'certificate'
+  | 'agent';
 export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial';
 export type SerialTransport = 'local' | 'raw-tcp' | 'rfc2217';
 export type SerialDataBits = 5 | 6 | 7 | 8;

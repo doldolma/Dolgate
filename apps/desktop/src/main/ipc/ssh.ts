@@ -2,68 +2,19 @@ import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
-  type AgentForwardingEndpointKind,
   type DesktopConnectInput,
   type DesktopLocalConnectInput,
   type KeyboardInteractiveRespondInput,
   type ServerInfoResponse,
 } from "@shared";
-import { execFile } from "node:child_process";
 import { shell as electronShell, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 
-interface AgentForwardingEndpoint {
-  kind: AgentForwardingEndpointKind;
-  endpoint: string;
-}
-
-function execFileText(
-  file: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: timeoutMs }, (error, stdout) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
-export async function resolveAgentForwardingEndpoint(
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
-  runLaunchctl: (key: string) => Promise<string | null> = async (key) => {
-    if (platform !== "darwin") {
-      return null;
-    }
-    const output = await execFileText("launchctl", ["getenv", key], 1500)
-      .catch(() => "");
-    const trimmed = output.trim();
-    return trimmed || null;
-  },
-): Promise<AgentForwardingEndpoint | null> {
-  if (platform === "win32") {
-    return {
-      kind: "windows-openssh-pipe",
-      endpoint: "\\\\.\\pipe\\openssh-ssh-agent",
-    };
-  }
-
-  if (platform === "darwin" || platform === "linux") {
-    const fromEnv = env.SSH_AUTH_SOCK?.trim();
-    const endpoint =
-      fromEnv ||
-      (platform === "darwin" ? await runLaunchctl("SSH_AUTH_SOCK") : null);
-    return endpoint ? { kind: "unix", endpoint } : null;
-  }
-
-  return null;
-}
+// 로컬 agent 엔드포인트 해석은 agent-endpoint 모듈로 이전(포워딩+인증 공용 + 셸 환경 해석).
+// 기존 import 경로(테스트 포함) 호환을 위해 재노출한다.
+export { resolveLocalAgentEndpoint as resolveAgentForwardingEndpoint } from "./agent-endpoint";
 
 async function assertAwsSsmServerProxySupported(
   ctx: MainIpcContext,
@@ -231,8 +182,11 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       const agentForwardingRequested =
         sshHost.agentForwarding === true && !useMosh;
       const agentForwardingEndpoint = agentForwardingRequested
-        ? await resolveAgentForwardingEndpoint()
+        ? await resolveLocalAgentEndpoint()
         : null;
+      // authType이 "agent"면 로컬 ssh-agent 엔드포인트를 해석해 코어에 전달(서명 위임).
+      const authAgentEndpoint =
+        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
@@ -262,6 +216,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         agentForwarding: agentForwardingRequested,
         agentForwardingEndpointKind: agentForwardingEndpoint?.kind,
         agentForwardingEndpoint: agentForwardingEndpoint?.endpoint,
+        authAgentEndpointKind: authAgentEndpoint?.kind,
+        authAgentEndpoint: authAgentEndpoint?.endpoint,
         tmux: input.tmux === true,
         // tmux control mode 진입 시 감지된 원격 tmux 버전을 코어로 전달해 버전별 입력
         // 인코딩(-H vs -l)·refresh-client 방언(콤마 vs WxH)을 고르게 한다.
@@ -330,6 +286,9 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       ctx.coreManager.writeBinary(sessionId, data);
     },
   );
+
+  // SSH Agent 인증 설정 시 로컬 agent 상태(도달·키 개수)를 조회한다. 실패해도 인증엔 무관.
+  ipcMain.handle(ipcChannels.ssh.probeAgent, async () => probeLocalAgent());
 
   ipcMain.handle(
     ipcChannels.ssh.resize,

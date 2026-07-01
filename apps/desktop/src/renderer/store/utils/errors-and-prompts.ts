@@ -72,6 +72,20 @@ export function resolveConnectionFailurePresentation(
       message: `AWS SSM 세션이 종료되었습니다. (code ${awsSsmExitCodeMatch[1]})`,
     };
   }
+  if (/ssh-agent has no keys/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message:
+        "SSH 에이전트에 등록된 키가 없습니다. 에이전트에 키를 추가한 뒤 다시 연결해 주세요.",
+    };
+  }
+  if (/ssh-agent (connection failed|key listing failed)/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message:
+        "SSH 에이전트에 연결하지 못했습니다. 에이전트가 실행 중인지 확인해 주세요.",
+    };
+  }
   if (/host key is not trusted yet/i.test(normalized)) {
     return {
       title: "Host Key Not Trusted",

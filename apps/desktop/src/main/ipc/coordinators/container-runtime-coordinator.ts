@@ -12,6 +12,7 @@ import type {
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { AwsService } from "../../aws-service";
 import type { CoreManager } from "../../core-manager";
+import { resolveLocalAgentEndpoint } from "../agent-endpoint";
 import { resolveContainerTunnelTarget } from "../../container-port-forward-target";
 import type { KnownHostRepository } from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
@@ -271,6 +272,8 @@ export function createContainerRuntimeCoordinator(deps: {
     const { secrets, shouldPersistHostSecret } =
       await secretCoordinator.resolveRuntimeSshSecrets(host);
     const jump = await resolveJumpHostTarget(host);
+    const authAgentEndpoint =
+      host.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
     const result = await coreManager.containersConnect({
       endpointId,
       host: host.hostname,
@@ -284,6 +287,8 @@ export function createContainerRuntimeCoordinator(deps: {
       trustedHostKeyBase64: trustedHostKeysBase64[0],
       trustedHostKeysBase64,
       jump,
+      authAgentEndpointKind: authAgentEndpoint?.kind,
+      authAgentEndpoint: authAgentEndpoint?.endpoint,
       hostId: host.id,
     });
     if (shouldPersistHostSecret) {

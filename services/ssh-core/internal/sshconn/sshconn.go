@@ -84,6 +84,10 @@ type Config struct {
 	// Progress가 설정되면 DialClient가 홉마다 connecting→connected(또는 failed)를 보고한다.
 	// config가 점프 체인 재귀에 전파돼 가장 깊은 점프부터 순서대로 이벤트가 도착한다.
 	Progress ProgressFunc
+	// AuthAgentEndpoint*이 설정되고 target.AuthType이 "agent"면, 로컬 ssh-agent(1Password 등)에
+	// 연결해 서명을 위임한다. config가 점프 체인 재귀에 전파되므로 모든 홉이 같은 로컬 agent를 쓴다.
+	AuthAgentEndpointKind string
+	AuthAgentEndpoint     string
 }
 
 type HostKeyProbeResult struct {
@@ -191,10 +195,12 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
 	}
 
-	authMethods, err := resolveAuthMethods(target, responder)
+	authMethods, cleanupAuth, err := resolveAuthMethods(target, config, responder)
 	if err != nil {
 		return nil, err
 	}
+	// agent 인증은 핸드셰이크 동안 로컬 ssh-agent 연결이 필요하다. 연결 성립(NewClientConn) 후 정리.
+	defer cleanupAuth()
 
 	hostKeyCallback, err := strictHostKeyCallback(target.TrustedHostKeyBase64, target.TrustedHostKeysBase64)
 	if err != nil {
@@ -564,20 +570,21 @@ func resolvePasswordPromptAuthMethod(responder InteractiveResponder) ssh.AuthMet
 	})
 }
 
-func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.AuthMethod, error) {
+func resolveAuthMethods(target Target, config Config, responder InteractiveResponder) ([]ssh.AuthMethod, func(), error) {
+	noop := func() {}
 	switch target.AuthType {
 	case "password":
 		if target.Password == "" {
-			return nil, fmt.Errorf("password auth requires a password")
+			return nil, noop, fmt.Errorf("password auth requires a password")
 		}
 		return []ssh.AuthMethod{
 			ssh.Password(target.Password),
 			resolveKeyboardInteractiveAuthMethod(responder),
-		}, nil
+		}, noop, nil
 	case "privateKey":
 		signer, err := resolvePrivateKeySigner(target)
 		if err != nil {
-			return nil, err
+			return nil, noop, err
 		}
 		// publickey 외에 password 프롬프트도 함께 제시 — 서버가 publickey 다음 password를
 		// 요구하는 다단계 인증을 만족시킨다. publickey만으로 끝나는 서버에선 호출되지 않는다.
@@ -585,29 +592,50 @@ func resolveAuthMethods(target Target, responder InteractiveResponder) ([]ssh.Au
 			ssh.PublicKeys(signer),
 			resolvePasswordPromptAuthMethod(responder),
 			resolveKeyboardInteractiveAuthMethod(responder),
-		}, nil
+		}, noop, nil
 	case "certificate":
 		signer, err := resolvePrivateKeySigner(target)
 		if err != nil {
-			return nil, err
+			return nil, noop, err
 		}
 		cert, err := resolveCertificate(target)
 		if err != nil {
-			return nil, err
+			return nil, noop, err
 		}
 		certSigner, err := ssh.NewCertSigner(cert, signer)
 		if err != nil {
-			return nil, fmt.Errorf("create cert signer: %w", err)
+			return nil, noop, fmt.Errorf("create cert signer: %w", err)
 		}
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(certSigner),
 			resolvePasswordPromptAuthMethod(responder),
 			resolveKeyboardInteractiveAuthMethod(responder),
-		}, nil
+		}, noop, nil
+	case "agent":
+		// 로컬 ssh-agent(1Password/gpg-agent/기본 agent)에 연결해 서명을 위임한다. agent 연결은
+		// 핸드셰이크 동안 필요하므로 cleanup으로 반환해 DialClient가 연결 성립 후 닫는다.
+		ag, closer, err := dialLocalAgent(config.AuthAgentEndpointKind, config.AuthAgentEndpoint)
+		if err != nil {
+			return nil, noop, fmt.Errorf("ssh-agent connection failed: %w", err)
+		}
+		signers, err := ag.Signers()
+		if err != nil {
+			_ = closer.Close()
+			return nil, noop, fmt.Errorf("ssh-agent key listing failed: %w", err)
+		}
+		if len(signers) == 0 {
+			_ = closer.Close()
+			return nil, noop, fmt.Errorf("ssh-agent has no keys")
+		}
+		return []ssh.AuthMethod{
+			ssh.PublicKeys(signers...),
+			resolvePasswordPromptAuthMethod(responder),
+			resolveKeyboardInteractiveAuthMethod(responder),
+		}, func() { _ = closer.Close() }, nil
 	case "keyboardInteractive":
-		return []ssh.AuthMethod{resolveKeyboardInteractiveAuthMethod(responder)}, nil
+		return []ssh.AuthMethod{resolveKeyboardInteractiveAuthMethod(responder)}, noop, nil
 	default:
-		return nil, fmt.Errorf("unsupported auth type: %s", target.AuthType)
+		return nil, noop, fmt.Errorf("unsupported auth type: %s", target.AuthType)
 	}
 }
 

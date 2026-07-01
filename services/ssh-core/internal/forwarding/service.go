@@ -121,7 +121,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.PortForwardSt
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	})
+	}, payload.AuthAgentEndpointKind, payload.AuthAgentEndpoint)
 	if err != nil {
 		return err
 	}
@@ -244,11 +244,13 @@ func (s *Service) Stop(ruleID, requestID string) error {
 	return nil
 }
 
-func (s *Service) dialTarget(endpointID, requestID string, target sshconn.Target) (*ssh.Client, error) {
+func (s *Service) dialTarget(endpointID, requestID string, target sshconn.Target, authAgentEndpointKind, authAgentEndpoint string) (*ssh.Client, error) {
 	attempt := 0
 	// 홉 진행을 renderer로 방출(EndpointID=ruleID로 포트포워딩에 매핑) — 공통 헬퍼 재사용.
 	config := sshconn.DefaultConfig
 	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
+	config.AuthAgentEndpointKind = authAgentEndpointKind
+	config.AuthAgentEndpoint = authAgentEndpoint
 	return sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

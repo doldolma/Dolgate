@@ -113,6 +113,8 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 	// 홉 진행을 renderer로 방출(EndpointID로 SFTP pane에 매핑) — 세션·컨테이너·probe와 동일한 공통 헬퍼.
 	config := sshconn.DefaultConfig
 	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
+	config.AuthAgentEndpointKind = payload.AuthAgentEndpointKind
+	config.AuthAgentEndpoint = payload.AuthAgentEndpoint
 	client, err := sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

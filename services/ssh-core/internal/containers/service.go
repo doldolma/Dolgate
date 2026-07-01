@@ -104,7 +104,13 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.Contain
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	}
-	client, err := s.dialTarget(endpointID, requestID, target)
+	client, err := s.dialTarget(
+		endpointID,
+		requestID,
+		target,
+		payload.AuthAgentEndpointKind,
+		payload.AuthAgentEndpoint,
+	)
 	if err != nil {
 		return err
 	}
@@ -853,11 +859,15 @@ func (s *Service) dialTarget(
 	endpointID string,
 	requestID string,
 	target sshconn.Target,
+	authAgentEndpointKind string,
+	authAgentEndpoint string,
 ) (*ssh.Client, error) {
 	attempt := 0
 	// 홉 진행을 renderer로 방출(EndpointID로 컨테이너 탭에 매핑) — 세션·SFTP·probe와 동일한 공통 헬퍼.
 	config := sshconn.DefaultConfig
 	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
+	config.AuthAgentEndpointKind = authAgentEndpointKind
+	config.AuthAgentEndpoint = authAgentEndpoint
 	return sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

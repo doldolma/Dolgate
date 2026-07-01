@@ -259,6 +259,21 @@ export interface DesktopConnectInput {
 
 export type AgentForwardingEndpointKind = "unix" | "windows-openssh-pipe";
 
+// SSH Agent 인증 설정 시 HostForm에 표시할 로컬 ssh-agent 상태.
+// ok=키 있음, empty=실행 중이나 키 없음, unreachable=연결 불가, not-found=소켓 못 찾음,
+// unknown=상태 확인 불가(ssh-add 없음 등 — 인증 자체는 Go가 직접 처리하므로 무관).
+export type SshAgentProbeStatus =
+  | "ok"
+  | "empty"
+  | "unreachable"
+  | "not-found"
+  | "unknown";
+export interface SshAgentProbeResult {
+  status: SshAgentProbeStatus;
+  keyCount?: number;
+  endpoint?: string;
+}
+
 export interface DesktopLocalConnectInput {
   cols: number;
   rows: number;
@@ -314,6 +329,9 @@ export interface ResolvedCoreConnectPayload {
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
   jump?: ResolvedJumpHost;
+  // authType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프(연결 단위, config로 전파).
+  authAgentEndpointKind?: string;
+  authAgentEndpoint?: string;
   cols: number;
   rows: number;
   command?: string;
@@ -485,6 +503,8 @@ export interface ResolvedSftpConnectPayload {
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
   jump?: ResolvedJumpHost;
+  authAgentEndpointKind?: string;
+  authAgentEndpoint?: string;
 }
 
 export interface ResolvedContainersConnectPayload {
@@ -499,6 +519,8 @@ export interface ResolvedContainersConnectPayload {
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
   jump?: ResolvedJumpHost;
+  authAgentEndpointKind?: string;
+  authAgentEndpoint?: string;
 }
 
 export interface ResolvedHostKeyProbePayload {
@@ -524,6 +546,8 @@ export interface ResolvedPortForwardStartPayload {
   trustedHostKeyBase64: string;
   trustedHostKeysBase64?: string[];
   jump?: ResolvedJumpHost;
+  authAgentEndpointKind?: string;
+  authAgentEndpoint?: string;
   mode: PortForwardMode;
   bindAddress: string;
   bindPort: number;
@@ -929,6 +953,8 @@ export interface DesktopApi {
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;
+    // SSH Agent 인증 설정 시 로컬 ssh-agent 상태(도달 여부·키 개수)를 조회한다.
+    probeAgent: () => Promise<SshAgentProbeResult>;
     // tmux control mode 명령. sessionId 는 pane 가상 세션 id("tmux:<controlSessionId>:<paneNum>")다.
     tmuxSplitPane: (sessionId: string, direction: "h" | "v") => Promise<void>;
     tmuxNewWindow: (sessionId: string) => Promise<void>;

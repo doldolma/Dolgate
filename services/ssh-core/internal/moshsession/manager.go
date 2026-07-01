@@ -123,9 +123,11 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	}
 	// bootstrap SSH도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 세션과 동일한 공통 헬퍼.
 	client, err := sshconn.DialClient(target, sshconn.Config{
-		TCPDialTimeout:       m.config.TCPDialTimeout,
-		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
-		Progress:             sshconn.HopProgress(target, sessionID, "", m.emit),
+		TCPDialTimeout:        m.config.TCPDialTimeout,
+		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
+		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
+		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
+		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
 	}, m.keyboardInteractiveResponder(sessionID, requestID, &attempt))
 	if err != nil {
 		return err

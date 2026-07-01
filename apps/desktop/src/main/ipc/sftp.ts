@@ -23,6 +23,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "./context";
+import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
 export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
@@ -207,6 +208,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const authAgentEndpoint =
+        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
       const endpoint = await ctx.coreManager.sftpConnect({
         endpointId: input.endpointId,
@@ -221,6 +224,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        authAgentEndpointKind: authAgentEndpoint?.kind,
+        authAgentEndpoint: authAgentEndpoint?.endpoint,
         hostId: sshHost.id,
         title: sshHost.label,
       });

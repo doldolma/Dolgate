@@ -26,3 +26,7 @@ export function pickSshCertificate() {
 export function listSerialPorts(): Promise<SerialPortSummary[]> {
   return desktopApi.serial.listPorts();
 }
+
+export function probeSshAgent() {
+  return desktopApi.ssh.probeAgent();
+}

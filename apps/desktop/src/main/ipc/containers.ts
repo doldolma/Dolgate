@@ -18,6 +18,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "./context";
+import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
 function beginContainersLifecycle(
@@ -441,6 +442,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         await ctx.resolveRuntimeSshSecrets(sshHost);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const authAgentEndpoint =
+        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
       const connection = await ctx.coreManager.connect({
         host: sshHost.hostname,
         port: sshHost.port,
@@ -453,6 +456,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        authAgentEndpointKind: authAgentEndpoint?.kind,
+        authAgentEndpoint: authAgentEndpoint?.endpoint,
         cols: 120,
         rows: 32,
         command,

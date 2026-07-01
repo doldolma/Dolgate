@@ -59,25 +59,48 @@ describe("registerSshIpcHandlers", () => {
     ipcHandlers.clear();
   });
 
-  it("resolves agent forwarding endpoints for macOS env, macOS launchctl, and Windows OpenSSH agent", async () => {
+  it("resolves agent endpoints: shell env override, macOS env, macOS launchctl, and Windows OpenSSH agent", async () => {
+    // 셸 해석은 결정성을 위해 스텁(실제 셸을 띄우지 않음).
+    const noShell = async () => null;
+
+    // 셸 해석 실패 시 process.env.SSH_AUTH_SOCK 폴백.
     await expect(
-      resolveAgentForwardingEndpoint("darwin", {
-        SSH_AUTH_SOCK: "/tmp/agent.sock",
-      } as NodeJS.ProcessEnv),
+      resolveAgentForwardingEndpoint(
+        "darwin",
+        { SSH_AUTH_SOCK: "/tmp/agent.sock" } as NodeJS.ProcessEnv,
+        undefined,
+        noShell,
+      ),
     ).resolves.toEqual({
       kind: "unix",
       endpoint: "/tmp/agent.sock",
     });
 
+    // env·셸 모두 없으면 macOS launchctl 폴백.
     await expect(
       resolveAgentForwardingEndpoint(
         "darwin",
         {} as NodeJS.ProcessEnv,
         async () => "/private/tmp/com.apple.launchd.agent/Listeners",
+        noShell,
       ),
     ).resolves.toEqual({
       kind: "unix",
       endpoint: "/private/tmp/com.apple.launchd.agent/Listeners",
+    });
+
+    // 셸 프로필의 SSH_AUTH_SOCK(1Password 등)가 최우선 — env·launchctl보다 앞선다.
+    await expect(
+      resolveAgentForwardingEndpoint(
+        "darwin",
+        { SSH_AUTH_SOCK: "/tmp/default.sock" } as NodeJS.ProcessEnv,
+        async () => "/tmp/launchctl.sock",
+        async () => "/Users/me/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock",
+      ),
+    ).resolves.toEqual({
+      kind: "unix",
+      endpoint:
+        "/Users/me/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock",
     });
 
     await expect(

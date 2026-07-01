@@ -23,6 +23,7 @@ vi.mocked(useHostFormController).mockImplementation(() => ({
   listSerialPorts: vi.fn().mockResolvedValue([]),
   pickPrivateKey: pickPrivateKeyMock,
   pickSshCertificate: pickSshCertificateMock,
+  probeSshAgent: vi.fn().mockResolvedValue({ status: 'unknown' }),
 }));
 
 describe('SecretEditDialog', () => {

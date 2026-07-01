@@ -318,7 +318,10 @@ function buildConnectionRows(
   if (isSshHostRecord(host)) {
     rows.push({ label: 'Username', value: host.username || '미설정' });
     rows.push({ label: 'Port', value: host.port });
-    rows.push({ label: 'Auth', value: host.authType });
+    rows.push({
+      label: 'Auth',
+      value: host.authType === 'agent' ? 'SSH Agent' : host.authType,
+    });
     rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
     const jumpHostIds = deriveJumpHostIds(host);
     if (jumpHostIds.length > 0) {

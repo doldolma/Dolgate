@@ -199,9 +199,11 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 	}
 	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
 	client, err := sshconn.DialClient(target, sshconn.Config{
-		TCPDialTimeout:       m.config.TCPDialTimeout,
-		TCPKeepAliveInterval: m.config.TCPKeepAliveInterval,
-		Progress:             sshconn.HopProgress(target, sessionID, "", m.emit),
+		TCPDialTimeout:        m.config.TCPDialTimeout,
+		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
+		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
+		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
+		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
 	}, func(sshconn.InteractiveChallenge) ([]string, error) {
 		return nil, fmt.Errorf("keyboard-interactive not supported for tmux control mode")
 	})

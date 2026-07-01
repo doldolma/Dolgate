@@ -291,6 +291,9 @@ type ConnectPayload struct {
 	AgentForwarding             bool        `json:"agentForwarding,omitempty"`
 	AgentForwardingEndpointKind string      `json:"agentForwardingEndpointKind,omitempty"`
 	AgentForwardingEndpoint     string      `json:"agentForwardingEndpoint,omitempty"`
+	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프(포워딩과 별개).
+	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
+	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
 	// UseMosh가 true면 SSH 대신 mosh(UDP)로 연결한다. SSH는 mosh-server 부트스트랩에만
 	// 쓰이고 이후 통신은 mosh SSP다. jump host와는 상호 배타(데스크톱 UI에서 차단).
 	UseMosh bool `json:"useMosh,omitempty"`
@@ -421,6 +424,9 @@ type SFTPConnectPayload struct {
 	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
 	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
 	Jump                  *JumpTarget `json:"jump,omitempty"`
+	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
+	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
+	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
 }
 
 type ContainersConnectPayload struct {
@@ -435,6 +441,9 @@ type ContainersConnectPayload struct {
 	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
 	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
 	Jump                  *JumpTarget `json:"jump,omitempty"`
+	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
+	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
+	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
 }
 
 type HostKeyProbePayload struct {
@@ -659,6 +668,8 @@ type PortForwardStartPayload struct {
 	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
 	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
 	Jump                  *JumpTarget `json:"jump,omitempty"`
+	AuthAgentEndpointKind string      `json:"authAgentEndpointKind,omitempty"`
+	AuthAgentEndpoint     string      `json:"authAgentEndpoint,omitempty"`
 	Mode                  string      `json:"mode"`
 	BindAddress           string      `json:"bindAddress"`
 	BindPort              int         `json:"bindPort"`

@@ -81,6 +81,7 @@ vi.mocked(useHostFormController).mockImplementation(() => ({
   listSerialPorts: listSerialPortsMock,
   pickPrivateKey: pickPrivateKeyMock,
   pickSshCertificate: pickSshCertificateMock,
+  probeSshAgent: vi.fn().mockResolvedValue({ status: 'unknown' }),
 }));
 
 function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {

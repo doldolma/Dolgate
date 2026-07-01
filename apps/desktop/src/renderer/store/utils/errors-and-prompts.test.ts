@@ -119,4 +119,24 @@ describe("resolveConnectionFailurePresentation", () => {
       ).message,
     ).toBe("183.99.29.89:2731 연결이 중간에 끊겼습니다.");
   });
+
+  it("presents an empty ssh-agent as actionable guidance", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh handshake failed: ssh-agent has no keys",
+      ),
+    ).toEqual({
+      title: "Connection Failed",
+      message:
+        "SSH 에이전트에 등록된 키가 없습니다. 에이전트에 키를 추가한 뒤 다시 연결해 주세요.",
+    });
+  });
+
+  it("presents an unreachable ssh-agent as actionable guidance", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "ssh-agent connection failed: dial unix /tmp/agent.sock: connect: no such file or directory",
+      ).message,
+    ).toBe("SSH 에이전트에 연결하지 못했습니다. 에이전트가 실행 중인지 확인해 주세요.");
+  });
 });

@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MAX_HOST_STARTUP_COMMAND_LENGTH, getAwsEc2HostSshMetadataStatusLabel, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import { loadSavedCredential } from '../services/desktop/settings';
@@ -10,6 +10,42 @@ import { listAwsProfiles } from '../services/desktop/imports';
 import { Button, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
 import type { SearchableSelectOption } from '../ui';
 import { ArrowDown, ArrowUp, X } from '../ui/icons';
+
+function agentStatusColor(
+  status: SshAgentProbeResult['status'] | undefined,
+): string {
+  switch (status) {
+    case 'ok':
+      return 'var(--success-text)';
+    case 'unreachable':
+    case 'not-found':
+      return 'var(--danger-text)';
+    case 'empty':
+      return 'var(--accent-strong)';
+    default:
+      return 'var(--text-muted)';
+  }
+}
+
+function agentStatusText(probe: SshAgentProbeResult | null): string {
+  if (!probe) {
+    return '에이전트 상태 확인 중…';
+  }
+  switch (probe.status) {
+    case 'ok':
+      return `에이전트 감지됨${
+        typeof probe.keyCount === 'number' ? ` · 키 ${probe.keyCount}개` : ''
+      }`;
+    case 'empty':
+      return '에이전트에 등록된 키가 없습니다';
+    case 'unreachable':
+      return '에이전트에 연결할 수 없습니다';
+    case 'not-found':
+      return '에이전트를 찾을 수 없습니다';
+    default:
+      return '에이전트 상태를 확인할 수 없습니다';
+  }
+}
 
 const defaultSshDraft: SshHostDraft = {
   kind: 'ssh',
@@ -522,6 +558,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     listSerialPorts,
     pickPrivateKey: pickPrivateKeyFile,
     pickSshCertificate: pickSshCertificateFile,
+    probeSshAgent,
   } = useHostFormController();
   const formRef = useRef<HTMLFormElement | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -554,6 +591,31 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
+  // SSH Agent 인증 선택 시 로컬 agent 상태를 조회해 설정 시점에 표시(설정 실수를 미리 잡음).
+  const [agentProbe, setAgentProbe] = useState<SshAgentProbeResult | null>(null);
+  const isAgentAuthDraft = sshDraft?.authType === 'agent';
+  useEffect(() => {
+    if (!isAgentAuthDraft) {
+      setAgentProbe(null);
+      return;
+    }
+    let cancelled = false;
+    setAgentProbe(null);
+    probeSshAgent()
+      .then((result) => {
+        if (!cancelled) {
+          setAgentProbe(result);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAgentProbe({ status: 'unknown' });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAgentAuthDraft, probeSshAgent]);
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
   const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
   const commitJumpHostChain = (ids: string[]) => {
@@ -1715,19 +1777,22 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <SelectField
                 value={sshDraft.authType}
                 onChange={(event) => {
+                  const value = event.target.value;
                   const nextAuthType =
-                    event.target.value === 'privateKey'
+                    value === 'privateKey'
                       ? 'privateKey'
-                      : event.target.value === 'certificate'
+                      : value === 'certificate'
                         ? 'certificate'
-                        : 'password';
+                        : value === 'agent'
+                          ? 'agent'
+                          : 'password';
                   setDraft({
                     ...sshDraft,
                     authType: nextAuthType,
                     privateKeyPath: null,
                     certificatePath: null
                   });
-                  if (nextAuthType === 'password') {
+                  if (nextAuthType === 'password' || nextAuthType === 'agent') {
                     setPrivateKeyFile(null);
                     setCertificateFile(null);
                   } else if (nextAuthType === 'privateKey') {
@@ -1738,8 +1803,28 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 <option value="password">Password</option>
                 <option value="privateKey">Private key</option>
                 <option value="certificate">Certificate</option>
+                <option value="agent">SSH Agent</option>
               </SelectField>
             </label>
+
+            {sshDraft.authType === 'agent' ? (
+              <div className="grid gap-[0.45rem]">
+                <p className="text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
+                  키 파일이나 비밀번호 없이, 이 컴퓨터의 SSH 에이전트로 인증합니다.
+                  1Password나 ssh-add로 등록해 둔 키가 자동으로 사용됩니다.
+                </p>
+                <div className="flex items-center gap-[0.5rem] text-[0.8rem]">
+                  <span
+                    aria-hidden="true"
+                    className="inline-block h-[0.5rem] w-[0.5rem] shrink-0 rounded-full"
+                    style={{ background: agentStatusColor(agentProbe?.status) }}
+                  />
+                  <span className="text-[var(--text-soft)]">
+                    {agentStatusText(agentProbe)}
+                  </span>
+                </div>
+              </div>
+            ) : null}
 
             {sshDraft.authType === 'password' && credentialMode === 'new' ? (
               <label className={fieldClassName}>
@@ -1792,6 +1877,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </>
             ) : null}
 
+            {sshDraft.authType !== 'agent' ? (
             <div className="grid gap-[0.55rem]">
               <div className="flex items-center justify-between gap-3">
                 <span className={fieldLabelClassName}>Saved Credentials</span>
@@ -1829,8 +1915,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 ))}
               </SelectField>
             </div>
+            ) : null}
 
-            {credentialMode === 'existing' ? (
+            {credentialMode === 'existing' && sshDraft.authType !== 'agent' ? (
               <div className="grid gap-[0.55rem]">
                 {host && isSshHostRecord(host) && selectedSecretRef && onEditExistingSecret ? (
                   <Button

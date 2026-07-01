@@ -14,6 +14,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "./context";
+import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
@@ -523,6 +524,8 @@ export function registerPortForwardAndDnsIpcHandlers(
         await ctx.resolveRuntimeSshSecrets(sshHost);
       await ctx.ensureCertificateAuthReady(sshHost, secrets);
       const jump = await ctx.resolveJumpHostTarget(sshHost);
+      const authAgentEndpoint =
+        sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
       const runtime = await ctx.coreManager.startPortForward({
         ruleId: rule.id,
@@ -538,6 +541,8 @@ export function registerPortForwardAndDnsIpcHandlers(
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        authAgentEndpointKind: authAgentEndpoint?.kind,
+        authAgentEndpoint: authAgentEndpoint?.endpoint,
         mode: rule.mode,
         bindAddress: rule.bindAddress,
         bindPort: rule.bindPort,

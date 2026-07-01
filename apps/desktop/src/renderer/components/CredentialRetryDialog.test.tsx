@@ -25,6 +25,7 @@ describe("CredentialRetryDialog", () => {
       listSerialPorts: vi.fn().mockResolvedValue([]),
       pickPrivateKey: vi.fn(),
       pickSshCertificate: vi.fn(),
+      probeSshAgent: vi.fn().mockResolvedValue({ status: 'unknown' }),
     }));
   });
 

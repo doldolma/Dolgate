@@ -100,6 +100,7 @@ export const ipcChannels = {
     stopAutocomplete: 'ssh:autocomplete-stop',
     completionQuery: 'ssh:completion-query',
     respondKeyboardInteractive: 'ssh:respond-keyboard-interactive',
+    probeAgent: 'ssh:probe-agent',
     tmuxSplitPane: 'ssh:tmux-split-pane',
     tmuxNewWindow: 'ssh:tmux-new-window',
     tmuxSelectWindow: 'ssh:tmux-select-window',
