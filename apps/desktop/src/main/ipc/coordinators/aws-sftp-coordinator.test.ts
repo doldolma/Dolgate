@@ -74,7 +74,6 @@ describe("AWS SFTP coordinator", () => {
     ).resolves.toMatchObject({ id: "host-1" });
 
     expect(deps.awsService.login).toHaveBeenCalledWith("prod");
-    expect(deps.awsService.ensureSessionManagerPluginAvailable).toHaveBeenCalled();
   });
 
   it("emits a sanitized diagnostic when an instance is not managed by SSM", async () => {

@@ -192,13 +192,12 @@ npm run release:all
 
 ## AWS 사용 전 확인
 
-데스크톱의 AWS 관련 기능은 로컬 `aws` CLI와 `session-manager-plugin`에 의존합니다.
+SSM 세션 기능(shell·SFTP·포트 포워딩·ECS Exec/터널)은 앱에 내장된 SSM 데이터 채널로 동작하므로 `session-manager-plugin` 설치가 필요 없습니다. 로컬 `aws` CLI는 **AWS 프로필 인증**(프로필 생성·검증, SSO 브라우저 로그인)에만 필요합니다.
 
 최소 확인:
 
 ```bash
 aws --version
-session-manager-plugin --version
 ```
 
 추가 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)를 참고하면 됩니다.

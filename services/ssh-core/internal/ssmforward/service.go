@@ -1,17 +1,9 @@
 package ssmforward
 
 import (
-	"bufio"
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,8 +11,6 @@ import (
 
 	"dolssh/services/ssh-core/internal/protocol"
 )
-
-const startupGracePeriod = 500 * time.Millisecond
 
 var stopPortReleaseTimeout = 5 * time.Second
 var stopRequestWaitTimeout = stopPortReleaseTimeout + time.Second
@@ -327,223 +317,13 @@ func (h *runtimeHandle) bindTarget() (string, int) {
 	return resolveProbeAddress(h.bindAddress), h.bindPort
 }
 
-type commandRunner struct {
-	cmd         *exec.Cmd
-	stdout      io.ReadCloser
-	stderr      io.ReadCloser
-	waitCh      chan waitResult
-	treeKiller  processTreeKiller
-	messageMu   sync.RWMutex
-	lastMessage string
-	bindPortMu  sync.RWMutex
-	actualPort  int
-	onBindPort  func(int)
-}
-
-type waitResult struct {
-	exit sessionExit
-	err  error
-}
-
 func defaultRunnerFactory(payload protocol.SSMPortForwardStartPayload) (runtimeRunner, error) {
-	if payload.StreamURL != "" && payload.TokenValue != "" {
-		return startDataChannelForwardRunner(payload)
+	if payload.StreamURL == "" || payload.TokenValue == "" {
+		return nil, errors.New(
+			"AWS SSM 포트 포워딩 세션 토큰이 없습니다. 앱을 다시 시작한 뒤 다시 시도해 주세요.",
+		)
 	}
-
-	awsPath, pluginPath, err := resolveRuntimeTools()
-	if err != nil {
-		return nil, err
-	}
-
-	args, err := buildStartArgs(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	cmd := exec.CommandContext(context.Background(), awsPath, args...)
-	cmd.Env = mergeChildEnv(
-		buildRuntimePathValue(filepath.Dir(awsPath), filepath.Dir(pluginPath)),
-		payload.Env,
-		payload.UnsetEnv,
-	)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("capture aws ssm stdout: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("capture aws ssm stderr: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start aws ssm port forward: %w", err)
-	}
-
-	treeKiller, err := attachProcessTreeKiller(cmd)
-	if err != nil {
-		_ = ignoreProcessDone(cmd.Process.Kill())
-		_ = cmd.Wait()
-		_ = stdout.Close()
-		_ = stderr.Close()
-		return nil, fmt.Errorf("prepare aws ssm process tree: %w", err)
-	}
-
-	runner := &commandRunner{
-		cmd:        cmd,
-		stdout:     stdout,
-		stderr:     stderr,
-		waitCh:     make(chan waitResult, 1),
-		treeKiller: treeKiller,
-	}
-
-	go runner.captureOutput(stdout)
-	go runner.captureOutput(stderr)
-	go func() {
-		err := cmd.Wait()
-		runner.waitCh <- waitResult{exit: describeCmdExit(cmd.ProcessState), err: err}
-	}()
-
-	select {
-	case result := <-runner.waitCh:
-		_ = runner.Close()
-		return nil, errors.New(describeExit(result.exit, result.err, runner.ErrorMessage()))
-	case <-time.After(startupGracePeriod):
-		return runner, nil
-	}
-}
-
-func (r *commandRunner) Wait() (sessionExit, error) {
-	result := <-r.waitCh
-	return result.exit, result.err
-}
-
-func (r *commandRunner) Kill() error {
-	if r.treeKiller != nil {
-		return r.treeKiller.Kill()
-	}
-	if r.cmd == nil || r.cmd.Process == nil {
-		return nil
-	}
-	return ignoreProcessDone(r.cmd.Process.Kill())
-}
-
-func (r *commandRunner) Close() error {
-	var closeErr error
-	if r.stdout != nil {
-		if err := r.stdout.Close(); err != nil && closeErr == nil {
-			closeErr = err
-		}
-	}
-	if r.stderr != nil {
-		if err := r.stderr.Close(); err != nil && closeErr == nil {
-			closeErr = err
-		}
-	}
-	if r.treeKiller != nil {
-		if err := r.treeKiller.Close(); err != nil && closeErr == nil {
-			closeErr = err
-		}
-	}
-	return closeErr
-}
-
-func (r *commandRunner) ErrorMessage() string {
-	r.messageMu.RLock()
-	defer r.messageMu.RUnlock()
-	return r.lastMessage
-}
-
-func (r *commandRunner) ActualBindPort() int {
-	r.bindPortMu.RLock()
-	defer r.bindPortMu.RUnlock()
-	return r.actualPort
-}
-
-func (r *commandRunner) SetBindPortResolvedCallback(callback func(int)) {
-	r.bindPortMu.Lock()
-	r.onBindPort = callback
-	actualPort := r.actualPort
-	r.bindPortMu.Unlock()
-	if callback != nil && actualPort > 0 {
-		callback(actualPort)
-	}
-}
-
-func (r *commandRunner) captureOutput(reader io.Reader) {
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		r.messageMu.Lock()
-		r.lastMessage = line
-		r.messageMu.Unlock()
-		if bindPort := parseStartedBindPort(line); bindPort > 0 {
-			r.bindPortMu.Lock()
-			previousPort := r.actualPort
-			r.actualPort = bindPort
-			callback := r.onBindPort
-			r.bindPortMu.Unlock()
-			if callback != nil && previousPort != bindPort {
-				callback(bindPort)
-			}
-		}
-	}
-}
-
-var startedBindPortPattern = regexp.MustCompile(`(?i)\bport\s+(\d+)\s+opened\b`)
-
-func parseStartedBindPort(line string) int {
-	match := startedBindPortPattern.FindStringSubmatch(line)
-	if len(match) < 2 {
-		return 0
-	}
-	port, err := strconv.Atoi(match[1])
-	if err != nil || port <= 0 {
-		return 0
-	}
-	return port
-}
-
-func buildStartArgs(payload protocol.SSMPortForwardStartPayload) ([]string, error) {
-	parameters := map[string][]string{
-		"portNumber":      {strconv.Itoa(payload.TargetPort)},
-		"localPortNumber": {strconv.Itoa(payload.BindPort)},
-	}
-
-	documentName := "AWS-StartPortForwardingSession"
-	if payload.TargetKind == "remote-host" {
-		if strings.TrimSpace(payload.RemoteHost) == "" {
-			return nil, fmt.Errorf("remote host is required for remote-host target")
-		}
-		documentName = "AWS-StartPortForwardingSessionToRemoteHost"
-		parameters["host"] = []string{strings.TrimSpace(payload.RemoteHost)}
-	}
-
-	rawParameters, err := json.Marshal(parameters)
-	if err != nil {
-		return nil, fmt.Errorf("marshal ssm forward parameters: %w", err)
-	}
-
-	args := []string{
-		"ssm",
-		"start-session",
-		"--target",
-		payload.TargetID,
-		"--document-name",
-		documentName,
-		"--parameters",
-		string(rawParameters),
-	}
-	if strings.TrimSpace(payload.ProfileName) != "" {
-		args = append(args, "--profile", strings.TrimSpace(payload.ProfileName))
-	}
-	if strings.TrimSpace(payload.Region) != "" {
-		args = append(args, "--region", strings.TrimSpace(payload.Region))
-	}
-	return args, nil
+	return startDataChannelForwardRunner(payload)
 }
 
 func resolvedBindAddress(bindAddress string) string {
@@ -567,24 +347,6 @@ func describeExit(exit sessionExit, err error, message string) string {
 		return fmt.Sprintf("AWS SSM port forward exited with code %d", exit.ExitCode)
 	}
 	return ""
-}
-
-func describeCmdExit(state *os.ProcessState) sessionExit {
-	if state == nil {
-		return sessionExit{}
-	}
-	exit := sessionExit{ExitCode: state.ExitCode()}
-	return exit
-}
-
-func ignoreProcessDone(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, os.ErrProcessDone) {
-		return nil
-	}
-	return err
 }
 
 func resolveProbeAddress(bindAddress string) string {
@@ -619,110 +381,3 @@ func waitForPortRelease(bindAddress string, bindPort int, timeout time.Duration)
 	}
 }
 
-func splitPathEnv() []string {
-	rawPath := os.Getenv("PATH")
-	if rawPath == "" {
-		return nil
-	}
-	return strings.FieldsFunc(rawPath, func(r rune) bool { return r == os.PathListSeparator })
-}
-
-func buildRuntimePathValue(preferredDirs ...string) string {
-	entries := make([]string, 0, len(preferredDirs)+8)
-	seen := make(map[string]struct{})
-	appendUnique := func(entry string) {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			return
-		}
-		key := entry
-		if processPlatformIsWindows() {
-			key = strings.ToLower(entry)
-		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		entries = append(entries, entry)
-	}
-
-	for _, preferredDir := range preferredDirs {
-		appendUnique(preferredDir)
-	}
-	for _, entry := range splitPathEnv() {
-		appendUnique(entry)
-	}
-	return strings.Join(entries, string(os.PathListSeparator))
-}
-
-func mergeChildEnv(pathValue string, overrides map[string]string, unsetKeys []string) []string {
-	env := os.Environ()
-	env = append(env, "AWS_PAGER=")
-	unset := make(map[string]struct{}, len(unsetKeys))
-	for _, key := range unsetKeys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		unset[envKeyLookup(key)] = struct{}{}
-	}
-
-	overrideLookup := make(map[string]string, len(overrides))
-	for key, value := range overrides {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		overrideLookup[envKeyLookup(key)] = key + "=" + value
-	}
-
-	pathReplaced := false
-	next := make([]string, 0, len(env)+len(overrides)+1)
-	for _, entry := range env {
-		key, _, found := strings.Cut(entry, "=")
-		if !found {
-			next = append(next, entry)
-			continue
-		}
-		lookupKey := envKeyLookup(key)
-		if _, shouldUnset := unset[lookupKey]; shouldUnset {
-			continue
-		}
-		if override, shouldOverride := overrideLookup[lookupKey]; shouldOverride {
-			next = append(next, override)
-			delete(overrideLookup, lookupKey)
-			continue
-		}
-		if pathKeyMatches(key) {
-			if pathValue != "" {
-				next = append(next, fmt.Sprintf("%s=%s", key, pathValue))
-				pathReplaced = true
-			} else {
-				next = append(next, entry)
-			}
-			continue
-		}
-		next = append(next, entry)
-	}
-	if pathValue != "" && !pathReplaced {
-		next = append(next, fmt.Sprintf("PATH=%s", pathValue))
-	}
-	for _, override := range overrideLookup {
-		next = append(next, override)
-	}
-	return next
-}
-
-func envKeyLookup(key string) string {
-	if processPlatformIsWindows() {
-		return strings.ToUpper(key)
-	}
-	return key
-}
-
-func pathKeyMatches(key string) bool {
-	if processPlatformIsWindows() {
-		return strings.EqualFold(key, "PATH")
-	}
-	return key == "PATH"
-}

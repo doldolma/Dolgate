@@ -166,9 +166,7 @@ if (termiusHelperArgIndex >= 0) {
   const syncOutboxRepository = new SyncOutboxRepository();
   const secretStore = new SecretStore();
   const awsService = new AwsService(awsProfileRepository);
-  const awsSsmTunnelService = new AwsSsmTunnelService({
-    buildCommandEnv: () => awsService.buildManagedCommandEnv()
-  });
+  const awsSsmTunnelService = new AwsSsmTunnelService();
   const warpgateService = new WarpgateService(secretStore);
   const termiusImportService = new TermiusImportService();
   const opensshImportService = new OpenSshImportService();

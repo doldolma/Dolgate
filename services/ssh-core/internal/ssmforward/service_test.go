@@ -2,7 +2,6 @@ package ssmforward
 
 import (
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -51,111 +50,6 @@ func (r *bindPortAwareFakeRunner) ActualBindPort() int {
 
 func (r *bindPortAwareFakeRunner) SetBindPortResolvedCallback(callback func(int)) {
 	r.callback = callback
-}
-
-func TestBuildStartArgsForInstancePort(t *testing.T) {
-	args, err := buildStartArgs(protocol.SSMPortForwardStartPayload{
-		ProfileName: "default",
-		Region:      "ap-northeast-2",
-		TargetType:  "instance",
-		TargetID:    "i-123",
-		BindPort:    15432,
-		TargetKind:  "instance-port",
-		TargetPort:  5432,
-	})
-	if err != nil {
-		t.Fatalf("buildStartArgs() error = %v", err)
-	}
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "AWS-StartPortForwardingSession") {
-		t.Fatalf("args = %v, want AWS-StartPortForwardingSession", args)
-	}
-	if strings.Contains(joined, "AWS-StartPortForwardingSessionToRemoteHost") {
-		t.Fatalf("args = %v, unexpected remote-host document", args)
-	}
-}
-
-func TestBuildStartArgsForRemoteHost(t *testing.T) {
-	args, err := buildStartArgs(protocol.SSMPortForwardStartPayload{
-		ProfileName: "default",
-		Region:      "ap-northeast-2",
-		TargetType:  "instance",
-		TargetID:    "i-123",
-		BindPort:    13306,
-		TargetKind:  "remote-host",
-		TargetPort:  3306,
-		RemoteHost:  "db.internal",
-	})
-	if err != nil {
-		t.Fatalf("buildStartArgs() error = %v", err)
-	}
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "AWS-StartPortForwardingSessionToRemoteHost") {
-		t.Fatalf("args = %v, want AWS-StartPortForwardingSessionToRemoteHost", args)
-	}
-	if !strings.Contains(joined, "db.internal") {
-		t.Fatalf("args = %v, want remote host parameter", args)
-	}
-}
-
-func TestBuildStartArgsForEcsTaskRemoteHost(t *testing.T) {
-	args, err := buildStartArgs(protocol.SSMPortForwardStartPayload{
-		ProfileName: "default",
-		Region:      "ap-northeast-2",
-		TargetType:  "ecs-task",
-		TargetID:    "ecs:demo-cluster_task-123_runtime-456",
-		BindPort:    18080,
-		TargetKind:  "remote-host",
-		TargetPort:  8080,
-		RemoteHost:  "127.0.0.1",
-	})
-	if err != nil {
-		t.Fatalf("buildStartArgs() error = %v", err)
-	}
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "ecs:demo-cluster_task-123_runtime-456") {
-		t.Fatalf("args = %v, want ecs task target", args)
-	}
-	if !strings.Contains(joined, "AWS-StartPortForwardingSessionToRemoteHost") {
-		t.Fatalf("args = %v, want remote-host document", args)
-	}
-}
-
-func TestMergeChildEnvAppliesOverridesAndUnsetKeys(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", "old")
-	t.Setenv("AWS_PROFILE", "server-profile")
-	t.Setenv("DOLSSH_KEEP", "yes")
-
-	env := mergeChildEnv("/tmp/dolssh-bin", map[string]string{
-		"AWS_ACCESS_KEY_ID":     "new",
-		"AWS_SECRET_ACCESS_KEY": "secret",
-	}, []string{"AWS_PROFILE"})
-
-	lookup := map[string]string{}
-	for _, entry := range env {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok {
-			lookup[key] = value
-		}
-	}
-	if lookup["AWS_ACCESS_KEY_ID"] != "new" {
-		t.Fatalf("AWS_ACCESS_KEY_ID = %q, want new", lookup["AWS_ACCESS_KEY_ID"])
-	}
-	if lookup["AWS_SECRET_ACCESS_KEY"] != "secret" {
-		t.Fatalf("AWS_SECRET_ACCESS_KEY = %q, want secret", lookup["AWS_SECRET_ACCESS_KEY"])
-	}
-	if _, ok := lookup["AWS_PROFILE"]; ok {
-		t.Fatalf("AWS_PROFILE should be unset, env contains %q", lookup["AWS_PROFILE"])
-	}
-	if lookup["DOLSSH_KEEP"] != "yes" {
-		t.Fatalf("DOLSSH_KEEP = %q, want yes", lookup["DOLSSH_KEEP"])
-	}
-	if lookup["PATH"] == "" && lookup["Path"] == "" && lookup["path"] == "" && os.Getenv("PATH") != "" {
-		t.Fatalf("PATH was not preserved or replaced")
-	}
 }
 
 func TestServiceStopKillsRuntimeAndEmitsStopped(t *testing.T) {
@@ -409,11 +303,3 @@ func TestServiceEmitsUpdatedBindPortWhenResolvedLater(t *testing.T) {
 	_ = service.Stop("rule-4", "req-4")
 }
 
-func TestParseStartedBindPort(t *testing.T) {
-	if got := parseStartedBindPort("Port 40123 opened for sessionId abc123."); got != 40123 {
-		t.Fatalf("parseStartedBindPort() = %d, want 40123", got)
-	}
-	if got := parseStartedBindPort("Waiting for connections..."); got != 0 {
-		t.Fatalf("parseStartedBindPort() = %d, want 0", got)
-	}
-}

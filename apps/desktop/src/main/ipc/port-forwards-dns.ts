@@ -379,9 +379,6 @@ export function registerPortForwardAndDnsIpcHandlers(
             }
           }
 
-          publishRuntime("starting", "Checking Session Manager plugin");
-          await ctx.awsService.ensureSessionManagerPluginAvailable();
-
           publishRuntime("starting", "Resolving running ECS task");
           const targetId = await ctx.awsService.resolveEcsTaskTunnelTarget({
             profileName,

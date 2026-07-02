@@ -2941,28 +2941,6 @@ export class AwsService {
     }
   }
 
-  async ensureSessionManagerPluginAvailable(): Promise<void> {
-    if (isE2EFakeAwsSessionEnabled()) {
-      return;
-    }
-
-    try {
-      const result = await this.runResolvedCommand(
-        "session-manager-plugin",
-        ["--version"],
-        10_000,
-      );
-      if (result.exitCode !== 0) {
-        throw new Error("session-manager-plugin --version failed");
-      }
-      return;
-    } catch {
-      throw new Error(
-        "AWS Session Manager Plugin이 설치되어 있지 않아 SSM 세션을 열 수 없습니다.",
-      );
-    }
-  }
-
   async listProfiles(): Promise<AwsProfileSummary[]> {
     await this.ensureManagedProfilesReady();
     return this.profileRepository.listMetadata().map((profile) => ({
@@ -3380,13 +3358,10 @@ export class AwsService {
 
     await this.ensureAwsCliAvailable();
 
-    const [ssoStartUrl, ssoSession, configuredRegion, pluginAvailable] = await Promise.all([
+    const [ssoStartUrl, ssoSession, configuredRegion] = await Promise.all([
       this.readConfigValue(profileName, "sso_start_url", awsRootDir),
       this.readConfigValue(profileName, "sso_session", awsRootDir),
       this.readConfigValue(profileName, "region", awsRootDir),
-      resolveExecutable("session-manager-plugin")
-        .then(() => true)
-        .catch(() => false),
     ]);
     const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
 
@@ -3417,7 +3392,7 @@ export class AwsService {
         configuredRegion: configuredRegion || null,
         accountId: payload.Account ?? null,
         arn: payload.Arn ?? null,
-        missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
+        missingTools: [],
       };
     }
 
@@ -3431,7 +3406,7 @@ export class AwsService {
       errorMessage: isSsoProfile
         ? "브라우저 로그인이 필요합니다."
         : "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
-      missingTools: pluginAvailable ? [] : ["session-manager-plugin"],
+      missingTools: [],
     };
   }
 
@@ -3700,10 +3675,6 @@ export class AwsService {
   ): Promise<boolean> {
     if (isE2EFakeAwsSessionEnabled()) {
       return true;
-    }
-
-    if (!this.shouldUseInProcessSsm()) {
-      await this.ensureSessionManagerPluginAvailable();
     }
 
     try {
@@ -4982,14 +4953,11 @@ export class AwsService {
     }
   }
 
-  // In-process SSM sessions bypass aws + session-manager-plugin entirely; the
-  // escape hatch DOLSSH_AWS_INPROCESS=0 restores the binary-spawning path. E2E
-  // fake mode keeps the binary path because its fixtures replace the binaries.
+  // SSM sessions always run on the in-process data channel; the binary spawn
+  // path is gone. The only exception is e2e fake mode, where Node must not
+  // issue real AWS tokens — ssh-core serves the session from its fake fixtures.
   shouldUseInProcessSsm(): boolean {
-    if (isE2EFakeAwsSessionEnabled()) {
-      return false;
-    }
-    return process.env.DOLSSH_AWS_INPROCESS !== "0";
+    return !isE2EFakeAwsSessionEnabled();
   }
 
   async startSsmShellSession(
@@ -5197,13 +5165,6 @@ export class AwsService {
       };
     }
 
-    if (!this.shouldUseInProcessSsm()) {
-      try {
-        await this.ensureSessionManagerPluginAvailable();
-      } catch (error) {
-        throw prefixInspectionError("SSM 명령 전송", error);
-      }
-    }
 
     const startedAt = Date.now();
     const getRemainingTimeoutMs = () =>

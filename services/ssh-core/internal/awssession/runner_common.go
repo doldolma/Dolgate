@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"dolssh/services/ssh-core/internal/protocol"
 )
@@ -35,23 +34,13 @@ func defaultRunnerFactory(payload protocol.AWSConnectPayload) (sessionRunner, er
 	case "1":
 		return newFakeRunner("Connected to fake AWS SSM smoke session.\r\n"), nil
 	case "process":
-		runtime, err := resolveProcessBackedFakeRuntime(payload)
-		if err != nil {
-			return nil, err
-		}
-		return startPlatformAWSRunner(payload, runtime)
+		return startProcessBackedFakeAgentRunner(payload)
 	}
 
-	if payload.StreamURL != "" && payload.TokenValue != "" {
-		return startDataChannelRunner(payload)
+	if payload.StreamURL == "" || payload.TokenValue == "" {
+		return nil, errors.New("AWS SSM 세션 토큰이 없습니다. 앱을 다시 시작한 뒤 다시 시도해 주세요.")
 	}
-
-	runtime, err := resolveAWSRuntime(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	return startPlatformAWSRunner(payload, runtime)
+	return startDataChannelRunner(payload)
 }
 
 func normalizedSize(cols, rows int) (int, int) {
@@ -62,20 +51,6 @@ func normalizedSize(cols, rows int) (int, int) {
 		rows = defaultRows
 	}
 	return cols, rows
-}
-
-func buildAWSArgs(payload protocol.AWSConnectPayload) []string {
-	args := []string{
-		"ssm",
-		"start-session",
-		"--target",
-		payload.InstanceID,
-	}
-	if strings.TrimSpace(payload.ProfileName) != "" {
-		args = append(args, "--profile", payload.ProfileName)
-	}
-	args = append(args, "--region", payload.Region)
-	return args
 }
 
 func normalizeControlSignal(signal string) (string, error) {
@@ -98,38 +73,6 @@ func describeExit(exit sessionExit, err error) string {
 		return fmt.Sprintf("AWS SSM session exited with code %d", exit.ExitCode)
 	}
 	return ""
-}
-
-func mergeChildEnv(pathValue string, caseInsensitive bool) []string {
-	env := os.Environ()
-	if pathValue == "" {
-		return env
-	}
-
-	replaced := false
-	for index, entry := range env {
-		key, _, found := strings.Cut(entry, "=")
-		if !found {
-			continue
-		}
-		if envKeyMatches(key, "PATH", caseInsensitive) {
-			env[index] = fmt.Sprintf("%s=%s", key, pathValue)
-			replaced = true
-		}
-	}
-
-	if !replaced {
-		env = append(env, fmt.Sprintf("PATH=%s", pathValue))
-	}
-
-	return env
-}
-
-func envKeyMatches(left, right string, caseInsensitive bool) bool {
-	if caseInsensitive {
-		return strings.EqualFold(left, right)
-	}
-	return left == right
 }
 
 func ignoreProcessDone(err error) error {

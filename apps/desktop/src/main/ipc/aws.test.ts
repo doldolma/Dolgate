@@ -137,25 +137,18 @@ describe("registerAwsIpcHandlers", () => {
         ],
       });
     const invalidateEcsServiceActionContext = vi.fn();
-    const connectLocalSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
-    const noteSessionConfigured = vi.fn();
-    const buildManagedSessionEnvSpec = vi.fn().mockReturnValue({
-      env: {
-        HOME: "/tmp/dolgate-aws-home",
-        USERPROFILE: "/tmp/dolgate-aws-home",
-        AWS_CONFIG_FILE: "/tmp/dolgate-aws-home/.aws/config",
-        AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolgate-aws-home/.aws/credentials",
-      },
-      unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
+    const connectAwsSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const startEcsExecSession = vi.fn().mockResolvedValue({
+      sessionId: "ecs-sess-1",
+      streamUrl: "wss://ssmmessages.ap-northeast-2.amazonaws.com/v1/data-channel/ecs-sess-1",
+      tokenValue: "token-ecs-1",
     });
+    const noteSessionConfigured = vi.fn();
 
     registerAwsIpcHandlers({
       awsService: {
         resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
-        ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
-        ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
-        shouldUseInProcessSsm: vi.fn().mockReturnValue(false),
-        buildManagedSessionEnvSpec,
+        startEcsExecSession,
         describeEcsServiceActionContext,
         invalidateEcsServiceActionContext,
       },
@@ -170,7 +163,7 @@ describe("registerAwsIpcHandlers", () => {
       },
       assertAwsEcsHost: vi.fn(),
       coreManager: {
-        connectLocalSession,
+        connectAwsSession,
       },
       sessionReplayService: {
         noteSessionConfigured,
@@ -202,23 +195,16 @@ describe("registerAwsIpcHandlers", () => {
       "api",
     );
     expect(describeEcsServiceActionContext).toHaveBeenCalledTimes(2);
-    expect(connectLocalSession).toHaveBeenCalledTimes(1);
-    expect(connectLocalSession).toHaveBeenCalledWith(
+    expect(connectAwsSession).toHaveBeenCalledTimes(1);
+    expect(connectAwsSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        executable: "aws",
-        args: expect.arrayContaining(["ecs", "execute-command"]),
-        env: {
-          HOME: "/tmp/dolgate-aws-home",
-          USERPROFILE: "/tmp/dolgate-aws-home",
-          AWS_CONFIG_FILE: "/tmp/dolgate-aws-home/.aws/config",
-          AWS_SHARED_CREDENTIALS_FILE: "/tmp/dolgate-aws-home/.aws/credentials",
-        },
-        unsetEnv: ["AWS_PROFILE", "AWS_DEFAULT_PROFILE"],
-        lifecycle: {
-          hostId: "host-1",
-          hostLabel: "prod",
-          connectionDetails: "api · api · task-1",
-          connectionKind: "aws-ecs-exec",
+        connectionKind: "aws-ecs-exec",
+        connectionDetails: "api · api · task-1",
+        ssmSession: {
+          sessionId: "ecs-sess-1",
+          streamUrl:
+            "wss://ssmmessages.ap-northeast-2.amazonaws.com/v1/data-channel/ecs-sess-1",
+          tokenValue: "token-ecs-1",
         },
       }),
     );
