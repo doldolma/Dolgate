@@ -952,6 +952,11 @@ export class CoreManager {
   private onPortForwardEvent?: (
     event: PortForwardRuntimeEvent,
   ) => void | Promise<void>;
+  private issueSsmPortForwardToken?: (
+    payload: ResolvedSsmPortForwardStartPayload,
+  ) => Promise<
+    { sessionId: string; streamUrl: string; tokenValue: string } | undefined
+  >;
   // 바이너리 frame은 청크 경계를 보장하지 않으므로 별도 parser가 필요하다.
   private readonly parser = new CoreFrameParser();
 
@@ -1110,6 +1115,18 @@ export class CoreManager {
       | undefined,
   ): void {
     this.onPortForwardEvent = handler;
+  }
+
+  setSsmPortForwardTokenIssuer(
+    issuer:
+      | ((
+          payload: ResolvedSsmPortForwardStartPayload,
+        ) => Promise<
+          { sessionId: string; streamUrl: string; tokenValue: string } | undefined
+        >)
+      | undefined,
+  ): void {
+    this.issueSsmPortForwardToken = issuer;
   }
 
   registerWindow(window: BrowserWindow): void {
@@ -2020,6 +2037,9 @@ export class CoreManager {
     env?: Record<string, string>;
     unsetEnv?: string[];
     startupCommand?: string;
+    ssmSession?: { sessionId: string; streamUrl: string; tokenValue: string };
+    connectionKind?: "aws-ssm" | "aws-ecs-exec";
+    connectionDetails?: string;
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
@@ -2032,8 +2052,10 @@ export class CoreManager {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
-      connectionDetails: `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
-      connectionKind: "aws-ssm",
+      connectionDetails:
+        payload.connectionDetails ??
+        `${payload.profileName} · ${payload.region} · ${payload.instanceId}`,
+      connectionKind: payload.connectionKind ?? "aws-ssm",
       connectedAt: null,
       disconnectedAt: null,
       disconnectReason: null,
@@ -2061,6 +2083,9 @@ export class CoreManager {
       rows: payload.rows,
       env: payload.env,
       unsetEnv: payload.unsetEnv,
+      streamUrl: payload.ssmSession?.streamUrl,
+      tokenValue: payload.ssmSession?.tokenValue,
+      ssmSessionId: payload.ssmSession?.sessionId,
     };
     this.sendControl<ResolvedAwsConnectPayload>({
       id: randomUUID(),
@@ -2788,15 +2813,7 @@ export class CoreManager {
     this.broadcastPortForwardEvent({ runtime: baseRuntime });
     void this.onPortForwardEvent?.({ runtime: baseRuntime });
 
-    const response = await this.requestResponse<Record<string, unknown>>(
-      {
-        id: randomUUID(),
-        type: "ssmPortForwardStart",
-        endpointId: payload.ruleId,
-        payload,
-      },
-      ["portForwardStarted"],
-    );
+    const response = await this.sendSsmPortForwardStart(payload.ruleId, payload);
 
     const runtime = this.buildForwardRuntime(
       payload.ruleId,
@@ -2806,6 +2823,69 @@ export class CoreManager {
     this.portForwardRuntimes.set(payload.ruleId, runtime);
     this.broadcastPortForwardEvent({ runtime });
     return runtime;
+  }
+
+  // In-process path: obtain an SSM data-channel token so ssh-core can open the
+  // WebSocket itself. When the issuer is unset or declines (binary/e2e-fake
+  // mode), ssh-core falls back to spawning aws + session-manager-plugin.
+  private async sendSsmPortForwardStart(
+    ruleId: string,
+    payload: ResolvedSsmPortForwardStartPayload,
+  ): Promise<Record<string, unknown>> {
+    const ssmSession = await this.issueSsmPortForwardToken?.(payload);
+    const framePayload: ResolvedSsmPortForwardStartPayload = ssmSession
+      ? {
+          ...payload,
+          streamUrl: ssmSession.streamUrl,
+          tokenValue: ssmSession.tokenValue,
+          ssmSessionId: ssmSession.sessionId,
+        }
+      : payload;
+
+    return this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "ssmPortForwardStart",
+        endpointId: ruleId,
+        payload: framePayload,
+      },
+      ["portForwardStarted"],
+    );
+  }
+
+  // Endpoint-scoped SSM tunnels (AWS SFTP, containers, container shells) share
+  // the Go ssm-forward runtime with startSsmPortForward but skip the eager
+  // definition/runtime registration and broadcasts. Asynchronous Go port-forward
+  // events still flow through the common event routing, same as ECS tunnels.
+  async startSsmTunnel(
+    payload: ResolvedSsmPortForwardStartPayload & { ruleId: string },
+  ): Promise<{ bindAddress: string; bindPort: number }> {
+    await this.start();
+    const response = await this.sendSsmPortForwardStart(payload.ruleId, payload);
+    const bindAddress =
+      typeof response.bindAddress === "string" && response.bindAddress
+        ? response.bindAddress
+        : payload.bindAddress;
+    const bindPort =
+      typeof response.bindPort === "number" && response.bindPort > 0
+        ? response.bindPort
+        : payload.bindPort;
+    return { bindAddress, bindPort };
+  }
+
+  async stopSsmTunnel(ruleId: string): Promise<void> {
+    if (!this.process) {
+      return;
+    }
+    await this.requestResponse(
+      {
+        id: randomUUID(),
+        type: "ssmPortForwardStop",
+        endpointId: ruleId,
+        payload: {},
+      },
+      ["portForwardStopped"],
+    );
   }
 
   async stopPortForward(ruleId: string): Promise<void> {

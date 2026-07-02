@@ -191,6 +191,22 @@ if (termiusHelperArgIndex >= 0) {
     },
     upsertActivityLog,
   );
+  awsSsmTunnelService.setInProcessBackend({
+    shouldUse: () => awsService.shouldUseInProcessSsm(),
+    start: (input) =>
+      coreManager.startSsmTunnel({
+        ruleId: input.runtimeId,
+        profileName: input.profileName,
+        region: input.region,
+        targetType: "instance",
+        targetId: input.instanceId,
+        bindAddress: input.bindAddress,
+        bindPort: input.bindPort,
+        targetKind: "instance-port",
+        targetPort: input.targetPort,
+      }),
+    stop: (runtimeId) => coreManager.stopSsmTunnel(runtimeId),
+  });
   const hostsOverrideManager = new HostsOverrideManager();
   const syncService = new SyncService(
     authService,

@@ -5,6 +5,8 @@ go 1.26.4
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/creack/pty v1.1.24
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/sftp v1.13.10
 	github.com/unixshells/mosh-go v0.5.2
 	go.bug.st/serial v1.7.1

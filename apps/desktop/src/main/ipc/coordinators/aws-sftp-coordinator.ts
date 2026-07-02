@@ -534,7 +534,9 @@ export function createAwsSftpCoordinator(deps: {
         stage: "checking-ssm",
         message: `${host.label} 인스턴스의 SSM 연결 상태를 확인하는 중입니다.`,
       });
-      await awsService.ensureSessionManagerPluginAvailable();
+      if (!awsService.shouldUseInProcessSsm()) {
+        await awsService.ensureSessionManagerPluginAvailable();
+      }
       const refreshedHost = await hydrateHostForSftp(host);
       const isManaged = await awsService.isManagedInstance(
         awsService.resolveManagedProfileNameOrFallback(

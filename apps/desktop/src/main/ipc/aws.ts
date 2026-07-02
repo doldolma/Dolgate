@@ -267,8 +267,11 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
         ctx.assertAwsEcsHost(host);
         const ecsHost = host as AwsEcsHostRecord;
         const profileName = resolveHostProfileName(ecsHost);
-        await ctx.awsService.ensureAwsCliAvailable();
-        await ctx.awsService.ensureSessionManagerPluginAvailable();
+        const useInProcess = ctx.awsService.shouldUseInProcessSsm();
+        if (!useInProcess) {
+          await ctx.awsService.ensureAwsCliAvailable();
+          await ctx.awsService.ensureSessionManagerPluginAvailable();
+        }
         const openShell = async () => {
           const actionContext = await ctx.awsService.describeEcsServiceActionContext(
             profileName,
@@ -293,42 +296,69 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
           if (!container) {
             throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
           }
-          const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
           const taskId =
             input.taskArn.split("/").filter(Boolean).at(-1) ?? input.taskArn;
-          const connection = await ctx.coreManager.connectLocalSession({
-            cols: input.cols,
-            rows: input.rows,
-            title: `${ecsHost.label} · ${input.serviceName} · ${input.containerName}`,
-            shellKind: "aws-ecs-exec",
-            executable: "aws",
-            args: [
-              "ecs",
-              "execute-command",
-              "--profile",
-              profileName,
-              "--region",
-              ecsHost.awsRegion,
-              "--cluster",
-              ecsHost.awsEcsClusterArn,
-              "--task",
-              input.taskArn,
-              "--container",
-              input.containerName,
-              "--interactive",
-              "--command",
-              "/bin/sh",
-            ],
-            env: awsSessionEnv.env,
-            unsetEnv: awsSessionEnv.unsetEnv,
-            lifecycle: {
-              hostId: ecsHost.id,
-              hostLabel: ecsHost.label,
-              connectionDetails:
-                `${input.serviceName} · ${input.containerName} · ${taskId}`,
-              connectionKind: "aws-ecs-exec",
-            },
-          });
+          const title = `${ecsHost.label} · ${input.serviceName} · ${input.containerName}`;
+          const connectionDetails = `${input.serviceName} · ${input.containerName} · ${taskId}`;
+          const connection = useInProcess
+            ? await (async () => {
+                const ssmSession = await ctx.awsService.startEcsExecSession({
+                  profileName,
+                  region: ecsHost.awsRegion,
+                  clusterArn: ecsHost.awsEcsClusterArn,
+                  taskArn: input.taskArn,
+                  containerName: input.containerName,
+                  command: "/bin/sh",
+                });
+                return ctx.coreManager.connectAwsSession({
+                  profileName,
+                  region: ecsHost.awsRegion,
+                  instanceId: input.taskArn,
+                  cols: input.cols,
+                  rows: input.rows,
+                  title,
+                  hostId: ecsHost.id,
+                  hostLabel: ecsHost.label,
+                  connectionKind: "aws-ecs-exec",
+                  connectionDetails,
+                  ssmSession,
+                });
+              })()
+            : await (async () => {
+                const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
+                return ctx.coreManager.connectLocalSession({
+                  cols: input.cols,
+                  rows: input.rows,
+                  title,
+                  shellKind: "aws-ecs-exec",
+                  executable: "aws",
+                  args: [
+                    "ecs",
+                    "execute-command",
+                    "--profile",
+                    profileName,
+                    "--region",
+                    ecsHost.awsRegion,
+                    "--cluster",
+                    ecsHost.awsEcsClusterArn,
+                    "--task",
+                    input.taskArn,
+                    "--container",
+                    input.containerName,
+                    "--interactive",
+                    "--command",
+                    "/bin/sh",
+                  ],
+                  env: awsSessionEnv.env,
+                  unsetEnv: awsSessionEnv.unsetEnv,
+                  lifecycle: {
+                    hostId: ecsHost.id,
+                    hostLabel: ecsHost.label,
+                    connectionDetails,
+                    connectionKind: "aws-ecs-exec",
+                  },
+                });
+              })();
           ctx.sessionReplayService.noteSessionConfigured(
             connection.sessionId,
             input.cols,

@@ -37,6 +37,7 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
       resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
       getProfileStatus: vi.fn().mockResolvedValue({ isAuthenticated: true }),
       login: vi.fn().mockResolvedValue(undefined),
+      shouldUseInProcessSsm: vi.fn(() => false),
       ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
       describeEc2Instance: vi.fn().mockResolvedValue(null),
       isManagedInstance: vi.fn().mockResolvedValue(true),

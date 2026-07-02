@@ -31,6 +31,19 @@ export interface AwsSsmTunnelHandle {
   bindPort: number;
 }
 
+/**
+ * In-process tunnel backend: runs the SSM port-forwarding data channel inside
+ * ssh-core (no aws CLI, no session-manager-plugin). Wired after CoreManager
+ * construction; when absent or shouldUse() is false, tunnels spawn the binary.
+ */
+export interface AwsSsmInProcessTunnelBackend {
+  shouldUse: () => boolean;
+  start: (
+    input: AwsSsmTunnelStartInput & { runtimeId: string; bindAddress: string },
+  ) => Promise<{ bindAddress: string; bindPort: number }>;
+  stop: (runtimeId: string) => Promise<void>;
+}
+
 interface TunnelRuntime {
   process: ChildProcessByStdio<null, Readable, Readable>;
   stopRequested: boolean;
@@ -329,6 +342,8 @@ async function defaultKillProcessTree(
 
 export class AwsSsmTunnelService {
   private readonly runtimes = new Map<string, TunnelRuntime>();
+  private readonly inProcessRuntimeIds = new Set<string>();
+  private inProcessBackend?: AwsSsmInProcessTunnelBackend;
   private readonly onRuntimeTerminated?: (
     runtimeId: string,
     message: string,
@@ -355,10 +370,28 @@ export class AwsSsmTunnelService {
       options.portReleaseTimeoutMs ?? TUNNEL_PORT_RELEASE_TIMEOUT_MS;
   }
 
+  setInProcessBackend(backend: AwsSsmInProcessTunnelBackend | undefined): void {
+    this.inProcessBackend = backend;
+  }
+
   async start(input: AwsSsmTunnelStartInput): Promise<AwsSsmTunnelHandle> {
     const runtimeId = input.runtimeId?.trim() || randomUUID();
-    if (this.runtimes.has(runtimeId)) {
+    if (this.runtimes.has(runtimeId) || this.inProcessRuntimeIds.has(runtimeId)) {
       throw new Error(`AWS SSM tunnel ${runtimeId} is already running.`);
+    }
+
+    if (this.inProcessBackend?.shouldUse()) {
+      const resolved = await this.inProcessBackend.start({
+        ...input,
+        runtimeId,
+        bindAddress: normalizeBindAddress(input.bindAddress),
+      });
+      this.inProcessRuntimeIds.add(runtimeId);
+      return {
+        runtimeId,
+        bindAddress: resolved.bindAddress,
+        bindPort: resolved.bindPort,
+      };
     }
 
     const awsPath = await resolveAwsExecutable("aws");
@@ -467,6 +500,12 @@ export class AwsSsmTunnelService {
   }
 
   async stop(runtimeId: string): Promise<void> {
+    if (this.inProcessRuntimeIds.has(runtimeId)) {
+      this.inProcessRuntimeIds.delete(runtimeId);
+      await this.inProcessBackend?.stop(runtimeId);
+      return;
+    }
+
     const runtime = this.runtimes.get(runtimeId);
     if (!runtime) {
       return;
@@ -498,7 +537,10 @@ export class AwsSsmTunnelService {
   }
 
   async shutdown(): Promise<void> {
-    const runtimeIds = Array.from(this.runtimes.keys());
+    const runtimeIds = [
+      ...this.runtimes.keys(),
+      ...this.inProcessRuntimeIds,
+    ];
     await Promise.all(runtimeIds.map((runtimeId) => this.stop(runtimeId)));
   }
 }

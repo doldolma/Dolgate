@@ -1007,6 +1007,82 @@ describe("CoreManager AWS SSM sessions", () => {
     await stopPromise;
   });
 
+  it("runs endpoint-scoped SSM tunnels without registering port-forward runtimes", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    manager.setSsmPortForwardTokenIssuer(async () => ({
+      sessionId: "ssm-sess-tunnel",
+      streamUrl: "wss://ssmmessages.example/v1/data-channel/ssm-sess-tunnel",
+      tokenValue: "token-tunnel",
+    }));
+
+    const startPromise = manager.startSsmTunnel({
+      ruleId: "aws-sftp:endpoint-1",
+      profileName: "default",
+      region: "ap-northeast-2",
+      targetType: "instance",
+      targetId: "i-ssm",
+      bindAddress: "127.0.0.1",
+      bindPort: 0,
+      targetKind: "instance-port",
+      targetPort: 22,
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+
+    const startRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(startRequest.type).toBe("ssmPortForwardStart");
+    expect(startRequest.endpointId).toBe("aws-sftp:endpoint-1");
+    expect(startRequest.payload).toMatchObject({
+      targetId: "i-ssm",
+      targetPort: 22,
+      streamUrl: "wss://ssmmessages.example/v1/data-channel/ssm-sess-tunnel",
+      tokenValue: "token-tunnel",
+      ssmSessionId: "ssm-sess-tunnel",
+    });
+
+    fakeProcess.emitControl({
+      type: "portForwardStarted",
+      requestId: startRequest.id,
+      endpointId: "aws-sftp:endpoint-1",
+      payload: {
+        transport: "aws-ssm",
+        mode: "local",
+        bindAddress: "127.0.0.1",
+        bindPort: 45111,
+        status: "running",
+      },
+    });
+
+    await expect(startPromise).resolves.toEqual({
+      bindAddress: "127.0.0.1",
+      bindPort: 45111,
+    });
+    // startSsmTunnel itself never registers a definition; the runtime entry (if
+    // any) comes from the shared async event routing, same as ECS tunnels.
+    expect(
+      manager.listPortForwardRuntimes().filter((runtime) => runtime.hostId),
+    ).toEqual([]);
+
+    const stopPromise = manager.stopSsmTunnel("aws-sftp:endpoint-1");
+    await waitForWriteCount(fakeProcess.writes, 2);
+
+    const stopRequest = decodeControlFrame(fakeProcess.writes[1]);
+    expect(stopRequest.type).toBe("ssmPortForwardStop");
+    expect(stopRequest.endpointId).toBe("aws-sftp:endpoint-1");
+
+    fakeProcess.emitControl({
+      type: "portForwardStopped",
+      requestId: stopRequest.id,
+      endpointId: "aws-sftp:endpoint-1",
+      payload: { message: "stopped" },
+    });
+
+    await stopPromise;
+  });
+
   it("preserves visible container transport while using AWS remote-host forwarding backend", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

@@ -346,6 +346,10 @@ type waitResult struct {
 }
 
 func defaultRunnerFactory(payload protocol.SSMPortForwardStartPayload) (runtimeRunner, error) {
+	if payload.StreamURL != "" && payload.TokenValue != "" {
+		return startDataChannelForwardRunner(payload)
+	}
+
 	awsPath, pluginPath, err := resolveRuntimeTools()
 	if err != nil {
 		return nil, err

@@ -137,6 +137,14 @@ export interface ResolvedAwsConnectPayload {
   rows: number;
   env?: Record<string, string>;
   unsetEnv?: string[];
+  /**
+   * In-process SSM data channel: when streamUrl/tokenValue are set (issued via
+   * ssm:StartSession in the main process), ssh-core opens the SSM WebSocket
+   * itself instead of spawning aws + session-manager-plugin.
+   */
+  streamUrl?: string;
+  tokenValue?: string;
+  ssmSessionId?: string;
 }
 
 export interface AwsSsmSessionStartRequest extends ResolvedAwsConnectPayload {

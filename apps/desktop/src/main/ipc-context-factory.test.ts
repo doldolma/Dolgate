@@ -56,6 +56,7 @@ function createDependencies(): RegisterIpcDependencies {
       listPortForwardRuntimes: vi.fn(() => []),
       setTerminalEventHandler: vi.fn(),
       setPortForwardEventHandler: vi.fn(),
+      setSsmPortForwardTokenIssuer: vi.fn(),
       setTerminalStreamHandler: vi.fn(),
       isTmuxSession: vi.fn(() => false),
     } as any,

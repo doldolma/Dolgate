@@ -128,6 +128,7 @@ export function createMainIpcContext(
     queueSync,
     emitSftpConnectionProgress: (event) => emitSftpConnectionProgress(event),
   });
+  coreManager.setSsmPortForwardTokenIssuer(awsService.ssmPortForwardTokenIssuer);
   const coreEventBridge = createCoreEventBridge({
     coreManager,
     sessionShareService,

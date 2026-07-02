@@ -28,6 +28,8 @@ function createContext() {
       resolveManagedProfileNameOrFallback: vi.fn(),
       buildManagedSessionEnvSpec: vi.fn(),
       buildServerProxySessionEnvSpec: vi.fn(),
+      shouldUseInProcessSsm: vi.fn(() => false),
+      startSsmShellSession: vi.fn(),
     },
     coreManager: {
       connect: vi.fn(),
@@ -355,7 +357,61 @@ describe("registerSshIpcHandlers", () => {
         startupCommand: "sudo -i",
       }),
     );
+    expect(ctx.awsService.startSsmShellSession).not.toHaveBeenCalled();
     expect(ctx.coreManager.connectAwsServerProxySession).not.toHaveBeenCalled();
+  });
+
+  it("issues an in-process SSM session token and forwards it to the core", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-1",
+      kind: "aws-ec2",
+      label: "AWS Prod",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-123",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
+      env: { AWS_CONFIG_FILE: "/managed/config" },
+      unsetEnv: ["AWS_PROFILE"],
+    });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(true);
+    ctx.awsService.startSsmShellSession.mockResolvedValue({
+      sessionId: "ssm-sess-1",
+      streamUrl: "wss://ssmmessages.ap-southeast-2.amazonaws.com/v1/data-channel/ssm-sess-1",
+      tokenValue: "token-1",
+    });
+    ctx.coreManager.connectAwsSession.mockResolvedValue({ sessionId: "session-local-aws" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, {
+        hostId: "aws-host-1",
+        cols: 120,
+        rows: 32,
+      }),
+    ).resolves.toEqual({ sessionId: "session-local-aws" });
+
+    expect(ctx.awsService.startSsmShellSession).toHaveBeenCalledWith(
+      "managed-prod",
+      "ap-southeast-2",
+      "i-123",
+    );
+    expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ssmSession: {
+          sessionId: "ssm-sess-1",
+          streamUrl:
+            "wss://ssmmessages.ap-southeast-2.amazonaws.com/v1/data-channel/ssm-sess-1",
+          tokenValue: "token-1",
+        },
+      }),
+    );
   });
 
   it("uses the server proxy AWS SSM session path when enabled", async () => {

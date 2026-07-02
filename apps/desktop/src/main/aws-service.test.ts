@@ -153,20 +153,16 @@ afterEach(async () => {
 describe('AwsService.isManagedInstance', () => {
   it('returns true when the target instance is present in the managed instance list', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       ensureSessionManagerPluginAvailable: () => Promise<void>;
-      runResolvedCommand: () => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }]
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }],
       }),
-      stderr: '',
-      exitCode: 0
     });
 
     await expect(service.isManagedInstance('default', 'ap-northeast-2', 'i-123')).resolves.toBe(true);
@@ -174,20 +170,16 @@ describe('AwsService.isManagedInstance', () => {
 
   it('returns false when the instance is not currently managed by SSM', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       ensureSessionManagerPluginAvailable: () => Promise<void>;
-      runResolvedCommand: () => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }]
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }],
       }),
-      stderr: '',
-      exitCode: 0
     });
 
     await expect(service.isManagedInstance('default', 'ap-northeast-2', 'i-123')).resolves.toBe(false);
@@ -195,20 +187,16 @@ describe('AwsService.isManagedInstance', () => {
 
   it('returns false when Session Manager reports ConnectionLost', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       ensureSessionManagerPluginAvailable: () => Promise<void>;
-      runResolvedCommand: () => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }]
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }],
       }),
-      stderr: '',
-      exitCode: 0
     });
 
     await expect(service.isManagedInstance('default', 'ap-northeast-2', 'i-123')).resolves.toBe(false);
@@ -216,54 +204,44 @@ describe('AwsService.isManagedInstance', () => {
 });
 
 describe('AwsService.listRegions', () => {
-  function createListRegionsService(result: {
-    stdout: string;
-    stderr: string;
-    exitCode: number;
-  }) {
+  function createListRegionsService(send: ReturnType<typeof vi.fn>) {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
       listRegions: (profileName: string) => Promise<string[]>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue(result);
+    service.getEc2Client = vi.fn().mockReturnValue({ send });
     return service;
   }
 
   it('falls back to the built-in EC2 region list when DescribeRegions is denied', async () => {
-    const service = createListRegionsService({
-      stdout: '',
-      stderr:
-        'An error occurred (UnauthorizedOperation) when calling the DescribeRegions operation: You are not authorized to perform this operation.',
-      exitCode: 255,
-    });
+    const service = createListRegionsService(
+      vi.fn().mockRejectedValue(
+        Object.assign(
+          new Error(
+            'You are not authorized to perform this operation.',
+          ),
+          { name: 'UnauthorizedOperation' },
+        ),
+      ),
+    );
 
     const regions = await service.listRegions('readonly');
 
     expect(regions).toContain('ap-northeast-2');
     expect(regions).toContain('us-east-1');
     expect(regions).toContain('mx-central-1');
-    expect(service.runResolvedCommand).toHaveBeenCalledWith('aws', [
-      'ec2',
-      'describe-regions',
-      '--profile',
-      'readonly',
-      '--region',
-      'us-east-1',
-      '--output',
-      'json',
-    ]);
+    expect(service.getEc2Client).toHaveBeenCalled();
   });
 
   it('keeps non-permission DescribeRegions failures visible', async () => {
-    const service = createListRegionsService({
-      stdout: '',
-      stderr:
-        'Unable to locate credentials. You can configure credentials by running "aws configure".',
-      exitCode: 255,
-    });
+    const service = createListRegionsService(
+      vi.fn().mockRejectedValue(
+        new Error(
+          'Unable to locate credentials. You can configure credentials by running "aws configure".',
+        ),
+      ),
+    );
 
     await expect(service.listRegions('broken')).rejects.toThrow(
       'Unable to locate credentials',
@@ -271,11 +249,9 @@ describe('AwsService.listRegions', () => {
   });
 
   it('falls back to the built-in EC2 region list when DescribeRegions returns an empty payload', async () => {
-    const service = createListRegionsService({
-      stdout: JSON.stringify({ Regions: [] }),
-      stderr: '',
-      exitCode: 0,
-    });
+    const service = createListRegionsService(
+      vi.fn().mockResolvedValue({ Regions: [] }),
+    );
 
     await expect(service.listRegions('empty')).resolves.toContain('ap-northeast-2');
   });
@@ -1800,41 +1776,34 @@ describe('AwsService AWS profile management', () => {
 describe('AwsService EC2 helpers', () => {
   it('includes availability zone when listing EC2 instances', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }]
-        }),
-        stderr: '',
-        exitCode: 0
-      });
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }],
+      }),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -1848,57 +1817,40 @@ describe('AwsService EC2 helpers', () => {
         ssmAvailabilityReason: null,
       }
     ]);
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      1,
-      'aws',
-      expect.arrayContaining(['ec2', 'describe-instances']),
-      20_000,
-    );
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      2,
-      'aws',
-      expect.arrayContaining(['ssm', 'describe-instance-information']),
-      5_000,
-    );
+    expect(service.getEc2Client).toHaveBeenCalled();
+    expect(service.getSsmClient).toHaveBeenCalled();
   });
 
   it('marks inactive managed instances unavailable with a more specific reason', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }]
-        }),
-        stderr: '',
-        exitCode: 0
-      });
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }],
+      }),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -1917,41 +1869,34 @@ describe('AwsService EC2 helpers', () => {
 
   it('marks ConnectionLost managed instances unavailable with an offline reason', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }]
-        }),
-        stderr: '',
-        exitCode: 0
-      });
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }],
+      }),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -1970,41 +1915,34 @@ describe('AwsService EC2 helpers', () => {
 
   it('marks non-running instances unavailable with a state-specific reason', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'stopped' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: []
-        }),
-        stderr: '',
-        exitCode: 0
-      });
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'stopped' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        InstanceInformationList: [],
+      }),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -2023,39 +1961,32 @@ describe('AwsService EC2 helpers', () => {
 
   it('keeps the EC2 list but marks every instance unknown when SSM availability lookup fails', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: '',
-        stderr: 'AccessDeniedException',
-        exitCode: 255
-      });
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockRejectedValue(new Error('AccessDeniedException')),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -2074,35 +2005,32 @@ describe('AwsService EC2 helpers', () => {
 
   it('keeps the EC2 list but marks every instance unknown when SSM availability lookup times out', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockRejectedValueOnce(new Error('aws 명령 실행이 제한 시간을 초과했습니다.'));
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockRejectedValue(new Error('operation timed out')),
+    });
 
     await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
       {
@@ -2117,24 +2045,14 @@ describe('AwsService EC2 helpers', () => {
           'SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.',
       }
     ]);
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      1,
-      'aws',
-      expect.arrayContaining(['ec2', 'describe-instances']),
-      20_000,
-    );
-    expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-      2,
-      'aws',
-      expect.arrayContaining(['ssm', 'describe-instance-information']),
-      5_000,
-    );
+    expect(service.getEc2Client).toHaveBeenCalled();
+    expect(service.getSsmClient).toHaveBeenCalled();
   });
 
   it('caps paginated SSM availability lookup calls to the remaining timeout budget', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
+      getSsmClient: ReturnType<typeof vi.fn>;
       listEc2Instances: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
     };
     const nowValues = [1_000_000, 1_000_000, 1_000_000, 1_010_500, 1_010_500];
@@ -2142,44 +2060,34 @@ describe('AwsService EC2 helpers', () => {
       .spyOn(Date, 'now')
       .mockImplementation(() => nowValues.shift() ?? 1_010_500);
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({
+        Reservations: [
+          {
+            Instances: [
+              {
+                InstanceId: 'i-123',
+                PrivateIpAddress: '10.0.0.10',
+                PlatformDetails: 'Linux/UNIX',
+                Placement: { AvailabilityZone: 'ap-northeast-2a' },
+                State: { Name: 'running' },
+                Tags: [{ Key: 'Name', Value: 'web-1' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const ssmSend = vi
       .fn()
       .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          Reservations: [
-            {
-              Instances: [
-                {
-                  InstanceId: 'i-123',
-                  PrivateIpAddress: '10.0.0.10',
-                  PlatformDetails: 'Linux/UNIX',
-                  Placement: { AvailabilityZone: 'ap-northeast-2a' },
-                  State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'web-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
+        InstanceInformationList: [],
+        NextToken: 'next-page',
       })
       .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: [],
-          NextToken: 'next-page'
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }]
-        }),
-        stderr: '',
-        exitCode: 0
+        InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }],
       });
+    service.getSsmClient = vi.fn().mockReturnValue({ send: ssmSend });
 
     try {
       await expect(service.listEc2Instances('default', 'ap-northeast-2')).resolves.toEqual([
@@ -2194,18 +2102,7 @@ describe('AwsService EC2 helpers', () => {
           ssmAvailabilityReason: null,
         }
       ]);
-      expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-        2,
-        'aws',
-        expect.arrayContaining(['ssm', 'describe-instance-information']),
-        5_000,
-      );
-      expect(service.runResolvedCommand).toHaveBeenNthCalledWith(
-        3,
-        'aws',
-        expect.arrayContaining(['ssm', 'describe-instance-information']),
-        1_500,
-      );
+      expect(ssmSend).toHaveBeenCalledTimes(2);
     } finally {
       nowSpy.mockRestore();
     }
@@ -2213,16 +2110,14 @@ describe('AwsService EC2 helpers', () => {
 
   it('describes a single EC2 instance and returns null when no instance is present', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2Client: ReturnType<typeof vi.fn>;
       describeEc2Instance: (profileName: string, region: string, instanceId: string) => Promise<Record<string, unknown> | null>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
+    service.getEc2Client = vi.fn().mockReturnValue({
+      send: vi
+        .fn()
+        .mockResolvedValueOnce({
           Reservations: [
             {
               Instances: [
@@ -2232,20 +2127,14 @@ describe('AwsService EC2 helpers', () => {
                   PlatformDetails: 'Linux/UNIX',
                   Placement: { AvailabilityZone: 'ap-northeast-2c' },
                   State: { Name: 'running' },
-                  Tags: [{ Key: 'Name', Value: 'api-1' }]
-                }
-              ]
-            }
-          ]
-        }),
-        stderr: '',
-        exitCode: 0
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({ Reservations: [] }),
-        stderr: '',
-        exitCode: 0
-      });
+                  Tags: [{ Key: 'Name', Value: 'api-1' }],
+                },
+              ],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ Reservations: [] }),
+    });
 
     await expect(service.describeEc2Instance('default', 'ap-northeast-2', 'i-abc')).resolves.toEqual({
       instanceId: 'i-abc',
@@ -2262,8 +2151,7 @@ describe('AwsService EC2 helpers', () => {
 
   it('sends the SSH public key with the expected EIC parameters', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      getEc2InstanceConnectClient: ReturnType<typeof vi.fn>;
       sendSshPublicKey: (input: {
         profileName: string;
         region: string;
@@ -2274,12 +2162,8 @@ describe('AwsService EC2 helpers', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({ Success: true }),
-      stderr: '',
-      exitCode: 0
-    });
+    const eicSend = vi.fn().mockResolvedValue({ Success: true });
+    service.getEc2InstanceConnectClient = vi.fn().mockReturnValue({ send: eicSend });
 
     await service.sendSshPublicKey({
       profileName: 'default',
@@ -2290,28 +2174,18 @@ describe('AwsService EC2 helpers', () => {
       publicKey: 'ssh-ed25519 AAAATEST'
     });
 
-    expect(service.runResolvedCommand).toHaveBeenCalledWith(
-      'aws',
-      [
-        'ec2-instance-connect',
-        'send-ssh-public-key',
-        '--profile',
-        'default',
-        '--region',
-        'ap-northeast-2',
-        '--instance-id',
-        'i-abc',
-        '--availability-zone',
-        'ap-northeast-2a',
-        '--instance-os-user',
-        'ubuntu',
-        '--ssh-public-key',
-        'ssh-ed25519 AAAATEST',
-        '--output',
-        'json'
-      ],
-      30_000
+    expect(service.getEc2InstanceConnectClient).toHaveBeenCalledWith(
+      'default',
+      'ap-northeast-2',
     );
+    expect(eicSend).toHaveBeenCalledTimes(1);
+    const sentCommand = eicSend.mock.calls[0][0];
+    expect(sentCommand.input).toEqual({
+      InstanceId: 'i-abc',
+      AvailabilityZone: 'ap-northeast-2a',
+      InstanceOSUser: 'ubuntu',
+      SSHPublicKey: 'ssh-ed25519 AAAATEST',
+    });
   });
 
   it('loads SSH metadata over SSM and recommends a username', async () => {
@@ -2358,6 +2232,56 @@ describe('AwsService EC2 helpers', () => {
       recommendedUsername: 'ubuntu',
       usernameCandidates: ['deploy', 'ubuntu']
     });
+  });
+
+  it('retries polling when the invocation is not registered yet (InvocationDoesNotExist)', async () => {
+    const service = new AwsService() as unknown as {
+      ensureSessionManagerPluginAvailable: () => Promise<void>;
+      getSsmClient: ReturnType<typeof vi.fn>;
+      loadHostSshMetadata: (input: {
+        profileName: string;
+        region: string;
+        instanceId: string;
+      }) => Promise<{
+        sshPort: number;
+        recommendedUsername: string | null;
+        usernameCandidates: string[];
+      }>;
+    };
+
+    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Command: { CommandId: 'cmd-123' } })
+      .mockRejectedValueOnce(
+        Object.assign(new Error(''), { name: 'InvocationDoesNotExist' })
+      )
+      .mockResolvedValueOnce({
+        Status: 'Success',
+        ResponseCode: 0,
+        StandardOutputContent: [
+          'OS_ID=ubuntu',
+          'CLOUD_USER=ubuntu',
+          'SSH_PORT=2222',
+          'PASSWD_USERS=ubuntu,deploy,ssm-user',
+          'HOME_USERS=deploy,ubuntu'
+        ].join('\n'),
+        StandardErrorContent: ''
+      });
+    service.getSsmClient = vi.fn().mockReturnValue({ send });
+
+    await expect(
+      service.loadHostSshMetadata({
+        profileName: 'default',
+        region: 'ap-northeast-2',
+        instanceId: 'i-abc'
+      })
+    ).resolves.toEqual({
+      sshPort: 2222,
+      recommendedUsername: 'ubuntu',
+      usernameCandidates: ['deploy', 'ubuntu']
+    });
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('times out SSH metadata polling after the shorter SSM probe budget', async () => {
@@ -2448,6 +2372,54 @@ describe('AwsService EC2 helpers', () => {
       status: 'error',
       errorMessage: '[SSM 명령 전송] SSM 명령을 전송하지 못했습니다.',
     });
+  });
+});
+
+describe('AwsService.startSsmShellSession', () => {
+  it('returns the session token issued by StartSession', async () => {
+    const service = new AwsService() as unknown as {
+      getSsmClient: ReturnType<typeof vi.fn>;
+      startSsmShellSession: (
+        profileName: string,
+        region: string,
+        instanceId: string,
+      ) => Promise<{ sessionId: string; streamUrl: string; tokenValue: string }>;
+    };
+
+    const send = vi.fn().mockResolvedValue({
+      SessionId: 'ssm-sess-1',
+      StreamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
+      TokenValue: 'token-1',
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({ send });
+
+    await expect(
+      service.startSsmShellSession('default', 'ap-northeast-2', 'i-abc'),
+    ).resolves.toEqual({
+      sessionId: 'ssm-sess-1',
+      streamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
+      tokenValue: 'token-1',
+    });
+    expect(send.mock.calls[0][0].input).toEqual({ Target: 'i-abc' });
+  });
+
+  it('fails when the StartSession response is missing stream details', async () => {
+    const service = new AwsService() as unknown as {
+      getSsmClient: ReturnType<typeof vi.fn>;
+      startSsmShellSession: (
+        profileName: string,
+        region: string,
+        instanceId: string,
+      ) => Promise<{ sessionId: string; streamUrl: string; tokenValue: string }>;
+    };
+
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn().mockResolvedValue({ SessionId: 'ssm-sess-1' }),
+    });
+
+    await expect(
+      service.startSsmShellSession('default', 'ap-northeast-2', 'i-abc'),
+    ).rejects.toThrow('SSM 세션 응답에 스트림 정보가 없습니다.');
   });
 });
 

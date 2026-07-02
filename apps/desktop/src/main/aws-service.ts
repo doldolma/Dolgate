@@ -52,15 +52,32 @@ import {
   FilterLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 import {
+  DescribeInstancesCommand,
+  DescribeRegionsCommand,
+  EC2Client,
+} from "@aws-sdk/client-ec2";
+import {
+  EC2InstanceConnectClient,
+  SendSSHPublicKeyCommand,
+} from "@aws-sdk/client-ec2-instance-connect";
+import {
   DescribeClustersCommand,
   DescribeServicesCommand,
   DescribeTaskDefinitionCommand,
   DescribeTasksCommand,
   ECSClient,
+  ExecuteCommandCommand,
   ListClustersCommand,
   ListServicesCommand,
   ListTasksCommand,
 } from "@aws-sdk/client-ecs";
+import {
+  DescribeInstanceInformationCommand,
+  GetCommandInvocationCommand,
+  SendCommandCommand,
+  SSMClient,
+  StartSessionCommand,
+} from "@aws-sdk/client-ssm";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
 import { AwsProfileRepository } from "./database";
 import {
@@ -500,9 +517,31 @@ function normalizeAwsCliError(stderr: string, fallback: string): Error {
   return new Error(message);
 }
 
+// GetCommandInvocation can throw InvocationDoesNotExist for a short window after
+// SendCommand returns, before the invocation is registered. The CLI's process spawn
+// latency used to hide this race; with the SDK the first poll hits it reliably.
+class SsmInvocationNotReadyError extends Error {
+  constructor() {
+    super("SSM 명령 실행 결과가 아직 등록되지 않았습니다.");
+    this.name = "SsmInvocationNotReadyError";
+  }
+}
+
+function isSsmInvocationDoesNotExistError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "InvocationDoesNotExist" ||
+      error.message.includes("InvocationDoesNotExist"))
+  );
+}
+
 function normalizeAwsSdkError(error: unknown, fallback: string): Error {
   const message = error instanceof Error ? error.message.trim() : "";
   if (!message) {
+    const name = error instanceof Error ? error.name.trim() : "";
+    if (name && name !== "Error") {
+      return new Error(`${fallback} (${name})`);
+    }
     return new Error(fallback);
   }
   if (
@@ -1488,6 +1527,12 @@ export class AwsService {
   private readonly cloudWatchClientCache = new Map<string, CloudWatchClient>();
   private readonly cloudWatchLogsClientCache = new Map<string, CloudWatchLogsClient>();
   private readonly ecsClientCache = new Map<string, ECSClient>();
+  private readonly ec2ClientCache = new Map<string, EC2Client>();
+  private readonly ssmClientCache = new Map<string, SSMClient>();
+  private readonly ec2InstanceConnectClientCache = new Map<
+    string,
+    EC2InstanceConnectClient
+  >();
   private hasBackfilledManagedSsoCache = false;
   private readonly profileRepository: AwsProfileRepository;
   private readonly awsProfileRootDir: string;
@@ -1660,6 +1705,51 @@ export class AwsService {
       region,
     });
     this.ecsClientCache.set(cacheKey, client);
+    return client;
+  }
+
+  private getEc2Client(profileName: string, region: string): EC2Client {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.ec2ClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new EC2Client({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.ec2ClientCache.set(cacheKey, client);
+    return client;
+  }
+
+  private getSsmClient(profileName: string, region: string): SSMClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.ssmClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new SSMClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.ssmClientCache.set(cacheKey, client);
+    return client;
+  }
+
+  private getEc2InstanceConnectClient(
+    profileName: string,
+    region: string,
+  ): EC2InstanceConnectClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.ec2InstanceConnectClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new EC2InstanceConnectClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.ec2InstanceConnectClientCache.set(cacheKey, client);
     return client;
   }
 
@@ -3612,108 +3702,78 @@ export class AwsService {
       return true;
     }
 
-    await this.ensureAwsCliAvailable();
-    await this.ensureSessionManagerPluginAvailable();
+    if (!this.shouldUseInProcessSsm()) {
+      await this.ensureSessionManagerPluginAvailable();
+    }
 
-    const result = await this.runResolvedCommand("aws", [
-      "ssm",
-      "describe-instance-information",
-      "--profile",
-      profileName,
-      "--region",
-      region,
-      "--filters",
-      `Key=InstanceIds,Values=${instanceId}`,
-      "--output",
-      "json",
-    ]);
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+    try {
+      const output = await this.getSsmClient(profileName, region).send(
+        new DescribeInstanceInformationCommand({
+          Filters: [{ Key: "InstanceIds", Values: [instanceId] }],
+        }),
+      );
+      return (output.InstanceInformationList ?? []).some(
+        (item) =>
+          item.InstanceId?.trim() === instanceId &&
+          isSsmPingStatusOnline(item.PingStatus),
+      );
+    } catch (error) {
+      throw normalizeAwsSdkError(
+        error,
         "SSM managed instance 상태를 확인하지 못했습니다.",
       );
     }
-
-    const payload = parseJson<{
-      InstanceInformationList?: Array<{
-        InstanceId?: string;
-        PingStatus?: string;
-      }>;
-    }>(
-      result.stdout,
-      "SSM managed instance 응답을 해석하지 못했습니다.",
-    );
-
-    return (payload.InstanceInformationList ?? []).some(
-      (item) =>
-        item.InstanceId?.trim() === instanceId &&
-        isSsmPingStatusOnline(item.PingStatus),
-    );
   }
 
   async listRegions(profileName: string): Promise<string[]> {
-    await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand("aws", [
-      "ec2",
-      "describe-regions",
-      "--profile",
-      profileName,
-      "--region",
-      REGION_DISCOVERY_REGION,
-      "--output",
-      "json",
-    ]);
-    if (result.exitCode !== 0) {
-      if (isDescribeRegionsPermissionDenied(result.stderr)) {
+    try {
+      const output = await this.getEc2Client(
+        profileName,
+        REGION_DISCOVERY_REGION,
+      ).send(new DescribeRegionsCommand({}));
+      const regions = (output.Regions ?? [])
+        .map((region) => region.RegionName?.trim() ?? "")
+        .filter(Boolean)
+        .sort((left, right) => left.localeCompare(right));
+      return regions.length > 0 ? regions : [...DEFAULT_AWS_EC2_REGIONS];
+    } catch (error) {
+      const detail =
+        error instanceof Error
+          ? `${error.name} ${error.message}`
+          : String(error);
+      if (isDescribeRegionsPermissionDenied(detail)) {
         return [...DEFAULT_AWS_EC2_REGIONS];
       }
-      throw normalizeAwsCliError(
-        result.stderr,
-        "AWS 리전 목록을 읽지 못했습니다.",
-      );
+      throw normalizeAwsSdkError(error, "AWS 리전 목록을 읽지 못했습니다.");
     }
-
-    const payload = parseJson<{ Regions?: Array<{ RegionName?: string }> }>(
-      result.stdout,
-      "AWS 리전 목록 응답을 해석하지 못했습니다.",
-    );
-    const regions = (payload.Regions ?? [])
-      .map((region) => region.RegionName?.trim() ?? "")
-      .filter(Boolean)
-      .sort((left, right) => left.localeCompare(right));
-    return regions.length > 0 ? regions : [...DEFAULT_AWS_EC2_REGIONS];
   }
 
   async listEc2Instances(
     profileName: string,
     region: string,
   ): Promise<AwsEc2InstanceSummary[]> {
-    await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ec2",
-        "describe-instances",
-        "--profile",
-        profileName,
-        "--region",
-        region,
-        "--output",
-        "json",
-      ],
-      AWS_EC2_LIST_COMMAND_TIMEOUT_MS,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+    let payload: Ec2DescribeInstancesPayload;
+    try {
+      const client = this.getEc2Client(profileName, region);
+      const reservations: NonNullable<
+        Ec2DescribeInstancesPayload["Reservations"]
+      > = [];
+      let nextToken: string | undefined;
+      do {
+        const page = await client.send(
+          new DescribeInstancesCommand({ NextToken: nextToken }),
+          { abortSignal: AbortSignal.timeout(AWS_EC2_LIST_COMMAND_TIMEOUT_MS) },
+        );
+        reservations.push(...(page.Reservations ?? []));
+        nextToken = page.NextToken?.trim() || undefined;
+      } while (nextToken);
+      payload = { Reservations: reservations };
+    } catch (error) {
+      throw normalizeAwsSdkError(
+        error,
         "EC2 인스턴스 목록을 읽지 못했습니다.",
       );
     }
-
-    const payload = parseJson<Ec2DescribeInstancesPayload>(
-      result.stdout,
-      "EC2 인스턴스 응답을 해석하지 못했습니다.",
-    );
 
     const treatAllAsSsmReady = isE2EFakeAwsSessionEnabled();
     const ssmLookup = treatAllAsSsmReady
@@ -3785,41 +3845,9 @@ export class AwsService {
         if (getRemainingTimeoutMs() <= 0) {
           throw buildTimeoutError();
         }
-        const args = [
-          "ssm",
-          "describe-instance-information",
-          "--profile",
-          profileName,
-          "--region",
-          region,
-          "--output",
-          "json",
-        ];
-        if (nextToken) {
-          args.push("--next-token", nextToken);
-        }
-
-        const result = await this.runResolvedCommand(
-          "aws",
-          args,
-          getCommandTimeoutMs(),
-        );
-        if (result.exitCode !== 0) {
-          throw normalizeAwsCliError(
-            result.stderr,
-            "SSM managed instance 상태를 확인하지 못했습니다.",
-          );
-        }
-
-        const payload = parseJson<{
-          InstanceInformationList?: Array<{
-            InstanceId?: string;
-            PingStatus?: string;
-          }>;
-          NextToken?: string;
-        }>(
-          result.stdout,
-          "SSM managed instance 응답을 해석하지 못했습니다.",
+        const payload = await this.getSsmClient(profileName, region).send(
+          new DescribeInstanceInformationCommand({ NextToken: nextToken }),
+          { abortSignal: AbortSignal.timeout(getCommandTimeoutMs()) },
         );
 
         for (const item of payload.InstanceInformationList ?? []) {
@@ -4901,34 +4929,18 @@ export class AwsService {
     region: string,
     instanceId: string,
   ): Promise<AwsEc2InstanceSummary | null> {
-    await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ec2",
-        "describe-instances",
-        "--profile",
-        profileName,
-        "--region",
-        region,
-        "--instance-ids",
-        instanceId,
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+    let payload: Ec2DescribeInstancesPayload;
+    try {
+      payload = await this.getEc2Client(profileName, region).send(
+        new DescribeInstancesCommand({ InstanceIds: [instanceId] }),
+        { abortSignal: AbortSignal.timeout(60_000) },
+      );
+    } catch (error) {
+      throw normalizeAwsSdkError(
+        error,
         "EC2 인스턴스 정보를 읽지 못했습니다.",
       );
     }
-
-    const payload = parseJson<Ec2DescribeInstancesPayload>(
-      result.stdout,
-      "EC2 인스턴스 응답을 해석하지 못했습니다.",
-    );
     for (const reservation of payload.Reservations ?? []) {
       for (const instance of reservation.Instances ?? []) {
         const summary = toInstanceSummary(instance);
@@ -4945,45 +4957,151 @@ export class AwsService {
       return;
     }
 
-    await this.ensureAwsCliAvailable();
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ec2-instance-connect",
-        "send-ssh-public-key",
-        "--profile",
+    try {
+      const output = await this.getEc2InstanceConnectClient(
         input.profileName,
-        "--region",
         input.region,
-        "--instance-id",
-        input.instanceId,
-        "--availability-zone",
-        input.availabilityZone,
-        "--instance-os-user",
-        input.osUser,
-        "--ssh-public-key",
-        input.publicKey,
-        "--output",
-        "json",
-      ],
-      30_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+      ).send(
+        new SendSSHPublicKeyCommand({
+          InstanceId: input.instanceId,
+          AvailabilityZone: input.availabilityZone,
+          InstanceOSUser: input.osUser,
+          SSHPublicKey: input.publicKey,
+        }),
+      );
+      if (!output.Success) {
+        throw new Error(
+          "EC2 Instance Connect 공개 키 전송이 거부되었습니다.",
+        );
+      }
+    } catch (error) {
+      throw normalizeAwsSdkError(
+        error,
         "EC2 Instance Connect 공개 키 전송에 실패했습니다.",
       );
     }
+  }
 
-    const payload = parseJson<{ Success?: boolean; Message?: string }>(
-      result.stdout,
-      "EC2 Instance Connect 응답을 해석하지 못했습니다.",
-    );
-    if (!payload.Success) {
-      throw new Error(
-        payload.Message?.trim() ||
-          "EC2 Instance Connect 공개 키 전송이 거부되었습니다.",
+  // In-process SSM sessions bypass aws + session-manager-plugin entirely; the
+  // escape hatch DOLSSH_AWS_INPROCESS=0 restores the binary-spawning path. E2E
+  // fake mode keeps the binary path because its fixtures replace the binaries.
+  shouldUseInProcessSsm(): boolean {
+    if (isE2EFakeAwsSessionEnabled()) {
+      return false;
+    }
+    return process.env.DOLSSH_AWS_INPROCESS !== "0";
+  }
+
+  async startSsmShellSession(
+    profileName: string,
+    region: string,
+    instanceId: string,
+  ): Promise<{ sessionId: string; streamUrl: string; tokenValue: string }> {
+    try {
+      const output = await this.getSsmClient(profileName, region).send(
+        new StartSessionCommand({ Target: instanceId }),
+        { abortSignal: AbortSignal.timeout(30_000) },
       );
+      const sessionId = output.SessionId?.trim();
+      const streamUrl = output.StreamUrl?.trim();
+      const tokenValue = output.TokenValue?.trim();
+      if (!sessionId || !streamUrl || !tokenValue) {
+        throw new Error("SSM 세션 응답에 스트림 정보가 없습니다.");
+      }
+      return { sessionId, streamUrl, tokenValue };
+    } catch (error) {
+      throw normalizeAwsSdkError(error, "SSM 세션을 시작하지 못했습니다.");
+    }
+  }
+
+  // Bound issuer for core-manager's port-forward token hook: returns undefined
+  // when the binary/e2e-fake path should be used, else a fresh SSM token.
+  readonly ssmPortForwardTokenIssuer = async (input: {
+    profileName: string;
+    region: string;
+    targetId: string;
+    targetKind: string;
+    targetPort: number;
+    remoteHost?: string;
+  }): Promise<
+    { sessionId: string; streamUrl: string; tokenValue: string } | undefined
+  > => {
+    if (!this.shouldUseInProcessSsm()) {
+      return undefined;
+    }
+    return this.startSsmPortForwardSession(input);
+  };
+
+  async startSsmPortForwardSession(input: {
+    profileName: string;
+    region: string;
+    targetId: string;
+    targetKind: string;
+    targetPort: number;
+    remoteHost?: string;
+  }): Promise<{ sessionId: string; streamUrl: string; tokenValue: string }> {
+    const isRemoteHost =
+      input.targetKind === "remote-host" &&
+      (input.remoteHost ?? "").trim() !== "";
+    const documentName = isRemoteHost
+      ? "AWS-StartPortForwardingSessionToRemoteHost"
+      : "AWS-StartPortForwardingSession";
+    const parameters: Record<string, string[]> = {
+      portNumber: [String(input.targetPort)],
+    };
+    if (isRemoteHost) {
+      parameters.host = [input.remoteHost!.trim()];
+    }
+    try {
+      const output = await this.getSsmClient(input.profileName, input.region).send(
+        new StartSessionCommand({
+          Target: input.targetId,
+          DocumentName: documentName,
+          Parameters: parameters,
+        }),
+        { abortSignal: AbortSignal.timeout(30_000) },
+      );
+      const sessionId = output.SessionId?.trim();
+      const streamUrl = output.StreamUrl?.trim();
+      const tokenValue = output.TokenValue?.trim();
+      if (!sessionId || !streamUrl || !tokenValue) {
+        throw new Error("SSM 포트 포워딩 세션 응답에 스트림 정보가 없습니다.");
+      }
+      return { sessionId, streamUrl, tokenValue };
+    } catch (error) {
+      throw normalizeAwsSdkError(error, "SSM 포트 포워딩 세션을 시작하지 못했습니다.");
+    }
+  }
+
+  async startEcsExecSession(input: {
+    profileName: string;
+    region: string;
+    clusterArn: string;
+    taskArn: string;
+    containerName: string;
+    command: string;
+  }): Promise<{ sessionId: string; streamUrl: string; tokenValue: string }> {
+    try {
+      const output = await this.getEcsClient(input.profileName, input.region).send(
+        new ExecuteCommandCommand({
+          cluster: input.clusterArn,
+          task: input.taskArn,
+          container: input.containerName,
+          command: input.command,
+          interactive: true,
+        }),
+        { abortSignal: AbortSignal.timeout(30_000) },
+      );
+      const session = output.session;
+      const sessionId = session?.sessionId?.trim();
+      const streamUrl = session?.streamUrl?.trim();
+      const tokenValue = session?.tokenValue?.trim();
+      if (!sessionId || !streamUrl || !tokenValue) {
+        throw new Error("ECS Exec 세션 응답에 스트림 정보가 없습니다.");
+      }
+      return { sessionId, streamUrl, tokenValue };
+    } catch (error) {
+      throw normalizeAwsSdkError(error, "ECS Exec 세션을 시작하지 못했습니다.");
     }
   }
 
@@ -4994,36 +5112,19 @@ export class AwsService {
     commands: string[];
     timeoutMs?: number;
   }): Promise<string> {
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ssm",
-        "send-command",
-        "--profile",
-        input.profileName,
-        "--region",
-        input.region,
-        "--instance-ids",
-        input.instanceId,
-        "--document-name",
-        "AWS-RunShellScript",
-        "--parameters",
-        `commands=${JSON.stringify(input.commands)}`,
-        "--output",
-        "json",
-      ],
-      input.timeoutMs ?? 30_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
-        "SSM 명령을 전송하지 못했습니다.",
+    let payload: SendCommandPayload;
+    try {
+      payload = await this.getSsmClient(input.profileName, input.region).send(
+        new SendCommandCommand({
+          InstanceIds: [input.instanceId],
+          DocumentName: "AWS-RunShellScript",
+          Parameters: { commands: input.commands },
+        }),
+        { abortSignal: AbortSignal.timeout(input.timeoutMs ?? 30_000) },
       );
+    } catch (error) {
+      throw normalizeAwsSdkError(error, "SSM 명령을 전송하지 못했습니다.");
     }
-    const payload = parseJson<SendCommandPayload>(
-      result.stdout,
-      "SSM 명령 전송 응답을 해석하지 못했습니다.",
-    );
     const commandId = payload.Command?.CommandId?.trim();
     if (!commandId) {
       throw new Error("SSM 명령 ID를 확인하지 못했습니다.");
@@ -5038,34 +5139,23 @@ export class AwsService {
     commandId: string;
     timeoutMs?: number;
   }): Promise<CommandInvocationPayload> {
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "ssm",
-        "get-command-invocation",
-        "--profile",
-        input.profileName,
-        "--region",
-        input.region,
-        "--instance-id",
-        input.instanceId,
-        "--command-id",
-        input.commandId,
-        "--output",
-        "json",
-      ],
-      input.timeoutMs ?? 30_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+    try {
+      return await this.getSsmClient(input.profileName, input.region).send(
+        new GetCommandInvocationCommand({
+          InstanceId: input.instanceId,
+          CommandId: input.commandId,
+        }),
+        { abortSignal: AbortSignal.timeout(input.timeoutMs ?? 30_000) },
+      );
+    } catch (error) {
+      if (isSsmInvocationDoesNotExistError(error)) {
+        throw new SsmInvocationNotReadyError();
+      }
+      throw normalizeAwsSdkError(
+        error,
         "SSM 명령 실행 결과를 읽지 못했습니다.",
       );
     }
-    return parseJson<CommandInvocationPayload>(
-      result.stdout,
-      "SSM 명령 실행 결과를 해석하지 못했습니다.",
-    );
   }
 
   async inspectHostSshMetadata(
@@ -5107,11 +5197,12 @@ export class AwsService {
       };
     }
 
-    try {
-      await this.ensureAwsCliAvailable();
-      await this.ensureSessionManagerPluginAvailable();
-    } catch (error) {
-      throw prefixInspectionError("SSM 명령 전송", error);
+    if (!this.shouldUseInProcessSsm()) {
+      try {
+        await this.ensureSessionManagerPluginAvailable();
+      } catch (error) {
+        throw prefixInspectionError("SSM 명령 전송", error);
+      }
     }
 
     const startedAt = Date.now();
@@ -5154,6 +5245,17 @@ export class AwsService {
           timeoutMs: getCommandTimeoutMs(),
         });
       } catch (error) {
+        if (error instanceof SsmInvocationNotReadyError) {
+          const delayMs = Math.min(
+            AWS_SSH_METADATA_POLL_INTERVAL_MS,
+            getRemainingTimeoutMs(),
+          );
+          if (delayMs <= 0) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
         throw prefixInspectionError("SSH 설정 조회", error);
       }
       const status = (invocation.Status ?? "").trim();

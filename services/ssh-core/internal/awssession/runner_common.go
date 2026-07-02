@@ -42,6 +42,10 @@ func defaultRunnerFactory(payload protocol.AWSConnectPayload) (sessionRunner, er
 		return startPlatformAWSRunner(payload, runtime)
 	}
 
+	if payload.StreamURL != "" && payload.TokenValue != "" {
+		return startDataChannelRunner(payload)
+	}
+
 	runtime, err := resolveAWSRuntime(payload)
 	if err != nil {
 		return nil, err

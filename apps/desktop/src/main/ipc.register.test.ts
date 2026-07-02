@@ -87,6 +87,7 @@ function createDependencySet() {
   const coreManager = {
     setTerminalEventHandler: vi.fn(),
     setPortForwardEventHandler: vi.fn(),
+    setSsmPortForwardTokenIssuer: vi.fn(),
     setTerminalStreamHandler: vi.fn(),
     listPortForwardRuntimes: vi.fn(() => []),
     inspectPrivateKey: vi.fn(),

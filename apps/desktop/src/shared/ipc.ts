@@ -566,6 +566,14 @@ export interface ResolvedSsmPortForwardStartPayload {
   targetKind: AwsSsmPortForwardTargetKind;
   targetPort: number;
   remoteHost?: string;
+  /**
+   * In-process SSM data channel token (issued via ssm:StartSession with a
+   * port-forwarding document). When present, ssh-core opens the SSM WebSocket
+   * itself instead of spawning aws + session-manager-plugin.
+   */
+  streamUrl?: string;
+  tokenValue?: string;
+  ssmSessionId?: string;
 }
 
 export interface SftpListInput {

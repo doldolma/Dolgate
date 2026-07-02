@@ -318,6 +318,12 @@ type AWSConnectPayload struct {
 	Rows        int               `json:"rows"`
 	Env         map[string]string `json:"env,omitempty"`
 	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
+	// In-process SSM data channel: when StreamURL and TokenValue are both set
+	// (issued by the Electron main process via ssm:StartSession), ssh-core opens
+	// the SSM WebSocket itself instead of spawning aws + session-manager-plugin.
+	StreamURL    string `json:"streamUrl,omitempty"`
+	TokenValue   string `json:"tokenValue,omitempty"`
+	SsmSessionID string `json:"ssmSessionId,omitempty"`
 }
 
 type LocalConnectPayload struct {
@@ -690,6 +696,13 @@ type SSMPortForwardStartPayload struct {
 	RemoteHost  string            `json:"remoteHost,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
+	// In-process SSM data channel: when StreamURL and TokenValue are both set
+	// (issued by the Electron main process via ssm:StartSession with a
+	// port-forwarding document), ssh-core opens the SSM WebSocket itself instead
+	// of spawning aws + session-manager-plugin.
+	StreamURL    string `json:"streamUrl,omitempty"`
+	TokenValue   string `json:"tokenValue,omitempty"`
+	SsmSessionID string `json:"ssmSessionId,omitempty"`
 }
 
 type StatusPayload struct {

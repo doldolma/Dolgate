@@ -154,6 +154,7 @@ describe("registerAwsIpcHandlers", () => {
         resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
         ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
+        shouldUseInProcessSsm: vi.fn().mockReturnValue(false),
         buildManagedSessionEnvSpec,
         describeEcsServiceActionContext,
         invalidateEcsServiceActionContext,
@@ -218,6 +219,100 @@ describe("registerAwsIpcHandlers", () => {
           hostLabel: "prod",
           connectionDetails: "api · api · task-1",
           connectionKind: "aws-ecs-exec",
+        },
+      }),
+    );
+    expect(noteSessionConfigured).toHaveBeenCalledWith("session-1", 120, 40);
+  });
+
+  it("opens the ECS Exec shell over an in-process SSM session when enabled", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    const describeEcsServiceActionContext = vi.fn().mockResolvedValue({
+      runningTasks: [
+        {
+          taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+          enableExecuteCommand: true,
+          containers: [{ containerName: "api" }],
+        },
+      ],
+    });
+    const startEcsExecSession = vi.fn().mockResolvedValue({
+      sessionId: "ecs-sess-1",
+      streamUrl: "wss://ssmmessages.ap-northeast-2.amazonaws.com/v1/data-channel/ecs-sess-1",
+      tokenValue: "token-ecs-1",
+    });
+    const ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
+    const connectAwsSession = vi.fn().mockResolvedValue({ sessionId: "session-1" });
+    const noteSessionConfigured = vi.fn();
+
+    registerAwsIpcHandlers({
+      awsService: {
+        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        ensureAwsCliAvailable,
+        ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
+        shouldUseInProcessSsm: vi.fn().mockReturnValue(true),
+        startEcsExecSession,
+        describeEcsServiceActionContext,
+        invalidateEcsServiceActionContext: vi.fn(),
+      },
+      hosts: {
+        getById: vi.fn().mockReturnValue({
+          id: "host-1",
+          label: "prod",
+          awsProfileName: "default",
+          awsRegion: "ap-northeast-2",
+          awsEcsClusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+        }),
+      },
+      assertAwsEcsHost: vi.fn(),
+      coreManager: {
+        connectAwsSession,
+      },
+      sessionReplayService: {
+        noteSessionConfigured,
+      },
+      normalizeEcsExecPermissionError: vi.fn((error) => error as Error),
+    } as any);
+
+    const handler = handlers.get(ipcChannels.aws.openEcsExecShell);
+    if (!handler) {
+      throw new Error("expected aws.openEcsExecShell handler to be registered");
+    }
+
+    await expect(
+      handler({}, {
+        hostId: "host-1",
+        serviceName: "api",
+        taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+        containerName: "api",
+        cols: 120,
+        rows: 40,
+      }),
+    ).resolves.toEqual({ sessionId: "session-1" });
+
+    // No CLI/plugin preflight when running in-process.
+    expect(ensureAwsCliAvailable).not.toHaveBeenCalled();
+    expect(startEcsExecSession).toHaveBeenCalledWith({
+      profileName: "default",
+      region: "ap-northeast-2",
+      clusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
+      taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
+      containerName: "api",
+      command: "/bin/sh",
+    });
+    expect(connectAwsSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionKind: "aws-ecs-exec",
+        connectionDetails: "api · api · task-1",
+        ssmSession: {
+          sessionId: "ecs-sess-1",
+          streamUrl:
+            "wss://ssmmessages.ap-northeast-2.amazonaws.com/v1/data-channel/ecs-sess-1",
+          tokenValue: "token-ecs-1",
         },
       }),
     );

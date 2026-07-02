@@ -125,10 +125,18 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
           : await (async () => {
               const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
+              const ssmSession = ctx.awsService.shouldUseInProcessSsm()
+                ? await ctx.awsService.startSsmShellSession(
+                    profileName,
+                    host.awsRegion,
+                    host.awsInstanceId,
+                  )
+                : undefined;
               return ctx.coreManager.connectAwsSession({
                 ...connectionInput,
                 env: awsSessionEnv.env,
                 unsetEnv: awsSessionEnv.unsetEnv,
+                ssmSession,
               });
             })();
         ctx.sessionReplayService.noteSessionConfigured(
