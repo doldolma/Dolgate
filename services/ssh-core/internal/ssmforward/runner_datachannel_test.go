@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,22 +24,43 @@ type fakePortForwardAgent struct {
 	t        *testing.T
 	echoSeq  int64
 	terminated chan struct{}
+
+	wg     sync.WaitGroup
+	connMu sync.Mutex
+	conns  []*websocket.Conn
 }
 
 func newFakePortForwardAgent(t *testing.T) (*fakePortForwardAgent, string) {
 	agent := &fakePortForwardAgent{t: t, terminated: make(chan struct{}, 1)}
 	server := httptest.NewServer(http.HandlerFunc(agent.handle))
 	t.Cleanup(server.Close)
+	// The handler goroutine must not outlive the test: t.Errorf after completion
+	// panics the whole package. httptest's Close does not wait for hijacked
+	// (websocket) connections, so close them to unblock reads and join explicitly.
+	t.Cleanup(func() {
+		agent.connMu.Lock()
+		for _, ws := range agent.conns {
+			_ = ws.Close()
+		}
+		agent.connMu.Unlock()
+		agent.wg.Wait()
+	})
 	return agent, "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
 func (f *fakePortForwardAgent) handle(w http.ResponseWriter, r *http.Request) {
+	f.wg.Add(1)
+	defer f.wg.Done()
+
 	ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
 	if err != nil {
 		f.t.Errorf("upgrade: %v", err)
 		return
 	}
 	defer ws.Close()
+	f.connMu.Lock()
+	f.conns = append(f.conns, ws)
+	f.connMu.Unlock()
 	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
@@ -160,8 +182,11 @@ func (f *fakePortForwardAgent) write(ws *websocket.Conn, msg *ssmdatachannel.Age
 		f.t.Errorf("marshal: %v", err)
 		return
 	}
+	// A failed send is not a test failure: the runner may close the channel at
+	// any moment (Kill right after DisconnectPort), so losing the race on the
+	// final acks is expected. The test's own assertions catch real breakage.
 	if err := ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
-		f.t.Errorf("write: %v", err)
+		f.t.Logf("fake agent write (benign during teardown): %v", err)
 	}
 }
 

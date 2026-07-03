@@ -21,6 +21,7 @@ import (
 // DataChannel is the interface definition for handling communication with the AWS SSM messaging service.
 type DataChannel interface {
 	OpenWithSessionToken(url, token string) error
+	ReadFrame() ([]byte, error)
 	HandleMsg(data []byte) ([]byte, error)
 	SetTerminalSize(rows, cols uint32) error
 	TerminateSession() error
@@ -30,6 +31,21 @@ type DataChannel interface {
 	io.ReaderFrom
 	io.WriterTo
 }
+
+// WebSocket liveness bounds. Without these a stalled/half-open connection to
+// the SSM endpoint is never detected: reads park forever in ReadMessage and the
+// session hangs indefinitely instead of erroring out (which would let the caller
+// reconnect). We ping every dataChannelPingInterval and require any frame or a
+// pong within dataChannelReadTimeout; writes are bounded by dataChannelWriteTimeout
+// so a stuck write can't wedge the channel (and its mutex) forever. Mirrors the
+// sync-api hub's keepalive on the outer websocket.
+const (
+	dataChannelPingInterval = 15 * time.Second
+	dataChannelReadTimeout  = 45 * time.Second
+	dataChannelWriteTimeout = 10 * time.Second
+)
+
+var ErrReadBufferTooSmall = errors.New("ssm data channel read buffer too small")
 
 // SsmDataChannel represents the data channel of the websocket connection used to communicate with the AWS
 // SSM service.  A new(SsmDataChannel) is ready for use, and should immediately call the
@@ -45,6 +61,9 @@ type SsmDataChannel struct {
 	pausePub      bool
 	outMsgBuf     MessageBuffer
 	inMsgBuf      MessageBuffer
+	outboundDone  chan struct{}
+	pingStop      chan struct{}
+	pingStopOnce  sync.Once
 	lastRows      uint32
 	lastCols      uint32
 }
@@ -58,11 +77,12 @@ func (c *SsmDataChannel) OpenWithSessionToken(url, token string) error {
 	c.handshakeOnce = sync.Once{}
 	c.outMsgBuf = NewMessageBuffer(50)
 	c.inMsgBuf = NewMessageBuffer(50)
+	c.outboundDone = make(chan struct{})
 
 	go c.processOutboundQueue()
 
 	if err := c.StartSessionFromDataChannelURL(url, token); err != nil {
-		c.outMsgBuf = nil // signals processOutboundQueue to exit
+		c.detachBuffers() // signals processOutboundQueue to exit
 		return err
 	}
 	return nil
@@ -71,6 +91,10 @@ func (c *SsmDataChannel) OpenWithSessionToken(url, token string) error {
 // Close shuts down the web socket connection with the AWS service. Type-specific actions (like sending
 // TerminateSession for port forwarding should be handled before calling Close().
 func (c *SsmDataChannel) Close() error {
+	c.detachBuffers()
+	if c.pingStop != nil {
+		c.pingStopOnce.Do(func() { close(c.pingStop) })
+	}
 	var err error
 	if c.ws != nil {
 		err = c.ws.Close()
@@ -78,73 +102,130 @@ func (c *SsmDataChannel) Close() error {
 	return err
 }
 
+// keepAlive pings the SSM endpoint periodically. A failed ping (dead/half-open
+// connection) closes the socket so the read loop unblocks and the session
+// errors out; the pong handler and Read() extend the read deadline on any
+// received frame so a live-but-idle session is never falsely dropped.
+func (c *SsmDataChannel) keepAlive() {
+	ticker := time.NewTicker(dataChannelPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.pingStop:
+			return
+		case <-ticker.C:
+			// WriteControl is safe to call concurrently with WriteMessage.
+			if err := c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(dataChannelWriteTimeout)); err != nil {
+				_ = c.ws.Close()
+				return
+			}
+		}
+	}
+}
+
+// detachBuffers switches the channel to unbuffered streaming and signals
+// processOutboundQueue to exit; locked because that goroutine reads these fields.
+func (c *SsmDataChannel) detachBuffers() {
+	c.mu.Lock()
+	c.inMsgBuf = nil
+	c.outMsgBuf = nil
+	c.handshakeCh = nil
+	c.mu.Unlock()
+}
+
 // WaitForHandshakeComplete blocks further processing until the required SSM handshake sequence used for
 // port-based clients (including ssh) completes.
 func (c *SsmDataChannel) WaitForHandshakeComplete(ctx context.Context) error {
-	buf := make([]byte, 4096)
+	cancelRead := make(chan struct{})
+	defer close(cancelRead)
+	go func() {
+		select {
+		case <-ctx.Done():
+			c.closeWebSocket()
+		case <-cancelRead:
+		}
+	}()
 
 	for {
 		select {
 		case <-c.handshakeCh:
 			// make stream unbuffered
-			c.inMsgBuf = nil
-			c.outMsgBuf = nil
-			c.handshakeCh = nil
+			c.detachBuffers()
 			return nil
 		case <-ctx.Done():
-			c.inMsgBuf = nil
-			c.outMsgBuf = nil
-			c.handshakeCh = nil
-			return context.Canceled
+			c.detachBuffers()
+			return ctx.Err()
 		default:
-			n, err := c.Read(buf)
+			msg, err := c.ReadFrame()
 			if err != nil {
+				if ctx.Err() != nil {
+					c.detachBuffers()
+					return ctx.Err()
+				}
 				return err
 			}
 
-			if _, err = c.HandleMsg(buf[:n]); err != nil {
+			if _, err = c.HandleMsg(msg); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// Read will get a single message from the websocket connection. The unprocessed message is copied to the
-// requested []byte (which should be sized to handle at least 1536 bytes).
-func (c *SsmDataChannel) Read(data []byte) (int, error) {
+// ReadFrame will get a single message from the websocket connection and return
+// the full unprocessed message bytes. Prefer this over Read when the frame size
+// is not known in advance.
+func (c *SsmDataChannel) ReadFrame() ([]byte, error) {
 	_, msg, err := c.ws.ReadMessage()
-	n := copy(data[:len(msg)], msg)
-
 	if err != nil {
 		// gorilla code states this is uber-fatal, and we just need to bail out
 		if websocket.IsCloseError(err, 1000, 1001, 1006) {
 			err = io.EOF
 		}
+		return nil, err
+	}
+
+	// Any received frame proves the connection is alive; extend the read window.
+	if c.ws != nil {
+		_ = c.ws.SetReadDeadline(time.Now().Add(dataChannelReadTimeout))
+	}
+
+	if len(msg) < agentMsgHeaderLen {
+		return msg, errors.New("invalid message received, too short")
+	}
+
+	return msg, nil
+}
+
+// Read will get a single message from the websocket connection. If the caller's
+// buffer is smaller than the frame, the prefix is copied and ErrReadBufferTooSmall
+// is returned instead of panicking.
+func (c *SsmDataChannel) Read(data []byte) (int, error) {
+	msg, err := c.ReadFrame()
+	n := copy(data, msg)
+	if err != nil {
 		return n, err
 	}
-
-	if n < agentMsgHeaderLen {
-		return n, errors.New("invalid message received, too short")
+	if n < len(msg) {
+		return n, ErrReadBufferTooSmall
 	}
-
 	return n, nil
 }
 
 // WriteTo uses the data channel as an io.Copy read source, writing output to the provided writer.
 func (c *SsmDataChannel) WriteTo(w io.Writer) (n int64, err error) {
-	buf := make([]byte, 2048)
-	var nr, nw int
+	var nw int
 	var payload []byte
 
 	for {
-		nr, err = c.Read(buf)
+		msg, err := c.ReadFrame()
 		if err != nil {
 			log.Printf("WriteTo read error: %v", err)
 			return n, err
 		}
 
-		if nr > 0 {
-			payload, err = c.HandleMsg(buf[:nr])
+		if len(msg) > 0 {
+			payload, err = c.HandleMsg(msg)
 			var isEOF bool
 			if err != nil {
 				if errors.Is(err, io.EOF) {
@@ -168,6 +249,15 @@ func (c *SsmDataChannel) WriteTo(w io.Writer) (n int64, err error) {
 				return n, nil
 			}
 		}
+	}
+}
+
+func (c *SsmDataChannel) closeWebSocket() {
+	c.mu.Lock()
+	ws := c.ws
+	c.mu.Unlock()
+	if ws != nil {
+		_ = ws.Close()
 	}
 }
 
@@ -198,45 +288,60 @@ func (c *SsmDataChannel) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 // Write sends an input stream data message type with the provided payload bytes as the message payload.
+// The sequence number is assigned by WriteMsg under the channel lock (do not preset it here).
 func (c *SsmDataChannel) Write(payload []byte) (int, error) {
 	msg := NewAgentMessage()
 	msg.MessageType = InputStreamData
 	msg.Flags = Data
 	msg.PayloadType = Output
 	msg.Payload = payload
-	msg.SequenceNumber = atomic.AddInt64(&c.seqNum, 1)
 
 	return c.WriteMsg(msg)
 }
 
-// WriteMsg is the underlying method which marshals AgentMessage types and sends them to the AWS service.
-// This is provided as a convenience so that messages types not already handled can be sent. If the message
-// SequenceNumber field is less than 0, it will be automatically incremented using the internal counter.
+// WriteMsg marshals an AgentMessage and sends it to the AWS service.
+//
+// The outbound sequence number is assigned HERE, under c.mu, so that the number
+// a message carries is bound atomically to the order it is written to the
+// socket. Assigning it in the caller (outside the lock) races when several
+// goroutines write concurrently at session start (terminal-size + shell
+// integration init + autocomplete probe + keystrokes): the numbers could be
+// handed out in one order but hit the wire in another, leaving a gap the SSM
+// agent stalls on — it stops acknowledging past the gap, so outMsgBuf never
+// drains and processOutboundQueue retransmits forever while input is dropped.
+// Acknowledge and HandshakeResponse messages mirror the peer's sequence number,
+// so they keep the caller-set value and do not advance the counter.
 func (c *SsmDataChannel) WriteMsg(msg *AgentMessage) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	mirrorsPeerSeq := msg.MessageType == Acknowledge || msg.PayloadType == HandshakeResponse
+
 	if !c.synSent {
-		atomic.StoreInt64(&c.seqNum, 0)
+		// The first message opens the stream: sequence 0 with the Syn flag.
+		c.seqNum = 0
+		c.synSent = true
 		msg.Flags = Syn
+		msg.SequenceNumber = 0
+	} else if !mirrorsPeerSeq {
+		c.seqNum++
 		msg.SequenceNumber = c.seqNum
 	}
 
-	if msg.SequenceNumber < 0 {
-		atomic.StoreInt64(&c.seqNum, 1)
-	}
-
+	// MarshalBinary mutates msg (payload digest/length), and retransmits from
+	// processOutboundQueue re-marshal the same instance the original writer may
+	// still be reading, so marshaling must happen under the channel lock.
 	data, err := msg.MarshalBinary()
 	if err != nil {
 		return 0, err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.synSent = true
-
-	if c.outMsgBuf != nil && msg.MessageType != Acknowledge && msg.PayloadType != HandshakeResponse {
+	if c.outMsgBuf != nil && !mirrorsPeerSeq {
 		err = c.outMsgBuf.Add(msg)
 	}
 
-	if !c.pausePub || msg.MessageType == Acknowledge || msg.PayloadType == HandshakeResponse {
+	if !c.pausePub || mirrorsPeerSeq {
+		_ = c.ws.SetWriteDeadline(time.Now().Add(dataChannelWriteTimeout))
 		return int(msg.payloadLength), c.ws.WriteMessage(websocket.BinaryMessage, data)
 	}
 	return int(msg.payloadLength), err
@@ -263,9 +368,13 @@ func (c *SsmDataChannel) HandleMsg(data []byte) ([]byte, error) {
 			c.outMsgBuf.Remove(m.SequenceNumber)
 		}
 	case PausePublication:
+		c.mu.Lock()
 		c.pausePub = true
+		c.mu.Unlock()
 	case StartPublication:
+		c.mu.Lock()
 		c.pausePub = false
+		c.mu.Unlock()
 	case OutputStreamData:
 		switch m.PayloadType {
 		case Output:
@@ -343,7 +452,6 @@ func (c *SsmDataChannel) SetTerminalSize(rows, cols uint32) error {
 	msg := NewAgentMessage()
 	msg.MessageType = InputStreamData
 	msg.Flags = Data
-	msg.SequenceNumber = atomic.AddInt64(&c.seqNum, 1)
 	msg.PayloadType = Size
 	msg.Payload = payload
 
@@ -360,7 +468,6 @@ func (c *SsmDataChannel) SetTerminalSize(rows, cols uint32) error {
 func (c *SsmDataChannel) TerminateSession() error {
 	msg := NewAgentMessage()
 	msg.MessageType = InputStreamData
-	msg.SequenceNumber = atomic.AddInt64(&c.seqNum, 1)
 	msg.Flags = Fin
 	msg.PayloadType = Flag
 
@@ -379,7 +486,6 @@ func (c *SsmDataChannel) TerminateSession() error {
 func (c *SsmDataChannel) DisconnectPort() error {
 	msg := NewAgentMessage()
 	msg.MessageType = InputStreamData
-	msg.SequenceNumber = atomic.AddInt64(&c.seqNum, 1)
 	msg.Flags = Data
 	msg.PayloadType = Flag
 
@@ -417,22 +523,57 @@ func (c *SsmDataChannel) processInboundQueue() ([]byte, error) {
 }
 
 func (c *SsmDataChannel) processOutboundQueue() {
+	done := c.outboundDone
+	defer func() {
+		if done != nil {
+			close(done)
+		}
+	}()
 	for {
 		time.Sleep(500 * time.Millisecond)
-		if c.pausePub {
+
+		// Snapshot under the lock: pausePub and outMsgBuf are written by other
+		// goroutines (HandleMsg, WaitForHandshakeComplete). The buffer must be
+		// used outside the lock because WriteMsg locks c.mu itself.
+		c.mu.Lock()
+		buf, paused := c.outMsgBuf, c.pausePub
+		c.mu.Unlock()
+
+		if paused {
 			continue
 		}
 
-		if c.outMsgBuf == nil {
+		if buf == nil {
 			return
 		}
 
-		for m := c.outMsgBuf.Next(); m != nil; m = c.outMsgBuf.Next() {
-			if _, err := c.WriteMsg(m); err != nil {
+		for m := buf.Next(); m != nil; m = buf.Next() {
+			// Retransmit via resendMsg, NOT WriteMsg: these messages already have
+			// their sequence number and are already buffered. WriteMsg would
+			// assign a NEW number, renumbering the stream and stalling the agent.
+			if err := c.resendMsg(m); err != nil {
 				// todo - handle error?
 			}
 		}
 	}
+}
+
+// resendMsg retransmits an already-sequenced message from the outbound retransmit
+// buffer. Unlike WriteMsg it must not assign a sequence number or re-buffer — the
+// message keeps the number it was first sent with, so retransmits never renumber
+// the stream.
+func (c *SsmDataChannel) resendMsg(msg *AgentMessage) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pausePub {
+		return nil
+	}
+	data, err := msg.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	_ = c.ws.SetWriteDeadline(time.Now().Add(dataChannelWriteTimeout))
+	return c.ws.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // sendAcknowledgeMessage sends the Acknowledge message type for each incoming message read from
@@ -496,6 +637,16 @@ func (c *SsmDataChannel) StartSessionFromDataChannelURL(url string, token string
 	}
 	c.ws = ws
 
+	// Arm liveness: initial read deadline, extend it on every pong, and start
+	// the ping loop. A pong (or any frame) keeps a healthy idle session alive;
+	// silence beyond dataChannelReadTimeout surfaces a dead connection.
+	c.pingStop = make(chan struct{})
+	_ = c.ws.SetReadDeadline(time.Now().Add(dataChannelReadTimeout))
+	c.ws.SetPongHandler(func(string) error {
+		return c.ws.SetReadDeadline(time.Now().Add(dataChannelReadTimeout))
+	})
+	go c.keepAlive()
+
 	if err = c.openDataChannel(token); err != nil {
 		_ = c.Close()
 		return err
@@ -513,6 +664,7 @@ func (c *SsmDataChannel) openDataChannel(token string) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	_ = c.ws.SetWriteDeadline(time.Now().Add(dataChannelWriteTimeout))
 	return c.ws.WriteJSON(openDataChanInput)
 }
 

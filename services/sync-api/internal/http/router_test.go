@@ -7,10 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -456,80 +453,28 @@ func TestServerInfoEndpoint(t *testing.T) {
 	}
 }
 
-func TestAwsSsoMobileStartRecoversAfterStartupProbeTimeout(t *testing.T) {
+// The SSO browser flow runs on the AWS SDK and is always available in
+// production; a router explicitly configured without a manager (tests only)
+// still answers 503 with the configured reason instead of crashing.
+func TestAwsSsoMobileStartReturns503WithoutManager(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	writeRouterFakeAWSCLI(t)
-	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
-		LocalAuthEnabled:   true,
-		LocalSignupEnabled: true,
-		AwsSsmRuntime: httpserver.AwsSsmRuntime{
-			Enabled:                      true,
-			AWSPath:                      "/usr/local/bin/aws",
-			SessionManagerPluginPath:     "/usr/local/bin/session-manager-plugin",
-			AwsSsoBrowserFlowReason:      "AWS CLI mobile SSO probe timed out",
-			AwsSsoBrowserFlowRecoverable: true,
-			AwsSsoBrowserFlowSupported:   false,
-		},
-	})
-	accessToken := signupAccessToken(t, router, "aws-sso-recover@example.com")
-
-	infoBefore := requestServerInfo(t, router)
-	if infoBefore.Capabilities.Sessions.AWSSsoBrowserFlow {
-		t.Fatalf("expected awsSsoBrowserFlow to start disabled")
-	}
-
-	recorder := postAwsSsoMobileStart(t, router, accessToken)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected recovered AWS SSO start to succeed, got %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var response struct {
-		LoginID    string `json:"loginId"`
-		Status     string `json:"status"`
-		BrowserURL string `json:"browserUrl"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode AWS SSO start response: %v", err)
-	}
-	if response.Status != "pending" || response.LoginID == "" || response.BrowserURL == "" {
-		t.Fatalf("unexpected AWS SSO start response: %#v", response)
-	}
-
-	handoffRequest := httptest.NewRequest(http.MethodGet, "/api/aws-sso/mobile/handoff/"+response.LoginID, nil)
-	handoffRequest.Header.Set("Authorization", "Bearer "+accessToken)
-	handoffRecorder := httptest.NewRecorder()
-	router.ServeHTTP(handoffRecorder, handoffRequest)
-	if handoffRecorder.Code != http.StatusOK {
-		t.Fatalf("expected recovered AWS SSO handoff status to succeed, got %d: %s", handoffRecorder.Code, handoffRecorder.Body.String())
-	}
-
-	infoAfter := requestServerInfo(t, router)
-	if !infoAfter.Capabilities.Sessions.AWSSsoBrowserFlow {
-		t.Fatalf("expected awsSsoBrowserFlow to be enabled after recovery")
-	}
-}
-
-func TestAwsSsoMobileStartDoesNotRecoverHardUnsupported(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	writeRouterFakeAWSCLI(t)
 	router := createTestRouterWithConfig(t, httpserver.RouterConfig{
 		LocalAuthEnabled:   true,
 		LocalSignupEnabled: true,
 		AwsSsmRuntime: httpserver.AwsSsmRuntime{
 			Enabled:                    true,
-			AWSPath:                    "/usr/local/bin/aws",
-			SessionManagerPluginPath:   "/usr/local/bin/session-manager-plugin",
-			AwsSsoBrowserFlowReason:    "AWS CLI mobile SSO probe failed: Unknown options: --issuer-url",
+			AwsSsoBrowserFlowReason:    "browser flow disabled for this test",
 			AwsSsoBrowserFlowSupported: false,
 		},
 	})
-	accessToken := signupAccessToken(t, router, "aws-sso-hard-unsupported@example.com")
+	accessToken := signupAccessToken(t, router, "aws-sso-disabled@example.com")
 
 	recorder := postAwsSsoMobileStart(t, router, accessToken)
 	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected hard unsupported AWS SSO start to remain 503, got %d: %s", recorder.Code, recorder.Body.String())
+		t.Fatalf("expected AWS SSO start without manager to be 503, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), "Unknown options") {
-		t.Fatalf("expected hard unsupported reason in response, got %s", recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), "browser flow disabled for this test") {
+		t.Fatalf("expected configured reason in response, got %s", recorder.Body.String())
 	}
 }
 
@@ -604,37 +549,6 @@ func postAwsSsoMobileStart(t *testing.T, router *gin.Engine, accessToken string)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	return recorder
-}
-
-func writeRouterFakeAWSCLI(t *testing.T) {
-	t.Helper()
-
-	dir := t.TempDir()
-	buildRouterFakeAwsCLI(t, dir, "aws")
-	buildRouterFakeAwsCLI(t, dir, "session-manager-plugin")
-	t.Setenv("PATH", dir)
-}
-
-// buildRouterFakeAwsCLI compiles the cross-platform fake AWS CLI fixture
-// (testfixture/fakeaws) into dir under baseName, appending .exe on Windows so
-// exec.LookPath can resolve it from PATH. router_test lives in the external
-// http_test package, so it cannot reuse the http package's buildFakeAwsCLI
-// helper and keeps its own copy.
-func buildRouterFakeAwsCLI(t *testing.T, dir, baseName string) string {
-	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		baseName += ".exe"
-	}
-	binaryPath := filepath.Join(dir, baseName)
-
-	buildCommand := exec.Command("go", "build", "-o", binaryPath, "./testfixture/fakeaws")
-	buildCommand.Dir = "."
-	buildCommand.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if output, err := buildCommand.CombinedOutput(); err != nil {
-		t.Fatalf("build fake aws cli (%s): %v\n%s", baseName, err, output)
-	}
-	return binaryPath
 }
 
 func TestAwsSessionWebSocketAcceptsQueryAccessToken(t *testing.T) {

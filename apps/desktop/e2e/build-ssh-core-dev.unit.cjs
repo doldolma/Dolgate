@@ -5,12 +5,14 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  acquireBuildLock,
   buildFingerprintKey,
   collectDevBuildFingerprintFiles,
   createContentFingerprint,
   ensureSshCoreDevBuild,
   getDevBuildMarkerPath,
   getTargetRoot,
+  readLockOwnerPid,
   resolveRequiredOutputs,
 } = require("../scripts/build-ssh-core-dev.cjs");
 
@@ -357,5 +359,77 @@ test("skips unsupported platforms", async () => {
     assert.deepEqual(result, { skipped: true });
   } finally {
     await cleanupFixture(fixture);
+  }
+});
+
+test("acquireBuildLock records the owner pid and releases the lock", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ssh-core-lock-"));
+  const lockPath = path.join(dir, "build.lock");
+
+  try {
+    const lock = await acquireBuildLock(lockPath, { pid: 4242, logger: () => {} });
+    assert.equal(await readLockOwnerPid(lockPath), 4242);
+
+    await lock.release();
+    await assert.rejects(fs.access(lockPath), "lock file should be gone after release");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("acquireBuildLock reclaims a stale lock left by a dead process", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ssh-core-lock-"));
+  const lockPath = path.join(dir, "build.lock");
+  const logs = [];
+
+  try {
+    // Simulate a lock left behind by a build that was interrupted (Ctrl+C).
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 999999 }));
+
+    const lock = await acquireBuildLock(lockPath, {
+      pid: 4242,
+      isProcessAliveImpl: () => false, // the recorded owner is gone
+      logger: (message) => logs.push(message),
+    });
+
+    assert.equal(await readLockOwnerPid(lockPath), 4242, "current process took over");
+    assert.ok(
+      logs.some((line) => line.includes("stale") && line.includes("999999")),
+      `expected a stale-lock notice, got ${JSON.stringify(logs)}`,
+    );
+
+    await lock.release();
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("acquireBuildLock waits then times out while a live owner holds the lock", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ssh-core-lock-"));
+  const lockPath = path.join(dir, "build.lock");
+  const logs = [];
+
+  try {
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 4243 }));
+
+    await assert.rejects(
+      acquireBuildLock(lockPath, {
+        pid: 4242,
+        timeoutMs: 60,
+        pollMs: 10,
+        isProcessAliveImpl: () => true, // owner still running
+        logger: (message) => logs.push(message),
+      }),
+      /Timed out waiting for ssh-core dev build lock/,
+    );
+
+    assert.ok(
+      logs.some((line) => line.includes("Waiting for ssh-core dev build lock")),
+      `expected a waiting notice, got ${JSON.stringify(logs)}`,
+    );
+    // A live owner's lock must never be removed.
+    assert.equal(await readLockOwnerPid(lockPath), 4243);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

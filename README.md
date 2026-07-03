@@ -7,7 +7,7 @@ AWS SSM으로 EC2·ECS에 SSH 포트 없이 접속하고, 동기화 백엔드까
 
 ### 대표 기능
 
-- **AWS SSM 네이티브 통합** — EC2 import, SSM 기반 shell·SFTP·포트 포워딩, ECS Exec 셸·터널링까지. 인스턴스에 SSH 인바운드 포트를 열지 않고, `aws` CLI나 `session-manager-plugin` 설치 없이 앱에 내장된 SSM 데이터 채널로 접속합니다.
+- **AWS SSM 네이티브 통합** — EC2 import, SSM 기반 shell·SFTP·포트 포워딩, ECS Exec 셸·터널링까지. 인스턴스에 SSH 인바운드 포트를 열지 않고, 앱에 내장된 SSM 데이터 채널로 접속합니다.
 - **동기화를 self-host로** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다. 로그인·데이터를 외부 클라우드에 맡기지 않고 자체 서버에서 운영할 수 있습니다.
 - **원격 값까지 읽는 명령어 자동완성** — Fig 스펙 옵션·서브커맨드에 더해, 원격 호스트에서 직접 값을 가져오는 동적 추천(컨테이너 이름·git 브랜치 등)과 경로·스니펫까지 추천합니다.
 - **세션 공유 & 협업** — 실행 중인 세션을 브라우저 viewer 링크로 공유하고 실시간 채팅으로 함께 봅니다.
@@ -129,13 +129,7 @@ image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 
 ### AWS / SSM 사용 전 확인
 
-세션 기능(SSM shell · AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널링)은 앱에 내장된 SSM 데이터 채널로 동작하므로 `session-manager-plugin`이나 `aws` CLI 설치가 필요 없습니다.
-
-단, **AWS 프로필 인증**(프로필 생성·검증, SSO 브라우저 로그인)에는 아직 로컬 `aws` CLI가 필요합니다.
-
-```bash
-aws --version
-```
+세션(SSM shell · AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널링)은 내장 SSM 데이터 채널로, 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)은 AWS SDK로 동작합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 그대로 사용할 수 있습니다.
 
 대상 EC2는 **SSM managed instance** 상태여야 하고, AWS Import는 Linux/UNIX 인스턴스를 기준으로 동작합니다.
 필요한 IAM 권한(사용자/역할 · EC2 인스턴스 프로파일 · ECS task role)과 정책 JSON 예시는 [AWS / SSM 설정 가이드](./docs/aws.md)를 참고하세요.

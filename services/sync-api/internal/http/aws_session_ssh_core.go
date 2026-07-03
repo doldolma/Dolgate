@@ -1,9 +1,11 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 
 	"github.com/google/uuid"
@@ -32,6 +34,9 @@ type awsSessionCoreRuntime interface {
 
 type AwsSessionBridge struct {
 	core awsSessionCoreRuntime
+	// ssmTokens issues ssm:StartSession tokens for the in-process data channel;
+	// ssh-core itself is credential-free and requires StreamURL/TokenValue.
+	ssmTokens awsSsmTokenIssuer
 
 	mu        sync.RWMutex
 	sessions  map[string]*directAwsSession
@@ -58,7 +63,8 @@ func NewAwsSessionBridge() *AwsSessionBridge {
 
 func newAwsSessionBridgeWithCore(core awsSessionCoreRuntime) *AwsSessionBridge {
 	bridge := &AwsSessionBridge{
-		sessions: make(map[string]*directAwsSession),
+		sessions:  make(map[string]*directAwsSession),
+		ssmTokens: sdkAwsSsmTokenIssuer{},
 	}
 	if core == nil {
 		core = coreruntime.New(coreruntime.Options{
@@ -103,7 +109,7 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 	}
 
 	cols, rows := normalizeSshCoreSize(request.Cols, request.Rows)
-	if err := bridge.core.ConnectAWS(session.sessionID, uuid.NewString(), coretypes.AWSConnectPayload{
+	payload := coretypes.AWSConnectPayload{
 		ProfileName: request.ProfileName,
 		Region:      request.Region,
 		InstanceID:  request.InstanceID,
@@ -111,12 +117,34 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 		Rows:        rows,
 		Env:         request.Env,
 		UnsetEnv:    request.UnsetEnv,
-	}); err != nil {
+	}
+	// ssh-core's in-process data channel needs a StartSession token; skip
+	// issuance in e2e fake mode, where ssh-core substitutes a fake runner.
+	if !awsSessionFakeModeEnabled() {
+		token, err := bridge.ssmTokens.IssueShellSession(
+			context.Background(),
+			request.Region,
+			request.Env,
+			request.InstanceID,
+		)
+		if err != nil {
+			session.finalize(nil)
+			return nil, fmt.Errorf("start AWS session: %w", err)
+		}
+		payload.StreamURL = token.StreamURL
+		payload.TokenValue = token.TokenValue
+		payload.SsmSessionID = token.SessionID
+	}
+	if err := bridge.core.ConnectAWS(session.sessionID, uuid.NewString(), payload); err != nil {
 		session.finalize(nil)
 		return nil, fmt.Errorf("start AWS session: %w", err)
 	}
 
 	return session, nil
+}
+
+func awsSessionFakeModeEnabled() bool {
+	return os.Getenv("DOLSSH_E2E_FAKE_AWS_SESSION") != ""
 }
 
 func (bridge *AwsSessionBridge) handleEvent(event coretypes.Event) {

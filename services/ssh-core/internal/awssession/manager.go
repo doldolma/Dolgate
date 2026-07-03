@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,7 +27,18 @@ type sessionHandle struct {
 	done                chan struct{}
 	probeMu             sync.Mutex
 	probe               *autocompleteProbe
+	probePrompt         *autocompleteProbePrompt
 	handshake           autocomplete.Handshake
+
+	shellIntegrationMu             sync.Mutex
+	shellIntegrationState          shellIntegrationState
+	shellIntegrationFlushScheduled bool
+	shellIntegrationInstallOnce    sync.Once
+	shellIntegrationQuietTimer     *time.Timer
+	shellIntegrationMaxTimer       *time.Timer
+	shellIntegrationTail           string
+	shellIntegrationReady          chan struct{}
+	shellIntegrationReadyOnce      sync.Once
 }
 
 type autocompleteProbe struct {
@@ -41,6 +53,21 @@ type autocompleteProbeResult struct {
 	err    error
 }
 
+type autocompleteProbePrompt struct {
+	buffer   []byte
+	response autocompleteProbeResult
+	result   chan autocompleteProbeResult
+}
+
+type shellIntegrationState int
+
+const (
+	shellIntegrationUnknown shellIntegrationState = iota
+	shellIntegrationArmed
+	shellIntegrationInstalling
+	shellIntegrationInstalled
+)
+
 type Manager struct {
 	mu           sync.RWMutex
 	sessions     map[string]*sessionHandle
@@ -51,15 +78,11 @@ type Manager struct {
 
 const shutdownDrainTimeout = 2 * time.Second
 
-// autocompleteProbeTimeout bounds how long we wait for the in-band OSC 6973
-// snapshot response. AWS SSM sessions commonly start as ssm-user and `exec sudo`
-// into the target user before the interactive shell is ready, and the probe then
-// runs a full PATH scan, so the response can land several seconds after we inject
-// it (observed ~5s on a real instance). A 2s budget cancelled the probe before
-// the valid snapshot arrived — the snapshot was then dropped and autocomplete
-// silently stayed disabled (the probe echo also leaked once the probe was gone).
-// Plain SSH has no sudo hop and answers within ~2s, so this only matters for SSM.
-const autocompleteProbeTimeout = 8 * time.Second
+// autocompleteProbeTimeout is the total budget for AWS in-band autocomplete
+// prepare: waiting for the first integrated prompt plus collecting the snapshot.
+// Keep it below the desktop-side AWS prepare timeout so queued input is released
+// only after ssh-core has either completed or abandoned the in-band probe.
+const autocompleteProbeTimeout = 9 * time.Second
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
 	return NewManagerWithRunnerFactory(emit, stream, defaultRunnerFactory)
@@ -85,12 +108,22 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 	}
 
 	handle := &sessionHandle{
-		runner: runner,
-		done:   make(chan struct{}),
+		runner:                runner,
+		done:                  make(chan struct{}),
+		shellIntegrationReady: make(chan struct{}),
 	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
+
+	if handle.beginShellIntegration() {
+		m.scheduleShellIntegrationInstall(sessionID, handle)
+	}
+
+	for _, reader := range runner.Streams() {
+		handle.streams.Add(1)
+		go m.stream(sessionID, handle, reader)
+	}
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventConnected,
@@ -100,11 +133,6 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 			Status: "connected",
 		},
 	})
-
-	for _, reader := range runner.Streams() {
-		handle.streams.Add(1)
-		go m.stream(sessionID, handle, reader)
-	}
 
 	go m.waitForSession(sessionID)
 	return nil
@@ -130,6 +158,18 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 	if err != nil {
 		return autocomplete.Result{}, err
 	}
+	if err := m.InstallShellIntegration(sessionID); err != nil {
+		return autocomplete.Result{}, err
+	}
+	deadline := time.Now().Add(autocompleteProbeTimeout)
+	if !session.waitForShellIntegrationReady(time.Until(deadline)) {
+		return autocomplete.Degraded("", "probe-timeout"), nil
+	}
+	probeBudget := time.Until(deadline)
+	if probeBudget <= 0 {
+		return autocomplete.Degraded("", "probe-timeout"), nil
+	}
+
 	nonceBytes := make([]byte, 12)
 	if _, err := rand.Read(nonceBytes); err != nil {
 		return autocomplete.Result{}, err
@@ -155,7 +195,7 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 	select {
 	case response := <-probe.result:
 		return response.result, response.err
-	case <-time.After(autocompleteProbeTimeout):
+	case <-time.After(probeBudget):
 		m.clearAutocompleteProbe(session, probe)
 		return autocomplete.Degraded("", "probe-timeout"), nil
 	}
@@ -168,19 +208,24 @@ func (m *Manager) StopAutocomplete(sessionID string) {
 	}
 	session.probeMu.Lock()
 	session.probe = nil
+	session.probePrompt = nil
 	session.probeMu.Unlock()
 }
 
-// InstallShellIntegration arms the OSC 133 handshake filter and writes the
-// integration init command into the SSM PTY. Must run before the snapshot probe
-// so the prompt marker arrives ahead of the probe response.
+// InstallShellIntegration arms the OSC 133 handshake filter. AWS SSM can type
+// its own shell profile/run-as command after the data channel opens, so the
+// actual init command is written by the startup gate after that first prompt
+// settles, not immediately on connect.
 func (m *Manager) InstallShellIntegration(sessionID string) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
 	}
-	session.handshake.Arm(false)
-	return session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+	if !session.beginShellIntegration() {
+		return nil
+	}
+	m.scheduleShellIntegrationInstall(sessionID, session)
+	return nil
 }
 
 // FlushShellIntegration releases any output held by the handshake filter when
@@ -281,11 +326,16 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
+			m.observeShellIntegrationOutput(sessionID, handle, chunk)
 			// Suppress the integration command echo until the first prompt
 			// marker, then let the 6973 snapshot probe parsing run on what
 			// remains (the marker is injected before the probe, so it arrives
 			// first and the probe response is never swallowed).
-			chunk = handle.handshake.Filter(chunk)
+			var handshakeDone bool
+			chunk, handshakeDone = handle.handshake.FilterWithStatus(chunk)
+			if handshakeDone {
+				handle.markShellIntegrationReady()
+			}
 			if len(chunk) > 0 {
 				chunk = m.consumeAutocompleteProbe(handle, chunk)
 			}
@@ -306,16 +356,268 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 	}
 }
 
+const (
+	// shellIntegrationHandshakeTimeout bounds how long the echo-suppression
+	// handshake waits for the first OSC 133;A prompt marker before releasing any
+	// buffered output. AWS SSM can take a few seconds to exec into the target
+	// login shell, so keep this aligned with the runtime/SSH manager budget.
+	shellIntegrationHandshakeTimeout = 8 * time.Second
+	shellIntegrationInstallQuiet     = 500 * time.Millisecond
+	shellIntegrationInstallMaxWait   = 2500 * time.Millisecond
+	shellIntegrationTailLimit        = 2048
+)
+
+func (h *sessionHandle) beginShellIntegration() bool {
+	h.shellIntegrationMu.Lock()
+	defer h.shellIntegrationMu.Unlock()
+	switch h.shellIntegrationState {
+	case shellIntegrationArmed, shellIntegrationInstalling, shellIntegrationInstalled:
+		return false
+	}
+	h.shellIntegrationState = shellIntegrationArmed
+	h.handshake.Arm(false)
+	return true
+}
+
+func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessionHandle) (bool, error) {
+	session.shellIntegrationMu.Lock()
+	switch session.shellIntegrationState {
+	case shellIntegrationInstalling, shellIntegrationInstalled:
+		session.shellIntegrationMu.Unlock()
+		return false, nil
+	case shellIntegrationUnknown:
+		session.shellIntegrationState = shellIntegrationInstalling
+		session.handshake.Arm(false)
+	default:
+		session.shellIntegrationState = shellIntegrationInstalling
+	}
+	session.stopShellIntegrationInstallTimersLocked()
+	session.shellIntegrationMu.Unlock()
+
+	if err := session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+		flushed := session.handshake.Flush()
+		session.shellIntegrationMu.Lock()
+		session.shellIntegrationState = shellIntegrationUnknown
+		session.shellIntegrationMu.Unlock()
+		if len(flushed) > 0 {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+		}
+		return false, err
+	}
+
+	session.shellIntegrationMu.Lock()
+	session.shellIntegrationState = shellIntegrationInstalled
+	shouldScheduleFlush := !session.shellIntegrationFlushScheduled
+	session.shellIntegrationFlushScheduled = true
+	session.shellIntegrationMu.Unlock()
+
+	if shouldScheduleFlush {
+		m.scheduleShellIntegrationFlush(sessionID, session)
+	}
+	return true, nil
+}
+
+func (m *Manager) scheduleShellIntegrationInstall(sessionID string, session *sessionHandle) {
+	session.shellIntegrationMu.Lock()
+	defer session.shellIntegrationMu.Unlock()
+	if session.shellIntegrationState != shellIntegrationArmed || session.shellIntegrationMaxTimer != nil {
+		return
+	}
+	session.shellIntegrationMaxTimer = time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+		m.abandonShellIntegrationInstall(sessionID, session)
+	})
+}
+
+func (m *Manager) observeShellIntegrationOutput(sessionID string, session *sessionHandle, chunk []byte) {
+	if len(chunk) == 0 {
+		return
+	}
+
+	session.shellIntegrationMu.Lock()
+	defer session.shellIntegrationMu.Unlock()
+	if session.shellIntegrationState != shellIntegrationArmed {
+		return
+	}
+
+	session.shellIntegrationTail += string(chunk)
+	if len(session.shellIntegrationTail) > shellIntegrationTailLimit {
+		session.shellIntegrationTail = session.shellIntegrationTail[len(session.shellIntegrationTail)-shellIntegrationTailLimit:]
+	}
+
+	if looksLikeShellPrompt(session.shellIntegrationTail) {
+		if session.shellIntegrationMaxTimer != nil {
+			session.shellIntegrationMaxTimer.Stop()
+			session.shellIntegrationMaxTimer = nil
+		}
+		if session.shellIntegrationQuietTimer == nil {
+			session.shellIntegrationQuietTimer = time.AfterFunc(shellIntegrationInstallQuiet, func() {
+				m.triggerShellIntegrationInstall(sessionID, session)
+			})
+		} else {
+			session.shellIntegrationQuietTimer.Reset(shellIntegrationInstallQuiet)
+		}
+		return
+	}
+	if session.shellIntegrationQuietTimer != nil {
+		session.shellIntegrationQuietTimer.Stop()
+	}
+}
+
+func (m *Manager) abandonShellIntegrationInstall(sessionID string, session *sessionHandle) {
+	session.shellIntegrationMu.Lock()
+	if session.shellIntegrationState != shellIntegrationArmed {
+		session.shellIntegrationMu.Unlock()
+		return
+	}
+	session.stopShellIntegrationInstallTimersLocked()
+	session.shellIntegrationState = shellIntegrationUnknown
+	session.shellIntegrationMu.Unlock()
+
+	if flushed := session.handshake.Flush(); len(flushed) > 0 && m.HasSession(sessionID) {
+		m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+	}
+}
+
+func (m *Manager) triggerShellIntegrationInstall(sessionID string, session *sessionHandle) {
+	if !m.HasSession(sessionID) {
+		return
+	}
+	session.shellIntegrationInstallOnce.Do(func() {
+		go func() {
+			_, _ = m.writeShellIntegrationCommand(sessionID, session)
+		}()
+	})
+}
+
+func (h *sessionHandle) stopShellIntegrationInstallTimersLocked() {
+	if h.shellIntegrationQuietTimer != nil {
+		h.shellIntegrationQuietTimer.Stop()
+		h.shellIntegrationQuietTimer = nil
+	}
+	if h.shellIntegrationMaxTimer != nil {
+		h.shellIntegrationMaxTimer.Stop()
+		h.shellIntegrationMaxTimer = nil
+	}
+	h.shellIntegrationTail = ""
+}
+
+func (m *Manager) scheduleShellIntegrationFlush(sessionID string, session *sessionHandle) {
+	go func() {
+		timer := time.NewTimer(shellIntegrationHandshakeTimeout)
+		defer timer.Stop()
+		select {
+		case <-session.done:
+		case <-session.shellIntegrationReady:
+		case <-timer.C:
+			m.FlushShellIntegration(sessionID)
+		}
+	}()
+}
+
+func looksLikeShellPrompt(value string) bool {
+	trimmed := strings.TrimRight(stripTerminalControls(value), " \t\r\n")
+	if trimmed == "" {
+		return false
+	}
+	for _, suffix := range []string{"$", "#", "%", ">", "❯", "➜"} {
+		if strings.HasSuffix(trimmed, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripTerminalControls(value string) string {
+	var out strings.Builder
+	out.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch == 0x1b {
+			i = skipEscapeSequence(value, i)
+			continue
+		}
+		if ch < 0x20 && ch != '\r' && ch != '\n' && ch != '\t' {
+			continue
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
+}
+
+func skipEscapeSequence(value string, esc int) int {
+	if esc+1 >= len(value) {
+		return esc
+	}
+	switch value[esc+1] {
+	case ']':
+		for i := esc + 2; i < len(value); i++ {
+			if value[i] == '\a' {
+				return i
+			}
+			if value[i] == 0x1b && i+1 < len(value) && value[i+1] == '\\' {
+				return i + 1
+			}
+		}
+		return len(value) - 1
+	case '[':
+		for i := esc + 2; i < len(value); i++ {
+			if value[i] >= 0x40 && value[i] <= 0x7e {
+				return i
+			}
+		}
+		return len(value) - 1
+	default:
+		return esc + 1
+	}
+}
+
+func (h *sessionHandle) markShellIntegrationReady() {
+	h.shellIntegrationReadyOnce.Do(func() {
+		close(h.shellIntegrationReady)
+	})
+}
+
+func (h *sessionHandle) waitForShellIntegrationReady(timeout time.Duration) bool {
+	if timeout <= 0 {
+		return false
+	}
+	select {
+	case <-h.shellIntegrationReady:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
 func (m *Manager) clearAutocompleteProbe(handle *sessionHandle, expected *autocompleteProbe) {
 	handle.probeMu.Lock()
 	if handle.probe == expected {
 		handle.probe = nil
+	}
+	if handle.probePrompt != nil && handle.probePrompt.result == expected.result {
+		handle.probePrompt = nil
 	}
 	handle.probeMu.Unlock()
 }
 
 func (m *Manager) consumeAutocompleteProbe(handle *sessionHandle, chunk []byte) []byte {
 	handle.probeMu.Lock()
+	if handle.probePrompt != nil {
+		prompt := handle.probePrompt
+		prompt.buffer = append(prompt.buffer, chunk...)
+		remainder, done := consumeProbePromptRedraw(prompt.buffer)
+		if !done && len(prompt.buffer) <= autocomplete.MaxMetadataBytes {
+			handle.probeMu.Unlock()
+			return nil
+		}
+		handle.probePrompt = nil
+		handle.probeMu.Unlock()
+		select {
+		case prompt.result <- prompt.response:
+		default:
+		}
+		return remainder
+	}
 	probe := handle.probe
 	if probe == nil {
 		handle.probeMu.Unlock()
@@ -353,13 +655,33 @@ func (m *Manager) consumeAutocompleteProbe(handle *sessionHandle, chunk []byte) 
 	encoded := append([]byte(nil), probe.buffer[start+len(prefix):end]...)
 	remainder := append([]byte(nil), probe.buffer[end+1:]...)
 	handle.probe = nil
-	handle.probeMu.Unlock()
 	result, err := autocomplete.DecodeInBandSnapshot(encoded, probe.revision)
+	response := autocompleteProbeResult{result: result, err: err}
+	remainder, promptDone := consumeProbePromptRedraw(remainder)
+	if !promptDone {
+		handle.probePrompt = &autocompleteProbePrompt{
+			buffer:   remainder,
+			response: response,
+			result:   probe.result,
+		}
+		handle.probeMu.Unlock()
+		return nil
+	}
+	handle.probeMu.Unlock()
 	select {
-	case probe.result <- autocompleteProbeResult{result: result, err: err}:
+	case probe.result <- response:
 	default:
 	}
 	return remainder
+}
+
+func consumeProbePromptRedraw(buffer []byte) ([]byte, bool) {
+	marker := []byte(autocomplete.PromptInputStartMarker)
+	idx := bytes.Index(buffer, marker)
+	if idx < 0 {
+		return buffer, false
+	}
+	return append([]byte(nil), buffer[idx+len(marker):]...), true
 }
 
 func (m *Manager) emitSessionError(sessionID, message string) {
@@ -392,6 +714,10 @@ func (m *Manager) closeSession(sessionID string, message string) {
 	if !ok {
 		return
 	}
+
+	session.shellIntegrationMu.Lock()
+	session.stopShellIntegrationInstallTimersLocked()
+	session.shellIntegrationMu.Unlock()
 
 	m.emit(protocol.Event{
 		Type:      protocol.EventClosed,

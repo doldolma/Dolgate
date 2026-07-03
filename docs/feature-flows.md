@@ -48,7 +48,7 @@ flowchart TD
   - SSM managed
   - sshd/SFTP enabled
   - EC2 Instance Connect 가능
-  - AWS 프로필 인증 완료 (세션 연결 자체는 내장 SSM 데이터 채널로 동작 — `session-manager-plugin` 불필요)
+  - AWS 프로필 인증 완료 (세션 연결은 내장 SSM 데이터 채널로 동작)
 - 연결 시 진행 단계가 UI에 표시됩니다.
   - profile 확인
   - 브라우저 로그인 필요 시 로그인

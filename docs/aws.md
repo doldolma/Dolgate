@@ -5,7 +5,7 @@ Dolgate의 AWS 관련 기능(EC2 import, SSM shell 연결, AWS SFTP, SSM 포트 
 
 ## 사용 전 확인
 
-다음 기능들은 앱에 내장된 SSM 데이터 채널로 동작합니다. `session-manager-plugin`은 필요 없고, 세션 연결 자체에는 `aws` CLI도 필요 없습니다.
+AWS 관련 기능은 전부 앱에 내장되어 있습니다. 세션 계열 기능은 내장 SSM 데이터 채널로 동작하고, 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)과 AWS API 호출은 AWS SDK로 처리합니다.
 
 - AWS EC2 Import
 - AWS SSM shell 연결
@@ -13,20 +13,9 @@ Dolgate의 AWS 관련 기능(EC2 import, SSM shell 연결, AWS SFTP, SSM 포트 
 - AWS SFTP
 - AWS SSM 포트 포워딩
 - AWS 기반 container tunnel
+- AWS 프로필 생성·검증·SSO 브라우저 로그인
 
-단, **AWS 프로필 인증**(프로필 생성·검증, SSO 브라우저 로그인, AssumeRole)에는 아직 로컬 `aws` CLI가 필요합니다.
-
-최소 확인:
-
-```bash
-aws --version
-```
-
-macOS 예시:
-
-```bash
-brew install awscli
-```
+기존에 로컬 `~/.aws` 설정 파일로 관리하던 프로필은 **가져오기**로 앱 전용 프로필 저장소에 복사해 사용할 수 있습니다.
 
 추가로 AWS Import는 대상 인스턴스가 **SSM managed instance** 상태여야 하고, SSH username/port 자동 확인을 위해 SSM Run Command를 사용합니다.
 현재 AWS Import는 **Linux/UNIX 계열 EC2 인스턴스 기준**으로 동작하며, Windows 인스턴스는 SSH import 대상으로 지원하지 않습니다.
@@ -105,7 +94,7 @@ Dolgate에서 사용하는 대표 문서는 아래와 같습니다.
 
 구성 기준:
 
-- 사용자/역할 권한: Dolgate가 `aws` CLI로 세션 시작, Run Command, 공개키 주입을 수행하는 데 필요한 권한
+- 사용자/역할 권한: Dolgate가 AWS SDK로 세션 시작, Run Command, 공개키 주입을 수행하는 데 필요한 권한
 - EC2 인스턴스 프로파일: SSM Agent가 Session Manager / Run Command를 처리하는 데 필요한 역할
 
 참고:

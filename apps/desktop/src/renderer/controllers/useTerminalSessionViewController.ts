@@ -434,10 +434,8 @@ export function useTerminalSessionViewController({
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec',
     connected: tab?.status === 'connected',
-    // 셸 통합 init을 연결 직후 주입한다(lazy 미사용). 통합 프롬프트가 곧 첫 프롬프트라
-    // (core-manager가 133;A를 본 뒤 startup command를 flush) 더블 프롬프트는 없다.
-    // eager로 둬야 OSC 7(cwd)·OSC 133이 첫 프롬프트부터 흘러, SSM(aws-ec2)에서도 파일
-    // 드롭 업로드가 현재 경로를 인식한다(lazy면 cwd 미보고로 홈에 폴백됐었다).
+    // AWS SSM도 Go manager가 연결 직후 shell integration을 1회 설치하고,
+    // autocomplete probe는 첫 OSC 133 prompt marker 이후에만 보내므로 eager prepare가 안전하다.
     lazyPrepare: false,
     sendInput: sendAutocompleteInput,
     snippets,

@@ -6,13 +6,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path"
 	"sort"
 	"strings"
@@ -42,6 +40,10 @@ type awsSftpCoreRuntime interface {
 type AwsSftpBridge struct {
 	runtime AwsSsmRuntime
 	core    awsSftpCoreRuntime
+	// ssmTokens issues the port-forwarding StartSession token ssh-core's
+	// in-process data channel requires; eic pushes the ephemeral SSH key.
+	ssmTokens awsSsmTokenIssuer
+	eic       awsEc2InstanceConnectAPI
 
 	mu       sync.RWMutex
 	sessions map[string]*awsSftpSession
@@ -153,8 +155,10 @@ type awsSftpWriteRequest struct {
 
 func NewAwsSftpBridge(runtime AwsSsmRuntime) *AwsSftpBridge {
 	bridge := &AwsSftpBridge{
-		runtime:  runtime,
-		sessions: make(map[string]*awsSftpSession),
+		runtime:   runtime,
+		ssmTokens: sdkAwsSsmTokenIssuer{},
+		eic:       sdkAwsEc2InstanceConnect{},
+		sessions:  make(map[string]*awsSftpSession),
 	}
 	bridge.core = coreruntime.New(coreruntime.Options{})
 	return bridge
@@ -162,9 +166,11 @@ func NewAwsSftpBridge(runtime AwsSsmRuntime) *AwsSftpBridge {
 
 func newAwsSftpBridgeWithCore(runtime AwsSsmRuntime, core awsSftpCoreRuntime) *AwsSftpBridge {
 	return &AwsSftpBridge{
-		runtime:  runtime,
-		core:     core,
-		sessions: make(map[string]*awsSftpSession),
+		runtime:   runtime,
+		core:      core,
+		ssmTokens: sdkAwsSsmTokenIssuer{},
+		eic:       sdkAwsEc2InstanceConnect{},
+		sessions:  make(map[string]*awsSftpSession),
 	}
 }
 
@@ -206,17 +212,33 @@ func (bridge *AwsSftpBridge) CreateSession(ctx context.Context, userID string, r
 	if err != nil {
 		return awsSftpSessionResponse{}, err
 	}
+	// ssh-core's in-process forwarder is credential-free: issue the
+	// port-forwarding StartSession token here with the request credentials.
+	token, err := bridge.ssmTokens.IssuePortForwardSession(
+		ctx,
+		request.Region,
+		request.Env,
+		request.InstanceID,
+		request.SSHPort,
+		bindPort,
+	)
+	if err != nil {
+		return awsSftpSessionResponse{}, fmt.Errorf("start AWS SSM tunnel: %w", err)
+	}
 	if err := bridge.core.StartSSMPortForward(tunnelID, uuid.NewString(), coretypes.SSMPortForwardStartPayload{
-		ProfileName: "",
-		Region:      request.Region,
-		TargetType:  "instance",
-		TargetID:    request.InstanceID,
-		BindAddress: "127.0.0.1",
-		BindPort:    bindPort,
-		TargetKind:  "instance-port",
-		TargetPort:  request.SSHPort,
-		Env:         request.Env,
-		UnsetEnv:    request.UnsetEnv,
+		ProfileName:  "",
+		Region:       request.Region,
+		TargetType:   "instance",
+		TargetID:     request.InstanceID,
+		BindAddress:  "127.0.0.1",
+		BindPort:     bindPort,
+		TargetKind:   "instance-port",
+		TargetPort:   request.SSHPort,
+		Env:          request.Env,
+		UnsetEnv:     request.UnsetEnv,
+		StreamURL:    token.StreamURL,
+		TokenValue:   token.TokenValue,
+		SsmSessionID: token.SessionID,
 	}); err != nil {
 		return awsSftpSessionResponse{}, fmt.Errorf("start AWS SSM tunnel: %w", err)
 	}
@@ -242,7 +264,7 @@ func (bridge *AwsSftpBridge) CreateSession(ctx context.Context, userID string, r
 	if err != nil {
 		return awsSftpSessionResponse{}, err
 	}
-	if err := sendAwsSftpPublicKey(ctx, bridge.runtime.AWSPath, request, publicKey); err != nil {
+	if err := bridge.eic.SendSSHPublicKey(ctx, request, publicKey); err != nil {
 		return awsSftpSessionResponse{}, err
 	}
 
@@ -616,52 +638,6 @@ func createAwsSftpEphemeralSigner() (ssh.Signer, string, error) {
 	return signer, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))), nil
 }
 
-func sendAwsSftpPublicKey(ctx context.Context, awsPath string, request awsSftpCreateSessionRequest, publicKey string) error {
-	if strings.TrimSpace(awsPath) == "" {
-		return errors.New("aws executable not found")
-	}
-	commandCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	args := []string{
-		"ec2-instance-connect",
-		"send-ssh-public-key",
-		"--region", request.Region,
-		"--instance-id", request.InstanceID,
-		"--availability-zone", request.AvailabilityZone,
-		"--instance-os-user", request.SSHUsername,
-		"--ssh-public-key", publicKey,
-		"--output", "json",
-	}
-	cmd := exec.CommandContext(commandCtx, awsPath, args...)
-	cmd.Env = mergeAwsSftpChildEnv(request.Env, request.UnsetEnv)
-	output, err := cmd.CombinedOutput()
-	if commandCtx.Err() == context.DeadlineExceeded {
-		return errors.New("EC2 Instance Connect public key send timed out")
-	}
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("send EC2 Instance Connect public key: %s", message)
-	}
-	var payload struct {
-		Success bool   `json:"Success"`
-		Message string `json:"Message"`
-	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return fmt.Errorf("decode EC2 Instance Connect response: %w", err)
-	}
-	if !payload.Success {
-		if strings.TrimSpace(payload.Message) != "" {
-			return errors.New(strings.TrimSpace(payload.Message))
-		}
-		return errors.New("EC2 Instance Connect public key was rejected")
-	}
-	return nil
-}
-
 func dialAwsSftpClient(ctx context.Context, host string, port int, username string, signer ssh.Signer, trustedHostKeyBase64 string) (*ssh.Client, error) {
 	expected, err := base64.StdEncoding.DecodeString(trustedHostKeyBase64)
 	if err != nil {
@@ -691,46 +667,6 @@ func dialAwsSftpClient(ctx context.Context, host string, port int, username stri
 		return nil, fmt.Errorf("ssh handshake failed: %w", err)
 	}
 	return ssh.NewClient(conn, chans, reqs), nil
-}
-
-func mergeAwsSftpChildEnv(overrides map[string]string, unsetKeys []string) []string {
-	env := os.Environ()
-	env = append(env, "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off")
-	unset := make(map[string]struct{}, len(unsetKeys))
-	for _, key := range unsetKeys {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			unset[key] = struct{}{}
-		}
-	}
-	overrideLookup := make(map[string]string, len(overrides))
-	for key, value := range overrides {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			overrideLookup[key] = key + "=" + value
-		}
-	}
-	next := make([]string, 0, len(env)+len(overrides))
-	for _, entry := range env {
-		key, _, ok := strings.Cut(entry, "=")
-		if !ok {
-			next = append(next, entry)
-			continue
-		}
-		if _, shouldUnset := unset[key]; shouldUnset {
-			continue
-		}
-		if override, shouldOverride := overrideLookup[key]; shouldOverride {
-			next = append(next, override)
-			delete(overrideLookup, key)
-			continue
-		}
-		next = append(next, entry)
-	}
-	for _, override := range overrideLookup {
-		next = append(next, override)
-	}
-	return next
 }
 
 func toAwsSftpFileEntry(parentPath string, info os.FileInfo) awsSftpFileEntry {

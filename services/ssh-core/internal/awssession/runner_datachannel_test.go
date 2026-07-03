@@ -1,6 +1,7 @@
 package awssession
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -292,4 +293,29 @@ func TestDataChannelRunnerRemoteClose(t *testing.T) {
 		t.Fatalf("stream read after close = %v, want io.EOF", err)
 	}
 	_ = runner.Close()
+}
+
+func TestDataChannelRunnerHandlesLargeOutputFrame(t *testing.T) {
+	agent, url := newFakeSsmAgent(t)
+	runner := startTestDataChannelRunner(t, url)
+	defer runner.Close()
+
+	agent.waitFor(t, "open")
+	agent.waitFor(t, "size")
+
+	want := bytes.Repeat([]byte("x"), 64*1024)
+	agent.echo(want)
+
+	stream := runner.Streams()[0]
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(stream, got); err != nil {
+		t.Fatalf("read large output frame: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("large output frame payload mismatch")
+	}
+
+	if err := runner.Kill(); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
 }

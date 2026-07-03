@@ -192,12 +192,6 @@ npm run release:all
 
 ## AWS 사용 전 확인
 
-SSM 세션 기능(shell·SFTP·포트 포워딩·ECS Exec/터널)은 앱에 내장된 SSM 데이터 채널로 동작하므로 `session-manager-plugin` 설치가 필요 없습니다. 로컬 `aws` CLI는 **AWS 프로필 인증**(프로필 생성·검증, SSO 브라우저 로그인)에만 필요합니다.
-
-최소 확인:
-
-```bash
-aws --version
-```
+SSM 세션 기능(shell·SFTP·포트 포워딩·ECS Exec/터널)은 내장 SSM 데이터 채널로 동작하고, AWS 프로필 인증(프로필 생성·검증, SSO 브라우저 로그인, AssumeRole)은 AWS SDK로 처리합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 사용할 수 있습니다.
 
 추가 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)를 참고하면 됩니다.

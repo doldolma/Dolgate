@@ -553,6 +553,84 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(fakeWindow.sent.some((entry) => entry.channel === ipcChannels.ssh.data)).toBe(true);
   });
 
+  // X 닫기(사용자 요청)는 reason="client"로 종료돼야 렌더러 자동 재연결이
+  // 이를 드롭으로 오인해 세션을 되살리지 않는다.
+  it("closes AWS server proxy sessions with reason client on user disconnect", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    const events: CoreEvent<Record<string, unknown>>[] = [];
+    manager.registerWindow(fakeWindow.window as never);
+    manager.setTerminalEventHandler((event) => {
+      events.push(event);
+    });
+
+    const connectPromise = manager.connectAwsServerProxySession({
+      serverUrl: "https://sync.example.com",
+      accessToken: "access-token",
+      profileName: "managed-prod",
+      region: "ap-southeast-2",
+      instanceId: "i-1234567890",
+      cols: 132,
+      rows: 44,
+      title: "AWS Proxy Host",
+      hostId: "host-proxy",
+      hostLabel: "AWS Proxy Host",
+    });
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    const { sessionId } = await connectPromise;
+    socket.receive({ type: "ready" });
+
+    manager.disconnect(sessionId);
+
+    // 프록시에 close를 알리고 소켓을 닫는다.
+    expect(
+      socket.sent.map((message) => JSON.parse(message)),
+    ).toContainEqual({ type: "close" });
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+
+    const closedEvent = events.find((event) => event.type === "closed");
+    expect(closedEvent?.payload).toMatchObject({
+      message: "client requested disconnect",
+      reason: "client",
+    });
+  });
+
+  it("marks unexpected AWS server proxy socket drops with reason transport", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    const events: CoreEvent<Record<string, unknown>>[] = [];
+    manager.registerWindow(fakeWindow.window as never);
+    manager.setTerminalEventHandler((event) => {
+      events.push(event);
+    });
+
+    const connectPromise = manager.connectAwsServerProxySession({
+      serverUrl: "https://sync.example.com",
+      accessToken: "access-token",
+      profileName: "managed-prod",
+      region: "ap-southeast-2",
+      instanceId: "i-1234567890",
+      cols: 132,
+      rows: 44,
+      title: "AWS Proxy Host",
+      hostId: "host-proxy",
+      hostLabel: "AWS Proxy Host",
+    });
+    const socket = FakeWebSocket.instances[0]!;
+    socket.open();
+    await connectPromise;
+    socket.receive({ type: "ready" });
+
+    // 서버/네트워크 쪽에서 소켓이 갑자기 닫힌 상황.
+    socket.close();
+
+    const closedEvent = events.find((event) => event.type === "closed");
+    expect(closedEvent?.payload).toMatchObject({ reason: "transport" });
+  });
+
   it("includes session-scoped AWS env overrides when provided", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

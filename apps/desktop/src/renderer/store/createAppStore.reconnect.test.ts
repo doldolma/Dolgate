@@ -202,6 +202,50 @@ describe("auto-reconnect trigger (runtimeEventSlice)", () => {
     expect(isReconnecting("stable-aws")).toBe(false);
   });
 
+  // 서버 프록시 SSM 세션의 X 닫기: core-manager가 reason="client"를 실어주므로
+  // 메시지가 비어있지 않아도("client requested disconnect") 재연결하지 않는다.
+  it("does NOT reconnect an aws-ec2 server-proxy session closed by the user (reason client)", () => {
+    const store = seedAwsStore(
+      connectedTab({ stableId: "stable-aws", sessionId: "a1", hostId: "aws1" }),
+    );
+    store
+      .getState()
+      .handleCoreEvent(
+        closedEvent(
+          { reason: "client", message: "client requested disconnect" },
+          "a1",
+        ),
+      );
+
+    expect(isReconnecting("stable-aws")).toBe(false);
+    expect(
+      store.getState().tabs.find((item) => item.stableId === "stable-aws"),
+    ).toBeUndefined();
+  });
+
+  it("reconnects an aws-ec2 server-proxy session on a websocket drop (reason transport)", () => {
+    const store = seedAwsStore(
+      connectedTab({ stableId: "stable-aws", sessionId: "a1", hostId: "aws1" }),
+    );
+    store
+      .getState()
+      .handleCoreEvent(
+        closedEvent(
+          {
+            reason: "transport",
+            message: "서버 AWS SSM 프록시 연결이 종료되었습니다.",
+          },
+          "a1",
+        ),
+      );
+
+    expect(isReconnecting("stable-aws")).toBe(true);
+    const tab = store
+      .getState()
+      .tabs.find((item) => item.stableId === "stable-aws");
+    expect(tab?.status).toBe("connecting");
+  });
+
   it("does NOT reconnect a session that never produced output", () => {
     const store = seedStore(connectedTab({ hasReceivedOutput: false }));
     store

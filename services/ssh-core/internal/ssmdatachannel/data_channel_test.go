@@ -2,12 +2,14 @@ package ssmdatachannel_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +35,13 @@ type fakeAgentServer struct {
 	sizeMsgs   chan string
 	inputSeqs  chan int64
 	echoSeqNum int64
+	// noAck makes the agent record input sequence numbers but never acknowledge
+	// them, so the client's retransmit loop keeps re-sending unacked messages.
+	noAck bool
+
+	wg     sync.WaitGroup
+	connMu sync.Mutex
+	conns  []*websocket.Conn
 }
 
 func newFakeAgentServer(t *testing.T) (*fakeAgentServer, *httptest.Server) {
@@ -44,10 +53,24 @@ func newFakeAgentServer(t *testing.T) (*fakeAgentServer, *httptest.Server) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(srv.Close)
+	// The handler goroutine must not outlive the test: t.Errorf after completion
+	// panics the whole package. httptest's Close does not wait for hijacked
+	// (websocket) connections, so close them to unblock reads and join explicitly.
+	t.Cleanup(func() {
+		f.connMu.Lock()
+		for _, ws := range f.conns {
+			_ = ws.Close()
+		}
+		f.connMu.Unlock()
+		f.wg.Wait()
+	})
 	return f, srv
 }
 
 func (f *fakeAgentServer) handle(w http.ResponseWriter, r *http.Request) {
+	f.wg.Add(1)
+	defer f.wg.Done()
+
 	upgrader := websocket.Upgrader{}
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -55,6 +78,9 @@ func (f *fakeAgentServer) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer ws.Close()
+	f.connMu.Lock()
+	f.conns = append(f.conns, ws)
+	f.connMu.Unlock()
 
 	_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 
@@ -95,18 +121,24 @@ func (f *fakeAgentServer) handle(w http.ResponseWriter, r *http.Request) {
 			switch msg.PayloadType {
 			case ssmdatachannel.Output:
 				f.inputSeqs <- msg.SequenceNumber
+				if f.noAck {
+					continue
+				}
+				// Send failures are not test failures: the client may close the
+				// channel right after the test saw what it was waiting for, so
+				// losing the race on trailing acks/echoes is expected.
 				if err := f.ack(ws, msg); err != nil {
-					f.t.Errorf("sending ack: %v", err)
+					f.t.Logf("fake agent ack (benign during teardown): %v", err)
 					return
 				}
 				if err := f.echo(ws, msg.Payload); err != nil {
-					f.t.Errorf("sending echo: %v", err)
+					f.t.Logf("fake agent echo (benign during teardown): %v", err)
 					return
 				}
 			case ssmdatachannel.Size:
 				f.sizeMsgs <- string(msg.Payload)
 				if err := f.ack(ws, msg); err != nil {
-					f.t.Errorf("sending size ack: %v", err)
+					f.t.Logf("fake agent size ack (benign during teardown): %v", err)
 					return
 				}
 			default:
@@ -160,6 +192,88 @@ func (f *fakeAgentServer) writeMsg(ws *websocket.Conn, msg *ssmdatachannel.Agent
 
 func wsURL(srv *httptest.Server) string {
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
+func TestReadReturnsBufferTooSmallForOversizedFrame(t *testing.T) {
+	largePayload := bytes.Repeat([]byte("x"), 64*1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
+			t.Errorf("read channel-open: %v", err)
+			return
+		}
+
+		msg := ssmdatachannel.NewAgentMessage()
+		msg.MessageType = ssmdatachannel.OutputStreamData
+		msg.Flags = ssmdatachannel.Data
+		msg.PayloadType = ssmdatachannel.Output
+		msg.Payload = largePayload
+		data, err := msg.MarshalBinary()
+		if err != nil {
+			t.Errorf("marshal large frame: %v", err)
+			return
+		}
+		if err := ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
+			t.Errorf("write large frame: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	dc := new(ssmdatachannel.SsmDataChannel)
+	if err := dc.OpenWithSessionToken(wsURL(srv), testToken); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	buf := make([]byte, 128)
+	n, err := dc.Read(buf)
+	if !errors.Is(err, ssmdatachannel.ErrReadBufferTooSmall) {
+		t.Fatalf("Read error = %v, want ErrReadBufferTooSmall", err)
+	}
+	if n != len(buf) {
+		t.Fatalf("Read copied %d bytes, want %d", n, len(buf))
+	}
+}
+
+func TestWaitForHandshakeCompleteHonorsContext(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer ws.Close()
+		if _, _, err := ws.ReadMessage(); err != nil { // channel-open JSON
+			t.Errorf("read channel-open: %v", err)
+			return
+		}
+		<-release
+	}))
+	defer srv.Close()
+	t.Cleanup(func() { close(release) })
+
+	dc := new(ssmdatachannel.SsmDataChannel)
+	if err := dc.OpenWithSessionToken(wsURL(srv), testToken); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := dc.WaitForHandshakeComplete(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForHandshakeComplete error = %v, want context deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("WaitForHandshakeComplete ignored context; elapsed %s", elapsed)
+	}
 }
 
 func TestOpenWithSessionTokenEchoRoundTrip(t *testing.T) {
@@ -249,5 +363,156 @@ func TestOpenWithSessionTokenEchoRoundTrip(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for terminal-size message")
+	}
+}
+
+// TestConcurrentWritesAssignGaplessSequenceNumbers is the regression test for the
+// input-freeze bug: when several goroutines write at once (terminal-size + shell
+// integration init + autocomplete probe + keystrokes at session start), the
+// outbound sequence numbers must be assigned in wire order with no gaps. A gap
+// makes the real SSM agent stop acknowledging past it, so the retransmit buffer
+// never drains and input stops reaching the shell. WriteMsg assigns the number
+// under the channel lock precisely so this can't happen.
+func TestConcurrentWritesAssignGaplessSequenceNumbers(t *testing.T) {
+	server, srv := newFakeAgentServer(t)
+
+	dc := new(ssmdatachannel.SsmDataChannel)
+	if err := dc.OpenWithSessionToken(wsURL(srv), testToken); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	// Drain the channel so the agent's acks/echoes are consumed; otherwise the
+	// client socket backpressures and the agent stops reading input.
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := dc.Read(buf)
+			if err != nil {
+				return
+			}
+			_, _ = dc.HandleMsg(buf[:n])
+		}
+	}()
+
+	const goroutines, perGoroutine = 8, 4
+	total := goroutines * perGoroutine
+
+	// Collect the sequence numbers the agent received, concurrently with the
+	// writes, so acks flow promptly and legitimate retransmits stay rare.
+	seen := make(map[int64]bool)
+	var seenMu sync.Mutex
+	enough := make(chan struct{})
+	go func() {
+		for {
+			seq := <-server.inputSeqs
+			seenMu.Lock()
+			seen[seq] = true
+			done := len(seen) >= total
+			seenMu.Unlock()
+			if done {
+				close(enough)
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for k := 0; k < perGoroutine; k++ {
+				if _, err := dc.Write([]byte{byte('a' + g)}); err != nil {
+					t.Errorf("Write: %v", err)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	select {
+	case <-enough:
+	case <-time.After(5 * time.Second):
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		t.Fatalf("saw %d/%d distinct sequence numbers: %v", len(seen), total, seen)
+	}
+
+	// Every sequence number 0..total-1 must be present — no gaps.
+	seenMu.Lock()
+	defer seenMu.Unlock()
+	for seq := int64(0); seq < int64(total); seq++ {
+		if !seen[seq] {
+			t.Fatalf("missing sequence number %d (gap stalls the SSM stream); saw %v", seq, seen)
+		}
+	}
+}
+
+// TestRetransmitPreservesSequenceNumbers guards the other half of the fix: when
+// unacked messages are retransmitted from the outbound queue, they must keep
+// their original sequence number. Reassigning a new number on each retransmit
+// (the bug that made the freeze survive the first fix) renumbers the stream and
+// the agent stalls. The paused-then-resumed sudo path takes exactly this
+// retransmit route, so it must be gap- and renumber-free.
+func TestRetransmitPreservesSequenceNumbers(t *testing.T) {
+	// Construct with noAck set before the server starts so the retransmit loop
+	// keeps firing (no data race on the flag: it is set before any handler runs).
+	f := &fakeAgentServer{
+		t:         t,
+		noAck:     true,
+		openMsgs:  make(chan channelOpenMessage, 1),
+		sizeMsgs:  make(chan string, 4),
+		inputSeqs: make(chan int64, 64),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(f.handle))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() {
+		f.connMu.Lock()
+		for _, ws := range f.conns {
+			_ = ws.Close()
+		}
+		f.connMu.Unlock()
+		f.wg.Wait()
+	})
+
+	dc := new(ssmdatachannel.SsmDataChannel)
+	if err := dc.OpenWithSessionToken(wsURL(srv), testToken); err != nil {
+		t.Fatalf("OpenWithSessionToken: %v", err)
+	}
+	defer dc.Close()
+
+	// Two writes: seq 0 (Syn) and seq 1. The agent never acks, so the outbound
+	// queue retransmits both every ~500ms.
+	if _, err := dc.Write([]byte("a")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := dc.Write([]byte("b")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	// Collect what the agent receives across several retransmit cycles.
+	received := make([]int64, 0, 16)
+	deadline := time.After(2200 * time.Millisecond)
+	for {
+		select {
+		case seq := <-f.inputSeqs:
+			received = append(received, seq)
+			continue
+		case <-deadline:
+		}
+		break
+	}
+
+	if len(received) < 4 {
+		t.Fatalf("expected retransmits (>=4 receives), got %d: %v", len(received), received)
+	}
+	// Every received sequence number must be 0 or 1 — retransmits reuse the
+	// original numbers and never climb.
+	for _, seq := range received {
+		if seq != 0 && seq != 1 {
+			t.Fatalf("retransmit renumbered the stream: saw seq %d (want only 0/1), full: %v", seq, received)
+		}
 	}
 }

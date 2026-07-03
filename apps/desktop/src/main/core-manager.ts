@@ -88,6 +88,15 @@ import { resolveDesktopRepoRoot } from "./repo-root";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 
+// AWS SSM 자동완성 프로브 대기 상한. ssh-core의 autocompleteProbeTimeout(9s,
+// services/ssh-core/internal/awssession/manager.go)이 prompt 대기 + snapshot
+// probe를 하나의 deadline으로 묶으므로, 여기는 그보다 길어야 한다(릴레이 여유 +1s).
+// 이보다 짧으면(과거 3.5s) 코어가 정상적으로 프로브 중인데 데스크톱이 먼저
+// 포기해 응답이 버려지고, 그 동안 큐에 잡힌 입력 때문에 "연결됐는데 입력이
+// 안 되는" 세션처럼 보인다.
+const AWS_SSM_AUTOCOMPLETE_PROBE_TIMEOUT_MS = 10_000;
+const AUTOCOMPLETE_PREPARE_TIMEOUT_MS = 3_500;
+
 interface ActivityLogInput {
   level: "info" | "warn" | "error";
   category: "session" | "audit";
@@ -2358,10 +2367,12 @@ export class CoreManager {
     if (runtime.errorEmitted) {
       return;
     }
+    // 의도치 않은 웹소켓 단절(의도적 종료는 finalized 가드로 위에서 걸러짐).
     this.emitAwsServerProxyEvent(
       sessionId,
       "closed",
       "서버 AWS SSM 프록시 연결이 종료되었습니다.",
+      "transport",
     );
   }
 
@@ -2378,7 +2389,7 @@ export class CoreManager {
     }
     this.awsServerProxySessions.delete(sessionId);
     this.rejectPendingAwsAutocomplete(sessionId);
-    this.emitAwsServerProxyEvent(sessionId, "closed", message);
+    this.emitAwsServerProxyEvent(sessionId, "closed", message, "client");
   }
 
   private rejectPendingAwsAutocomplete(sessionId: string): void {
@@ -2392,17 +2403,20 @@ export class CoreManager {
     }
   }
 
+  // reason은 ssh 경로의 ClosedPayload.Reason과 같은 재연결 판별 구분자다.
+  // 프록시 이벤트는 여기서 직접 만들므로 클라이언트가 아는 종료 유형("client",
+  // "transport")을 명시해, 렌더러가 사용자 닫기를 드롭으로 오인해 자동
+  // 재연결하지 않게 한다.
   private emitAwsServerProxyEvent(
     sessionId: string,
     type: Extract<CoreEventType, "connected" | "error" | "closed">,
     message: string,
+    reason?: "client" | "transport",
   ): void {
     this.handleControlEvent({
       type,
       sessionId,
-      payload: {
-        message,
-      },
+      payload: reason ? { message, reason } : { message },
     });
   }
 
@@ -2825,9 +2839,9 @@ export class CoreManager {
     return runtime;
   }
 
-  // In-process path: obtain an SSM data-channel token so ssh-core can open the
-  // WebSocket itself. When the issuer is unset or declines (binary/e2e-fake
-  // mode), ssh-core falls back to spawning aws + session-manager-plugin.
+  // Obtain an SSM data-channel token so ssh-core can open the WebSocket
+  // itself. The issuer declines only in e2e-fake mode, where ssh-core
+  // substitutes a fake runner instead of a real session.
   private async sendSsmPortForwardStart(
     ruleId: string,
     payload: ResolvedSsmPortForwardStartPayload,
@@ -3379,8 +3393,17 @@ export class CoreManager {
         payload: {},
       },
       ["terminalAutocompleteCapability"],
-      { timeoutMs: 3500 },
+      { timeoutMs: this.autocompleteProbeTimeoutMs(sessionId) },
     );
+  }
+
+  // 직결 AWS SSM 세션도 ssh-core의 8초 프로브 예산을 그대로 타므로 SSM 계열만
+  // 길게 기다린다. SSH/local은 ~2초 안에 응답하므로 짧은 상한을 유지해
+  // 실패 시 입력 큐가 오래 잡혀 있지 않게 한다.
+  private autocompleteProbeTimeoutMs(sessionId: string): number {
+    return this.sessionTransportById.get(sessionId) === "aws-ssm"
+      ? AWS_SSM_AUTOCOMPLETE_PROBE_TIMEOUT_MS
+      : AUTOCOMPLETE_PREPARE_TIMEOUT_MS;
   }
 
   // autocomplete와 무관하게 셸 통합(OSC 7 cwd / OSC 133)만 설치한다(probe 없음).
@@ -3420,7 +3443,7 @@ export class CoreManager {
         payload: {},
       },
       ["terminalAutocompleteCapability"],
-      { timeoutMs: 3500 },
+      { timeoutMs: this.autocompleteProbeTimeoutMs(sessionId) },
     );
   }
 
@@ -3482,7 +3505,7 @@ export class CoreManager {
       const timeout = setTimeout(() => {
         this.pendingAwsAutocompleteResponses.delete(requestId);
         reject(new Error("Timed out waiting for AWS SSM autocomplete probe"));
-      }, 3500);
+      }, AWS_SSM_AUTOCOMPLETE_PROBE_TIMEOUT_MS);
       this.pendingAwsAutocompleteResponses.set(requestId, {
         sessionId,
         resolve,

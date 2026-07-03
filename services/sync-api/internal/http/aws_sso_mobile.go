@@ -5,11 +5,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +21,6 @@ const (
 	awsSsoRegistrationScope          = "sso:account:access"
 	awsSsoLoginTTL                   = 10 * time.Minute
 	awsSsoCredentialGrace            = 60 * time.Second
-	awsCliTimeout                    = 30 * time.Second
 	awsSsoAuthorizeURLPattern        = "https://oidc.%s.amazonaws.com/authorize"
 )
 
@@ -60,16 +57,20 @@ type awsSsoCredentialCacheEntry struct {
 }
 
 type AwsSsoMobileManager struct {
-	runtime       AwsSsmRuntime
+	api           awsSsoAPI
 	mu            sync.Mutex
 	pendingByID   map[string]*awsSsoPendingLogin
 	pendingByKey  map[string]string
 	credentialMap map[string]*awsSsoCredentialCacheEntry
 }
 
-func NewAwsSsoMobileManager(runtime AwsSsmRuntime) *AwsSsoMobileManager {
+func NewAwsSsoMobileManager() *AwsSsoMobileManager {
+	return newAwsSsoMobileManagerWithAPI(sdkAwsSsoAPI{})
+}
+
+func newAwsSsoMobileManagerWithAPI(api awsSsoAPI) *AwsSsoMobileManager {
 	return &AwsSsoMobileManager{
-		runtime:       runtime,
+		api:           api,
 		pendingByID:   make(map[string]*awsSsoPendingLogin),
 		pendingByKey:  make(map[string]string),
 		credentialMap: make(map[string]*awsSsoCredentialCacheEntry),
@@ -81,9 +82,6 @@ func (manager *AwsSsoMobileManager) Start(
 	userID string,
 	request awsSsoMobileLoginStartRequest,
 ) (awsSsoMobileLoginStartResponse, error) {
-	if strings.TrimSpace(manager.runtime.AWSPath) == "" {
-		return awsSsoMobileLoginStartResponse{}, errors.New("AWS CLI가 서버에 준비되지 않았습니다.")
-	}
 	if err := validateLoopbackRedirectURI(request.RedirectURI); err != nil {
 		return awsSsoMobileLoginStartResponse{}, err
 	}
@@ -390,25 +388,16 @@ func (manager *AwsSsoMobileManager) registerClient(
 	ctx context.Context,
 	request awsSsoMobileLoginStartRequest,
 ) (*awsSsoRegisterClientResponse, error) {
-	args := []string{
-		"sso-oidc",
-		"register-client",
-		"--region", request.SsoRegion,
-		"--client-name", "Dolgate Mobile",
-		"--client-type", "public",
-		"--issuer-url", request.SsoStartURL,
-		"--redirect-uris", request.RedirectURI,
-		"--grant-types", awsSsoAuthorizationCodeGrantType, awsSsoRefreshTokenGrantType,
-		"--scopes", awsSsoRegistrationScope,
-	}
-	var response awsSsoRegisterClientResponse
-	if err := manager.runAWSJSON(ctx, args, &response); err != nil {
+	response, err := manager.api.RegisterClient(ctx, request)
+	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(response.ClientID) == "" || strings.TrimSpace(response.ClientSecret) == "" {
+	if response == nil ||
+		strings.TrimSpace(response.ClientID) == "" ||
+		strings.TrimSpace(response.ClientSecret) == "" {
 		return nil, errors.New("AWS SSO client registration에 실패했습니다.")
 	}
-	return &response, nil
+	return response, nil
 }
 
 func (manager *AwsSsoMobileManager) createAuthorizationCodeToken(
@@ -420,22 +409,7 @@ func (manager *AwsSsoMobileManager) createAuthorizationCodeToken(
 	redirectURI string,
 	codeVerifier string,
 ) (*awsSsoCreateTokenResponse, error) {
-	args := []string{
-		"sso-oidc",
-		"create-token",
-		"--region", region,
-		"--client-id", clientID,
-		"--client-secret", clientSecret,
-		"--code", code,
-		"--redirect-uri", redirectURI,
-		"--code-verifier", codeVerifier,
-		"--grant-type", awsSsoAuthorizationCodeGrantType,
-	}
-	var response awsSsoCreateTokenResponse
-	if err := manager.runAWSJSON(ctx, args, &response); err != nil {
-		return nil, err
-	}
-	return &response, nil
+	return manager.api.CreateAuthorizationCodeToken(ctx, region, clientID, clientSecret, code, redirectURI, codeVerifier)
 }
 
 func (manager *AwsSsoMobileManager) createRefreshToken(
@@ -445,20 +419,7 @@ func (manager *AwsSsoMobileManager) createRefreshToken(
 	clientSecret string,
 	refreshToken string,
 ) (*awsSsoCreateTokenResponse, error) {
-	args := []string{
-		"sso-oidc",
-		"create-token",
-		"--region", region,
-		"--client-id", clientID,
-		"--client-secret", clientSecret,
-		"--refresh-token", refreshToken,
-		"--grant-type", awsSsoRefreshTokenGrantType,
-	}
-	var response awsSsoCreateTokenResponse
-	if err := manager.runAWSJSON(ctx, args, &response); err != nil {
-		return nil, err
-	}
-	return &response, nil
+	return manager.api.CreateRefreshToken(ctx, region, clientID, clientSecret, refreshToken)
 }
 
 func (manager *AwsSsoMobileManager) getRoleCredential(
@@ -468,33 +429,7 @@ func (manager *AwsSsoMobileManager) getRoleCredential(
 	roleName string,
 	accessToken string,
 ) (*awsTemporaryCredentialPayload, error) {
-	args := []string{
-		"sso",
-		"get-role-credentials",
-		"--region", region,
-		"--account-id", accountID,
-		"--role-name", roleName,
-		"--access-token", accessToken,
-	}
-	var response awsSsoGetRoleCredentialsResponse
-	if err := manager.runAWSJSON(ctx, args, &response); err != nil {
-		return nil, err
-	}
-	if response.RoleCredentials == nil ||
-		strings.TrimSpace(response.RoleCredentials.AccessKeyID) == "" ||
-		strings.TrimSpace(response.RoleCredentials.SecretAccessKey) == "" {
-		return nil, errors.New("AWS SSO role credential을 가져오지 못했습니다.")
-	}
-	expiresAt := ""
-	if response.RoleCredentials.Expiration > 0 {
-		expiresAt = time.UnixMilli(response.RoleCredentials.Expiration).UTC().Format(time.RFC3339)
-	}
-	return &awsTemporaryCredentialPayload{
-		AccessKeyID:     response.RoleCredentials.AccessKeyID,
-		SecretAccessKey: response.RoleCredentials.SecretAccessKey,
-		SessionToken:    response.RoleCredentials.SessionToken,
-		ExpiresAt:       expiresAt,
-	}, nil
+	return manager.api.GetRoleCredential(ctx, region, accountID, roleName, accessToken)
 }
 
 func (manager *AwsSsoMobileManager) pendingResponseLocked(
@@ -567,27 +502,6 @@ func (manager *AwsSsoMobileManager) failPendingLocked(
 		ExpiresAt: pending.ExpiresAt.Format(time.RFC3339),
 		Message:   normalized,
 	}
-}
-
-func (manager *AwsSsoMobileManager) runAWSJSON(
-	ctx context.Context,
-	args []string,
-	target any,
-) error {
-	commandContext, cancel := context.WithTimeout(ctx, awsCliTimeout)
-	defer cancel()
-
-	normalizedArgs := append([]string{}, args...)
-	normalizedArgs = append(normalizedArgs, "--output", "json")
-	command := exec.CommandContext(commandContext, manager.runtime.AWSPath, normalizedArgs...)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s", normalizeAwsCliError(string(output)))
-	}
-	if err := json.Unmarshal(output, target); err != nil {
-		return fmt.Errorf("AWS CLI 응답을 해석하지 못했습니다: %w", err)
-	}
-	return nil
 }
 
 func (manager *AwsSsoMobileManager) cacheKey(
@@ -722,24 +636,6 @@ func parseCredentialExpiry(value string, fallback time.Time) time.Time {
 	return parsed
 }
 
-func normalizeAwsCliError(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "AWS 요청에 실패했습니다."
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
-		for _, key := range []string{"error_description", "error", "message", "Message", "__type"} {
-			if value, ok := parsed[key].(string); ok && strings.TrimSpace(value) != "" {
-				return strings.TrimSpace(value)
-			}
-		}
-	}
-
-	return trimmed
-}
-
 func max(left int32, right int32) int32 {
 	if left > right {
 		return left
@@ -798,13 +694,4 @@ type awsSsoCreateTokenResponse struct {
 	AccessToken  string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
 	ExpiresIn    int32  `json:"expiresIn"`
-}
-
-type awsSsoGetRoleCredentialsResponse struct {
-	RoleCredentials *struct {
-		AccessKeyID     string `json:"accessKeyId"`
-		SecretAccessKey string `json:"secretAccessKey"`
-		SessionToken    string `json:"sessionToken"`
-		Expiration      int64  `json:"expiration"`
-	} `json:"roleCredentials"`
 }

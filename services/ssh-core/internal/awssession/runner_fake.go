@@ -3,6 +3,8 @@ package awssession
 import (
 	"io"
 	"sync"
+
+	"dolssh/services/ssh-core/internal/autocomplete"
 )
 
 type fakeRunner struct {
@@ -10,6 +12,9 @@ type fakeRunner struct {
 	outputWriter *io.PipeWriter
 	done         chan sessionExit
 	doneOnce     sync.Once
+	primeOnce    sync.Once
+	mu           sync.Mutex
+	initial      string
 }
 
 func newFakeRunner(initialOutput string) sessionRunner {
@@ -18,12 +23,7 @@ func newFakeRunner(initialOutput string) sessionRunner {
 		outputReader: outputReader,
 		outputWriter: outputWriter,
 		done:         make(chan sessionExit, 1),
-	}
-
-	if initialOutput != "" {
-		go func() {
-			_, _ = outputWriter.Write([]byte(initialOutput))
-		}()
+		initial:      initialOutput,
 	}
 
 	return runner
@@ -32,6 +32,16 @@ func newFakeRunner(initialOutput string) sessionRunner {
 func (r *fakeRunner) Write(data []byte) error {
 	if len(data) == 0 {
 		return nil
+	}
+	if string(data) == autocomplete.ShellIntegrationInitCommand() {
+		r.mu.Lock()
+		initial := r.initial
+		r.initial = ""
+		r.mu.Unlock()
+		payload := append(append([]byte(nil), data...), []byte(autocomplete.PromptStartMarker)...)
+		payload = append(payload, []byte(initial)...)
+		_, err := r.outputWriter.Write(payload)
+		return err
 	}
 	_, err := r.outputWriter.Write(data)
 	return err
@@ -63,6 +73,11 @@ func (r *fakeRunner) Close() error {
 }
 
 func (r *fakeRunner) Streams() []io.Reader {
+	r.primeOnce.Do(func() {
+		go func() {
+			_, _ = r.outputWriter.Write([]byte("$ "))
+		}()
+	})
 	return []io.Reader{r.outputReader}
 }
 

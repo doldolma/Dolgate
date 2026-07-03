@@ -53,6 +53,7 @@
     "@aws-sdk/client-ecs": "^3.1028.0",
     "@aws-sdk/client-ssm": "^3.1028.0",
     "@aws-sdk/client-sso": "^3.1028.0",
+    "@aws-sdk/client-sso-oidc": "^3.1032.0",
     "@aws-sdk/client-sts": "^3.1028.0",
     "@aws-sdk/credential-provider-ini": "^3.972.29",
     "@codemirror/language-data": "^6.5.2",

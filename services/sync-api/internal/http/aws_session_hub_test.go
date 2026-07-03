@@ -15,6 +15,9 @@ import (
 
 type fakeAwsSessionRunner struct {
 	events chan awsSessionRuntimeEvent
+	// prepareBlock이 설정되면 PrepareAutocomplete는 채널이 닫힐 때까지 대기한다
+	// (ssh-core의 수 초짜리 프로브 대기를 흉내낸다).
+	prepareBlock chan struct{}
 
 	mu                   sync.Mutex
 	writes               [][]byte
@@ -58,6 +61,9 @@ func (runner *fakeAwsSessionRunner) ControlSignal(signal string) error {
 }
 
 func (runner *fakeAwsSessionRunner) PrepareAutocomplete(requestID string) error {
+	if runner.prepareBlock != nil {
+		<-runner.prepareBlock
+	}
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	runner.autocompleteRequests = append(runner.autocompleteRequests, "prepare:"+requestID)
@@ -144,6 +150,77 @@ func TestAwsSessionHubReturns503WhenRuntimeIsUnavailable(t *testing.T) {
 	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 for unavailable runtime, got %d", response.StatusCode)
 	}
+}
+
+// 자동완성 프로브는 ssh-core에서 최대 8초를 기다린다. 허브가 이를 읽기 루프에서
+// 동기로 돌리면 그동안 input이 전부 밀려 "연결됐는데 입력이 안 되는" 세션이
+// 된다(서버 프록시 + sudo 로그인 전환 EC2에서 실제 발생). prepare가 블로킹된
+// 동안에도 input이 즉시 runner에 도달해야 한다.
+func TestAwsSessionHubKeepsPumpingInputWhileAutocompletePrepareBlocks(t *testing.T) {
+	fakeRunner := newFakeAwsSessionRunner()
+	fakeRunner.prepareBlock = make(chan struct{})
+
+	hub := NewAwsSessionHub(AwsSsmRuntime{Enabled: true}, func(_ AwsSsmRuntime, _ awsSessionStartRequest) (awsSessionRunner, error) {
+		return fakeRunner, nil
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := hub.HandleWebSocket(writer, request); err != nil {
+			t.Errorf("handle websocket: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type: "start",
+		Payload: &awsSessionStartRequest{
+			HostID:     "host-aws-1",
+			Label:      "Production EC2",
+			Region:     "ap-northeast-2",
+			InstanceID: "i-0123456789",
+			Cols:       132,
+			Rows:       48,
+		},
+	}); err != nil {
+		t.Fatalf("write start message: %v", err)
+	}
+
+	// prepare가 프로브 대기로 블로킹된 상태를 만든다.
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type:      "autocompletePrepare",
+		RequestID: "req-prepare-1",
+	}); err != nil {
+		t.Fatalf("write autocomplete prepare message: %v", err)
+	}
+
+	// 블로킹 중에도 input은 즉시 runner에 도달해야 한다.
+	if err := conn.WriteJSON(awsSessionClientMessage{
+		Type:       "input",
+		DataBase64: base64.StdEncoding.EncodeToString([]byte("pwd\r")),
+	}); err != nil {
+		t.Fatalf("write input message: %v", err)
+	}
+	waitForCondition(t, func() bool {
+		writes := fakeRunner.writesSnapshot()
+		return len(writes) == 1 && string(writes[0]) == "pwd\r"
+	})
+	if requests := fakeRunner.autocompleteSnapshot(); len(requests) != 0 {
+		t.Fatalf("prepare should still be blocked, got %v", requests)
+	}
+
+	// 프로브가 끝나면 prepare도 정상 완료된다.
+	close(fakeRunner.prepareBlock)
+	waitForCondition(t, func() bool {
+		requests := fakeRunner.autocompleteSnapshot()
+		return len(requests) == 1 && requests[0] == "prepare:req-prepare-1"
+	})
 }
 
 func TestAwsSessionHubBridgesStartInputResizeAndOutput(t *testing.T) {

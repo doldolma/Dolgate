@@ -2,9 +2,7 @@ import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } fr
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { TextDecoder } from "node:util";
 import { AWS_PROFILE_REGION_OPTIONS } from "@shared";
 import type {
   AwsEc2InstanceSummary,
@@ -78,7 +76,18 @@ import {
   SSMClient,
   StartSessionCommand,
 } from "@aws-sdk/client-ssm";
+import {
+  ListAccountRolesCommand,
+  ListAccountsCommand,
+  SSOClient,
+} from "@aws-sdk/client-sso";
+import {
+  AssumeRoleCommand,
+  GetCallerIdentityCommand,
+  STSClient,
+} from "@aws-sdk/client-sts";
 import { fromIni } from "@aws-sdk/credential-provider-ini";
+import { performAwsSsoLogin } from "./aws-sso-login";
 import { AwsProfileRepository } from "./database";
 import {
   copyAwsProfileConfigSectionBetweenDocuments,
@@ -144,16 +153,6 @@ const DEFAULT_AWS_EC2_REGIONS = [
 function isE2EFakeAwsSessionEnabled(): boolean {
   const mode = process.env.DOLSSH_E2E_FAKE_AWS_SESSION;
   return mode === "1" || mode === "process";
-}
-
-interface CommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-interface CommandError extends Error {
-  code?: string;
 }
 
 interface AwsPendingSsoPreparation {
@@ -242,95 +241,6 @@ export interface AwsSessionEnvSpec {
   unsetEnv: string[];
 }
 
-const resolvedExecutableCache = new Map<string, string>();
-
-function splitPathEnv(): string[] {
-  const rawPath = process.env.PATH ?? "";
-  return rawPath
-    .split(path.delimiter)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-}
-
-function splitPathValue(rawPath: string | undefined): string[] {
-  return (rawPath ?? "")
-    .split(path.delimiter)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
-}
-
-function getExecutableCandidates(command: string): string[] {
-  const candidates = new Set<string>();
-  const pathEntries = splitPathEnv();
-
-  if (process.platform === "win32") {
-    if (command === "aws") {
-      candidates.add("C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe");
-    }
-    if (command === "session-manager-plugin") {
-      candidates.add(
-        "C:\\Program Files\\Amazon\\SessionManagerPlugin\\bin\\session-manager-plugin.exe",
-      );
-    }
-
-    for (const entry of pathEntries) {
-      candidates.add(path.join(entry, `${command}.exe`));
-    }
-    for (const entry of pathEntries) {
-      candidates.add(path.join(entry, `${command}.cmd`));
-      candidates.add(path.join(entry, `${command}.bat`));
-      candidates.add(path.join(entry, command));
-    }
-    return [...candidates];
-  }
-
-  for (const entry of pathEntries) {
-    candidates.add(path.join(entry, command));
-  }
-
-  if (process.platform === "darwin") {
-    if (command === "aws") {
-      candidates.add(`/opt/aws-cli/bin/${command}`);
-    }
-    candidates.add(`/opt/homebrew/bin/${command}`);
-    candidates.add(`/usr/local/bin/${command}`);
-    candidates.add(`/usr/bin/${command}`);
-  } else {
-    if (command === "aws") {
-      candidates.add(`/usr/local/aws-cli/v2/current/bin/${command}`);
-    }
-    candidates.add(`/usr/local/bin/${command}`);
-    candidates.add(`/usr/bin/${command}`);
-    candidates.add(`/bin/${command}`);
-  }
-
-  return [...candidates];
-}
-
-async function pathExists(candidatePath: string): Promise<boolean> {
-  try {
-    await access(candidatePath, fsConstants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolveExecutable(command: string): Promise<string> {
-  if (resolvedExecutableCache.has(command)) {
-    return resolvedExecutableCache.get(command)!;
-  }
-
-  for (const candidate of getExecutableCandidates(command)) {
-    if (await pathExists(candidate)) {
-      resolvedExecutableCache.set(command, candidate);
-      return candidate;
-    }
-  }
-
-  throw new Error(command);
-}
-
 const DEFAULT_AWS_COMMAND_TIMEOUT_MS = 30_000;
 const AWS_PROFILE_DETAILS_STATUS_TIMEOUT_MS = 8_000;
 const AWS_EC2_LIST_COMMAND_TIMEOUT_MS = 20_000;
@@ -339,148 +249,6 @@ const AWS_SSM_AVAILABILITY_COMMAND_TIMEOUT_MS = 5_000;
 const AWS_SSH_METADATA_PROBE_TIMEOUT_MS = 12_000;
 const AWS_SSH_METADATA_COMMAND_TIMEOUT_MS = 5_000;
 const AWS_SSH_METADATA_POLL_INTERVAL_MS = 1_000;
-const WINDOWS_EUC_KR_DECODER = new TextDecoder("euc-kr");
-
-interface AwsCliDecodeOptions {
-  platform?: NodeJS.Platform;
-  allowWindowsLegacyFallback?: boolean;
-}
-
-function countReplacementCharacters(value: string): number {
-  let count = 0;
-  for (const character of value) {
-    if (character === "\uFFFD") {
-      count += 1;
-    }
-  }
-  return count;
-}
-
-function shouldAllowWindowsLegacyAwsCliDecodeFallback(command: string): boolean {
-  const normalizedCommand = command.trim().toLowerCase();
-  return normalizedCommand === "aws" || normalizedCommand === "session-manager-plugin";
-}
-
-export function decodeAwsCliOutput(
-  raw: Uint8Array,
-  options: AwsCliDecodeOptions = {},
-): string {
-  const utf8Decoded = Buffer.from(raw).toString("utf8");
-  const platform = options.platform ?? process.platform;
-  if (platform !== "win32" || !options.allowWindowsLegacyFallback) {
-    return utf8Decoded;
-  }
-  const utf8ReplacementCount = countReplacementCharacters(utf8Decoded);
-  if (utf8ReplacementCount === 0) {
-    return utf8Decoded;
-  }
-  const eucKrDecoded = WINDOWS_EUC_KR_DECODER.decode(raw);
-  if (countReplacementCharacters(eucKrDecoded) < utf8ReplacementCount) {
-    return eucKrDecoded;
-  }
-  return utf8Decoded;
-}
-
-function runCommand(
-  command: string,
-  args: string[],
-  timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
-  envOverride?: NodeJS.ProcessEnv,
-  decodeOptions: AwsCliDecodeOptions = {},
-): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      env: envOverride ?? process.env,
-    });
-
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    let settled = false;
-
-    const finish = (callback: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      callback();
-    };
-
-    child.stdout.on("data", (chunk: string | Buffer) => {
-      stdoutChunks.push(
-        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
-      );
-    });
-
-    child.stderr.on("data", (chunk: string | Buffer) => {
-      stderrChunks.push(
-        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8"),
-      );
-    });
-
-    child.on("error", (error) => {
-      finish(() => reject(error));
-    });
-
-    child.on("exit", (code) => {
-      finish(() => {
-        resolve({
-          stdout: decodeAwsCliOutput(Buffer.concat(stdoutChunks), decodeOptions),
-          stderr: decodeAwsCliOutput(Buffer.concat(stderrChunks), decodeOptions),
-          exitCode: code ?? 0,
-        });
-      });
-    });
-
-    const timeout = setTimeout(() => {
-      finish(() => {
-        child.kill("SIGKILL");
-        reject(new Error(`${command} 명령 실행이 제한 시간을 초과했습니다.`));
-      });
-    }, timeoutMs);
-  });
-}
-
-export async function resolveAwsExecutable(
-  command: "aws" | "session-manager-plugin",
-): Promise<string> {
-  return resolveExecutable(command);
-}
-
-export async function buildAwsCommandEnv(
-  envPatch?: Record<string, string | null | undefined>,
-  baseEnv: NodeJS.ProcessEnv = process.env,
-): Promise<NodeJS.ProcessEnv> {
-  const env = { ...baseEnv };
-  const resolvedDirs = new Set<string>();
-
-  for (const command of ["aws", "session-manager-plugin"] as const) {
-    try {
-      const executablePath = await resolveExecutable(command);
-      resolvedDirs.add(path.dirname(executablePath));
-    } catch {
-      // missing optional tool is handled by caller-specific availability checks
-    }
-  }
-
-  const mergedPathEntries = [...resolvedDirs, ...splitPathValue(baseEnv.PATH)];
-  env.PATH = [...new Set(mergedPathEntries)].join(path.delimiter);
-
-  if (envPatch) {
-    for (const [key, value] of Object.entries(envPatch)) {
-      if (value === null || value === undefined) {
-        delete env[key];
-        continue;
-      }
-      env[key] = value;
-    }
-  }
-
-  return env;
-}
-
 function splitAwsSessionEnvSpec(
   envPatch: Record<string, string | null | undefined>,
 ): AwsSessionEnvSpec {
@@ -507,14 +275,6 @@ function parseJson<T>(raw: string, fallbackMessage: string): T {
   } catch {
     throw new Error(fallbackMessage);
   }
-}
-
-function normalizeAwsCliError(stderr: string, fallback: string): Error {
-  const message = stderr.trim();
-  if (!message) {
-    return new Error(fallback);
-  }
-  return new Error(message);
 }
 
 // GetCommandInvocation can throw InvocationDoesNotExist for a short window after
@@ -609,6 +369,32 @@ function isAwsSsoSessionInvalidMessage(message: string): boolean {
   return /sso session associated with this profile has expired|sso token.+expired|aws sso login|token has expired|session has expired|otherwise invalid/iu.test(
     message,
   );
+}
+
+// Re-encodes an SDK error into the CLI stderr wire format so the shared
+// context-specific mapping below (which parses "(Code)") applies to SDK
+// errors too — the SDK error name is the same code the CLI printed.
+function normalizeAwsProfileFlowSdkError(
+  error: unknown,
+  fallback: string,
+  context: AwsProfileFlowErrorContext,
+): Error {
+  if (
+    error instanceof Error &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  ) {
+    return new Error(`${fallback} (요청 시간 초과)`);
+  }
+  const name =
+    error instanceof Error && error.name.trim() && error.name.trim() !== "Error"
+      ? error.name.trim()
+      : "";
+  const message = error instanceof Error ? error.message.trim() : "";
+  const synthesized =
+    name && message
+      ? `An error occurred (${name}) when calling the ${context} operation: ${message}`
+      : message || name;
+  return normalizeAwsProfileFlowError(synthesized, fallback, context);
 }
 
 function normalizeAwsProfileFlowError(
@@ -1628,6 +1414,78 @@ export class AwsService {
     };
   }
 
+  // Resolves profile credentials from an arbitrary .aws root (managed or a
+  // temp preparation root). HOME must point at the root's home while the SSO
+  // token provider runs, hence the env-override wrapper + global queue.
+  private async resolveProfileCredentialsFromRoot(
+    profileName: string,
+    awsRootDir: string,
+  ) {
+    const provider = fromIni({
+      profile: profileName,
+      configFilepath: path.join(awsRootDir, "config"),
+      filepath: path.join(awsRootDir, "credentials"),
+      ignoreCache: true,
+    });
+    return this.enqueueManagedAwsSdkEnv(async () =>
+      this.withAwsEnvOverrides(
+        this.getManagedAwsEnvOverrides(awsRootDir),
+        async () => provider(),
+      ),
+    );
+  }
+
+  private async resolveProfileRegionFromRoot(
+    profileName: string,
+    awsRootDir: string,
+  ): Promise<string | null> {
+    try {
+      const documents = await loadAwsProfileDocuments(awsRootDir);
+      const snapshot = inspectAwsProfileDocuments(documents, profileName);
+      return snapshot.mergedValues.region?.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async stsGetCallerIdentityFromRoot(
+    profileName: string,
+    awsRootDir: string,
+    timeoutMs: number,
+  ): Promise<{ account: string | null; arn: string | null }> {
+    const credentials = await this.resolveProfileCredentialsFromRoot(
+      profileName,
+      awsRootDir,
+    );
+    const region =
+      (await this.resolveProfileRegionFromRoot(profileName, awsRootDir)) ??
+      "us-east-1";
+    const output = await new STSClient({ region, credentials }).send(
+      new GetCallerIdentityCommand({}),
+      { abortSignal: AbortSignal.timeout(timeoutMs) },
+    );
+    return { account: output.Account ?? null, arn: output.Arn ?? null };
+  }
+
+  // Seam for tests: runs the in-app SSO OIDC browser login and writes the
+  // token cache into the given .aws root.
+  private async performSsoLoginForRoot(input: {
+    startUrl: string;
+    ssoRegion: string;
+    sessionName?: string | null;
+    awsRootDir: string;
+  }): Promise<{ accessToken: string }> {
+    return performAwsSsoLogin({
+      ...input,
+      openExternal: (url) => this.openExternalUrl(url),
+    });
+  }
+
+  private async openExternalUrl(url: string): Promise<void> {
+    const { shell } = await import("electron");
+    await shell.openExternal(url);
+  }
+
   private async enqueueManagedAwsSdkEnv<T>(task: () => Promise<T>): Promise<T> {
     const next = this.managedAwsSdkEnvQueue.then(task, task);
     this.managedAwsSdkEnvQueue = next.then(
@@ -1638,7 +1496,13 @@ export class AwsService {
   }
 
   private async withManagedAwsSdkEnv<T>(task: () => Promise<T>): Promise<T> {
-    const overrides = this.getManagedAwsEnvOverrides();
+    return this.withAwsEnvOverrides(this.getManagedAwsEnvOverrides(), task);
+  }
+
+  private async withAwsEnvOverrides<T>(
+    overrides: Record<string, string | null>,
+    task: () => Promise<T>,
+  ): Promise<T> {
     const previousValues = new Map<string, string | undefined>();
 
     for (const [key, value] of Object.entries(overrides)) {
@@ -2040,35 +1904,6 @@ export class AwsService {
     );
   }
 
-  private async runResolvedCommand(
-    command: string,
-    args: string[],
-    timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
-  ): Promise<CommandResult> {
-    const executablePath = await resolveExecutable(command);
-    const env = await this.buildManagedCommandEnv();
-    return runCommand(executablePath, args, timeoutMs, env, {
-      platform: process.platform,
-      allowWindowsLegacyFallback:
-        shouldAllowWindowsLegacyAwsCliDecodeFallback(command),
-    });
-  }
-
-  private async runResolvedCommandWithEnv(
-    command: string,
-    args: string[],
-    envPatch: Record<string, string | null | undefined>,
-    timeoutMs = DEFAULT_AWS_COMMAND_TIMEOUT_MS,
-  ): Promise<CommandResult> {
-    const executablePath = await resolveExecutable(command);
-    const env = await this.buildManagedCommandEnv(process.env, envPatch);
-    return runCommand(executablePath, args, timeoutMs, env, {
-      platform: process.platform,
-      allowWindowsLegacyFallback:
-        shouldAllowWindowsLegacyAwsCliDecodeFallback(command),
-    });
-  }
-
   private getAwsRootEnvPatch(
     homeDir: string,
     awsRootDir: string,
@@ -2109,24 +1944,6 @@ export class AwsService {
     );
   }
 
-  async buildManagedCommandEnv(
-    baseEnv: NodeJS.ProcessEnv = process.env,
-    envPatch?: Record<string, string | null | undefined>,
-  ): Promise<NodeJS.ProcessEnv> {
-    const sessionEnv = this.buildManagedSessionEnvSpec();
-    const managedEnvPatch = Object.fromEntries([
-      ...Object.entries(sessionEnv.env),
-      ...sessionEnv.unsetEnv.map((key) => [key, null] as const),
-    ]);
-    return buildAwsCommandEnv(
-      {
-        ...managedEnvPatch,
-        ...(envPatch ?? {}),
-      },
-      baseEnv,
-    );
-  }
-
   buildManagedSessionEnvSpec(): AwsSessionEnvSpec {
     return splitAwsSessionEnvSpec(this.getManagedAwsEnvOverrides());
   }
@@ -2159,10 +1976,6 @@ export class AwsService {
       AWS_CONFIG_FILE: null,
       AWS_SHARED_CREDENTIALS_FILE: null,
     });
-  }
-
-  private getConfiguredAwsRootEnvPatch(): Record<string, string | null> {
-    return this.getManagedAwsEnvOverrides();
   }
 
   private async createTempAwsRoot(): Promise<{
@@ -2322,88 +2135,48 @@ export class AwsService {
     return preparation;
   }
 
-  private async readSsoAccessToken(homeDir: string): Promise<string> {
-    const cacheDir = path.join(homeDir, ".aws", "sso", "cache");
-    let files: string[] = [];
-    try {
-      files = await readdir(cacheDir);
-    } catch {
-      throw new Error("AWS SSO access token cache를 찾지 못했습니다.");
-    }
-
-    for (const fileName of files) {
-      if (!fileName.toLowerCase().endsWith(".json")) {
-        continue;
-      }
-      try {
-        const raw = await readFile(path.join(cacheDir, fileName), "utf8");
-        const payload = parseJson<AwsSsoTokenCacheEntry>(
-          raw,
-          "AWS SSO token cache를 해석하지 못했습니다.",
-        );
-        const accessToken = payload.accessToken?.trim();
-        if (accessToken) {
-          return accessToken;
-        }
-      } catch {
-        continue;
-      }
-    }
-
-    throw new Error("AWS SSO access token을 찾지 못했습니다.");
-  }
-
   private async listSsoAccounts(input: {
     accessToken: string;
     ssoRegion: string;
   }): Promise<AwsSsoProfileAccountOption[]> {
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "sso",
-        "list-accounts",
-        "--access-token",
-        input.accessToken,
-        "--region",
-        input.ssoRegion,
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsProfileFlowError(
-        result.stderr,
+    const collected: AwsSsoProfileAccountOption[] = [];
+    try {
+      const client = new SSOClient({ region: input.ssoRegion });
+      let nextToken: string | undefined;
+      do {
+        const output = await client.send(
+          new ListAccountsCommand({
+            accessToken: input.accessToken,
+            nextToken,
+          }),
+          { abortSignal: AbortSignal.timeout(60_000) },
+        );
+        for (const item of output.accountList ?? []) {
+          const accountId = item.accountId?.trim() ?? "";
+          if (!accountId) {
+            continue;
+          }
+          collected.push({
+            accountId,
+            accountName: item.accountName?.trim() || accountId,
+            emailAddress: item.emailAddress?.trim() || null,
+          });
+        }
+        nextToken = output.nextToken ?? undefined;
+      } while (nextToken);
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         "AWS SSO 계정 목록을 불러오지 못했습니다.",
         "sso-account-list",
       );
     }
 
-    const payload = parseJson<{
-      accountList?: Array<{
-        accountId?: string;
-        accountName?: string;
-        emailAddress?: string;
-      }>;
-    }>(result.stdout, "AWS SSO 계정 목록 응답을 해석하지 못했습니다.");
-
-    return (payload.accountList ?? [])
-      .flatMap((item) => {
-        const accountId = item.accountId?.trim() ?? "";
-        if (!accountId) {
-          return [];
-        }
-        return [{
-          accountId,
-          accountName: item.accountName?.trim() || accountId,
-          emailAddress: item.emailAddress?.trim() || null,
-        } satisfies AwsSsoProfileAccountOption];
-      })
-      .sort(
-        (left, right) =>
-          left.accountName.localeCompare(right.accountName) ||
-          left.accountId.localeCompare(right.accountId),
-      );
+    return collected.sort(
+      (left, right) =>
+        left.accountName.localeCompare(right.accountName) ||
+        left.accountId.localeCompare(right.accountId),
+    );
   }
 
   private async listSsoRolesForAccount(input: {
@@ -2411,48 +2184,39 @@ export class AwsService {
     ssoRegion: string;
     accountId: string;
   }): Promise<AwsSsoProfileRoleOption[]> {
-    const result = await this.runResolvedCommand(
-      "aws",
-      [
-        "sso",
-        "list-account-roles",
-        "--access-token",
-        input.accessToken,
-        "--account-id",
-        input.accountId,
-        "--region",
-        input.ssoRegion,
-        "--output",
-        "json",
-      ],
-      60_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsProfileFlowError(
-        result.stderr,
+    const collected: AwsSsoProfileRoleOption[] = [];
+    try {
+      const client = new SSOClient({ region: input.ssoRegion });
+      let nextToken: string | undefined;
+      do {
+        const output = await client.send(
+          new ListAccountRolesCommand({
+            accessToken: input.accessToken,
+            accountId: input.accountId,
+            nextToken,
+          }),
+          { abortSignal: AbortSignal.timeout(60_000) },
+        );
+        for (const item of output.roleList ?? []) {
+          const roleName = item.roleName?.trim() ?? "";
+          if (!roleName) {
+            continue;
+          }
+          collected.push({ accountId: input.accountId, roleName });
+        }
+        nextToken = output.nextToken ?? undefined;
+      } while (nextToken);
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         "AWS SSO role 목록을 불러오지 못했습니다.",
         "sso-role-list",
       );
     }
 
-    const payload = parseJson<{
-      roleList?: Array<{
-        roleName?: string;
-      }>;
-    }>(result.stdout, "AWS SSO role 목록 응답을 해석하지 못했습니다.");
-
-    return (payload.roleList ?? [])
-      .flatMap((item) => {
-        const roleName = item.roleName?.trim() ?? "";
-        if (!roleName) {
-          return [];
-        }
-        return [{
-          accountId: input.accountId,
-          roleName,
-        } satisfies AwsSsoProfileRoleOption];
-      })
-      .sort((left, right) => left.roleName.localeCompare(right.roleName));
+    return collected.sort((left, right) =>
+      left.roleName.localeCompare(right.roleName),
+    );
   }
 
   private async assertProfileNameAvailable(profileName: string): Promise<void> {
@@ -2513,23 +2277,44 @@ export class AwsService {
     errorContext: AwsProfileFlowErrorContext;
     fallbackMessage: string;
   }): Promise<void> {
-    const validationResult = await this.runResolvedCommandWithEnv(
-      "aws",
-      ["sts", "get-caller-identity", "--profile", input.profileName, "--output", "json"],
-      {
-        ...this.getAwsRootEnvPatch(input.homeDir, input.awsRootDir),
-        AWS_PROFILE: null,
-        AWS_DEFAULT_PROFILE: null,
-      },
-      30_000,
-    );
-    if (validationResult.exitCode !== 0) {
-      throw normalizeAwsProfileFlowError(
-        validationResult.stderr,
+    try {
+      await this.stsGetCallerIdentityFromRoot(
+        input.profileName,
+        input.awsRootDir,
+        30_000,
+      );
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         input.fallbackMessage,
         input.errorContext,
       );
     }
+  }
+
+  // Raw STS call seam (tests stub this and exercise the error mapping in the
+  // validate wrapper).
+  private async stsAssumeRoleWithSourceProfile(input: {
+    sourceProfileName: string;
+    roleArn: string;
+    sessionName: string;
+  }): Promise<void> {
+    const credentials = await this.resolveProfileCredentialsFromRoot(
+      input.sourceProfileName,
+      this.awsProfileRootDir,
+    );
+    const region =
+      (await this.resolveProfileRegionFromRoot(
+        input.sourceProfileName,
+        this.awsProfileRootDir,
+      )) ?? "us-east-1";
+    await new STSClient({ region, credentials }).send(
+      new AssumeRoleCommand({
+        RoleArn: input.roleArn,
+        RoleSessionName: input.sessionName,
+      }),
+      { abortSignal: AbortSignal.timeout(30_000) },
+    );
   }
 
   private async validateAssumeRoleWithSourceProfile(input: {
@@ -2538,34 +2323,15 @@ export class AwsService {
     errorContext: AwsProfileFlowErrorContext;
     fallbackMessage: string;
   }): Promise<void> {
-    const sessionName = `dolssh-validate-${Date.now()}`;
-    const validationResult = await this.runResolvedCommandWithEnv(
-      "aws",
-      [
-        "sts",
-        "assume-role",
-        "--profile",
-        input.sourceProfileName,
-        "--role-arn",
-        input.roleArn,
-        "--role-session-name",
-        sessionName,
-        "--output",
-        "json",
-      ],
-      {
-        ...this.getConfiguredAwsRootEnvPatch(),
-        AWS_PROFILE: null,
-        AWS_DEFAULT_PROFILE: null,
-        AWS_ACCESS_KEY_ID: null,
-        AWS_SECRET_ACCESS_KEY: null,
-        AWS_SESSION_TOKEN: null,
-      },
-      30_000,
-    );
-    if (validationResult.exitCode !== 0) {
-      throw normalizeAwsProfileFlowError(
-        validationResult.stderr,
+    try {
+      await this.stsAssumeRoleWithSourceProfile({
+        sourceProfileName: input.sourceProfileName,
+        roleArn: input.roleArn,
+        sessionName: `dolssh-validate-${Date.now()}`,
+      });
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         input.fallbackMessage,
         input.errorContext,
       );
@@ -2873,27 +2639,34 @@ export class AwsService {
     };
   }
 
+  // Raw STS call seam (tests stub this and exercise the error mapping in the
+  // validate wrapper).
+  private async stsGetCallerIdentityWithStaticCredentials(input: {
+    accessKeyId: string;
+    secretAccessKey: string;
+    region?: string | null;
+  }): Promise<void> {
+    await new STSClient({
+      region: input.region?.trim() || "us-east-1",
+      credentials: {
+        accessKeyId: input.accessKeyId,
+        secretAccessKey: input.secretAccessKey,
+      },
+    }).send(new GetCallerIdentityCommand({}), {
+      abortSignal: AbortSignal.timeout(30_000),
+    });
+  }
+
   private async validateStaticCredentials(input: {
     accessKeyId: string;
     secretAccessKey: string;
     region?: string | null;
   }): Promise<void> {
-    const validationResult = await this.runResolvedCommandWithEnv(
-      "aws",
-      ["sts", "get-caller-identity", "--output", "json"],
-      {
-        AWS_ACCESS_KEY_ID: input.accessKeyId,
-        AWS_SECRET_ACCESS_KEY: input.secretAccessKey,
-        AWS_REGION: input.region?.trim() || null,
-        AWS_DEFAULT_REGION: input.region?.trim() || null,
-        AWS_PROFILE: null,
-        AWS_DEFAULT_PROFILE: null,
-      },
-      30_000,
-    );
-    if (validationResult.exitCode !== 0) {
-      throw normalizeAwsProfileFlowError(
-        validationResult.stderr,
+    try {
+      await this.stsGetCallerIdentityWithStaticCredentials(input);
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         "입력한 AWS 자격 증명이 유효하지 않습니다.",
         "static-validation",
       );
@@ -2918,27 +2691,6 @@ export class AwsService {
     };
     this.profileRepository.upsert(payload);
     await this.materializeManagedProfiles();
-  }
-
-  async ensureAwsCliAvailable(): Promise<void> {
-    if (isE2EFakeAwsSessionEnabled()) {
-      return;
-    }
-
-    try {
-      const result = await this.runResolvedCommand(
-        "aws",
-        ["--version"],
-        10_000,
-      );
-      if (result.exitCode !== 0) {
-        throw new Error("aws --version failed");
-      }
-    } catch (error) {
-      throw new Error(
-        "AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.",
-      );
-    }
   }
 
   async listProfiles(): Promise<AwsProfileSummary[]> {
@@ -2995,7 +2747,6 @@ export class AwsService {
     }
 
     await this.ensureManagedProfilesReady();
-    await this.ensureAwsCliAvailable();
 
     if (input.kind === "static") {
       const profileName = normalizeAwsProfileName(input.profileName);
@@ -3160,7 +2911,6 @@ export class AwsService {
     }
 
     await this.ensureManagedProfilesReady();
-    await this.ensureAwsCliAvailable();
     this.pruneExpiredSsoPreparations();
 
     const profileName = normalizeAwsProfileName(input.profileName);
@@ -3217,26 +2967,23 @@ export class AwsService {
       );
       await writeAwsProfileDocuments(documents);
 
-      const envPatch = {
-        ...this.getAwsRootEnvPatch(tempRoot.homeDir, tempRoot.awsRootDir),
-        AWS_PROFILE: null,
-        AWS_DEFAULT_PROFILE: null,
-      };
-      const loginResult = await this.runResolvedCommandWithEnv(
-        "aws",
-        ["sso", "login", "--profile", profileName],
-        envPatch,
-        5 * 60_000,
-      );
-      if (loginResult.exitCode !== 0) {
-        throw normalizeAwsProfileFlowError(
-          loginResult.stderr,
+      let accessToken: string;
+      try {
+        const login = await this.performSsoLoginForRoot({
+          startUrl: ssoStartUrl,
+          ssoRegion,
+          sessionName: ssoSessionName,
+          awsRootDir: tempRoot.awsRootDir,
+        });
+        accessToken = login.accessToken;
+      } catch (error) {
+        throw normalizeAwsProfileFlowSdkError(
+          error,
           "AWS SSO 로그인에 실패했습니다.",
           "sso-login",
         );
       }
 
-      const accessToken = await this.readSsoAccessToken(tempRoot.homeDir);
       const accounts = await this.listSsoAccounts({
         accessToken,
         ssoRegion,
@@ -3306,15 +3053,13 @@ export class AwsService {
     key: string,
     awsRootDir = this.awsProfileRootDir,
   ): Promise<string> {
-    const result = await this.runResolvedCommandWithEnv(
-      "aws",
-      ["configure", "get", key, "--profile", profileName],
-      this.getManagedAwsEnvOverrides(awsRootDir),
-    );
-    if (result.exitCode !== 0) {
+    try {
+      const documents = await loadAwsProfileDocuments(awsRootDir);
+      const snapshot = inspectAwsProfileDocuments(documents, profileName);
+      return snapshot.mergedValues[key]?.trim() ?? "";
+    } catch {
       return "";
     }
-    return result.stdout.trim();
   }
 
   private async getProfileStatusFromRoot(
@@ -3356,7 +3101,6 @@ export class AwsService {
       };
     }
 
-    await this.ensureAwsCliAvailable();
 
     const [ssoStartUrl, ssoSession, configuredRegion] = await Promise.all([
       this.readConfigValue(profileName, "sso_start_url", awsRootDir),
@@ -3365,23 +3109,11 @@ export class AwsService {
     ]);
     const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
 
-    const identity = await this.runResolvedCommandWithEnv(
-      "aws",
-      [
-        "sts",
-        "get-caller-identity",
-        "--profile",
+    try {
+      const identity = await this.stsGetCallerIdentityFromRoot(
         profileName,
-        "--output",
-        "json",
-      ],
-      this.getManagedAwsEnvOverrides(awsRootDir),
-      statusTimeoutMs,
-    );
-    if (identity.exitCode === 0) {
-      const payload = parseJson<{ Account?: string; Arn?: string }>(
-        identity.stdout,
-        "AWS 프로필 상태 응답을 해석하지 못했습니다.",
+        awsRootDir,
+        statusTimeoutMs,
       );
       return {
         id: profileId,
@@ -3390,24 +3122,24 @@ export class AwsService {
         isSsoProfile,
         isAuthenticated: true,
         configuredRegion: configuredRegion || null,
-        accountId: payload.Account ?? null,
-        arn: payload.Arn ?? null,
+        accountId: identity.account,
+        arn: identity.arn,
+        missingTools: [],
+      };
+    } catch {
+      return {
+        id: profileId,
+        profileName,
+        available: true,
+        isSsoProfile,
+        isAuthenticated: false,
+        configuredRegion: configuredRegion || null,
+        errorMessage: isSsoProfile
+          ? "브라우저 로그인이 필요합니다."
+          : "이 프로필은 저장된 AWS 자격 증명으로 인증하지 못했습니다.",
         missingTools: [],
       };
     }
-
-    return {
-      id: profileId,
-      profileName,
-      available: true,
-      isSsoProfile,
-      isAuthenticated: false,
-      configuredRegion: configuredRegion || null,
-      errorMessage: isSsoProfile
-        ? "브라우저 로그인이 필요합니다."
-        : "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
-      missingTools: [],
-    };
   }
 
   async getProfileStatus(profileName: string): Promise<AwsProfileStatus> {
@@ -3535,7 +3267,6 @@ export class AwsService {
     }
 
     await this.ensureManagedProfilesReady();
-    await this.ensureAwsCliAvailable();
 
     const profileName = normalizeAwsProfileName(input.profileName);
     const accessKeyId = input.accessKeyId.trim();
@@ -3599,7 +3330,6 @@ export class AwsService {
     }
 
     await this.ensureManagedProfilesReady();
-    await this.ensureAwsCliAvailable();
 
     const profileName = normalizeAwsProfileName(input.profileName);
     const nextProfileName = normalizeAwsProfileName(
@@ -3631,7 +3361,6 @@ export class AwsService {
     }
 
     await this.ensureManagedProfilesReady();
-    await this.ensureAwsCliAvailable();
 
     const normalizedProfileName = normalizeAwsProfileName(profileName);
     const existingProfile = this.getManagedProfileByName(normalizedProfileName);
@@ -3647,23 +3376,39 @@ export class AwsService {
       return;
     }
 
-    await this.ensureAwsCliAvailable();
     const status = await this.getProfileStatus(profileName);
     if (!status.isSsoProfile) {
       throw new Error(
-        "이 프로필은 브라우저 로그인 대신 AWS CLI 자격 증명이 필요합니다.",
+        "이 프로필은 브라우저 로그인 대신 저장된 AWS 자격 증명을 사용합니다.",
       );
     }
 
-    const result = await this.runResolvedCommand(
-      "aws",
-      ["sso", "login", "--profile", profileName],
-      5 * 60_000,
-    );
-    if (result.exitCode !== 0) {
-      throw normalizeAwsCliError(
-        result.stderr,
+    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
+    const values = inspectAwsProfileDocuments(documents, profileName).mergedValues;
+    const ssoSession = values.sso_session?.trim() || null;
+    const sessionValues = ssoSession
+      ? getAwsSsoSessionValues(documents, ssoSession)
+      : {};
+    const startUrl =
+      values.sso_start_url?.trim() || sessionValues.sso_start_url?.trim() || "";
+    const ssoRegion =
+      values.sso_region?.trim() || sessionValues.sso_region?.trim() || "";
+    if (!startUrl || !ssoRegion) {
+      throw new Error("프로필의 SSO 설정(sso_start_url/sso_region)을 찾지 못했습니다.");
+    }
+
+    try {
+      await this.performSsoLoginForRoot({
+        startUrl,
+        ssoRegion,
+        sessionName: ssoSession,
+        awsRootDir: this.awsProfileRootDir,
+      });
+    } catch (error) {
+      throw normalizeAwsProfileFlowSdkError(
+        error,
         "AWS SSO 로그인에 실패했습니다.",
+        "sso-login",
       );
     }
   }
@@ -4990,6 +4735,7 @@ export class AwsService {
     targetId: string;
     targetKind: string;
     targetPort: number;
+    bindPort: number;
     remoteHost?: string;
   }): Promise<
     { sessionId: string; streamUrl: string; tokenValue: string } | undefined
@@ -5006,6 +4752,7 @@ export class AwsService {
     targetId: string;
     targetKind: string;
     targetPort: number;
+    bindPort: number;
     remoteHost?: string;
   }): Promise<{ sessionId: string; streamUrl: string; tokenValue: string }> {
     const isRemoteHost =
@@ -5016,6 +4763,7 @@ export class AwsService {
       : "AWS-StartPortForwardingSession";
     const parameters: Record<string, string[]> = {
       portNumber: [String(input.targetPort)],
+      localPortNumber: [String(input.bindPort)],
     };
     if (isRemoteHost) {
       parameters.host = [input.remoteHost!.trim()];

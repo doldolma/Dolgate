@@ -819,7 +819,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   </div>
                   <p className="m-0 text-[0.9rem] text-[var(--text-soft)]">
                     {selectedDetails.isAuthenticated
-                      ? '현재 AWS CLI 기준으로 인증 가능한 상태입니다.'
+                      ? '현재 인증 가능한 상태입니다.'
                       : selectedDetails.errorMessage ?? '추가 로그인이 필요하거나 자격 증명을 다시 확인해야 합니다.'}
                   </p>
                 </div>

@@ -55,17 +55,14 @@ func startDataChannelRunner(payload protocol.AWSConnectPayload) (sessionRunner, 
 func (r *datachannelRunner) pump() {
 	defer close(r.done)
 
-	// Read copies one whole websocket message; the agent sends small frames
-	// (~1.5KB), so this leaves generous headroom.
-	buffer := make([]byte, 32*1024)
 	for {
-		n, err := r.dc.Read(buffer)
+		msg, err := r.dc.ReadFrame()
 		if err != nil {
 			r.finish(err)
 			return
 		}
 
-		payload, err := r.dc.HandleMsg(buffer[:n])
+		payload, err := r.dc.HandleMsg(msg)
 		if len(payload) > 0 {
 			// Blocks until the manager consumes it: natural backpressure.
 			if _, writeErr := r.writer.Write(payload); writeErr != nil {

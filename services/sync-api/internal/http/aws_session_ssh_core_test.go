@@ -1,12 +1,34 @@
 package http
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
+
+// fakeAwsSsmTokenIssuer stands in for ssm:StartSession so bridge tests with a
+// fake core runtime never talk to AWS.
+type fakeAwsSsmTokenIssuer struct{}
+
+func (fakeAwsSsmTokenIssuer) IssueShellSession(context.Context, string, map[string]string, string) (awsSsmSessionToken, error) {
+	return awsSsmSessionToken{
+		SessionID:  "fake-ssm-session",
+		StreamURL:  "wss://fake.example/stream",
+		TokenValue: "fake-token",
+	}, nil
+}
+
+func (fakeAwsSsmTokenIssuer) IssuePortForwardSession(context.Context, string, map[string]string, string, int, int) (awsSsmSessionToken, error) {
+	return awsSsmSessionToken{
+		SessionID:  "fake-ssm-forward",
+		StreamURL:  "wss://fake.example/forward",
+		TokenValue: "fake-forward-token",
+	}, nil
+}
 
 type fakeAwsSessionCoreRuntime struct {
 	mu sync.Mutex
@@ -86,7 +108,7 @@ func TestAwsSessionBridgeUsesEmbeddedRuntime(t *testing.T) {
 	}
 
 	output := waitForAwsRuntimeEvent(t, runner.Events(), "output")
-	if string(output.Data) != "Connected to fake AWS SSM smoke session.\r\n" {
+	if !strings.Contains(string(output.Data), "Connected to fake AWS SSM smoke session.\r\n") {
 		t.Fatalf("unexpected initial output %q", string(output.Data))
 	}
 
@@ -124,6 +146,7 @@ func TestAwsSessionBridgeRejectsNewRunnersAfterClose(t *testing.T) {
 func TestDirectAwsSessionForwardsControlSignal(t *testing.T) {
 	core := &fakeAwsSessionCoreRuntime{}
 	bridge := newAwsSessionBridgeWithCore(core)
+	bridge.ssmTokens = fakeAwsSsmTokenIssuer{}
 	defer bridge.Close()
 
 	runner, err := bridge.NewRunner(awsSessionStartRequest{
@@ -134,6 +157,19 @@ func TestDirectAwsSessionForwardsControlSignal(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	core.mu.Lock()
+	if len(core.connectCalls) != 1 {
+		core.mu.Unlock()
+		t.Fatalf("ConnectAWS() calls = %d, want 1", len(core.connectCalls))
+	}
+	payload := core.connectCalls[0]
+	core.mu.Unlock()
+	if payload.StreamURL != "wss://fake.example/stream" ||
+		payload.TokenValue != "fake-token" ||
+		payload.SsmSessionID != "fake-ssm-session" {
+		t.Fatalf("ConnectAWS payload missing issued token: %#v", payload)
 	}
 
 	if err := runner.ControlSignal("interrupt"); err != nil {
@@ -150,6 +186,7 @@ func TestDirectAwsSessionForwardsControlSignal(t *testing.T) {
 func TestDirectAwsSessionBackpressureRequestsDisconnect(t *testing.T) {
 	core := &fakeAwsSessionCoreRuntime{}
 	bridge := newAwsSessionBridgeWithCore(core)
+	bridge.ssmTokens = fakeAwsSsmTokenIssuer{}
 	core.onDisconnect = func(sessionID string) {
 		bridge.handleEvent(coretypes.Event{
 			Type:      coretypes.EventClosed,

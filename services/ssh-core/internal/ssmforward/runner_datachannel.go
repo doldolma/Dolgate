@@ -85,11 +85,10 @@ func startDataChannelForwardRunner(payload protocol.SSMPortForwardStartPayload) 
 // readLoop is the single reader of the data channel: it decodes agent messages and
 // writes payloads to whichever downstream connection is currently active.
 func (r *datachannelForwardRunner) readLoop() {
-	buffer := make([]byte, 32*1024)
 	for {
-		n, err := r.dc.Read(buffer)
-		if n > 0 {
-			payload, handleErr := r.dc.HandleMsg(buffer[:n])
+		msg, err := r.dc.ReadFrame()
+		if len(msg) > 0 {
+			payload, handleErr := r.dc.HandleMsg(msg)
 			if len(payload) > 0 {
 				r.connMu.Lock()
 				conn := r.conn

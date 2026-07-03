@@ -365,17 +365,22 @@ func (hub *AwsSessionHub) HandleWebSocket(writer http.ResponseWriter, request *h
 				}
 				continue
 			}
-			var err error
-			if message.Type == "autocompletePrepare" {
-				err = activeRunner.PrepareAutocomplete(message.RequestID)
-			} else {
-				err = activeRunner.RefreshAutocomplete(message.RequestID)
-			}
-			if err != nil {
-				enqueue(awsSessionServerMessage{Type: "autocompleteCapability", RequestID: message.RequestID, Payload: map[string]any{
-					"status": "degraded", "sources": []string{"session-history"}, "reasonCode": "metadata-unavailable",
-				}}, false)
-			}
+			// 자동완성 프로브는 ssh-core 안에서 응답을 수 초(최대 8초)까지 기다린다.
+			// 이 읽기 루프에서 동기로 돌리면 그동안 input/resize가 전부 밀려
+			// "연결은 됐는데 입력이 안 되는" 세션이 되므로 반드시 비동기로 처리한다.
+			go func(runner awsSessionRunner, messageType, requestID string) {
+				var err error
+				if messageType == "autocompletePrepare" {
+					err = runner.PrepareAutocomplete(requestID)
+				} else {
+					err = runner.RefreshAutocomplete(requestID)
+				}
+				if err != nil {
+					enqueue(awsSessionServerMessage{Type: "autocompleteCapability", RequestID: requestID, Payload: map[string]any{
+						"status": "degraded", "sources": []string{"session-history"}, "reasonCode": "metadata-unavailable",
+					}}, false)
+				}
+			}(activeRunner, message.Type, message.RequestID)
 
 		case "autocompleteStop":
 			if activeRunner != nil {

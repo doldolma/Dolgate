@@ -62,34 +62,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("create auth service: %v", err)
 	}
+	// AWS SSM 세션/터널은 ssh-core 인프로세스 datachannel + AWS SDK 토큰 발급으로
+	// 동작한다. aws-cli/session-manager-plugin 바이너리 검출이 사라졌으므로 관련
+	// 기능은 항상 활성화된다.
 	awsSsmRuntime := httpserver.DetectAwsSsmRuntime()
 	awsSsoBrowserFlowEnabled := awsSsmRuntime.AwsSsoBrowserFlowSupported
-	var awsSessionBridge *httpserver.AwsSessionBridge
-	var awsSftpBridge *httpserver.AwsSftpBridge
-	if awsSsmRuntime.Enabled {
-		awsSessionBridge = httpserver.NewAwsSessionBridge()
-		defer awsSessionBridge.Close()
-		awsSftpBridge = httpserver.NewAwsSftpBridge(awsSsmRuntime)
-		defer awsSftpBridge.Close()
-	}
-	var awsSsoMobileManager *httpserver.AwsSsoMobileManager
-	if awsSsoBrowserFlowEnabled {
-		awsSsoMobileManager = httpserver.NewAwsSsoMobileManager(awsSsmRuntime)
-	}
-	if awsSsmRuntime.Enabled {
-		log.Printf(
-			"AWS SSM runtime enabled (aws=%s, plugin=%s)",
-			awsSsmRuntime.AWSPath,
-			awsSsmRuntime.SessionManagerPluginPath,
-		)
-	} else {
-		log.Printf("AWS SSM runtime unavailable: %s", strings.Join(awsSsmRuntime.MissingTools, ", "))
-	}
-	if awsSsoBrowserFlowEnabled {
-		log.Printf("AWS SSO browser flow enabled (aws=%s)", awsSsmRuntime.AWSPath)
-	} else if strings.TrimSpace(awsSsmRuntime.AwsSsoBrowserFlowReason) != "" {
-		log.Printf("AWS SSO browser flow unavailable: %s", awsSsmRuntime.AwsSsoBrowserFlowReason)
-	}
+	awsSessionBridge := httpserver.NewAwsSessionBridge()
+	defer awsSessionBridge.Close()
+	awsSftpBridge := httpserver.NewAwsSftpBridge(awsSsmRuntime)
+	defer awsSftpBridge.Close()
+	awsSsoMobileManager := httpserver.NewAwsSsoMobileManager()
+	log.Printf("AWS SSM runtime enabled (in-process data channel + AWS SDK)")
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,

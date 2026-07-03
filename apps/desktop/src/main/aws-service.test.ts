@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AwsService,
   buildSshMetadataProbeCommands,
-  decodeAwsCliOutput,
 } from './aws-service';
 import { resetDesktopStateStorageForTests } from './state-storage';
 
@@ -33,78 +32,6 @@ async function createTempAwsProfileDir() {
   tempDirectories.push(rootDir);
   return rootDir;
 }
-
-function getAwsCommandArgs(call: unknown[]): string[] {
-  return Array.isArray(call[1]) ? (call[1] as string[]) : [];
-}
-
-function getAwsCommandName(call: unknown[]): string {
-  return getAwsCommandArgs(call).slice(0, 2).join(' ');
-}
-
-describe('decodeAwsCliOutput', () => {
-  const cp949KoreanLogBytes = Buffer.from([
-    0xc7, 0xd1, 0xb1, 0xdb, 0x20, 0xb7, 0xce, 0xb1, 0xd7,
-  ]);
-
-  it('keeps valid UTF-8 output unchanged on Windows', () => {
-    expect(
-      decodeAwsCliOutput(Buffer.from('한글 로그', 'utf8'), {
-        platform: 'win32',
-        allowWindowsLegacyFallback: true,
-      }),
-    ).toBe('한글 로그');
-  });
-
-  it('falls back to euc-kr on Windows when UTF-8 decoding introduces replacement characters', () => {
-    expect(
-      decodeAwsCliOutput(cp949KoreanLogBytes, {
-        platform: 'win32',
-        allowWindowsLegacyFallback: true,
-      }),
-    ).toBe('한글 로그');
-  });
-
-  it('keeps ASCII JSON output unchanged across platforms', () => {
-    const raw = Buffer.from('{"message":"ok"}', 'utf8');
-    expect(
-      decodeAwsCliOutput(raw, {
-        platform: 'win32',
-        allowWindowsLegacyFallback: true,
-      }),
-    ).toBe('{"message":"ok"}');
-    expect(
-      decodeAwsCliOutput(raw, {
-        platform: 'darwin',
-        allowWindowsLegacyFallback: true,
-      }),
-    ).toBe('{"message":"ok"}');
-  });
-
-  it('does not apply the euc-kr fallback on macOS', () => {
-    expect(
-      decodeAwsCliOutput(cp949KoreanLogBytes, {
-        platform: 'darwin',
-        allowWindowsLegacyFallback: true,
-      }),
-    ).not.toBe('한글 로그');
-  });
-
-  it('keeps a JSON payload with CP949 message text parseable after Windows fallback', () => {
-    const raw = Buffer.concat([
-      Buffer.from('{"events":[{"timestamp":1,"message":"', 'ascii'),
-      cp949KoreanLogBytes,
-      Buffer.from('"}]}', 'ascii'),
-    ]);
-    const decoded = decodeAwsCliOutput(raw, {
-      platform: 'win32',
-      allowWindowsLegacyFallback: true,
-    });
-    expect(JSON.parse(decoded)).toEqual({
-      events: [{ timestamp: 1, message: '한글 로그' }],
-    });
-  });
-});
 
 beforeEach(async () => {
   const userDataDir = await createTempAwsProfileDir();
@@ -260,64 +187,53 @@ describe('AwsService.listRegions', () => {
 describe('AwsService.getProfileStatus', () => {
   it('includes the configured region when the profile is authenticated', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       readConfigValue: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
         isAuthenticated: boolean;
       }>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.readConfigValue = vi
       .fn()
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('ap-northeast-2');
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Account: '123456789012',
-        Arn: 'arn:aws:iam::123456789012:user/test',
-      }),
-      stderr: '',
-      exitCode: 0,
+    service.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({
+      account: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/test',
     });
 
     await expect(service.getProfileStatus('default')).resolves.toMatchObject({
       isAuthenticated: true,
       configuredRegion: 'ap-northeast-2',
     });
-    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
-      'aws',
-      ['sts', 'get-caller-identity', '--profile', 'default', '--output', 'json'],
-      expect.any(Object),
+    expect(service.stsGetCallerIdentityFromRoot).toHaveBeenCalledWith(
+      'default',
+      expect.any(String),
       30_000,
     );
   });
 
   it('returns null configuredRegion when the profile has no default region', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       readConfigValue: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
         isAuthenticated: boolean;
       }>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.readConfigValue = vi
       .fn()
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('');
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: 'credential missing',
-      exitCode: 255,
-    });
+    service.stsGetCallerIdentityFromRoot = vi
+      .fn()
+      .mockRejectedValue(new Error('credential missing'));
 
     await expect(service.getProfileStatus('default')).resolves.toMatchObject({
       isAuthenticated: false,
@@ -403,8 +319,7 @@ describe('AwsService.createProfile', () => {
   it('validates credentials first and writes the new profile when they are valid', async () => {
     const rootDir = await createTempAwsProfileDir();
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -414,15 +329,9 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Account: '123456789012',
-        Arn: 'arn:aws:iam::123456789012:user/test',
-      }),
-      stderr: '',
-      exitCode: 0,
-    });
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockResolvedValue(undefined);
 
     await service.createProfile({
       kind: 'static',
@@ -432,16 +341,12 @@ describe('AwsService.createProfile', () => {
       region: 'ap-northeast-2',
     });
 
-    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
-      'aws',
-      ['sts', 'get-caller-identity', '--output', 'json'],
+    expect(service.stsGetCallerIdentityWithStaticCredentials).toHaveBeenCalledWith(
       expect.objectContaining({
-        AWS_ACCESS_KEY_ID: 'AKIATEST123',
-        AWS_SECRET_ACCESS_KEY: 'secret-value',
-        AWS_REGION: 'ap-northeast-2',
-        AWS_DEFAULT_REGION: 'ap-northeast-2',
+        accessKeyId: 'AKIATEST123',
+        secretAccessKey: 'secret-value',
+        region: 'ap-northeast-2',
       }),
-      30_000,
     );
     const config = await readFile(path.join(rootDir, 'config'), 'utf8');
     const credentials = await readFile(path.join(rootDir, 'credentials'), 'utf8');
@@ -459,8 +364,7 @@ describe('AwsService.createProfile', () => {
       credentials: ['[dolssh-prod]', 'aws_access_key_id = AKIAEXISTING', 'aws_secret_access_key = secret', ''].join('\n'),
     });
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -470,8 +374,7 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn();
+    service.stsGetCallerIdentityWithStaticCredentials = vi.fn();
 
     await expect(
       service.createProfile({
@@ -482,14 +385,13 @@ describe('AwsService.createProfile', () => {
         region: null,
       }),
     ).rejects.toThrow('같은 이름의 AWS 프로필이 이미 존재합니다.');
-    expect(service.runResolvedCommandWithEnv).not.toHaveBeenCalled();
+    expect(service.stsGetCallerIdentityWithStaticCredentials).not.toHaveBeenCalled();
   });
 
   it('does not write a region when it is omitted', async () => {
     const rootDir = await createTempAwsProfileDir();
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -499,12 +401,9 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '{}',
-      stderr: '',
-      exitCode: 0,
-    });
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockResolvedValue(undefined);
 
     await service.createProfile({
       kind: 'static',
@@ -523,10 +422,9 @@ describe('AwsService.createProfile', () => {
 
   it('fails validation without writing any profile values when credentials are invalid', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
+      saveStaticProfileValues: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -536,14 +434,16 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.listProfiles = vi.fn().mockResolvedValue([]);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: 'The security token included in the request is invalid.',
-      exitCode: 255,
-    });
-    service.runResolvedCommand = vi.fn();
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error('The security token included in the request is invalid.'),
+          { name: 'InvalidClientTokenId' },
+        ),
+      );
+    service.saveStaticProfileValues = vi.fn();
 
     await expect(
       service.createProfile({
@@ -556,15 +456,14 @@ describe('AwsService.createProfile', () => {
     ).rejects.toThrow(
       '입력한 Access Key 또는 Secret이 올바르지 않습니다. Access Key가 잘못되었거나 비활성화되었을 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.',
     );
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
+    expect(service.saveStaticProfileValues).not.toHaveBeenCalled();
   });
 
-  it('keeps unmapped validation errors as raw stderr for debugging', async () => {
+  it('keeps unmapped validation errors as raw messages for debugging', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
+      saveStaticProfileValues: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
         profileName: string;
@@ -574,14 +473,11 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.listProfiles = vi.fn().mockResolvedValue([]);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: 'mystery validation failure',
-      exitCode: 255,
-    });
-    service.runResolvedCommand = vi.fn();
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockRejectedValue(new Error('mystery validation failure'));
+    service.saveStaticProfileValues = vi.fn();
 
     await expect(
       service.createProfile({
@@ -592,7 +488,7 @@ describe('AwsService.createProfile', () => {
         region: null,
       }),
     ).rejects.toThrow('mystery validation failure');
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
+    expect(service.saveStaticProfileValues).not.toHaveBeenCalled();
   });
 
   it('translates AssumeRole access denied errors for role profiles', async () => {
@@ -607,9 +503,7 @@ describe('AwsService.createProfile', () => {
       ].join('\n'),
     });
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
         profileName: string;
@@ -619,14 +513,14 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr:
-        'An error occurred (AccessDenied) when calling the AssumeRole operation: User is not authorized to perform sts:AssumeRole',
-      exitCode: 255,
-    });
-    service.runResolvedCommand = vi.fn();
+    service.stsAssumeRoleWithSourceProfile = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error('User is not authorized to perform sts:AssumeRole'),
+          { name: 'AccessDenied' },
+        ),
+      );
 
     await expect(
       service.createProfile({
@@ -639,7 +533,6 @@ describe('AwsService.createProfile', () => {
     ).rejects.toThrow(
       '선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.',
     );
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
   });
 
   it('validates role profiles by assuming the role with the selected source profile', async () => {
@@ -655,8 +548,7 @@ describe('AwsService.createProfile', () => {
     });
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
         profileName: string;
@@ -666,16 +558,7 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Credentials: {
-          AccessKeyId: 'ASIA....',
-        },
-      }),
-      stderr: '',
-      exitCode: 0,
-    });
+    service.stsAssumeRoleWithSourceProfile = vi.fn().mockResolvedValue(undefined);
 
     await service.createProfile({
       kind: 'role',
@@ -685,25 +568,12 @@ describe('AwsService.createProfile', () => {
       region: 'ap-northeast-2',
     });
 
-    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
-      'aws',
-      [
-        'sts',
-        'assume-role',
-        '--profile',
-        'default',
-        '--role-arn',
-        'arn:aws:iam::123456789012:role/Admin',
-        '--role-session-name',
-        expect.stringMatching(/^dolssh-validate-\d+$/),
-        '--output',
-        'json',
-      ],
+    expect(service.stsAssumeRoleWithSourceProfile).toHaveBeenCalledWith(
       expect.objectContaining({
-        AWS_CONFIG_FILE: path.join(rootDir, 'config'),
-        AWS_SHARED_CREDENTIALS_FILE: path.join(rootDir, 'credentials'),
+        sourceProfileName: 'default',
+        roleArn: 'arn:aws:iam::123456789012:role/Admin',
+        sessionName: expect.stringMatching(/^dolssh-validate-\d+$/),
       }),
-      30_000,
     );
 
     const config = await readFile(path.join(rootDir, 'config'), 'utf8');
@@ -730,8 +600,7 @@ describe('AwsService.createProfile', () => {
       credentials: '',
     });
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
         profileName: string;
@@ -741,12 +610,13 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: 'Error when retrieving token from sso: Token has expired and refresh failed',
-      exitCode: 255,
-    });
+    service.stsAssumeRoleWithSourceProfile = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'Error when retrieving token from sso: Token has expired and refresh failed',
+        ),
+      );
 
     await expect(
       service.createProfile({
@@ -773,8 +643,7 @@ describe('AwsService.createProfile', () => {
       ].join('\n'),
     });
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
         profileName: string;
@@ -784,13 +653,16 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr:
-        'Parameter validation failed: Invalid length for parameter RoleArn, value: 18, valid min length: 20',
-      exitCode: 255,
-    });
+    service.stsAssumeRoleWithSourceProfile = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error(
+            'Invalid length for parameter RoleArn, value: 18, valid min length: 20',
+          ),
+          { name: 'ValidationError' },
+        ),
+      );
 
     await expect(
       service.createProfile({
@@ -812,10 +684,8 @@ describe('AwsService.createProfile', () => {
     await writeAwsProfileFiles(awsRootDir, {});
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       pendingSsoPreparations: Map<string, unknown>;
       createProfile: (input: {
         kind: 'sso';
@@ -830,15 +700,14 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.listProfiles = vi.fn().mockResolvedValue([]);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr:
-        'The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.',
-      exitCode: 255,
-    });
-    service.runResolvedCommand = vi.fn();
+    service.stsGetCallerIdentityFromRoot = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.',
+        ),
+      );
     service.pendingSsoPreparations.set('prep-token', {
       preparationToken: 'prep-token',
       profileName: 'corp-sso',
@@ -900,8 +769,7 @@ describe('AwsService.createProfile', () => {
     );
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       pendingSsoPreparations: Map<string, unknown>;
       createProfile: (input: {
         kind: 'sso';
@@ -916,14 +784,9 @@ describe('AwsService.createProfile', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Account: '123456789012',
-        Arn: 'arn:aws:sts::123456789012:assumed-role/AdministratorAccess/dolssh',
-      }),
-      stderr: '',
-      exitCode: 0,
+    service.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({
+      account: '123456789012',
+      arn: 'arn:aws:sts::123456789012:assumed-role/AdministratorAccess/dolssh',
     });
     service.pendingSsoPreparations.set('prep-token', {
       preparationToken: 'prep-token',
@@ -967,43 +830,6 @@ describe('AwsService.createProfile', () => {
     });
   });
 
-  it('surfaces the aws cli availability error before any work starts', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      createProfile: (input: {
-        kind: 'static';
-        profileName: string;
-        accessKeyId: string;
-        secretAccessKey: string;
-        region?: string | null;
-      }) => Promise<void>;
-    };
-
-    service.ensureAwsCliAvailable = vi
-      .fn()
-      .mockRejectedValue(
-        new Error('AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.'),
-      );
-    service.listProfiles = vi.fn();
-    service.runResolvedCommandWithEnv = vi.fn();
-    service.runResolvedCommand = vi.fn();
-
-    await expect(
-      service.createProfile({
-        kind: 'static',
-        profileName: 'dolssh-prod',
-        accessKeyId: 'AKIATEST123',
-        secretAccessKey: 'secret-value',
-        region: null,
-      }),
-    ).rejects.toThrow('AWS CLI가 설치되어 있지 않습니다. `aws --version`이 동작해야 합니다.');
-    expect(service.listProfiles).not.toHaveBeenCalled();
-    expect(service.runResolvedCommandWithEnv).not.toHaveBeenCalled();
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
-  });
 });
 
 describe('AwsService AWS profile management', () => {
@@ -1145,35 +971,28 @@ describe('AwsService AWS profile management', () => {
     });
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
       readConfigValue: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.readConfigValue = vi
       .fn()
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('')
       .mockResolvedValueOnce('ap-northeast-2');
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        Account: '123456789012',
-        Arn: 'arn:aws:iam::123456789012:user/test',
-      }),
-      stderr: '',
-      exitCode: 0,
+    service.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({
+      account: '123456789012',
+      arn: 'arn:aws:iam::123456789012:user/test',
     });
 
     await expect(service.getProfileDetails('static-profile')).resolves.toMatchObject({
       profileName: 'static-profile',
       kind: 'static',
     });
-    expect(service.runResolvedCommandWithEnv).toHaveBeenCalledWith(
-      'aws',
-      ['sts', 'get-caller-identity', '--profile', 'static-profile', '--output', 'json'],
-      expect.any(Object),
+    expect(service.stsGetCallerIdentityFromRoot).toHaveBeenCalledWith(
+      'static-profile',
+      expect.any(String),
       8_000,
     );
   });
@@ -1364,8 +1183,7 @@ describe('AwsService AWS profile management', () => {
     });
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
         profileName: string;
         accessKeyId: string;
@@ -1374,12 +1192,9 @@ describe('AwsService AWS profile management', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '{}',
-      stderr: '',
-      exitCode: 0,
-    });
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockResolvedValue(undefined);
 
     await service.updateProfile({
       profileName: 'static-profile',
@@ -1394,7 +1209,7 @@ describe('AwsService AWS profile management', () => {
     expect(config).not.toContain('region = ap-northeast-2');
     expect(credentials).toContain('aws_access_key_id = AKIANEWVALUE');
     expect(credentials).toContain('aws_secret_access_key = new-secret');
-    expect(service.runResolvedCommandWithEnv).toHaveBeenCalled();
+    expect(service.stsGetCallerIdentityWithStaticCredentials).toHaveBeenCalled();
   });
 
   it('updates static, sso, and role profile regions without validating aws auth', async () => {
@@ -1429,18 +1244,18 @@ describe('AwsService AWS profile management', () => {
     });
 
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
+      stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       updateProfileRegion: (input: {
         profileName: string;
         region?: string | null;
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi
+    service.stsGetCallerIdentityWithStaticCredentials = vi
       .fn()
-      .mockRejectedValue(new Error('aws cli should not be checked'));
-    service.runResolvedCommandWithEnv = vi
+      .mockRejectedValue(new Error('auth validation should not run'));
+    service.stsAssumeRoleWithSourceProfile = vi
       .fn()
       .mockRejectedValue(new Error('auth validation should not run'));
 
@@ -1473,8 +1288,8 @@ describe('AwsService AWS profile management', () => {
       /\[profile corp-sso\]\nsso_session = dolssh-[0-9a-f]{12}\nsso_account_id = 123456789012\nsso_role_name = ReadOnly\nregion = ap-southeast-2/,
     );
     expect(credentials).toContain('aws_access_key_id = AKIASOURCE1234');
-    expect(service.ensureAwsCliAvailable).not.toHaveBeenCalled();
-    expect(service.runResolvedCommandWithEnv).not.toHaveBeenCalled();
+    expect(service.stsGetCallerIdentityWithStaticCredentials).not.toHaveBeenCalled();
+    expect(service.stsAssumeRoleWithSourceProfile).not.toHaveBeenCalled();
   });
 
   it('removes a profile region when saving a blank region-only update', async () => {
@@ -1540,9 +1355,7 @@ describe('AwsService AWS profile management', () => {
       ].join('\n'),
     });
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
         profileName: string;
         accessKeyId: string;
@@ -1551,14 +1364,16 @@ describe('AwsService AWS profile management', () => {
       }) => Promise<void>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr:
-        'An error occurred (SignatureDoesNotMatch) when calling the GetCallerIdentity operation: The request signature we calculated does not match the signature you provided.',
-      exitCode: 255,
-    });
-    service.runResolvedCommand = vi.fn();
+    service.stsGetCallerIdentityWithStaticCredentials = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(
+          new Error(
+            'The request signature we calculated does not match the signature you provided.',
+          ),
+          { name: 'SignatureDoesNotMatch' },
+        ),
+      );
 
     await expect(
       service.updateProfile({
@@ -1570,15 +1385,13 @@ describe('AwsService AWS profile management', () => {
     ).rejects.toThrow(
       '입력한 Access Key 또는 Secret이 올바르지 않습니다. Secret이 다르거나 잘못된 키 조합일 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.',
     );
-    expect(service.runResolvedCommand).not.toHaveBeenCalled();
   });
 
   it('translates SSO login preparation failures', async () => {
     const rootDir = await createTempAwsProfileDir();
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
+      performSsoLoginForRoot: ReturnType<typeof vi.fn>;
       prepareSsoProfile: (input: {
         profileName: string;
         ssoStartUrl: string;
@@ -1587,14 +1400,14 @@ describe('AwsService AWS profile management', () => {
       }) => Promise<unknown>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.listProfiles = vi.fn().mockResolvedValue([]);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr:
-        'The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.',
-      exitCode: 255,
-    });
+    service.performSsoLoginForRoot = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.',
+        ),
+      );
 
     await expect(
       service.prepareSsoProfile({
@@ -1611,11 +1424,9 @@ describe('AwsService AWS profile management', () => {
   it('translates SSO account loading failures after login', async () => {
     const rootDir = await createTempAwsProfileDir();
     const service = new AwsService(rootDir) as unknown as {
-      ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
-      runResolvedCommandWithEnv: ReturnType<typeof vi.fn>;
-      readSsoAccessToken: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
+      performSsoLoginForRoot: ReturnType<typeof vi.fn>;
+      listSsoAccounts: ReturnType<typeof vi.fn>;
       prepareSsoProfile: (input: {
         profileName: string;
         ssoStartUrl: string;
@@ -1624,19 +1435,17 @@ describe('AwsService AWS profile management', () => {
       }) => Promise<unknown>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
     service.listProfiles = vi.fn().mockResolvedValue([]);
-    service.runResolvedCommandWithEnv = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    });
-    service.readSsoAccessToken = vi.fn().mockResolvedValue('token-value');
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: '',
-      stderr: 'AccessDeniedException: token expired',
-      exitCode: 255,
-    });
+    service.performSsoLoginForRoot = vi
+      .fn()
+      .mockResolvedValue({ accessToken: 'token-value' });
+    service.listSsoAccounts = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'SSO 로그인 후 account 또는 role 목록을 불러오지 못했습니다. 권한과 SSO 설정을 확인해 주세요.',
+        ),
+      );
 
     await expect(
       service.prepareSsoProfile({
@@ -2423,1567 +2232,85 @@ describe('AwsService.startSsmShellSession', () => {
   });
 });
 
-describe.skip("AwsService ECS helpers (legacy CLI coverage)", () => {
-  it('lists ECS clusters with summary counts', async () => {
+describe('AwsService.startSsmPortForwardSession', () => {
+  it('includes localPortNumber for direct instance port forwarding', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      listEcsClusters: (profileName: string, region: string) => Promise<Array<Record<string, unknown>>>;
+      getSsmClient: ReturnType<typeof vi.fn>;
+      startSsmPortForwardSession: (input: {
+        profileName: string;
+        region: string;
+        targetId: string;
+        targetKind: string;
+        targetPort: number;
+        bindPort: number;
+      }) => Promise<{ sessionId: string; streamUrl: string; tokenValue: string }>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          clusterArns: ['arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          clusters: [
-            {
-              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-              clusterName: 'prod',
-              status: 'ACTIVE',
-              activeServicesCount: 4,
-              runningTasksCount: 6,
-              pendingTasksCount: 1,
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
+    const send = vi.fn().mockResolvedValue({
+      SessionId: 'ssm-forward-1',
+      StreamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-forward-1',
+      TokenValue: 'forward-token-1',
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({ send });
 
-    await expect(service.listEcsClusters('default', 'ap-northeast-2')).resolves.toEqual([
-      {
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        clusterName: 'prod',
-        status: 'ACTIVE',
-        activeServicesCount: 4,
-        runningTasksCount: 6,
-        pendingTasksCount: 1,
-      },
-    ]);
-  });
-
-  it('loads an ECS cluster metadata snapshot without CloudWatch utilization data', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsClusterSnapshot: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          clusters: [
-            {
-              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-              clusterName: 'prod',
-              status: 'ACTIVE',
-              activeServicesCount: 2,
-              runningTasksCount: 3,
-              pendingTasksCount: 1,
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              status: 'ACTIVE',
-              desiredCount: 2,
-              runningCount: 2,
-              pendingCount: 0,
-              launchType: 'FARGATE',
-              loadBalancers: [{ targetGroupArn: 'arn:aws:elasticloadbalancing:ap-northeast-2:123456789012:targetgroup/api/abc' }],
-              serviceConnectConfiguration: { enabled: true },
-              taskDefinition: 'api:7',
-              deployments: [{ status: 'PRIMARY', rolloutState: 'COMPLETED' }],
-              events: [{ message: 'steady state' }],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskDefinition: {
-            revision: 7,
-            cpu: '512',
-            memory: '1024',
-            containerDefinitions: [
-              {
-                portMappings: [
-                  { containerPort: 9090, protocol: 'tcp' },
-                  { containerPort: 8080, protocol: 'tcp' },
-                  { containerPort: 8080, protocol: 'tcp' },
-                ],
-              },
-            ],
-          },
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await expect(
-      service.describeEcsClusterSnapshot(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      ),
-    ).resolves.toMatchObject({
+    await service.startSsmPortForwardSession({
       profileName: 'default',
       region: 'ap-northeast-2',
-      cluster: {
-        clusterName: 'prod',
-        status: 'ACTIVE',
+      targetId: 'i-abc',
+      targetKind: 'instance-port',
+      targetPort: 22,
+      bindPort: 0,
+    });
+
+    expect(send.mock.calls[0][0].input).toEqual({
+      Target: 'i-abc',
+      DocumentName: 'AWS-StartPortForwardingSession',
+      Parameters: {
+        portNumber: ['22'],
+        localPortNumber: ['0'],
       },
-      services: [
-        {
-          serviceName: 'api',
-          status: 'ACTIVE',
-          rolloutState: 'COMPLETED',
-          desiredCount: 2,
-          runningCount: 2,
-          pendingCount: 0,
-          launchType: 'FARGATE',
-          servicePorts: [
-            { port: 8080, protocol: 'tcp' },
-            { port: 9090, protocol: 'tcp' },
-          ],
-          exposureKinds: ['alb', 'service-connect'],
-          cpuUtilizationPercent: null,
-          memoryUtilizationPercent: null,
-          configuredCpu: '512',
-          configuredMemory: '1024',
-          taskDefinitionRevision: 7,
-          latestEventMessage: 'steady state',
-        },
-      ],
-      metricsWarning: null,
     });
   });
 
-  it('loads ECS cluster utilization separately from cluster metadata', async () => {
+  it('includes localPortNumber for remote-host forwarding', async () => {
     const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsClusterUtilization: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          MetricDataResults: [
-            {
-              Id: 'cpu0',
-              Timestamps: [
-                '2026-03-29T00:05:00.000Z',
-                '2026-03-29T00:04:00.000Z',
-              ],
-              Values: [23.4, 19.8],
-            },
-            {
-              Id: 'mem0',
-              Timestamps: [
-                '2026-03-29T00:05:00.000Z',
-                '2026-03-29T00:04:00.000Z',
-              ],
-              Values: [61.2, 58.4],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await expect(
-      service.describeEcsClusterUtilization(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      ),
-    ).resolves.toMatchObject({
-      warning: null,
-      services: [
-        {
-          serviceName: 'api',
-          cpuUtilizationPercent: 23.4,
-          memoryUtilizationPercent: 61.2,
-          cpuHistory: [
-            {
-              timestamp: '2026-03-29T00:04:00.000Z',
-              value: 19.8,
-            },
-            {
-              timestamp: '2026-03-29T00:05:00.000Z',
-              value: 23.4,
-            },
-          ],
-          memoryHistory: [
-            {
-              timestamp: '2026-03-29T00:04:00.000Z',
-              value: 58.4,
-            },
-            {
-              timestamp: '2026-03-29T00:05:00.000Z',
-              value: 61.2,
-            },
-          ],
-        },
-      ],
-    });
-  });
-
-  it('keeps the ECS utilization snapshot available when CloudWatch utilization lookup fails', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsClusterUtilization: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: '',
-        stderr: 'AccessDenied',
-        exitCode: 255,
-      });
-
-    await expect(
-      service.describeEcsClusterUtilization(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      ),
-    ).resolves.toMatchObject({
-      services: [
-        {
-          serviceName: 'api',
-          cpuUtilizationPercent: null,
-          memoryUtilizationPercent: null,
-          cpuHistory: [],
-          memoryHistory: [],
-        },
-      ],
-      warning:
-        '현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.',
-    });
-  });
-
-  it('reuses the cached ECS service list for consecutive utilization lookups within 5 minutes', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsClusterUtilization: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({ MetricDataResults: [] }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({ MetricDataResults: [] }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await service.describeEcsClusterUtilization(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-    );
-    await service.describeEcsClusterUtilization(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-    );
-
-    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
-    expect(commandNames.filter((name) => name === 'ecs list-services')).toHaveLength(1);
-    expect(commandNames.filter((name) => name === 'cloudwatch get-metric-data')).toHaveLength(2);
-  });
-
-  it('reuses the cached ECS task definition across snapshot, tunnel, and action-context reads', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsClusterSnapshot: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-      describeEcsTaskTunnelService: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-      describeEcsServiceActionContext: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          clusters: [
-            {
-              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-              clusterName: 'prod',
-              status: 'ACTIVE',
-              activeServicesCount: 1,
-              runningTasksCount: 1,
-              pendingTasksCount: 0,
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              status: 'ACTIVE',
-              desiredCount: 1,
-              runningCount: 1,
-              pendingCount: 0,
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-              deployments: [],
-              events: [],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskDefinition: {
-            revision: 42,
-            containerDefinitions: [
-              {
-                name: 'api',
-                portMappings: [{ containerPort: 8080, protocol: 'tcp' }],
-              },
-            ],
-          },
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              status: 'ACTIVE',
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-              deployments: [],
-              events: [],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          tasks: [
-            {
-              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-              lastStatus: 'RUNNING',
-              enableExecuteCommand: true,
-              containers: [
-                {
-                  name: 'api',
-                  lastStatus: 'RUNNING',
-                  runtimeId: 'runtime-1',
-                },
-              ],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await service.describeEcsClusterSnapshot(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-    );
-    await service.describeEcsTaskTunnelService(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-    await service.describeEcsServiceActionContext(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-
-    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
-    expect(commandNames.filter((name) => name === 'ecs describe-task-definition')).toHaveLength(1);
-  });
-
-  it('dedupes concurrent ECS action-context lookups for the same service', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsServiceActionContext: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockImplementation(
-      async (_executable: string, args: string[]) => {
-        const commandName = args.slice(0, 2).join(' ');
-        if (commandName === 'ecs describe-services') {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          return {
-            stdout: JSON.stringify({
-              services: [
-                {
-                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-                  serviceName: 'api',
-                  status: 'ACTIVE',
-                  taskDefinition:
-                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-                  deployments: [],
-                  events: [],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-task-definition') {
-          return {
-            stdout: JSON.stringify({
-              taskDefinition: {
-                revision: 42,
-                containerDefinitions: [{ name: 'api' }],
-              },
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs list-tasks') {
-          return {
-            stdout: JSON.stringify({
-              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-tasks') {
-          return {
-            stdout: JSON.stringify({
-              tasks: [
-                {
-                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-                  lastStatus: 'RUNNING',
-                  enableExecuteCommand: true,
-                  containers: [{ name: 'api', runtimeId: 'runtime-1' }],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        throw new Error(`Unexpected command: ${commandName}`);
-      },
-    );
-
-    const [first, second] = await Promise.all([
-      service.describeEcsServiceActionContext(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        'api',
-      ),
-      service.describeEcsServiceActionContext(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        'api',
-      ),
-    ]);
-
-    expect(first).toEqual(second);
-    expect(service.runResolvedCommand.mock.calls.map(getAwsCommandName)).toEqual([
-      'ecs describe-services',
-      'ecs describe-task-definition',
-      'ecs list-tasks',
-      'ecs describe-tasks',
-    ]);
-  });
-
-  it('reuses the cached ECS action context when loading service logs', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsServiceActionContext: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-      loadEcsServiceLogs: (input: {
+      getSsmClient: ReturnType<typeof vi.fn>;
+      startSsmPortForwardSession: (input: {
         profileName: string;
         region: string;
-        clusterArn: string;
-        serviceName: string;
-        taskArn?: string | null;
-        containerName?: string | null;
-        followCursor?: string | null;
-        startTime?: string | null;
-        endTime?: string | null;
-        limit?: number;
-      }) => Promise<Record<string, unknown>>;
+        targetId: string;
+        targetKind: string;
+        targetPort: number;
+        bindPort: number;
+        remoteHost?: string;
+      }) => Promise<{ sessionId: string; streamUrl: string; tokenValue: string }>;
     };
 
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockImplementation(
-      async (_executable: string, args: string[]) => {
-        const commandName = args.slice(0, 2).join(' ');
-        if (commandName === 'ecs describe-services') {
-          return {
-            stdout: JSON.stringify({
-              services: [
-                {
-                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-                  serviceName: 'api',
-                  status: 'ACTIVE',
-                  taskDefinition:
-                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-                  deployments: [],
-                  events: [],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-task-definition') {
-          return {
-            stdout: JSON.stringify({
-              taskDefinition: {
-                revision: 42,
-                containerDefinitions: [
-                  {
-                    name: 'api',
-                    logConfiguration: {
-                      logDriver: 'awslogs',
-                      options: {
-                        'awslogs-group': '/ecs/api',
-                        'awslogs-region': 'ap-northeast-2',
-                        'awslogs-stream-prefix': 'ecs',
-                      },
-                    },
-                  },
-                ],
-              },
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs list-tasks') {
-          return {
-            stdout: JSON.stringify({
-              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-tasks') {
-          return {
-            stdout: JSON.stringify({
-              tasks: [
-                {
-                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-                  lastStatus: 'RUNNING',
-                  enableExecuteCommand: true,
-                  containers: [{ name: 'api', runtimeId: 'runtime-1', lastStatus: 'RUNNING' }],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'logs filter-log-events') {
-          return {
-            stdout: JSON.stringify({ events: [] }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        throw new Error(`Unexpected command: ${commandName}`);
-      },
-    );
+    const send = vi.fn().mockResolvedValue({
+      SessionId: 'ssm-forward-2',
+      StreamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-forward-2',
+      TokenValue: 'forward-token-2',
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({ send });
 
-    await service.describeEcsServiceActionContext(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-    await service.loadEcsServiceLogs({
+    await service.startSsmPortForwardSession({
       profileName: 'default',
       region: 'ap-northeast-2',
-      clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      serviceName: 'api',
-      limit: 50,
+      targetId: 'i-abc',
+      targetKind: 'remote-host',
+      targetPort: 5432,
+      bindPort: 15432,
+      remoteHost: 'db.internal',
     });
 
-    const commandNames = service.runResolvedCommand.mock.calls.map(getAwsCommandName);
-    expect(commandNames.filter((name) => name === 'ecs describe-services')).toHaveLength(1);
-    expect(commandNames.filter((name) => name === 'ecs list-tasks')).toHaveLength(1);
-    expect(commandNames.filter((name) => name === 'ecs describe-tasks')).toHaveLength(1);
-    expect(commandNames.filter((name) => name === 'logs filter-log-events')).toHaveLength(1);
-  });
-
-  it('uses the cached action-context runtime ID before falling back to describe-tasks for ECS tunnel targets', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsServiceActionContext: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-      resolveEcsTaskTunnelTargetForTask: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        taskArn: string;
-        containerName: string;
-      }) => Promise<string>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockImplementation(
-      async (_executable: string, args: string[]) => {
-        const commandName = args.slice(0, 2).join(' ');
-        if (commandName === 'ecs describe-services') {
-          return {
-            stdout: JSON.stringify({
-              services: [
-                {
-                  serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-                  serviceName: 'api',
-                  status: 'ACTIVE',
-                  taskDefinition:
-                    'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-                  deployments: [],
-                  events: [],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-task-definition') {
-          return {
-            stdout: JSON.stringify({
-              taskDefinition: {
-                revision: 42,
-                containerDefinitions: [{ name: 'api' }],
-              },
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs list-tasks') {
-          return {
-            stdout: JSON.stringify({
-              taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        if (commandName === 'ecs describe-tasks') {
-          return {
-            stdout: JSON.stringify({
-              tasks: [
-                {
-                  taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-                  lastStatus: 'RUNNING',
-                  enableExecuteCommand: true,
-                  containers: [{ name: 'api', runtimeId: 'runtime-1' }],
-                },
-              ],
-            }),
-            stderr: '',
-            exitCode: 0,
-          };
-        }
-        throw new Error(`Unexpected command: ${commandName}`);
+    expect(send.mock.calls[0][0].input).toEqual({
+      Target: 'i-abc',
+      DocumentName: 'AWS-StartPortForwardingSessionToRemoteHost',
+      Parameters: {
+        portNumber: ['5432'],
+        localPortNumber: ['15432'],
+        host: ['db.internal'],
       },
-    );
-
-    await service.describeEcsServiceActionContext(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-
-    await expect(
-      service.resolveEcsTaskTunnelTargetForTask({
-        profileName: 'default',
-        region: 'ap-northeast-2',
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-        containerName: 'api',
-      }),
-    ).resolves.toBe('ecs:prod_task-1_runtime-1');
-
-    expect(
-      service.runResolvedCommand.mock.calls
-        .map(getAwsCommandName)
-        .filter((name) => name === 'ecs describe-tasks'),
-    ).toHaveLength(1);
-  });
-
-  it('falls back to describe-tasks for ECS tunnel targets when the action-context cache does not have a runtime ID', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      resolveEcsTaskTunnelTargetForTask: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        taskArn: string;
-        containerName: string;
-      }) => Promise<string>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        tasks: [
-          {
-            taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-            lastStatus: 'RUNNING',
-            enableExecuteCommand: true,
-            containers: [{ name: 'api', runtimeId: 'runtime-2' }],
-          },
-        ],
-      }),
-      stderr: '',
-      exitCode: 0,
-    });
-
-    await expect(
-      service.resolveEcsTaskTunnelTargetForTask({
-        profileName: 'default',
-        region: 'ap-northeast-2',
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-        containerName: 'api',
-      }),
-    ).resolves.toBe('ecs:prod_task-1_runtime-2');
-
-    expect(service.runResolvedCommand.mock.calls.map(getAwsCommandName)).toEqual([
-      'ecs describe-tasks',
-    ]);
-  });
-
-  it('refreshes the service-list cache and clears action-context cache after a fresh cluster snapshot', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsServiceActionContext: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-      describeEcsClusterSnapshot: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-      describeEcsClusterUtilization: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              status: 'ACTIVE',
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-              deployments: [],
-              events: [],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskDefinition: {
-            revision: 42,
-            containerDefinitions: [{ name: 'api' }],
-          },
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          tasks: [
-            {
-              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-              lastStatus: 'RUNNING',
-              enableExecuteCommand: true,
-              containers: [{ name: 'api', runtimeId: 'runtime-1' }],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          clusters: [
-            {
-              clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-              clusterName: 'prod',
-              status: 'ACTIVE',
-              activeServicesCount: 1,
-              runningTasksCount: 1,
-              pendingTasksCount: 0,
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/worker'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/worker',
-              serviceName: 'worker',
-              status: 'ACTIVE',
-              desiredCount: 1,
-              runningCount: 1,
-              pendingCount: 0,
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/worker:7',
-              deployments: [],
-              events: [],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskDefinition: {
-            revision: 7,
-            containerDefinitions: [{ name: 'worker' }],
-          },
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({ MetricDataResults: [] }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-              serviceName: 'api',
-              status: 'ACTIVE',
-              taskDefinition:
-                'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-              deployments: [],
-              events: [],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          tasks: [
-            {
-              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-2',
-              lastStatus: 'RUNNING',
-              enableExecuteCommand: true,
-              containers: [{ name: 'api', runtimeId: 'runtime-2' }],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await service.describeEcsServiceActionContext(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-    await service.describeEcsClusterSnapshot(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-    );
-    await expect(
-      service.describeEcsClusterUtilization(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      ),
-    ).resolves.toMatchObject({
-      services: [
-        {
-          serviceName: 'worker',
-        },
-      ],
-    });
-    await service.describeEcsServiceActionContext(
-      'default',
-      'ap-northeast-2',
-      'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      'api',
-    );
-
-    const commandCalls = service.runResolvedCommand.mock.calls;
-    expect(commandCalls.map(getAwsCommandName).filter((name) => name === 'ecs list-services')).toHaveLength(1);
-    expect(
-      commandCalls.filter((call) => {
-        const args = getAwsCommandArgs(call);
-        return getAwsCommandName(call) === 'ecs describe-services' && args.includes('api');
-      }),
-    ).toHaveLength(2);
-  });
-
-  it('lists ECS task tunnel services with basic runtime counts', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      listEcsTaskTunnelServices: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-      ) => Promise<Array<Record<string, unknown>>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          serviceArns: ['arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceName: 'api',
-              status: 'ACTIVE',
-              desiredCount: 2,
-              runningCount: 2,
-              pendingCount: 0,
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await expect(
-      service.listEcsTaskTunnelServices(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      ),
-    ).resolves.toEqual([
-      {
-        serviceName: 'api',
-        status: 'ACTIVE',
-        desiredCount: 2,
-        runningCount: 2,
-        pendingCount: 0,
-      },
-    ]);
-  });
-
-  it('loads ECS task tunnel container ports from task definition metadata', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      describeEcsTaskTunnelService: (
-        profileName: string,
-        region: string,
-        clusterArn: string,
-        serviceName: string,
-      ) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          services: [
-            {
-              serviceName: 'api',
-              taskDefinition: 'arn:aws:ecs:ap-northeast-2:123456789012:task-definition/api:42',
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskDefinition: {
-            containerDefinitions: [
-              {
-                name: 'web',
-                portMappings: [
-                  { containerPort: 8080, protocol: 'tcp' },
-                  { containerPort: 8080, protocol: 'tcp' },
-                ],
-              },
-              {
-                name: 'metrics',
-                portMappings: [{ containerPort: 9090, protocol: 'tcp' }],
-              },
-            ],
-          },
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await expect(
-      service.describeEcsTaskTunnelService(
-        'default',
-        'ap-northeast-2',
-        'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        'api',
-      ),
-    ).resolves.toEqual({
-      serviceName: 'api',
-      containers: [
-        {
-          containerName: 'metrics',
-          ports: [{ port: 9090, protocol: 'tcp' }],
-        },
-        {
-          containerName: 'web',
-          ports: [{ port: 8080, protocol: 'tcp' }],
-        },
-      ],
-    });
-  });
-
-  it('resolves an ECS task tunnel target string from the first running task', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      resolveEcsTaskTunnelTarget: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        serviceName: string;
-        containerName: string;
-      }) => Promise<string>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi
-      .fn()
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          taskArns: ['arn:aws:ecs:ap-northeast-2:123456789012:task/prod/abcdef1234567890'],
-        }),
-        stderr: '',
-        exitCode: 0,
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          tasks: [
-            {
-              taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/abcdef1234567890',
-              enableExecuteCommand: true,
-              containers: [
-                {
-                  name: 'web',
-                  runtimeId: 'runtime-123',
-                },
-              ],
-            },
-          ],
-        }),
-        stderr: '',
-        exitCode: 0,
-      });
-
-    await expect(
-      service.resolveEcsTaskTunnelTarget({
-        profileName: 'default',
-        region: 'ap-northeast-2',
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        serviceName: 'api',
-        containerName: 'web',
-      }),
-    ).resolves.toBe('ecs:prod_abcdef1234567890_runtime-123');
-  });
-
-  it('reports a clear error when there is no running ECS task for the service', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      resolveEcsTaskTunnelTarget: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        serviceName: string;
-        containerName: string;
-      }) => Promise<string>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({ taskArns: [] }),
-      stderr: '',
-      exitCode: 0,
-    });
-
-    await expect(
-      service.resolveEcsTaskTunnelTarget({
-        profileName: 'default',
-        region: 'ap-northeast-2',
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        serviceName: 'api',
-        containerName: 'web',
-      }),
-    ).rejects.toThrow('이 서비스에 실행 중인 task가 없습니다.');
-  });
-
-  it('loads ECS service logs from the last 30 minutes on the initial fetch', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-29T00:30:00.000Z'));
-
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      describeEcsServiceActionContext: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      loadEcsServiceLogs: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        serviceName: string;
-        taskArn?: string | null;
-        containerName?: string | null;
-        followCursor?: string | null;
-        startTime?: string | null;
-        endTime?: string | null;
-        limit?: number;
-      }) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.describeEcsServiceActionContext = vi.fn().mockResolvedValue({
-      serviceName: 'api',
-      serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-      taskDefinitionArn: 'api:7',
-      taskDefinitionRevision: 7,
-      containers: [
-        {
-          containerName: 'api',
-          ports: [{ port: 8080, protocol: 'tcp' }],
-          execEnabled: true,
-          logSupport: {
-            containerName: 'api',
-            supported: true,
-            reason: null,
-            logGroupName: '/ecs/api',
-            logRegion: 'ap-northeast-2',
-            logStreamPrefix: 'ecs',
-          },
-        },
-      ],
-      runningTasks: [
-        {
-          taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-          taskId: 'task-1',
-          lastStatus: 'RUNNING',
-          enableExecuteCommand: true,
-          containers: [
-            {
-              containerName: 'api',
-              lastStatus: 'RUNNING',
-              runtimeId: 'runtime-1',
-            },
-          ],
-        },
-      ],
-      deployments: [],
-      events: [],
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({ events: [] }),
-      stderr: '',
-      exitCode: 0,
-    });
-
-    await service.loadEcsServiceLogs({
-      profileName: 'default',
-      region: 'ap-northeast-2',
-      clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      serviceName: 'api',
-      limit: 200,
-    });
-
-    expect(service.runResolvedCommand).toHaveBeenCalledWith(
-      'aws',
-      expect.arrayContaining([
-        'logs',
-        'filter-log-events',
-        '--start-time',
-        String(Date.parse('2026-03-29T00:00:00.000Z')),
-      ]),
-      60_000,
-    );
-
-    vi.useRealTimers();
-  });
-
-  it('loads ECS service logs for a custom absolute range when start and end are provided', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      describeEcsServiceActionContext: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      loadEcsServiceLogs: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        serviceName: string;
-        taskArn?: string | null;
-        containerName?: string | null;
-        followCursor?: string | null;
-        startTime?: string | null;
-        endTime?: string | null;
-        limit?: number;
-      }) => Promise<Record<string, unknown>>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.describeEcsServiceActionContext = vi.fn().mockResolvedValue({
-      serviceName: 'api',
-      serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-      taskDefinitionArn: 'api:7',
-      taskDefinitionRevision: 7,
-      containers: [
-        {
-          containerName: 'api',
-          ports: [{ port: 8080, protocol: 'tcp' }],
-          execEnabled: true,
-          logSupport: {
-            containerName: 'api',
-            supported: true,
-            reason: null,
-            logGroupName: '/ecs/api',
-            logRegion: 'ap-northeast-2',
-            logStreamPrefix: 'ecs',
-          },
-        },
-      ],
-      runningTasks: [
-        {
-          taskArn: 'arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1',
-          taskId: 'task-1',
-          lastStatus: 'RUNNING',
-          enableExecuteCommand: true,
-          containers: [
-            {
-              containerName: 'api',
-              lastStatus: 'RUNNING',
-              runtimeId: 'runtime-1',
-            },
-          ],
-        },
-      ],
-      deployments: [],
-      events: [],
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({ events: [] }),
-      stderr: '',
-      exitCode: 0,
-    });
-
-    await service.loadEcsServiceLogs({
-      profileName: 'default',
-      region: 'ap-northeast-2',
-      clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-      serviceName: 'api',
-      startTime: '2026-03-28T15:00:00.000Z',
-      endTime: '2026-03-28T16:00:00.000Z',
-      limit: 200,
-    });
-
-    expect(service.runResolvedCommand).toHaveBeenCalledWith(
-      'aws',
-      expect.arrayContaining([
-        'logs',
-        'filter-log-events',
-        '--start-time',
-        String(Date.parse('2026-03-28T15:00:00.000Z')),
-        '--end-time',
-        String(Date.parse('2026-03-28T16:00:00.000Z')),
-      ]),
-      60_000,
-    );
-  });
-
-  it('preserves Korean message text when loading ECS service logs', async () => {
-    const service = new AwsService() as unknown as {
-      ensureAwsCliAvailable: () => Promise<void>;
-      describeEcsServiceActionContext: ReturnType<typeof vi.fn>;
-      runResolvedCommand: ReturnType<typeof vi.fn>;
-      loadEcsServiceLogs: (input: {
-        profileName: string;
-        region: string;
-        clusterArn: string;
-        serviceName: string;
-        taskArn?: string | null;
-        containerName?: string | null;
-        followCursor?: string | null;
-        startTime?: string | null;
-        endTime?: string | null;
-        limit?: number;
-      }) => Promise<{
-        entries: Array<{
-          message: string;
-        }>;
-      }>;
-    };
-
-    service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.describeEcsServiceActionContext = vi.fn().mockResolvedValue({
-      serviceName: 'api',
-      serviceArn: 'arn:aws:ecs:ap-northeast-2:123456789012:service/prod/api',
-      taskDefinitionArn: 'api:7',
-      taskDefinitionRevision: 7,
-      containers: [
-        {
-          containerName: 'api',
-          ports: [{ port: 8080, protocol: 'tcp' }],
-          execEnabled: true,
-          logSupport: {
-            containerName: 'api',
-            supported: true,
-            reason: null,
-            logGroupName: '/ecs/api',
-            logRegion: 'ap-northeast-2',
-            logStreamPrefix: 'ecs',
-          },
-        },
-      ],
-      runningTasks: [],
-      deployments: [],
-      events: [],
-    });
-    service.runResolvedCommand = vi.fn().mockResolvedValue({
-      stdout: JSON.stringify({
-        events: [
-          {
-            eventId: 'event-1',
-            timestamp: Date.parse('2026-03-29T00:05:00.000Z'),
-            message: '한글 로그',
-            logStreamName: 'ecs/api/task-1',
-          },
-        ],
-      }),
-      stderr: '',
-      exitCode: 0,
-    });
-
-    await expect(
-      service.loadEcsServiceLogs({
-        profileName: 'default',
-        region: 'ap-northeast-2',
-        clusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod',
-        serviceName: 'api',
-        limit: 50,
-      }),
-    ).resolves.toMatchObject({
-      entries: [{ message: '한글 로그' }],
     });
   });
 });

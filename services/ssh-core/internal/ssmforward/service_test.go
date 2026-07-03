@@ -3,6 +3,7 @@ package ssmforward
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 
 type fakeRunner struct {
 	message string
-	killed  bool
+	// killed is polled by the test goroutine while Stop() sets it from another,
+	// so it must be atomic.
+	killed  atomic.Bool
 	closed  bool
 	killErr error
 	waitFn  func() (sessionExit, error)
@@ -31,7 +34,7 @@ func (r *fakeRunner) Wait() (sessionExit, error) {
 }
 
 func (r *fakeRunner) Kill() error {
-	r.killed = true
+	r.killed.Store(true)
 	return r.killErr
 }
 
@@ -88,10 +91,10 @@ func TestServiceStopKillsRuntimeAndEmitsStopped(t *testing.T) {
 	}()
 
 	deadline := time.Now().Add(50 * time.Millisecond)
-	for !runner.killed && time.Now().Before(deadline) {
+	for !runner.killed.Load() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !runner.killed {
+	if !runner.killed.Load() {
 		t.Fatal("runner.killed = false, want true")
 	}
 	if len(emitted) != 1 || emitted[0].Type != protocol.EventPortForwardStarted {

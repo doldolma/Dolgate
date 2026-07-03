@@ -4,15 +4,46 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fakeAwsSsoAPI mirrors the canned responses of the old fake aws CLI fixture
+// so the manager's flow logic is tested without any AWS traffic.
+type fakeAwsSsoAPI struct{}
+
+func (fakeAwsSsoAPI) RegisterClient(context.Context, awsSsoMobileLoginStartRequest) (*awsSsoRegisterClientResponse, error) {
+	return &awsSsoRegisterClientResponse{ClientID: "client-1", ClientSecret: "secret-1"}, nil
+}
+
+func (fakeAwsSsoAPI) CreateAuthorizationCodeToken(context.Context, string, string, string, string, string, string) (*awsSsoCreateTokenResponse, error) {
+	return &awsSsoCreateTokenResponse{
+		AccessToken:  "access-token-1",
+		RefreshToken: "refresh-token-1",
+		ExpiresIn:    3600,
+	}, nil
+}
+
+func (fakeAwsSsoAPI) CreateRefreshToken(context.Context, string, string, string, string) (*awsSsoCreateTokenResponse, error) {
+	return &awsSsoCreateTokenResponse{
+		AccessToken:  "access-token-2",
+		RefreshToken: "refresh-token-2",
+		ExpiresIn:    3600,
+	}, nil
+}
+
+func (fakeAwsSsoAPI) GetRoleCredential(context.Context, string, string, string, string) (*awsTemporaryCredentialPayload, error) {
+	return &awsTemporaryCredentialPayload{
+		AccessKeyID:     "AKIASSO",
+		SecretAccessKey: "sso-secret",
+		SessionToken:    "sso-token",
+		ExpiresAt:       time.UnixMilli(4102444800000).UTC().Format(time.RFC3339),
+	}, nil
+}
 
 func TestAwsSsoMobileManagerStartAndHandoff(t *testing.T) {
 	t.Parallel()
 
-	awsPath := writeFakeAWSCLI(t)
-	manager := NewAwsSsoMobileManager(AwsSsmRuntime{
-		AWSPath: awsPath,
-	})
+	manager := newAwsSsoMobileManagerWithAPI(fakeAwsSsoAPI{})
 	request := awsSsoMobileLoginStartRequest{
 		TargetProfileName:        "target-role",
 		SourceProfileName:        "source-sso",
@@ -74,10 +105,7 @@ func TestAwsSsoMobileManagerStartAndHandoff(t *testing.T) {
 func TestAwsSsoMobileManagerCancel(t *testing.T) {
 	t.Parallel()
 
-	awsPath := writeFakeAWSCLI(t)
-	manager := NewAwsSsoMobileManager(AwsSsmRuntime{
-		AWSPath: awsPath,
-	})
+	manager := newAwsSsoMobileManagerWithAPI(fakeAwsSsoAPI{})
 	request := awsSsoMobileLoginStartRequest{
 		TargetProfileName:        "target-role",
 		SourceProfileName:        "source-sso",
@@ -104,10 +132,4 @@ func TestAwsSsoMobileManagerCancel(t *testing.T) {
 	if handoffResponse.Status != "cancelled" {
 		t.Fatalf("Status().Status = %q, want cancelled", handoffResponse.Status)
 	}
-}
-
-func writeFakeAWSCLI(t *testing.T) string {
-	t.Helper()
-
-	return buildFakeAwsCLI(t, t.TempDir(), "aws")
 }

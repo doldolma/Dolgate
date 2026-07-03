@@ -55,28 +55,10 @@ func (state *awsSsoMobileRuntimeState) browserFlowSupported() bool {
 	return state.manager != nil || state.runtime.AwsSsoBrowserFlowSupported
 }
 
-func (state *awsSsoMobileRuntimeState) managerForStart() (*AwsSsoMobileManager, AwsSsmRuntime) {
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	if state.manager != nil {
-		return state.manager, state.runtime
-	}
-	if !state.runtime.AwsSsoBrowserFlowRecoverable {
-		return nil, state.runtime
-	}
-
-	nextRuntime := DetectAwsSsmRuntime()
-	state.runtime = nextRuntime
-	if !nextRuntime.AwsSsoBrowserFlowSupported {
-		return nil, nextRuntime
-	}
-
-	state.manager = NewAwsSsoMobileManager(nextRuntime)
-	log.Printf("AWS SSO browser flow recovered on request (aws=%s)", nextRuntime.AWSPath)
-	return state.manager, state.runtime
-}
-
+// currentManager returns the configured SSO manager. The browser flow runs on
+// the AWS SDK and no longer depends on a CLI probe, so the old
+// recover-on-request path (re-detecting binaries at request time) is gone; a
+// nil manager only occurs in tests that explicitly configure the flow off.
 func (state *awsSsoMobileRuntimeState) currentManager() (*AwsSsoMobileManager, AwsSsmRuntime) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -843,7 +825,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	awsSsoGroup := router.Group("/api/aws-sso/mobile")
 	awsSsoGroup.Use(authMiddleware(authService))
 	awsSsoGroup.POST("/start", func(ctx *gin.Context) {
-		awsSsoMobile, awsSsmRuntime := awsSsoMobileRuntime.managerForStart()
+		awsSsoMobile, awsSsmRuntime := awsSsoMobileRuntime.currentManager()
 		if awsSsoMobile == nil {
 			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": awsSsoBrowserUnavailableMessage(awsSsmRuntime)})
 			return

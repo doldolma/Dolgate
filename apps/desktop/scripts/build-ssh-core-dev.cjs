@@ -208,12 +208,53 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquireBuildLock(lockPath, { timeoutMs = 120000, pollMs = 200 } = {}) {
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    // Signal 0 does not deliver a signal; it only runs the kernel's existence
+    // and permission checks, so it is the standard liveness probe.
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // ESRCH => no such process (dead). EPERM => alive but owned by another user.
+    return error?.code === "EPERM";
+  }
+}
+
+async function readLockOwnerPid(lockPath) {
+  try {
+    const raw = await fs.readFile(lockPath, "utf8");
+    const pid = Number(JSON.parse(raw)?.pid);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    // Missing, empty, or mid-write lock file: owner is indeterminate.
+    return null;
+  }
+}
+
+async function acquireBuildLock(
+  lockPath,
+  {
+    timeoutMs = 120000,
+    pollMs = 200,
+    pid = process.pid,
+    isProcessAliveImpl = isProcessAlive,
+    logger = console.log,
+  } = {},
+) {
   const startedAt = Date.now();
+  let announcedWait = false;
 
   while (true) {
     try {
       const handle = await fs.open(lockPath, "wx");
+      // Record the owner so a future run can tell an active build apart from a
+      // stale lock left behind by an interrupted one (Ctrl+C, crash).
+      await handle.writeFile(
+        `${JSON.stringify({ pid, createdAt: new Date().toISOString() })}\n`,
+      );
       return {
         async release() {
           await handle.close().catch(() => {});
@@ -224,9 +265,29 @@ async function acquireBuildLock(lockPath, { timeoutMs = 120000, pollMs = 200 } =
       if (!error || error.code !== "EEXIST") {
         throw error;
       }
+
+      // Reclaim a lock whose owning process is gone; otherwise a leftover lock
+      // would make every subsequent run block silently until the timeout.
+      const ownerPid = await readLockOwnerPid(lockPath);
+      if (ownerPid !== null && ownerPid !== pid && !isProcessAliveImpl(ownerPid)) {
+        logger(`Removing stale ssh-core dev build lock from dead PID ${ownerPid}.`);
+        await fs.rm(lockPath, { force: true }).catch(() => {});
+        continue;
+      }
+
       if (Date.now() - startedAt > timeoutMs) {
         throw new Error("Timed out waiting for ssh-core dev build lock.");
       }
+
+      if (!announcedWait) {
+        announcedWait = true;
+        logger(
+          ownerPid !== null
+            ? `Waiting for ssh-core dev build lock held by PID ${ownerPid}…`
+            : "Waiting for ssh-core dev build lock…",
+        );
+      }
+
       await sleep(pollMs);
     }
   }
@@ -336,7 +397,9 @@ module.exports = {
   getGoVersion,
   getRequiredOutputNames,
   getTargetRoot,
+  isProcessAlive,
   outputsExist,
+  readLockOwnerPid,
   resolveDevBuildTarget,
   resolveRequiredOutputs,
 };

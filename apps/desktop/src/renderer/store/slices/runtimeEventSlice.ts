@@ -200,12 +200,21 @@ function shouldAutoReconnectSession(
     | undefined;
   const message = String(payload?.message ?? "");
 
-  // aws-ec2(SSM): reason discriminator가 없으므로 SSM 종료 코드로 판별한다.
+  // aws-ec2(SSM): 서버 프록시 세션은 core-manager가 reason 구분자를 직접
+  // 실어준다(사용자 X 닫기 = "client" → 재연결 금지, 웹소켓 단절 = "transport").
+  // 직결 SSM 세션은 reason이 없으므로 기존대로 SSM 종료 코드로 판별한다.
   if (host.kind === "aws-ec2") {
     if (event.type === "error") {
       return classifyReconnect(message) !== "permanent";
     }
     if (event.type === "closed") {
+      const reason = String(payload?.reason ?? "");
+      if (reason === "client" || reason === "remote-exit") {
+        return false; // 사용자 요청 종료/원격 정상 종료 → 되살리지 않음
+      }
+      if (reason === "transport" || reason === "keepalive") {
+        return true; // 프록시 연결 단절 → 재연결
+      }
       const exitMatch = AWS_SSM_SESSION_EXIT_PATTERN.exec(message);
       if (exitMatch) {
         // code 0 = 사용자 정상 종료 → 재연결 안 함. 비정상 종료 = 드롭 → 재연결.

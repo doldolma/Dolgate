@@ -493,9 +493,10 @@ func (runtime *Runtime) StopAutocomplete(sessionID string) {
 const shellIntegrationHandshakeTimeout = 8 * time.Second
 
 // installShellIntegration injects the OSC 133 hooks into the interactive shell
-// once per session (idempotent across refreshes) and schedules a flush so a
-// failed handshake never strands output. Injection runs before the snapshot
-// probe so the prompt marker arrives ahead of the probe response.
+// once per session (idempotent across refreshes). Managers that own delayed or
+// transport-specific handshakes schedule their own flush; local sessions still
+// use the runtime fallback timer. Injection runs before the snapshot probe so
+// the prompt marker arrives ahead of the probe response.
 func (runtime *Runtime) installShellIntegration(sessionID string) error {
 	runtime.autocompleteMu.Lock()
 	if runtime.shellIntegrationInstalled[sessionID] {
@@ -512,12 +513,12 @@ func (runtime *Runtime) installShellIntegration(sessionID string) error {
 		// 1.5s 뒤 flush 한다(여기서 별도 AfterFunc 불필요).
 		err = runtime.tmux.InstallShellIntegration(sessionID)
 	case runtime.aws.HasSession(sessionID):
+		// AWS manager arms/writes/flushes the in-band handshake itself. Runtime
+		// must not start a second flush timer here: SSM can delay the actual
+		// init write until after AWS shell profile/run-as settles, and an early
+		// runtime flush would release the raw first prompt before the integrated
+		// prompt arrives.
 		err = runtime.aws.InstallShellIntegration(sessionID)
-		if err == nil {
-			time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
-				runtime.aws.FlushShellIntegration(sessionID)
-			})
-		}
 	case runtime.local.HasSession(sessionID):
 		err = runtime.local.InstallShellIntegration(sessionID)
 		if err == nil {

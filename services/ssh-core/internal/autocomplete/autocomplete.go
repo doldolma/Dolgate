@@ -40,6 +40,11 @@ func CapOutput(data []byte) (string, bool) {
 // installed successfully (the handshake) and marks a prompt boundary.
 const PromptStartMarker = "\x1b]133;A\x07"
 
+// PromptInputStartMarker is the OSC 133;B sequence appended to PS1 by the shell
+// integration. It terminates the visible prompt redraw that follows a hidden
+// in-band probe.
+const PromptInputStartMarker = "\x1b]133;B\x07"
+
 // maxHandshakeBytes bounds how much output the handshake filter buffers while
 // waiting for the first prompt marker before giving up and flushing.
 const maxHandshakeBytes = 64 * 1024
@@ -418,13 +423,20 @@ func (h *Handshake) Arm(preserveMotd bool) {
 // Filter returns the bytes to forward to the renderer, suppressing the injected
 // command's echo while armed and not yet completed.
 func (h *Handshake) Filter(chunk []byte) []byte {
+	forward, _ := h.FilterWithStatus(chunk)
+	return forward
+}
+
+// FilterWithStatus is like Filter, and also reports whether this chunk
+// completed the OSC 133;A handshake.
+func (h *Handshake) FilterWithStatus(chunk []byte) ([]byte, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.filter == nil {
-		return chunk
+		return chunk, false
 	}
-	forward, _ := h.filter.Filter(chunk)
-	return forward
+	forward, handshakeDone := h.filter.Filter(chunk)
+	return forward, handshakeDone
 }
 
 // Flush releases any buffered output (handshake-timeout path) so nothing is
