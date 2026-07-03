@@ -4,6 +4,7 @@ import type {
   HostSecretInput,
   SftpEndpointSummary,
   SftpPaneId,
+  TransferJob,
   TransferStartInput,
 } from "@shared";
 import type { SftpPaneState, TerminalUploadResult } from "../types";
@@ -32,6 +33,50 @@ type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
 
 export { upsertTransferJob } from "../utils";
+
+// 터미널 업로드 전용 SFTP 연결은 재사용을 위해 호스트별로 캐시되지만, 어떤 UI에도
+// 보이지 않아 사용자가 닫을 수 없다. 마지막 사용 후 이 시간이 지나면 자동으로 닫는다.
+export const TERMINAL_UPLOAD_IDLE_TIMEOUT_MS = 5 * 60_000;
+
+const terminalUploadIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const terminalUploadJobIdsByHost = new Map<string, Set<string>>();
+
+const ACTIVE_TRANSFER_STATUSES = new Set<TransferJob["status"]>([
+  "queued",
+  "running",
+  "paused",
+  "cancelling",
+]);
+
+export function registerTerminalUploadJob(hostId: string, jobId: string): void {
+  let jobIds = terminalUploadJobIdsByHost.get(hostId);
+  if (!jobIds) {
+    jobIds = new Set();
+    terminalUploadJobIdsByHost.set(hostId, jobIds);
+  }
+  jobIds.add(jobId);
+}
+
+function clearTerminalUploadIdleTracking(hostId: string): void {
+  const timer = terminalUploadIdleTimers.get(hostId);
+  if (timer) {
+    clearTimeout(timer);
+  }
+  terminalUploadIdleTimers.delete(hostId);
+  terminalUploadJobIdsByHost.delete(hostId);
+}
+
+// 스냅샷 리셋처럼 캐시 참조를 통째로 버리는 경로에서 호출한다. 참조만 버리면
+// 연결이 고아(재사용 불가 + 서버 타임아웃까지 잔존)가 되므로 실제로 닫는다.
+export function releaseTerminalUploadEndpoints(
+  api: SliceDeps["api"],
+  endpoints: Record<string, SftpEndpointSummary>,
+): void {
+  for (const [hostId, endpoint] of Object.entries(endpoints)) {
+    clearTerminalUploadIdleTracking(hostId);
+    void api.sftp.disconnect(endpoint.id).catch(() => undefined);
+  }
+}
 
 function normalizeDroppedPathForComparison(targetPath: string): string {
   return targetPath.replace(/[\\/]+$/, "").normalize("NFC");
@@ -469,8 +514,10 @@ export function createSftpServices(deps: SliceDeps) {
     if (cached) {
       try {
         await api.sftp.list({ endpointId: cached.id, path: cached.path });
+        scheduleTerminalUploadIdleDisconnect(set, hostId);
         return cached;
       } catch {
+        clearTerminalUploadIdleTracking(hostId);
         set((current) => {
           const next = { ...current.sftp.terminalUploadEndpoints };
           delete next[hostId];
@@ -499,10 +546,59 @@ export function createSftpServices(deps: SliceDeps) {
           },
         },
       }));
+      scheduleTerminalUploadIdleDisconnect(set, hostId);
       return endpoint;
     } finally {
       unsubscribeProgress?.();
     }
+  };
+
+  const hasActiveTerminalUpload = (hostId: string): boolean => {
+    const jobIds = terminalUploadJobIdsByHost.get(hostId);
+    if (!jobIds || jobIds.size === 0) {
+      return false;
+    }
+    const activeIds = new Set(
+      get()
+        .sftp.transfers.filter((job) => ACTIVE_TRANSFER_STATUSES.has(job.status))
+        .map((job) => job.id),
+    );
+    for (const jobId of [...jobIds]) {
+      if (!activeIds.has(jobId)) {
+        jobIds.delete(jobId);
+      }
+    }
+    return jobIds.size > 0;
+  };
+
+  const scheduleTerminalUploadIdleDisconnect = (
+    set: StoreSetter,
+    hostId: string,
+  ): void => {
+    const existing = terminalUploadIdleTimers.get(hostId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    const timer = setTimeout(() => {
+      terminalUploadIdleTimers.delete(hostId);
+      const cached = get().sftp.terminalUploadEndpoints[hostId];
+      if (!cached) {
+        terminalUploadJobIdsByHost.delete(hostId);
+        return;
+      }
+      if (hasActiveTerminalUpload(hostId)) {
+        scheduleTerminalUploadIdleDisconnect(set, hostId);
+        return;
+      }
+      terminalUploadJobIdsByHost.delete(hostId);
+      set((current) => {
+        const next = { ...current.sftp.terminalUploadEndpoints };
+        delete next[hostId];
+        return { sftp: { ...current.sftp, terminalUploadEndpoints: next } };
+      });
+      void api.sftp.disconnect(cached.id).catch(() => undefined);
+    }, TERMINAL_UPLOAD_IDLE_TIMEOUT_MS);
+    terminalUploadIdleTimers.set(hostId, timer);
   };
 
   // 터미널 패널에 드롭한 로컬 파일을 호스트의 targetPath(없으면 홈)로 SFTP 업로드한다.
@@ -581,6 +677,8 @@ export function createSftpServices(deps: SliceDeps) {
 
     const job = await api.sftp.startTransfer(transferInput);
     markTerminalUploadJob(job.id);
+    registerTerminalUploadJob(input.hostId, job.id);
+    scheduleTerminalUploadIdleDisconnect(set, input.hostId);
     set((state) => ({
       sftp: {
         ...state.sftp,

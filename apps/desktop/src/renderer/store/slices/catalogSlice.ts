@@ -142,6 +142,7 @@ import {
   toTrustInput,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
+import { releaseTerminalUploadEndpoints } from "../services/sftp";
 
 export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
   const { api, set, get } = deps;
@@ -308,6 +309,9 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               api.bootstrap.getInitialSnapshot(),
               api.snippets.list(),
             ]);
+            // 아래 set이 terminalUploadEndpoints 참조를 통째로 버리므로, 그 전에
+            // 실제 연결을 닫아 고아 커넥션을 막는다 (첫 부트스트랩에서는 no-op).
+            releaseTerminalUploadEndpoints(api, get().sftp.terminalUploadEndpoints);
             set({
               hosts: sortHosts(snapshot.hosts),
               groups: sortGroups(snapshot.groups),
