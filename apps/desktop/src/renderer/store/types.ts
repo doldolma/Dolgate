@@ -416,6 +416,13 @@ export interface PendingHostKeyPrompt {
         secrets?: HostSecretInput;
       }
     | {
+        kind: "terminalUpload";
+        hostId: string;
+        endpointId: string;
+        targetPath: string | null;
+        localPaths: string[];
+      }
+    | {
         kind: "portForward";
         ruleId: string;
         hostId: string;
@@ -579,7 +586,11 @@ export type TerminalUploadResult =
     }
   | {
       ok: false;
-      reason: "unsupported" | "connect-failed" | "no-items";
+      reason:
+        | "unsupported"
+        | "connect-failed"
+        | "no-items"
+        | "awaiting-host-trust";
       message?: string;
     };
 

@@ -669,6 +669,9 @@ describe("ContainersWorkspace", () => {
 
     expect(screen.getByText("현재 버퍼에서 1건 일치")).toBeInTheDocument();
     expect(screen.getByText("error happened")).toBeInTheDocument();
+    expect(screen.getByTestId("containers-logs-output")).toHaveClass(
+      "select-text",
+    );
     expect(screen.queryByText("broker connected")).not.toBeInTheDocument();
     expect(
       screen
@@ -1230,15 +1233,56 @@ describe("ContainersWorkspace", () => {
 
     render(<ContainersWorkspace {...createProps(tab)} host={host} />);
 
-    const timestamp = screen.getByText(
-      formatContainerLogTimestamp("2025-10-15T08:55:31.000000000Z") ?? "",
-    );
+    const timestampLabel =
+      formatContainerLogTimestamp("2025-10-15T08:55:31.000000000Z") ?? "";
+    const timestamp = screen.getByText(timestampLabel);
     expect(timestamp).toHaveAttribute(
       "title",
       "2025-10-15T08:55:31.000000000Z",
     );
     expect(screen.getByText("broker connected")).toBeInTheDocument();
     expect(screen.getByText("raw fallback log line")).toBeInTheDocument();
+  });
+
+  it("toggles container log timestamp display without hiding messages", () => {
+    const host = createHost();
+    const rawTimestamp = "2025-10-15T08:55:31.000000000Z";
+    const timestampLabel = formatContainerLogTimestamp(rawTimestamp) ?? "";
+    const tab = {
+      ...createTab(),
+      activePanel: "logs" as const,
+      logs: {
+        hostId: "host-1",
+        containerId: "container-1",
+        runtime: "docker" as const,
+        lines: [
+          `${rawTimestamp} broker connected`,
+          `${rawTimestamp} 2025-10-15 app timestamp remains`,
+        ],
+        cursor: rawTimestamp,
+      },
+      logsState: "ready" as const,
+    };
+
+    render(<ContainersWorkspace {...createProps(tab)} host={host} />);
+
+    const timestampSwitch = screen.getByRole("switch", { name: "시간 표시" });
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByText(timestampLabel)).toHaveLength(2);
+
+    fireEvent.click(timestampSwitch);
+
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByText(timestampLabel)).not.toBeInTheDocument();
+    expect(screen.getByText("broker connected")).toBeInTheDocument();
+    expect(
+      screen.getByText("2025-10-15 app timestamp remains"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(timestampSwitch);
+
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByText(timestampLabel)).toHaveLength(2);
   });
 
   it("renders ANSI-colored log messages as styled spans", () => {

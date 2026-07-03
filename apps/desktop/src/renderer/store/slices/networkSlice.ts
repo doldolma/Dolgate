@@ -162,9 +162,8 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     clearContainerTabConnectionOverlay,
     startPendingContainerShellConnect,
     loadContainersList,
-  } =
-    containersServices;
-  const { connectTrustedHostPane } = sftpServices;
+  } = containersServices;
+  const { connectTrustedHostPane, uploadFilesToHostPath } = sftpServices;
 
   return {
     portForwards: [],
@@ -357,6 +356,16 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                 hostId: pending.action.hostId,
                 endpointId: pending.action.endpointId,
                 secrets: pending.action.secrets,
+              });
+              return;
+            }
+            if (pending.action.kind === "terminalUpload") {
+              await uploadFilesToHostPath(set, get, {
+                hostId: pending.action.hostId,
+                targetPath: pending.action.targetPath,
+                localPaths: pending.action.localPaths,
+                endpointId: pending.action.endpointId,
+                skipHostTrustPrompt: true,
               });
               return;
             }

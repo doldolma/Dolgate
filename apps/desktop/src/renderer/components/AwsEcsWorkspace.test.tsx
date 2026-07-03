@@ -758,6 +758,68 @@ describe("AwsEcsWorkspace", () => {
       "bg-[var(--selection-tint)]",
     );
     expect(await screen.findByText("hello from task-1")).toBeInTheDocument();
+    expect(screen.getByTestId("ecs-logs-output")).toHaveClass("select-text");
+  });
+
+  it("toggles ECS log timestamp display without hiding prefixes or find highlights", async () => {
+    const timestamp = "2026-03-29T00:11:00.000Z";
+    const { container } = render(
+      <AwsEcsWorkspace
+        host={createHost()}
+        tab={createTab(createSnapshot(), {
+          ecsActivePanel: "logs",
+          ecsLogsByServiceName: {
+            worker: {
+              ...createEmptyEcsServiceLogsState(),
+              snapshot: createLogsSnapshot({
+                entries: [
+                  {
+                    id: "log-1",
+                    timestamp,
+                    message: "worker completed",
+                    taskId: "task-1",
+                    containerName: "worker",
+                  },
+                ],
+              }),
+            },
+          },
+        })}
+        isActive={true}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefreshUtilization={vi.fn().mockResolvedValue(undefined)}
+        onOpenEcsExecShell={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const logsOutput = screen.getByTestId("ecs-logs-output");
+    const timestampSwitch = screen.getByRole("switch", { name: "시간 표시" });
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "true");
+    expect(within(logsOutput).getByTitle(timestamp)).toBeInTheDocument();
+
+    fireEvent.click(timestampSwitch);
+
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "false");
+    expect(within(logsOutput).queryByTitle(timestamp)).not.toBeInTheDocument();
+    expect(within(logsOutput).getByText("worker completed")).toBeInTheDocument();
+    expect(
+      within(logsOutput).getByText(
+        (content) => content.includes("worker") && content.includes("task-1"),
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const localFindInput = await screen.findByLabelText("현재 로그에서 찾기");
+    fireEvent.change(localFindInput, { target: { value: "worker" } });
+
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    const marks = container.querySelectorAll('[data-local-find-match="true"]');
+    expect(marks).toHaveLength(2);
+
+    fireEvent.click(timestampSwitch);
+
+    expect(timestampSwitch).toHaveAttribute("aria-checked", "true");
+    expect(within(logsOutput).getByTitle(timestamp)).toBeInTheDocument();
   });
 
   it("opens local Ctrl+F find over rendered ECS logs without changing the log filter", async () => {

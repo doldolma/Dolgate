@@ -913,6 +913,129 @@ describe("createAppStore sftp", () => {
     expect(api.sftp.connect).toHaveBeenCalled();
   });
 
+  it("prompts for AWS host-key trust before terminal SFTP upload and resumes after trust", async () => {
+    const api = createMockApi();
+    const awsHost = createAwsEc2Host();
+    const droppedPath = "/Users/tester/Drop/app.log";
+    api.hosts.list = vi.fn().mockResolvedValue([awsHost]);
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      ...createUntrustedHostProbe(),
+      hostId: awsHost.id,
+      hostLabel: awsHost.label,
+      host: "aws-ssm:default:ap-northeast-2:i-aws",
+      targetDescription: "AWS SSM - i-aws",
+    });
+    api.files.getParentPath = vi.fn().mockResolvedValue("/Users/tester/Drop");
+    api.files.list = vi.fn().mockResolvedValue({
+      path: "/Users/tester/Drop",
+      entries: [
+        {
+          name: "app.log",
+          path: droppedPath,
+          isDirectory: false,
+          size: 42,
+          mtime: "2025-01-01T00:00:00.000Z",
+          kind: "file",
+          permissions: "rw-r--r--",
+        },
+      ],
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const result = await store.getState().uploadLocalFilesToHost({
+      hostId: awsHost.id,
+      targetPath: "/srv/app",
+      localPaths: [droppedPath],
+    });
+
+    const probeInput = vi.mocked(api.knownHosts.probeHost).mock.calls[0]?.[0];
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "awaiting-host-trust",
+    });
+    expect(probeInput).toMatchObject({
+      hostId: awsHost.id,
+      endpointId: expect.any(String),
+    });
+    expect(store.getState().pendingHostKeyPrompt).toMatchObject({
+      action: {
+        kind: "terminalUpload",
+        hostId: awsHost.id,
+        endpointId: probeInput?.endpointId,
+        targetPath: "/srv/app",
+        localPaths: [droppedPath],
+      },
+    });
+    expect(api.sftp.connect).not.toHaveBeenCalled();
+    expect(api.sftp.startTransfer).not.toHaveBeenCalled();
+
+    await store.getState().acceptPendingHostKeyPrompt("trust");
+
+    expect(api.knownHosts.trust).toHaveBeenCalled();
+    expect(api.knownHosts.probeHost).toHaveBeenCalledTimes(1);
+    expect(api.sftp.connect).toHaveBeenCalledWith({
+      hostId: awsHost.id,
+      endpointId: probeInput?.endpointId,
+    });
+    expect(api.sftp.startTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          kind: "remote",
+          endpointId: probeInput?.endpointId,
+          path: "/srv/app",
+        },
+        items: [
+          expect.objectContaining({
+            name: "app.log",
+            path: droppedPath,
+          }),
+        ],
+      }),
+    );
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(store.getState().sftp.transfers).toEqual([
+      expect.objectContaining({ id: "job-1" }),
+    ]);
+  });
+
+  it("does not start terminal SFTP upload when AWS host-key trust is dismissed", async () => {
+    const api = createMockApi();
+    const awsHost = createAwsEc2Host();
+    api.hosts.list = vi.fn().mockResolvedValue([awsHost]);
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      ...createUntrustedHostProbe(),
+      hostId: awsHost.id,
+      hostLabel: awsHost.label,
+      host: "aws-ssm:default:ap-northeast-2:i-aws",
+      targetDescription: "AWS SSM - i-aws",
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const result = await store.getState().uploadLocalFilesToHost({
+      hostId: awsHost.id,
+      targetPath: "/srv/app",
+      localPaths: ["/Users/tester/Drop/app.log"],
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "awaiting-host-trust",
+    });
+    expect(store.getState().pendingHostKeyPrompt?.action.kind).toBe(
+      "terminalUpload",
+    );
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.sftp.connect).not.toHaveBeenCalled();
+    expect(api.sftp.startTransfer).not.toHaveBeenCalled();
+  });
+
   it("updates the SFTP pane progress from endpoint-scoped AWS progress events", async () => {
     const store = createAppStore(createMockApi());
     await store.getState().bootstrap();

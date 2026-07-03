@@ -145,7 +145,7 @@ const ecsSectionCardClass =
 const ecsEmptyDetailClass =
   "rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const ecsLogsOutputClass =
-  "grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
+  "select-text grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
 const ecsLogsOverlayChipClass =
   "pointer-events-none absolute left-[1rem] right-[1rem] top-[1rem] z-[2] flex items-center justify-center gap-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_28%,var(--border)_72%)] bg-[color-mix(in_srgb,var(--surface-strong)_76%,var(--accent-strong)_24%)] px-[0.9rem] py-[0.4rem] text-[0.82rem] font-semibold text-[rgba(243,247,255,0.98)] shadow-[var(--shadow)] backdrop-blur-[10px]";
 const ecsFactsGridClass =
@@ -743,6 +743,7 @@ export function AwsEcsWorkspace({
     createEmptyShellPickerState,
   );
   const [logsFocusMode, setLogsFocusMode] = useState(false);
+  const [logsTimestampsVisible, setLogsTimestampsVisible] = useState(true);
   const [localFindOpen, setLocalFindOpen] = useState(false);
   const [localFindQuery, setLocalFindQuery] = useState("");
   const [activeLocalFindMatchIndex, setActiveLocalFindMatchIndex] = useState(0);
@@ -1407,7 +1408,9 @@ export function AwsEcsWorkspace({
   const ecsLocalFind = useMemo(() => {
     let nextMatchIndex = 0;
     const rows = filteredLogs.map((entry) => {
-      const timestampText = formatLoadedAt(entry.timestamp);
+      const timestampText = logsTimestampsVisible
+        ? formatLoadedAt(entry.timestamp)
+        : "";
       const prefixText = getLogEntryRenderedPrefix(entry);
       const timestampMatchCount = trimmedLocalFindQuery
         ? countLocalFindMatches(timestampText, trimmedLocalFindQuery)
@@ -1436,7 +1439,7 @@ export function AwsEcsWorkspace({
       rows,
       matchCount: nextMatchIndex,
     };
-  }, [filteredLogs, trimmedLocalFindQuery]);
+  }, [filteredLogs, logsTimestampsVisible, trimmedLocalFindQuery]);
 
   const moveLocalFindMatch = useCallback(
     (direction: 1 | -1) => {
@@ -2450,6 +2453,14 @@ export function AwsEcsWorkspace({
                             }}
                             disabled={logsState.loading}
                           />
+                          <ToggleSwitch
+                            checked={logsTimestampsVisible}
+                            label="시간 표시"
+                            className="w-auto max-w-max"
+                            onClick={() => {
+                              setLogsTimestampsVisible((current) => !current);
+                            }}
+                          />
                           <Button
                             variant="secondary"
                             size="sm"
@@ -2616,28 +2627,35 @@ export function AwsEcsWorkspace({
                                   ecsLocalFind.rows.map((row) => (
                                     <div
                                       key={row.entry.id}
-                                      className="grid grid-cols-[max-content_minmax(0,1fr)] items-start gap-[0.9rem]"
+                                      className={cn(
+                                        "grid items-start gap-[0.9rem]",
+                                        logsTimestampsVisible
+                                          ? "grid-cols-[max-content_minmax(0,1fr)]"
+                                          : "grid-cols-[minmax(0,1fr)]",
+                                      )}
                                     >
-                                      <span
-                                        className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
-                                        title={row.entry.timestamp}
-                                      >
-                                        {
-                                          renderLocalFindHighlightedText(
-                                            row.timestampText,
-                                            trimmedLocalFindQuery,
-                                            {
-                                              activeMatchIndex:
-                                                activeLocalFindMatchIndex,
-                                              matchIndexOffset:
-                                                row.matchIndexOffset,
-                                              registerMatchRef:
-                                                registerLocalFindMatchRef,
-                                              keyPrefix: `ecs-log:${row.entry.id}:timestamp`,
-                                            },
-                                          ).nodes
-                                        }
-                                      </span>
+                                      {logsTimestampsVisible ? (
+                                        <span
+                                          className="whitespace-nowrap text-[rgba(163,181,214,0.82)]"
+                                          title={row.entry.timestamp}
+                                        >
+                                          {
+                                            renderLocalFindHighlightedText(
+                                              row.timestampText,
+                                              trimmedLocalFindQuery,
+                                              {
+                                                activeMatchIndex:
+                                                  activeLocalFindMatchIndex,
+                                                matchIndexOffset:
+                                                  row.matchIndexOffset,
+                                                registerMatchRef:
+                                                  registerLocalFindMatchRef,
+                                                keyPrefix: `ecs-log:${row.entry.id}:timestamp`,
+                                              },
+                                            ).nodes
+                                          }
+                                        </span>
+                                      ) : null}
                                       <span className="min-w-0 break-words whitespace-pre-wrap">
                                         {row.prefixText ? (
                                           <span className="text-[rgba(163,181,214,0.82)]">

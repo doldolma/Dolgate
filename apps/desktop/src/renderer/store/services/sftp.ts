@@ -7,7 +7,11 @@ import type {
   TransferJob,
   TransferStartInput,
 } from "@shared";
-import type { SftpPaneState, TerminalUploadResult } from "../types";
+import type {
+  PendingHostKeyPrompt,
+  SftpPaneState,
+  TerminalUploadResult,
+} from "../types";
 import type { SliceDeps } from "./context";
 import { markTerminalUploadJob } from "../../lib/terminal-upload-registry";
 import { createBootstrapSyncServices } from "./bootstrap-sync";
@@ -31,6 +35,26 @@ import {
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
+
+class TerminalUploadAwaitingHostTrustError extends Error {
+  constructor() {
+    super("터미널 업로드를 계속하려면 호스트 키 신뢰가 필요합니다.");
+  }
+}
+
+function isTerminalUploadAwaitingHostTrustError(
+  error: unknown,
+): error is TerminalUploadAwaitingHostTrustError {
+  return error instanceof TerminalUploadAwaitingHostTrustError;
+}
+
+type TerminalUploadInput = {
+  hostId: string;
+  targetPath: string | null;
+  localPaths: string[];
+  endpointId?: string;
+  skipHostTrustPrompt?: boolean;
+};
 
 export { upsertTransferJob } from "../utils";
 
@@ -498,6 +522,11 @@ export function createSftpServices(deps: SliceDeps) {
     get: StoreGetter,
     hostId: string,
     onProgress?: (message: string) => void,
+    options: {
+      endpointId?: string;
+      trustAction?: PendingHostKeyPrompt["action"];
+      skipHostTrustPrompt?: boolean;
+    } = {},
   ): Promise<SftpEndpointSummary> => {
     const state = get();
     for (const pane of [state.sftp.leftPane, state.sftp.rightPane]) {
@@ -526,7 +555,7 @@ export function createSftpServices(deps: SliceDeps) {
       }
     }
 
-    const endpointId = globalThis.crypto.randomUUID();
+    const endpointId = options.endpointId ?? globalThis.crypto.randomUUID();
     // 연결 단계(SSM 터널/핸드셰이크/SFTP 채널 등)를 호출자에게 흘려 준다.
     const unsubscribeProgress = onProgress
       ? api.sftp.onConnectionProgress((event) => {
@@ -536,6 +565,18 @@ export function createSftpServices(deps: SliceDeps) {
         })
       : null;
     try {
+      if (!options.skipHostTrustPrompt && options.trustAction) {
+        onProgress?.("SSH 호스트 키를 확인하는 중입니다.");
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          endpointId,
+          skipProbeIfAlreadyTrusted: true,
+          action: options.trustAction,
+        });
+        if (!trusted) {
+          throw new TerminalUploadAwaitingHostTrustError();
+        }
+      }
       const endpoint = await api.sftp.connect({ hostId, endpointId });
       set((current) => ({
         sftp: {
@@ -606,7 +647,7 @@ export function createSftpServices(deps: SliceDeps) {
   const uploadFilesToHostPath = async (
     set: StoreSetter,
     get: StoreGetter,
-    input: { hostId: string; targetPath: string | null; localPaths: string[] },
+    input: TerminalUploadInput,
     onProgress?: (message: string) => void,
   ): Promise<TerminalUploadResult> => {
     const host = get().hosts.find((item) => item.id === input.hostId);
@@ -622,14 +663,35 @@ export function createSftpServices(deps: SliceDeps) {
     }
 
     let endpoint: SftpEndpointSummary;
+    const endpointId = input.endpointId ?? globalThis.crypto.randomUUID();
     try {
       endpoint = await ensureSftpEndpointForHost(
         set,
         get,
         input.hostId,
         onProgress,
+        {
+          endpointId,
+          skipHostTrustPrompt: input.skipHostTrustPrompt,
+          trustAction: input.skipHostTrustPrompt
+            ? undefined
+            : {
+                kind: "terminalUpload",
+                hostId: input.hostId,
+                endpointId,
+                targetPath: input.targetPath,
+                localPaths: input.localPaths,
+              },
+        },
       );
     } catch (error) {
+      if (isTerminalUploadAwaitingHostTrustError(error)) {
+        return {
+          ok: false,
+          reason: "awaiting-host-trust",
+          message: "호스트 키를 저장하면 업로드를 계속합니다.",
+        };
+      }
       return {
         ok: false,
         reason: "connect-failed",

@@ -216,7 +216,7 @@ const summaryCardClass =
 const emptyDetailClass =
   "rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_82%,transparent_18%)] px-4 py-4 text-[var(--text-soft)]";
 const logsOutputClass =
-  "grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
+  "select-text grid min-h-0 flex-1 content-start gap-[0.4rem] overflow-auto rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[rgba(7,13,24,0.88)] px-[1.1rem] py-4 text-[rgba(226,234,255,0.92)]";
 const detailPanelTabsClass =
   "gap-[0.55rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.4rem] shadow-none";
 const detailPanelTabButtonBaseClass =
@@ -1380,6 +1380,7 @@ export function ContainersWorkspace({
     createEmptyContainerTunnelState,
   );
   const [logsFocusMode, setLogsFocusMode] = useState(false);
+  const [logsTimestampsVisible, setLogsTimestampsVisible] = useState(true);
   const [logsRangePickerOpen, setLogsRangePickerOpen] = useState(false);
   const [localFindOpen, setLocalFindOpen] = useState(false);
   const [localFindQuery, setLocalFindQuery] = useState("");
@@ -1524,7 +1525,9 @@ export function ContainersWorkspace({
     let nextMatchIndex = 0;
     const rows = effectiveLogLines.map((line, index) => {
       const parsedLine = parseContainerLogLine(line);
-      const timestampText = parsedLine.timestampLabel ?? "";
+      const timestampText = logsTimestampsVisible
+        ? parsedLine.timestampLabel ?? ""
+        : "";
       const timestampMatchCount =
         timestampText && trimmedLocalFindQuery
           ? countLocalFindMatches(timestampText, trimmedLocalFindQuery)
@@ -1547,7 +1550,7 @@ export function ContainersWorkspace({
       rows,
       matchCount: nextMatchIndex,
     };
-  }, [effectiveLogLines, trimmedLocalFindQuery]);
+  }, [effectiveLogLines, logsTimestampsVisible, trimmedLocalFindQuery]);
   const canStart = selectedContainer
     ? canStartContainer(selectedContainer.status)
     : false;
@@ -2535,6 +2538,14 @@ export function ContainersWorkspace({
                     description="새 로그가 들어오면 하단을 자동으로 따라갑니다."
                     onClick={handleToggleLogsFollow}
                   />
+                  <ToggleSwitch
+                    checked={logsTimestampsVisible}
+                    className="w-auto max-w-max"
+                    label="시간 표시"
+                    onClick={() => {
+                      setLogsTimestampsVisible((current) => !current);
+                    }}
+                  />
                   <Button
                     type="button"
                     variant="secondary"
@@ -2674,7 +2685,11 @@ export function ContainersWorkspace({
                       const isMatch =
                         !!trimmedLogsSearchQuery &&
                         matchesContainerLogQuery(row.line, trimmedLogsSearchQuery);
-                      if (!parsedLine.timestampRaw || !parsedLine.timestampLabel) {
+                      if (
+                        !logsTimestampsVisible ||
+                        !parsedLine.timestampRaw ||
+                        !parsedLine.timestampLabel
+                      ) {
                         return (
                           <div
                             key={row.key}

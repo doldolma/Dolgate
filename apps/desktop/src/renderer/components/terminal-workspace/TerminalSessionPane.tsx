@@ -299,10 +299,12 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             (message) => setUploadPending(message),
           );
           if (!result.ok) {
+            const awaitingHostTrust = result.reason === 'awaiting-host-trust';
             setUploadNotice({
-              tone: 'danger',
-              message:
-                result.reason === 'unsupported'
+              tone: awaitingHostTrust ? 'info' : 'danger',
+              message: awaitingHostTrust
+                ? (result.message ?? '호스트 키를 저장하면 업로드를 계속합니다.')
+                : result.reason === 'unsupported'
                   ? '이 세션은 SFTP 업로드를 지원하지 않습니다.'
                   : result.reason === 'connect-failed'
                     ? `SFTP 연결 실패: ${result.message ?? ''}`
