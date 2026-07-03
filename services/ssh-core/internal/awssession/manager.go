@@ -116,6 +116,18 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
 
+	// Report the data channel's keepalive round-trip as a tab latency indicator,
+	// the same EventLatency the renderer already shows for SSH keepalive RTT.
+	if lr, ok := runner.(interface{ SetLatencyHandler(func(time.Duration)) }); ok {
+		lr.SetLatencyHandler(func(rtt time.Duration) {
+			m.emit(protocol.Event{
+				Type:      protocol.EventLatency,
+				SessionID: sessionID,
+				Payload:   protocol.LatencyPayload{RoundTripMs: int(rtt.Milliseconds())},
+			})
+		})
+	}
+
 	if handle.beginShellIntegration() {
 		m.scheduleShellIntegrationInstall(sessionID, handle)
 	}

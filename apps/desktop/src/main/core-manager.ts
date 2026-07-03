@@ -2269,6 +2269,17 @@ export class CoreManager {
       return;
     }
 
+    // 서버 프록시 SSM 세션의 keepalive RTT — 직결 세션과 동일한 latency 이벤트로
+    // 흘려보내 탭 지연 인디케이터를 갱신한다.
+    if (type === "latency") {
+      const payload =
+        message.payload && typeof message.payload === "object"
+          ? (message.payload as Record<string, unknown>)
+          : {};
+      this.handleControlEvent({ type: "latency", sessionId, payload });
+      return;
+    }
+
     if (type === "output") {
       const dataBase64 = typeof message.dataBase64 === "string" ? message.dataBase64 : "";
       if (!dataBase64) {

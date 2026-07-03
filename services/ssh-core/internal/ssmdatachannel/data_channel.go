@@ -40,7 +40,10 @@ type DataChannel interface {
 // so a stuck write can't wedge the channel (and its mutex) forever. Mirrors the
 // sync-api hub's keepalive on the outer websocket.
 const (
-	dataChannelPingInterval = 15 * time.Second
+	// 10s matches the SSH keepalive interval so the tab latency indicator
+	// refreshes at the same cadence for both transports. Read timeout stays well
+	// above it (tolerates several missed pongs before declaring the link dead).
+	dataChannelPingInterval = 10 * time.Second
 	dataChannelReadTimeout  = 45 * time.Second
 	dataChannelWriteTimeout = 10 * time.Second
 )
@@ -66,6 +69,29 @@ type SsmDataChannel struct {
 	pingStopOnce  sync.Once
 	lastRows      uint32
 	lastCols      uint32
+
+	// onRTT, if set, is called with the websocket ping→pong round-trip time on
+	// each keepalive cycle. It measures latency to the AWS SSM endpoint (the
+	// control channel), not the full path to the instance shell.
+	rttMu sync.Mutex
+	onRTT func(time.Duration)
+}
+
+// SetRTTHandler registers a callback invoked with each keepalive ping→pong
+// round-trip time. Safe to call concurrently with the ping loop.
+func (c *SsmDataChannel) SetRTTHandler(fn func(time.Duration)) {
+	c.rttMu.Lock()
+	c.onRTT = fn
+	c.rttMu.Unlock()
+}
+
+func (c *SsmDataChannel) reportRTT(rtt time.Duration) {
+	c.rttMu.Lock()
+	fn := c.onRTT
+	c.rttMu.Unlock()
+	if fn != nil {
+		fn(rtt)
+	}
 }
 
 // OpenWithSessionToken initializes the channel state (retransmit/reorder message buffers, handshake
@@ -114,8 +140,12 @@ func (c *SsmDataChannel) keepAlive() {
 		case <-c.pingStop:
 			return
 		case <-ticker.C:
+			// Carry the send time in the ping payload; the peer echoes it back in
+			// the pong (RFC 6455), letting the pong handler compute the round trip.
 			// WriteControl is safe to call concurrently with WriteMessage.
-			if err := c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(dataChannelWriteTimeout)); err != nil {
+			var buf [8]byte
+			binary.BigEndian.PutUint64(buf[:], uint64(time.Now().UnixNano()))
+			if err := c.ws.WriteControl(websocket.PingMessage, buf[:], time.Now().Add(dataChannelWriteTimeout)); err != nil {
 				_ = c.ws.Close()
 				return
 			}
@@ -642,7 +672,15 @@ func (c *SsmDataChannel) StartSessionFromDataChannelURL(url string, token string
 	// silence beyond dataChannelReadTimeout surfaces a dead connection.
 	c.pingStop = make(chan struct{})
 	_ = c.ws.SetReadDeadline(time.Now().Add(dataChannelReadTimeout))
-	c.ws.SetPongHandler(func(string) error {
+	c.ws.SetPongHandler(func(appData string) error {
+		// The pong echoes our ping's 8-byte send timestamp; decode it to report
+		// the round-trip latency (best-effort — a malformed/empty pong is ignored).
+		if len(appData) == 8 {
+			sent := time.Unix(0, int64(binary.BigEndian.Uint64([]byte(appData))))
+			if rtt := time.Since(sent); rtt > 0 {
+				c.reportRTT(rtt)
+			}
+		}
 		return c.ws.SetReadDeadline(time.Now().Add(dataChannelReadTimeout))
 	})
 	go c.keepAlive()

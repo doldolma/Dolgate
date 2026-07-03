@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/ssmdatachannel"
@@ -92,6 +93,12 @@ func (r *datachannelRunner) finish(cause error) {
 
 	_ = r.writer.Close()
 	_ = r.dc.Close()
+}
+
+// SetLatencyHandler forwards the data channel's ping→pong round-trip time so the
+// manager can report it as a tab latency indicator (mirrors SSH keepalive RTT).
+func (r *datachannelRunner) SetLatencyHandler(fn func(time.Duration)) {
+	r.dc.SetRTTHandler(fn)
 }
 
 func (r *datachannelRunner) Write(data []byte) error {

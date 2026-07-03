@@ -182,6 +182,10 @@ func (bridge *AwsSessionBridge) handleEvent(event coretypes.Event) {
 		session.emit(awsSessionRuntimeEvent{
 			Type: "autocompleteShellState", RequestID: event.RequestID, Payload: event.Payload,
 		})
+	case coretypes.EventLatency:
+		// Forward the data channel keepalive RTT so the desktop shows a tab
+		// latency indicator for server-proxy SSM sessions too.
+		session.emit(awsSessionRuntimeEvent{Type: "latency", Payload: event.Payload})
 	}
 }
 
