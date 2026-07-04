@@ -26,8 +26,11 @@ function createAwsHost(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-function createCoordinator(overrides: Record<string, unknown> = {}) {
-  const host = createAwsHost();
+function createCoordinator(
+  overrides: Record<string, unknown> = {},
+  hostOverrides: Record<string, unknown> = {},
+) {
+  const host = createAwsHost(hostOverrides);
   const deps = {
     hosts: {
       update: vi.fn((_id, draft) => ({ ...host, ...draft })),
@@ -96,6 +99,44 @@ describe("AWS SFTP coordinator", () => {
         endpointId: "endpoint-1",
         hostId: "host-1",
         reasonCode: "not-managed-instance",
+      }),
+    );
+  });
+
+  it("preserves the AWS SSM server proxy flag while refreshing SSH metadata", async () => {
+    const { deps, coordinator, host } = createCoordinator(
+      {},
+      {
+        awsSsmServerProxyEnabled: true,
+        awsSshUsername: null,
+        awsSshMetadataStatus: "idle",
+      },
+    );
+
+    await expect(
+      coordinator.resolvePreflight({
+        endpointId: "endpoint-1",
+        host,
+        allowBrowserLogin: true,
+      }),
+    ).resolves.toMatchObject({
+      awsSsmServerProxyEnabled: true,
+      awsSshUsername: "ubuntu",
+    });
+
+    expect(deps.hosts.update).toHaveBeenCalledWith(
+      "host-1",
+      expect.objectContaining({
+        awsSsmServerProxyEnabled: true,
+        awsSshMetadataStatus: "loading",
+      }),
+    );
+    expect(deps.hosts.update).toHaveBeenCalledWith(
+      "host-1",
+      expect.objectContaining({
+        awsSsmServerProxyEnabled: true,
+        awsSshMetadataStatus: "ready",
+        awsSshUsername: "ubuntu",
       }),
     );
   });

@@ -119,6 +119,7 @@ export function createAwsSftpCoordinator(deps: {
     awsSshPort: host.awsSshPort ?? null,
     awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
     awsSshMetadataError: host.awsSshMetadataError ?? null,
+    awsSsmServerProxyEnabled: host.awsSsmServerProxyEnabled === true,
     ...overrides,
   });
 

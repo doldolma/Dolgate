@@ -525,7 +525,9 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     awsSshPort: draft.awsSshPort ?? null,
     awsSshMetadataStatus: normalizeAwsSshMetadataStatus(draft.awsSshMetadataStatus, draft),
     awsSshMetadataError: normalizeAwsSshMetadataError(draft.awsSshMetadataError),
-    awsSsmServerProxyEnabled: draft.awsSsmServerProxyEnabled === true,
+    awsSsmServerProxyEnabled:
+      draft.awsSsmServerProxyEnabled ??
+      (current?.awsSsmServerProxyEnabled === true),
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),

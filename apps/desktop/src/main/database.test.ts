@@ -270,7 +270,8 @@ describe('HostRepository', () => {
       awsSshUsername: 'ubuntu',
       awsSshPort: 2222,
       awsSshMetadataStatus: 'ready',
-      awsSshMetadataError: null
+      awsSshMetadataError: null,
+      awsSsmServerProxyEnabled: true
     });
 
     expect(created).toMatchObject({
@@ -279,7 +280,8 @@ describe('HostRepository', () => {
       awsSshUsername: 'ubuntu',
       awsSshPort: 2222,
       awsSshMetadataStatus: 'ready',
-      awsSshMetadataError: null
+      awsSshMetadataError: null,
+      awsSsmServerProxyEnabled: true
     });
 
     const updated = hosts.update('aws-host-1', {
@@ -308,7 +310,8 @@ describe('HostRepository', () => {
       awsSshUsername: 'ec2-user',
       awsSshPort: 22,
       awsSshMetadataStatus: 'ready',
-      awsSshMetadataError: null
+      awsSshMetadataError: null,
+      awsSsmServerProxyEnabled: true
     });
     expect(hosts.getById('aws-host-1')).toMatchObject({
       kind: 'aws-ec2',
@@ -316,7 +319,32 @@ describe('HostRepository', () => {
       awsSshUsername: 'ec2-user',
       awsSshPort: 22,
       awsSshMetadataStatus: 'ready',
-      awsSshMetadataError: null
+      awsSshMetadataError: null,
+      awsSsmServerProxyEnabled: true
+    });
+
+    const disabled = hosts.update('aws-host-1', {
+      kind: 'aws-ec2',
+      label: 'AWS Prod',
+      groupName: 'Production',
+      tags: ['prod'],
+      terminalThemeId: null,
+      awsProfileName: 'default',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-abc',
+      awsAvailabilityZone: 'ap-northeast-2c',
+      awsInstanceName: 'web-1',
+      awsPlatform: 'Linux/UNIX',
+      awsPrivateIp: '10.0.0.10',
+      awsState: 'running',
+      awsSshUsername: 'ec2-user',
+      awsSshPort: 22,
+      awsSshMetadataStatus: 'ready',
+      awsSshMetadataError: null,
+      awsSsmServerProxyEnabled: false
+    });
+    expect(disabled).toMatchObject({
+      awsSsmServerProxyEnabled: false
     });
   });
 
