@@ -753,6 +753,30 @@ export function createSessionServices(deps: SliceDeps) {
             ),
           );
         });
+        // 일반 SSH 호스트와 동일하게, SSM 위 SSH 호스트 키를 먼저 probe하고 미신뢰면
+        // 신뢰 프롬프트(KnownHostPromptDialog)를 띄운다 — 수락 전에는 연결하지 않는다.
+        // probe 진행 이벤트는 aws-ec2-ssh 엔드포인트로 흘려 이 터미널 탭 오버레이에 매핑한다.
+        const trusted = await ensureTrustedHost(set, {
+          hostId,
+          sessionId,
+          endpointId: `aws-ec2-ssh:${hostId}`,
+          skipProbeIfAlreadyTrusted: true,
+          action: {
+            kind: "ssh",
+            hostId,
+            cols,
+            rows,
+            secrets,
+          },
+        });
+        if (!trusted) {
+          updateSessionProgress(
+            set,
+            sessionId,
+            resolveAwaitingHostTrustProgress(host),
+          );
+          return;
+        }
         updateSessionProgress(
           set,
           sessionId,
