@@ -93,7 +93,24 @@ async function writeDesktopState(userDataDir) {
               updatedAt: timestamp,
             },
           ],
-          knownHosts: [],
+          // EC2(aws-ec2) 연결은 이제 SSH 호스트와 동일하게 연결 전 호스트 키 신뢰를 요구한다.
+          // 스모크는 "이미 신뢰한 호스트" 정상 상태를 재현하므로 Smoke AWS의 SSM 호스트 키를
+          // 미리 신뢰 목록에 심어, 연결 시 신뢰 프롬프트 없이 바로 진행되게 한다.
+          knownHosts: [
+            {
+              id: "known-aws-smoke",
+              host: "aws-ssm:default:ap-northeast-2:i-smoke-test",
+              port: 22,
+              algorithm: "ssh-ed25519",
+              publicKeyBase64:
+                "AAAAC3NzaC1lZDI1NTE5AAAAIE2ESmokeTestKeyDoNotUseAnywhereElse00",
+              fingerprintSha256:
+                "SHA256:E2ESmokeTestFingerprintDoNotUseAnywhereElse0000",
+              createdAt: timestamp,
+              lastSeenAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ],
           portForwards: [],
           secretMetadata: [],
           syncOutbox: [],
