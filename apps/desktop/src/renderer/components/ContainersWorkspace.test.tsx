@@ -368,7 +368,7 @@ describe("ContainersWorkspace", () => {
     ).toBeInTheDocument();
     expect(
       screen.getAllByText(
-        "이 호스트의 SSH 호스트 키를 먼저 신뢰해야 컨테이너를 조회할 수 있습니다.",
+        "이 호스트의 SSH 호스트 키를 아직 신뢰하지 않았습니다. 호스트 키를 신뢰한 뒤 다시 시도해 주세요.",
       ).length,
     ).toBeGreaterThanOrEqual(2);
 
