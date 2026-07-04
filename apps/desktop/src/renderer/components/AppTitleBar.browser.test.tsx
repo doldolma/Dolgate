@@ -150,6 +150,30 @@ describe('AppTitleBar update popover', () => {
     expect(tabStrip?.className).toContain('[-webkit-app-region:drag]');
   });
 
+  it('keeps titlebar chrome draggable but session tabs no-drag while idle on Windows', () => {
+    const tab = createSessionTab();
+    const { container } = renderTitleBar({
+      desktopPlatform: 'win32',
+      tabs: [tab],
+      tabStrip: [{ kind: 'session', sessionId: tab.sessionId }],
+    });
+
+    const header = container.querySelector('header');
+    const tabRegion = screen.getByTestId('titlebar-tab-region');
+    const tabStrip = container.querySelector('[data-titlebar-tab-strip="true"]');
+
+    // 세션 탭 외의 상단바 chrome은 Windows에서도 창 드래그 영역이어야 한다(macOS 패리티).
+    expect(header?.className).toContain('[-webkit-app-region:drag]');
+    expect(tabRegion.className).toContain('[-webkit-app-region:drag]');
+    expect(tabStrip?.className).toContain('[-webkit-app-region:drag]');
+
+    // 세션 탭 pill 자체는 창 드래그 대상이 아니어야 한다(클릭·재정렬 유지).
+    const pill = screen
+      .getByRole('button', { name: 'mqtt/evo-parser' })
+      .closest('.group');
+    expect(pill?.className).toContain('[-webkit-app-region:no-drag]');
+  });
+
   it('keeps fixed workspace tabs outside the scrollable session strip', () => {
     const tab = createSessionTab();
     const { container } = renderTitleBar({
