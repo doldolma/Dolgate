@@ -1,4 +1,5 @@
 import {
+  getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
@@ -9,7 +10,7 @@ import {
 } from "@shared";
 import { shell as electronShell, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
-import type { MainIpcContext, SshHostRecord } from "./context";
+import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context";
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 
@@ -48,6 +49,53 @@ async function assertAwsSsmServerProxySupported(
   if (info.capabilities?.sessions?.awsSsm !== true) {
     throw new Error("서버에서 AWS SSM 세션을 지원하지 않습니다.");
   }
+}
+
+// SSH-over-SSM 실패로 SSM 셸에 폴백한 뒤 이 시간 안에는 SSH 재시도를 건너뛴다.
+// 실패한 SSH 시도는 preflight(Run Command)·EIC·핸드셰이크까지 수 초를 쓰므로,
+// 연결할 때마다 그 레이턴시를 반복 지불하지 않게 한다.
+const AWS_SSH_OVER_SSM_RETRY_AFTER_MS = 10 * 60 * 1000;
+
+// SSH-over-SSM 가능성에 영향을 주는 연결 설정의 지문. 시그니처가 바뀌면
+// (포트·사용자·AZ·인스턴스·프로필·프록시 모드 수정) 폴백 기억을 버리고 SSH부터 다시 시도한다.
+function buildAwsEc2SshOverSsmSignature(host: AwsEc2HostRecord): string {
+  return JSON.stringify([
+    host.awsRegion,
+    host.awsInstanceId,
+    getAwsEc2HostSshPort(host),
+    host.awsSshUsername?.trim() || null,
+    host.awsAvailabilityZone ?? null,
+    host.awsSsmServerProxyEnabled === true,
+    host.awsProfileId ?? host.awsProfileName,
+  ]);
+}
+
+// renderer는 이 에러 메시지로 호스트 키 신뢰 프롬프트를 띄운다(host-coordinator의
+// requireTrustedHostKeys). 폴백해 버리면 사용자가 신뢰 후 SSH로 붙을 기회가 사라진다.
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isHostKeySecurityError(error: unknown): boolean {
+  const message = errorMessageOf(error);
+  return [
+    /Host key is not trusted yet/i,
+    /host key mismatch/i,
+    /Host key changed/i,
+    /trusted host key/i,
+    /host key trust/i,
+  ].some((pattern) => pattern.test(message));
+}
+
+function combineAwsSshFallbackFailure(
+  sshError: unknown,
+  fallbackError: unknown,
+): Error {
+  return new Error(
+    `SSH-over-SSM 연결 실패 후 SSM 셸 폴백도 실패했습니다. SSH-over-SSM: ${errorMessageOf(
+      sshError,
+    )} / SSM 셸: ${errorMessageOf(fallbackError)}`,
+  );
 }
 
 async function connectAwsServerProxySessionWithAuthRetry(
@@ -93,6 +141,12 @@ async function connectAwsServerProxySessionWithAuthRetry(
 }
 
 export function registerSshIpcHandlers(ctx: MainIpcContext): void {
+  // hostId → SSH-over-SSM 폴백 기억. register 클로저 안에 두어 앱 수명과 함께 산다.
+  const awsSshOverSsmFallbacks = new Map<
+    string,
+    { signature: string; retryAfter: number }
+  >();
+
   ipcMain.handle(
     ipcChannels.ssh.connect,
     async (_event, input: DesktopConnectInput) => {
@@ -122,37 +176,104 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           title,
           startupCommand: input.startupCommand,
         };
-        const connection =
-          input.tmux === true
-            ? // tmux control mode over SSH-over-SSM — same as a normal SSH host,
-              // only the transport differs (server-proxy WebSocket vs local tunnel).
-              await connectAwsEc2OverSsm(ctx, host, {
+        const connectSsmShell = async () =>
+          host.awsSsmServerProxyEnabled === true
+            ? connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
+            : (async () => {
+                const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
+                const ssmSession = ctx.awsService.shouldUseInProcessSsm()
+                  ? await ctx.awsService.startSsmShellSession(
+                      profileName,
+                      host.awsRegion,
+                      host.awsInstanceId,
+                    )
+                  : undefined;
+                return ctx.coreManager.connectAwsSession({
+                  ...connectionInput,
+                  env: awsSessionEnv.env,
+                  unsetEnv: awsSessionEnv.unsetEnv,
+                  ssmSession,
+                });
+              })();
+
+        let connection: { sessionId: string } | undefined;
+        if (input.tmux === true) {
+          // tmux control mode over SSH-over-SSM — same as a normal SSH host,
+          // only the transport differs (server-proxy WebSocket vs local tunnel).
+          // tmux는 SSM 셸로 대체할 수 없으므로 폴백 없이 실패를 그대로 알린다.
+          connection = await connectAwsEc2OverSsm(ctx, host, {
+            cols: input.cols,
+            rows: input.rows,
+            title,
+            command: input.tmuxCommand?.trim() || undefined,
+            tmux: true,
+            tmuxVersion: input.tmuxVersion,
+            startupCommand: input.startupCommand,
+          });
+        } else {
+          // 일반 연결도 SSH-over-SSM을 우선 시도한다 — 실제 SSH 셸이라 셸 통합
+          // (동적 자동완성·명령 완료 알림)과 ZMODEM/드래그 업로드가 살아난다.
+          // sshd 미기동·EIC 미지원 등으로 실패하면 기존 SSM 셸로 폴백한다.
+          const signature = buildAwsEc2SshOverSsmSignature(host);
+          let failedSshOverSsm: { error: unknown; signature: string } | undefined;
+          const memo = awsSshOverSsmFallbacks.get(host.id);
+          const skipSshAttempt =
+            memo !== undefined &&
+            memo.signature === signature &&
+            memo.retryAfter > Date.now();
+          if (memo && !skipSshAttempt) {
+            awsSshOverSsmFallbacks.delete(host.id);
+          }
+          if (!skipSshAttempt) {
+            try {
+              connection = await connectAwsEc2OverSsm(ctx, host, {
                 cols: input.cols,
                 rows: input.rows,
                 title,
-                command: input.tmuxCommand?.trim() || undefined,
-                tmux: true,
-                tmuxVersion: input.tmuxVersion,
                 startupCommand: input.startupCommand,
-              })
-            : host.awsSsmServerProxyEnabled === true
-              ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
-              : await (async () => {
-              const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
-              const ssmSession = ctx.awsService.shouldUseInProcessSsm()
-                ? await ctx.awsService.startSsmShellSession(
-                    profileName,
-                    host.awsRegion,
-                    host.awsInstanceId,
-                  )
-                : undefined;
-              return ctx.coreManager.connectAwsSession({
-                ...connectionInput,
-                env: awsSessionEnv.env,
-                unsetEnv: awsSessionEnv.unsetEnv,
-                ssmSession,
+                awaitReady: true,
               });
-            })();
+            } catch (error) {
+              if (isHostKeySecurityError(error)) {
+                throw error;
+              }
+              const latestHost = ctx.hosts.getById(host.id);
+              failedSshOverSsm = {
+                error,
+                signature:
+                  latestHost && isAwsEc2HostRecord(latestHost)
+                    ? buildAwsEc2SshOverSsmSignature(latestHost)
+                    : signature,
+              };
+            }
+          }
+          if (!connection) {
+            try {
+              connection = await connectSsmShell();
+            } catch (fallbackError) {
+              if (failedSshOverSsm) {
+                throw combineAwsSshFallbackFailure(
+                  failedSshOverSsm.error,
+                  fallbackError,
+                );
+              }
+              throw fallbackError;
+            }
+            if (failedSshOverSsm) {
+              const reason = errorMessageOf(failedSshOverSsm.error);
+              awsSshOverSsmFallbacks.set(host.id, {
+                signature: failedSshOverSsm.signature,
+                retryAfter: Date.now() + AWS_SSH_OVER_SSM_RETRY_AFTER_MS,
+              });
+              ctx.activityLogs.append(
+                "warn",
+                "session",
+                "SSH-over-SSM 연결에 실패해 SSM 셸로 폴백합니다.",
+                { hostId: host.id, host: host.label, reason },
+              );
+            }
+          }
+        }
         ctx.sessionReplayService.noteSessionConfigured(
           connection.sessionId,
           input.cols,

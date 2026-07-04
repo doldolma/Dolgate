@@ -5,8 +5,14 @@ import {
   buildAwsWsProxyTarget,
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
-import type { AwsEc2HostRecord, MainIpcContext } from "./context";
+import type {
+  AwsConnectionProgressStage,
+  AwsEc2HostRecord,
+  MainIpcContext,
+} from "./context";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+
+const AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX = "aws-ec2-ssh:";
 
 export interface AwsEc2OverSsmConnectOptions {
   cols: number;
@@ -16,6 +22,7 @@ export interface AwsEc2OverSsmConnectOptions {
   tmux?: boolean;
   tmuxVersion?: string;
   startupCommand?: string;
+  awaitReady?: boolean;
 }
 
 /**
@@ -36,13 +43,27 @@ export async function connectAwsEc2OverSsm(
   host: AwsEc2HostRecord,
   options: AwsEc2OverSsmConnectOptions,
 ): Promise<{ sessionId: string }> {
-  // Hydrate SSH username / AZ / SSM readiness. Progress is suppressed: this is a
-  // terminal session, not an SFTP pane, so the tab's own connecting state suffices.
+  const progressEndpointId = `${AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX}${host.id}`;
+  const emitProgress = (
+    stage: AwsConnectionProgressStage,
+    message: string,
+    hostId = host.id,
+  ) => {
+    ctx.emitContainersConnectionProgress({
+      endpointId: progressEndpointId,
+      hostId,
+      stage,
+      message,
+    });
+  };
+
+  // Hydrate SSH username / AZ / SSM readiness. This is the same AWS preflight as
+  // SFTP, but the renderer maps the aws-ec2-ssh endpoint to the pending terminal tab.
   const hydratedHost = await ctx.resolveAwsSftpPreflight({
-    endpointId: `aws-ec2-ssh:${randomUUID()}`,
+    endpointId: progressEndpointId,
     host,
     allowBrowserLogin: true,
-    emitProgress: () => undefined,
+    emitProgress: (event) => ctx.emitContainersConnectionProgress(event),
   });
   const profileName =
     ctx.awsService.resolveManagedProfileNameOrFallback(
@@ -50,6 +71,11 @@ export async function connectAwsEc2OverSsm(
       hydratedHost.awsProfileName,
     ) ?? hydratedHost.awsProfileName;
   const sshPort = getAwsEc2HostSshPort(hydratedHost);
+  emitProgress(
+    "probing-host-key",
+    `${hydratedHost.label} 호스트 키 신뢰 정보를 확인하는 중입니다.`,
+    hydratedHost.id,
+  );
   const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
     hostname: buildAwsSsmKnownHostIdentity({
       profileName,
@@ -69,6 +95,11 @@ export async function connectAwsEc2OverSsm(
   if (!availabilityZone) {
     throw new Error("Availability Zone을 확인하지 못했습니다.");
   }
+  emitProgress(
+    "generating-key",
+    "임시 SSH 키를 생성하는 중입니다.",
+    hydratedHost.id,
+  );
   const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
 
   const baseConnect = {
@@ -83,7 +114,9 @@ export async function connectAwsEc2OverSsm(
     hostId: hydratedHost.id,
     hostLabel: hydratedHost.label,
     title: options.title,
-    transport: "aws-ssm" as const,
+    transport: "ssh" as const,
+    connectionKind: "aws-ssm" as const,
+    connectionDetails: `${profileName} · ${hydratedHost.awsRegion} · ${hydratedHost.awsInstanceId}`,
     tmux: options.tmux,
     tmuxVersion: options.tmuxVersion,
     startupCommand: options.startupCommand,
@@ -92,6 +125,11 @@ export async function connectAwsEc2OverSsm(
   if (hydratedHost.awsSsmServerProxyEnabled === true) {
     // Server-proxy: sync-api owns every AWS call. Send the resolved credentials +
     // ephemeral public key in the start message; ssh-core keeps the private key.
+    emitProgress(
+      "opening-tunnel",
+      "서버 프록시로 EC2 공개 키 주입과 SSM 터널 생성을 준비하는 중입니다.",
+      hydratedHost.id,
+    );
     const startMessage = await buildAwsServerProxyStartMessage(ctx.awsService, {
       region: hydratedHost.awsRegion,
       profileName,
@@ -101,8 +139,13 @@ export async function connectAwsEc2OverSsm(
       sshPort,
       publicKey,
     });
-    return runWithAwsServerProxyAuthRetry(ctx.authService, (accessToken) =>
-      ctx.coreManager.connect({
+    return runWithAwsServerProxyAuthRetry(ctx.authService, (accessToken) => {
+      emitProgress(
+        "connecting-sftp",
+        `${hydratedHost.label} SSH 세션을 시작하는 중입니다.`,
+        hydratedHost.id,
+      );
+      const payload = {
         ...baseConnect,
         host: hydratedHost.awsInstanceId,
         port: sshPort,
@@ -111,11 +154,19 @@ export async function connectAwsEc2OverSsm(
           accessToken,
           startMessage,
         }),
-      }),
-    );
+      };
+      return options.awaitReady === true
+        ? ctx.coreManager.connectAndAwaitReady(payload)
+        : ctx.coreManager.connect(payload);
+    });
   }
 
   // Direct: push the EIC key ourselves and open a local SSM tunnel to ride SSH over.
+  emitProgress(
+    "sending-public-key",
+    "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    hydratedHost.id,
+  );
   await ctx.awsService.sendSshPublicKey({
     profileName,
     region: hydratedHost.awsRegion,
@@ -124,6 +175,11 @@ export async function connectAwsEc2OverSsm(
     osUser: sshUsername,
     publicKey,
   });
+  emitProgress(
+    "opening-tunnel",
+    "SSH 연결용 내부 SSM 터널을 여는 중입니다.",
+    hydratedHost.id,
+  );
   const bindPort = await ctx.reserveLoopbackPort();
   const tunnel = await ctx.awsSsmTunnelService.start({
     runtimeId: `aws-ec2-ssh:${hydratedHost.id}:${randomUUID()}`,
@@ -135,13 +191,21 @@ export async function connectAwsEc2OverSsm(
     targetPort: sshPort,
   });
   try {
-    const connection = await retryAwsSsmSshOperation(() =>
-      ctx.coreManager.connect({
+    emitProgress(
+      "connecting-sftp",
+      `${hydratedHost.label} SSH 세션을 시작하는 중입니다.`,
+      hydratedHost.id,
+    );
+    const connection = await retryAwsSsmSshOperation(() => {
+      const payload = {
         ...baseConnect,
         host: tunnel.bindAddress,
         port: tunnel.bindPort,
-      }),
-    );
+      };
+      return options.awaitReady === true
+        ? ctx.coreManager.connectAndAwaitReady(payload)
+        : ctx.coreManager.connect(payload);
+    });
     // Tear the tunnel down when the session closes (core-event-bridge stops it on
     // the generic "closed"/"error" session event, same as container shells).
     ctx.trackAwsContainerShellTunnelRuntime(

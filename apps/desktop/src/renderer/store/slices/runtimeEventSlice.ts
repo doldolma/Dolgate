@@ -1622,7 +1622,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   : null;
               const nextProgress =
                 event.type === "connected"
-                  ? currentAttempt?.source === "container-shell"
+                  ? currentTab.hasReceivedOutput === true
+                    ? null
+                    : currentAttempt?.source === "container-shell"
                     ? null
                     : (resolvedShellKind ?? currentTab.shellKind) === "aws-ecs-exec"
                     ? null
@@ -1661,8 +1663,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                       : tab.shellKind,
                   errorMessage: event.type === "error" ? errorMessage : undefined,
                   connectionProgress: nextProgress,
-                  hasReceivedOutput:
-                    event.type === "connected" ? false : tab.hasReceivedOutput,
+                  hasReceivedOutput: tab.hasReceivedOutput,
                   lastEventAt: new Date().toISOString(),
                 };
               });
@@ -1991,6 +1992,47 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           },
     handleContainerConnectionProgressEvent: (event) => {
             set((state) => {
+              if (event.endpointId === `aws-ec2-ssh:${event.hostId}`) {
+                const pendingHostSessionIds = new Set(
+                  state.pendingConnectionAttempts
+                    .filter(
+                      (attempt) =>
+                        attempt.source === "host" &&
+                        attempt.hostId === event.hostId,
+                    )
+                    .map((attempt) => attempt.sessionId),
+                );
+                if (pendingHostSessionIds.size === 0) {
+                  return state;
+                }
+
+                let didUpdatePendingSession = false;
+                const nextTabs = state.tabs.map((tab) => {
+                  if (!pendingHostSessionIds.has(tab.sessionId)) {
+                    return tab;
+                  }
+                  if (tab.connectionProgress?.stage === "awaiting-host-trust") {
+                    return tab;
+                  }
+
+                  didUpdatePendingSession = true;
+                  return {
+                    ...tab,
+                    connectionProgress: createConnectionProgress(
+                      event.stage,
+                      event.message,
+                      {
+                        blockingKind:
+                          event.stage === "browser-login" ? "browser" : "none",
+                      },
+                    ),
+                    lastEventAt: new Date().toISOString(),
+                  };
+                });
+
+                return didUpdatePendingSession ? { tabs: nextTabs } : state;
+              }
+
               const currentTab = findContainersTab(state, event.hostId);
               if (!currentTab) {
                 return state;

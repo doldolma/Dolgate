@@ -402,7 +402,9 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
               hostId: hydratedHost.id,
               hostLabel: hydratedHost.label,
               title,
-              transport: "aws-ssm",
+              transport: "ssh",
+              connectionKind: "aws-ssm",
+              connectionDetails: `${profileName} · ${hydratedHost.awsRegion} · ${hydratedHost.awsInstanceId}`,
               wsProxy: buildAwsWsProxyTarget({
                 serverUrl: ctx.authService.getServerUrl(),
                 accessToken,
@@ -446,7 +448,9 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
               hostId: hydratedHost.id,
               hostLabel: hydratedHost.label,
               title,
-              transport: "aws-ssm",
+              transport: "ssh",
+              connectionKind: "aws-ssm",
+              connectionDetails: `${profileName} · ${hydratedHost.awsRegion} · ${hydratedHost.awsInstanceId}`,
             }),
           );
           ctx.trackAwsContainerShellTunnelRuntime(

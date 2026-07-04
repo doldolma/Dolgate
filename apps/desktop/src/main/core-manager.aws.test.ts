@@ -169,6 +169,12 @@ async function waitForWriteCount(
   }
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 describe("CoreManager AWS SSM sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -980,6 +986,243 @@ describe("CoreManager AWS SSM sessions", () => {
       expect(frame.metadata.type).toBe("write");
       expect([...frame.payload]).toEqual([0x03]);
     }
+  });
+
+  it("keeps SSH-over-SSM control input on the raw SSH stream while preserving AWS lifecycle metadata", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const { sessionId } = await manager.connect({
+      host: "127.0.0.1",
+      port: 2222,
+      username: "ubuntu",
+      authType: "privateKey",
+      privateKeyPem: "PRIVATE",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "AWS SSH-over-SSM",
+      hostId: "aws-host-ssh-1",
+      hostLabel: "AWS Host",
+      transport: "ssh",
+      connectionKind: "aws-ssm",
+      connectionDetails: "default · ap-northeast-2 · i-ssh-over-ssm",
+    });
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(connectRequest.payload).not.toHaveProperty("connectionKind");
+    expect(connectRequest.payload).not.toHaveProperty("connectionDetails");
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: {
+        status: "connected",
+      },
+    });
+
+    manager.write(sessionId, "\u0003");
+    manager.writeBinary(sessionId, Uint8Array.of(0x03));
+
+    expect(fakeProcess.writes).toHaveLength(3);
+    for (const frameBuffer of fakeProcess.writes.slice(1)) {
+      const frame = decodeSingleFrame(frameBuffer);
+      expect(frame.kind).toBe("stream");
+      if (frame.kind !== "stream") {
+        return;
+      }
+      expect(frame.metadata.type).toBe("write");
+      expect([...frame.payload]).toEqual([0x03]);
+    }
+    expect(manager.getSessionLifecycleState(sessionId)).toMatchObject({
+      connectionKind: "aws-ssm",
+      connectionDetails: "default · ap-northeast-2 · i-ssh-over-ssm",
+      status: "connected",
+    });
+  });
+
+  it("connectAndAwaitReady resolves after the first connected event", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const connectPromise = manager.connectAndAwaitReady({
+      host: "ssh.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "SSH Host",
+      hostId: "ssh-host-1",
+      hostLabel: "SSH Host Label",
+      transport: "ssh",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    expect(connectRequest.type).toBe("connect");
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId: connectRequest.sessionId,
+      payload: { status: "connected" },
+    });
+
+    await expect(connectPromise).resolves.toEqual({
+      sessionId: connectRequest.sessionId,
+    });
+  });
+
+  it("connectAndAwaitReady replays connected after resolving so renderer can catch up", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const events: CoreEvent<Record<string, unknown>>[] = [];
+    const manager = new CoreManager();
+    manager.setTerminalEventHandler((event) => {
+      events.push(event);
+    });
+    const connectPromise = manager.connectAndAwaitReady({
+      host: "ssh.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "SSH Host",
+      hostId: "ssh-host-1",
+      hostLabel: "SSH Host Label",
+      transport: "ssh",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId: connectRequest.sessionId,
+      payload: { status: "connected" },
+    });
+
+    await connectPromise;
+    await delay(40);
+
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "connected" &&
+          event.sessionId === connectRequest.sessionId,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("connectAndAwaitReady rejects pre-ready errors and suppresses the speculative tab event", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const fakeWindow = createFakeWindow();
+    manager.registerWindow(fakeWindow.window as never);
+
+    const connectPromise = manager.connectAndAwaitReady({
+      host: "ssh.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "SSH Host",
+      hostId: "ssh-host-1",
+      hostLabel: "SSH Host Label",
+      transport: "ssh",
+      startupCommand: "echo ready",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+
+    fakeProcess.emitControl({
+      type: "error",
+      sessionId: connectRequest.sessionId,
+      payload: { message: "connection refused" },
+    });
+
+    await expect(connectPromise).rejects.toThrow("connection refused");
+    expect(fakeWindow.sent).toEqual([]);
+
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId: connectRequest.sessionId,
+      payload: { message: "closed after error" },
+    });
+    expect(fakeWindow.sent).toEqual([]);
+
+    manager.disconnect(connectRequest.sessionId ?? "");
+    expect(fakeWindow.sent).toEqual([]);
+  });
+
+  it("connectAndAwaitReady rejects pre-ready closed events", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const connectPromise = manager.connectAndAwaitReady({
+      host: "ssh.internal",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "trusted",
+      cols: 120,
+      rows: 32,
+      title: "SSH Host",
+      hostId: "ssh-host-1",
+      hostLabel: "SSH Host Label",
+      transport: "ssh",
+    });
+
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+
+    fakeProcess.emitControl({
+      type: "closed",
+      sessionId: connectRequest.sessionId,
+      payload: { message: "connection closed" },
+    });
+
+    await expect(connectPromise).rejects.toThrow("connection closed");
+  });
+
+  it("connect returns immediately without waiting for a connected event", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+
+    await expect(
+      manager.connect({
+        host: "ssh.internal",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        password: "secret",
+        trustedHostKeyBase64: "trusted",
+        cols: 120,
+        rows: 32,
+        title: "SSH Host",
+        hostId: "ssh-host-1",
+        hostLabel: "SSH Host Label",
+        transport: "ssh",
+      }),
+    ).resolves.toEqual({ sessionId: expect.any(String) });
+    expect(fakeProcess.writes).toHaveLength(1);
   });
 
   it("keeps multi-byte AWS payloads as raw write frames", async () => {

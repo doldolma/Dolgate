@@ -128,7 +128,8 @@ describe("registerContainersIpcHandlers", () => {
         host: "127.0.0.1",
         port: 2222,
         username: "ubuntu",
-        transport: "aws-ssm",
+        transport: "ssh",
+        connectionKind: "aws-ssm",
       }),
     );
     expect(trackAwsContainerShellTunnelRuntime).toHaveBeenCalledWith(

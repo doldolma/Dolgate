@@ -14,15 +14,25 @@ vi.mock("electron", () => ({
   },
 }));
 
+vi.mock("./aws-ec2-ssh-over-ssm", () => ({
+  connectAwsEc2OverSsm: vi.fn(),
+}));
+
 import {
   registerSshIpcHandlers,
   resolveAgentForwardingEndpoint,
 } from "./ssh";
+import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
+
+const connectAwsEc2OverSsmMock = vi.mocked(connectAwsEc2OverSsm);
 
 function createContext() {
   return {
     hosts: {
       getById: vi.fn(),
+    },
+    activityLogs: {
+      append: vi.fn(),
     },
     awsService: {
       resolveManagedProfileNameOrFallback: vi.fn(),
@@ -59,6 +69,9 @@ function createContext() {
 describe("registerSshIpcHandlers", () => {
   beforeEach(() => {
     ipcHandlers.clear();
+    connectAwsEc2OverSsmMock.mockReset();
+    // 기본값: SSH-over-SSM 실패 → 기존 테스트들은 SSM 셸 폴백 경로를 검증한다.
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
   });
 
   it("resolves agent endpoints: shell env override, macOS env, macOS launchctl, and Windows OpenSSH agent", async () => {
@@ -486,6 +499,319 @@ describe("registerSshIpcHandlers", () => {
         startupCommand: "sudo -i",
       }),
     );
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+  });
+
+  function createAwsEc2Context(hostOverrides: Record<string, unknown> = {}) {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-1",
+      kind: "aws-ec2",
+      label: "AWS Prod",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-123",
+      awsSsmServerProxyEnabled: false,
+      ...hostOverrides,
+    });
+    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue(
+      "managed-prod",
+    );
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
+      env: { AWS_CONFIG_FILE: "/managed/config" },
+      unsetEnv: ["AWS_PROFILE"],
+    });
+    ctx.coreManager.connectAwsSession.mockResolvedValue({
+      sessionId: "session-ssm-shell",
+    });
+    return ctx;
+  }
+
+  it("connects EC2 over SSH-over-SSM first and skips the SSM shell when it succeeds", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockResolvedValue({ sessionId: "session-ssh" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, {
+        hostId: "aws-host-1",
+        cols: 120,
+        rows: 32,
+        startupCommand: "sudo -i",
+      }),
+    ).resolves.toEqual({ sessionId: "session-ssh" });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledWith(
+      ctx,
+      expect.objectContaining({ id: "aws-host-1" }),
+      expect.objectContaining({
+        cols: 120,
+        rows: 32,
+        startupCommand: "sudo -i",
+        awaitReady: true,
+      }),
+    );
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+    expect(ctx.coreManager.connectAwsServerProxySession).not.toHaveBeenCalled();
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  it("connects server-proxy EC2 hosts over SSH-over-SSM first as well", async () => {
+    const ctx = createAwsEc2Context({ awsSsmServerProxyEnabled: true });
+    connectAwsEc2OverSsmMock.mockResolvedValue({
+      sessionId: "session-ssh-proxy",
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-ssh-proxy" });
+
+    // 프록시 모드도 SSH-over-SSM이 성공하면 SSM 셸(프록시 세션)을 열지 않는다.
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
+    expect(ctx.coreManager.connectAwsServerProxySession).not.toHaveBeenCalled();
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the server-proxy SSM session when proxy-mode SSH-over-SSM fails", async () => {
+    const ctx = createAwsEc2Context({ awsSsmServerProxyEnabled: true });
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            serverVersion: "test",
+            capabilities: { sessions: { awsSsm: true } },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    ctx.awsService.buildServerProxySessionEnvSpec.mockResolvedValue({
+      env: { AWS_REGION: "ap-southeast-2" },
+      unsetEnv: [],
+    });
+    ctx.coreManager.connectAwsServerProxySession.mockResolvedValue({
+      sessionId: "session-server-proxy-fallback",
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-server-proxy-fallback" });
+
+    expect(ctx.coreManager.connectAwsServerProxySession).toHaveBeenCalledTimes(1);
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+    expect(ctx.activityLogs.append).toHaveBeenCalledWith(
+      "warn",
+      "session",
+      expect.stringContaining("SSM 셸로 폴백"),
+      expect.objectContaining({ hostId: "aws-host-1" }),
+    );
+  });
+
+  it("falls back to the SSM shell and records an activity log when SSH-over-SSM fails", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("EIC not supported"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-ssm-shell" });
+
+    expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledTimes(1);
+    expect(ctx.activityLogs.append).toHaveBeenCalledWith(
+      "warn",
+      "session",
+      expect.stringContaining("SSM 셸로 폴백"),
+      expect.objectContaining({
+        hostId: "aws-host-1",
+        reason: "EIC not supported",
+      }),
+    );
+  });
+
+  it("rethrows host-key trust errors without falling back to the SSM shell", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(
+      new Error("Host key is not trusted yet."),
+    );
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).rejects.toThrow("Host key is not trusted yet.");
+
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "host key mismatch",
+    "Host key changed.",
+    "trusted host key is required",
+    "Host key trust is required.",
+  ])(
+    "rethrows host-key security errors without falling back: %s",
+    async (message) => {
+      const ctx = createAwsEc2Context();
+      connectAwsEc2OverSsmMock.mockRejectedValue(new Error(message));
+
+      registerSshIpcHandlers(ctx);
+      const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+      await expect(
+        connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+      ).rejects.toThrow(message);
+
+      expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+      expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+    },
+  );
+
+  it("skips the SSH-over-SSM attempt on the next connect after a fallback", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    // 첫 연결만 SSH를 시도하고, 두 번째는 기억된 폴백으로 곧장 SSM 셸.
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(1);
+    expect(ctx.coreManager.connectAwsSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries SSH-over-SSM after a fallback when the host connection settings change", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    // 호스트의 SSH 포트가 바뀌면 시그니처가 달라져 SSH부터 다시 시도한다.
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-1",
+      kind: "aws-ec2",
+      label: "AWS Prod",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-123",
+      awsSsmServerProxyEnabled: false,
+      awsSshPort: 2222,
+    });
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries SSH-over-SSM after a fallback when the SSH username changes", async () => {
+    const ctx = createAwsEc2Context({ awsSshUsername: "ubuntu" });
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-1",
+      kind: "aws-ec2",
+      label: "AWS Prod",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-123",
+      awsSsmServerProxyEnabled: false,
+      awsSshUsername: "ec2-user",
+    });
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries SSH-over-SSM after a fallback when the availability zone changes", async () => {
+    const ctx = createAwsEc2Context({ awsAvailabilityZone: "ap-southeast-2a" });
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-1",
+      kind: "aws-ec2",
+      label: "AWS Prod",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-123",
+      awsSsmServerProxyEnabled: false,
+      awsAvailabilityZone: "ap-southeast-2b",
+    });
+    await connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not memoize the SSH-over-SSM failure when the SSM shell fallback also fails", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+    ctx.coreManager.connectAwsSession
+      .mockRejectedValueOnce(new Error("ssm denied"))
+      .mockResolvedValueOnce({ sessionId: "session-ssm-shell" });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).rejects.toThrow(
+      "SSH-over-SSM 연결 실패 후 SSM 셸 폴백도 실패했습니다.",
+    );
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-1", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-ssm-shell" });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalledTimes(2);
+    expect(ctx.activityLogs.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fall back for tmux connections when SSH-over-SSM fails", async () => {
+    const ctx = createAwsEc2Context();
+    connectAwsEc2OverSsmMock.mockRejectedValue(new Error("sshd unreachable"));
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, {
+        hostId: "aws-host-1",
+        cols: 120,
+        rows: 32,
+        tmux: true,
+      }),
+    ).rejects.toThrow("sshd unreachable");
+
     expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
   });
 });

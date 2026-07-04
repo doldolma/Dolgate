@@ -118,6 +118,20 @@ interface SessionLifecycleState {
   hasReplay: boolean;
 }
 
+type CoreSessionConnectPayload = ResolvedCoreConnectPayload & {
+  title: string;
+  hostId: string;
+  hostLabel: string;
+  transport?: "ssh" | "warpgate" | "aws-ssm";
+  connectionKind?: Extract<
+    SessionConnectionKind,
+    "ssh" | "mosh" | "aws-ssm" | "warpgate"
+  >;
+  connectionDetails?: string | null;
+  startupCommand?: string;
+  tmux?: boolean;
+};
+
 interface AwsServerProxyStartPayload {
   hostId: string;
   label: string;
@@ -606,6 +620,13 @@ interface PendingAwsAutocompleteResponse {
   timeout: NodeJS.Timeout;
 }
 
+interface PendingSessionReadyWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  suppressFailureEvent: boolean;
+  settled: boolean;
+}
+
 function isTransferEvent(type: CoreEventType): boolean {
   return (
     type === "sftpTransferProgress" ||
@@ -935,6 +956,15 @@ export class CoreManager {
   private readonly pendingAwsAutocompleteResponses = new Map<
     string,
     PendingAwsAutocompleteResponse
+  >();
+  private readonly pendingSessionReadyWaiters = new Map<
+    string,
+    PendingSessionReadyWaiter
+  >();
+  private readonly suppressedSessionCloseEvents = new Set<string>();
+  private readonly suppressedSessionCloseEventTimers = new Map<
+    string,
+    NodeJS.Timeout
   >();
   private readonly sessionTransportById = new Map<string, SessionTransport>();
   // tmux control mode 로 연결한 control 세션 id 집합. control 세션은 transport 가 "ssh"
@@ -1405,22 +1435,20 @@ export class CoreManager {
         });
       }
       this.rejectAllPending(message);
+      this.rejectAllPendingSessionReady(message);
       this.clearRuntimeState();
       this.process = null;
       this.isShuttingDown = false;
     });
   }
 
-  async connect(
-    payload: ResolvedCoreConnectPayload & {
-      title: string;
-      hostId: string;
-      hostLabel: string;
-      transport?: "ssh" | "warpgate" | "aws-ssm";
-      startupCommand?: string;
-      tmux?: boolean;
-    },
-  ): Promise<{ sessionId: string }> {
+  private async startCoreSession(
+    payload: CoreSessionConnectPayload,
+    options: {
+      awaitReady?: boolean;
+      suppressReadyFailureEvent?: boolean;
+    } = {},
+  ): Promise<{ sessionId: string; ready?: Promise<void> }> {
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
@@ -1442,14 +1470,18 @@ export class CoreManager {
       hostId: payload.hostId,
       hostLabel: payload.hostLabel,
       title: payload.title,
-      connectionDetails: `${payload.host} · ${payload.port} · ${payload.username}`,
-      connectionKind: payload.useMosh
-        ? "mosh"
-        : payload.transport === "warpgate"
-          ? "warpgate"
-          : payload.transport === "aws-ssm"
-            ? "aws-ssm"
-            : "ssh",
+      connectionDetails:
+        payload.connectionDetails ??
+        `${payload.host} · ${payload.port} · ${payload.username}`,
+      connectionKind:
+        payload.connectionKind ??
+        (payload.useMosh
+          ? "mosh"
+          : payload.transport === "warpgate"
+            ? "warpgate"
+            : payload.transport === "aws-ssm"
+              ? "aws-ssm"
+              : "ssh"),
       connectedAt: null,
       disconnectedAt: null,
       disconnectReason: null,
@@ -1467,15 +1499,61 @@ export class CoreManager {
       status: "connecting",
       lastEventAt: new Date().toISOString(),
     });
-    const { startupCommand: _startupCommand, tmux: useTmux, ...corePayload } =
-      payload;
+    const ready = options.awaitReady
+      ? new Promise<void>((resolve, reject) => {
+          this.pendingSessionReadyWaiters.set(sessionId, {
+            resolve,
+            reject,
+            suppressFailureEvent: options.suppressReadyFailureEvent === true,
+            settled: false,
+          });
+        })
+      : undefined;
+    const {
+      startupCommand: _startupCommand,
+      tmux: useTmux,
+      connectionKind: _connectionKind,
+      connectionDetails: _connectionDetails,
+      ...corePayload
+    } = payload;
     this.sendControl<ResolvedCoreConnectPayload>({
       id: randomUUID(),
       type: useTmux ? "tmuxConnect" : "connect",
       sessionId,
       payload: corePayload,
     });
+    return { sessionId, ready };
+  }
+
+  async connect(payload: CoreSessionConnectPayload): Promise<{ sessionId: string }> {
+    const { sessionId } = await this.startCoreSession(payload);
     return { sessionId };
+  }
+
+  async connectAndAwaitReady(
+    payload: CoreSessionConnectPayload,
+  ): Promise<{ sessionId: string }> {
+    const { sessionId, ready } = await this.startCoreSession(payload, {
+      awaitReady: true,
+      suppressReadyFailureEvent: true,
+    });
+    await ready;
+    this.replayConnectedEventSoon(sessionId);
+    return { sessionId };
+  }
+
+  private replayConnectedEventSoon(sessionId: string): void {
+    const timer = setTimeout(() => {
+      if (!this.tabs.has(sessionId)) {
+        return;
+      }
+      this.handleControlEvent({
+        type: "connected",
+        sessionId,
+        payload: { status: "connected" },
+      });
+    }, 25);
+    timer.unref?.();
   }
 
   beginContainerLifecycle(input: {
@@ -3871,8 +3949,95 @@ export class CoreManager {
     }
   }
 
+  private resolvePendingSessionReady(
+    event: CoreEvent<Record<string, unknown>>,
+  ): boolean {
+    if (!event.sessionId) {
+      return false;
+    }
+    if (
+      event.type === "closed" &&
+      this.consumeSuppressedSessionCloseEvent(event.sessionId)
+    ) {
+      return true;
+    }
+    const pending = this.pendingSessionReadyWaiters.get(event.sessionId);
+    if (!pending || pending.settled) {
+      return false;
+    }
+
+    if (event.type === "connected") {
+      pending.settled = true;
+      this.pendingSessionReadyWaiters.delete(event.sessionId);
+      pending.resolve();
+      return false;
+    }
+
+    if (event.type !== "error" && event.type !== "closed") {
+      return false;
+    }
+
+    pending.settled = true;
+    this.pendingSessionReadyWaiters.delete(event.sessionId);
+    const fallbackMessage =
+      event.type === "closed"
+        ? "SSH session closed before it was ready."
+        : "SSH session failed before it was ready.";
+    const message =
+      typeof event.payload.message === "string" && event.payload.message.trim()
+        ? event.payload.message
+        : fallbackMessage;
+    if (pending.suppressFailureEvent) {
+      if (event.type !== "closed") {
+        this.suppressNextSessionCloseEvent(event.sessionId);
+      }
+      this.clearSpeculativeSession(event.sessionId);
+    }
+    pending.reject(new Error(message));
+    return pending.suppressFailureEvent;
+  }
+
+  private suppressNextSessionCloseEvent(sessionId: string): void {
+    const currentTimer = this.suppressedSessionCloseEventTimers.get(sessionId);
+    if (currentTimer) {
+      clearTimeout(currentTimer);
+    }
+    this.suppressedSessionCloseEvents.add(sessionId);
+    const timer = setTimeout(() => {
+      this.suppressedSessionCloseEvents.delete(sessionId);
+      this.suppressedSessionCloseEventTimers.delete(sessionId);
+    }, 30_000);
+    timer.unref?.();
+    this.suppressedSessionCloseEventTimers.set(sessionId, timer);
+  }
+
+  private consumeSuppressedSessionCloseEvent(sessionId: string): boolean {
+    if (!this.suppressedSessionCloseEvents.delete(sessionId)) {
+      return false;
+    }
+    const timer = this.suppressedSessionCloseEventTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.suppressedSessionCloseEventTimers.delete(sessionId);
+    }
+    return true;
+  }
+
+  private clearSpeculativeSession(sessionId: string): void {
+    this.clearPendingStartupCommand(sessionId);
+    this.sessionTransportById.delete(sessionId);
+    this.tmuxControlSessionIds.delete(sessionId);
+    this.tabs.delete(sessionId);
+    this.desiredResizeBySession.delete(sessionId);
+    this.sentResizeBySession.delete(sessionId);
+    this.sessionLifecycleById.delete(sessionId);
+  }
+
   private handleControlEvent(event: CoreEvent<Record<string, unknown>>): void {
     this.resolvePendingResponse(event);
+    if (this.resolvePendingSessionReady(event)) {
+      return;
+    }
 
     if (isTransferEvent(event.type)) {
       const existing = event.jobId
@@ -4312,6 +4477,14 @@ export class CoreManager {
     }
   }
 
+  private rejectAllPendingSessionReady(message: string): void {
+    for (const [sessionId, pending] of this.pendingSessionReadyWaiters) {
+      pending.settled = true;
+      pending.reject(new Error(message));
+      this.pendingSessionReadyWaiters.delete(sessionId);
+    }
+  }
+
   private describeTransferEndpoint(
     endpoint: TransferStartInput["source"],
   ): string {
@@ -4336,6 +4509,7 @@ export class CoreManager {
       pending.reject(new Error("SSH core process stopped"));
     }
     this.pendingAwsAutocompleteResponses.clear();
+    this.rejectAllPendingSessionReady("SSH core process stopped");
     this.tabs.clear();
     this.sftpEndpoints.clear();
     this.sftpLifecycleByEndpointId.clear();
@@ -4347,6 +4521,11 @@ export class CoreManager {
     this.portForwardRuntimes.clear();
     this.desiredResizeBySession.clear();
     this.sentResizeBySession.clear();
+    for (const timer of this.suppressedSessionCloseEventTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.suppressedSessionCloseEventTimers.clear();
+    this.suppressedSessionCloseEvents.clear();
     this.sessionTransportById.clear();
     for (const state of this.startupCommandFlushStateBySessionId.values()) {
       if (state.quietTimer) {

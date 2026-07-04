@@ -337,6 +337,43 @@ describe("createAppStore sessions and auth recovery", () => {
     });
   });
 
+  it("does not restore the connecting overlay when a delayed connected event arrives after output", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [
+        createAwsSessionTab({
+          status: "connecting",
+          hasReceivedOutput: true,
+          connectionProgress: {
+            stage: "connecting",
+            message: "AWS Linux SSM 세션을 시작하는 중입니다.",
+            blockingKind: "none",
+            retryable: false,
+          },
+        }),
+      ],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "connected",
+      sessionId: "aws-session-1",
+      payload: {
+        status: "connected",
+      },
+    });
+
+    expect(store.getState().tabs[0]).toMatchObject({
+      sessionId: "aws-session-1",
+      status: "connected",
+      hasReceivedOutput: true,
+      connectionProgress: null,
+    });
+  });
+
   it("removes an AWS SSM session tab on normal close after output was received", async () => {
     const store = createAppStore(createMockApi());
     await store.getState().bootstrap();
@@ -622,6 +659,61 @@ describe("createAppStore sessions and auth recovery", () => {
 
     expect(store.getState().tabs[0]?.sessionId).toBe("session-1");
     expect(store.getState().tabs[0]?.status).toBe("connecting");
+  });
+
+  it("updates pending AWS SSH tabs from SSH-over-SSM preflight progress events", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: null,
+      arn: null,
+      errorMessage: null,
+      missingTools: [],
+    });
+    const connect = createDeferred<{ sessionId: string }>();
+    api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+
+    const connectPromise = store.getState().connectHost("aws-host-1", 120, 32);
+    await flushMicrotasks();
+
+    expect(store.getState().tabs[0]?.sessionId.startsWith("pending:")).toBe(
+      true,
+    );
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "sending-public-key",
+      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "sending-public-key",
+      message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+      blockingKind: "none",
+    });
+
+    store.getState().handleContainerConnectionProgressEvent({
+      endpointId: "aws-ec2-ssh:aws-host-1",
+      hostId: "aws-host-1",
+      stage: "opening-tunnel",
+      message: "SSH 연결용 내부 SSM 터널을 여는 중입니다.",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress).toMatchObject({
+      stage: "opening-tunnel",
+      message: "SSH 연결용 내부 SSM 터널을 여는 중입니다.",
+    });
+
+    connect.resolve({ sessionId: "aws-session-1" });
+    await connectPromise;
   });
 
   it("opens a local terminal tab immediately and replaces the pending id when connected", async () => {
