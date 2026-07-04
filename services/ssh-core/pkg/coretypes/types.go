@@ -479,6 +479,9 @@ type HostKeyProbePayload struct {
 	// (ConnectionHopProgressPayload)을 해당 연결의 오버레이에 매핑하는 데 쓴다.
 	SessionID  string `json:"sessionId,omitempty"`
 	EndpointID string `json:"endpointId,omitempty"`
+	// WSProxy가 설정되면 직접 TCP dial 대신 sync-api WebSocket으로 전송을 라우팅해
+	// 호스트 키를 읽는다(서버 프록시/bastion — IP 제한 VPC에서 probe도 서버 IP 경유).
+	WSProxy *WSProxyTarget `json:"wsProxy,omitempty"`
 }
 
 type CertificateInspectPayload struct {

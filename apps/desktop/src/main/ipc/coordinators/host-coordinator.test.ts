@@ -22,8 +22,12 @@ function createAwsHost() {
   } as any;
 }
 
-function createCoordinator(options: { probeHostKey?: ReturnType<typeof vi.fn> } = {}) {
-  const host = createAwsHost();
+function createCoordinator(
+  options: { probeHostKey?: ReturnType<typeof vi.fn>; serverProxy?: boolean } = {},
+) {
+  const host = options.serverProxy
+    ? { ...createAwsHost(), awsSsmServerProxyEnabled: true }
+    : createAwsHost();
   const deps = {
     hosts: {
       getById: vi.fn(() => host),
@@ -48,6 +52,15 @@ function createCoordinator(options: { probeHostKey?: ReturnType<typeof vi.fn> } 
     },
     awsService: {
       resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+      buildServerProxySessionEnvSpec: vi.fn().mockResolvedValue({
+        env: { AWS_ACCESS_KEY_ID: "AKIA" },
+        unsetEnv: [],
+      }),
+    },
+    authService: {
+      getServerUrl: vi.fn(() => "https://sync.example.com"),
+      getAccessToken: vi.fn(() => "token-1"),
+      refreshSession: vi.fn().mockResolvedValue({ status: "authenticated" }),
     },
     awsSsmTunnelService: {
       start: vi.fn().mockResolvedValue({
@@ -61,6 +74,10 @@ function createCoordinator(options: { probeHostKey?: ReturnType<typeof vi.fn> } 
       resolvePreflight: vi.fn().mockResolvedValue(host),
       reserveLoopbackPort: vi.fn().mockResolvedValue(2222),
       storePreflight: vi.fn(),
+      createEphemeralAwsSftpKeyPair: vi.fn(() => ({
+        privateKeyPem: "private",
+        publicKey: "public",
+      })),
       formatSftpStageError: vi.fn((stage, error, errorOptions = {}) => {
         const message = error instanceof Error ? error.message : String(error);
         const formatted = new Error(`[${stage}] ${message}`);
@@ -144,5 +161,42 @@ describe("host coordinator", () => {
         reasonCode: "tunnel-open-failed",
       }),
     );
+  });
+
+  it("probes AWS host key through the server proxy when enabled", async () => {
+    const probeHostKey = vi.fn().mockResolvedValue({
+      algorithm: "ecdsa-sha2-nistp256",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+    });
+    const { deps, coordinator } = createCoordinator({
+      probeHostKey,
+      serverProxy: true,
+    });
+    const emitProgress = vi.fn();
+
+    await expect(
+      coordinator.buildHostKeyProbeResult(emitProgress, {
+        hostId: "host-1",
+        endpointId: "endpoint-1",
+      }),
+    ).resolves.toMatchObject({
+      host: "aws-ssm:prod:ap-northeast-2:i-123",
+      port: 22,
+      status: "untrusted",
+    });
+
+    // 서버 프록시 경로: WS 릴레이로 인스턴스에 붙어 키를 읽고, 로컬 SSM 터널은 열지 않는다.
+    expect(probeHostKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "i-123",
+        port: 22,
+        wsProxy: expect.objectContaining({
+          url: expect.stringContaining("/api/aws-ssh-tunnel/ws"),
+          authToken: "token-1",
+        }),
+      }),
+    );
+    expect(deps.awsSsmTunnelService.start).not.toHaveBeenCalled();
   });
 });

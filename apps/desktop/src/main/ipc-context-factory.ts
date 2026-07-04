@@ -145,6 +145,7 @@ export function createMainIpcContext(
     knownHosts,
     coreManager,
     awsService,
+    authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
     resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
@@ -155,6 +156,7 @@ export function createMainIpcContext(
     coreManager,
     knownHosts,
     awsService,
+    authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
     tunnelRegistry,
@@ -265,8 +267,7 @@ export function createMainIpcContext(
     hasSecretValue: secretCoordinator.hasSecretValue,
     mergeSecrets: secretCoordinator.mergeSecrets,
     resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
-    resolveManagedPrivateKeyPem:
-      secretCoordinator.resolveManagedPrivateKeyPem,
+    resolveManagedPrivateKeyPem: secretCoordinator.resolveManagedPrivateKeyPem,
     resolveManagedCertificateText:
       secretCoordinator.resolveManagedCertificateText,
     inspectCertificate: secretCoordinator.inspectCertificate,
@@ -286,8 +287,7 @@ export function createMainIpcContext(
     describeHostLabel: hostCoordinator.describeHostLabel,
     describeHostTarget: hostCoordinator.describeHostTarget,
     buildHostKeyProbeResult: hostCoordinator.buildHostKeyProbeResult,
-    loadAwsHostSshMetadataRecord:
-      awsSftpCoordinator.loadHostSshMetadataRecord,
+    loadAwsHostSshMetadataRecord: awsSftpCoordinator.loadHostSshMetadataRecord,
     normalizeEcsExecPermissionError:
       awsSftpCoordinator.normalizeEcsExecPermissionError,
     createEphemeralAwsSftpKeyPair:

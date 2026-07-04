@@ -13,6 +13,12 @@ export interface TunnelRegistry {
     sessionId: string,
     runtimeId: string,
   ) => void;
+  // 서버 프록시 컨테이너 연결은 로컬 SSM 터널이 없으므로(WS 릴레이가 ssh-core 안에서 전송을
+  // 소유) 추적할 runtimeId가 없다. hydratedHost만 따로 기억해 재-preflight를 피한다.
+  trackContainersHydratedHost: (
+    endpointId: string,
+    hydratedHost: AwsEc2HostRecord,
+  ) => void;
   getContainersHydratedHost: (endpointId: string) => AwsEc2HostRecord | null;
   stopSftpTunnelForEndpoint: (endpointId: string) => Promise<void>;
   stopContainersTunnelForEndpoint: (endpointId: string) => Promise<void>;
@@ -68,6 +74,9 @@ export function createTunnelRegistry(deps: {
     },
     trackContainersTunnelRuntime: (endpointId, runtimeId, hydratedHost) => {
       awsContainersTunnelRuntimeByEndpoint.set(endpointId, runtimeId);
+      awsContainersHydratedHostByEndpoint.set(endpointId, hydratedHost);
+    },
+    trackContainersHydratedHost: (endpointId, hydratedHost) => {
       awsContainersHydratedHostByEndpoint.set(endpointId, hydratedHost);
     },
     trackContainerShellTunnelRuntime: (sessionId, runtimeId) => {

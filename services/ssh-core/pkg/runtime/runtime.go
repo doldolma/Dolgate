@@ -197,12 +197,17 @@ func New(options Options) *Runtime {
 			// 프로브 홉이 실제 연결과 같은 오버레이에 표시되게 한다.
 			probeConfig := sshconn.DefaultConfig
 			probeConfig.Progress = sshconn.HopProgress(
-				sshconn.Target{Host: payload.Host, Port: payload.Port, Jump: jump},
+				sshconn.Target{
+					Host:    payload.Host,
+					Port:    payload.Port,
+					Jump:    jump,
+					WSProxy: payload.WSProxy,
+				},
 				payload.SessionID,
 				payload.EndpointID,
 				emitEvent,
 			)
-			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, jump, probeConfig)
+			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, jump, payload.WSProxy, probeConfig)
 			if err != nil {
 				return coretypes.HostKeyProbedPayload{}, err
 			}

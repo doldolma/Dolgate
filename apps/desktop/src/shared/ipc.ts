@@ -567,6 +567,9 @@ export interface ResolvedHostKeyProbePayload {
   // 상관 ID. 세션(터미널 탭)이면 sessionId, SFTP·컨테이너 등이면 endpointId를 채운다.
   sessionId?: string;
   endpointId?: string;
+  // 설정되면 직접 dial 대신 sync-api WebSocket으로 전송을 라우팅해 호스트 키를 읽는다
+  // (서버 프록시/bastion). 실연결과 동일하게 IP 제한 VPC에서도 probe가 서버 IP를 경유한다.
+  wsProxy?: WsProxyTarget;
 }
 
 export interface ResolvedPortForwardStartPayload {
@@ -589,6 +592,9 @@ export interface ResolvedPortForwardStartPayload {
   targetHost?: string;
   targetPort?: number;
   sourceEndpointId?: string;
+  // 설정되면 직접 dial 대신 sync-api WebSocket으로 SSH 전송을 라우팅한다(서버 프록시/bastion).
+  // AWS EC2 포트포워딩을 네이티브 SSM 대신 SSH -L로 서버 경유시킬 때 쓴다.
+  wsProxy?: WsProxyTarget;
 }
 
 export interface ResolvedSsmPortForwardStartPayload {

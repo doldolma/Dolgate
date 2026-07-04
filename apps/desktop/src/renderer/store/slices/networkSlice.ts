@@ -278,7 +278,12 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               return;
             }
             const requiresTrustedHost =
-              host?.kind === "ssh" || host?.kind === "warpgate-ssh";
+              host?.kind === "ssh" ||
+              host?.kind === "warpgate-ssh" ||
+              // 서버 프록시 EC2 포트포워딩은 네이티브 SSM이 아니라 SSH -L로 붙으므로
+              // strict 호스트키 검사를 탄다 → 시작 전에 호스트 키 신뢰가 선행돼야 한다.
+              (host?.kind === "aws-ec2" &&
+                host.awsSsmServerProxyEnabled === true);
             if (requiresTrustedHost) {
               const trusted = await ensureTrustedHost(set, {
                 hostId: rule.hostId,

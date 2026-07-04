@@ -24,7 +24,7 @@ func TestVMControlMode(t *testing.T) {
 	}
 	user := envOr("TMUX_VM_USER", "ubuntu")
 
-	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), sshconn.DefaultConfig)
+	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("probe host key: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestVMReattach(t *testing.T) {
 		t.Skip("set TMUX_VM_HOST and TMUX_VM_PASS")
 	}
 	user := envOr("TMUX_VM_USER", "ubuntu")
-	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), sshconn.DefaultConfig)
+	probe, err := sshconn.ProbeHostKey(host, 22, sshconn.JumpTargetFromCore(nil), nil, sshconn.DefaultConfig)
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}

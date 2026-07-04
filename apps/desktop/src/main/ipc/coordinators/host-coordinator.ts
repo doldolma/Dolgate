@@ -20,6 +20,12 @@ import type {
   SshCertificateInfo,
 } from "@shared";
 import type { AwsService } from "../../aws-service";
+import type { AuthService } from "../../auth-service";
+import {
+  buildAwsServerProxyStartMessage,
+  buildAwsWsProxyTarget,
+  runWithAwsServerProxyAuthRetry,
+} from "../../aws-ws-proxy";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { CoreManager } from "../../core-manager";
 import type { HostRepository, KnownHostRepository } from "../../database";
@@ -67,6 +73,7 @@ export function createHostCoordinator(deps: {
   knownHosts: KnownHostRepository;
   coreManager: CoreManager;
   awsService: AwsService;
+  authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
   resolveRuntimeSshSecrets: (
@@ -83,6 +90,7 @@ export function createHostCoordinator(deps: {
     knownHosts,
     coreManager,
     awsService,
+    authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
     resolveRuntimeSshSecrets,
@@ -270,83 +278,128 @@ export function createHostCoordinator(deps: {
           emitProgress: emitConnectionProgress,
         });
 
-        currentStage = "opening-tunnel";
-        emitStage(
-          "opening-tunnel",
-          "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
-          hydratedHost.id,
-        );
-        const bindPort = await awsSftpCoordinator.reserveLoopbackPort();
-        const tunnel = await awsSsmTunnelService.start({
-          runtimeId: `aws-sftp-probe:${endpointId || host.id}:${randomUUID()}`,
-          profileName:
-            awsService.resolveManagedProfileNameOrFallback(
-              hydratedHost.awsProfileId,
-              hydratedHost.awsProfileName,
-            ) ?? hydratedHost.awsProfileName,
-          region: hydratedHost.awsRegion,
-          instanceId: hydratedHost.awsInstanceId,
-          bindAddress: "127.0.0.1",
-          bindPort,
-          targetPort: getAwsEc2HostSshPort(hydratedHost),
-        });
+        const resolvedProfileName =
+          awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName;
+        const knownHostPort = getAwsEc2HostSshPort(hydratedHost);
 
-        try {
+        let probed: HostKeyProbeResult;
+        if (hydratedHost.awsSsmServerProxyEnabled === true) {
+          // 서버 프록시(bastion): 직접 SSM 터널 대신 sync-api WS 릴레이 경유로 호스트 키를
+          // 읽는다. 릴레이 start message는 EIC 주입에 sshUsername/AZ/공개키가 필요하므로
+          // (probe는 인증하지 않지만 릴레이가 터널을 열려면 필요) 임시 키를 만들어 넣는다.
+          const sshUsername = hydratedHost.awsSshUsername?.trim();
+          if (!sshUsername) {
+            throw new Error(
+              hydratedHost.awsSshMetadataError ||
+                "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+            );
+          }
+          const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
+          if (!availabilityZone) {
+            throw new Error("Availability Zone을 확인하지 못했습니다.");
+          }
+          const { publicKey } = awsSftpCoordinator.createEphemeralAwsSftpKeyPair();
+          const startMessage = await buildAwsServerProxyStartMessage(awsService, {
+            region: hydratedHost.awsRegion,
+            profileName: resolvedProfileName,
+            instanceId: hydratedHost.awsInstanceId,
+            availabilityZone,
+            sshUsername,
+            sshPort: knownHostPort,
+            publicKey,
+          });
           currentStage = "probing-host-key";
           emitStage(
             "probing-host-key",
-            "SSH 호스트 키를 확인하는 중입니다.",
+            "서버 프록시로 SSH 호스트 키를 확인하는 중입니다.",
             hydratedHost.id,
           );
-          const probed = await retryAwsSsmSshOperation(() =>
-            coreManager.probeHostKey({
-              host: tunnel.bindAddress,
-              port: tunnel.bindPort,
-            }),
+          probed = await retryAwsSsmSshOperation(() =>
+            runWithAwsServerProxyAuthRetry(authService, (accessToken) =>
+              coreManager.probeHostKey({
+                host: hydratedHost.awsInstanceId,
+                port: knownHostPort,
+                wsProxy: buildAwsWsProxyTarget({
+                  serverUrl: authService.getServerUrl(),
+                  accessToken,
+                  startMessage,
+                }),
+              }),
+            ),
           );
-          const knownHost = buildAwsSsmKnownHostIdentity({
-            profileName:
-              awsService.resolveManagedProfileNameOrFallback(
-                hydratedHost.awsProfileId,
-                hydratedHost.awsProfileName,
-              ) ?? hydratedHost.awsProfileName,
+        } else {
+          currentStage = "opening-tunnel";
+          emitStage(
+            "opening-tunnel",
+            "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+            hydratedHost.id,
+          );
+          const bindPort = await awsSftpCoordinator.reserveLoopbackPort();
+          const tunnel = await awsSsmTunnelService.start({
+            runtimeId: `aws-sftp-probe:${endpointId || host.id}:${randomUUID()}`,
+            profileName: resolvedProfileName,
             region: hydratedHost.awsRegion,
             instanceId: hydratedHost.awsInstanceId,
+            bindAddress: "127.0.0.1",
+            bindPort,
+            targetPort: knownHostPort,
           });
-          const knownHostPort = getAwsEc2HostSshPort(hydratedHost);
-          const existing = knownHosts.getByHostPortAlgorithm(
-            knownHost,
-            knownHostPort,
-            probed.algorithm,
-          );
-          const status = !existing
-            ? "untrusted"
-            : existing.publicKeyBase64 === probed.publicKeyBase64
-              ? "trusted"
-              : "mismatch";
-
-          if (status === "trusted") {
-            knownHosts.touch(knownHost, knownHostPort, probed.algorithm);
+          try {
+            currentStage = "probing-host-key";
+            emitStage(
+              "probing-host-key",
+              "SSH 호스트 키를 확인하는 중입니다.",
+              hydratedHost.id,
+            );
+            probed = await retryAwsSsmSshOperation(() =>
+              coreManager.probeHostKey({
+                host: tunnel.bindAddress,
+                port: tunnel.bindPort,
+              }),
+            );
+          } finally {
+            await awsSsmTunnelService.stop(tunnel.runtimeId).catch(() => undefined);
           }
-          if (endpointId) {
-            awsSftpCoordinator.storePreflight(endpointId, hydratedHost);
-          }
-
-          return {
-            hostId: hydratedHost.id,
-            hostLabel: hydratedHost.label,
-            host: knownHost,
-            port: knownHostPort,
-            targetDescription: `AWS SSM · ${hydratedHost.awsInstanceId}`,
-            algorithm: probed.algorithm,
-            publicKeyBase64: probed.publicKeyBase64,
-            fingerprintSha256: probed.fingerprintSha256,
-            status,
-            existing,
-          };
-        } finally {
-          await awsSsmTunnelService.stop(tunnel.runtimeId).catch(() => undefined);
         }
+
+        const knownHost = buildAwsSsmKnownHostIdentity({
+          profileName: resolvedProfileName,
+          region: hydratedHost.awsRegion,
+          instanceId: hydratedHost.awsInstanceId,
+        });
+        const existing = knownHosts.getByHostPortAlgorithm(
+          knownHost,
+          knownHostPort,
+          probed.algorithm,
+        );
+        const status = !existing
+          ? "untrusted"
+          : existing.publicKeyBase64 === probed.publicKeyBase64
+            ? "trusted"
+            : "mismatch";
+
+        if (status === "trusted") {
+          knownHosts.touch(knownHost, knownHostPort, probed.algorithm);
+        }
+        if (endpointId) {
+          awsSftpCoordinator.storePreflight(endpointId, hydratedHost);
+        }
+
+        return {
+          hostId: hydratedHost.id,
+          hostLabel: hydratedHost.label,
+          host: knownHost,
+          port: knownHostPort,
+          targetDescription: `AWS SSM · ${hydratedHost.awsInstanceId}`,
+          algorithm: probed.algorithm,
+          publicKeyBase64: probed.publicKeyBase64,
+          fingerprintSha256: probed.fingerprintSha256,
+          status,
+          existing,
+        };
       } catch (error) {
         if (error instanceof Error && /^\[/.test(error.message)) {
           throw error;
