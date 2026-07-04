@@ -1879,17 +1879,8 @@ export function PortForwardingPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] px-6 py-5 shadow-[var(--shadow-soft)]">
-        <div>
-          <SectionLabel>Forwarding</SectionLabel>
-          <h2 className="mt-2 text-[1.35rem] font-semibold tracking-[-0.02em] text-[var(--text)]">Port Forwarding</h2>
-          <p className="mt-2 max-w-[46rem] text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">SSH 포워딩, AWS EC2 포워딩, ECS Task 터널, 컨테이너 터널, DNS Override 규칙을 저장하고 필요할 때만 실행합니다.</p>
-        </div>
-        <Button type="button" variant="primary" onClick={() => openCreate(activeTab)}>
-          {createButtonLabel(activeTab)}
-        </Button>
-      </div>
-
+      {/* 상단 브레드크럼(← Hosts · Port Forwarding)에 이미 제목이 있어 흰색 헤더 카드는 생략.
+          생성 버튼은 아래 탭 행 오른쪽으로 옮긴다. */}
       {interactiveAuth ? (
         <InteractiveAuthCard
           auth={interactiveAuth}
@@ -1910,23 +1901,28 @@ export function PortForwardingPanel({
         />
       ) : null}
 
-      <Tabs role="tablist" aria-label="Port forwarding transport" className="gap-2 bg-[var(--surface-elevated)] p-1.5">
-        <TabButton role="tab" aria-selected={activeTab === 'ssh'} active={activeTab === 'ssh'} onClick={() => setActiveTab('ssh')}>
-          SSH Forwarding
-        </TabButton>
-        <TabButton role="tab" aria-selected={activeTab === 'aws-ssm'} active={activeTab === 'aws-ssm'} onClick={() => setActiveTab('aws-ssm')}>
-          AWS EC2
-        </TabButton>
-        <TabButton role="tab" aria-selected={activeTab === 'ecs-task'} active={activeTab === 'ecs-task'} onClick={() => setActiveTab('ecs-task')}>
-          ECS Task
-        </TabButton>
-        <TabButton role="tab" aria-selected={activeTab === 'container'} active={activeTab === 'container'} onClick={() => setActiveTab('container')}>
-          Container
-        </TabButton>
-        <TabButton role="tab" aria-selected={activeTab === 'dns'} active={activeTab === 'dns'} onClick={() => setActiveTab('dns')}>
-          DNS Override
-        </TabButton>
-      </Tabs>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <Tabs role="tablist" aria-label="Port forwarding transport" className="gap-2 bg-[var(--surface-elevated)] p-1.5">
+          <TabButton role="tab" aria-selected={activeTab === 'ssh'} active={activeTab === 'ssh'} onClick={() => setActiveTab('ssh')}>
+            SSH Forwarding
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'aws-ssm'} active={activeTab === 'aws-ssm'} onClick={() => setActiveTab('aws-ssm')}>
+            AWS EC2
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'ecs-task'} active={activeTab === 'ecs-task'} onClick={() => setActiveTab('ecs-task')}>
+            ECS Task
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'container'} active={activeTab === 'container'} onClick={() => setActiveTab('container')}>
+            Container
+          </TabButton>
+          <TabButton role="tab" aria-selected={activeTab === 'dns'} active={activeTab === 'dns'} onClick={() => setActiveTab('dns')}>
+            DNS Override
+          </TabButton>
+        </Tabs>
+        <Button type="button" variant="primary" onClick={() => openCreate(activeTab)}>
+          {createButtonLabel(activeTab)}
+        </Button>
+      </div>
 
       <PanelSection>
         {activeTab === 'dns' && dnsToggleError ? (

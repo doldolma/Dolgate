@@ -82,17 +82,23 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-[1.1rem] overflow-auto px-[1.6rem] py-[1.3rem]">
-      <header className="flex flex-wrap items-center justify-between gap-[0.9rem]">
-        <div className="grid gap-[0.25rem]">
-          <h2 className="text-[1.35rem] font-semibold text-[var(--text)]">Snippets</h2>
-          <p className="text-[0.9rem] text-[var(--text-soft)]">
-            자주 쓰는 명령을 저장해 두고 터미널 자동완성에서 꺼내 씁니다. {'{{변수}}'}로 값을 받을 수 있어요.
-          </p>
+      {/* 상단 브레드크럼(← Hosts · Snippets)에 이미 제목이 있어 Snippets 헤더는 생략.
+          저장된 스니펫이 있을 때만 검색 + New Snippet 행을 상단에 둔다. 비어있을 땐
+          아래 중앙 정렬 빈 상태 카드에 CTA를 둬 상단에 버튼만 덩그러니 뜨지 않게 한다. */}
+      {snippets.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-[0.9rem]">
+          <Input
+            aria-label="Snippet search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="이름, 키워드, 명령 검색"
+            className="w-full max-w-[360px]"
+          />
+          <Button variant="primary" className="ml-auto shrink-0" onClick={openCreate}>
+            New Snippet
+          </Button>
         </div>
-        <Button variant="primary" onClick={openCreate}>
-          New Snippet
-        </Button>
-      </header>
+      ) : null}
 
       {isFormOpen ? (
         <div className="grid gap-[0.9rem] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[1.1rem]">
@@ -154,18 +160,13 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
         <EmptyState
           title="아직 저장된 snippet이 없습니다."
           description="자주 쓰는 명령을 추가하면 터미널 자동완성에서 바로 꺼내 쓸 수 있습니다."
-        />
+        >
+          <Button variant="primary" onClick={openCreate}>
+            New Snippet
+          </Button>
+        </EmptyState>
       ) : (
         <div className="grid gap-[0.7rem]">
-          {snippets.length > 0 ? (
-            <Input
-              aria-label="Snippet search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="이름, 키워드, 명령 검색"
-              className="max-w-[360px]"
-            />
-          ) : null}
           {visibleSnippets.map((snippet) => {
             const variables = parseSnippetVariables(snippet.command);
             return (
