@@ -317,6 +317,37 @@ export interface ResolvedJumpHost {
 }
 
 // main 프로세스가 키체인과 DB를 합쳐 최종적으로 Go 코어에 보내는 payload다.
+/**
+ * Opaque start blob ssh-core forwards verbatim to sync-api as the first WebSocket
+ * frame. Its keys are the JSON the server's relay reads (region, instanceId, EIC
+ * publicKey, resolved AWS credential env, ...). Mirrors awsSshTunnelStartMessage
+ * on the Go side.
+ */
+export interface AwsSshTunnelStartMessage {
+  region: string;
+  profileName: string;
+  instanceId: string;
+  availabilityZone: string;
+  sshUsername: string;
+  sshPort: number;
+  publicKey: string;
+  env: Record<string, string>;
+  unsetEnv?: string[];
+}
+
+/**
+ * Routes the raw SSH transport through a WebSocket to sync-api instead of dialing
+ * the target directly (server-proxy / bastion mode for IP-restricted VPCs). ssh-core
+ * dials `url` with Bearer `authToken`, forwards `startMessage` verbatim, then speaks
+ * plain SSH over the relayed bytes — so shell/tmux/sftp/forwarding work through the
+ * server unchanged. Mirrors coretypes.WSProxyTarget on the Go side.
+ */
+export interface WsProxyTarget {
+  url: string;
+  authToken?: string;
+  startMessage: AwsSshTunnelStartMessage;
+}
+
 export interface ResolvedCoreConnectPayload {
   host: string;
   port: number;
@@ -344,6 +375,8 @@ export interface ResolvedCoreConnectPayload {
   // 감지된 원격 tmux 버전 문자열. Go 코어의 ConnectPayload.TmuxVersion(json: tmuxVersion)에
   // 매핑돼 버전별 입력 인코딩/refresh-client 방언 분기에 쓰인다. tmuxConnect일 때만 의미.
   tmuxVersion?: string;
+  // 설정되면 직접 dial 대신 sync-api WebSocket으로 SSH 전송을 라우팅한다(서버 프록시/bastion).
+  wsProxy?: WsProxyTarget;
 }
 
 export interface ResolvedLocalConnectPayload {
@@ -505,6 +538,7 @@ export interface ResolvedSftpConnectPayload {
   jump?: ResolvedJumpHost;
   authAgentEndpointKind?: string;
   authAgentEndpoint?: string;
+  wsProxy?: WsProxyTarget;
 }
 
 export interface ResolvedContainersConnectPayload {
@@ -521,6 +555,7 @@ export interface ResolvedContainersConnectPayload {
   jump?: ResolvedJumpHost;
   authAgentEndpointKind?: string;
   authAgentEndpoint?: string;
+  wsProxy?: WsProxyTarget;
 }
 
 export interface ResolvedHostKeyProbePayload {

@@ -33,6 +33,7 @@ type RouterConfig struct {
 	AwsSsoBrowserFlow  bool
 	AwsSessionBridge   *AwsSessionBridge
 	AwsSftpBridge      *AwsSftpBridge
+	AwsSshTunnelRelay  *AwsSshTunnelRelay
 	AwsSsoMobile       *AwsSsoMobileManager
 }
 
@@ -670,6 +671,27 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	}))
 	awsSessionGroup.GET("/ws", func(ctx *gin.Context) {
 		if err := awsSessionHub.HandleWebSocket(ctx.Writer, ctx.Request); err != nil {
+			if ctx.Writer.Written() {
+				return
+			}
+			logAndJSONError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
+		}
+	})
+
+	// Server-proxy (bastion) transport: relays raw SSH bytes over a WebSocket to the
+	// SSM tunnel that sync-api opens on its allowlisted IP. Desktop ssh-core rides
+	// plain SSH over it, so shell/tmux/sftp/forwarding work through the server in
+	// IP-restricted VPCs. Mirrors the aws-sessions WS group's auth (header or query).
+	awsSshTunnelGroup := router.Group("/api/aws-ssh-tunnel")
+	awsSshTunnelGroup.Use(authMiddlewareWithOptions(authService, authMiddlewareOptions{
+		AllowQueryAccessToken: true,
+	}))
+	awsSshTunnelGroup.GET("/ws", func(ctx *gin.Context) {
+		if config.AwsSshTunnelRelay == nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "AWS SSH tunnel relay is unavailable on this server."})
+			return
+		}
+		if err := config.AwsSshTunnelRelay.HandleWebSocket(ctx.Writer, ctx.Request); err != nil {
 			if ctx.Writer.Written() {
 				return
 			}

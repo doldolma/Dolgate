@@ -92,6 +92,7 @@ require (
 	github.com/unixshells/mosh-go v0.5.2 // indirect
 	github.com/unixshells/vt-go v0.1.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/xtaci/smux v1.5.35 // indirect
 	go.bug.st/serial v1.7.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.7.0 // indirect
 	golang.org/x/arch v0.28.0 // indirect

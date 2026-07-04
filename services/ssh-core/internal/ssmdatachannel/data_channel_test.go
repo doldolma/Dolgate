@@ -24,6 +24,8 @@ type channelOpenMessage struct {
 	MessageSchemaVersion string
 	RequestId            string
 	TokenValue           string
+	ClientId             string
+	ClientVersion        string
 }
 
 // fakeAgentServer speaks just enough of the SSM agent data-channel protocol for a
@@ -296,6 +298,12 @@ func TestOpenWithSessionTokenEchoRoundTrip(t *testing.T) {
 		if open.RequestId == "" {
 			t.Fatal("channel-open RequestId is empty")
 		}
+		if open.ClientId == "" {
+			t.Fatal("channel-open ClientId is empty")
+		}
+		if open.ClientVersion == "" {
+			t.Fatal("channel-open ClientVersion is empty")
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for channel-open message")
 	}
@@ -450,12 +458,10 @@ func TestConcurrentWritesAssignGaplessSequenceNumbers(t *testing.T) {
 	}
 }
 
-// TestRetransmitPreservesSequenceNumbers guards the other half of the fix: when
-// unacked messages are retransmitted from the outbound queue, they must keep
-// their original sequence number. Reassigning a new number on each retransmit
-// (the bug that made the freeze survive the first fix) renumbers the stream and
-// the agent stalls. The paused-then-resumed sudo path takes exactly this
-// retransmit route, so it must be gap- and renumber-free.
+// TestRetransmitPreservesSequenceNumbers guards two datachannel failure modes:
+// retransmits must keep their original sequence number, and the resend scheduler
+// must not replay the whole unacked buffer on every tick. Replaying everything
+// turns a large SFTP upload into duplicate datachannel traffic under load.
 func TestRetransmitPreservesSequenceNumbers(t *testing.T) {
 	// Construct with noAck set before the server starts so the retransmit loop
 	// keeps firing (no data race on the flag: it is set before any handler runs).
@@ -483,8 +489,8 @@ func TestRetransmitPreservesSequenceNumbers(t *testing.T) {
 	}
 	defer dc.Close()
 
-	// Two writes: seq 0 (Syn) and seq 1. The agent never acks, so the outbound
-	// queue retransmits both every ~500ms.
+	// Two writes: seq 0 (Syn) and seq 1. The agent never acks, so only the
+	// oldest unacked message (seq 0) should be retransmitted.
 	if _, err := dc.Write([]byte("a")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -494,7 +500,7 @@ func TestRetransmitPreservesSequenceNumbers(t *testing.T) {
 
 	// Collect what the agent receives across several retransmit cycles.
 	received := make([]int64, 0, 16)
-	deadline := time.After(2200 * time.Millisecond)
+	deadline := time.After(2600 * time.Millisecond)
 	for {
 		select {
 		case seq := <-f.inputSeqs:
@@ -510,9 +516,17 @@ func TestRetransmitPreservesSequenceNumbers(t *testing.T) {
 	}
 	// Every received sequence number must be 0 or 1 — retransmits reuse the
 	// original numbers and never climb.
+	counts := make(map[int64]int)
 	for _, seq := range received {
+		counts[seq]++
 		if seq != 0 && seq != 1 {
 			t.Fatalf("retransmit renumbered the stream: saw seq %d (want only 0/1), full: %v", seq, received)
 		}
+	}
+	if counts[0] < 3 {
+		t.Fatalf("oldest unacked message was not retransmitted enough: counts=%v received=%v", counts, received)
+	}
+	if counts[1] != 1 {
+		t.Fatalf("non-oldest unacked message was retransmitted; counts=%v received=%v", counts, received)
 	}
 }

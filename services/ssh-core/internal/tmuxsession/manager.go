@@ -196,6 +196,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
+		WSProxy:               payload.WSProxy,
 	}
 	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
 	client, err := sshconn.DialClient(target, sshconn.Config{

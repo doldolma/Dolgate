@@ -319,3 +319,42 @@ func TestDataChannelRunnerHandlesLargeOutputFrame(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 }
+
+func TestDataChannelRunnerKeepsReadingWhenStreamConsumerIsSlow(t *testing.T) {
+	agent, url := newFakeSsmAgent(t)
+	runner := startTestDataChannelRunner(t, url)
+	defer runner.Close()
+
+	agent.waitFor(t, "open")
+	agent.waitFor(t, "size")
+
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for index := 0; index < 32; index++ {
+			agent.echo([]byte("top output\n"))
+		}
+		agent.channelClosed()
+	}()
+
+	select {
+	case <-sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake agent blocked because runner stopped reading websocket output")
+	}
+
+	waited := make(chan error, 1)
+	go func() {
+		_, err := runner.Wait()
+		waited <- err
+	}()
+
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("Wait returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner did not observe remote close while stream consumer was slow")
+	}
+}

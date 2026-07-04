@@ -109,6 +109,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
+		WSProxy:               payload.WSProxy,
 	}
 	// 홉 진행을 renderer로 방출(EndpointID로 SFTP pane에 매핑) — 세션·컨테이너·probe와 동일한 공통 헬퍼.
 	config := sshconn.DefaultConfig

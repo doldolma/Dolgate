@@ -16,14 +16,10 @@ import (
 
 const forwardHandshakeTimeout = 15 * time.Second
 
-// datachannelForwardRunner runs an SSM port-forwarding session over the in-process
-// data channel instead of spawning aws + session-manager-plugin.
-//
-// It implements the plugin's "basic" (non-multiplexed) port forwarding: one active
-// downstream TCP connection at a time. That is exactly right for SSH/SFTP-over-SSM
-// (a single connection) and for single-connection tunnels. Multiplexed forwarding
-// (concurrent connections over one session, via smux) is a deliberate follow-up;
-// until then a second concurrent connection is refused while one is active.
+// datachannelForwardRunner runs the session-manager-plugin's basic
+// (non-multiplexed) SSM port-forwarding mode over the in-process data channel.
+// Newer agents advertise LocalPortForwarding + smux support during the
+// handshake; those sessions are handled by datachannelMuxForwardRunner instead.
 type datachannelForwardRunner struct {
 	dc       *ssmdatachannel.SsmDataChannel
 	listener net.Listener
@@ -35,6 +31,16 @@ type datachannelForwardRunner struct {
 
 	connMu sync.Mutex
 	conn   net.Conn // currently active downstream connection, nil when idle
+	// pending buffers instance→client bytes that arrive before the FIRST downstream
+	// connection attaches — notably sshd's version banner, which the SSM agent
+	// forwards on session start. Without this the banner is dropped and the first
+	// SSH handshake fails with "overflow reading version string" (masked until now
+	// by a retry that reconnects and gets a fresh banner). Buffering makes the first
+	// connection succeed. Only pre-first-connection: once primed, a nil conn means a
+	// closed connection and bytes are dropped as before, so a closed connection's
+	// tail never leaks into the next one.
+	pending []byte
+	primed  bool
 
 	mu          sync.Mutex
 	exit        sessionExit
@@ -50,7 +56,7 @@ func startDataChannelForwardRunner(payload protocol.SSMPortForwardStartPayload) 
 	}
 
 	// Port forwarding requires the SessionType handshake to complete before any
-	// bytes flow; this also flips the channel into unbuffered streaming mode.
+	// bytes flow.
 	hsCtx, hsCancel := context.WithTimeout(context.Background(), forwardHandshakeTimeout)
 	err := dc.WaitForHandshakeComplete(hsCtx)
 	hsCancel()
@@ -67,12 +73,24 @@ func startDataChannelForwardRunner(payload protocol.SSMPortForwardStartPayload) 
 		_ = dc.Close()
 		return nil, fmt.Errorf("listen on %s: %w", address, err)
 	}
+	bindPort := listener.Addr().(*net.TCPAddr).Port
+
+	if shouldUseDataChannelMux(dc) {
+		runner, err := newDataChannelMuxForwardRunner(dc, listener, bindPort)
+		if err != nil {
+			_ = listener.Close()
+			_ = dc.TerminateSession()
+			_ = dc.Close()
+			return nil, fmt.Errorf("start SSM mux port forward: %w", err)
+		}
+		return runner, nil
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := &datachannelForwardRunner{
 		dc:       dc,
 		listener: listener,
-		bindPort: listener.Addr().(*net.TCPAddr).Port,
+		bindPort: bindPort,
 		cancel:   cancel,
 		done:     make(chan struct{}),
 	}
@@ -92,9 +110,14 @@ func (r *datachannelForwardRunner) readLoop() {
 			if len(payload) > 0 {
 				r.connMu.Lock()
 				conn := r.conn
+				if conn == nil && !r.primed {
+					// Buffer bytes that precede the first downstream connection
+					// (sshd's banner) so the first SSH handshake sees them.
+					r.pending = append(r.pending, payload...)
+				}
 				r.connMu.Unlock()
 				if conn != nil {
-					_, _ = conn.Write(payload)
+					_ = writeAll(conn, payload)
 				}
 			}
 			if handleErr != nil {
@@ -121,8 +144,13 @@ func (r *datachannelForwardRunner) acceptLoop(ctx context.Context) {
 
 		r.connMu.Lock()
 		busy := r.conn != nil
+		var pending []byte
 		if !busy {
 			r.conn = conn
+			// Hand off any bytes buffered before this first connection attached.
+			pending = r.pending
+			r.pending = nil
+			r.primed = true
 		}
 		r.connMu.Unlock()
 		if busy {
@@ -130,6 +158,14 @@ func (r *datachannelForwardRunner) acceptLoop(ctx context.Context) {
 			// than interleave them onto one unmuxed channel.
 			_ = conn.Close()
 			continue
+		}
+
+		// Deliver the pre-connect bytes (e.g. sshd's banner) before streaming so the
+		// SSH handshake doesn't miss the version string.
+		if len(pending) > 0 {
+			if err := writeAll(conn, pending); err != nil && !errors.Is(err, net.ErrClosed) {
+				r.setMessage(err.Error())
+			}
 		}
 
 		// conn -> channel; blocks until the client closes the connection.
@@ -176,6 +212,22 @@ func (r *datachannelForwardRunner) finishWith(cause error) {
 		_ = r.dc.Close()
 		close(r.done)
 	})
+}
+
+func writeAll(w io.Writer, payload []byte) error {
+	for len(payload) > 0 {
+		written, err := w.Write(payload)
+		if written > 0 {
+			payload = payload[written:]
+		}
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }
 
 func (r *datachannelForwardRunner) setMessage(message string) {

@@ -19,6 +19,7 @@ type datachannelRunner struct {
 	dc     *ssmdatachannel.SsmDataChannel
 	reader *io.PipeReader
 	writer *io.PipeWriter
+	output chan []byte
 
 	done chan struct{}
 
@@ -26,6 +27,9 @@ type datachannelRunner struct {
 	killed bool
 	exit   sessionExit
 	waitEr error
+
+	finishOnce sync.Once
+	closeCh    chan struct{}
 }
 
 func startDataChannelRunner(payload protocol.AWSConnectPayload) (sessionRunner, error) {
@@ -42,12 +46,15 @@ func startDataChannelRunner(payload protocol.AWSConnectPayload) (sessionRunner, 
 
 	reader, writer := io.Pipe()
 	runner := &datachannelRunner{
-		dc:     dc,
-		reader: reader,
-		writer: writer,
-		done:   make(chan struct{}),
+		dc:      dc,
+		reader:  reader,
+		writer:  writer,
+		output:  make(chan []byte, 1024),
+		done:    make(chan struct{}),
+		closeCh: make(chan struct{}),
 	}
 	go runner.pump()
+	go runner.drainOutput()
 	return runner, nil
 }
 
@@ -55,6 +62,7 @@ func startDataChannelRunner(payload protocol.AWSConnectPayload) (sessionRunner, 
 // manager reads via Streams(). It owns the runner's exit state.
 func (r *datachannelRunner) pump() {
 	defer close(r.done)
+	defer close(r.output)
 
 	for {
 		msg, err := r.dc.ReadFrame()
@@ -65,9 +73,11 @@ func (r *datachannelRunner) pump() {
 
 		payload, err := r.dc.HandleMsg(msg)
 		if len(payload) > 0 {
-			// Blocks until the manager consumes it: natural backpressure.
-			if _, writeErr := r.writer.Write(payload); writeErr != nil {
-				r.finish(writeErr)
+			copied := append([]byte(nil), payload...)
+			select {
+			case r.output <- copied:
+			case <-r.closeCh:
+				r.finish(nil)
 				return
 			}
 		}
@@ -78,21 +88,38 @@ func (r *datachannelRunner) pump() {
 	}
 }
 
-func (r *datachannelRunner) finish(cause error) {
-	r.mu.Lock()
-	killed := r.killed
-	if errors.Is(cause, io.EOF) || killed {
-		// Remote shell exit (ChannelClosed) or client-requested disconnect.
-		r.exit = sessionExit{}
-		r.waitEr = nil
-	} else {
-		r.exit = sessionExit{ExitCode: 1}
-		r.waitEr = cause
+func (r *datachannelRunner) drainOutput() {
+	defer r.writer.Close()
+	for payload := range r.output {
+		if len(payload) == 0 {
+			continue
+		}
+		if _, err := r.writer.Write(payload); err != nil {
+			r.finish(err)
+			return
+		}
 	}
-	r.mu.Unlock()
+}
 
-	_ = r.writer.Close()
-	_ = r.dc.Close()
+func (r *datachannelRunner) finish(cause error) {
+	r.finishOnce.Do(func() {
+		close(r.closeCh)
+
+		r.mu.Lock()
+		killed := r.killed
+		if cause == nil || errors.Is(cause, io.EOF) || killed {
+			// Remote shell exit (ChannelClosed) or client-requested disconnect.
+			r.exit = sessionExit{}
+			r.waitEr = nil
+		} else {
+			r.exit = sessionExit{ExitCode: 1}
+			r.waitEr = cause
+		}
+		r.mu.Unlock()
+
+		_ = r.writer.Close()
+		_ = r.dc.Close()
+	})
 }
 
 // SetLatencyHandler forwards the data channel's ping→pong round-trip time so the

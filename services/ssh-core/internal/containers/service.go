@@ -103,6 +103,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.Contain
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
+		WSProxy:               payload.WSProxy,
 	}
 	client, err := s.dialTarget(
 		endpointID,

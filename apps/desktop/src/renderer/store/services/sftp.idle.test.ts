@@ -49,7 +49,7 @@ function createHarness() {
     },
   };
 
-  const get = (() => state) as SliceDeps["get"];
+  const get = (() => state) as unknown as SliceDeps["get"];
   const set = ((updater: unknown) => {
     const patch =
       typeof updater === "function"

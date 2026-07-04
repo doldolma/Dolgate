@@ -267,30 +267,46 @@ type JumpTarget struct {
 	Jump                  *JumpTarget `json:"jump,omitempty"`
 }
 
+// WSProxyTarget routes the raw SSH transport through a WebSocket to sync-api
+// instead of dialing the target host directly. Used for server-proxy (bastion)
+// mode in IP-restricted VPCs: sync-api holds the AWS-facing socket, opens the SSM
+// port-forward to the instance, and relays raw TCP over the WebSocket. ssh-core
+// then speaks plain SSH over it, so shell/tmux/sftp/forwarding all work unchanged
+// above the transport. StartMessage is an opaque JSON blob (AWS creds, instanceId,
+// EIC public key, ...) that ssh-core forwards verbatim as the first frame, so
+// ssh-core stays AWS-agnostic on this path. When set, Jump is ignored — the proxy
+// itself is the path.
+type WSProxyTarget struct {
+	URL          string          `json:"url"`
+	AuthToken    string          `json:"authToken,omitempty"`
+	StartMessage json.RawMessage `json:"startMessage,omitempty"`
+}
+
 type EnvVar struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
 type ConnectPayload struct {
-	Host                        string      `json:"host"`
-	Port                        int         `json:"port"`
-	Username                    string      `json:"username"`
-	AuthType                    string      `json:"authType"`
-	Password                    string      `json:"password,omitempty"`
-	PrivateKeyPEM               string      `json:"privateKeyPem,omitempty"`
-	CertificateText             string      `json:"certificateText,omitempty"`
-	Passphrase                  string      `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64        string      `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64       []string    `json:"trustedHostKeysBase64,omitempty"`
-	Jump                        *JumpTarget `json:"jump,omitempty"`
-	Cols                        int         `json:"cols"`
-	Rows                        int         `json:"rows"`
-	Command                     string      `json:"command,omitempty"`
-	Env                         []EnvVar    `json:"env,omitempty"`
-	AgentForwarding             bool        `json:"agentForwarding,omitempty"`
-	AgentForwardingEndpointKind string      `json:"agentForwardingEndpointKind,omitempty"`
-	AgentForwardingEndpoint     string      `json:"agentForwardingEndpoint,omitempty"`
+	Host                        string         `json:"host"`
+	Port                        int            `json:"port"`
+	Username                    string         `json:"username"`
+	AuthType                    string         `json:"authType"`
+	Password                    string         `json:"password,omitempty"`
+	PrivateKeyPEM               string         `json:"privateKeyPem,omitempty"`
+	CertificateText             string         `json:"certificateText,omitempty"`
+	Passphrase                  string         `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64        string         `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64       []string       `json:"trustedHostKeysBase64,omitempty"`
+	Jump                        *JumpTarget    `json:"jump,omitempty"`
+	WSProxy                     *WSProxyTarget `json:"wsProxy,omitempty"`
+	Cols                        int            `json:"cols"`
+	Rows                        int            `json:"rows"`
+	Command                     string         `json:"command,omitempty"`
+	Env                         []EnvVar       `json:"env,omitempty"`
+	AgentForwarding             bool           `json:"agentForwarding,omitempty"`
+	AgentForwardingEndpointKind string         `json:"agentForwardingEndpointKind,omitempty"`
+	AgentForwardingEndpoint     string         `json:"agentForwardingEndpoint,omitempty"`
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프(포워딩과 별개).
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
@@ -419,34 +435,36 @@ type SerialControlCompletedPayload struct {
 }
 
 type SFTPConnectPayload struct {
-	Host                  string      `json:"host"`
-	Port                  int         `json:"port"`
-	Username              string      `json:"username"`
-	AuthType              string      `json:"authType"`
-	Password              string      `json:"password,omitempty"`
-	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
-	CertificateText       string      `json:"certificateText,omitempty"`
-	Passphrase            string      `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
-	Jump                  *JumpTarget `json:"jump,omitempty"`
+	Host                  string         `json:"host"`
+	Port                  int            `json:"port"`
+	Username              string         `json:"username"`
+	AuthType              string         `json:"authType"`
+	Password              string         `json:"password,omitempty"`
+	PrivateKeyPEM         string         `json:"privateKeyPem,omitempty"`
+	CertificateText       string         `json:"certificateText,omitempty"`
+	Passphrase            string         `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string         `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string       `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget    `json:"jump,omitempty"`
+	WSProxy               *WSProxyTarget `json:"wsProxy,omitempty"`
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
 }
 
 type ContainersConnectPayload struct {
-	Host                  string      `json:"host"`
-	Port                  int         `json:"port"`
-	Username              string      `json:"username"`
-	AuthType              string      `json:"authType"`
-	Password              string      `json:"password,omitempty"`
-	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
-	CertificateText       string      `json:"certificateText,omitempty"`
-	Passphrase            string      `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
-	Jump                  *JumpTarget `json:"jump,omitempty"`
+	Host                  string         `json:"host"`
+	Port                  int            `json:"port"`
+	Username              string         `json:"username"`
+	AuthType              string         `json:"authType"`
+	Password              string         `json:"password,omitempty"`
+	PrivateKeyPEM         string         `json:"privateKeyPem,omitempty"`
+	CertificateText       string         `json:"certificateText,omitempty"`
+	Passphrase            string         `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string         `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string       `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget    `json:"jump,omitempty"`
+	WSProxy               *WSProxyTarget `json:"wsProxy,omitempty"`
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
@@ -663,25 +681,26 @@ type TransferFailedItemPayload struct {
 }
 
 type PortForwardStartPayload struct {
-	Host                  string      `json:"host"`
-	Port                  int         `json:"port"`
-	Username              string      `json:"username"`
-	AuthType              string      `json:"authType"`
-	Password              string      `json:"password,omitempty"`
-	PrivateKeyPEM         string      `json:"privateKeyPem,omitempty"`
-	CertificateText       string      `json:"certificateText,omitempty"`
-	Passphrase            string      `json:"passphrase,omitempty"`
-	TrustedHostKeyBase64  string      `json:"trustedHostKeyBase64"`
-	TrustedHostKeysBase64 []string    `json:"trustedHostKeysBase64,omitempty"`
-	Jump                  *JumpTarget `json:"jump,omitempty"`
-	AuthAgentEndpointKind string      `json:"authAgentEndpointKind,omitempty"`
-	AuthAgentEndpoint     string      `json:"authAgentEndpoint,omitempty"`
-	Mode                  string      `json:"mode"`
-	BindAddress           string      `json:"bindAddress"`
-	BindPort              int         `json:"bindPort"`
-	TargetHost            string      `json:"targetHost,omitempty"`
-	TargetPort            int         `json:"targetPort,omitempty"`
-	SourceEndpointID      string      `json:"sourceEndpointId,omitempty"`
+	Host                  string         `json:"host"`
+	Port                  int            `json:"port"`
+	Username              string         `json:"username"`
+	AuthType              string         `json:"authType"`
+	Password              string         `json:"password,omitempty"`
+	PrivateKeyPEM         string         `json:"privateKeyPem,omitempty"`
+	CertificateText       string         `json:"certificateText,omitempty"`
+	Passphrase            string         `json:"passphrase,omitempty"`
+	TrustedHostKeyBase64  string         `json:"trustedHostKeyBase64"`
+	TrustedHostKeysBase64 []string       `json:"trustedHostKeysBase64,omitempty"`
+	Jump                  *JumpTarget    `json:"jump,omitempty"`
+	WSProxy               *WSProxyTarget `json:"wsProxy,omitempty"`
+	AuthAgentEndpointKind string         `json:"authAgentEndpointKind,omitempty"`
+	AuthAgentEndpoint     string         `json:"authAgentEndpoint,omitempty"`
+	Mode                  string         `json:"mode"`
+	BindAddress           string         `json:"bindAddress"`
+	BindPort              int            `json:"bindPort"`
+	TargetHost            string         `json:"targetHost,omitempty"`
+	TargetPort            int            `json:"targetPort,omitempty"`
+	SourceEndpointID      string         `json:"sourceEndpointId,omitempty"`
 }
 
 type SSMPortForwardStartPayload struct {

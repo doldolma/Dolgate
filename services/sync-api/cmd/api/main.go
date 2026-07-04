@@ -71,6 +71,8 @@ func main() {
 	defer awsSessionBridge.Close()
 	awsSftpBridge := httpserver.NewAwsSftpBridge(awsSsmRuntime)
 	defer awsSftpBridge.Close()
+	awsSshTunnelRelay := httpserver.NewAwsSshTunnelRelay(awsSsmRuntime)
+	defer awsSshTunnelRelay.Close()
 	awsSsoMobileManager := httpserver.NewAwsSsoMobileManager()
 	log.Printf("AWS SSM runtime enabled (in-process data channel + AWS SDK)")
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
@@ -108,9 +110,10 @@ func main() {
 			RedirectURL:  cfg.Auth.OIDC.RedirectURL,
 			Scopes:       cfg.Auth.OIDC.Scopes,
 		},
-		AwsSsoMobile:     awsSsoMobileManager,
-		AwsSessionBridge: awsSessionBridge,
-		AwsSftpBridge:    awsSftpBridge,
+		AwsSsoMobile:      awsSsoMobileManager,
+		AwsSessionBridge:  awsSessionBridge,
+		AwsSftpBridge:     awsSftpBridge,
+		AwsSshTunnelRelay: awsSshTunnelRelay,
 	})
 	if err != nil {
 		log.Fatalf("create router: %v", err)
@@ -149,6 +152,9 @@ func main() {
 		}
 		if awsSftpBridge != nil {
 			awsSftpBridge.Close()
+		}
+		if awsSshTunnelRelay != nil {
+			awsSshTunnelRelay.Close()
 		}
 		if err := <-serveErrCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)

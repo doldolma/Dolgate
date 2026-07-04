@@ -9,6 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/sftp v1.13.10
 	github.com/unixshells/mosh-go v0.5.2
+	github.com/xtaci/smux v1.5.35
 	go.bug.st/serial v1.7.1
 	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0

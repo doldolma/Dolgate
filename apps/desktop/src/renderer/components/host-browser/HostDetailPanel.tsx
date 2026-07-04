@@ -373,6 +373,9 @@ function buildConnectionRows(
     if (host.awsSshPort) {
       rows.push({ label: 'SSH Port', value: host.awsSshPort });
     }
+    if (host.awsSsmServerProxyEnabled) {
+      rows.push({ label: '서버 프록시', value: '사용' });
+    }
   } else if (host.kind === 'aws-ecs') {
     rows.push({ label: 'Profile', value: host.awsProfileName });
     rows.push({ label: 'Cluster', value: host.awsEcsClusterName });

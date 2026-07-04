@@ -1,6 +1,7 @@
 package ssmforward
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/xtaci/smux"
 
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/ssmdatachannel"
@@ -21,13 +23,32 @@ import (
 // fakePortForwardAgent performs the SSM port-forwarding handshake and then echoes
 // any input stream data back as output stream data, standing in for the remote host.
 type fakePortForwardAgent struct {
-	t        *testing.T
-	echoSeq  int64
+	t          *testing.T
+	echoSeq    int64
 	terminated chan struct{}
+	// agentVersion and sessionProperties are advertised during the SSM
+	// SessionType handshake. Leaving sessionProperties empty keeps existing
+	// tests on the basic port-forwarding path; setting type=LocalPortForwarding
+	// with a new enough agent enables smux.
+	agentVersion      string
+	sessionProperties map[string]any
+	mux               bool
+	// earlyOutput, when set before the runner opens the channel, is streamed to the
+	// client immediately after the handshake — before any downstream connection —
+	// mimicking sshd's banner, which a real SSM agent forwards on session start.
+	earlyOutput []byte
+	// pauseAfterInputBytes makes the fake MGS send pause_publication once after
+	// enough client input has passed through. The real session-manager-plugin
+	// ignores this on the client side; treating it as input backpressure wedges
+	// large SFTP/SSH-over-SSM streams.
+	pauseAfterInputBytes int
+	inputBytes           int
+	pauseSent            bool
 
-	wg     sync.WaitGroup
-	connMu sync.Mutex
-	conns  []*websocket.Conn
+	wg      sync.WaitGroup
+	connMu  sync.Mutex
+	conns   []*websocket.Conn
+	writeMu sync.Mutex
 }
 
 func newFakePortForwardAgent(t *testing.T) (*fakePortForwardAgent, string) {
@@ -91,6 +112,14 @@ func (f *fakePortForwardAgent) handle(w http.ResponseWriter, r *http.Request) {
 
 	f.sendHandshakeComplete(ws)
 
+	if len(f.earlyOutput) > 0 {
+		f.echo(ws, f.earlyOutput)
+	}
+	if f.mux {
+		f.handleMux(ws)
+		return
+	}
+
 	// Echo loop.
 	for {
 		_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -108,7 +137,12 @@ func (f *fakePortForwardAgent) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		switch msg.PayloadType {
 		case ssmdatachannel.Output:
+			f.inputBytes += len(msg.Payload)
 			f.ack(ws, msg)
+			if f.pauseAfterInputBytes > 0 && !f.pauseSent && f.inputBytes >= f.pauseAfterInputBytes {
+				f.pauseSent = true
+				f.pausePublication(ws)
+			}
 			f.echo(ws, msg.Payload)
 		case ssmdatachannel.Flag:
 			// DisconnectPort or TerminateSession.
@@ -121,11 +155,108 @@ func (f *fakePortForwardAgent) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (f *fakePortForwardAgent) handleMux(ws *websocket.Conn) {
+	agentConn, dataConn := net.Pipe()
+	defer agentConn.Close()
+	defer dataConn.Close()
+
+	cfg := smux.DefaultConfig()
+	cfg.KeepAliveDisabled = true
+	session, err := smux.Server(agentConn, cfg)
+	if err != nil {
+		f.t.Errorf("smux server: %v", err)
+		return
+	}
+	defer session.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := dataConn.Read(buf)
+			if n > 0 {
+				f.echo(ws, buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			stream, err := session.AcceptStream()
+			if err != nil {
+				return
+			}
+			go func(stream *smux.Stream) {
+				defer stream.Close()
+				buf := make([]byte, 32*1024)
+				for {
+					n, err := stream.Read(buf)
+					if n > 0 {
+						if writeErr := writeAll(stream, buf[:n]); writeErr != nil {
+							return
+						}
+					}
+					if err != nil {
+						return
+					}
+				}
+			}(stream)
+		}
+	}()
+
+	for {
+		_ = ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, data, err := ws.ReadMessage()
+		if err != nil {
+			return
+		}
+		msg := new(ssmdatachannel.AgentMessage)
+		if err := msg.UnmarshalBinary(data); err != nil {
+			f.t.Errorf("unmarshal: %v", err)
+			return
+		}
+		if msg.MessageType != ssmdatachannel.InputStreamData {
+			continue // ignore acks
+		}
+		switch msg.PayloadType {
+		case ssmdatachannel.Output:
+			f.ack(ws, msg)
+			if err := writeAll(dataConn, msg.Payload); err != nil {
+				return
+			}
+		case ssmdatachannel.Flag:
+			f.ack(ws, msg)
+			select {
+			case f.terminated <- struct{}{}:
+			default:
+			}
+			return
+		}
+		select {
+		case <-done:
+			return
+		default:
+		}
+	}
+}
+
 func (f *fakePortForwardAgent) sendHandshakeRequest(ws *websocket.Conn) {
+	agentVersion := f.agentVersion
+	if agentVersion == "" {
+		agentVersion = "3.1.1600.0"
+	}
+	params := map[string]any{"SessionType": "Port"}
+	if f.sessionProperties != nil {
+		params["Properties"] = f.sessionProperties
+	}
 	payload, _ := json.Marshal(ssmdatachannel.HandshakeRequestPayload{
-		AgentVersion: "3.1.1600.0",
+		AgentVersion: agentVersion,
 		RequestedClientActions: []ssmdatachannel.RequestedClientAction{
-			{ActionType: ssmdatachannel.SessionType, ActionParameters: map[string]any{"SessionType": "Port"}},
+			{ActionType: ssmdatachannel.SessionType, ActionParameters: params},
 		},
 	})
 	msg := ssmdatachannel.NewAgentMessage()
@@ -176,6 +307,15 @@ func (f *fakePortForwardAgent) echo(ws *websocket.Conn, payload []byte) {
 	f.write(ws, msg)
 }
 
+func (f *fakePortForwardAgent) pausePublication(ws *websocket.Conn) {
+	msg := ssmdatachannel.NewAgentMessage()
+	msg.MessageType = ssmdatachannel.PausePublication
+	msg.Flags = ssmdatachannel.Data
+	msg.PayloadType = ssmdatachannel.Undefined
+	msg.SequenceNumber = f.echoSeq
+	f.write(ws, msg)
+}
+
 func (f *fakePortForwardAgent) write(ws *websocket.Conn, msg *ssmdatachannel.AgentMessage) {
 	data, err := msg.MarshalBinary()
 	if err != nil {
@@ -185,8 +325,57 @@ func (f *fakePortForwardAgent) write(ws *websocket.Conn, msg *ssmdatachannel.Age
 	// A failed send is not a test failure: the runner may close the channel at
 	// any moment (Kill right after DisconnectPort), so losing the race on the
 	// final acks is expected. The test's own assertions catch real breakage.
+	f.writeMu.Lock()
+	defer f.writeMu.Unlock()
 	if err := ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
 		f.t.Logf("fake agent write (benign during teardown): %v", err)
+	}
+}
+
+// The SSM agent forwards sshd's banner on session start, which can arrive before
+// the first downstream connection attaches. The runner must buffer and deliver it,
+// otherwise the first SSH handshake reads no version banner and fails with
+// "overflow reading version string" (the observed EC2 tmux first-connect failure).
+func TestDataChannelForwardRunnerDeliversEarlyServerBytes(t *testing.T) {
+	agent, url := newFakePortForwardAgent(t)
+	banner := []byte("SSH-2.0-OpenSSH_9.0\r\n")
+	agent.earlyOutput = banner
+
+	runner, err := startDataChannelForwardRunner(protocol.SSMPortForwardStartPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		TargetID:    "i-test",
+		TargetKind:  "remote-host",
+		RemoteHost:  "127.0.0.1",
+		TargetPort:  22,
+		BindAddress: "127.0.0.1",
+		BindPort:    0,
+		StreamURL:   url,
+		TokenValue:  "test-token",
+	})
+	if err != nil {
+		t.Fatalf("startDataChannelForwardRunner: %v", err)
+	}
+	defer runner.Close()
+
+	bindPort := runner.(bindPortAwareRunner).ActualBindPort()
+
+	// Let the banner arrive and (without the fix) get dropped before we connect.
+	time.Sleep(300 * time.Millisecond)
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(bindPort)), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial local tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	got := make([]byte, len(banner))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatalf("first connection never received the pre-connect server banner (dropped): %v", err)
+	}
+	if string(got) != string(banner) {
+		t.Fatalf("banner = %q, want %q", got, banner)
 	}
 }
 
@@ -256,5 +445,150 @@ func TestDataChannelForwardRunnerRoundTrip(t *testing.T) {
 	}
 	if exit.ExitCode != 0 {
 		t.Fatalf("exit code = %d, want 0", exit.ExitCode)
+	}
+}
+
+func TestDataChannelForwardRunnerUsesSmuxForSupportedLocalPortForwarding(t *testing.T) {
+	agent, url := newFakePortForwardAgent(t)
+	agent.mux = true
+	agent.agentVersion = "3.1.1600.0"
+	agent.sessionProperties = map[string]any{
+		"portNumber": "22",
+		"type":       "LocalPortForwarding",
+	}
+
+	runner, err := startDataChannelForwardRunner(protocol.SSMPortForwardStartPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		TargetID:    "i-test",
+		TargetKind:  "remote-host",
+		RemoteHost:  "127.0.0.1",
+		TargetPort:  22,
+		BindAddress: "127.0.0.1",
+		BindPort:    0,
+		StreamURL:   url,
+		TokenValue:  "test-token",
+	})
+	if err != nil {
+		t.Fatalf("startDataChannelForwardRunner: %v", err)
+	}
+	defer runner.Close()
+
+	if _, ok := runner.(*datachannelMuxForwardRunner); !ok {
+		t.Fatalf("runner type = %T, want *datachannelMuxForwardRunner", runner)
+	}
+
+	bindPort := runner.(bindPortAwareRunner).ActualBindPort()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(bindPort)), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial local tunnel: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+
+	payload := bytes.Repeat([]byte("smux-ssm-transfer-"), 32*1024)
+	got := make([]byte, len(payload))
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(conn, got)
+		readDone <- err
+	}()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- writeAll(conn, payload)
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write smux payload: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("write smux payload timed out")
+	}
+
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("read smux echo: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("read smux echo timed out")
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("smux echo payload changed")
+	}
+}
+
+func TestDataChannelForwardRunnerIgnoresPausePublicationForClientInput(t *testing.T) {
+	agent, url := newFakePortForwardAgent(t)
+	agent.pauseAfterInputBytes = 4096
+
+	runner, err := startDataChannelForwardRunner(protocol.SSMPortForwardStartPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		TargetID:    "i-test",
+		TargetKind:  "remote-host",
+		RemoteHost:  "127.0.0.1",
+		TargetPort:  22,
+		BindAddress: "127.0.0.1",
+		BindPort:    0,
+		StreamURL:   url,
+		TokenValue:  "test-token",
+	})
+	if err != nil {
+		t.Fatalf("startDataChannelForwardRunner: %v", err)
+	}
+	defer runner.Close()
+
+	bindPort := runner.(bindPortAwareRunner).ActualBindPort()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(bindPort)), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial local tunnel: %v", err)
+	}
+	defer conn.Close()
+
+	payload := bytes.Repeat([]byte{0x5a}, 128*1024)
+	readDone := make(chan error, 1)
+	got := make([]byte, len(payload))
+	go func() {
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, err := io.ReadFull(conn, got)
+		readDone <- err
+	}()
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		written, err := conn.Write(payload)
+		if err == nil && written != len(payload) {
+			err = io.ErrShortWrite
+		}
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write payload through tunnel: %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("write blocked after pause_publication")
+	}
+
+	select {
+	case err := <-readDone:
+		if err != nil {
+			t.Fatalf("read echoed payload after pause_publication: %v", err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("read blocked after pause_publication")
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("echoed payload changed after pause_publication")
+	}
+	if !agent.pauseSent {
+		t.Fatal("fake agent did not send pause_publication")
 	}
 }

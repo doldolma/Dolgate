@@ -20,6 +20,11 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import {
+  buildAwsServerProxyStartMessage,
+  buildAwsWsProxyTarget,
+  runWithAwsServerProxyAuthRetry,
+} from "../aws-ws-proxy";
 
 function beginContainersLifecycle(
   ctx: MainIpcContext,
@@ -365,6 +370,48 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           throw new Error("Availability Zone을 확인하지 못했습니다.");
         }
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
+
+        if (hydratedHost.awsSsmServerProxyEnabled === true) {
+          // Server-proxy: sync-api opens the SSM tunnel + pushes the EIC key on its
+          // allowlisted IP; ssh-core rides plain SSH-over-SSM over a WebSocket to run
+          // the container shell command. No local tunnel, no desktop-side EIC.
+          const startMessage = await buildAwsServerProxyStartMessage(
+            ctx.awsService,
+            {
+              region: hydratedHost.awsRegion,
+              profileName,
+              instanceId: hydratedHost.awsInstanceId,
+              availabilityZone,
+              sshUsername,
+              sshPort,
+              publicKey,
+            },
+          );
+          return runWithAwsServerProxyAuthRetry(ctx.authService, (accessToken) =>
+            ctx.coreManager.connect({
+              host: hydratedHost.awsInstanceId,
+              port: sshPort,
+              username: sshUsername,
+              authType: "privateKey",
+              privateKeyPem,
+              trustedHostKeyBase64: trustedHostKeysBase64[0],
+              trustedHostKeysBase64,
+              cols: 120,
+              rows: 32,
+              command,
+              hostId: hydratedHost.id,
+              hostLabel: hydratedHost.label,
+              title,
+              transport: "aws-ssm",
+              wsProxy: buildAwsWsProxyTarget({
+                serverUrl: ctx.authService.getServerUrl(),
+                accessToken,
+                startMessage,
+              }),
+            }),
+          );
+        }
+
         await ctx.awsService.sendSshPublicKey({
           profileName,
           region: hydratedHost.awsRegion,

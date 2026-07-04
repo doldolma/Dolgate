@@ -32,6 +32,7 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       awsSshPort: record.awsSshPort ?? null,
       awsSshMetadataStatus: record.awsSshMetadataStatus ?? null,
       awsSshMetadataError: record.awsSshMetadataError ?? null,
+      awsSsmServerProxyEnabled: record.awsSsmServerProxyEnabled === true,
     };
   }
 

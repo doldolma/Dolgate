@@ -25,6 +25,11 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import {
+  buildAwsServerProxyStartMessage,
+  buildAwsWsProxyTarget,
+  runWithAwsServerProxyAuthRetry,
+} from "../aws-ws-proxy";
 
 export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -99,6 +104,64 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           message: "임시 SSH 키를 생성하는 중입니다.",
         });
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
+
+        if (hydratedHost.awsSsmServerProxyEnabled === true) {
+          // Server-proxy (bastion): sync-api opens the SSM tunnel and pushes the EIC
+          // key on its allowlisted IP; ssh-core rides plain SFTP-over-SSH over a
+          // WebSocket to it. No local tunnel and no desktop-side EIC — the server
+          // owns every AWS call, which is the whole point for IP-restricted VPCs.
+          ctx.emitSftpConnectionProgress({
+            endpointId,
+            hostId: hydratedHost.id,
+            stage: "connecting-sftp",
+            message: "서버 프록시로 SFTP 세션을 여는 중입니다.",
+          });
+          const startMessage = await buildAwsServerProxyStartMessage(
+            ctx.awsService,
+            {
+              region: hydratedHost.awsRegion,
+              profileName,
+              instanceId: hydratedHost.awsInstanceId,
+              availabilityZone,
+              sshUsername,
+              sshPort,
+              publicKey,
+            },
+          );
+          try {
+            return await runWithAwsServerProxyAuthRetry(
+              ctx.authService,
+              (accessToken) =>
+                ctx.coreManager.sftpConnect({
+                  endpointId,
+                  host: hydratedHost.awsInstanceId,
+                  port: sshPort,
+                  username: sshUsername,
+                  authType: "privateKey",
+                  privateKeyPem,
+                  trustedHostKeyBase64: trustedHostKeysBase64[0],
+                  trustedHostKeysBase64,
+                  hostId: hydratedHost.id,
+                  title: hydratedHost.label,
+                  wsProxy: buildAwsWsProxyTarget({
+                    serverUrl: ctx.authService.getServerUrl(),
+                    accessToken,
+                    startMessage,
+                  }),
+                }),
+            );
+          } catch (error) {
+            if (error instanceof Error && /^\[/.test(error.message)) {
+              throw error;
+            }
+            throw ctx.emitSftpConnectionFailureProgress({
+              endpointId,
+              host: hydratedHost,
+              stage: "connecting-sftp",
+              error,
+            });
+          }
+        }
 
         ctx.emitSftpConnectionProgress({
           endpointId,

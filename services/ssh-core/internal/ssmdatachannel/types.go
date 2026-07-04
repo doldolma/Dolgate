@@ -90,7 +90,7 @@ type RequestedClientAction struct {
 // SessionTypeRequest is part of the handshake process.
 type SessionTypeRequest struct {
 	SessionType string
-	Properties  any
+	Properties  json.RawMessage
 }
 
 // HandshakeResponsePayload is the local client response to the offered handshake request.  The ProcessedClientActions

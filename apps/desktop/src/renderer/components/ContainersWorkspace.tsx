@@ -2535,7 +2535,6 @@ export function ContainersWorkspace({
                     aria-label="Follow"
                     className="max-w-[15rem]"
                     label="Follow"
-                    description="새 로그가 들어오면 하단을 자동으로 따라갑니다."
                     onClick={handleToggleLogsFollow}
                   />
                   <ToggleSwitch

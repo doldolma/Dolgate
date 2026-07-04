@@ -380,4 +380,3 @@ func waitForPortRelease(bindAddress string, bindPort int, timeout time.Duration)
 		time.Sleep(100 * time.Millisecond)
 	}
 }
-

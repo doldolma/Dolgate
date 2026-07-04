@@ -305,4 +305,3 @@ func TestServiceEmitsUpdatedBindPortWhenResolvedLater(t *testing.T) {
 
 	_ = service.Stop("rule-4", "req-4")
 }
-

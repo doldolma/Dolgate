@@ -13,6 +13,7 @@ type MessageBuffer interface {
 	Add(msg *AgentMessage) error
 	Remove(seqNum int64)
 	Get(seqNum int64) *AgentMessage
+	Oldest() *AgentMessage
 	Next() *AgentMessage
 }
 
@@ -25,6 +26,9 @@ type messageBuffer struct {
 }
 
 func (m *messageBuffer) Len() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return m.buf.Len()
 }
 
@@ -32,7 +36,11 @@ func (m *messageBuffer) Add(msg *AgentMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.Len() == m.size {
+	if existing := m.seqMap[msg.SequenceNumber]; existing != nil {
+		existing.Value = msg
+		return nil
+	}
+	if m.buf.Len() == m.size {
 		return ErrBufferFull
 	}
 
@@ -48,6 +56,9 @@ func (m *messageBuffer) Remove(seqNum int64) {
 
 	if v, ok := m.seqMap[seqNum]; ok {
 		if v != nil {
+			if v == m.cursor {
+				m.cursor = v.Prev()
+			}
 			m.buf.Remove(v)
 		}
 		delete(m.seqMap, seqNum)
@@ -62,6 +73,16 @@ func (m *messageBuffer) Get(seqNum int64) *AgentMessage {
 		if v != nil {
 			return v.Value.(*AgentMessage)
 		}
+	}
+	return nil
+}
+
+func (m *messageBuffer) Oldest() *AgentMessage {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if el := m.buf.Front(); el != nil {
+		return el.Value.(*AgentMessage)
 	}
 	return nil
 }

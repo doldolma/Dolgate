@@ -11,6 +11,7 @@ import { shell as electronShell, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
+import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 
 // 로컬 agent 엔드포인트 해석은 agent-endpoint 모듈로 이전(포워딩+인증 공용 + 셸 환경 해석).
 // 기존 import 경로(테스트 포함) 호환을 위해 재노출한다.
@@ -121,9 +122,22 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           title,
           startupCommand: input.startupCommand,
         };
-        const connection = host.awsSsmServerProxyEnabled === true
-          ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
-          : await (async () => {
+        const connection =
+          input.tmux === true
+            ? // tmux control mode over SSH-over-SSM — same as a normal SSH host,
+              // only the transport differs (server-proxy WebSocket vs local tunnel).
+              await connectAwsEc2OverSsm(ctx, host, {
+                cols: input.cols,
+                rows: input.rows,
+                title,
+                command: input.tmuxCommand?.trim() || undefined,
+                tmux: true,
+                tmuxVersion: input.tmuxVersion,
+                startupCommand: input.startupCommand,
+              })
+            : host.awsSsmServerProxyEnabled === true
+              ? await connectAwsServerProxySessionWithAuthRetry(ctx, connectionInput)
+              : await (async () => {
               const awsSessionEnv = ctx.awsService.buildManagedSessionEnvSpec();
               const ssmSession = ctx.awsService.shouldUseInProcessSsm()
                 ? await ctx.awsService.startSsmShellSession(

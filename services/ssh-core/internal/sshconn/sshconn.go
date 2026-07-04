@@ -37,6 +37,10 @@ type Target struct {
 	// 이 Target에 2차 SSH 핸드셰이크를 한다 (ProxyJump / `ssh -J`). 재귀 구조라
 	// 다단 체인도 표현 가능하지만 현재 UI는 단일 홉만 사용한다.
 	Jump *Target
+	// WSProxy가 설정되면 직접 TCP dial 대신 sync-api로 가는 WebSocket을 raw 전송으로
+	// 쓰고 그 위에 SSH 핸드셰이크를 올린다(서버 프록시/bastion, IP 제한 VPC 대응).
+	// 이 경우 Jump는 무시된다 — 프록시 경로 자체가 대상까지의 통로다.
+	WSProxy *coretypes.WSProxyTarget
 }
 
 // JumpTargetFromCore는 와이어 페이로드의 점프 호스트(coretypes.JumpTarget)를
@@ -229,7 +233,17 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		rawConn    net.Conn
 		jumpClient *ssh.Client
 	)
-	if target.Jump != nil {
+	if target.WSProxy != nil {
+		// 서버 프록시(bastion): 대상까지의 raw 전송을 sync-api WebSocket으로 대신한다.
+		// sync-api가 EIC·SSM 터널을 서버 IP에서 열고 instance:22로 raw TCP를 중계하므로
+		// 아래 SSH 핸드셰이크는 일반 TCP 연결과 동일하게 이 conn 위에서 진행된다.
+		reportProgress(ProgressConnecting)
+		rawConn, err = dialWSProxyConn(target.WSProxy, config.TCPDialTimeout)
+		if err != nil {
+			reportProgress(ProgressFailed)
+			return nil, fmt.Errorf("ws proxy: %w", err)
+		}
+	} else if target.Jump != nil {
 		jumpClient, err = DialClient(*target.Jump, config, responder)
 		if err != nil {
 			return nil, fmt.Errorf("jump host: %w", err)
