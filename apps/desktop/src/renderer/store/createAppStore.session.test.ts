@@ -1158,6 +1158,65 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
+  it("prompts for host key trust before connecting an untrusted AWS EC2 host over SSM", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: null,
+      arn: null,
+      errorMessage: null,
+      missingTools: [],
+    });
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "aws-host-1",
+      hostLabel: "AWS Linux",
+      host: "aws-ssm:default:ap-northeast-2:i-aws",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAATEST",
+      fingerprintSha256: "SHA256:test",
+      status: "untrusted",
+      existing: null,
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+    }));
+
+    await store.getState().connectHost("aws-host-1", 120, 32);
+
+    // 일반 SSH와 동일하게, 미신뢰 EC2 호스트는 연결 전에 신뢰 프롬프트를 띄운다.
+    expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: "aws-host-1",
+        endpointId: "aws-ec2-ssh:aws-host-1",
+      }),
+    );
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe(
+      "untrusted",
+    );
+    expect(store.getState().pendingHostKeyPrompt?.action).toMatchObject({
+      kind: "ssh",
+      hostId: "aws-host-1",
+    });
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
+      "awaiting-host-trust",
+    );
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+
+    // 수락하면 신뢰 목록에 저장하고 SSH-over-SSM 연결로 이어진다.
+    await store.getState().acceptPendingHostKeyPrompt("trust");
+
+    expect(api.knownHosts.trust).toHaveBeenCalled();
+    expect(api.ssh.connect).toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
   it("returns to home when the last session closes", async () => {
     const store = createAppStore(createMockApi());
 
