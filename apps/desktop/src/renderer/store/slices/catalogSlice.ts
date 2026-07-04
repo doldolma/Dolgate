@@ -476,7 +476,12 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 ...get().hosts.filter((host) => host.id !== next.id),
                 next,
               ]),
-              hostDrawer: { mode: "edit", hostId: next.id },
+              // 편집 저장은 드로어를 편집 모드로 유지(호출부가 성공 시 닫는다). 새로 생성한
+              // 경우엔 편집 창으로 넘어가지 않도록 드로어를 닫는다(호출부가 방금 만든 호스트를
+              // 선택/상세 화면으로 전환). 편집창이 잠깐 스쳐 보이는 것도 막는다.
+              hostDrawer: hostId
+                ? { mode: "edit", hostId: next.id }
+                : { mode: "closed" },
             });
             await refreshHostAndKeychainState(set);
             await syncOperationalData(set);
