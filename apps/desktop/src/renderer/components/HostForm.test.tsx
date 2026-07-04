@@ -151,6 +151,7 @@ describe('HostForm', () => {
   it('saves edit-mode changes only on explicit save', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onActionStateChange = vi.fn();
+    const onLabelChange = vi.fn();
     const ref = createRef<HostFormHandle>();
 
     render(
@@ -161,10 +162,12 @@ describe('HostForm', () => {
         groupOptions={groupOptions}
         onSubmit={onSubmit}
         onActionStateChange={onActionStateChange}
+        onLabelChange={onLabelChange}
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Prod API' } });
+    // 이름 편집은 이제 드로어 헤더의 편집 타이틀(HostFormHandle.setLabel)로 이뤄진다.
+    act(() => ref.current?.setLabel('Prod API'));
 
     // 자동저장 없음 — 명시적 저장 전에는 호출되지 않는다.
     await wait(250);
@@ -179,7 +182,7 @@ describe('HostForm', () => {
       }),
       undefined
     );
-    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Prod API');
+    expect(onLabelChange).toHaveBeenLastCalledWith('Prod API');
     await waitFor(() =>
       expect(onActionStateChange).toHaveBeenLastCalledWith({
         saveInFlight: false,
@@ -263,31 +266,37 @@ describe('HostForm', () => {
 
   it('keeps create mode manual without auto-saving', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
 
-    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
+    render(<HostForm ref={ref} host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'New host' } });
+    act(() => ref.current?.setLabel('New host'));
     await wait(900);
 
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('auto-fills the label from hostname for a new SSH host', () => {
-    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
+    const onLabelChange = vi.fn();
+    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} onLabelChange={onLabelChange} />);
 
     fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
 
-    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('prod.example.com');
+    // 라벨 입력은 드로어 헤더로 옮겨졌으므로, 파생된 이름은 onLabelChange 로 관찰한다.
+    expect(onLabelChange).toHaveBeenLastCalledWith('prod.example.com');
   });
 
   it('keeps a manually edited label when hostname changes afterwards', () => {
-    render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} />);
+    const onLabelChange = vi.fn();
+    const ref = createRef<HostFormHandle>();
+    render(<HostForm ref={ref} host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} onLabelChange={onLabelChange} />);
 
     fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Production API' } });
+    act(() => ref.current?.setLabel('Production API'));
     fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'api.example.com' } });
 
-    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Production API');
+    // 수동 편집한 이름은 hostname 이 바뀌어도 유지된다(마지막 보고값이 그대로).
+    expect(onLabelChange).toHaveBeenLastCalledWith('Production API');
   });
 
   it('shows saved secret controls inline for a new SSH host', () => {
@@ -553,13 +562,16 @@ describe('HostForm', () => {
 
   it('does not overwrite local edits when the same host id rehydrates while dirty', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const { rerender } = render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
+    const onLabelChange = vi.fn();
+    const ref = createRef<HostFormHandle>();
+    const { rerender } = render(<HostForm ref={ref} host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} onLabelChange={onLabelChange} />);
 
-    const labelInput = screen.getByLabelText('Label') as HTMLInputElement;
-    fireEvent.change(labelInput, { target: { value: 'Dirty local label' } });
+    // 이름 편집은 드로어 헤더(setLabel)로 이뤄진다.
+    act(() => ref.current?.setLabel('Dirty local label'));
 
     rerender(
       <HostForm
+        ref={ref}
         host={createHost({
           label: 'Server-side label',
           updatedAt: '2026-03-25T00:01:00.000Z'
@@ -567,15 +579,18 @@ describe('HostForm', () => {
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
         onSubmit={onSubmit}
+        onLabelChange={onLabelChange}
       />
     );
 
-    expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Dirty local label');
+    // dirty 로컬 편집은 재하이드레이션에 덮이지 않는다(마지막 보고값 유지).
+    expect(onLabelChange).toHaveBeenLastCalledWith('Dirty local label');
   });
 
   it('rehydrates the form when the same host id receives a newer revision while clean', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const { rerender } = render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} />);
+    const onLabelChange = vi.fn();
+    const { rerender } = render(<HostForm host={createHost()} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={onSubmit} onLabelChange={onLabelChange} />);
 
     rerender(
       <HostForm
@@ -586,10 +601,11 @@ describe('HostForm', () => {
         keychainEntries={keychainEntries}
         groupOptions={groupOptions}
         onSubmit={onSubmit}
+        onLabelChange={onLabelChange}
       />
     );
 
-    await waitFor(() => expect((screen.getByLabelText('Label') as HTMLInputElement).value).toBe('Server-side label'));
+    await waitFor(() => expect(onLabelChange).toHaveBeenLastCalledWith('Server-side label'));
   });
 
   it('does not append a duplicate tag when enter is followed by blur', async () => {
@@ -652,7 +668,8 @@ describe('HostForm', () => {
     expect(within(connectionSection).getByText('Saved Credentials')).toBeInTheDocument();
 
     expect(within(detailsSection).getByText('Details')).toBeInTheDocument();
-    expect(within(detailsSection).getByLabelText('Label')).toBeInTheDocument();
+    // Label(이름)은 드로어 헤더의 편집 타이틀로 이동 — Details 에는 Group·Tags 만 남는다.
+    expect(within(detailsSection).queryByLabelText('Label')).not.toBeInTheDocument();
     expect(within(detailsSection).getByLabelText('Group')).toBeInTheDocument();
     expect(within(detailsSection).getByLabelText('Tags')).toBeInTheDocument();
 
