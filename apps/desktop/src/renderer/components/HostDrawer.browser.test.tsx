@@ -68,7 +68,7 @@ describe('HostDrawer close behavior', () => {
   it('does not close when clicking inside the edit drawer header or form', () => {
     const { onClose } = renderDrawer({ mode: 'edit' });
 
-    fireEvent.mouseDown(screen.getByRole('heading', { name: 'App Server' }));
+    fireEvent.mouseDown(screen.getByLabelText('Label'));
     fireEvent.mouseDown(screen.getByLabelText('Hostname'));
 
     expect(onClose).not.toHaveBeenCalled();

@@ -299,6 +299,8 @@ export interface HostFormHandle {
   /** 편집 폼을 명시적으로 저장(연결하지 않음). 호스트 필드 + 환경변수 모두 반영. */
   submit: () => Promise<boolean>;
   submitAndConnect: () => Promise<boolean>;
+  /** 드로어 헤더의 편집 타이틀에서 이름을 바꿀 때 draft.label 을 갱신한다. */
+  setLabel: (label: string) => void;
 }
 
 export interface HostFormProps {
@@ -317,6 +319,8 @@ export interface HostFormProps {
   onEditExistingSecret?: (secretRef: string) => void;
   onOpenSecrets?: () => void;
   onActionStateChange?: (state: HostFormActionState) => void;
+  /** draft.label 이 바뀔 때마다 호출 — 드로어 헤더의 편집 가능한 타이틀과 동기화한다. */
+  onLabelChange?: (label: string) => void;
 }
 
 type HostFormSaveStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -549,7 +553,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onConnect,
   onEditExistingSecret,
   onOpenSecrets,
-  onActionStateChange
+  onActionStateChange,
+  onLabelChange
 }: HostFormProps, ref) {
   const fieldClassName = 'flex flex-col gap-[0.4rem] text-[var(--text)]';
   const fieldLabelClassName =
@@ -1228,10 +1233,6 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const metadataFields = (
     <>
       <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Label</span>
-        <Input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} placeholder="Production API" />
-      </label>
-      <label className={fieldClassName}>
         <span className={fieldLabelClassName}>Group</span>
         <SelectField value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
           {groupOptions.map((option) => (
@@ -1480,7 +1481,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   useImperativeHandle(ref, () => ({
     submitCreate,
     submit,
-    submitAndConnect
+    submitAndConnect,
+    setLabel: (label: string) => setDraft((prev) => ({ ...prev, label }))
   }), [submit, submitAndConnect, submitCreate]);
 
   useEffect(() => {
@@ -1489,6 +1491,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       saveStatusText: isEditMode ? saveStatusText : null
     });
   }, [isEditMode, onActionStateChange, saveInFlight, saveStatusText]);
+
+  // draft.label 을 드로어 헤더의 편집 타이틀로 올려보낸다(호스트 하이드레이션·hostname 자동
+  // 파생 등 폼 내부 변경도 헤더에 반영). 헤더 입력의 편집은 setLabel 로 여기 draft 에 되돌아온다.
+  useEffect(() => {
+    onLabelChange?.(draft.label);
+  }, [draft.label, onLabelChange]);
 
   return (
     <>

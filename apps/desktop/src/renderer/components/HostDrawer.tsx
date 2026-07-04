@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
@@ -51,6 +51,18 @@ export function HostDrawer({
   });
   const isFooterBusy = isActionInFlight || formActionState.saveInFlight;
   const formHost = host;
+  // 헤더의 굵은 이름을 편집 가능한 타이틀로 쓴다(예전 정적 h2 자리). label 상태의 원본은
+  // HostForm 의 draft 이고, 폼→헤더는 onLabelChange 로, 헤더→폼은 ref.setLabel 로 동기화한다.
+  const [headerLabel, setHeaderLabel] = useState(host?.label ?? '');
+  // 폼 내부에서 label 이 바뀌면(호스트 하이드레이션·hostname 자동 파생 등) 헤더 입력에 반영.
+  const handleFormLabelChange = useCallback((label: string) => {
+    setHeaderLabel(label);
+  }, []);
+  // 헤더 입력 편집: 컨트롤드 입력이라 즉시 headerLabel 을 갱신하고, 폼 draft 에도 되돌린다.
+  const handleHeaderLabelInput = useCallback((value: string) => {
+    setHeaderLabel(value);
+    hostFormRef.current?.setLabel(value);
+  }, []);
   // Overview(HostDetailPanel) 헤더와 같은 뱃지 로직을 써서 편집 헤더도 동일한 모양으로 맞춘다.
   // 생성 모드는 아직 호스트가 없으므로 createKind 기준 대체 라벨을 보여준다.
   const headerBadgeLabel = formHost
@@ -95,9 +107,16 @@ export function HostDrawer({
           >
             {headerBadgeLabel}
           </span>
-          <h2 className="min-w-0 truncate text-[1rem] font-bold text-[var(--text)]">
-            {mode === 'create' ? 'New Host' : formHost?.label ?? 'Host'}
-          </h2>
+          <input
+            type="text"
+            value={headerLabel}
+            onChange={(event) => handleHeaderLabelInput(event.target.value)}
+            placeholder={mode === 'create' ? 'New Host' : 'Label'}
+            aria-label="Label"
+            spellCheck={false}
+            autoComplete="off"
+            className="min-w-0 flex-1 rounded-[6px] bg-transparent px-[0.35rem] py-[0.15rem] text-[1rem] font-bold text-[var(--text)] outline-none transition-colors duration-140 placeholder:font-normal placeholder:text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_78%,transparent_22%)] focus:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_45%,transparent)]"
+          />
         </div>
         {/* Overview(HostDetailPanel) 상세 닫기와 동일한 고스트 스타일 X 버튼으로 맞춘다. */}
         <button
@@ -130,6 +149,7 @@ export function HostDrawer({
           onEditExistingSecret={onEditExistingSecret}
           onOpenSecrets={onOpenSecrets}
           onActionStateChange={setFormActionState}
+          onLabelChange={handleFormLabelChange}
         />
       </div>
 
