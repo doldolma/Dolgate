@@ -258,11 +258,8 @@ export function SettingsPanel({
 
   return (
     <div className="flex min-h-full flex-1 flex-col gap-5">
-      <div className="px-0 pb-[0.25rem] pt-[0.4rem]">
-        <SectionLabel>Preferences</SectionLabel>
-        <h2>Settings</h2>
-      </div>
-
+      {/* 상단 브레드크럼(← Hosts · Settings)에 이미 제목이 있어 Preferences/Settings 헤더는 생략,
+          섹션 탭을 맨 위로 올린다. */}
       <Tabs role="tablist" aria-label="Settings sections">
         {settingsSections.map((section) => (
           <TabButton

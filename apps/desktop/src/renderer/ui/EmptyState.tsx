@@ -9,6 +9,7 @@ interface EmptyStateProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> 
 export function EmptyState({
   title,
   description,
+  children,
   className,
   ...props
 }: EmptyStateProps) {
@@ -22,6 +23,8 @@ export function EmptyState({
     >
       <strong className="mb-[0.4rem] block text-[1rem]">{title}</strong>
       {description ? <p className="text-[var(--text-soft)]">{description}</p> : null}
+      {/* 선택: 설명 아래 액션(예: New … CTA). 전달 안 하면 렌더되지 않아 기존 사용처엔 영향 없음. */}
+      {children ? <div className="mt-[0.9rem]">{children}</div> : null}
     </div>
   );
 }

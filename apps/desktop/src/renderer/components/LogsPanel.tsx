@@ -18,7 +18,6 @@ import {
   CardMain,
   EmptyState,
   PanelSection,
-  SectionLabel,
   SelectField,
   Toolbar,
 } from '../ui';
@@ -359,16 +358,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
 
   return (
     <div className="flex flex-col gap-[1.1rem]">
-      <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
-        <div>
-          <SectionLabel>Diagnostics</SectionLabel>
-          <h2 className="m-0">Logs</h2>
-        </div>
-        <Button variant="secondary" onClick={() => void onClear()}>
-          Clear logs
-        </Button>
-      </div>
-
+      {/* 상단 브레드크럼(← Hosts · Logs)에 이미 제목이 있어 Diagnostics/Logs 헤더는 생략.
+          Clear logs 버튼은 아래 필터 행 오른쪽으로 옮긴다. */}
       <Toolbar>
         <label className="flex w-full max-w-[220px] flex-col gap-[0.4rem]">
           <span className="text-[0.9rem] text-[var(--text-soft)]">Category</span>
@@ -398,6 +389,10 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
             <option value="error">Error</option>
           </SelectField>
         </label>
+
+        <Button variant="secondary" className="ml-auto" onClick={() => void onClear()}>
+          Clear logs
+        </Button>
       </Toolbar>
 
       <PanelSection>
