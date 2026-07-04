@@ -35,6 +35,15 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
     awsService: {
       resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
       sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
+      buildServerProxySessionEnvSpec: vi.fn().mockResolvedValue({
+        env: { AWS_ACCESS_KEY_ID: "AKIA" },
+        unsetEnv: [],
+      }),
+    },
+    authService: {
+      getServerUrl: vi.fn(() => "https://sync.example.com"),
+      getAccessToken: vi.fn(() => "token-1"),
+      refreshSession: vi.fn().mockResolvedValue({ status: "authenticated" }),
     },
     awsSsmTunnelService: {
       start: vi.fn().mockResolvedValue({
@@ -57,6 +66,7 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
     tunnelRegistry: {
       getContainersHydratedHost: vi.fn(() => null),
       trackContainersTunnelRuntime: vi.fn(),
+      trackContainersHydratedHost: vi.fn(),
       moveContainersTunnelRuntime: vi.fn(),
       stopContainersTunnelForEndpoint: vi.fn().mockResolvedValue(undefined),
     },
@@ -98,6 +108,59 @@ describe("container runtime coordinator", () => {
 
     expect(deps.awsSsmTunnelService.stop).toHaveBeenCalledWith("runtime-1");
     expect(deps.tunnelRegistry.trackContainersTunnelRuntime).not.toHaveBeenCalled();
+  });
+
+  it("routes AWS container runtime through the server proxy when enabled", async () => {
+    const serverProxyHost = {
+      ...createAwsHost(),
+      awsSsmServerProxyEnabled: true,
+    };
+    const containersConnect = vi.fn().mockResolvedValue({
+      runtime: "docker",
+      runtimeCommand: "/usr/bin/docker",
+      unsupportedReason: null,
+    });
+    const { deps, coordinator } = createCoordinator({
+      coreManager: {
+        getContainersEndpointRuntime: vi.fn(() => null),
+        containersConnect,
+        setPortForwardRuntime: vi.fn(),
+        listPortForwardRuntimes: vi.fn(() => []),
+        containersDisconnect: vi.fn().mockResolvedValue(undefined),
+      },
+      awsSftpCoordinator: {
+        consumePreflight: vi.fn(() => serverProxyHost),
+        resolvePreflight: vi.fn(),
+        clearPreflight: vi.fn(),
+        createEphemeralAwsSftpKeyPair: vi.fn(() => ({
+          privateKeyPem: "private",
+          publicKey: "public",
+        })),
+        reserveLoopbackPort: vi.fn().mockResolvedValue(2222),
+      },
+    });
+
+    await expect(
+      coordinator.ensureContainersEndpoint(serverProxyHost, "endpoint-1"),
+    ).resolves.toMatchObject({ endpointId: "endpoint-1", runtime: "docker" });
+
+    // 서버 프록시 경로: WS 릴레이로 연결하고, 로컬 SSM 터널·EIC 푸시는 하지 않는다.
+    expect(containersConnect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: "i-123",
+        port: 22,
+        wsProxy: expect.objectContaining({
+          url: expect.stringContaining("/api/aws-ssh-tunnel/ws"),
+          authToken: "token-1",
+        }),
+      }),
+    );
+    expect(deps.awsSsmTunnelService.start).not.toHaveBeenCalled();
+    expect(deps.awsService.sendSshPublicKey).not.toHaveBeenCalled();
+    expect(deps.tunnelRegistry.trackContainersHydratedHost).toHaveBeenCalledWith(
+      "endpoint-1",
+      serverProxyHost,
+    );
   });
 
   it("publishes an error runtime if container tunnel startup fails", async () => {

@@ -11,6 +11,12 @@ import type {
 } from "@shared";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { AwsService } from "../../aws-service";
+import type { AuthService } from "../../auth-service";
+import {
+  buildAwsServerProxyStartMessage,
+  buildAwsWsProxyTarget,
+  runWithAwsServerProxyAuthRetry,
+} from "../../aws-ws-proxy";
 import type { CoreManager } from "../../core-manager";
 import { resolveLocalAgentEndpoint } from "../agent-endpoint";
 import { resolveContainerTunnelTarget } from "../../container-port-forward-target";
@@ -61,6 +67,7 @@ export function createContainerRuntimeCoordinator(deps: {
   coreManager: CoreManager;
   knownHosts: KnownHostRepository;
   awsService: AwsService;
+  authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
   tunnelRegistry: TunnelRegistry;
@@ -75,6 +82,7 @@ export function createContainerRuntimeCoordinator(deps: {
     coreManager,
     knownHosts,
     awsService,
+    authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
     tunnelRegistry,
@@ -168,6 +176,68 @@ export function createContainerRuntimeCoordinator(deps: {
 
       const { privateKeyPem, publicKey } =
         awsSftpCoordinator.createEphemeralAwsSftpKeyPair();
+
+      if (hydratedHost.awsSsmServerProxyEnabled === true) {
+        // 서버 프록시(bastion): sync-api가 서버(허용된) IP에서 SSM 터널을 열고 EIC 키를
+        // 주입하며, ssh-core는 그 위로 WebSocket을 타고 컨테이너 런타임에 SSH로 붙는다.
+        // 데스크톱은 로컬 터널도 EIC 푸시도 하지 않는다(IP 제한 VPC용). SFTP/컨테이너 셸과 동일.
+        const proxyProfileName =
+          awsService.resolveManagedProfileNameOrFallback(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ) ?? hydratedHost.awsProfileName;
+        emitContainersConnectionProgress({
+          endpointId,
+          hostId: hydratedHost.id,
+          stage: "connecting-containers",
+          message: "서버 프록시로 컨테이너 런타임 연결을 준비하는 중입니다.",
+        });
+        const startMessage = await buildAwsServerProxyStartMessage(awsService, {
+          region: hydratedHost.awsRegion,
+          profileName: proxyProfileName,
+          instanceId: hydratedHost.awsInstanceId,
+          availabilityZone,
+          sshUsername,
+          sshPort,
+          publicKey,
+        });
+        try {
+          const result = await runWithAwsServerProxyAuthRetry(
+            authService,
+            (accessToken) =>
+              coreManager.containersConnect({
+                endpointId,
+                host: hydratedHost.awsInstanceId,
+                port: sshPort,
+                username: sshUsername,
+                authType: "privateKey",
+                privateKeyPem,
+                trustedHostKeyBase64: trustedHostKeysBase64[0],
+                trustedHostKeysBase64,
+                hostId: hydratedHost.id,
+                wsProxy: buildAwsWsProxyTarget({
+                  serverUrl: authService.getServerUrl(),
+                  accessToken,
+                  startMessage,
+                }),
+              }),
+          );
+          if (result.runtime) {
+            tunnelRegistry.trackContainersHydratedHost(endpointId, hydratedHost);
+          }
+          return {
+            endpointId,
+            runtime: result.runtime,
+            runtimeCommand: result.runtimeCommand,
+            unsupportedReason: result.unsupportedReason,
+            hydratedHost,
+          };
+        } catch (error) {
+          awsSftpCoordinator.clearPreflight(endpointId);
+          throw error;
+        }
+      }
+
       await awsService.sendSshPublicKey({
         profileName:
           awsService.resolveManagedProfileNameOrFallback(

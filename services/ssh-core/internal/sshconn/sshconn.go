@@ -297,7 +297,7 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 // 읽는다 — 베스천 뒤의(직접 닿지 않는) 타깃 키도 신뢰할 수 있게 한다. 베스천 인증은
 // 비대화형(password/privateKey/certificate)만 지원하며(responder 없이 DialClient),
 // keyboard-interactive 베스천을 경유하는 probe는 현재 지원하지 않는다.
-func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyProbeResult, error) {
+func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProxyTarget, config Config) (HostKeyProbeResult, error) {
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
 	}
@@ -317,7 +317,18 @@ func ProbeHostKey(host string, port int, jump *Target, config Config) (HostKeyPr
 	}
 
 	var rawConn net.Conn
-	if jump != nil {
+	if wsProxy != nil {
+		// 서버 프록시(bastion): 타깃까지의 raw 전송을 sync-api WebSocket으로 대신한다.
+		// sync-api가 EIC·SSM 터널을 서버 IP에서 열고 instance:port로 raw TCP를 중계하므로
+		// 아래 호스트 키 read는 일반 TCP 연결과 동일하게 이 conn 위에서 진행된다.
+		reportTarget(ProgressConnecting)
+		var err error
+		rawConn, err = dialWSProxyConn(wsProxy, config.TCPDialTimeout)
+		if err != nil {
+			reportTarget(ProgressFailed)
+			return HostKeyProbeResult{}, fmt.Errorf("ws proxy: %w", err)
+		}
+	} else if jump != nil {
 		jumpClient, err := DialClient(*jump, config, nil)
 		if err != nil {
 			return HostKeyProbeResult{}, fmt.Errorf("jump host: %w", err)

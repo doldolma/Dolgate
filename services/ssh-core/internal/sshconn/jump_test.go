@@ -282,7 +282,7 @@ func TestDialClientThroughJumpTargetKeyMismatch(t *testing.T) {
 func TestProbeHostKeyDirect(t *testing.T) {
 	target := newJumpTestServer(t, "u", "pw", "TARGET-OK")
 
-	result, err := ProbeHostKey("127.0.0.1", target.port(), nil, DefaultConfig)
+	result, err := ProbeHostKey("127.0.0.1", target.port(), nil, nil, DefaultConfig)
 	if err != nil {
 		t.Fatalf("ProbeHostKey direct: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestProbeHostKeyThroughJumpHost(t *testing.T) {
 	bastion := newJumpTestServer(t, "buser", "bpw", "BASTION-OK")
 
 	jump := bastion.target("buser", "bpw")
-	result, err := ProbeHostKey("127.0.0.1", target.port(), &jump, DefaultConfig)
+	result, err := ProbeHostKey("127.0.0.1", target.port(), &jump, nil, DefaultConfig)
 	if err != nil {
 		t.Fatalf("ProbeHostKey through jump: %v", err)
 	}

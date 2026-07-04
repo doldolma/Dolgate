@@ -1,4 +1,6 @@
 import {
+  buildAwsSsmKnownHostIdentity,
+  getAwsEc2HostSshPort,
   isLinkedDnsOverrideRecord,
   isStaticDnsOverrideRecord,
   type DnsOverrideDraft,
@@ -6,6 +8,11 @@ import {
 } from "@shared";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
+import {
+  buildAwsServerProxyStartMessage,
+  buildAwsWsProxyTarget,
+  runWithAwsServerProxyAuthRetry,
+} from "../aws-ws-proxy";
 import { describeHostsOverrideFailure as describeHostsOverrideManagerFailure } from "../hosts-override-manager";
 import type {
   AwsEc2HostRecord,
@@ -470,6 +477,104 @@ export function registerPortForwardAndDnsIpcHandlers(
           );
           if (!isManaged) {
             throw new Error("SSM Agent 또는 managed instance 상태를 확인해 주세요.");
+          }
+
+          if (awsHost.awsSsmServerProxyEnabled === true) {
+            // 서버 프록시(bastion): 네이티브 SSM 포워드 대신 sync-api WS 릴레이 위로 SSH를
+            // 열고 그 SSH 연결에서 -L 포워딩한다(IP 제한 VPC에서 모든 AWS 접근을 서버 IP로).
+            // 릴레이가 EIC 키를 서버에서 주입하므로 임시 키를 만들어 start message에 넣는다.
+            // instance-port는 인스턴스 자신의 포트(localhost), remote-host는 인스턴스에서
+            // 닿는 원격 호스트로 -L 매핑한다.
+            publishRuntime("starting", "Resolving SSH access via server proxy");
+            const hydratedHost = await ctx.resolveAwsSftpPreflight({
+              endpointId: `aws-ssm-forward:${rule.id}`,
+              host: awsHost,
+              allowBrowserLogin: true,
+            });
+            const sshPort = getAwsEc2HostSshPort(hydratedHost);
+            const proxyProfileName = resolveHostProfileName(hydratedHost);
+            const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+              hostname: buildAwsSsmKnownHostIdentity({
+                profileName: proxyProfileName,
+                region: hydratedHost.awsRegion,
+                instanceId: hydratedHost.awsInstanceId,
+              }),
+              port: sshPort,
+            });
+            const sshUsername = hydratedHost.awsSshUsername?.trim();
+            if (!sshUsername) {
+              throw new Error(
+                hydratedHost.awsSshMetadataError ||
+                  "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+              );
+            }
+            const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
+            if (!availabilityZone) {
+              throw new Error("Availability Zone을 확인하지 못했습니다.");
+            }
+            const targetHost =
+              rule.targetKind === "remote-host"
+                ? (rule.remoteHost ?? "").trim()
+                : "localhost";
+            if (!targetHost) {
+              throw new Error("원격 호스트 주소를 확인해 주세요.");
+            }
+            const { privateKeyPem, publicKey } =
+              ctx.createEphemeralAwsSftpKeyPair();
+            const startMessage = await buildAwsServerProxyStartMessage(
+              ctx.awsService,
+              {
+                region: hydratedHost.awsRegion,
+                profileName: proxyProfileName,
+                instanceId: hydratedHost.awsInstanceId,
+                availabilityZone,
+                sshUsername,
+                sshPort,
+                publicKey,
+              },
+            );
+            publishRuntime("starting", "Starting port forward via server proxy");
+            const runtime = await runWithAwsServerProxyAuthRetry(
+              ctx.authService,
+              (accessToken) =>
+                ctx.coreManager.startPortForward({
+                  ruleId: rule.id,
+                  hostId: awsHost.id,
+                  transport: "aws-ssm",
+                  host: hydratedHost.awsInstanceId,
+                  port: sshPort,
+                  username: sshUsername,
+                  authType: "privateKey",
+                  privateKeyPem,
+                  trustedHostKeyBase64: trustedHostKeysBase64[0],
+                  trustedHostKeysBase64,
+                  mode: "local",
+                  bindAddress: rule.bindAddress,
+                  bindPort: rule.bindPort,
+                  targetHost,
+                  targetPort: rule.targetPort,
+                  wsProxy: buildAwsWsProxyTarget({
+                    serverUrl: ctx.authService.getServerUrl(),
+                    accessToken,
+                    startMessage,
+                  }),
+                }),
+            );
+            try {
+              await ctx.rewriteActiveDnsOverrides();
+            } catch (error) {
+              await ctx.stopPortForwardWithDnsOverrideCleanup(rule.id).catch(
+                () => undefined,
+              );
+              publishRuntime(
+                "error",
+                error instanceof Error
+                  ? error.message
+                  : "hosts override를 적용하지 못했습니다.",
+              );
+              throw error;
+            }
+            return runtime;
           }
 
           publishRuntime("starting", "Starting SSM port forward");

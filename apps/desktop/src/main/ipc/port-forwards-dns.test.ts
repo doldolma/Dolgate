@@ -134,4 +134,95 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       'Dolgate DNS Helper가 준비되지 않았습니다. 잠시 후 다시 시도해 주세요. 원인: connect: permission denied',
     );
   });
+
+  it('routes a server-proxy AWS EC2 port forward through SSH -L over the WS relay', async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    const awsHost = {
+      id: 'aws-1',
+      kind: 'aws-ec2',
+      label: 'Prod EC2',
+      awsProfileId: null,
+      awsProfileName: 'prod',
+      awsRegion: 'ap-northeast-2',
+      awsInstanceId: 'i-123',
+      awsAvailabilityZone: 'ap-northeast-2a',
+      awsSshUsername: 'ubuntu',
+      awsSshPort: 22,
+      awsSsmServerProxyEnabled: true,
+    };
+    const rule = {
+      id: 'rule-1',
+      hostId: 'aws-1',
+      transport: 'aws-ssm',
+      targetKind: 'instance-port',
+      targetPort: 8080,
+      bindAddress: '127.0.0.1',
+      bindPort: 18080,
+    };
+    const startPortForward = vi
+      .fn()
+      .mockResolvedValue({ ruleId: 'rule-1', status: 'running' });
+    const startSsmPortForward = vi.fn();
+
+    registerPortForwardAndDnsIpcHandlers({
+      portForwards: { getById: vi.fn(() => rule) },
+      hosts: { getById: vi.fn(() => awsHost) },
+      assertAwsEc2Host: vi.fn(),
+      awsService: {
+        resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+        getProfileStatus: vi
+          .fn()
+          .mockResolvedValue({ isAuthenticated: true, isSsoProfile: false }),
+        isManagedInstance: vi.fn().mockResolvedValue(true),
+        buildServerProxySessionEnvSpec: vi
+          .fn()
+          .mockResolvedValue({ env: { AWS_ACCESS_KEY_ID: 'AKIA' }, unsetEnv: [] }),
+      },
+      authService: {
+        getServerUrl: vi.fn(() => 'https://sync.example.com'),
+        getAccessToken: vi.fn(() => 'token-1'),
+        refreshSession: vi.fn().mockResolvedValue({ status: 'authenticated' }),
+      },
+      resolveAwsSftpPreflight: vi.fn().mockResolvedValue(awsHost),
+      requireTrustedHostKeys: vi.fn(() => ['trusted']),
+      createEphemeralAwsSftpKeyPair: vi.fn(() => ({
+        privateKeyPem: 'priv',
+        publicKey: 'pub',
+      })),
+      coreManager: {
+        setPortForwardRuntime: vi.fn(),
+        listPortForwardRuntimes: vi.fn(() => []),
+        startPortForward,
+        startSsmPortForward,
+      },
+      rewriteActiveDnsOverrides: vi.fn().mockResolvedValue(undefined),
+    } as any);
+
+    const handler = handlers.get(ipcChannels.portForwards.start);
+    expect(handler).toBeTypeOf('function');
+    await handler?.({}, 'rule-1');
+
+    // 서버 프록시: 네이티브 SSM 포워드가 아니라 WS 릴레이 위 SSH -L로 붙는다.
+    expect(startSsmPortForward).not.toHaveBeenCalled();
+    expect(startPortForward).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ruleId: 'rule-1',
+        host: 'i-123',
+        port: 22,
+        username: 'ubuntu',
+        authType: 'privateKey',
+        targetHost: 'localhost',
+        targetPort: 8080,
+        transport: 'aws-ssm',
+        wsProxy: expect.objectContaining({
+          url: expect.stringContaining('/api/aws-ssh-tunnel/ws'),
+          authToken: 'token-1',
+        }),
+      }),
+    );
+  });
 });
