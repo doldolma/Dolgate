@@ -68,10 +68,19 @@ test.describe("desktop replay regression", () => {
       await expect(
         page.getByRole("heading", { name: "Logs" }).first(),
       ).toBeVisible();
-      await expect(page.getByTestId("logs-lifecycle-card").filter({ hasText: "Smoke AWS" }).first()).toBeVisible();
-      await expect(page.getByText("AWS SSM")).toBeVisible();
-      await expect(page.getByText("default · ap-northeast-2 · i-smoke-test")).toBeVisible();
-      await expect(page.getByText("Closed")).toBeVisible();
+      // 페이지 전역 getByText는 취약하다 — EC2가 신뢰된 호스트로 붙으면서 fake 환경에선
+      // SSH-over-SSM이 SSM 셸로 폴백하며 남기는 경고 로그의 metadata(JSON)에도 "AWS SSM"이
+      // 들어가 2개가 매칭된다. 검증 의도(세션 lifecycle 카드 내용)에 맞게 카드로 스코프한다.
+      const lifecycleCard = page
+        .getByTestId("logs-lifecycle-card")
+        .filter({ hasText: "Smoke AWS" })
+        .first();
+      await expect(lifecycleCard).toBeVisible();
+      await expect(lifecycleCard.getByText("AWS SSM")).toBeVisible();
+      await expect(
+        lifecycleCard.getByText("default · ap-northeast-2 · i-smoke-test"),
+      ).toBeVisible();
+      await expect(lifecycleCard.getByText("Closed")).toBeVisible();
 
       const replayWindowPromise = app.waitForEvent("window");
       await page.getByRole("button", { name: "Replay" }).click();
