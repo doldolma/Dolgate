@@ -17,7 +17,6 @@ import {
   buildVisibleGroups,
   filterHostsInGroupTree,
   getAwsEc2HostSftpDisabledReason,
-  getAwsEc2HostSshMetadataStatusLabel,
   getAwsSftpDiagnosticAction,
   getAwsSftpDiagnosticTitle,
   getHostBadgeLabel,
@@ -2191,21 +2190,11 @@ function HostPicker({
                 const canOpenHostSettings = awsHost
                   ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
                   : false;
-                const awsMetadataStatusLabel = awsHost
-                  ? getAwsEc2HostSshMetadataStatusLabel(awsHost.awsSshMetadataStatus)
-                  : null;
                 const isSelected = pane.selectedHostId === host.id;
                 const isBusy = isConnecting && isSelected;
-                const hint = disabledReason
-                  ? disabledReason
-                  : awsMetadataStatusLabel
-                    ? `${awsMetadataStatusLabel}${
-                        awsHost?.awsSshMetadataStatus === "error" &&
-                        awsHost.awsSshMetadataError
-                          ? ` · ${awsHost.awsSshMetadataError}`
-                          : ""
-                      }`
-                    : undefined;
+                // 홈 호스트 카드(HostListCard)와 통일: "SSH 설정 자동 확인됨" 등 상태 문구는
+                // 노출하지 않는다. 사용 불가 사유(예: Windows 미지원)만 힌트로 남긴다.
+                const hint = disabledReason ?? undefined;
                 return (
                   <HostCard
                     key={host.id}
