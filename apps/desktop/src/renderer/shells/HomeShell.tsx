@@ -341,11 +341,17 @@ export function HomeShell({
       desktopPlatform={desktopPlatform}
       onClose={homeViewModel.closeHostDrawer}
       onSubmit={async (draft, secrets) => {
-        await homeViewModel.saveHost(
-          homeViewModel.hostDrawer.mode === 'edit' ? currentHost?.id ?? null : null,
+        const isEdit = homeViewModel.hostDrawer.mode === 'edit';
+        const saved = await homeViewModel.saveHost(
+          isEdit ? currentHost?.id ?? null : null,
           draft,
           secrets,
         );
+        // 새로 생성한 경우엔 편집 창으로 넘어가지 않고, saveHost가 닫은 드로어 뒤로 방금
+        // 만든 호스트를 선택(상세) 화면으로 보여준다. 편집 저장은 드로어에서 기존대로 처리.
+        if (!isEdit) {
+          setSelectedHostId(saved.id);
+        }
       }}
       onConnect={
         currentHost
