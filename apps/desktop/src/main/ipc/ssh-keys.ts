@@ -1,6 +1,7 @@
 import type { SshKeyGenerateInput, SshKeyInstallInput } from "@shared";
 import { clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
+import { installSshPublicKeyWithAwsSupport } from "./aws-ec2-authorized-key";
 import type { MainIpcContext } from "./context";
 
 export function registerSshKeyIpcHandlers(ctx: MainIpcContext): void {
@@ -19,6 +20,7 @@ export function registerSshKeyIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.sshKeys.install,
-    async (_event, input: SshKeyInstallInput) => ctx.installSshPublicKey(input),
+    async (_event, input: SshKeyInstallInput) =>
+      installSshPublicKeyWithAwsSupport(ctx, input),
   );
 }

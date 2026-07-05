@@ -718,6 +718,7 @@ func (runtime *Runtime) InstallAuthorizedKey(requestID string, payload coretypes
 		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
+		WSProxy:               payload.WSProxy,
 	}, sshconn.DefaultConfig, nil)
 	if err != nil {
 		return err

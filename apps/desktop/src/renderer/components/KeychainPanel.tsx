@@ -1,5 +1,10 @@
 import { useMemo, useState } from 'react';
-import { getHostSearchText, getHostSecretRef, isSshHostRecord } from '@shared';
+import {
+  getHostSearchText,
+  getHostSecretRef,
+  isAwsEc2HostRecord,
+  isSshHostRecord,
+} from '@shared';
 import type {
   HostRecord,
   SecretMetadataRecord,
@@ -159,20 +164,24 @@ export function KeychainPanel({
     );
   }, [entries, hostsBySecretRef, searchQuery]);
 
-  const sshHosts = useMemo(() => hosts.filter(isSshHostRecord), [hosts]);
+  const installableHosts = useMemo(
+    () =>
+      hosts.filter((host) => isSshHostRecord(host) || isAwsEc2HostRecord(host)),
+    [hosts],
+  );
   const installTarget = entries.find((entry) => entry.secretRef === installTargetRef) ?? null;
   const visibleInstallHosts = useMemo(() => {
     const query = installHostSearchQuery.trim();
     if (!query) {
-      return sshHosts;
+      return installableHosts;
     }
-    return sshHosts.filter((host) =>
+    return installableHosts.filter((host) =>
       matchesKeyboardLayoutQuery(getHostSearchText(host).join(' '), query),
     );
-  }, [installHostSearchQuery, sshHosts]);
+  }, [installHostSearchQuery, installableHosts]);
   const selectedInstallHosts = useMemo(
-    () => sshHosts.filter((host) => selectedInstallHostIds.includes(host.id)),
-    [selectedInstallHostIds, sshHosts],
+    () => installableHosts.filter((host) => selectedInstallHostIds.includes(host.id)),
+    [selectedInstallHostIds, installableHosts],
   );
 
   const openInstallDialog = (secretRef: string) => {
@@ -423,9 +432,9 @@ export function KeychainPanel({
                   </Button>
                 </div>
                 <div className="grid max-h-[18rem] gap-2 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] p-2">
-                  {sshHosts.length === 0 ? (
+                  {installableHosts.length === 0 ? (
                     <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
-                      SSH host가 없습니다.
+                      설치 가능한 호스트가 없습니다.
                     </p>
                   ) : visibleInstallHosts.length === 0 ? (
                     <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
@@ -453,7 +462,9 @@ export function KeychainPanel({
                           <span className="grid min-w-0 gap-1">
                             <strong className="truncate">{host.label}</strong>
                             <span className="truncate text-[var(--text-soft)]">
-                              {host.username}@{host.hostname}:{host.port}
+                              {isSshHostRecord(host)
+                                ? `${host.username}@${host.hostname}:${host.port}`
+                                : `EC2 · ${host.awsRegion} · ${host.awsInstanceId}`}
                             </span>
                           </span>
                         </label>
