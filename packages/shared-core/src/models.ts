@@ -256,6 +256,8 @@ export interface AwsEc2HostRecord extends HostBaseRecord {
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
   awsSsmServerProxyEnabled?: boolean;
+  /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
+  agentForwarding?: boolean | null;
   startupCommand?: HostStartupCommand | null;
 }
 
@@ -275,6 +277,8 @@ export interface AwsEc2HostDraft extends HostBaseDraft {
   awsSshMetadataStatus?: AwsSshMetadataStatus | null;
   awsSshMetadataError?: string | null;
   awsSsmServerProxyEnabled?: boolean;
+  /** OpenSSH agent forwarding(-A). 신뢰하는 호스트에서만 켠다. */
+  agentForwarding?: boolean | null;
   startupCommand?: HostStartupCommand | null;
 }
 

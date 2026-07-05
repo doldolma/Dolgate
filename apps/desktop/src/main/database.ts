@@ -317,7 +317,8 @@ function normalizeIncomingHostRecord(record: HostRecord): HostRecord {
       awsSshUsername: record.awsSshUsername ?? null,
       awsSshPort: record.awsSshPort ?? null,
       awsSshMetadataStatus: normalizeAwsSshMetadataStatus(record.awsSshMetadataStatus, record),
-      awsSshMetadataError: normalizeAwsSshMetadataError(record.awsSshMetadataError)
+      awsSshMetadataError: normalizeAwsSshMetadataError(record.awsSshMetadataError),
+      agentForwarding: record.agentForwarding === true ? true : null
     };
   }
 
@@ -528,6 +529,7 @@ function toAwsHostRecord(id: string, draft: AwsEc2HostDraft, timestamp: string, 
     awsSsmServerProxyEnabled:
       draft.awsSsmServerProxyEnabled ??
       (current?.awsSsmServerProxyEnabled === true),
+    agentForwarding: draft.agentForwarding === true ? true : null,
     groupName: normalizeGroupPath(draft.groupName),
     tags: normalizeTags(draft.tags),
     terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),

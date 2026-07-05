@@ -33,6 +33,7 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       awsSshMetadataStatus: record.awsSshMetadataStatus ?? null,
       awsSshMetadataError: record.awsSshMetadataError ?? null,
       awsSsmServerProxyEnabled: record.awsSsmServerProxyEnabled === true,
+      agentForwarding: record.agentForwarding ?? null,
     };
   }
 

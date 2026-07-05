@@ -10,6 +10,7 @@ import type {
   AwsEc2HostRecord,
   MainIpcContext,
 } from "./context";
+import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 
 const AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX = "aws-ec2-ssh:";
@@ -102,6 +103,14 @@ export async function connectAwsEc2OverSsm(
   );
   const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
 
+  // Agent forwarding은 SSH 채널 레벨 기능이라 전송(SSM 터널/서버프록시)과 무관하게 ssh-core가
+  // 로컬 agent에 붙어 처리한다(EIC 임시키 인증과 별개로 진짜 로컬 agent를 인스턴스로 포워딩).
+  // bastion에서 사설 호스트로 hop할 때 로컬 키를 그대로 쓰는 정석 유스케이스.
+  const agentForwardingRequested = hydratedHost.agentForwarding === true;
+  const agentForwardingEndpoint = agentForwardingRequested
+    ? await resolveLocalAgentEndpoint()
+    : null;
+
   const baseConnect = {
     username: sshUsername,
     authType: "privateKey" as const,
@@ -120,6 +129,9 @@ export async function connectAwsEc2OverSsm(
     tmux: options.tmux,
     tmuxVersion: options.tmuxVersion,
     startupCommand: options.startupCommand,
+    agentForwarding: agentForwardingRequested,
+    agentForwardingEndpointKind: agentForwardingEndpoint?.kind,
+    agentForwardingEndpoint: agentForwardingEndpoint?.endpoint,
   };
 
   if (hydratedHost.awsSsmServerProxyEnabled === true) {

@@ -776,6 +776,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         awsSshMetadataStatus: host.awsSshMetadataStatus ?? null,
         awsSshMetadataError: host.awsSshMetadataError ?? null,
         awsSsmServerProxyEnabled: host.awsSsmServerProxyEnabled === true,
+        agentForwarding: host.agentForwarding === true ? true : null,
         startupCommand: host.startupCommand ?? null
       };
       nextCredentialMode = 'new';
@@ -1623,6 +1624,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                             ...current,
                             awsSsmServerProxyEnabled:
                                 current.awsSsmServerProxyEnabled !== true
+                          }
+                          : current
+                  )
+              }
+          />
+          <ToggleSwitch
+              checked={draft.agentForwarding === true}
+              label="SSH Agent Forwarding"
+              description="로컬 SSH 키를 원격에서 쓸 수 있게 합니다(예: bastion에서 사설 호스트로 hop). 신뢰하는 호스트만 켜세요."
+              onClick={() =>
+                  setDraft((current) =>
+                      current.kind === 'aws-ec2'
+                          ? {
+                            ...current,
+                            agentForwarding: current.agentForwarding !== true
                           }
                           : current
                   )
