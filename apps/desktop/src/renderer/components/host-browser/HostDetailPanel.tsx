@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   getHostBadgeLabel,
+  isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isSshHostRecord,
   normalizeGroupPath,
@@ -861,7 +862,7 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
                   <Pencil className="h-4 w-4" aria-hidden />
                   Edit Host
                 </Button>
-                {isSshHostRecord(host) &&
+                {(isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
                 hb.onGenerateAndInstallSshKey &&
                 hb.onInstallSshPublicKey ? (
                   <Button
@@ -899,7 +900,7 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
 
       </div>
       {keyInstallOpen &&
-      isSshHostRecord(host) &&
+      (isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
       hb.onGenerateAndInstallSshKey &&
       hb.onInstallSshPublicKey ? (
         <SshKeyInstallDialog

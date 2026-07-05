@@ -452,7 +452,7 @@ describe('SettingsPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: '호스트에 설치' }));
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Lime prod/ }));
     fireEvent.change(screen.getByLabelText('Key passphrase'), {
       target: { value: 'runtime-only' },
     });
@@ -464,6 +464,40 @@ describe('SettingsPanel', () => {
         hostIds: ['ssh-lime'],
         mode: 'installOnly',
         passphraseOverride: 'runtime-only',
+      }),
+    );
+  });
+
+  it('installs a managed key to an EC2 host from the keychain', async () => {
+    const { onInstallSshPublicKey } = renderSettingsPanel({
+      activeSection: 'secrets',
+      keychainEntries: [
+        {
+          secretRef: 'secret-managed',
+          label: 'Managed SSH key',
+          linkedHostCount: 0,
+          hasPassword: false,
+          hasPassphrase: false,
+          hasManagedPrivateKey: true,
+          hasCertificate: false,
+          privateKeyEncrypted: false,
+          keyAlgorithm: 'ssh-ed25519',
+          passphraseSaved: false,
+          updatedAt: '2026-03-24T12:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '호스트에 설치' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /aws-bastion/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+
+    await waitFor(() =>
+      expect(onInstallSshPublicKey).toHaveBeenCalledWith({
+        secretRef: 'secret-managed',
+        hostIds: ['aws-host-1'],
+        mode: 'installOnly',
+        passphraseOverride: undefined,
       }),
     );
   });

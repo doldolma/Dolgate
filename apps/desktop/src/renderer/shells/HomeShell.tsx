@@ -4,6 +4,7 @@ import {
   getGroupLabel,
   getParentGroupPath,
   getHostSecretRef,
+  isAwsEc2HostRecord,
   isSshHostRecord,
   normalizeGroupPath,
   type AuthState,
@@ -300,14 +301,17 @@ export function HomeShell({
     input: SshKeyGenerateInput,
   ) {
     const host = findHost(homeViewModel.hosts, hostId);
-    if (!host || !isSshHostRecord(host)) {
+    if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
       throw new Error('SSH host를 찾지 못했습니다.');
     }
+    // EC2는 SSH-over-SSM(EIC)로 접속해 설치만 한다 — 매 연결 임시 키를 쓰므로
+    // "이 키로 접속 전환"이 없다.
+    const isEc2 = isAwsEc2HostRecord(host);
     const key = await settingsViewModel.generateSshKey(input);
     const result = await settingsViewModel.installSshPublicKey({
       secretRef: key.secretRef,
       hostIds: [host.id],
-      mode: 'installAndUse',
+      mode: isEc2 ? 'installOnly' : 'installAndUse',
       passphraseOverride:
         input.passphrase && !input.savePassphrase ? input.passphrase : undefined,
     });
@@ -315,7 +319,11 @@ export function HomeShell({
     if (failed) {
       throw new Error(failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.');
     }
-    setHostBrowserStatus(`${host.label} 호스트가 새 SSH 키를 사용하도록 전환되었습니다.`);
+    setHostBrowserStatus(
+      isEc2
+        ? `${host.label} 인스턴스의 authorized_keys에 새 SSH 키를 설치했습니다.`
+        : `${host.label} 호스트가 새 SSH 키를 사용하도록 전환되었습니다.`,
+    );
   }
 
   // 호스트 편집/생성 폼은 별도 오버레이가 아니라 우측 상세 영역(HostBrowser aside) 안에 표시한다.

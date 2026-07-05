@@ -244,7 +244,10 @@ export interface MainIpcContext {
   ) => Promise<string | undefined>;
   inspectCertificate: (certificateText: string) => Promise<SshCertificateInfo>;
   generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
-  resolveSshPublicKey: (secretRef: string) => Promise<SshKeyMaterialResult>;
+  resolveSshPublicKey: (
+    secretRef: string,
+    passphraseOverride?: string | null,
+  ) => Promise<SshKeyMaterialResult>;
   installSshPublicKey: (
     input: SshKeyInstallInput,
   ) => Promise<SshKeyInstallResult>;

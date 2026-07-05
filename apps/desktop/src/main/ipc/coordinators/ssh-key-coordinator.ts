@@ -20,7 +20,10 @@ import type {
 
 export interface SshKeyCoordinator {
   generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
-  resolveSshPublicKey: (secretRef: string) => Promise<SshKeyMaterialResult>;
+  resolveSshPublicKey: (
+    secretRef: string,
+    passphraseOverride?: string | null,
+  ) => Promise<SshKeyMaterialResult>;
   installSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
 }
 
