@@ -625,6 +625,7 @@ function normalizeHostRecord(value: unknown): HostRecord | null {
       awsSshMetadataError:
         typeof value.awsSshMetadataError === 'string' ? value.awsSshMetadataError : null,
       awsSsmServerProxyEnabled: value.awsSsmServerProxyEnabled === true,
+      agentForwarding: value.agentForwarding === true ? true : null,
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
