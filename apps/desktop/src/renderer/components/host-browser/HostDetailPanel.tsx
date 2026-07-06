@@ -832,6 +832,10 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
                   <SquareTerminal className="h-4 w-4" aria-hidden />
                   Connect
                 </Button>
+                <Button variant="secondary" size="sm" onClick={() => hb.onEditHost(host.id)}>
+                  <Pencil className="h-4 w-4" aria-hidden />
+                  Edit Host
+                </Button>
                 {!isAwsEcsHostRecord(host) && hb.onOpenSftp ? (
                   <Button variant="secondary" size="sm" onClick={() => hb.onOpenSftp?.(host.id)}>
                     <Folder className="h-4 w-4" aria-hidden />
@@ -858,10 +862,6 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
                     Containers
                   </Button>
                 ) : null}
-                <Button variant="secondary" size="sm" onClick={() => hb.onEditHost(host.id)}>
-                  <Pencil className="h-4 w-4" aria-hidden />
-                  Edit Host
-                </Button>
                 {(isSshHostRecord(host) || isAwsEc2HostRecord(host)) &&
                 hb.onGenerateAndInstallSshKey &&
                 hb.onInstallSshPublicKey ? (
