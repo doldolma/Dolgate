@@ -5,3 +5,4 @@ export { useSftpViewModel } from './sftp';
 export { useAppSettingsViewModel } from './settings';
 export { useSettingsViewModel } from './settings';
 export { useAppModalViewModel } from './modals';
+export { useAiChatViewModel } from './ai';

@@ -45,6 +45,9 @@ import type {
   SecretMetadataRecord,
   SshKeyGenerateInput,
   AiApiKeyStatus,
+  AiChatEvent,
+  AiChatMessage,
+  AiErrorPayload,
   AiProviderId,
   AiTestConnectionInput,
   AiTestResult,
@@ -1286,6 +1289,29 @@ export interface ZmodemSlice {
   dismissZmodemTransfer: (jobId: string) => void;
 }
 
+// AI 채팅 패널(Phase 2). 대화는 sessionId(탭)별, in-memory. 터미널 최근 출력은 전송 시
+// 자동으로 컨텍스트에 포함하며(별도 첨부 UI 없음), 표시 메시지에는 담지 않고 요청에만 싣는다.
+export interface AiConversation {
+  open: boolean;
+  messages: AiChatMessage[];
+  requestId: string | null;
+  streamingText: string;
+  streaming: boolean;
+  error: AiErrorPayload | null;
+}
+
+export interface AiChatSlice {
+  aiConversations: Record<string, AiConversation>;
+  aiPanelWidth: number;
+  toggleAiPanel: (sessionId: string) => void;
+  setAiPanelWidth: (width: number) => void;
+  // context = 전송 시점 터미널 최근 출력(redaction됨). 표시 메시지엔 안 들어가고 요청에만 실린다.
+  sendAiMessage: (sessionId: string, text: string, context?: string) => Promise<void>;
+  handleAiChatEvent: (event: AiChatEvent) => void;
+  cancelAiMessage: (sessionId: string) => void;
+  clearAiConversation: (sessionId: string) => void;
+}
+
 export type AppState = CatalogSlice &
   SessionSlice &
   ContainersSlice &
@@ -1293,7 +1319,8 @@ export type AppState = CatalogSlice &
   NetworkSlice &
   SettingsSlice &
   RuntimeEventSlice &
-  ZmodemSlice;
+  ZmodemSlice &
+  AiChatSlice;
 
 export interface SliceDeps {
   api: DesktopApi;

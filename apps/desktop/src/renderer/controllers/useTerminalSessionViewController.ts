@@ -916,6 +916,8 @@ export function useTerminalSessionViewController({
       serialize: () => runtime.captureRestoreSnapshot(),
       getSessionId: () => liveSessionIdRef.current,
       getCellSize: () => runtime.getCellSize(),
+      getSelection: () => runtime.getSelection(),
+      captureRecentText: (maxLines: number) => runtime.captureRecentText(maxLines),
     };
     registerTerminalHooks(stableId, terminalHooks);
     // 안전망: 이전 터미널이 남긴 스크롤백이 있으면 복원한다.

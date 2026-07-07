@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DragEvent } from 'react';
+import type { DragEvent, KeyboardEvent } from 'react';
 import {
   isAwsEc2HostRecord,
   isSshHostRecord,
@@ -14,6 +14,7 @@ import {
 import { getSessionCwd } from '../../lib/terminal-cwd-registry';
 import { getPathForDroppedFile } from '../../services/desktop/files';
 import { useTerminalSessionViewController } from '../../controllers/useTerminalSessionViewController';
+import { AiChatPanel } from './AiChatPanel';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
@@ -173,6 +174,30 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     snippets,
     onCommandFinished,
   });
+  const aiPanelOpen = useAppStore(
+    (state) => state.aiConversations?.[sessionId]?.open ?? false,
+  );
+  const aiPanelWidth = useAppStore((state) => state.aiPanelWidth);
+  const toggleAiPanel = useAppStore((state) => state.toggleAiPanel);
+  // 선택/출력 캡처는 stableId 로 살아있는 런타임에서 읽는다(재연결로 sessionId가 바뀌어도 안정).
+  const stableId = tab?.stableId ?? sessionId;
+  const handlePaneKeyDownCapture = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      // ⌘I / Ctrl+I: AI 패널 토글. 나머지 단축키(검색 등)는 컨트롤러로 위임.
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        (event.key === 'i' || event.key === 'I')
+      ) {
+        event.preventDefault();
+        toggleAiPanel(sessionId);
+        return;
+      }
+      controller.handlePaneKeyDownCapture(event);
+    },
+    [controller, sessionId, toggleAiPanel],
+  );
+
   const [serialNotice, setSerialNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -341,7 +366,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         showHeader && 'p-[0.4rem]',
       )}
       style={style}
-      onKeyDownCapture={controller.handlePaneKeyDownCapture}
+      onKeyDownCapture={handlePaneKeyDownCapture}
       onMouseDown={controller.handlePaneMouseDown}
       onDragOver={handleFileDragOver}
       onDragLeave={handleFileDragLeave}
@@ -457,6 +482,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         />
       ) : null}
 
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
       <div
         ref={controller.containerRef}
         className={cn(
@@ -519,6 +545,21 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           onCancel={controller.cancelAutocompleteSnippet}
         />
       </div>
+        {aiPanelOpen ? (
+          <AiChatPanel sessionId={sessionId} stableId={stableId} width={aiPanelWidth} />
+        ) : null}
+      </div>
+      {!aiPanelOpen ? (
+        <button
+          type="button"
+          className="absolute right-0 top-1/2 z-[15] flex -translate-y-1/2 items-center gap-1 rounded-l-[8px] border border-r-0 border-[var(--border)] bg-[var(--surface-elevated)] px-1.5 py-3 text-[0.7rem] font-semibold tracking-[0.15em] text-[var(--text-soft)] shadow-[var(--shadow-soft)] [writing-mode:vertical-rl] hover:text-[var(--text)]"
+          onClick={() => toggleAiPanel(sessionId)}
+          title="AI 어시스턴트 (⌘I)"
+          aria-label="AI 어시스턴트 열기"
+        >
+          AI
+        </button>
+      ) : null}
       {tab?.moshState ? (
         <TerminalMoshStatusBar
           state={tab.moshState}
