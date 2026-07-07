@@ -13,7 +13,8 @@ import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./pro
 import { normalizeAiError } from "./provider-errors";
 
 // Anthropic 은 max_tokens 가 필수라 기본 상한을 둔다(요청이 값을 주면 그걸 우선).
-const DEFAULT_ANTHROPIC_MAX_TOKENS = 1024;
+// 4096 = 현재 Claude 계열이 공통으로 허용하는 안전한 출력 상한(1024 는 답이 잘렸음).
+const DEFAULT_ANTHROPIC_MAX_TOKENS = 4096;
 
 export class AnthropicAdapter implements ProviderAdapter {
   readonly id = "anthropic" as const;

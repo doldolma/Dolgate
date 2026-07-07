@@ -25,6 +25,13 @@ type stubSSHManager struct {
 	completionErr  error
 	installCount   int
 	installErr     error
+	runCommand     string
+	runTimeoutMs   int
+	runOut         string
+	runStderr      string
+	runExit        int
+	runTrunc       bool
+	runErr         error
 }
 
 func (stub *stubSSHManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
@@ -62,6 +69,11 @@ func (stub *stubSSHManager) InstallShellIntegration(string) error {
 func (stub *stubSSHManager) FlushShellIntegration(string) {}
 func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return stub.completionOut, stub.completionTrun, stub.completionErr
+}
+func (stub *stubSSHManager) RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error) {
+	stub.runCommand = command
+	stub.runTimeoutMs = timeoutMs
+	return stub.runOut, stub.runStderr, stub.runExit, stub.runTrunc, stub.runErr
 }
 func (stub *stubSSHManager) KillTmuxSession(string, string) error { return nil }
 
@@ -441,6 +453,87 @@ func TestRuntimeRoutesSessionIOResizeDisconnectAndSignals(t *testing.T) {
 	}
 	if moshManager.disconnectID != "session-mosh" {
 		t.Fatalf("expected mosh disconnect, got %#v", moshManager)
+	}
+}
+
+func TestRuntimeRunCommandEmitsResultForSSHSession(t *testing.T) {
+	var events []coretypes.Event
+	sshManager := &stubSSHManager{
+		hasSession: true,
+		runOut:     "hello\n",
+		runStderr:  "warn\n",
+		runExit:    3,
+		runTrunc:   true,
+	}
+	runtime := newRuntimeWithDeps(
+		func(e coretypes.Event) { events = append(events, e) },
+		func(coretypes.StreamFrame, []byte) {},
+		sshManager,
+		&stubMoshManager{},
+		&stubAWSManager{},
+		&stubLocalManager{},
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.RunCommand("session-ssh", "req-1", "df -h", 5000); err != nil {
+		t.Fatalf("RunCommand() error = %v", err)
+	}
+	if sshManager.runCommand != "df -h" || sshManager.runTimeoutMs != 5000 {
+		t.Fatalf("SSH manager did not receive command: %#v", sshManager)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Type != coretypes.EventRunCommandResult || ev.RequestID != "req-1" || ev.SessionID != "session-ssh" {
+		t.Fatalf("unexpected event envelope: %#v", ev)
+	}
+	payload, ok := ev.Payload.(coretypes.RunCommandResultPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %#v", ev.Payload)
+	}
+	if payload.Stdout != "hello\n" || payload.Stderr != "warn\n" || payload.ExitCode != 3 || !payload.Truncated || payload.Error != "" {
+		t.Fatalf("unexpected result payload: %#v", payload)
+	}
+}
+
+func TestRuntimeRunCommandRejectsUnsupportedSession(t *testing.T) {
+	var events []coretypes.Event
+	// AWS SSM session present, but run_command has no auxiliary exec channel there.
+	runtime := newRuntimeWithDeps(
+		func(e coretypes.Event) { events = append(events, e) },
+		func(coretypes.StreamFrame, []byte) {},
+		&stubSSHManager{hasSession: false},
+		&stubMoshManager{},
+		&stubAWSManager{hasSession: true},
+		&stubLocalManager{},
+		&stubSerialManager{},
+		&stubSFTPService{},
+		&stubContainersService{},
+		&stubForwardingService{},
+		&stubSSMForwardingService{},
+		nil,
+		nil,
+	)
+
+	if err := runtime.RunCommand("session-aws", "req-2", "ls", 0); err != nil {
+		t.Fatalf("RunCommand() error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	payload, ok := events[0].Payload.(coretypes.RunCommandResultPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %#v", events[0].Payload)
+	}
+	if payload.Error == "" || payload.ExitCode != -1 {
+		t.Fatalf("expected unsupported-session error payload, got %#v", payload)
 	}
 }
 

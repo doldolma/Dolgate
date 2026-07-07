@@ -1298,15 +1298,29 @@ export interface ZmodemSlice {
 
 // AI 채팅 패널(Phase 2). 대화는 sessionId(탭)별, in-memory. 터미널 최근 출력은 전송 시
 // 자동으로 컨텍스트에 포함하며(별도 첨부 UI 없음), 표시 메시지에는 담지 않고 요청에만 싣는다.
+// 한 번의 도구 실행(패널에 진행/완료 표시). 완료된 턴은 해당 assistant 메시지에 접혀서 보존된다.
+export interface AiToolRun {
+  id: string;
+  label: string;
+  status: "running" | "done" | "error";
+}
+
+// 표시용 메시지 = wire 메시지 + (assistant 턴이 사용한 도구 실행 목록).
+export interface AiDisplayMessage extends AiChatMessage {
+  toolRuns?: AiToolRun[];
+}
+
 export interface AiConversation {
   open: boolean;
-  messages: AiChatMessage[];
+  messages: AiDisplayMessage[];
   requestId: string | null;
   streamingText: string;
   streaming: boolean;
   error: AiErrorPayload | null;
-  // 스트리밍 중 실행 도구 표시(예: "🔍 웹 검색: …"). done/error에서 clear.
-  toolActivity: string | null;
+  // 현재 진행 중인 턴의 도구 실행들(스트리밍 중 펼쳐서 표시). done 시 마지막 메시지에 옮겨 접는다.
+  toolRuns: AiToolRun[];
+  // run_command 변경 명령 승인 대기(패널에 승인/거부 카드 표시). 응답/취소 시 clear.
+  pendingApproval: { toolCallId: string; command: string; reason: string } | null;
 }
 
 export interface AiChatSlice {
@@ -1317,6 +1331,13 @@ export interface AiChatSlice {
   // context = 전송 시점 터미널 최근 출력(redaction됨). 표시 메시지엔 안 들어가고 요청에만 실린다.
   sendAiMessage: (sessionId: string, text: string, context?: string) => Promise<void>;
   handleAiChatEvent: (event: AiChatEvent) => void;
+  // run_command 승인/거부. remember=true 면 이 세션에서 이후 변경 명령을 자동 승인.
+  respondAiApproval: (
+    sessionId: string,
+    toolCallId: string,
+    approved: boolean,
+    remember?: boolean,
+  ) => Promise<void>;
   cancelAiMessage: (sessionId: string) => void;
   clearAiConversation: (sessionId: string) => void;
 }

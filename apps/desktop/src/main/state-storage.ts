@@ -47,6 +47,7 @@ import {
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
+  DEFAULT_AI_SETTINGS,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
   clampAiTemperature,
@@ -54,6 +55,7 @@ import {
   clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
   normalizeAiBaseUrl,
+  normalizeAiTokenLimit,
   normalizeHostEnvVars,
   normalizeJumpHostIds,
   normalizeSftpBrowserColumnWidths
@@ -197,7 +199,8 @@ function normalizeAiSettings(value: unknown): AiSettings | null {
     baseUrl: normalizeAiBaseUrl(typeof value.baseUrl === 'string' ? value.baseUrl : undefined),
     model: typeof value.model === 'string' ? value.model : '',
     temperature:
-      typeof value.temperature === 'number' ? clampAiTemperature(value.temperature) : undefined
+      typeof value.temperature === 'number' ? clampAiTemperature(value.temperature) : undefined,
+    contextTokens: normalizeAiTokenLimit(value.contextTokens) ?? DEFAULT_AI_SETTINGS.contextTokens
   };
 }
 

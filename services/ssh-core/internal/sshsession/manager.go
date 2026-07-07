@@ -490,6 +490,62 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 	return out, truncated, nil
 }
 
+// runHostCommandMaxBytes caps captured stdout/stderr per stream to protect the
+// IPC pipe. The Node run_command tool trims further for the model context.
+const runHostCommandMaxBytes = 1 << 18 // 256 KiB
+
+const (
+	runHostCommandDefaultTimeout = 30 * time.Second
+	runHostCommandMaxTimeout     = 120 * time.Second
+)
+
+// RunHostCommand runs an arbitrary command on a separate exec channel (not the
+// interactive PTY) and returns stdout, stderr and the remote exit code. Used by
+// the AI assistant's run_command tool. Unlike RunCompletionCommand it surfaces
+// stderr and the exit status. A non-zero exit is NOT an error (err==nil,
+// exitCode set); err is returned only when the command could not be run at all.
+func (m *Manager) RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return "", "", -1, false, err
+	}
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if timeout <= 0 {
+		timeout = runHostCommandDefaultTimeout
+	}
+	if timeout > runHostCommandMaxTimeout {
+		timeout = runHostCommandMaxTimeout
+	}
+	// 로그인 셸로 감싸 대화형 세션과 같은 PATH/환경을 로드한다(그냥 exec 하면 docker 등이
+	// PATH 에 없어 "command not found" 가 나기 쉽다 — Synology 등에서 흔함).
+	wrapped := "sh -lc " + sshcmd.QuotePosix(command)
+	stdout, stderr, runErr := sshcmd.RunWithTimeout(session.client, wrapped, timeout)
+	exitCode := 0
+	var execErr error
+	if runErr != nil {
+		var exitError *ssh.ExitError
+		if errors.As(runErr, &exitError) {
+			// Remote command ran and exited non-zero — not an exec failure.
+			exitCode = exitError.ExitStatus()
+		} else {
+			// Channel error / timeout / killed by signal: could not obtain an exit
+			// status. -1 marks "no exit status"; surface the underlying error.
+			exitCode = -1
+			execErr = runErr
+		}
+	}
+	outStr, outTrunc := capRunCommandOutput(stdout)
+	errStr, errTrunc := capRunCommandOutput(stderr)
+	return outStr, errStr, exitCode, outTrunc || errTrunc, execErr
+}
+
+func capRunCommandOutput(b []byte) (string, bool) {
+	if len(b) <= runHostCommandMaxBytes {
+		return string(b), false
+	}
+	return string(b[:runHostCommandMaxBytes]), true
+}
+
 func (h *sessionHandle) runCompletionWorker(command string) ([]byte, bool, error) {
 	worker := h.getCompletionWorker()
 	return worker.Run(command, autocomplete.CompletionTimeout, autocomplete.MaxCompletionBytes)

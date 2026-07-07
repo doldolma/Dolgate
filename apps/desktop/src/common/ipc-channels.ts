@@ -178,7 +178,9 @@ export const ipcChannels = {
     clearSearchKey: 'ai:clear-search-key',
     chat: 'ai:chat',
     cancelChat: 'ai:cancel-chat',
-    // main → renderer 스트리밍 이벤트(delta/done/error). requestId 로 상관한다.
+    // run_command 변경 명령 승인/거부(renderer→main).
+    respondApproval: 'ai:respond-approval',
+    // main → renderer 스트리밍 이벤트(delta/tool/approval-required/done/error). requestId 로 상관한다.
     chatEvent: 'ai:chat-event'
   },
   notifications: {

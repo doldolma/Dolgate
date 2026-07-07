@@ -28,6 +28,7 @@ import {
   isSshHostRecord,
   isSerialHostRecord,
   normalizeAiBaseUrl,
+  normalizeAiTokenLimit,
   normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
@@ -1458,6 +1459,10 @@ export class SettingsRepository {
             typeof incoming.temperature === 'number'
               ? clampAiTemperature(incoming.temperature)
               : undefined;
+        }
+        if (Object.prototype.hasOwnProperty.call(incoming, 'contextTokens')) {
+          next.contextTokens =
+            normalizeAiTokenLimit(incoming.contextTokens) ?? DEFAULT_AI_SETTINGS.contextTokens;
         }
         state.settings.ai = next;
         state.settings.updatedAt = nowIso();

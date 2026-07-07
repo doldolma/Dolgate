@@ -87,6 +87,46 @@ import {
 import { resolveDesktopRepoRoot } from "./repo-root";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
+// AI run_command 기본 타임아웃(모델이 지정 안 하면). Go 코어가 최대 120s 로 상한을 건다.
+const AI_RUN_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
+
+// AI run_in_terminal 캡처 출력에서 ANSI/OSC 이스케이프·CR 을 제거해 모델이 읽기 좋게 만든다.
+function stripTerminalNoise(text: string): string {
+  // 소스에 실제 제어문자를 넣지 않도록 ESC/LF 를 char code 로 만든다.
+  const ESC = String.fromCharCode(27);
+  const LF = String.fromCharCode(10);
+  let out = "";
+  for (let idx = 0; idx < text.length; idx += 1) {
+    const ch = text[idx];
+    if (ch === ESC) {
+      const next = text[idx + 1];
+      if (next === "]") {
+        // OSC: BEL(7) 또는 ESC 까지 스킵
+        idx += 2;
+        while (idx < text.length && text.charCodeAt(idx) !== 7 && text[idx] !== ESC) idx += 1;
+      } else if (next === "[") {
+        // CSI: 최종 바이트(@-~ = 64..126) 까지 스킵
+        idx += 2;
+        while (idx < text.length) {
+          const code = text.charCodeAt(idx);
+          if (code >= 64 && code <= 126) break;
+          idx += 1;
+        }
+      } else {
+        idx += 1;
+      }
+      continue;
+    }
+    const code = text.charCodeAt(idx);
+    if (code === 13) {
+      out += LF;
+      continue;
+    }
+    if (code < 32 && code !== 10 && code !== 9) continue;
+    out += ch;
+  }
+  return out.trim();
+}
 
 // AWS SSM 자동완성 프로브 대기 상한. ssh-core의 autocompleteProbeTimeout(9s,
 // services/ssh-core/internal/awssession/manager.go)이 prompt 대기 + snapshot
@@ -224,7 +264,7 @@ interface ContainerLifecycleState {
   endReason: string | null;
 }
 
-type SessionTransport =
+export type SessionTransport =
   | "ssh"
   | "mosh"
   | "aws-ssm"
@@ -988,6 +1028,11 @@ export class CoreManager {
     sessionId: string,
     chunk: Uint8Array,
   ) => void | Promise<void>;
+  // AI run_in_terminal 출력 캡처(sessionId당 1개). broadcastStream 이 활성 캡처에 청크를 쌓는다.
+  private readonly terminalCaptures = new Map<
+    string,
+    { chunks: Uint8Array[]; bytes: number; maxBytes: number; lastAt: number; truncated: boolean }
+  >();
   private onPortForwardEvent?: (
     event: PortForwardRuntimeEvent,
   ) => void | Promise<void>;
@@ -3585,6 +3630,88 @@ export class CoreManager {
     return typeof response.stdout === "string" ? response.stdout : "";
   }
 
+  // AI 어시스턴트의 run_command 도구용. 세션의 기존 ssh.Client에 별도 exec 채널을 열어(사용자 PTY와 분리)
+  // 명령을 실행하고 stdout/stderr/exit 를 돌려준다. exec 자체가 불가한 세션/상황이면 throw(도구가 잡아
+  // 모델에 isError 로 전달). Go 코어가 최종 capability 게이트(비-SSH 세션은 error 페이로드로 응답).
+  async runCommand(
+    sessionId: string,
+    command: string,
+    options?: { timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number; truncated: boolean }> {
+    await this.start();
+    const commandTimeoutMs = options?.timeoutMs ?? AI_RUN_COMMAND_DEFAULT_TIMEOUT_MS;
+    const response = await this.requestResponse<{
+      stdout?: string;
+      stderr?: string;
+      exitCode?: number;
+      truncated?: boolean;
+      error?: string;
+    }>(
+      {
+        id: randomUUID(),
+        type: "runCommand",
+        sessionId,
+        payload: { command, timeoutMs: commandTimeoutMs },
+      },
+      ["runCommandResult"],
+      { timeoutMs: commandTimeoutMs + 5_000 },
+    );
+    if (typeof response.error === "string" && response.error.length > 0) {
+      throw new Error(response.error);
+    }
+    return {
+      stdout: typeof response.stdout === "string" ? response.stdout : "",
+      stderr: typeof response.stderr === "string" ? response.stderr : "",
+      exitCode: typeof response.exitCode === "number" ? response.exitCode : -1,
+      truncated: response.truncated === true,
+    };
+  }
+
+  getSessionTransport(sessionId: string): SessionTransport | undefined {
+    return this.sessionTransportById.get(sessionId);
+  }
+
+  // AI run_in_terminal: 사용자의 활성 PTY 에 명령+Enter 를 입력하고, 나온 출력을 캡처해 돌려준다.
+  // quietMs 동안 새 출력이 없거나 · maxMs 초과 · 크기 상한 도달 중 먼저 오는 것에서 멈춘다.
+  // 스트리밍/장기 실행(docker logs -f 등)은 maxMs 로 잘려 running:true 로 반환(모델이 무한 대기 안 함).
+  async runInTerminalCapture(
+    sessionId: string,
+    command: string,
+    opts?: { quietMs?: number; maxMs?: number; maxBytes?: number },
+  ): Promise<{ output: string; running: boolean }> {
+    await this.start();
+    const quietMs = opts?.quietMs ?? 800;
+    const maxMs = opts?.maxMs ?? 12_000;
+    const maxBytes = opts?.maxBytes ?? 200_000;
+    const capture = {
+      chunks: [] as Uint8Array[],
+      bytes: 0,
+      maxBytes,
+      lastAt: Date.now(),
+      truncated: false,
+    };
+    this.terminalCaptures.set(sessionId, capture);
+    const startedAt = Date.now();
+    try {
+      this.writeBinary(sessionId, new TextEncoder().encode(`${command}\r`));
+      await new Promise<void>((resolve) => {
+        const timer = setInterval(() => {
+          const now = Date.now();
+          const quiet = capture.bytes > 0 && now - capture.lastAt >= quietMs;
+          if (quiet || now - startedAt >= maxMs || capture.truncated) {
+            clearInterval(timer);
+            resolve();
+          }
+        }, 150);
+      });
+    } finally {
+      this.terminalCaptures.delete(sessionId);
+    }
+    const running = capture.truncated || Date.now() - startedAt >= maxMs;
+    const raw = Buffer.concat(capture.chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
+    return { output: stripTerminalNoise(raw), running };
+  }
+
   private requestAwsServerProxyAutocomplete(
     sessionId: string,
     type: "autocompletePrepare" | "autocompleteRefresh",
@@ -4642,6 +4769,17 @@ export class CoreManager {
       }
     }
     void this.onTerminalStream?.(metadata.sessionId, new Uint8Array(payload));
+    // AI run_in_terminal 출력 캡처가 활성이면 청크를 쌓는다(상한까지).
+    const capture = this.terminalCaptures.get(metadata.sessionId);
+    if (capture) {
+      capture.lastAt = Date.now();
+      if (capture.bytes < capture.maxBytes) {
+        capture.chunks.push(new Uint8Array(payload));
+        capture.bytes += payload.length;
+      } else {
+        capture.truncated = true;
+      }
+    }
   }
 
   private startSftpLifecycle(

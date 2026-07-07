@@ -60,6 +60,7 @@ const (
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
 	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
 	CommandShellIntegrationInstall     CommandType = "terminalShellIntegrationInstall"
+	CommandRunCommand                  CommandType = "runCommand"
 	CommandTmuxConnect                 CommandType = "tmuxConnect"
 	CommandTmuxSendKeys                CommandType = "tmuxSendKeys"
 	CommandTmuxSplitPane               CommandType = "tmuxSplitPane"
@@ -122,6 +123,7 @@ const (
 	EventTerminalAutocompleteSnapshot   EventType = "terminalAutocompleteSnapshot"
 	EventTerminalAutocompleteShellState EventType = "terminalAutocompleteShellState"
 	EventTerminalCompletionResult       EventType = "terminalCompletionResult"
+	EventRunCommandResult               EventType = "runCommandResult"
 	EventMoshState                      EventType = "moshState"
 	EventAgentForwardingStatus          EventType = "agentForwardingStatus"
 	EventTmuxLayoutChange               EventType = "tmuxLayoutChange"
@@ -390,6 +392,27 @@ type TerminalCompletionQueryPayload struct {
 type TerminalCompletionResultPayload struct {
 	Stdout    string `json:"stdout"`
 	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// RunCommandPayload asks the host to run an arbitrary command on a separate exec
+// channel (not the interactive PTY) and return its output. Used by the AI
+// assistant's run_command tool. Distinct from TerminalCompletionQueryPayload: it
+// surfaces stderr and the remote exit code, not just capped stdout.
+type RunCommandPayload struct {
+	Command   string `json:"command"`
+	TimeoutMs int    `json:"timeoutMs,omitempty"`
+}
+
+// RunCommandResultPayload is the result of a RunCommandPayload. ExitCode is the
+// remote command's exit status (0 on success; -1 when the exec itself could not
+// run). Error is set only when the command could not be executed at all (session
+// gone, unsupported session type, timeout) — never for a mere non-zero exit.
+type RunCommandResultPayload struct {
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	ExitCode  int    `json:"exitCode"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type SerialConnectPayload struct {

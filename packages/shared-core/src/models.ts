@@ -1158,6 +1158,8 @@ export interface AiSettings {
   model: string;
   /** 0..2 로 clamp. undefined 면 provider 기본값 사용. */
   temperature?: number;
+  /** 모델 컨텍스트 창(토큰). 입력이 이 예산을 넘으면 오래된 대화부터 잘라낸다. */
+  contextTokens?: number;
 }
 
 export const DEFAULT_AI_SETTINGS: AiSettings = {
@@ -1166,8 +1168,17 @@ export const DEFAULT_AI_SETTINGS: AiSettings = {
   baseUrl: 'https://api.openai.com/v1',
   // 빈 값 → UI 가 모델 선택을 강제(폐기될 수 있는 모델 id 하드코딩 회피).
   model: '',
-  temperature: undefined
+  temperature: undefined,
+  contextTokens: 128000
 };
+
+// contextTokens 정규화: 양의 정수만, 그 외엔 undefined(기본값 사용).
+export function normalizeAiTokenLimit(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return Math.floor(value);
+}
 
 export const MIN_AI_TEMPERATURE = 0;
 export const MAX_AI_TEMPERATURE = 2;

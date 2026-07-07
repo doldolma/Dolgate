@@ -41,6 +41,8 @@ type sshSessionManager interface {
 	InstallShellIntegration(sessionID string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
+	// RunHostCommand 은 보조 exec 채널에서 임의 명령을 실행하고 stdout/stderr/exit 를 돌려준다(AI run_command).
+	RunHostCommand(sessionID, command string, timeoutMs int) (string, string, int, bool, error)
 	// KillTmuxSession 은 감지 하단바에서 attach 없이 원격 tmux 세션을 종료한다(보조 exec).
 	KillTmuxSession(sessionID, sessionName string) error
 }
@@ -462,6 +464,45 @@ func (runtime *Runtime) RunCompletionQuery(sessionID, requestID, command string)
 		Payload: coretypes.TerminalCompletionResultPayload{
 			Stdout:    stdout,
 			Truncated: truncated,
+		},
+	})
+	return nil
+}
+
+// RunCommand runs an arbitrary command on the session's auxiliary exec channel
+// for the AI assistant's run_command tool, and emits the result correlated by
+// requestID. v1 supports SSH sessions only (plain SSH / Warpgate / EC2-over-SSM);
+// tmux control-mode, local and AWS SSM are unsupported and report an error in the
+// result payload. Like RunCompletionQuery it is best-effort and never emits a
+// session-fatal error that would tear down the terminal.
+func (runtime *Runtime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {
+	if !runtime.ssh.HasSession(sessionID) {
+		runtime.emitEvent(coretypes.Event{
+			Type:      coretypes.EventRunCommandResult,
+			RequestID: requestID,
+			SessionID: sessionID,
+			Payload: coretypes.RunCommandResultPayload{
+				ExitCode: -1,
+				Error:    "이 세션 유형은 명령 실행을 지원하지 않습니다.",
+			},
+		})
+		return nil
+	}
+	stdout, stderr, exitCode, truncated, err := runtime.ssh.RunHostCommand(sessionID, command, timeoutMs)
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	runtime.emitEvent(coretypes.Event{
+		Type:      coretypes.EventRunCommandResult,
+		RequestID: requestID,
+		SessionID: sessionID,
+		Payload: coretypes.RunCommandResultPayload{
+			Stdout:    stdout,
+			Stderr:    stderr,
+			ExitCode:  exitCode,
+			Truncated: truncated,
+			Error:     errMsg,
 		},
 	})
 	return nil
