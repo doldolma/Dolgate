@@ -3,6 +3,7 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type {
   AiApiKeyStatus,
+  AiApprovalResponse,
   AiChatEvent,
   AiChatStartInput,
   AiProviderId,
@@ -75,6 +76,13 @@ export function registerAiIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.ai.cancelChat,
     async (_event, requestId: string): Promise<void> => {
       ctx.aiService.cancelChat(requestId);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ai.respondApproval,
+    async (_event, input: AiApprovalResponse): Promise<void> => {
+      ctx.aiService.resolveApproval(input);
     },
   );
 }

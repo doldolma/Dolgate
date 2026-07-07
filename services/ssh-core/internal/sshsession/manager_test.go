@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +37,10 @@ type sshTestServer struct {
 	promptMarkerOnIntegration bool
 	execDelay                 time.Duration
 	agentForwardingAccepted   bool
+	// execResponder, when set, handles an exec request for a matching command by
+	// returning custom stdout/stderr/exit status. Returning handled=false falls
+	// through to the default behaviour (echo shellPath, exit 0).
+	execResponder func(command string) (stdout, stderr string, status uint32, handled bool)
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -532,6 +537,55 @@ func (s *sshTestServer) port() int {
 	return port
 }
 
+func TestManagerRunHostCommand(t *testing.T) {
+	server, _, cleanup := newSSHTestServer(t)
+	defer cleanup()
+	server.shellPath = "/bin/sh" // non-empty so exec requests are accepted
+	// 명령은 로그인 셸(sh -lc '…')로 감싸져 오므로 부분 일치로 확인한다.
+	server.execResponder = func(command string) (string, string, uint32, bool) {
+		if strings.Contains(command, "do-thing") {
+			return "line1\nline2\n", "oops\n", 7, true
+		}
+		return "", "", 0, false
+	}
+
+	events := make(chan protocol.Event, 16)
+	manager := sshsession.NewManager(func(event protocol.Event) {
+		select {
+		case events <- event:
+		default:
+		}
+	}, func(_ protocol.StreamFrame, _ []byte) {})
+
+	if err := manager.Connect("session-run", "req-run", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 server.port(),
+		Username:             "tester",
+		AuthType:             "password",
+		Password:             "s3cret",
+		TrustedHostKeyBase64: server.hostKeyBase64,
+		Cols:                 80,
+		Rows:                 24,
+	}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	// Non-zero exit + stderr on a separate exec channel (not the PTY).
+	stdout, stderr, exitCode, truncated, err := manager.RunHostCommand("session-run", "do-thing", 5000)
+	if err != nil {
+		t.Fatalf("RunHostCommand() error = %v", err)
+	}
+	if stdout != "line1\nline2\n" || stderr != "oops\n" || exitCode != 7 || truncated {
+		t.Fatalf("unexpected result: stdout=%q stderr=%q exit=%d trunc=%v", stdout, stderr, exitCode, truncated)
+	}
+
+	// Unknown session surfaces an error (not a zero exit).
+	if _, _, _, _, err := manager.RunHostCommand("missing", "ls", 1000); err == nil {
+		t.Fatal("expected error for unknown session")
+	}
+}
+
 func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestServer) {
 	serverConn, chans, reqs, err := ssh.NewServerConn(raw, config)
 	if err != nil {
@@ -577,6 +631,20 @@ func handleConnection(raw net.Conn, config *ssh.ServerConfig, server *sshTestSer
 						return
 					}
 					_ = req.Reply(true, nil)
+					if server.execResponder != nil {
+						var execPayload struct{ Command string }
+						_ = ssh.Unmarshal(req.Payload, &execPayload)
+						if stdout, stderr, status, handled := server.execResponder(execPayload.Command); handled {
+							if stdout != "" {
+								_, _ = ch.Write([]byte(stdout))
+							}
+							if stderr != "" {
+								_, _ = ch.Stderr().Write([]byte(stderr))
+							}
+							_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+							return
+						}
+					}
 					_, _ = ch.Write([]byte(server.shellPath + "\n"))
 					_, _ = ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 					return

@@ -8,6 +8,7 @@ function harness(aiSettings: unknown) {
     ai: {
       chat: vi.fn().mockResolvedValue({ requestId: "req" }),
       cancelChat: vi.fn().mockResolvedValue(undefined),
+      respondApproval: vi.fn().mockResolvedValue(undefined),
     },
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,6 +48,8 @@ describe("aiChatSlice", () => {
     expect(arg.request.messages[0].role).toBe("system");
     expect(arg.request.messages.at(-1)).toEqual({ role: "user", content: "hello" });
     expect(arg.requestId).toBe(conv.requestId);
+    // sessionId 를 함께 전달해야 main 의 run_command 가 어느 세션에서 실행할지 안다.
+    expect(arg.sessionId).toBe("s1");
   });
 
   it("includes terminal context in the request only (not the stored transcript)", async () => {
@@ -137,6 +140,46 @@ describe("aiChatSlice", () => {
     const conv = get().aiConversations["s1"];
     expect(conv.messages).toEqual([]);
     expect(conv.open).toBe(true);
+  });
+
+  it("sets pendingApproval on an approval-required event and clears it on done", async () => {
+    const { slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "delete it");
+    const requestId = get().aiConversations["s1"].requestId as string;
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "approval-required",
+      approval: { toolCallId: "tc1", command: "rm -rf /x", reason: "변경 가능성이 있는 명령" },
+    });
+    expect(get().aiConversations["s1"].pendingApproval).toEqual({
+      toolCallId: "tc1",
+      command: "rm -rf /x",
+      reason: "변경 가능성이 있는 명령",
+    });
+
+    slice.handleAiChatEvent({ requestId, type: "done", result: { text: "ok", finishReason: "stop" } });
+    expect(get().aiConversations["s1"].pendingApproval).toBeNull();
+  });
+
+  it("respondAiApproval forwards the decision and hides the card", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "delete it");
+    const requestId = get().aiConversations["s1"].requestId as string;
+    slice.handleAiChatEvent({
+      requestId,
+      type: "approval-required",
+      approval: { toolCallId: "tc1", command: "rm x", reason: "변경 가능성이 있는 명령" },
+    });
+
+    await slice.respondAiApproval("s1", "tc1", true, true);
+    expect(api.ai.respondApproval).toHaveBeenCalledWith({
+      requestId,
+      toolCallId: "tc1",
+      approved: true,
+      remember: true,
+    });
+    expect(get().aiConversations["s1"].pendingApproval).toBeNull();
   });
 
   it("toggles the panel and clamps the width", () => {

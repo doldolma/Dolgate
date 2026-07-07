@@ -75,6 +75,9 @@ func (stub *stubCoreRuntime) InstallShellIntegration(sessionID string) error    
 func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command string) error {
 	return nil
 }
+func (stub *stubCoreRuntime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {
+	return nil
+}
 func (stub *stubCoreRuntime) ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error {
 	return nil
 }

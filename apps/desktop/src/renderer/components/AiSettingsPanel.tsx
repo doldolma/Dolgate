@@ -11,6 +11,7 @@ const AI_DEFAULTS: AiSettings = {
   baseUrl: 'https://api.openai.com/v1',
   model: '',
   temperature: undefined,
+  contextTokens: 128000,
 };
 
 const TAVILY_KEYS_URL = 'https://app.tavily.com/';
@@ -32,7 +33,7 @@ interface AiSettingsPanelProps {
 
 export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelProps) {
   const ai = settings ?? AI_DEFAULTS;
-  const providerId = ai.providerId;
+  const aiKey = JSON.stringify(ai);
 
   // IPC 는 스토어 액션을 통해서만 호출한다(컴포넌트에서 desktopApi 직접 사용 금지 — 경계 규칙).
   const testAiConnection = useAppStore((state) => state.testAiConnection);
@@ -44,6 +45,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const setAiSearchKey = useAppStore((state) => state.setAiSearchKey);
   const clearAiSearchKey = useAppStore((state) => state.clearAiSearchKey);
 
+  // 설정은 초안(draft)으로 편집하고 "설정 저장"을 눌러야만 반영된다(자동 저장 안 함 — 저장 안 하고 나가면 폐기).
+  // API 키/Tavily 키는 키체인에 개별 저장(초안과 무관).
+  const [draft, setDraft] = useState<AiSettings>(ai);
+  const [saved, setSaved] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -51,10 +56,18 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const [searchKeyInput, setSearchKeyInput] = useState('');
   const [hasSearchKey, setHasSearchKey] = useState(false);
 
-  const update = useCallback(
-    (patch: Partial<AiSettings>) => onUpdateSettings({ ai: { ...ai, ...patch } }),
-    [ai, onUpdateSettings],
-  );
+  // 저장된 설정이 실제로 바뀌면(저장 완료·최초 로드) 초안을 다시 맞춘다. 편집 중(props 불변)엔 안 건드린다.
+  useEffect(() => {
+    setDraft(JSON.parse(aiKey) as AiSettings);
+  }, [aiKey]);
+
+  const providerId = draft.providerId;
+  const dirty = JSON.stringify({ ...draft, model: draft.model.trim() }) !== aiKey;
+
+  const setField = useCallback((patch: Partial<AiSettings>) => {
+    setSaved(false);
+    setDraft((current) => ({ ...current, ...patch }));
+  }, []);
 
   const refreshKeyStatus = useCallback(
     async (provider: AiProviderId) => {
@@ -68,7 +81,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     [getAiApiKeyStatus],
   );
 
-  // provider가 바뀌면 키 상태를 다시 읽고 입력/결과를 초기화한다(키는 provider별로 분리 저장).
+  // 초안 provider가 바뀌면 키 상태를 다시 읽고 입력/결과를 초기화한다(키는 provider별로 분리 저장).
   useEffect(() => {
     void refreshKeyStatus(providerId);
     setKeyInput('');
@@ -88,14 +101,19 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     void refreshSearchKeyStatus();
   }, [refreshSearchKeyStatus]);
 
+  async function handleSaveSettings() {
+    await onUpdateSettings({ ai: { ...draft, model: draft.model.trim() } });
+    setSaved(true);
+  }
+
   async function handleTest() {
     setTesting(true);
     setResult(null);
     try {
       const res = await testAiConnection({
         providerId,
-        baseUrl: ai.baseUrl,
-        model: ai.model,
+        baseUrl: draft.baseUrl,
+        model: draft.model.trim(),
         apiKey: keyInput.trim() || undefined,
       });
       setResult(res);
@@ -155,21 +173,21 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
 
       <div className="grid grid-cols-1 gap-[0.9rem]">
         <ToggleSwitch
-          checked={ai.enabled}
+          checked={draft.enabled}
           label="AI 어시스턴트 사용"
           description="세션에서 AI 도우미를 사용할 수 있게 합니다. API 키는 이 기기의 키체인에만 저장되며 동기화되지 않습니다."
           onClick={() => {
-            void update({ enabled: !ai.enabled });
+            setField({ enabled: !draft.enabled });
           }}
         />
 
-        {ai.enabled ? (
+        {draft.enabled ? (
           <>
             <FieldGroup label="Provider">
               <SelectField
                 value={providerId}
                 onChange={(event) => {
-                  void update({ providerId: event.target.value as AiProviderId });
+                  setField({ providerId: event.target.value as AiProviderId });
                 }}
               >
                 {PROVIDER_OPTIONS.map((option) => (
@@ -186,10 +204,8 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   type="text"
                   aria-label="AI Base URL"
                   placeholder="https://api.openai.com/v1"
-                  defaultValue={ai.baseUrl ?? ''}
-                  onBlur={(event) => {
-                    void update({ baseUrl: event.target.value });
-                  }}
+                  value={draft.baseUrl ?? ''}
+                  onChange={(event) => setField({ baseUrl: event.target.value })}
                 />
                 <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
                   로컬/호환 서버 주소. 비우면 https://api.openai.com/v1 을 사용합니다.
@@ -202,11 +218,29 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                 type="text"
                 aria-label="AI Model"
                 placeholder={providerId === 'anthropic' ? 'claude-… (모델 id)' : 'gpt-4o-mini · llama3.1 …'}
-                defaultValue={ai.model}
-                onBlur={(event) => {
-                  void update({ model: event.target.value.trim() });
+                value={draft.model}
+                onChange={(event) => setField({ model: event.target.value })}
+              />
+            </FieldGroup>
+
+            <FieldGroup label="컨텍스트 창 (토큰)">
+              <Input
+                type="number"
+                aria-label="AI Context Window Tokens"
+                min={2000}
+                step={1000}
+                value={draft.contextTokens ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  const parsed = Number(value);
+                  setField({
+                    contextTokens: value !== '' && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+                  });
                 }}
               />
+              <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
+                모델의 컨텍스트 창 크기. 대화·도구 출력이 이 예산을 넘으면 오래된 대화부터 잘라 보냅니다.
+              </span>
             </FieldGroup>
 
             <FieldGroup label="API Key">
@@ -220,13 +254,13 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
               />
               <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
                 {hasKey
-                  ? '키가 이 기기 키체인에 저장되어 있습니다.'
+                  ? '키가 이 기기 키체인에 저장되어 있습니다(설정 저장과 별도로 즉시 저장).'
                   : 'openai-호환 로컬 서버는 키가 필요 없을 수 있습니다.'}
               </span>
             </FieldGroup>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="primary" onClick={() => void handleTest()} disabled={testing}>
+              <Button variant="secondary" onClick={() => void handleTest()} disabled={testing}>
                 {testing ? '테스트 중…' : '연결 테스트'}
               </Button>
               <Button
@@ -316,6 +350,20 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             </FieldGroup>
           </>
         ) : null}
+
+        {/* 설정 저장(자동 저장 안 함). enabled 토글·provider·모델·컨텍스트 등 구성값을 함께 저장. */}
+        <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
+          <Button variant="primary" onClick={() => void handleSaveSettings()} disabled={!dirty}>
+            설정 저장
+          </Button>
+          <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
+            {dirty
+              ? '저장하지 않은 변경사항이 있습니다. (키는 위에서 개별 저장)'
+              : saved
+                ? '저장되었습니다.'
+                : '변경사항 없음'}
+          </span>
+        </div>
       </div>
     </section>
   );

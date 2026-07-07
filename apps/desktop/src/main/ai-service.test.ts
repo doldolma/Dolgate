@@ -26,16 +26,22 @@ vi.mock("./ai/provider-anthropic", () => ({
 const toolsMock = vi.hoisted(() => ({
   defs: [] as unknown[],
   executor: vi.fn(),
+  runExecutor: vi.fn(),
+  inspectExecutor: vi.fn(),
 }));
 vi.mock("./ai/tools/registry", () => ({
   buildToolRegistry: () => ({
     defs: toolsMock.defs,
-    executors: new Map([["web_search", toolsMock.executor]]),
+    executors: new Map([
+      ["web_search", toolsMock.executor],
+      ["run_in_terminal", toolsMock.runExecutor],
+      ["inspect_command", toolsMock.inspectExecutor],
+    ]),
   }),
 }));
 
-import { AiService } from "./ai-service";
-import type { AiChatEvent } from "../shared/ai";
+import { AiService, trimMessages } from "./ai-service";
+import type { AiChatEvent, AiChatMessage } from "../shared/ai";
 
 function makeSecretStore() {
   const store = new Map<string, string>();
@@ -208,6 +214,231 @@ describe("AiService agent loop", () => {
     const service = new AiService(makeSettings(AGENT_SETTINGS) as never, makeSecretStore() as never);
     const events = await collectChat(service, "r2", { model: "m", messages: [] });
     expect(events.at(-1)).toMatchObject({ type: "error" });
+  });
+});
+
+describe("AiService run_in_terminal approval gate", () => {
+  const GATE_SETTINGS = { enabled: true, providerId: "openai-compat", model: "m" };
+
+  beforeEach(() => {
+    adapterMocks.chat.mockReset();
+    toolsMock.defs = [{ name: "run_in_terminal", parameters: { type: "object", properties: {} } }];
+    toolsMock.runExecutor.mockReset();
+    toolsMock.runExecutor.mockResolvedValue("typed into terminal");
+  });
+
+  // 모델이 run_command 를 한 번 호출하고, 도구 결과를 받은 뒤 최종 답을 내는 흐름을 구성한다.
+  function drive(
+    service: AiService,
+    requestId: string,
+    command: string,
+    opts: { sessionId?: string; changesState?: boolean; onApproval?: (toolCallId: string) => void } = {},
+  ): Promise<AiChatEvent[]> {
+    const argsJson = JSON.stringify(
+      opts.changesState ? { command, changes_state: true } : { command },
+    );
+    adapterMocks.chat
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "tc1", name: "run_in_terminal", argsJson }],
+      })
+      .mockResolvedValueOnce({ text: "done", finishReason: "stop" });
+    return new Promise((resolve) => {
+      const events: AiChatEvent[] = [];
+      service.startChat(
+        { requestId, sessionId: opts.sessionId, request: { model: "m", messages: [] } as never },
+        (event) => {
+          events.push(event);
+          if (event.type === "approval-required") {
+            opts.onApproval?.(event.approval.toolCallId);
+          }
+          if (event.type === "done" || event.type === "error") {
+            resolve(events);
+          }
+        },
+      );
+    });
+  }
+
+  it("auto-runs read-only commands without an approval prompt", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "r1", "ls -la", { sessionId: "s1" });
+    expect(events.some((event) => event.type === "approval-required")).toBe(false);
+    expect(toolsMock.runExecutor).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("requires approval for mutating commands and runs them once approved", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "r2", "rm -rf /data", {
+      sessionId: "s1",
+      onApproval: (toolCallId) => service.resolveApproval({ requestId: "r2", toolCallId, approved: true }),
+    });
+    expect(events.some((event) => event.type === "approval-required")).toBe(true);
+    expect(toolsMock.runExecutor).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("asks approval when the model marks it state-changing even if it looks read-only", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "rc", "touch /tmp/x", {
+      changesState: true,
+      onApproval: (toolCallId) => service.resolveApproval({ requestId: "rc", toolCallId, approved: true }),
+    });
+    expect(events.some((event) => event.type === "approval-required")).toBe(true);
+    expect(toolsMock.runExecutor).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run the command when the user rejects", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "r3", "rm -rf /data", {
+      sessionId: "s1",
+      onApproval: (toolCallId) => service.resolveApproval({ requestId: "r3", toolCallId, approved: false }),
+    });
+    expect(toolsMock.runExecutor).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("skips approval for later mutating commands once the session is remembered", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    await drive(service, "r4a", "rm a", {
+      sessionId: "sX",
+      onApproval: (toolCallId) =>
+        service.resolveApproval({ requestId: "r4a", toolCallId, approved: true, remember: true }),
+    });
+    const second = await drive(service, "r4b", "rm b", { sessionId: "sX" });
+    expect(second.some((event) => event.type === "approval-required")).toBe(false);
+    expect(toolsMock.runExecutor).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts a pending approval when the chat is cancelled", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "r5", "rm -rf /data", {
+      sessionId: "s1",
+      onApproval: () => service.cancelChat("r5"),
+    });
+    expect(events.at(-1)).toMatchObject({ type: "done", result: { finishReason: "aborted" } });
+    expect(toolsMock.runExecutor).not.toHaveBeenCalled();
+  });
+
+  it("audits a rejected command via the injected auditLog", async () => {
+    const auditLog = vi.fn();
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never, {
+      auditLog,
+    });
+    await drive(service, "r6", "systemctl restart nginx", {
+      sessionId: "s1",
+      onApproval: (toolCallId) => service.resolveApproval({ requestId: "r6", toolCallId, approved: false }),
+    });
+    expect(auditLog).toHaveBeenCalledWith("warn", "audit", expect.stringContaining("거부"), expect.anything());
+  });
+});
+
+describe("AiService inspect_command (read-only, hidden)", () => {
+  const SETTINGS = { enabled: true, providerId: "openai-compat", model: "m" };
+
+  beforeEach(() => {
+    adapterMocks.chat.mockReset();
+    toolsMock.defs = [{ name: "inspect_command", parameters: { type: "object", properties: {} } }];
+    toolsMock.inspectExecutor.mockReset();
+    toolsMock.inspectExecutor.mockResolvedValue("$ df -h\nexit code: 0");
+  });
+
+  function driveInspect(
+    service: AiService,
+    requestId: string,
+    command: string,
+  ): Promise<AiChatEvent[]> {
+    adapterMocks.chat
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "ic1", name: "inspect_command", argsJson: JSON.stringify({ command }) }],
+      })
+      .mockResolvedValueOnce({ text: "done", finishReason: "stop" });
+    return new Promise((resolve) => {
+      const events: AiChatEvent[] = [];
+      service.startChat(
+        { requestId, sessionId: "s1", request: { model: "m", messages: [] } as never },
+        (event) => {
+          events.push(event);
+          if (event.type === "done" || event.type === "error") {
+            resolve(events);
+          }
+        },
+      );
+    });
+  }
+
+  it("runs a read-only inspect command with no approval prompt", async () => {
+    const service = new AiService(makeSettings(SETTINGS) as never, makeSecretStore() as never);
+    const events = await driveInspect(service, "i1", "df -h");
+    expect(events.some((event) => event.type === "approval-required")).toBe(false);
+    expect(toolsMock.inspectExecutor).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("refuses a state-changing command without prompting or executing (no hidden mutation)", async () => {
+    const service = new AiService(makeSettings(SETTINGS) as never, makeSecretStore() as never);
+    const events = await driveInspect(service, "i2", "rm -rf /data");
+    expect(events.some((event) => event.type === "approval-required")).toBe(false);
+    expect(toolsMock.inspectExecutor).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  it("runs a read-only pipeline/loop (compound command) without refusing", async () => {
+    const service = new AiService(makeSettings(SETTINGS) as never, makeSecretStore() as never);
+    const events = await driveInspect(
+      service,
+      "i3",
+      "for d in /sys/block/sd*; do cat $d/queue/rotational 2>/dev/null; done",
+    );
+    expect(toolsMock.inspectExecutor).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+});
+
+describe("trimMessages (context window budgeting)", () => {
+  const sys: AiChatMessage = { role: "system", content: "system" };
+
+  it("keeps system + the current turn and drops oldest history to fit the budget", () => {
+    const messages: AiChatMessage[] = [
+      sys,
+      { role: "user", content: "x".repeat(4000) },
+      { role: "assistant", content: "y".repeat(4000) },
+      { role: "user", content: "recent question" },
+    ];
+    const trimmed = trimMessages(messages, 50);
+    expect(trimmed[0]).toEqual(sys);
+    expect(trimmed.at(-1)).toEqual({ role: "user", content: "recent question" });
+    expect(trimmed.length).toBeLessThan(messages.length);
+    expect(trimmed.some((m) => m.content.startsWith("x"))).toBe(false);
+  });
+
+  it("never splits the current turn's tool_call / tool_result pairs", () => {
+    const messages: AiChatMessage[] = [
+      sys,
+      { role: "user", content: "z".repeat(8000) }, // 오래된 대화
+      { role: "user", content: "do it" },
+      { role: "assistant", content: "", toolCalls: [{ id: "c1", name: "run_in_terminal", argsJson: "{}" }] },
+      { role: "tool", content: "", toolResults: [{ toolCallId: "c1", content: "output" }] },
+    ];
+    const trimmed = trimMessages(messages, 30);
+    const roles = trimmed.map((m) => m.role);
+    expect(roles).toEqual(["system", "user", "assistant", "tool"]);
+    expect(trimmed.some((m) => m.content.startsWith("z"))).toBe(false);
+    expect(trimmed.find((m) => m.content === "do it")).toBeTruthy();
+  });
+
+  it("keeps recent history when the budget is generous", () => {
+    const messages: AiChatMessage[] = [
+      sys,
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "q2" },
+    ];
+    expect(trimMessages(messages, 100000)).toEqual(messages);
   });
 });
 

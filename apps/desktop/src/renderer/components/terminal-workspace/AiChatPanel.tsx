@@ -5,6 +5,8 @@ import { useAppStore } from '../../store/appStore';
 import { redactAiContext } from '../../lib/ai-context-redact';
 import { captureTerminalRecentText } from '../../lib/terminal-write-registry';
 import { Button, Textarea } from '../../ui';
+import { Check, Copy, RefreshCw, X } from '../../ui/icons';
+import type { AiToolRun } from '../../store/types';
 
 interface AiChatPanelProps {
   sessionId: string;
@@ -25,18 +27,97 @@ const MARKDOWN_CLASSNAME =
   '[&_a]:text-[var(--accent-strong)] [&_a]:underline [&_strong]:font-semibold ' +
   '[&_h1]:my-1 [&_h1]:text-[1rem] [&_h1]:font-semibold [&_h2]:my-1 [&_h2]:text-[0.95rem] [&_h2]:font-semibold [&_h3]:my-1 [&_h3]:font-semibold';
 
+// react-markdown이 넘기는 hast 노드에서 원본 텍스트를 추출한다(코드블록 복사용).
+function hastToText(node: unknown): string {
+  const n = node as { type?: string; value?: string; children?: unknown[] } | null;
+  if (!n) {
+    return '';
+  }
+  if (n.type === 'text') {
+    return n.value ?? '';
+  }
+  if (Array.isArray(n.children)) {
+    return n.children.map(hastToText).join('');
+  }
+  return '';
+}
+
+function CopyButton({
+  text,
+  label = '복사',
+  className,
+}: {
+  text: string;
+  label?: string;
+  className?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    },
+    [],
+  );
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={copied ? '복사됨' : label}
+      className={className}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            if (timerRef.current) {
+              clearTimeout(timerRef.current);
+            }
+            timerRef.current = setTimeout(() => setCopied(false), 1200);
+          })
+          .catch(() => undefined);
+      }}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-[var(--success-text)]" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+    </button>
+  );
+}
+
+function ToolRunRow({ run }: { run: AiToolRun }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[0.78rem] text-[var(--text-soft)]">
+      {run.status === 'running' ? (
+        <RefreshCw className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+      ) : run.status === 'error' ? (
+        <X className="h-3 w-3 shrink-0 text-[var(--danger-text)]" aria-hidden />
+      ) : (
+        <Check className="h-3 w-3 shrink-0 text-[var(--success-text)]" aria-hidden />
+      )}
+      <span className="min-w-0 truncate">{run.label}</span>
+    </div>
+  );
+}
+
 export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const conversation = useAppStore((state) => state.aiConversations[sessionId]);
   const aiEnabled = useAppStore((state) => state.settings.ai?.enabled ?? false);
   const sendAiMessage = useAppStore((state) => state.sendAiMessage);
   const cancelAiMessage = useAppStore((state) => state.cancelAiMessage);
   const clearAiConversation = useAppStore((state) => state.clearAiConversation);
+  const respondAiApproval = useAppStore((state) => state.respondAiApproval);
   const toggleAiPanel = useAppStore((state) => state.toggleAiPanel);
   const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
   const setAiPanelWidth = useAppStore((state) => state.setAiPanelWidth);
 
   const [input, setInput] = useState('');
+  const [rememberApproval, setRememberApproval] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -44,7 +125,8 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const streaming = conversation?.streaming ?? false;
   const streamingText = conversation?.streamingText ?? '';
   const error = conversation?.error ?? null;
-  const toolActivity = conversation?.toolActivity ?? null;
+  const toolRuns = conversation?.toolRuns ?? [];
+  const pendingApproval = conversation?.pendingApproval ?? null;
 
   useEffect(() => {
     const node = transcriptRef.current;
@@ -150,35 +232,67 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           ) : (
             <div
               key={index}
-              className={`max-w-[92%] self-start break-words rounded-[10px] bg-[var(--surface-strong)] px-3 py-2 text-[var(--text)] ${MARKDOWN_CLASSNAME}`}
+              className="group/msg flex max-w-[92%] flex-col items-start gap-1 self-start"
             >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        if (href) {
-                          void openExternalUrl(href);
-                        }
-                      }}
-                    >
-                      {children}
-                    </a>
-                  ),
-                }}
+              {message.toolRuns && message.toolRuns.length > 0 ? (
+                <details className="w-full rounded-[8px] border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 py-1.5">
+                  <summary className="cursor-pointer list-none text-[0.75rem] text-[var(--text-soft)] [&::-webkit-details-marker]:hidden">
+                    🛠 도구 {message.toolRuns.length}개 사용
+                  </summary>
+                  <div className="mt-1.5 flex flex-col gap-1">
+                    {message.toolRuns.map((run) => (
+                      <ToolRunRow key={run.id} run={run} />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+              <div
+                className={`w-full break-words rounded-[10px] bg-[var(--surface-strong)] px-3 py-2 text-[var(--text)] ${MARKDOWN_CLASSNAME}`}
               >
-                {message.content}
-              </ReactMarkdown>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children }) => (
+                      <a
+                        href={href}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (href) {
+                            void openExternalUrl(href);
+                          }
+                        }}
+                      >
+                        {children}
+                      </a>
+                    ),
+                    pre: ({ node, children }) => (
+                      <div className="group/code relative">
+                        <CopyButton
+                          text={hastToText(node)}
+                          className="absolute right-1.5 top-1.5 z-[1] inline-flex items-center rounded-[6px] border border-[var(--border)] bg-[var(--surface)] p-1 text-[var(--text-soft)] opacity-0 transition-opacity hover:bg-[var(--surface-strong)] hover:text-[var(--text)] group-hover/code:opacity-100"
+                        />
+                        <pre>{children}</pre>
+                      </div>
+                    ),
+                  }}
+                >
+                  {message.content}
+                </ReactMarkdown>
+              </div>
+              <CopyButton
+                text={message.content}
+                label="응답 복사"
+                className="inline-flex items-center rounded-[6px] p-1 text-[var(--text-soft)] opacity-0 transition-opacity hover:bg-[var(--surface-strong)] hover:text-[var(--text)] group-hover/msg:opacity-100"
+              />
             </div>
           ),
         )}
 
-        {streaming && toolActivity ? (
-          <div className="self-start text-[0.8rem] italic text-[var(--text-soft)]">
-            {toolActivity}
+        {streaming && toolRuns.length > 0 ? (
+          <div className="flex w-full max-w-[92%] flex-col gap-1 self-start rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2">
+            {toolRuns.map((run) => (
+              <ToolRunRow key={run.id} run={run} />
+            ))}
           </div>
         ) : null}
 
@@ -191,6 +305,48 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
             ) : (
               <span className="text-[var(--text-soft)]">…</span>
             )}
+          </div>
+        ) : null}
+
+        {pendingApproval ? (
+          <div className="flex flex-col gap-2.5 self-stretch rounded-[12px] border border-[color-mix(in_srgb,var(--warning-text)_26%,var(--border))] bg-[var(--warning-bg)] p-3">
+            <div className="flex items-center gap-1.5 text-[0.78rem] font-semibold text-[var(--warning-text)]">
+              <span aria-hidden>⚠</span>
+              <span>명령 실행 승인</span>
+            </div>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-[8px] border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 py-2 font-mono text-[0.8rem] leading-snug text-[var(--text)]">
+              {pendingApproval.command}
+            </pre>
+            <div className="text-[0.72rem] text-[var(--text-soft)]">{pendingApproval.reason}</div>
+            <label className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-2 text-[0.76rem] text-[var(--text-soft)]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-[var(--accent-strong)]"
+                checked={rememberApproval}
+                onChange={(event) => setRememberApproval(event.target.checked)}
+              />
+              <span>이 세션에서 자동 승인</span>
+            </label>
+            <div className="mt-0.5 grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void respondAiApproval(sessionId, pendingApproval.toolCallId, false);
+                  setRememberApproval(false);
+                }}
+              >
+                거부
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  void respondAiApproval(sessionId, pendingApproval.toolCallId, true, rememberApproval);
+                  setRememberApproval(false);
+                }}
+              >
+                승인
+              </Button>
+            </div>
           </div>
         ) : null}
 

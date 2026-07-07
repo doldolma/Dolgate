@@ -112,6 +112,7 @@ import type {
 import type { SyncPayloadV2 } from "@dolssh/shared-core";
 import type {
   AiApiKeyStatus,
+  AiApprovalResponse,
   AiChatEvent,
   AiChatStartInput,
   AiTestConnectionInput,
@@ -171,6 +172,7 @@ export type CoreCommandType =
   | "terminalAutocompleteStop"
   | "terminalCompletionQuery"
   | "terminalShellIntegrationInstall"
+  | "runCommand"
   | "tmuxConnect"
   | "tmuxSplitPane"
   | "tmuxNewWindow"
@@ -227,6 +229,7 @@ export type CoreEventType =
   | "terminalAutocompleteSnapshot"
   | "terminalAutocompleteShellState"
   | "terminalCompletionResult"
+  | "runCommandResult"
   | "moshState"
   | "agentForwardingStatus"
   | "tmuxAvailable"
@@ -1104,6 +1107,7 @@ export interface DesktopApi {
     clearSearchKey: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
     chat: (input: AiChatStartInput) => Promise<{ requestId: string }>;
     cancelChat: (requestId: string) => Promise<void>;
+    respondApproval: (input: AiApprovalResponse) => Promise<void>;
     onChatEvent: (listener: (event: AiChatEvent) => void) => () => void;
   };
   portForwards: {

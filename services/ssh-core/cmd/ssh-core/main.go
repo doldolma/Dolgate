@@ -41,6 +41,7 @@ type coreRuntime interface {
 	RefreshAutocomplete(sessionID, requestID string) error
 	StopAutocomplete(sessionID string)
 	RunCompletionQuery(sessionID, requestID, command string) error
+	RunCommand(sessionID, requestID, command string, timeoutMs int) error
 	InstallShellIntegration(sessionID string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
@@ -362,6 +363,19 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		// emitAsyncError. RunCompletionQuery always emits its own result event.
 		go func() {
 			_ = core.RunCompletionQuery(request.SessionID, request.ID, payload.Command)
+		}()
+		return nil
+	case protocol.CommandRunCommand:
+		var payload protocol.RunCommandPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// Best-effort, fire-and-forget: RunCommand always emits its own result
+		// event (correlated by requestID), so it is NOT wrapped in emitAsyncError —
+		// a failed AI command must never surface a session-fatal error that would
+		// tear down the terminal.
+		go func() {
+			_ = core.RunCommand(request.SessionID, request.ID, payload.Command, payload.TimeoutMs)
 		}()
 		return nil
 	case protocol.CommandShellIntegrationInstall:

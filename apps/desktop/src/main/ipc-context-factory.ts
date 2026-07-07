@@ -37,6 +37,7 @@ import { createSnapshotCoordinator } from "./ipc/coordinators/snapshot-coordinat
 import { createSshKeyCoordinator } from "./ipc/coordinators/ssh-key-coordinator";
 import { createTunnelRegistry } from "./ipc/coordinators/tunnel-registry";
 import { AiService } from "./ai-service";
+import { buildAiToolHelpers } from "./ai/host-exec-helpers";
 
 export interface RegisterIpcDependencies {
   hosts: HostRepository;
@@ -96,7 +97,11 @@ export function createMainIpcContext(
   } = deps;
 
   const localFiles = new LocalFileService();
-  const aiService = new AiService(settings, secretStore);
+  const aiService = new AiService(
+    settings,
+    secretStore,
+    buildAiToolHelpers({ coreManager, hosts, activityLogs }),
+  );
   const queueSync = () => {
     void syncService.pushDirty().catch(() => undefined);
   };

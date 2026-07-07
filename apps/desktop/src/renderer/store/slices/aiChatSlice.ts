@@ -1,16 +1,39 @@
 import type { AiChatMessage, AiChatRequest } from "@shared";
-import type { AiChatSlice, AiConversation, SliceDeps } from "../types";
+import type { AiChatSlice, AiConversation, AiToolRun, SliceDeps } from "../types";
+
+// tool 이벤트를 현재 턴의 실행 목록에 반영한다(같은 id 는 상태 갱신, 없으면 추가).
+function upsertToolRun(
+  runs: AiToolRun[],
+  tool: { id: string; label: string; status: "running" | "done" | "error" },
+): AiToolRun[] {
+  const next = runs.slice();
+  const index = next.findIndex((run) => run.id === tool.id);
+  const entry: AiToolRun = { id: tool.id, label: tool.label, status: tool.status };
+  if (index >= 0) {
+    next[index] = entry;
+  } else {
+    next.push(entry);
+  }
+  return next;
+}
 
 const DEFAULT_AI_PANEL_WIDTH = 380;
 const MIN_AI_PANEL_WIDTH = 280;
 const MAX_AI_PANEL_WIDTH = 760;
 
-// 읽기전용 어시스턴트 system 프롬프트(도구·실행 없음 — Phase 2).
 const SYSTEM_PROMPT =
   "You are an assistant embedded in the Dolgate SSH terminal client. " +
-  "Help with shell, SSH, and DevOps questions. Be concise and use fenced code blocks for commands. " +
-  "You cannot execute commands or access the machine directly. " +
-  "The user may include their recent terminal output as context — use it when relevant.";
+  "Help with shell, SSH, and DevOps questions. Be concise; use fenced code blocks for commands.\n\n" +
+  "You can act on the connected host with two tools:\n" +
+  "- inspect_command: run a READ-ONLY command on a hidden channel and get its output back. This is your DEFAULT " +
+  "whenever the user wants to KNOW or diagnose something. Gather the data YOURSELF (chain/loop/pipe as needed), then " +
+  "answer the user DIRECTLY with a clear summary of what you found. NEVER just run a command and tell the user to look " +
+  "at their terminal — collect the information and report the answer yourself.\n" +
+  "- run_in_terminal: type a command into the user's VISIBLE terminal and run it there. Use ONLY when the user wants to " +
+  "perform or watch an action (start/stop/restart services, follow logs, interactive or long-running commands, apply a " +
+  "change) or explicitly asks you to run it in their terminal. It also returns captured output — summarize that too.\n\n" +
+  "Default to inspect_command for anything informational and answer directly. Change the host only via run_in_terminal " +
+  "(the user approves state-changing commands). The user's recent terminal output may be attached as context — use it when relevant.";
 
 function emptyConversation(): AiConversation {
   return {
@@ -20,7 +43,8 @@ function emptyConversation(): AiConversation {
     streamingText: "",
     streaming: false,
     error: null,
-    toolActivity: null,
+    toolRuns: [],
+    pendingApproval: null,
   };
 }
 
@@ -118,7 +142,8 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
             streamingText: "",
             streaming: true,
             error: null,
-            toolActivity: null,
+            toolRuns: [],
+            pendingApproval: null,
           },
         },
       }));
@@ -139,7 +164,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
       };
 
       try {
-        await api.ai.chat({ requestId, request });
+        await api.ai.chat({ requestId, sessionId, request });
       } catch (error) {
         patch(sessionId, (current) =>
           current.requestId === requestId
@@ -180,12 +205,32 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
         }
 
         if (event.type === "tool") {
+          // 도구가 시작되면 그 직전까지 스트리밍된 "중간 사고" 텍스트는 지운다.
+          // (여러 번 도구를 부르는 동안 반복적 사고가 벽처럼 쌓이는 것 방지 — 최종 답만 남긴다.)
+          const clearStreaming = event.tool.status === "running";
           return {
             aiConversations: {
               ...state.aiConversations,
               [sessionId]: {
                 ...conv,
-                toolActivity: event.tool.status === "running" ? event.tool.label : null,
+                toolRuns: upsertToolRun(conv.toolRuns, event.tool),
+                ...(clearStreaming ? { streamingText: "" } : {}),
+              },
+            },
+          };
+        }
+
+        if (event.type === "approval-required") {
+          return {
+            aiConversations: {
+              ...state.aiConversations,
+              [sessionId]: {
+                ...conv,
+                pendingApproval: {
+                  toolCallId: event.approval.toolCallId,
+                  command: event.approval.command,
+                  reason: event.approval.reason,
+                },
               },
             },
           };
@@ -193,8 +238,16 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
 
         if (event.type === "done") {
           const finalText = conv.streamingText || event.result.text;
-          const messages: AiChatMessage[] = finalText
-            ? [...conv.messages, { role: "assistant", content: finalText }]
+          const runs = conv.toolRuns;
+          const messages = finalText
+            ? [
+                ...conv.messages,
+                {
+                  role: "assistant" as const,
+                  content: finalText,
+                  ...(runs.length ? { toolRuns: runs } : {}),
+                },
+              ]
             : conv.messages;
           return {
             aiConversations: {
@@ -205,7 +258,8 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
                 requestId: null,
                 streaming: false,
                 streamingText: "",
-                toolActivity: null,
+                toolRuns: [],
+                pendingApproval: null,
               },
             },
           };
@@ -221,11 +275,23 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
               streaming: false,
               streamingText: "",
               error: event.error,
-              toolActivity: null,
+              toolRuns: [],
+              pendingApproval: null,
             },
           },
         };
       });
+    },
+
+    respondAiApproval: async (sessionId, toolCallId, approved, remember) => {
+      const conv = get().aiConversations[sessionId];
+      const requestId = conv?.requestId;
+      if (!requestId) {
+        return;
+      }
+      // 사용자가 응답했으니 카드는 즉시 감춘다(실행 상태는 이어지는 tool 이벤트로 표시).
+      patch(sessionId, (current) => ({ ...current, pendingApproval: null }));
+      await api.ai.respondApproval({ requestId, toolCallId, approved, remember });
     },
   };
 }

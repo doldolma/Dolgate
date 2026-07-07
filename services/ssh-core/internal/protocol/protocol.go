@@ -65,6 +65,7 @@ const (
 	CommandTerminalAutocompleteStop    = coretypes.CommandTerminalAutocompleteStop
 	CommandTerminalCompletionQuery     = coretypes.CommandTerminalCompletionQuery
 	CommandShellIntegrationInstall     = coretypes.CommandShellIntegrationInstall
+	CommandRunCommand                  = coretypes.CommandRunCommand
 	CommandTmuxConnect                 = coretypes.CommandTmuxConnect
 	CommandTmuxSplitPane               = coretypes.CommandTmuxSplitPane
 	CommandTmuxNewWindow               = coretypes.CommandTmuxNewWindow
@@ -123,6 +124,7 @@ const (
 	EventTerminalAutocompleteSnapshot   = coretypes.EventTerminalAutocompleteSnapshot
 	EventTerminalAutocompleteShellState = coretypes.EventTerminalAutocompleteShellState
 	EventTerminalCompletionResult       = coretypes.EventTerminalCompletionResult
+	EventRunCommandResult               = coretypes.EventRunCommandResult
 	EventMoshState                      = coretypes.EventMoshState
 	EventAgentForwardingStatus          = coretypes.EventAgentForwardingStatus
 	EventTmuxAvailable                  = coretypes.EventTmuxAvailable
@@ -162,6 +164,8 @@ type TerminalAutocompleteSnapshotPayload = coretypes.TerminalAutocompleteSnapsho
 type TerminalAutocompleteShellStatePayload = coretypes.TerminalAutocompleteShellStatePayload
 type TerminalCompletionQueryPayload = coretypes.TerminalCompletionQueryPayload
 type TerminalCompletionResultPayload = coretypes.TerminalCompletionResultPayload
+type RunCommandPayload = coretypes.RunCommandPayload
+type RunCommandResultPayload = coretypes.RunCommandResultPayload
 type TerminalAutocompleteExecutable = coretypes.TerminalAutocompleteExecutable
 type SerialConnectPayload = coretypes.SerialConnectPayload
 type SerialListPortsPayload = coretypes.SerialListPortsPayload

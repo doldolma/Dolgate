@@ -113,6 +113,7 @@ export const defaultSettings: AppSettings = {
     baseUrl: "https://api.openai.com/v1",
     model: "",
     temperature: undefined,
+    contextTokens: 128000,
   },
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,

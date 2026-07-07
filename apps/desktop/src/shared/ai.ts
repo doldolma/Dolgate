@@ -96,10 +96,20 @@ export interface AiTestConnectionInput {
   apiKey?: string;
 }
 
-// ai:chat 시작 입력.
+// ai:chat 시작 입력. sessionId 는 host 도구(run_command)가 어느 세션에서 실행할지 알기 위해 필요.
+// 세션 밖(예: 홈)에서 연 채팅이면 생략될 수 있고, 그 경우 run_command 는 노출되지 않는다.
 export interface AiChatStartInput {
   requestId: string;
+  sessionId?: string;
   request: AiChatRequest;
+}
+
+// run_command 승인 응답(renderer→main). remember=true 면 해당 세션에서 이후 변경 명령을 자동 승인.
+export interface AiApprovalResponse {
+  requestId: string;
+  toolCallId: string;
+  approved: boolean;
+  remember?: boolean;
 }
 
 export type AiToolStatus = "running" | "done" | "error";
@@ -111,6 +121,12 @@ export type AiChatEvent =
       requestId: string;
       type: "tool";
       tool: { id: string; name: string; status: AiToolStatus; label: string };
+    }
+  | {
+      requestId: string;
+      type: "approval-required";
+      // 모델이 실행하려는 변경 가능성 있는 명령. 사용자가 승인/거부할 때까지 에이전트 루프가 멈춘다.
+      approval: { toolCallId: string; command: string; reason: string };
     }
   | { requestId: string; type: "done"; result: AiChatResult }
   | { requestId: string; type: "error"; error: AiErrorPayload };
