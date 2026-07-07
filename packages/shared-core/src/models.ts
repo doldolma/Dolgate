@@ -1146,7 +1146,7 @@ export function clampAutoReconnectDelayMs(value: number): number {
 // AiSettings는 SSH/EC2 세션용 AI 어시스턴트(v1: BYO API 키)의 공개 설정이다.
 // API 키는 여기 담지 않고 SecretStore(키체인, account: `ai:apiKey:<providerId>`)에만 저장하며,
 // 동기화 대상이 아니다(getSyncedTerminalPreferences가 터미널 테마만 직렬화 → 자동 로컬 유지).
-export type AiProviderId = 'openai-compat' | 'anthropic';
+export type AiProviderId = 'openai-compat' | 'anthropic' | 'codex';
 // 웹 검색 백엔드. duckduckgo=키리스(스크레이프), tavily=BYO 키(더 안정·고품질).
 export type AiSearchBackend = 'duckduckgo' | 'tavily';
 
@@ -1165,7 +1165,8 @@ export interface AiSettings {
 export const DEFAULT_AI_SETTINGS: AiSettings = {
   enabled: false,
   providerId: 'openai-compat',
-  baseUrl: 'https://api.openai.com/v1',
+  // 미설정(빈 값) = 프로바이더 기본 호스트 사용. UI 는 placeholder 로만 안내한다.
+  baseUrl: undefined,
   // 빈 값 → UI 가 모델 선택을 강제(폐기될 수 있는 모델 id 하드코딩 회피).
   model: '',
   temperature: undefined,
@@ -1191,8 +1192,12 @@ export function clampAiTemperature(value: number): number {
   return Math.min(MAX_AI_TEMPERATURE, Math.max(MIN_AI_TEMPERATURE, value));
 }
 
+// openai-compat 의 기본 호스트. 미설정(undefined)과 의미가 같으므로 저장하지 않는다.
+const DEFAULT_OPENAI_COMPAT_BASE_URL = 'https://api.openai.com/v1';
+
 // AI 프로바이더 요청에 쓰는 베이스 URL 정규화.
 // 빈 값이면 undefined, http/https 만 허용, 후행 슬래시 제거, 파싱 실패 시 undefined.
+// 기본 호스트와 같은 값은 undefined 로 접는다(미설정과 동일 — 과거 기본값으로 저장된 설정 마이그레이션 겸용).
 export function normalizeAiBaseUrl(value: string | undefined): string | undefined {
   if (value == null) {
     return undefined;
@@ -1206,7 +1211,8 @@ export function normalizeAiBaseUrl(value: string | undefined): string | undefine
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return undefined;
     }
-    return url.toString().replace(/\/+$/, '');
+    const normalized = url.toString().replace(/\/+$/, '');
+    return normalized === DEFAULT_OPENAI_COMPAT_BASE_URL ? undefined : normalized;
   } catch {
     return undefined;
   }

@@ -85,6 +85,14 @@ export function normalizeAiError(error: unknown): AiErrorPayload {
       };
     }
     if (status === 400 || status === 422) {
+      // 이미지 첨부를 비전 미지원 모델로 보낸 경우 — 원인 메시지의 키워드로만 판별(고정 문구 반환이라 유출 없음).
+      if (/image|vision|multimodal|image_url/i.test(rawMessage)) {
+        return {
+          reason: "invalid-response",
+          message:
+            "모델이 이미지 입력을 지원하지 않는 것 같습니다. 텍스트만 다시 보내거나 설정에서 비전 지원 모델로 바꿔 주세요.",
+        };
+      }
       return { reason: "invalid-response", message: "요청이 거부되었습니다. 모델·설정을 확인하세요." };
     }
   }

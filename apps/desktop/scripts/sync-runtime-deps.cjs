@@ -93,19 +93,31 @@ function resolveInstalledPackageJson(packageName) {
 
 async function collectRuntimeDependencyGraph() {
   const targetPlatform = resolveTargetPlatform();
-  const queue = Object.keys(desktopPackage.dependencies || {}).filter(
-    (packageName) => !isWorkspacePackage(packageName) && shouldIncludeRuntimePackage(packageName, targetPlatform)
-  );
+  const queue = Object.keys(desktopPackage.dependencies || {})
+    .filter(
+      (packageName) => !isWorkspacePackage(packageName) && shouldIncludeRuntimePackage(packageName, targetPlatform)
+    )
+    .map((packageName) => ({ name: packageName, optional: false }));
   const visited = new Set();
   const packages = [];
 
   while (queue.length > 0) {
-    const packageName = queue.shift();
-    if (!packageName || visited.has(packageName) || isWorkspacePackage(packageName)) {
+    const entry = queue.shift();
+    if (!entry || visited.has(entry.name) || isWorkspacePackage(entry.name)) {
       continue;
     }
 
-    const manifestPath = resolveInstalledPackageJson(packageName);
+    // optionalDependencies 는 npm 의미론상 미설치일 수 있다(예: @openai/codex 의
+    // 타 플랫폼 바이너리 패키지). resolve 실패 시 optional 이면 조용히 스킵한다.
+    let manifestPath;
+    try {
+      manifestPath = resolveInstalledPackageJson(entry.name);
+    } catch (error) {
+      if (entry.optional) {
+        continue;
+      }
+      throw error;
+    }
     const manifestDirectory = path.dirname(manifestPath);
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
 
@@ -115,21 +127,20 @@ async function collectRuntimeDependencyGraph() {
       sourceDirectory: manifestDirectory
     });
 
-    const childDependencies = {
-      ...(manifest.dependencies || {}),
-      ...(manifest.optionalDependencies || {})
-    };
-
-    for (const childName of Object.keys(childDependencies)) {
-      if (
-        !visited.has(childName) &&
-        !isWorkspacePackage(childName) &&
-        !isBuiltinDependency(childName) &&
-        shouldIncludeRuntimePackage(childName, targetPlatform)
-      ) {
-        queue.push(childName);
+    const enqueueChildren = (dependencyNames, optional) => {
+      for (const childName of dependencyNames) {
+        if (
+          !visited.has(childName) &&
+          !isWorkspacePackage(childName) &&
+          !isBuiltinDependency(childName) &&
+          shouldIncludeRuntimePackage(childName, targetPlatform)
+        ) {
+          queue.push({ name: childName, optional });
+        }
       }
-    }
+    };
+    enqueueChildren(Object.keys(manifest.dependencies || {}), false);
+    enqueueChildren(Object.keys(manifest.optionalDependencies || {}), true);
   }
 
   return packages.sort((left, right) => left.name.localeCompare(right.name));

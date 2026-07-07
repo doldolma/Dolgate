@@ -2,7 +2,7 @@ import type { IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 
 import { ipcChannels } from "../../common/ipc-channels";
-import { subscribeAiChatEvent } from "../events/state";
+import { subscribeAiChatEvent, subscribeAiTerminalOutputRequest } from "../events/state";
 
 export function buildAiBridge(ipcRenderer: IpcRenderer): DesktopApi["ai"] {
   return {
@@ -22,7 +22,14 @@ export function buildAiBridge(ipcRenderer: IpcRenderer): DesktopApi["ai"] {
     chat: (input) => ipcRenderer.invoke(ipcChannels.ai.chat, input),
     cancelChat: (requestId) => ipcRenderer.invoke(ipcChannels.ai.cancelChat, requestId),
     respondApproval: (input) => ipcRenderer.invoke(ipcChannels.ai.respondApproval, input),
+    respondTerminalOutput: (input) =>
+      ipcRenderer.invoke(ipcChannels.ai.terminalOutputResponse, input),
+    codexLoginStart: () => ipcRenderer.invoke(ipcChannels.ai.codexLoginStart),
+    codexAuthStatus: () => ipcRenderer.invoke(ipcChannels.ai.codexAuthStatus),
+    codexLogout: () => ipcRenderer.invoke(ipcChannels.ai.codexLogout),
+    codexUsage: () => ipcRenderer.invoke(ipcChannels.ai.codexUsage),
     // main→renderer 스트리밍 이벤트 구독(해제 함수 반환). requestId 로 필터링은 소비자(2단계) 몫.
     onChatEvent: (listener) => subscribeAiChatEvent(listener),
+    onTerminalOutputRequest: (listener) => subscribeAiTerminalOutputRequest(listener),
   };
 }

@@ -9,6 +9,7 @@ import type {
   AiToolDef,
   AiTestResult,
 } from "../../shared/ai";
+import { mergeTextAttachments } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
 import { normalizeAiError } from "./provider-errors";
 
@@ -153,10 +154,36 @@ function toOpenAiMessages(
       } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
       continue;
     }
+    if (message.role === "user" && message.attachments?.length) {
+      const parts = toUserContentParts(message);
+      if (parts.length > 0) {
+        out.push({ role: "user", content: parts });
+        continue;
+      }
+    }
     out.push({
       role: message.role,
       content: message.content,
     } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
   }
   return out;
+}
+
+// user 턴의 첨부를 content parts 로. 병합 텍스트 part 하나 뒤에 이미지 data URL part 들.
+// 빈 text part 는 호환 서버가 거부할 수 있어 생략. parts 가 비면 호출측이 평문 폴백.
+function toUserContentParts(message: AiChatMessage): OpenAI.Chat.Completions.ChatCompletionContentPart[] {
+  const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
+  const text = mergeTextAttachments(message.content, message.attachments);
+  if (text) {
+    parts.push({ type: "text", text });
+  }
+  for (const attachment of message.attachments ?? []) {
+    if (attachment.kind === "image") {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${attachment.mediaType};base64,${attachment.dataBase64}` },
+      });
+    }
+  }
+  return parts;
 }

@@ -12,9 +12,9 @@ Dolgate는 현재 네 개의 주요 런타임 경계로 나뉩니다.
 ```mermaid
 flowchart LR
   subgraph Desktop["Electron Desktop"]
-    Main["main<br/>브라우저 로그인 / 로컬 저장소 / 프로세스 관리"]
+    Main["main<br/>브라우저 로그인 / AI egress / 로컬 저장소 / 프로세스 관리"]
     Preload["preload<br/>contextBridge API"]
-    Renderer["renderer<br/>workspace UI / xterm.js / 상태관리"]
+    Renderer["renderer<br/>workspace UI / xterm.js / AI panel / 상태관리"]
     Main --> Preload --> Renderer
   end
   subgraph Mobile["React Native Mobile"]
@@ -35,17 +35,18 @@ flowchart LR
 ## 데스크톱 앱
 
 - `main`
-  브라우저 윈도우, 로컬 파일 저장소, encrypted secret store, 브라우저 로그인, 서버 동기화, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
+  브라우저 윈도우, 로컬 파일 저장소, encrypted secret store, 브라우저 로그인, 서버 동기화, AI provider egress, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
 - `preload`
   `contextBridge`를 통해 renderer에 필요한 최소 API만 노출합니다.
 - `renderer`
-  Zustand 상태와 xterm.js 기반 탭 UI, 로그인 게이트, 호스트 목록, 검색 인터페이스, 고정 `SFTP` 워크스페이스를 담당합니다.
+  Zustand 상태와 xterm.js 기반 탭 UI, 로그인 게이트, 호스트 목록, 검색 인터페이스, 고정 `SFTP` 워크스페이스, AI 패널과 터미널 scrollback snapshot을 담당합니다.
 
 주요 런타임 특징:
 
 - 앱 시작 시 먼저 refresh token으로 로그인 복구를 시도합니다.
 - 온라인 복구가 실패해도 offline lease가 유효하면 `offline-authenticated` 상태로 홈 화면을 열고, 이후 백그라운드에서 재동기화를 재시도합니다.
 - 새 로그인은 backend `/login` 페이지를 외부 브라우저로 열고, 성공 시 로컬 loopback callback 또는 `dolgate://auth/callback` 식별자를 통해 세션을 교환합니다.
+- AI 어시스턴트의 provider 호출과 웹/URL 도구는 Electron main에서 실행해 API 키와 외부 egress를 renderer 밖에 둡니다. renderer는 질문 시점의 터미널 snapshot과 사용자 인터페이스만 담당합니다.
 - `ssh-core`는 앱 시작 시 항상 떠 있지 않고, 실제 SSH/SFTP/포트 포워딩 경로가 필요할 때 lazily 시작합니다.
 - 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업·파일 전송·인앱 파일 편집(읽기/쓰기)은 Go 코어가 담당합니다.
 

@@ -495,7 +495,7 @@ func (m *Manager) RunCompletionCommand(sessionID, command string) (string, bool,
 const runHostCommandMaxBytes = 1 << 18 // 256 KiB
 
 const (
-	runHostCommandDefaultTimeout = 30 * time.Second
+	runHostCommandDefaultTimeout = 15 * time.Second
 	runHostCommandMaxTimeout     = 120 * time.Second
 )
 

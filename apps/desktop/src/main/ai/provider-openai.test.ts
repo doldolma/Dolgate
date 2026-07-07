@@ -84,6 +84,67 @@ describe("OpenAiAdapter", () => {
     );
   });
 
+  it("maps user attachments to text + image_url parts", async () => {
+    mocks.create.mockResolvedValue(
+      streamOf([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+    );
+    const adapter = new OpenAiAdapter({ providerId: "openai-compat", model: "gpt", apiKey: "k" });
+    await adapter.chat(
+      {
+        model: "gpt",
+        messages: [
+          { role: "system", content: "sys" },
+          {
+            role: "user",
+            content: "이 화면 봐줘",
+            attachments: [
+              { kind: "image", mediaType: "image/png", dataBase64: "aGk=" },
+              { kind: "text", name: "app.log", text: "line1" },
+            ],
+          },
+        ],
+      },
+      { signal: new AbortController().signal, onDelta: () => undefined },
+    );
+
+    const body = mocks.create.mock.calls[0][0] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    // system 은 string 유지, user 는 parts 배열.
+    expect(body.messages[0].content).toBe("sys");
+    expect(body.messages[1].content).toEqual([
+      { type: "text", text: "이 화면 봐줘\n\n[첨부 파일: app.log]\n```\nline1\n```" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aGk=" } },
+    ]);
+  });
+
+  it("omits the empty text part for an image-only send", async () => {
+    mocks.create.mockResolvedValue(
+      streamOf([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+    );
+    const adapter = new OpenAiAdapter({ providerId: "openai-compat", model: "gpt", apiKey: "k" });
+    await adapter.chat(
+      {
+        model: "gpt",
+        messages: [
+          {
+            role: "user",
+            content: "",
+            attachments: [{ kind: "image", mediaType: "image/jpeg", dataBase64: "aGk=" }],
+          },
+        ],
+      },
+      { signal: new AbortController().signal, onDelta: () => undefined },
+    );
+
+    const body = mocks.create.mock.calls[0][0] as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(body.messages[0].content).toEqual([
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,aGk=" } },
+    ]);
+  });
+
   it("accumulates streamed tool_calls by index and returns them", async () => {
     mocks.create.mockResolvedValue(
       streamOf([

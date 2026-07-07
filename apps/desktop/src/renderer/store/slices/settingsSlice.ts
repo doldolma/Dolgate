@@ -229,6 +229,10 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
     getAiSearchKeyStatus: (backend) => api.ai.searchKeyStatus(backend),
     setAiSearchKey: (backend, key) => api.ai.setSearchKey(backend, key),
     clearAiSearchKey: (backend) => api.ai.clearSearchKey(backend),
+    codexLoginStart: () => api.ai.codexLoginStart(),
+    getCodexAuthStatus: () => api.ai.codexAuthStatus(),
+    codexLogout: () => api.ai.codexLogout(),
+    getCodexUsage: () => api.ai.codexUsage(),
     openExternalUrl: (url) => api.shell.openExternal(url)
   };
 

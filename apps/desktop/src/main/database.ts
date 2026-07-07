@@ -1443,7 +1443,11 @@ export class SettingsRepository {
         if (typeof incoming.enabled === 'boolean') {
           next.enabled = incoming.enabled;
         }
-        if (incoming.providerId === 'openai-compat' || incoming.providerId === 'anthropic') {
+        if (
+          incoming.providerId === 'openai-compat' ||
+          incoming.providerId === 'anthropic' ||
+          incoming.providerId === 'codex'
+        ) {
           next.providerId = incoming.providerId;
         }
         if (Object.prototype.hasOwnProperty.call(incoming, 'baseUrl')) {

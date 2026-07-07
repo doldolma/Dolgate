@@ -115,8 +115,13 @@ import type {
   AiApprovalResponse,
   AiChatEvent,
   AiChatStartInput,
+  AiTerminalOutputRequest,
+  AiTerminalOutputResponse,
   AiTestConnectionInput,
   AiTestResult,
+  CodexAuthStatus,
+  CodexLoginStart,
+  CodexUsage,
 } from "./ai";
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
@@ -1109,6 +1114,13 @@ export interface DesktopApi {
     cancelChat: (requestId: string) => Promise<void>;
     respondApproval: (input: AiApprovalResponse) => Promise<void>;
     onChatEvent: (listener: (event: AiChatEvent) => void) => () => void;
+    respondTerminalOutput: (input: AiTerminalOutputResponse) => Promise<void>;
+    onTerminalOutputRequest: (listener: (event: AiTerminalOutputRequest) => void) => () => void;
+    // Codex(ChatGPT 계정) 인증. authUrl 은 렌더러가 openExternalUrl 로 연다.
+    codexLoginStart: () => Promise<CodexLoginStart>;
+    codexAuthStatus: () => Promise<CodexAuthStatus>;
+    codexLogout: () => Promise<void>;
+    codexUsage: () => Promise<CodexUsage>;
   };
   portForwards: {
     list: () => Promise<PortForwardListSnapshot>;

@@ -46,13 +46,18 @@ describe("aiChatSlice", () => {
     const arg = api.ai.chat.mock.calls[0][0];
     expect(arg.request.model).toBe("gpt-x");
     expect(arg.request.messages[0].role).toBe("system");
+    expect(arg.request.messages[0].content).toContain("Dolgate AI Assistant");
+    expect(arg.request.messages[0].content).toContain('"gpt-x"');
+    expect(arg.request.messages[0].content).toContain(
+      "Only mention the configured model identifier when the user explicitly asks what model is being used",
+    );
     expect(arg.request.messages.at(-1)).toEqual({ role: "user", content: "hello" });
     expect(arg.requestId).toBe(conv.requestId);
     // sessionId 를 함께 전달해야 main 의 run_command 가 어느 세션에서 실행할지 안다.
     expect(arg.sessionId).toBe("s1");
   });
 
-  it("includes terminal context in the request only (not the stored transcript)", async () => {
+  it("includes session context in the request only (not the stored transcript)", async () => {
     const { api, slice, get } = harness(ENABLED);
     await slice.sendAiMessage("s1", "why did it fail?", "build error at line 42");
 
@@ -64,8 +69,79 @@ describe("aiChatSlice", () => {
     const messages = api.ai.chat.mock.calls[0][0].request.messages;
     const contextMessage = messages[messages.length - 2];
     expect(contextMessage.role).toBe("user");
+    expect(contextMessage.content).toContain("현재 세션 컨텍스트");
     expect(contextMessage.content).toContain("build error at line 42");
     expect(messages.at(-1)).toEqual({ role: "user", content: "why did it fail?" });
+  });
+
+  it("passes terminal snapshot metadata with the chat request and clears it on completion", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "read older output", undefined, {
+      snapshotId: "snapshot-1",
+      recentOutputLines: 100,
+    });
+
+    const conv = get().aiConversations["s1"];
+    expect(conv.terminalSnapshotId).toBe("snapshot-1");
+    expect(api.ai.chat.mock.calls[0][0].terminalSnapshot).toEqual({
+      snapshotId: "snapshot-1",
+      recentOutputLines: 100,
+    });
+
+    slice.handleAiChatEvent({
+      requestId: conv.requestId,
+      type: "done",
+      result: { text: "ok", finishReason: "stop" },
+    });
+    expect(get().aiConversations["s1"].terminalSnapshotId).toBeNull();
+  });
+
+  it("carries attachments on both the stored message and the wire message", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    const attachments = [
+      { kind: "image" as const, mediaType: "image/png", dataBase64: "aGk=" },
+      { kind: "text" as const, name: "app.log", text: "line1" },
+    ];
+    await slice.sendAiMessage("s1", "이거 봐줘", undefined, undefined, attachments);
+
+    expect(get().aiConversations["s1"].messages).toEqual([
+      { role: "user", content: "이거 봐줘", attachments },
+    ]);
+    const messages = api.ai.chat.mock.calls[0][0].request.messages;
+    expect(messages.at(-1)).toEqual({ role: "user", content: "이거 봐줘", attachments });
+  });
+
+  it("allows an attachment-only send (empty text)", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    const attachments = [{ kind: "image" as const, mediaType: "image/png", dataBase64: "aGk=" }];
+    await slice.sendAiMessage("s1", "   ", undefined, undefined, attachments);
+
+    expect(api.ai.chat).toHaveBeenCalledTimes(1);
+    expect(get().aiConversations["s1"].messages).toEqual([
+      { role: "user", content: "", attachments },
+    ]);
+  });
+
+  it("still ignores an empty send without attachments", async () => {
+    const { api, slice } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "   ");
+    expect(api.ai.chat).not.toHaveBeenCalled();
+  });
+
+  it("re-sends history attachments on the next turn via toWireMessage", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    const attachments = [{ kind: "image" as const, mediaType: "image/png", dataBase64: "aGk=" }];
+    await slice.sendAiMessage("s1", "첫 질문", undefined, undefined, attachments);
+    slice.handleAiChatEvent({
+      requestId: get().aiConversations["s1"].requestId,
+      type: "done",
+      result: { text: "답", finishReason: "stop" },
+    });
+
+    await slice.sendAiMessage("s1", "후속 질문");
+    const messages = api.ai.chat.mock.calls[1][0].request.messages;
+    const historyUser = messages.find((m: { content: string }) => m.content === "첫 질문");
+    expect(historyUser.attachments).toEqual(attachments);
   });
 
   it("does not send when the assistant is disabled", async () => {
@@ -100,6 +176,91 @@ describe("aiChatSlice", () => {
     expect(conv.streaming).toBe(false);
     expect(conv.streamingText).toBe("");
     expect(conv.messages.at(-1)).toEqual({ role: "assistant", content: "hello" });
+  });
+
+  it("keeps different streamed text as collapsed generation trace on the final assistant message", async () => {
+    const { slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "hi");
+    const requestId = get().aiConversations["s1"].requestId as string;
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "delta",
+      delta: { kind: "text", text: "검사 중입니다..." },
+    });
+    slice.handleAiChatEvent({
+      requestId,
+      type: "done",
+      result: { text: "원인은 SSH 키 권한 문제입니다.", finishReason: "stop" },
+    });
+
+    expect(get().aiConversations["s1"].messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "원인은 SSH 키 권한 문제입니다.",
+      generationTrace: "검사 중입니다...",
+    });
+  });
+
+  it("preserves streamed text that is cleared when a tool starts", async () => {
+    const { slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "inspect it");
+    const requestId = get().aiConversations["s1"].requestId as string;
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "delta",
+      delta: { kind: "text", text: "최근 로그를 먼저 확인합니다." },
+    });
+    slice.handleAiChatEvent({
+      requestId,
+      type: "tool",
+      tool: { id: "tool-1", name: "inspect_command", status: "running", label: "journalctl" },
+    });
+    expect(get().aiConversations["s1"].streamingText).toBe("");
+    expect(get().aiConversations["s1"].generationTrace).toBe("최근 로그를 먼저 확인합니다.");
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "tool",
+      tool: { id: "tool-1", name: "inspect_command", status: "done", label: "journalctl" },
+    });
+    slice.handleAiChatEvent({
+      requestId,
+      type: "done",
+      result: { text: "로그상 서비스 재시작이 필요합니다.", finishReason: "stop" },
+    });
+
+    expect(get().aiConversations["s1"].messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "로그상 서비스 재시작이 필요합니다.",
+      toolRuns: [{ id: "tool-1", label: "journalctl", status: "done" }],
+      generationTrace: "최근 로그를 먼저 확인합니다.",
+    });
+  });
+
+  it("omits display-only generation trace when sending conversation history", async () => {
+    const { api, slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "first");
+    const requestId = get().aiConversations["s1"].requestId as string;
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "delta",
+      delta: { kind: "text", text: "중간 생성 내용" },
+    });
+    slice.handleAiChatEvent({
+      requestId,
+      type: "done",
+      result: { text: "최종 답변", finishReason: "stop" },
+    });
+
+    await slice.sendAiMessage("s1", "second");
+    const messages = api.ai.chat.mock.calls[1][0].request.messages;
+    const assistantHistory = messages.find(
+      (message: { role: string; content: string }) =>
+        message.role === "assistant" && message.content === "최종 답변",
+    );
+    expect(assistantHistory).toEqual({ role: "assistant", content: "최종 답변" });
   });
 
   it("sets an error on an error event and ignores unknown requestIds", async () => {

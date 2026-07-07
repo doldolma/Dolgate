@@ -11,14 +11,17 @@ Dolgate Desktop은 macOS와 Windows를 위한 Electron 기반 SSH 워크스페�
 - 명령어 자동완성 (Fig 스펙 + generator + 경로 + 스니펫)
 - 명령어 스니펫 (변수 지원, 자동완성·관리 UI 연동)
 - 명령 완료 OS 알림 (오래 걸리거나 실패한 명령 종료 시, 셸 통합 기반)
+- AI 어시스턴트 (세션 컨텍스트 기반 질문, 조회/실행 도구, provider 선택)
 - 듀얼 패널 SFTP 브라우저와 파일 전송
 - 터미널 파일 전송 (드래그 SFTP 업로드 / 원격 `sz` ZMODEM 다운로드)
 - SFTP 원격 파일 내장 편집 (텍스트 파일 인앱 편집·저장, 변경 충돌 감지, sudo 저장)
+- SSH Agent 인증 (1Password / `ssh-add` / OS ssh-agent)
+- SSH Agent Forwarding (`ssh -A` 계열, 신뢰하는 호스트에서만 권장)
 - 점프 호스트(베스천) 경유 연결 (ProxyJump / `ssh -J`)
 - Local / Remote / Dynamic 포트 포워딩
-- 세션 녹화 및 재생
+- 세션 녹화 및 재생 (로컬 저장, 서버 동기화 없음)
 - Session Share, 브라우저 viewer, 실시간 채팅
-- AWS EC2 import, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
+- AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
 - Docker / Podman 컨테이너 모니터링, 로그, 메트릭, 셸, 터널링
 - OpenSSH / Xshell / Termius import
 - GitHub Releases 기반 업데이트 배포
@@ -87,6 +90,25 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 - **알림 내용**: 제목은 호스트 라벨, 본문은 `명령 · 완료/실패(exit N) · 소요시간`. 알림을 클릭하면 앱 창이 다시 앞으로 옵니다.
 - 표시 여부 판정(임계 시간·실패·포커스)은 렌더러에서 끝내고, 실제 OS 알림 표시는 Electron main의 notification 서비스가 담당합니다.
 
+## AI 어시스턴트
+
+터미널 우측의 AI 패널에서 현재 세션에 대해 질문하고, 필요한 경우 도구로 호스트 상태를 조회하거나 사용자가 보는 터미널에 명령을 실행할 수 있습니다. 패널은 우측 AI 버튼이나 `Cmd/Ctrl+I` 단축키로 열고 닫을 수 있으며, 세션 탭 단위로 유지됩니다. 터미널 입력 영역과 분리되어 자동완성·tmux 조작과 충돌하지 않습니다.
+
+- **Provider**: OpenAI-compatible API(OpenAI, Ollama, LM Studio, vLLM 등), Anthropic Claude API, Codex(ChatGPT 계정 로그인)를 지원합니다. OpenAI-compatible/Anthropic은 API 키를 OS 키체인에 저장하고, Codex는 API 키 없이 브라우저 로그인 세션을 사용합니다.
+- **자동 컨텍스트**: 질문 시점의 호스트 요약, 현재 세션 정보, 최근 터미널 출력 100줄을 함께 보냅니다. 더 이전 출력이 필요하면 AI가 질문 시점에 고정된 scrollback snapshot에서 추가 범위를 읽을 수 있습니다.
+- **도구**: `inspect_command`는 숨은 SSH exec 채널로 읽기 전용 조회를 수행하고, `run_in_terminal`은 사용자가 보는 터미널에 명령을 입력해 실행합니다. 웹 검색과 URL 읽기도 provider와 별개로 사용할 수 있습니다.
+- **안전장치**: 컨텍스트와 도구 결과는 시크릿 redaction을 거치며, 변경 가능성이 있는 명령은 사용자 승인 후 실행합니다. 진행 중인 응답과 도구 루프는 패널의 정지 버튼으로 중단할 수 있습니다.
+- **제약**: 호스트 exec 도구는 세션에 SSH client가 있는 경우에만 노출됩니다. 일반 SSH, Warpgate SSH, EC2 SSH-over-SSM은 같은 SSH 연결을 공유하고, raw SSM shell fallback처럼 SSH client가 없는 경로는 실행 도구가 제한될 수 있습니다.
+
+## SSH Agent 인증과 Forwarding
+
+호스트 생성/수정 화면에서 **Auth Type = SSH Agent**를 선택하면 비밀번호나 키 파일을 Dolgate에 저장하지 않고 로컬 ssh-agent로 인증합니다. macOS의 `SSH_AUTH_SOCK`, launchctl agent, Windows OpenSSH agent, 1Password SSH Agent, `ssh-add`로 등록한 키를 사용할 수 있습니다.
+
+- **상태 확인**: SSH Agent 인증을 선택하면 로컬 agent 연결 가능 여부와 키 개수를 설정 화면에서 확인합니다.
+- **저장 방식**: agent 인증은 로컬 agent에 서명을 위임하므로 개인키 자체를 Dolgate 저장소나 sync-api에 저장하지 않습니다.
+- **Agent Forwarding**: SSH 호스트와 AWS EC2 호스트에서 **SSH Agent Forwarding**을 켜면 원격 호스트에서 다시 다른 서버로 hop할 때 로컬 키를 사용할 수 있습니다. `ssh -A`와 같은 성격이므로 신뢰하는 호스트에서만 켜는 것을 권장합니다.
+- **제약**: mosh 연결에서는 agent forwarding을 지원하지 않아 토글이 비활성화됩니다.
+
 ## 점프 호스트 (베스천)
 
 프라이빗 서브넷처럼 직접 닿지 않는 호스트를, 중간 **베스천(SSH 서버)을 경유**해 접속하는 기능입니다. 표준 SSH의 `direct-tcpip` 포워딩(`ssh -J`)을 쓰므로 베스천에는 평범한 sshd만 있으면 되고, 모든 처리는 클라이언트(`ssh-core`)에서 일어납니다(sync-api 무관).
@@ -95,7 +117,8 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 - **적용 범위**: 터미널 · SFTP · 포트 포워딩 · 컨테이너 — 4개 연결 전부 동일하게 경유합니다. (내부적으로 모든 연결이 거치는 단일 dial 지점 `sshconn.DialClient`에 점프를 주입)
 - **신뢰(TOFU)**: 베스천을 먼저 신뢰한 뒤, 타깃 호스트 키는 **신뢰된 베스천을 경유해** probe합니다. 베스천이 신뢰돼 있지 않으면 자동으로 지문 프롬프트가 떠 신뢰 후 진행합니다. 베스천 뒤의(직접 닿지 않는) 타깃 키도 이 경유 probe로 확인/신뢰할 수 있습니다.
 - **인증**: 베스천이 password / privateKey / certificate / keyboard-interactive 어느 방식이든 연결됩니다(두 홉을 순차 인증). 단, 베스천 경유 **키 probe**는 비대화형 인증(password/key/certificate)만 지원합니다.
-- **제약(v1)**: 단일 홉만 지원합니다(`h1,h2,h3` 같은 다단 체인 UI는 범위 밖 — Go 코어는 재귀 구조로 표현 가능). 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
+- **다단 체인**: 여러 jump host를 위에서부터 순서대로 지정할 수 있습니다. 첫 번째 홉은 클라이언트에서 직접 연결하는 베스천이고, 마지막 홉은 타깃 바로 앞 홉입니다.
+- **제약**: 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
 
 ## 명령어 스니펫 (Snippets)
 
@@ -146,6 +169,14 @@ SFTP 패널을 열지 않고 **터미널에서 직접** 파일을 주고받는 �
 - **제한**: ZMODEM 다운로드는 **512MB까지**이며, 초과 시 SFTP 사용을 권하는 메시지로 중단됩니다. `rz`(ZMODEM 업로드)는 지원하지 않으며, 업로드는 드래그 업로드로 대체합니다.
 - **레이어**: 드래그 업로드는 렌더러가 SFTP 전송 작업(`sftp:start-transfer`)으로 처리하고, ZMODEM은 렌더러가 스트림에서 감지해 Electron main이 Downloads에 저장합니다.
 
+## 세션 녹화와 Replay
+
+터미널 세션이 종료되면 입출력과 화면 크기 변경을 로컬 replay 데이터로 남겨 나중에 다시 볼 수 있습니다. Replay 창에서는 재생/일시정지, scrubber 이동, 속도 조절, 확대/축소를 사용할 수 있습니다.
+
+- **저장 위치**: 세션 replay는 데스크톱 로컬 저장소에만 보관되며 sync-api로 동기화되지 않습니다.
+- **보관 개수**: 설정 > General의 **Session Replay Retention**에서 로컬에 남길 종료 세션 replay 개수를 조정합니다.
+- **용도**: 장애 조사, 작업 복기, 다른 사람에게 전달하기 전 화면 흐름 확인에 적합합니다. 실시간 공유가 필요하면 Session Share를 사용합니다.
+
 ## 로컬 실행
 
 ```bash
@@ -192,6 +223,6 @@ npm run release:all
 
 ## AWS 사용 전 확인
 
-SSM 세션 기능(shell·SFTP·포트 포워딩·ECS Exec/터널)은 내장 SSM 데이터 채널로 동작하고, AWS 프로필 인증(프로필 생성·검증, SSO 브라우저 로그인, AssumeRole)은 AWS SDK로 처리합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 사용할 수 있습니다.
+EC2 터미널은 SSH-over-SSM을 먼저 시도합니다. 공개키 주입이나 SSH 준비 단계에서 일반 SSH 연결을 열 수 없으면 SSM shell로 fallback할 수 있고, AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널은 내장 SSM 데이터 채널로 동작합니다. AWS 프로필 인증(프로필 생성·검증, SSO 브라우저 로그인, AssumeRole)은 AWS SDK로 처리합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 사용할 수 있습니다.
 
 추가 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)를 참고하면 됩니다.

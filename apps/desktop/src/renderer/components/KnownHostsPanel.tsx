@@ -9,7 +9,6 @@ import {
   CardTitleRow,
   EmptyState,
   PanelSection,
-  SectionLabel,
 } from '../ui';
 
 interface KnownHostsPanelProps {
@@ -22,7 +21,6 @@ export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
     <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
-          <SectionLabel>Security</SectionLabel>
           <h2 className="m-0">Known Hosts</h2>
           <p className="mt-2 max-w-[48rem] text-[var(--text-soft)]">
             신뢰한 호스트 키 목록입니다. 새 연결은 이 목록과 정확히 일치해야만 진행됩니다.

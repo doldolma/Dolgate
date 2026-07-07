@@ -26,4 +26,8 @@ export interface ProviderAdapter {
   readonly id: AiProviderId;
   testConnection(opts: { signal: AbortSignal }): Promise<AiTestResult>;
   chat(request: AiChatRequest, opts: ProviderChatOptions): Promise<AiChatResult>;
+  // 모델의 컨텍스트 창(입력 토큰 한도)을 프로바이더에서 조회. 알 수 없으면 null.
+  // Anthropic 은 Models API 로 정확히 알 수 있어 구현하고, openai-compat 은 서버에
+  // 로드된 창을 API 로 알 수 없어 미구현(사용자 설정 사용). 실패는 throw 하지 않는다.
+  getModelContextTokens?(model: string, opts: { signal: AbortSignal }): Promise<number | null>;
 }
