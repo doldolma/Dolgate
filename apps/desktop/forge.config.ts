@@ -54,7 +54,9 @@ function resolveAppIcon(): string {
 
 const config = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: '**/node_modules/@openai/codex*/vendor/**'
+    },
     prune: false,
     executableName: 'dolgate',
     name: 'dolgate',
@@ -65,6 +67,9 @@ const config = {
       }
     ],
     icon: resolveAppIcon(),
+    osxUniversal: {
+      x64ArchFiles: '**/node_modules/@openai/codex-*/vendor/**/*'
+    },
     ignore: (file: string) => {
       if (!file) {
         return false;
