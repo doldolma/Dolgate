@@ -1,8 +1,12 @@
+import { chmod, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const syncRuntimeDeps = require('../../scripts/sync-runtime-deps.cjs') as {
+  removePath: (targetPath: string) => Promise<void>;
   resolveInstalledPackageJson: (packageName: string) => string;
   shouldIncludeRuntimePackage: (packageName: string, targetPlatform?: string | null) => boolean;
   resolveTargetPlatform: () => string | null;
@@ -29,5 +33,19 @@ describe('sync-runtime-deps target filtering', () => {
     expect(syncRuntimeDeps.resolveInstalledPackageJson('@aws-sdk/nested-clients')).toMatch(
       /@aws-sdk[\\/]nested-clients[\\/]package\.json$/,
     );
+  });
+
+  it('removes read-only nested dependency trees', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dolgate-runtime-deps-'));
+    const nested = join(root, 'vendor', 'resources');
+    const file = join(nested, 'codex-resource.txt');
+    await mkdir(nested, { recursive: true });
+    await writeFile(file, 'resource');
+    await chmod(file, 0o400);
+    await chmod(nested, 0o500);
+
+    await syncRuntimeDeps.removePath(root);
+
+    await expect(stat(root)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

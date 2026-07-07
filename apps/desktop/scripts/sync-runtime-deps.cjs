@@ -9,6 +9,7 @@ const desktopPackage = require(path.join(desktopRoot, 'package.json'));
 
 const targetNodeModules = path.join(desktopRoot, 'node_modules');
 const markerPath = path.join(targetNodeModules, '.dolssh-runtime-deps.json');
+const REMOVE_RETRY_DELAY_MS = 150;
 
 function isWorkspacePackage(packageName) {
   return packageName.startsWith('@dolssh/');
@@ -20,6 +21,56 @@ function isBuiltinDependency(packageName) {
 
 function packageNameToPath(packageName) {
   return path.join(targetNodeModules, ...packageName.split('/'));
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function makeWritable(targetPath) {
+  try {
+    await fs.chmod(targetPath, 0o700);
+  } catch {
+    // Best effort: the path may not exist or the platform may ignore chmod.
+  }
+}
+
+async function makeTreeWritable(targetPath) {
+  await makeWritable(targetPath);
+  let entries;
+  try {
+    entries = await fs.readdir(targetPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const childPath = path.join(targetPath, entry.name);
+      if (entry.isDirectory()) {
+        await makeTreeWritable(childPath);
+      } else {
+        await makeWritable(childPath);
+      }
+    })
+  );
+}
+
+async function removePath(targetPath) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true, maxRetries: 3, retryDelay: REMOVE_RETRY_DELAY_MS });
+      return;
+    } catch (error) {
+      if (!['EACCES', 'EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) {
+        throw error;
+      }
+      await makeTreeWritable(targetPath);
+      await sleep(REMOVE_RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+
+  await fs.rm(targetPath, { recursive: true, force: true, maxRetries: 5, retryDelay: REMOVE_RETRY_DELAY_MS });
 }
 
 function resolveTargetPlatform() {
@@ -45,13 +96,13 @@ async function removePreviouslyCopiedPackages() {
   const previousPackages = await readMarker();
   await Promise.all(
     previousPackages.map(async (packageName) => {
-      await fs.rm(packageNameToPath(packageName), { recursive: true, force: true });
+      await removePath(packageNameToPath(packageName));
     })
   );
 }
 
 function resolveInstalledPackageJson(packageName) {
-  const searchPaths = [desktopRoot, repoRoot];
+  const searchPaths = [repoRoot, desktopRoot];
   for (const searchRoot of searchPaths) {
     const manifestCandidate = path.join(
       searchRoot,
@@ -163,7 +214,7 @@ async function copyRuntimeDependencies() {
   for (const runtimePackage of packages) {
     const destination = packageNameToPath(runtimePackage.name);
     await fs.mkdir(path.dirname(destination), { recursive: true });
-    await fs.rm(destination, { recursive: true, force: true });
+    await removePath(destination);
     await copyRuntimePackage(runtimePackage, destination);
   }
 
@@ -191,6 +242,7 @@ if (require.main === module) {
 
 module.exports = {
   copyRuntimeDependencies,
+  removePath,
   resolveInstalledPackageJson,
   shouldIncludeRuntimePackage,
   resolveTargetPlatform
