@@ -17,7 +17,7 @@ import type {
 } from "../shared/ai";
 import type { ProviderAdapter, ProviderConfig } from "./ai/provider";
 import { buildToolRegistry, type ToolRegistry } from "./ai/tools/registry";
-import { looksDestructive } from "./ai/tools/command-classify";
+import { isLongRunningOrInteractive, looksDestructive } from "./ai/tools/command-classify";
 import { RUN_IN_TERMINAL_TOOL, type TerminalRunResult } from "./ai/tools/run-command";
 import { INSPECT_COMMAND_TOOL, type HostCommandResult } from "./ai/tools/inspect-command";
 import { AnthropicAdapter } from "./ai/provider-anthropic";
@@ -260,14 +260,14 @@ export class AiService {
           continue;
         }
       }
-      // inspect_command: 명백히 파괴적인 명령만 거부(숨은 변경 금지). 읽기 파이프라인/루프는 허용.
+      // inspect_command: 파괴적 명령(숨은 변경 금지) + 스트리밍/대화형(채널 물림)은 거부하고 run_in_terminal 로 유도.
       if (call.name === INSPECT_COMMAND_TOOL.name) {
         const cmd = commandArg(call);
-        if (cmd && looksDestructive(cmd)) {
+        if (cmd && (looksDestructive(cmd) || isLongRunningOrInteractive(cmd))) {
           results.push({
             toolCallId: call.id,
             content:
-              "변경 가능성이 있는 명령은 inspect_command 로 실행할 수 없습니다. 사용자가 볼 수 있도록 run_in_terminal 을 사용하세요.",
+              "변경·스트리밍·대화형 명령은 inspect_command 로 실행할 수 없습니다. 사용자가 볼 수 있도록 run_in_terminal 을 사용하세요.",
             isError: true,
           });
           emit({ requestId, type: "tool", tool: { id: call.id, name: call.name, status: "error", label } });

@@ -76,3 +76,66 @@ export function looksDestructive(command: string): boolean {
   }
   return false;
 }
+
+// 첫 명령 세그먼트의 첫 실행 토큰(환경변수·래퍼 건너뜀, basename).
+function firstCommandToken(command: string): string {
+  const segment = command.split(/\||;|&&|\|\||\n/)[0] ?? "";
+  const tokens = segment.trim().split(/\s+/).filter(Boolean);
+  let index = 0;
+  while (
+    index < tokens.length &&
+    (/^[A-Za-z_][A-Za-z0-9_]*=[^\s]*$/.test(tokens[index]) ||
+      NON_ESCALATION_WRAPPERS.has(tokens[index].split("/").pop() ?? ""))
+  ) {
+    index += 1;
+  }
+  return (tokens[index] ?? "").split("/").pop() ?? "";
+}
+
+// TTY 가 있어야 하거나 끝나지 않는(대화형/스트리밍) 명령 — 항상 대화형.
+const ALWAYS_INTERACTIVE = new Set([
+  "top", "htop", "watch", "vim", "vi", "nano", "emacs", "less", "more", "man", "ssh", "telnet",
+  "tmux", "screen",
+]);
+// 인자 없이 단독 실행하면 대화형 REPL 로 뜨는 것(스크립트/-c/-e 가 있으면 아님).
+const REPL_WHEN_BARE = new Set([
+  "mysql", "psql", "redis-cli", "mongo", "mongosh", "sqlite3", "python", "python3", "node", "irb",
+  "ftp", "sftp",
+]);
+
+// inspect_command(숨은 exec) 로 돌리면 채널이 물리는(끝나지 않거나 TTY 필요) 명령인지.
+// true 면 inspect 대신 run_in_terminal(사용자가 보고 Ctrl-C 가능) 로 보내야 한다.
+export function isLongRunningOrInteractive(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const lower = trimmed.toLowerCase();
+  // 로그 follow/스트리밍(-f/--follow) — grep -f 같은 오탐을 피하려고 스트리밍 명령과 함께일 때만.
+  if (/\b(tail|journalctl)\b[^|;&\n]*(\s-f\b|\s--follow\b)/.test(lower)) {
+    return true;
+  }
+  if (/\b(docker|podman|kubectl)\b[^|;&\n]*\blogs\b[^|;&\n]*(-f\b|--follow\b)/.test(lower)) {
+    return true;
+  }
+  // watch 는 반복 실행(장기)이라 잡아야 하는데 NON_ESCALATION_WRAPPERS 에 있어 firstCommandToken 이
+  // 건너뛴다 → 래퍼 skip 전 원시 첫 토큰(환경변수만 제외)으로 확인.
+  const rawTokens = trimmed.split(/\s+/).filter(Boolean);
+  let raw = 0;
+  while (raw < rawTokens.length && /^[A-Za-z_][A-Za-z0-9_]*=[^\s]*$/.test(rawTokens[raw])) {
+    raw += 1;
+  }
+  const rawFirst = (rawTokens[raw] ?? "").split("/").pop() ?? "";
+  if (rawFirst === "watch") {
+    return true;
+  }
+  const first = firstCommandToken(trimmed);
+  if (ALWAYS_INTERACTIVE.has(first)) {
+    return true;
+  }
+  // REPL 은 인자 없이 단독일 때만(예: `python` → REPL, `python x.py` → 정상 실행).
+  if (REPL_WHEN_BARE.has(first) && rawTokens.length - raw === 1) {
+    return true;
+  }
+  return false;
+}

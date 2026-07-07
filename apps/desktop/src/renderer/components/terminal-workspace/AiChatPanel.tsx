@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAppStore } from '../../store/appStore';
@@ -17,6 +17,9 @@ interface AiChatPanelProps {
 
 // 전송할 때마다 함께 실어 보내는 터미널 최근 출력 줄 수(토큰 과다 방지 위해 보수적으로).
 const RECENT_OUTPUT_LINES = 40;
+
+// 입력창 자동 높이 상한(px). 이보다 길어지면 창은 안 커지고 내부 스크롤.
+const AI_INPUT_MAX_HEIGHT = 200;
 
 // 마크다운 출력 스타일(테일윈드 arbitrary child selector로 typography 플러그인 없이 처리).
 const MARKDOWN_CLASSNAME =
@@ -119,6 +122,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const [input, setInput] = useState('');
   const [rememberApproval, setRememberApproval] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const messages = conversation?.messages ?? [];
@@ -134,6 +138,19 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
       node.scrollTop = node.scrollHeight;
     }
   }, [messages.length, streamingText, error]);
+
+  // Claude 입력창처럼: 내용/줄바꿈에 맞춰 높이 자동 증가, 상한(AI_INPUT_MAX_HEIGHT) 넘으면 내부 스크롤.
+  // 상한 미만에선 overflow hidden(보더-박스 오차로 인한 얇은 스크롤바 방지), 상한에선 auto.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = 'auto';
+    const capped = el.scrollHeight > AI_INPUT_MAX_HEIGHT;
+    el.style.height = `${capped ? AI_INPUT_MAX_HEIGHT : el.scrollHeight}px`;
+    el.style.overflowY = capped ? 'auto' : 'hidden';
+  }, [input]);
 
   function handleSend() {
     const text = input.trim();
@@ -359,11 +376,13 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
 
       <div className="flex flex-col gap-2 border-t border-[var(--border)] p-3">
         <Textarea
+          ref={inputRef}
           aria-label="AI 메시지 입력"
-          rows={2}
+          rows={1}
           value={input}
           disabled={!aiEnabled}
-          placeholder="메시지 입력 (Enter 전송, Shift+Enter 줄바꿈)"
+          placeholder="메시지 입력 (Shift+Enter 줄바꿈)"
+          className="max-h-[200px] resize-none"
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
             // IME 조합 중 Enter 는 무시(한글 등 마지막 글자 유실 방지).
