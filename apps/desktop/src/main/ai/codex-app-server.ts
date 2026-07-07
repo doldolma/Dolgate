@@ -62,36 +62,96 @@ function platformTarget(): { pkg: string; triple: string } | null {
   return null;
 }
 
+function appAsarUnpackedPath(appPath: string): string | null {
+  const normalizedPath = path.normalize(appPath);
+  const asarSegment = `${path.sep}app.asar`;
+  const asarIndex = normalizedPath.indexOf(asarSegment);
+  if (asarIndex === -1) {
+    return null;
+  }
+  return `${normalizedPath.slice(0, asarIndex)}${path.sep}app.asar.unpacked${normalizedPath.slice(
+    asarIndex + asarSegment.length,
+  )}`;
+}
+
+function nodeModulesRootsForCodex(): string[] {
+  const appPath = app.getAppPath();
+  if (app.isPackaged) {
+    const unpackedAppPath = appAsarUnpackedPath(appPath);
+    return unpackedAppPath ? [path.join(unpackedAppPath, "node_modules")] : [];
+  }
+  return [
+    path.join(appPath, "node_modules"),
+    path.resolve(appPath, "..", "..", "node_modules"),
+  ];
+}
+
+function findCodexNativePackage(binaryName: string): { binaryPath: string; pathDirs: string[] } | null {
+  const target = platformTarget();
+  if (!target) {
+    return null;
+  }
+
+  for (const root of nodeModulesRootsForCodex()) {
+    const packageRoot = path.join(root, ...target.pkg.split("/"), "vendor", target.triple);
+    const packageBinaryPath = path.join(packageRoot, "bin", binaryName);
+    if (existsSync(packageBinaryPath)) {
+      return {
+        binaryPath: packageBinaryPath,
+        pathDirs: [path.join(packageRoot, "codex-path")].filter((dir) => existsSync(dir)),
+      };
+    }
+
+    const legacyBinaryPath = path.join(packageRoot, "codex", binaryName);
+    if (existsSync(legacyBinaryPath)) {
+      return {
+        binaryPath: legacyBinaryPath,
+        pathDirs: [path.join(packageRoot, "path")].filter((dir) => existsSync(dir)),
+      };
+    }
+  }
+
+  return null;
+}
+
 // codex 네이티브 바이너리 경로 해석.
 // - 패키지 앱: extraResource 로 실어둔 resources/bin/codex (ssh-core 와 동일한 배포 방식).
+//   없으면 app.asar.unpacked 의 플랫폼 패키지(vendor/<triple>/bin)를 사용한다.
 // - dev: 워크스페이스 node_modules 의 플랫폼 패키지(vendor/<triple>/bin — 0.142+, 구버전은 codex/).
 // - 폴백: PATH 의 codex.
 export function resolveCodexBin(): string {
   const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, "bin", binaryName);
-  }
-  const target = platformTarget();
-  if (target) {
-    const appPath = app.getAppPath();
-    const nodeModulesRoots = [
-      path.join(appPath, "node_modules"),
-      path.resolve(appPath, "..", "..", "node_modules"),
-    ];
-    for (const root of nodeModulesRoots) {
-      const vendorRoot = path.join(root, ...target.pkg.split("/"), "vendor", target.triple);
-      const candidates = [
-        path.join(vendorRoot, "bin", binaryName),
-        path.join(vendorRoot, "codex", binaryName),
-      ];
-      for (const candidate of candidates) {
-        if (existsSync(candidate)) {
-          return candidate;
-        }
-      }
+    const resourceBinaryPath = path.join(process.resourcesPath, "bin", binaryName);
+    if (existsSync(resourceBinaryPath)) {
+      return resourceBinaryPath;
     }
+    return findCodexNativePackage(binaryName)?.binaryPath ?? resourceBinaryPath;
   }
-  return binaryName;
+  return findCodexNativePackage(binaryName)?.binaryPath ?? binaryName;
+}
+
+export function resolveCodexPathDirs(): string[] {
+  const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
+  return findCodexNativePackage(binaryName)?.pathDirs ?? [];
+}
+
+function pathEnvKey(env: Record<string, string>): string {
+  if (process.platform !== "win32") {
+    return "PATH";
+  }
+  return Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "Path";
+}
+
+function prependPathDirs(env: Record<string, string>, pathDirs: string[]): void {
+  if (pathDirs.length === 0) {
+    return;
+  }
+  const key = pathEnvKey(env);
+  const existingEntries = (env[key] ?? "")
+    .split(path.delimiter)
+    .filter((entry) => entry && !pathDirs.includes(entry));
+  env[key] = [...pathDirs, ...existingEntries].join(path.delimiter);
 }
 
 export function resolveCodexHome(): string {
@@ -110,6 +170,7 @@ export function codexEnv(): Record<string, string> {
     }
   }
   env.CODEX_HOME = resolveCodexHome();
+  prependPathDirs(env, resolveCodexPathDirs());
   return env;
 }
 
