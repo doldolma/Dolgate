@@ -25,7 +25,7 @@ import { SerialSessionActions } from './SerialSessionActions';
 import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
-import { NoticeCard } from '../../ui';
+import { Button, NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
@@ -356,6 +356,21 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     [canReceiveFileUpload, tab?.hostId, sessionId, uploadLocalFilesToHost],
   );
 
+  // Share 옆에 놓이는 AI 패널 토글(누르면 열림/닫힘). active=열림 상태 강조.
+  const aiToggleButton = (
+    <Button
+      variant="secondary"
+      size="sm"
+      active={aiPanelOpen}
+      className="min-h-9 rounded-full px-3.5"
+      onClick={() => toggleAiPanel(sessionId)}
+      title="AI 어시스턴트 (⌘I)"
+      aria-label={aiPanelOpen ? 'AI 어시스턴트 닫기' : 'AI 어시스턴트 열기'}
+    >
+      AI
+    </Button>
+  );
+
   return (
     <div
       className={cn(
@@ -384,6 +399,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           showHeader={showHeader}
           open={controller.sharePopoverOpen}
           actions={serialActions}
+          aiToggle={aiToggleButton}
           canStartShare={controller.canStartShare}
           shareCopyStatus={controller.shareCopyStatus}
           shareState={controller.shareState}
@@ -399,7 +415,17 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           onStopShare={controller.handleStopShare}
           canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
         />
-      ) : null}
+      ) : (
+        // 공유 불가 세션엔 Share 팝오버가 없으므로 AI 토글만 같은 위치에 띄운다.
+        <div
+          className={cn(
+            'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
+            showHeader && 'right-[0.8rem] top-[0.8rem]',
+          )}
+        >
+          {aiToggleButton}
+        </div>
+      )}
 
       {showHeader ? (
         <TerminalPaneHeader
@@ -549,17 +575,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           <AiChatPanel sessionId={sessionId} stableId={stableId} width={aiPanelWidth} />
         ) : null}
       </div>
-      {!aiPanelOpen ? (
-        <button
-          type="button"
-          className="absolute right-0 top-1/2 z-[15] flex -translate-y-1/2 items-center gap-1 rounded-l-[8px] border border-r-0 border-[var(--border)] bg-[var(--surface-elevated)] px-1.5 py-3 text-[0.7rem] font-semibold tracking-[0.15em] text-[var(--text-soft)] shadow-[var(--shadow-soft)] [writing-mode:vertical-rl] hover:text-[var(--text)]"
-          onClick={() => toggleAiPanel(sessionId)}
-          title="AI 어시스턴트 (⌘I)"
-          aria-label="AI 어시스턴트 열기"
-        >
-          AI
-        </button>
-      ) : null}
       {tab?.moshState ? (
         <TerminalMoshStatusBar
           state={tab.moshState}

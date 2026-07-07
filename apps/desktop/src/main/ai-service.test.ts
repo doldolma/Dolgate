@@ -387,6 +387,14 @@ describe("AiService inspect_command (read-only, hidden)", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 
+  it("refuses streaming/interactive commands (would hang the channel) and points to run_in_terminal", async () => {
+    const service = new AiService(makeSettings(SETTINGS) as never, makeSecretStore() as never);
+    const events = await driveInspect(service, "i4", "docker logs -f plex");
+    expect(events.some((event) => event.type === "approval-required")).toBe(false);
+    expect(toolsMock.inspectExecutor).not.toHaveBeenCalled();
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
   it("runs a read-only pipeline/loop (compound command) without refusing", async () => {
     const service = new AiService(makeSettings(SETTINGS) as never, makeSecretStore() as never);
     const events = await driveInspect(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { looksDestructive } from "./command-classify";
+import { isLongRunningOrInteractive, looksDestructive } from "./command-classify";
 
 describe("looksDestructive", () => {
   it("allows read-only commands, pipelines, loops, substitutions and /dev/null redirects", () => {
@@ -41,6 +41,44 @@ describe("looksDestructive", () => {
       "reboot",
     ]) {
       expect(looksDestructive(command), command).toBe(true);
+    }
+  });
+});
+
+describe("isLongRunningOrInteractive", () => {
+  it("flags streaming/follow and interactive/TTY commands", () => {
+    for (const command of [
+      "tail -f /var/log/syslog",
+      "journalctl -f",
+      "journalctl -u nginx -f",
+      "docker logs -f plex",
+      "docker logs --follow plex",
+      "kubectl logs -f pod",
+      "watch -n1 df -h",
+      "top",
+      "htop",
+      "vim /etc/hosts",
+      "less /var/log/big.log",
+      "man ssh",
+      "python",
+      "psql",
+    ]) {
+      expect(isLongRunningOrInteractive(command), command).toBe(true);
+    }
+  });
+
+  it("allows bounded read-only commands (no false positives)", () => {
+    for (const command of [
+      "tail -n 100 /var/log/syslog",
+      "journalctl -n 50",
+      "docker logs --tail 100 plex",
+      "ls -la",
+      "df -h",
+      "grep -f patterns.txt file",
+      "python analyze.py",
+      "psql -c 'select 1'",
+    ]) {
+      expect(isLongRunningOrInteractive(command), command).toBe(false);
     }
   });
 });
