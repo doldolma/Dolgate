@@ -88,7 +88,7 @@ import { resolveDesktopRepoRoot } from "./repo-root";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 // AI run_command 기본 타임아웃(모델이 지정 안 하면). Go 코어가 최대 120s 로 상한을 건다.
-const AI_RUN_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
+const AI_RUN_COMMAND_DEFAULT_TIMEOUT_MS = 15_000;
 
 // AI run_in_terminal 캡처 출력에서 ANSI/OSC 이스케이프·CR 을 제거해 모델이 읽기 좋게 만든다.
 function stripTerminalNoise(text: string): string {

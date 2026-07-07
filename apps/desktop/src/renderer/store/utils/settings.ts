@@ -110,7 +110,8 @@ export const defaultSettings: AppSettings = {
   ai: {
     enabled: false,
     providerId: "openai-compat",
-    baseUrl: "https://api.openai.com/v1",
+    // 미설정 = 기본 호스트 사용(설정 UI 는 placeholder 로만 안내).
+    baseUrl: undefined,
     model: "",
     temperature: undefined,
     contextTokens: 128000,

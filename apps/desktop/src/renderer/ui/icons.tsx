@@ -30,6 +30,7 @@ export {
   ArrowUp,
   ArrowDown,
   ArrowUpRight,
+  Square,
   RefreshCw,
   Bell,
   MoreVertical,
@@ -49,6 +50,9 @@ export {
   Circle,
   Eye,
   EyeOff,
+  Wrench,
+  Paperclip,
+  FileText,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

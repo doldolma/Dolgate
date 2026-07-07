@@ -226,9 +226,7 @@ export function KeychainPanel({
     <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
-          <SectionLabel>Saved Credentials</SectionLabel>
-          <h2 className="m-0">Saved Credentials</h2>
-          <p className="mt-2 max-w-[48rem] text-[var(--text-soft)]">
+          <p className="m-0 max-w-[48rem] text-[var(--text-soft)]">
             호스트가 사용하는 비밀번호, 패스프레이즈, 개인키, SSH 인증서를 안전하게 저장하고 연결 상태를 관리합니다.
           </p>
         </div>

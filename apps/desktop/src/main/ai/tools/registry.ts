@@ -3,6 +3,11 @@ import { WEB_SEARCH_TOOL, runWebSearch } from "./web-search";
 import { FETCH_URL_TOOL, runFetchUrl } from "./fetch-url";
 import { RUN_IN_TERMINAL_TOOL, runInTerminalTool, type TerminalRunResult } from "./run-command";
 import { INSPECT_COMMAND_TOOL, inspectCommandTool, type HostCommandResult } from "./inspect-command";
+import {
+  READ_TERMINAL_OUTPUT_TOOL,
+  readTerminalOutputTool,
+  type ReadTerminalOutput,
+} from "./read-terminal-output";
 
 export type ToolExecutor = (
   args: Record<string, unknown>,
@@ -23,6 +28,8 @@ export interface ToolRegistryConfig {
   runInTerminal?: (command: string) => Promise<TerminalRunResult>;
   // 있으면 inspect_command 노출: 숨은 exec 채널로 조회해 출력을 돌려줌(AI가 분석). sessionId 바인딩됨.
   execCapture?: (command: string) => Promise<HostCommandResult>;
+  // 있으면 read_terminal_output 노출: 질문 시점 renderer 스냅샷의 이전 scrollback 을 읽는다.
+  readTerminalOutput?: ReadTerminalOutput;
 }
 
 // 설정/세션에 따라 사용 가능한 클라이언트 도구만 노출한다. 검색키·host 실행자는 executor 에 클로저로 주입.
@@ -53,6 +60,13 @@ export function buildToolRegistry(config: ToolRegistryConfig): ToolRegistry {
     const exec = config.execCapture;
     defs.push(INSPECT_COMMAND_TOOL);
     executors.set(INSPECT_COMMAND_TOOL.name, (args) => inspectCommandTool(args, exec));
+  }
+  if (config.readTerminalOutput) {
+    const readTerminalOutput = config.readTerminalOutput;
+    defs.push(READ_TERMINAL_OUTPUT_TOOL);
+    executors.set(READ_TERMINAL_OUTPUT_TOOL.name, (args, ctx) =>
+      readTerminalOutputTool(args, readTerminalOutput, ctx.signal),
+    );
   }
 
   return { defs, executors };

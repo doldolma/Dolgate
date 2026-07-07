@@ -5,6 +5,11 @@ import { clampAiTemperature, normalizeAiBaseUrl } from "@shared";
 const adapterMocks = vi.hoisted(() => ({
   chat: vi.fn(),
   testConnection: vi.fn(),
+  // 기본(mockReset 직후)은 undefined 반환 → runChat 이 설정값/기본값으로 폴백.
+  getModelContextTokens: vi.fn(),
+  // 어댑터 생성자에 전달된 ProviderConfig 를 기록(베이스 URL 스코핑 등 config 해석 검증용).
+  openaiCtor: vi.fn(),
+  anthropicCtor: vi.fn(),
 }));
 
 vi.mock("./ai/provider-openai", () => ({
@@ -12,6 +17,9 @@ vi.mock("./ai/provider-openai", () => ({
     id = "openai-compat" as const;
     chat = adapterMocks.chat;
     testConnection = adapterMocks.testConnection;
+    constructor(config: unknown) {
+      adapterMocks.openaiCtor(config);
+    }
   },
 }));
 vi.mock("./ai/provider-anthropic", () => ({
@@ -19,7 +27,42 @@ vi.mock("./ai/provider-anthropic", () => ({
     id = "anthropic" as const;
     chat = adapterMocks.chat;
     testConnection = adapterMocks.testConnection;
+    getModelContextTokens = adapterMocks.getModelContextTokens;
+    constructor(config: unknown) {
+      adapterMocks.anthropicCtor(config);
+    }
   },
+}));
+
+// codex 어댑터/앱서버/MCP 배관도 목으로 대체(electron·바이너리·소켓 의존 차단).
+const codexMocks = vi.hoisted(() => ({
+  ctor: vi.fn(),
+  loginStart: vi.fn(),
+  authStatus: vi.fn(),
+  logout: vi.fn(),
+  usage: vi.fn(),
+  registerMcp: vi.fn(),
+  disposeMcp: vi.fn(),
+}));
+vi.mock("./ai/provider-codex", () => ({
+  CodexAdapter: class {
+    id = "codex" as const;
+    chat = adapterMocks.chat;
+    testConnection = adapterMocks.testConnection;
+    constructor(config: unknown, mcp?: unknown) {
+      codexMocks.ctor(config, mcp);
+    }
+  },
+}));
+vi.mock("./ai/codex-app-server", () => ({
+  getCodexAppServer: () => ({}),
+  codexLoginStart: codexMocks.loginStart,
+  codexAuthStatus: codexMocks.authStatus,
+  codexLogout: codexMocks.logout,
+  codexUsage: codexMocks.usage,
+}));
+vi.mock("./ai/codex-mcp-server", () => ({
+  registerCodexMcpTools: codexMocks.registerMcp,
 }));
 
 // 도구 registry 도 목으로 대체(네트워크 없는 도구 실행). web_search executor 만 노출.
@@ -28,6 +71,7 @@ const toolsMock = vi.hoisted(() => ({
   executor: vi.fn(),
   runExecutor: vi.fn(),
   inspectExecutor: vi.fn(),
+  terminalOutputExecutor: vi.fn(),
 }));
 vi.mock("./ai/tools/registry", () => ({
   buildToolRegistry: () => ({
@@ -36,12 +80,14 @@ vi.mock("./ai/tools/registry", () => ({
       ["web_search", toolsMock.executor],
       ["run_in_terminal", toolsMock.runExecutor],
       ["inspect_command", toolsMock.inspectExecutor],
+      ["read_terminal_output", toolsMock.terminalOutputExecutor],
     ]),
   }),
 }));
 
 import { AiService, trimMessages } from "./ai-service";
 import type { AiChatEvent, AiChatMessage } from "../shared/ai";
+import { mergeTextAttachments } from "../shared/ai";
 
 function makeSecretStore() {
   const store = new Map<string, string>();
@@ -77,7 +123,12 @@ function collectChat(service: AiService, requestId: string, request: unknown): P
 describe("AiService key management", () => {
   beforeEach(() => {
     adapterMocks.chat.mockReset();
+    adapterMocks.getModelContextTokens.mockReset();
     adapterMocks.testConnection.mockReset();
+    codexMocks.ctor.mockReset();
+    codexMocks.registerMcp.mockReset();
+    codexMocks.disposeMcp.mockReset();
+    codexMocks.usage.mockReset();
   });
 
   it("saves the api key under ai:apiKey:<provider> and reports status", async () => {
@@ -107,7 +158,12 @@ describe("AiService key management", () => {
 describe("AiService.startChat", () => {
   beforeEach(() => {
     adapterMocks.chat.mockReset();
+    adapterMocks.getModelContextTokens.mockReset();
     adapterMocks.testConnection.mockReset();
+    codexMocks.ctor.mockReset();
+    codexMocks.registerMcp.mockReset();
+    codexMocks.disposeMcp.mockReset();
+    codexMocks.usage.mockReset();
   });
 
   it("emits delta then done on success", async () => {
@@ -128,6 +184,107 @@ describe("AiService.startChat", () => {
     expect(events.map((event) => event.type)).toEqual(["delta", "done"]);
   });
 
+  it("codex chats without an api key/model, bridges tools via MCP instead of function calling", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    codexMocks.registerMcp.mockResolvedValue({
+      url: "http://127.0.0.1:9/mcp",
+      token: "tok",
+      dispose: codexMocks.disposeMcp,
+    });
+    // 도구가 있으면 요청 페이로드가 아니라 MCP 등록으로 흘러야 한다.
+    toolsMock.defs = [{ name: "web_search" }];
+    try {
+      const service = new AiService(
+        makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+        makeSecretStore() as never, // 키 저장 안 됨 — codex 는 키 불필요
+      );
+      const events = await collectChat(service, "r-codex", {
+        model: "",
+        messages: [{ role: "user", content: "hi" }],
+      });
+      expect(events.at(-1)).toMatchObject({ type: "done" });
+      // registry 의 defs 그대로 MCP 에 등록되고, 어댑터에 엔드포인트가 주입된다.
+      expect(codexMocks.registerMcp).toHaveBeenCalledWith(
+        expect.objectContaining({ defs: toolsMock.defs }),
+      );
+      expect(codexMocks.ctor).toHaveBeenCalledWith(
+        expect.objectContaining({ providerId: "codex", model: "" }),
+        expect.objectContaining({ url: "http://127.0.0.1:9/mcp", token: "tok" }),
+      );
+      // 요청 페이로드에는 function-calling 도구가 실리지 않는다.
+      expect(adapterMocks.chat.mock.calls[0][0].tools).toBeUndefined();
+      // 채팅 종료 후 MCP 등록이 해제된다.
+      expect(codexMocks.disposeMcp).toHaveBeenCalledTimes(1);
+    } finally {
+      toolsMock.defs = [];
+    }
+  });
+
+  it("codex MCP invoke routes through the shared tool executor (events + result)", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    let binding: { invoke: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }> } | null =
+      null;
+    codexMocks.registerMcp.mockImplementation(async (input) => {
+      binding = input;
+      return { url: "http://127.0.0.1:9/mcp", token: "tok", dispose: codexMocks.disposeMcp };
+    });
+    toolsMock.executor.mockResolvedValue("검색 결과 요약");
+    toolsMock.defs = [{ name: "web_search" }];
+    try {
+      const service = new AiService(
+        makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+        makeSecretStore() as never,
+      );
+      await collectChat(service, "r-codex-invoke", {
+        model: "",
+        messages: [{ role: "user", content: "hi" }],
+      });
+      expect(binding).not.toBeNull();
+
+      const ok = await binding!.invoke("web_search", { query: "dolgate" });
+      expect(toolsMock.executor).toHaveBeenCalledWith(
+        { query: "dolgate" },
+        expect.objectContaining({ signal: expect.anything() }),
+      );
+      expect(ok).toEqual({ content: "검색 결과 요약", isError: undefined });
+
+      const unknown = await binding!.invoke("nope", {});
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content).toContain("unknown tool");
+    } finally {
+      toolsMock.defs = [];
+      toolsMock.executor.mockReset();
+    }
+  });
+
+  it("delegates codex auth methods to the app-server helpers", async () => {
+    codexMocks.loginStart.mockResolvedValue({ loginId: "L1", authUrl: "https://auth" });
+    codexMocks.authStatus.mockResolvedValue({ authenticated: true });
+    codexMocks.logout.mockResolvedValue(undefined);
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+      makeSecretStore() as never,
+    );
+    await expect(service.codexLoginStart()).resolves.toEqual({ loginId: "L1", authUrl: "https://auth" });
+    await expect(service.codexAuthStatus()).resolves.toEqual({ authenticated: true });
+    await service.codexLogout();
+    expect(codexMocks.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("delegates codexUsage to the app-server helper", async () => {
+    codexMocks.usage.mockResolvedValue({
+      planType: "plus",
+      primary: { usedPercent: 3, windowMinutes: 300, resetsAt: 1783450934 },
+      secondary: null,
+    });
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+      makeSecretStore() as never,
+    );
+    await expect(service.codexUsage()).resolves.toMatchObject({ planType: "plus" });
+    expect(codexMocks.usage).toHaveBeenCalledTimes(1);
+  });
+
   it("emits an error when the assistant is disabled", async () => {
     const service = new AiService(
       makeSettings({ enabled: false, providerId: "openai-compat", model: "m" }) as never,
@@ -136,6 +293,128 @@ describe("AiService.startChat", () => {
     const events = await collectChat(service, "r2", { model: "m", messages: [] });
     expect(events[0]).toMatchObject({ type: "error", error: { reason: "disabled" } });
     expect(adapterMocks.chat).not.toHaveBeenCalled();
+  });
+
+  it("prefers the adapter-reported context window over the stored setting (anthropic auto)", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    // 저장된 설정(3000)으로는 잘릴 히스토리가, 어댑터 조회값(60k)으로는 유지되어야 한다.
+    adapterMocks.getModelContextTokens.mockResolvedValue(60_000);
+    const secretStore = makeSecretStore();
+    await secretStore.save("ai:apiKey:anthropic", "k");
+    const service = new AiService(
+      makeSettings({
+        enabled: true,
+        providerId: "anthropic",
+        model: "claude-x",
+        contextTokens: 3000,
+      }) as never,
+      secretStore as never,
+    );
+    const longHistory = "x".repeat(20_000); // ≈5k tokens — 3000 예산에선 탈락, 60k 예산에선 유지
+    await collectChat(service, "r-auto", {
+      model: "claude-x",
+      messages: [
+        { role: "system", content: "s" },
+        { role: "user", content: longHistory },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "recent" },
+      ],
+    });
+
+    expect(adapterMocks.getModelContextTokens).toHaveBeenCalledWith(
+      "claude-x",
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    const sent = adapterMocks.chat.mock.calls[0][0].messages as Array<{ content: string }>;
+    expect(sent.some((message) => message.content === longHistory)).toBe(true);
+  });
+
+  it("does not leak the openai-compat baseUrl into anthropic requests", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    const secretStore = makeSecretStore();
+    await secretStore.save("ai:apiKey:anthropic", "k");
+    // openai-compat 시절 저장된 잔존 baseUrl(예: Ollama) — anthropic 은 무시해야 한다.
+    const service = new AiService(
+      makeSettings({
+        enabled: true,
+        providerId: "anthropic",
+        baseUrl: "http://localhost:11434/v1",
+        model: "claude-x",
+      }) as never,
+      secretStore as never,
+    );
+    await collectChat(service, "r-base", {
+      model: "claude-x",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(adapterMocks.anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: undefined }),
+    );
+
+    // testConnection 도 같은 규칙(패널이 provider 무관하게 draft.baseUrl 을 보내는 경우 방어).
+    adapterMocks.testConnection.mockResolvedValue({ ok: true, message: "ok" });
+    await service.testConnection({
+      providerId: "anthropic",
+      baseUrl: "http://localhost:11434/v1",
+      model: "claude-x",
+    });
+    expect(adapterMocks.anthropicCtor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ baseUrl: undefined }),
+    );
+  });
+
+  it("keeps the configured baseUrl for openai-compat", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    const secretStore = makeSecretStore();
+    await secretStore.save("ai:apiKey:openai-compat", "k");
+    const service = new AiService(
+      makeSettings({
+        enabled: true,
+        providerId: "openai-compat",
+        baseUrl: "http://localhost:11434/v1",
+        model: "llama3.1",
+      }) as never,
+      secretStore as never,
+    );
+    await collectChat(service, "r-base-oai", {
+      model: "llama3.1",
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(adapterMocks.openaiCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: "http://localhost:11434/v1" }),
+    );
+  });
+
+  it("falls back to the stored context setting when the adapter lookup returns null", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    adapterMocks.getModelContextTokens.mockResolvedValue(null);
+    const secretStore = makeSecretStore();
+    await secretStore.save("ai:apiKey:anthropic", "k");
+    const service = new AiService(
+      makeSettings({
+        enabled: true,
+        providerId: "anthropic",
+        model: "claude-x",
+        contextTokens: 3000,
+      }) as never,
+      secretStore as never,
+    );
+    const longHistory = "x".repeat(20_000);
+    await collectChat(service, "r-fallback", {
+      model: "claude-x",
+      messages: [
+        { role: "system", content: "s" },
+        { role: "user", content: longHistory },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "recent" },
+      ],
+    });
+
+    const sent = adapterMocks.chat.mock.calls[0][0].messages as Array<{ content: string }>;
+    expect(sent.some((message) => message.content === longHistory)).toBe(false);
+    expect(sent.at(-1)).toMatchObject({ role: "user", content: "recent" });
   });
 
   it("emits an aborted done when cancelled", async () => {
@@ -168,8 +447,10 @@ describe("AiService.startChat", () => {
 describe("AiService agent loop", () => {
   beforeEach(() => {
     adapterMocks.chat.mockReset();
+    adapterMocks.getModelContextTokens.mockReset();
     toolsMock.defs = [];
     toolsMock.executor.mockReset();
+    toolsMock.terminalOutputExecutor.mockReset();
   });
 
   const AGENT_SETTINGS = {
@@ -215,6 +496,36 @@ describe("AiService agent loop", () => {
     const events = await collectChat(service, "r2", { model: "m", messages: [] });
     expect(events.at(-1)).toMatchObject({ type: "error" });
   });
+
+  it("labels read_terminal_output ranges clearly in tool events", async () => {
+    toolsMock.defs = [{ name: "read_terminal_output", parameters: { type: "object", properties: {} } }];
+    toolsMock.terminalOutputExecutor.mockResolvedValue("older output");
+    adapterMocks.chat
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool_calls",
+        toolCalls: [
+          {
+            id: "scrollback-1",
+            name: "read_terminal_output",
+            argsJson: '{"beforeRecentLines":100,"lines":200}',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ text: "done", finishReason: "stop" });
+    const service = new AiService(makeSettings(AGENT_SETTINGS) as never, makeSecretStore() as never);
+    const events = await collectChat(service, "r-terminal", { model: "m", messages: [] });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "tool",
+        tool: expect.objectContaining({
+          name: "read_terminal_output",
+          label: "터미널 출력 읽기: 101~300줄 전",
+        }),
+      }),
+    );
+    expect(toolsMock.terminalOutputExecutor).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("AiService run_in_terminal approval gate", () => {
@@ -222,6 +533,7 @@ describe("AiService run_in_terminal approval gate", () => {
 
   beforeEach(() => {
     adapterMocks.chat.mockReset();
+    adapterMocks.getModelContextTokens.mockReset();
     toolsMock.defs = [{ name: "run_in_terminal", parameters: { type: "object", properties: {} } }];
     toolsMock.runExecutor.mockReset();
     toolsMock.runExecutor.mockResolvedValue("typed into terminal");
@@ -322,16 +634,14 @@ describe("AiService run_in_terminal approval gate", () => {
     expect(toolsMock.runExecutor).not.toHaveBeenCalled();
   });
 
-  it("audits a rejected command via the injected auditLog", async () => {
-    const auditLog = vi.fn();
-    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never, {
-      auditLog,
-    });
-    await drive(service, "r6", "systemctl restart nginx", {
+  it("does not write rejected commands to the global activity log", async () => {
+    const service = new AiService(makeSettings(GATE_SETTINGS) as never, makeSecretStore() as never);
+    const events = await drive(service, "r6", "systemctl restart nginx", {
       sessionId: "s1",
       onApproval: (toolCallId) => service.resolveApproval({ requestId: "r6", toolCallId, approved: false }),
     });
-    expect(auditLog).toHaveBeenCalledWith("warn", "audit", expect.stringContaining("거부"), expect.anything());
+    expect(events.some((event) => event.type === "approval-required")).toBe(true);
+    expect(toolsMock.runExecutor).not.toHaveBeenCalled();
   });
 });
 
@@ -340,6 +650,7 @@ describe("AiService inspect_command (read-only, hidden)", () => {
 
   beforeEach(() => {
     adapterMocks.chat.mockReset();
+    adapterMocks.getModelContextTokens.mockReset();
     toolsMock.defs = [{ name: "inspect_command", parameters: { type: "object", properties: {} } }];
     toolsMock.inspectExecutor.mockReset();
     toolsMock.inspectExecutor.mockResolvedValue("$ df -h\nexit code: 0");
@@ -448,6 +759,56 @@ describe("trimMessages (context window budgeting)", () => {
     ];
     expect(trimMessages(messages, 100000)).toEqual(messages);
   });
+
+  it("counts image attachments toward history cost so image turns drop earlier", () => {
+    const imageTurn: AiChatMessage = {
+      role: "user",
+      content: "짧은 질문",
+      attachments: [{ kind: "image", mediaType: "image/png", dataBase64: "aGk=" }],
+    };
+    const textTwin: AiChatMessage = { role: "user", content: "짧은 질문" };
+    const tail: AiChatMessage = { role: "user", content: "recent" };
+    // 텍스트만 있으면 유지되는 예산에서, 같은 내용 + 이미지(≈1600 tokens)는 잘려야 한다.
+    const budget = 200;
+    expect(trimMessages([sys, textTwin, tail], budget)).toHaveLength(3);
+    const trimmed = trimMessages([sys, imageTurn, tail], budget);
+    expect(trimmed.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(trimmed.at(-1)).toEqual(tail);
+  });
+
+  it("counts text attachments toward history cost via mergeTextAttachments", () => {
+    const bigTextAttachment: AiChatMessage = {
+      role: "user",
+      content: "질문",
+      attachments: [{ kind: "text", name: "big.log", text: "x".repeat(4000) }],
+    };
+    const tail: AiChatMessage = { role: "user", content: "recent" };
+    const trimmed = trimMessages([sys, bigTextAttachment, tail], 100);
+    expect(trimmed.map((m) => m.role)).toEqual(["system", "user"]);
+    expect(trimmed.at(-1)).toEqual(tail);
+  });
+});
+
+describe("mergeTextAttachments", () => {
+  it("returns content unchanged without text attachments (images ignored)", () => {
+    expect(mergeTextAttachments("hello", undefined)).toBe("hello");
+    expect(
+      mergeTextAttachments("hello", [{ kind: "image", mediaType: "image/png", dataBase64: "aGk=" }]),
+    ).toBe("hello");
+  });
+
+  it("appends text attachments as labeled fenced blocks", () => {
+    const merged = mergeTextAttachments("질문", [
+      { kind: "text", name: "a.log", text: "l1" },
+      { kind: "text", name: "b.conf", text: "l2" },
+    ]);
+    expect(merged).toBe("질문\n\n[첨부 파일: a.log]\n```\nl1\n```\n\n[첨부 파일: b.conf]\n```\nl2\n```");
+  });
+
+  it("omits the leading separator when content is empty", () => {
+    const merged = mergeTextAttachments("", [{ kind: "text", name: "a.log", text: "l1" }]);
+    expect(merged).toBe("[첨부 파일: a.log]\n```\nl1\n```");
+  });
 });
 
 describe("ai settings helpers", () => {
@@ -459,9 +820,15 @@ describe("ai settings helpers", () => {
   });
 
   it("normalizeAiBaseUrl trims trailing slash and rejects non-http", () => {
-    expect(normalizeAiBaseUrl("https://api.openai.com/v1/")).toBe("https://api.openai.com/v1");
+    expect(normalizeAiBaseUrl("http://localhost:11434/v1/")).toBe("http://localhost:11434/v1");
     expect(normalizeAiBaseUrl("ftp://x")).toBeUndefined();
     expect(normalizeAiBaseUrl("   ")).toBeUndefined();
     expect(normalizeAiBaseUrl(undefined)).toBeUndefined();
+  });
+
+  it("normalizeAiBaseUrl collapses the default host to undefined (unset semantics)", () => {
+    // 과거 기본값('https://api.openai.com/v1')으로 저장된 설정을 미설정으로 마이그레이션한다.
+    expect(normalizeAiBaseUrl("https://api.openai.com/v1")).toBeUndefined();
+    expect(normalizeAiBaseUrl("https://api.openai.com/v1/")).toBeUndefined();
   });
 });

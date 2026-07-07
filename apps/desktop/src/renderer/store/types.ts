@@ -45,13 +45,18 @@ import type {
   SecretMetadataRecord,
   SshKeyGenerateInput,
   AiApiKeyStatus,
+  AiAttachment,
   AiChatEvent,
   AiChatMessage,
   AiErrorPayload,
   AiProviderId,
   AiSearchBackend,
+  AiTerminalSnapshotRef,
   AiTestConnectionInput,
   AiTestResult,
+  CodexAuthStatus,
+  CodexLoginStart,
+  CodexUsage,
   SshKeyInstallInput,
   SshKeyInstallResult,
   SshKeyMaterialResult,
@@ -921,6 +926,10 @@ interface AppStateParts {
   getAiSearchKeyStatus: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
   setAiSearchKey: (backend: AiSearchBackend, key: string) => Promise<AiApiKeyStatus>;
   clearAiSearchKey: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
+  codexLoginStart: () => Promise<CodexLoginStart>;
+  getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+  codexLogout: () => Promise<void>;
+  getCodexUsage: () => Promise<CodexUsage>;
   openExternalUrl: (url: string) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
@@ -1271,6 +1280,10 @@ export type SettingsSlice = Pick<
   | "getAiSearchKeyStatus"
   | "setAiSearchKey"
   | "clearAiSearchKey"
+  | "codexLoginStart"
+  | "getCodexAuthStatus"
+  | "codexLogout"
+  | "getCodexUsage"
   | "openExternalUrl"
 >;
 
@@ -1308,13 +1321,17 @@ export interface AiToolRun {
 // 표시용 메시지 = wire 메시지 + (assistant 턴이 사용한 도구 실행 목록).
 export interface AiDisplayMessage extends AiChatMessage {
   toolRuns?: AiToolRun[];
+  // 스트리밍 중 이미 화면에 표시했던 중간 생성 텍스트. 최종 답변 아래 접힌 상태로 보존한다.
+  generationTrace?: string;
 }
 
 export interface AiConversation {
   open: boolean;
   messages: AiDisplayMessage[];
   requestId: string | null;
+  terminalSnapshotId: string | null;
   streamingText: string;
+  generationTrace: string;
   streaming: boolean;
   error: AiErrorPayload | null;
   // 현재 진행 중인 턴의 도구 실행들(스트리밍 중 펼쳐서 표시). done 시 마지막 메시지에 옮겨 접는다.
@@ -1328,8 +1345,15 @@ export interface AiChatSlice {
   aiPanelWidth: number;
   toggleAiPanel: (sessionId: string) => void;
   setAiPanelWidth: (width: number) => void;
-  // context = 전송 시점 터미널 최근 출력(redaction됨). 표시 메시지엔 안 들어가고 요청에만 실린다.
-  sendAiMessage: (sessionId: string, text: string, context?: string) => Promise<void>;
+  // context = 전송 시점 세션 컨텍스트(호스트 요약 + 터미널 최근 출력, redaction됨).
+  // 표시 메시지엔 안 들어가고 요청에만 실린다. attachments 는 표시 메시지와 요청 양쪽에 실린다.
+  sendAiMessage: (
+    sessionId: string,
+    text: string,
+    context?: string,
+    terminalSnapshot?: AiTerminalSnapshotRef,
+    attachments?: AiAttachment[],
+  ) => Promise<void>;
   handleAiChatEvent: (event: AiChatEvent) => void;
   // run_command 승인/거부. remember=true 면 이 세션에서 이후 변경 명령을 자동 승인.
   respondAiApproval: (

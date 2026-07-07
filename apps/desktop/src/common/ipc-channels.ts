@@ -181,7 +181,17 @@ export const ipcChannels = {
     // run_command 변경 명령 승인/거부(renderer→main).
     respondApproval: 'ai:respond-approval',
     // main → renderer 스트리밍 이벤트(delta/tool/approval-required/done/error). requestId 로 상관한다.
-    chatEvent: 'ai:chat-event'
+    chatEvent: 'ai:chat-event',
+    // main → renderer: 현재 AI 요청에 고정된 터미널 스냅샷 범위를 읽어 달라는 client-side tool 요청.
+    terminalOutputRequest: 'ai:terminal-output-request',
+    // renderer → main: terminalOutputRequest 응답.
+    terminalOutputResponse: 'ai:terminal-output-response',
+    // Codex(ChatGPT 계정) 인증 — 로그인 URL 발급 / 상태 조회 / 로그아웃.
+    codexLoginStart: 'ai:codex-login-start',
+    codexAuthStatus: 'ai:codex-auth-status',
+    codexLogout: 'ai:codex-logout',
+    // Codex 요금제 사용량(rate limit) 조회.
+    codexUsage: 'ai:codex-usage'
   },
   notifications: {
     commandFinished: 'notifications:command-finished'

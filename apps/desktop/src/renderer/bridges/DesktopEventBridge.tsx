@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent } from 'react';
 import type { AiChatEvent, AuthState } from '@shared';
+import { readAiTerminalSnapshot } from '../lib/ai-terminal-snapshot';
 import { desktopApi } from '../store/appStore';
 
 interface DesktopEventBridgeProps {
@@ -86,6 +87,13 @@ export function DesktopEventBridge({
             handleAiChatEvent(event);
           })
         : () => undefined;
+    const offAiTerminalOutput =
+      typeof desktopApi.ai?.onTerminalOutputRequest === 'function' &&
+      typeof desktopApi.ai?.respondTerminalOutput === 'function'
+        ? desktopApi.ai.onTerminalOutputRequest((request) => {
+            void desktopApi.ai.respondTerminalOutput(readAiTerminalSnapshot(request));
+          })
+        : () => undefined;
 
     return () => {
       offCore();
@@ -98,6 +106,7 @@ export function DesktopEventBridge({
       offSessionShareChat();
       offAuth();
       offAiChat();
+      offAiTerminalOutput();
     };
   }, []);
 

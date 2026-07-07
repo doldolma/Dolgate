@@ -1,15 +1,17 @@
 # Dolgate
 
-Dolgate는 호스트·세션·스니펫을 데스크톱과 모바일이 동기화하며 쓰는 SSH 작업 환경입니다.
-AWS SSM으로 EC2·ECS에 SSH 포트 없이 접속하고, 동기화 백엔드까지 직접 호스팅할 수 있으며, 실행 중인 세션은 브라우저 링크 하나로 공유할 수 있습니다.
+Dolgate는 macOS, Windows, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다.
+호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
 
 ![Dolgate 홈 화면](./docs/hosts-workspace.png)
 
 ### 대표 기능
 
-- **AWS SSM 네이티브 통합** — EC2 import, SSM 기반 shell·SFTP·포트 포워딩, ECS Exec 셸·터널링까지. 인스턴스에 SSH 인바운드 포트를 열지 않고, 앱에 내장된 SSM 데이터 채널로 접속합니다.
-- **동기화를 self-host로** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다. 로그인·데이터를 외부 클라우드에 맡기지 않고 자체 서버에서 운영할 수 있습니다.
-- **원격 값까지 읽는 명령어 자동완성** — Fig 스펙 옵션·서브커맨드에 더해, 원격 호스트에서 직접 값을 가져오는 동적 추천(컨테이너 이름·git 브랜치 등)과 경로·스니펫까지 추천합니다.
+- **SSH/SSM 워크스페이스** — 일반 SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서 다룹니다. SSH Agent 인증과 Agent Forwarding도 지원합니다.
+- **tmux control mode** — 원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로 보여주고 detach된 세션에 다시 붙습니다.
+- **AI 어시스턴트** — `Cmd/Ctrl+I`로 열어 현재 SSH 세션의 호스트 정보와 최근 터미널 출력을 바탕으로 질문하고, 승인된 도구로 조회·실행을 도와줍니다.
+- **세션 녹화 및 재생** — 종료된 터미널 세션을 로컬에만 저장하고, 타임라인으로 다시 볼 수 있습니다.
+- **동기화를 self-host로** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다.
 - **세션 공유 & 협업** — 실행 중인 세션을 브라우저 viewer 링크로 공유하고 실시간 채팅으로 함께 봅니다.
 
 ## 구성
@@ -29,8 +31,15 @@ AWS SSM으로 EC2·ECS에 SSH 포트 없이 접속하고, 동기화 백엔드까
 - mosh 연결 (옵션) — UDP 기반이라 네트워크 전환·절전/복귀엔 강하지만, 셸 통합(자동완성·명령 완료 알림)은 비활성화됩니다 (원격 `mosh-server` 필요)
 - 명령어 자동완성 — Fig 스펙 + 원격 generator 동적 값 + 파일/폴더 경로 + 스니펫
 - 명령어 스니펫 — `{{변수}}` 치환 지원
-- 세션 녹화 및 재생
+- 세션 녹화 및 재생 — 로컬 저장, 서버 동기화 없음
 - 명령 완료 OS 알림 — 오래 걸리거나 실패한 명령 종료 시 (셸 통합 기반; 기준 시간·실패 시·비활성 시 옵션)
+
+**AI 어시스턴트**
+
+- 우측 AI 패널 — AI 버튼 또는 `Cmd/Ctrl+I`로 열고, 현재 세션의 호스트 정보와 최근 터미널 출력 100줄을 컨텍스트로 사용
+- Provider — OpenAI-compatible API(OpenAI·Ollama·LM Studio·vLLM 등), Anthropic Claude API, Codex(ChatGPT 계정 로그인)
+- 도구 — 웹 검색/URL 읽기, 숨은 SSH exec 조회, 보이는 터미널 실행, 질문 시점 기준 이전 터미널 scrollback 읽기
+- 안전장치 — 시크릿 redaction, 변경 명령 승인, 정지 버튼
 
 **파일 전송**
 
@@ -40,12 +49,14 @@ AWS SSM으로 EC2·ECS에 SSH 포트 없이 접속하고, 동기화 백엔드까
 
 **연결 & 네트워크**
 
+- SSH Agent 인증 — 로컬 `ssh-agent`, 1Password, `ssh-add`에 등록된 키로 연결
+- SSH Agent Forwarding — 신뢰하는 호스트에서 원격 hop에 로컬 키를 전달
 - 점프 호스트(베스천) 경유 연결 — 저장된 SSH 호스트를 ProxyJump로 지정
 - Local / Remote / Dynamic 포트 포워딩
 
 **AWS & 컨테이너**
 
-- AWS EC2 import, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
+- AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
 - Docker / Podman 컨테이너 모니터링·로그·메트릭·셸·터널링
 
 **공유 & 가져오기**
@@ -129,10 +140,10 @@ image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 
 ### AWS / SSM 사용 전 확인
 
-세션(SSM shell · AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널링)은 내장 SSM 데이터 채널로, 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)은 AWS SDK로 동작합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 그대로 사용할 수 있습니다.
+EC2 터미널은 SSH-over-SSM을 먼저 시도합니다. 공개키 주입이나 SSH 준비 단계에서 일반 SSH 연결을 열 수 없으면 SSM shell로 fallback할 수 있고, AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널링은 내장 SSM 데이터 채널로 동작합니다. 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)은 AWS SDK로 처리하며, 기존 로컬 `~/.aws` 프로필은 가져오기로 그대로 사용할 수 있습니다.
 
 대상 EC2는 **SSM managed instance** 상태여야 하고, AWS Import는 Linux/UNIX 인스턴스를 기준으로 동작합니다.
-필요한 IAM 권한(사용자/역할 · EC2 인스턴스 프로파일 · ECS task role)과 정책 JSON 예시는 [AWS / SSM 설정 가이드](./docs/aws.md)를 참고하세요.
+SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 필요합니다. 필요한 IAM 권한(사용자/역할 · EC2 인스턴스 프로파일 · ECS task role)과 정책 JSON 예시는 [AWS / SSM 설정 가이드](./docs/aws.md)를 참고하세요.
 
 ### 그 외
 
@@ -145,6 +156,7 @@ image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 
 - [Desktop 문서](./docs/desktop.md)
 - [Mobile 문서](./docs/mobile.md)
+- [AI 어시스턴트](./docs/ai-assistant-design.md)
 - [AWS / SSM 설정 가이드](./docs/aws.md)
 - [기능 흐름](./docs/feature-flows.md)
 - [아키텍처](./docs/architecture.md)

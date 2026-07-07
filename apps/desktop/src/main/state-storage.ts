@@ -192,7 +192,9 @@ function normalizeAiSettings(value: unknown): AiSettings | null {
     return null;
   }
   const providerId: AiProviderId =
-    value.providerId === 'anthropic' ? 'anthropic' : 'openai-compat';
+    value.providerId === 'anthropic' || value.providerId === 'codex'
+      ? value.providerId
+      : 'openai-compat';
   return {
     enabled: typeof value.enabled === 'boolean' ? value.enabled : false,
     providerId,

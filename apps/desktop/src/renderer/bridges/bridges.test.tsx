@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     sessionShare: null as ((event: unknown) => void) | null,
     sessionShareChat: null as ((event: unknown) => void) | null,
     aiChat: null as ((event: unknown) => void) | null,
+    aiTerminalOutput: null as ((event: unknown) => void) | null,
     auth: null as ((state: unknown) => void) | null,
     updater: null as ((event: { state: unknown }) => void) | null,
     windowState: null as ((state: unknown) => void) | null,
@@ -72,6 +73,11 @@ const mocks = vi.hoisted(() => {
           listeners.aiChat = listener;
           return vi.fn();
         }),
+        onTerminalOutputRequest: vi.fn((listener: (event: unknown) => void) => {
+          listeners.aiTerminalOutput = listener;
+          return vi.fn();
+        }),
+        respondTerminalOutput: vi.fn().mockResolvedValue(undefined),
       },
       auth: {
         onEvent: vi.fn((listener: (state: unknown) => void) => {
@@ -125,6 +131,7 @@ describe('renderer bridges', () => {
     mocks.listeners.sessionShare = null;
     mocks.listeners.sessionShareChat = null;
     mocks.listeners.aiChat = null;
+    mocks.listeners.aiTerminalOutput = null;
     mocks.listeners.auth = null;
     mocks.listeners.updater = null;
     mocks.listeners.windowState = null;
@@ -177,6 +184,41 @@ describe('renderer bridges', () => {
     expect(firstAuth).not.toHaveBeenCalled();
     expect(latestCore).toHaveBeenCalledWith({ type: 'connected' });
     expect(latestAuth).toHaveBeenCalledWith({ status: 'authenticated' });
+  });
+
+  it('responds to terminal output client-tool requests', async () => {
+    const stableFn = vi.fn();
+    render(
+      <DesktopEventBridge
+        onCoreEvent={stableFn}
+        onSftpConnectionProgress={stableFn}
+        onContainerConnectionProgress={stableFn}
+        onActivityLogsChanged={stableFn}
+        onTransferEvent={stableFn}
+        onPortForwardEvent={stableFn}
+        onSessionShareEvent={stableFn}
+        onSessionShareChatEvent={stableFn}
+        onAuthEvent={stableFn}
+        onAiChatEvent={stableFn}
+      />,
+    );
+
+    mocks.listeners.aiTerminalOutput?.({
+      requestId: 'request-1',
+      clientRequestId: 'client-1',
+      snapshotId: 'missing-snapshot',
+      beforeRecentLines: 100,
+      lines: 200,
+    });
+
+    await waitFor(() => {
+      expect(mocks.desktopApi.ai.respondTerminalOutput).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientRequestId: 'client-1',
+          error: expect.stringContaining('no longer available'),
+        }),
+      );
+    });
   });
 
   it('does not reload settings or re-subscribe state bridges on rerender', async () => {

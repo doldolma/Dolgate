@@ -362,7 +362,7 @@ describe('SettingsPanel', () => {
   it('renders keychain entries inside the secrets section', async () => {
     const { onEditSecret, onRemoveSecret } = renderSettingsPanel({ activeSection: 'secrets' });
 
-    expect(screen.getByRole('heading', { name: 'Saved Credentials' })).toBeInTheDocument();
+    expect(screen.getByText(/호스트가 사용하는 비밀번호/)).toBeInTheDocument();
     expect(screen.queryByText('local_keychain')).not.toBeInTheDocument();
     expect(screen.getByText('Password')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '비밀번호 복사' }));

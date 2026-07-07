@@ -9,6 +9,7 @@ import type {
   AiToolDef,
   AiTestResult,
 } from "../../shared/ai";
+import { mergeTextAttachments } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
 import { normalizeAiError } from "./provider-errors";
 
@@ -16,11 +17,19 @@ import { normalizeAiError } from "./provider-errors";
 // 4096 = 현재 Claude 계열이 공통으로 허용하는 안전한 출력 상한(1024 는 답이 잘렸음).
 const DEFAULT_ANTHROPIC_MAX_TOKENS = 4096;
 
+// Models API 조회가 채팅 시작을 붙잡지 않도록 하는 상한. 초과하면 포기하고 폴백(설정/기본값).
+const MODEL_LOOKUP_TIMEOUT_MS = 3_000;
+
+// 모델별 컨텍스트 창 캐시 — 어댑터 인스턴스는 채팅마다 새로 만들어지므로 모듈 레벨에 둔다.
+// 값은 모델의 고정 속성이라 프로세스 수명 동안 캐시해도 안전하다.
+const modelContextTokensCache = new Map<string, number>();
+
 export class AnthropicAdapter implements ProviderAdapter {
   readonly id = "anthropic" as const;
   private readonly client: Anthropic;
   private readonly model: string;
   private readonly temperature?: number;
+  private readonly baseUrl: string;
 
   constructor(config: ProviderConfig) {
     this.client = new Anthropic({
@@ -30,6 +39,36 @@ export class AnthropicAdapter implements ProviderAdapter {
     });
     this.model = config.model;
     this.temperature = config.temperature;
+    this.baseUrl = config.baseUrl ?? "";
+  }
+
+  // 모델의 컨텍스트 창을 Models API(max_input_tokens)에서 조회한다. 사용자가 설정할 필요가
+  // 없도록 자동화하는 용도라 실패(네트워크/미지원 게이트웨이/구버전 API)는 null 로 삼킨다.
+  async getModelContextTokens(model: string, opts: { signal: AbortSignal }): Promise<number | null> {
+    const cacheKey = `${this.baseUrl}|${model}`;
+    const cached = modelContextTokensCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    // 채팅 signal + 자체 타임아웃 합성(AbortSignal.any 는 Node 버전에 따라 없을 수 있어 수동 합성).
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    opts.signal.addEventListener("abort", onAbort, { once: true });
+    const timeoutId = setTimeout(() => controller.abort(), MODEL_LOOKUP_TIMEOUT_MS);
+    try {
+      const info = await this.client.models.retrieve(model, undefined, { signal: controller.signal });
+      const tokens = info?.max_input_tokens;
+      if (typeof tokens === "number" && tokens > 0) {
+        modelContextTokensCache.set(cacheKey, tokens);
+        return tokens;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+      opts.signal.removeEventListener("abort", onAbort);
+    }
   }
 
   async testConnection(opts: { signal: AbortSignal }): Promise<AiTestResult> {
@@ -117,6 +156,32 @@ function safeParseJson(json: string): unknown {
   }
 }
 
+// Anthropic Base64ImageSource.media_type 은 closed union — 그 외 타입은 이미지 블록으로 못 보낸다.
+const ANTHROPIC_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+// user 턴의 첨부를 content 블록 배열로. 이미지 블록 먼저, 병합 텍스트 블록 하나가 뒤따른다.
+// 빈 text 블록은 Anthropic 이 400 으로 거부하므로 텍스트가 비면 생략. 블록이 하나도 없으면 null(평문 폴백).
+function toUserContentBlocks(message: AiChatMessage): Anthropic.ContentBlockParam[] | null {
+  const blocks: Anthropic.ContentBlockParam[] = [];
+  for (const attachment of message.attachments ?? []) {
+    if (attachment.kind === "image" && ANTHROPIC_IMAGE_MEDIA_TYPES.has(attachment.mediaType)) {
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: attachment.mediaType as Anthropic.Base64ImageSource["media_type"],
+          data: attachment.dataBase64,
+        },
+      });
+    }
+  }
+  const text = mergeTextAttachments(message.content, message.attachments);
+  if (text) {
+    blocks.push({ type: "text", text });
+  }
+  return blocks.length > 0 ? blocks : null;
+}
+
 // 정규화된 메시지를 Anthropic 포맷으로. system 은 top-level 로 분리, tool 결과/호출은 content 블록으로.
 function toAnthropicMessages(messages: AiChatMessage[]): {
   system: string;
@@ -151,6 +216,14 @@ function toAnthropicMessages(messages: AiChatMessage[]): {
       }
       out.push({ role: "assistant", content: blocks });
       continue;
+    }
+    if (message.role === "user" && message.attachments?.length) {
+      const blocks = toUserContentBlocks(message);
+      if (blocks) {
+        out.push({ role: "user", content: blocks });
+        continue;
+      }
+      // 첨부가 전부 걸러졌으면(비지원 media type 등) 평문 폴백.
     }
     out.push({ role: message.role as "user" | "assistant", content: message.content });
   }

@@ -12,7 +12,7 @@ export const INSPECT_COMMAND_TOOL: AiToolDef = {
     "'for d in /sys/block/*; do cat $d/queue/rotational 2>/dev/null; done'). It does NOT appear in the user's terminal. " +
     "State-changing commands (rm, dd, writes, package installs, systemctl, sudo, …) are rejected here — for anything that " +
     "changes the host, or that the user should watch run live (following logs, interactive, long-running), use run_in_terminal instead. " +
-    "Each call is a fresh non-interactive exec (no sudo password prompt; working directory/environment do NOT persist — chain with '&&'). Times out after ~30s.",
+    "Each call is a fresh non-interactive exec (no sudo password prompt; working directory/environment do NOT persist — chain with '&&'). Times out after ~15s.",
   parameters: {
     type: "object",
     properties: {

@@ -16,6 +16,7 @@ import type {
 import { ipcChannels } from "../../common/ipc-channels";
 import {
   emitAiChatEvent,
+  emitAiTerminalOutputRequest,
   emitAuthEvent,
   emitActivityLogsChanged,
   emitContainerConnectionProgress,
@@ -91,6 +92,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.ai.chatEvent, (_event, payload: AiChatEvent) => {
     emitAiChatEvent(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.ai.terminalOutputRequest, (_event, payload) => {
+    emitAiTerminalOutputRequest(payload);
   });
 
   ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {

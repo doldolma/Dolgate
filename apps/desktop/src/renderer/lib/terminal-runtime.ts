@@ -49,6 +49,8 @@ export interface TerminalRuntime {
   getSelection: () => string;
   /** 커서 기준 최근 maxLines 줄의 버퍼 텍스트(후행 빈 줄 제거). AI 컨텍스트 첨부용. */
   captureRecentText: (maxLines: number) => string;
+  /** 현재 커서 기준 전체 scrollback 텍스트 라인 snapshot. AI anchored scrollback 조회용. */
+  captureTextSnapshot: () => string[];
   findNext: (term: string) => boolean;
   findPrevious: (term: string) => boolean;
   clearSearch: () => void;
@@ -308,6 +310,19 @@ function buildRecentText(terminal: Terminal, maxLines: number): string {
     lines.pop();
   }
   return lines.join('\n');
+}
+
+function buildTextSnapshot(terminal: Terminal): string[] {
+  const buffer = terminal.buffer.active;
+  const end = buffer.baseY + buffer.cursorY;
+  const lines: string[] = [];
+  for (let y = 0; y <= end; y += 1) {
+    lines.push(sanitizeTerminalLine(buffer.getLine(y)?.translateToString(true) ?? ''));
+  }
+  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') {
+    lines.pop();
+  }
+  return lines;
 }
 
 const VIEWPORT_SERIALIZE_OPTIONS: ISerializeOptions = {
@@ -599,6 +614,7 @@ export function createTerminalRuntime({
     },
     getSelection: () => terminal.getSelection(),
     captureRecentText: (maxLines: number) => buildRecentText(terminal, maxLines),
+    captureTextSnapshot: () => buildTextSnapshot(terminal),
     write(data) {
       if (disposed) {
         return;

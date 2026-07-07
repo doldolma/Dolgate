@@ -31,4 +31,24 @@ describe("buildToolRegistry", () => {
     expect(registry.executors.has("inspect_command")).toBe(true);
     expect(registry.defs.map((def) => def.name)).not.toContain("run_in_terminal");
   });
+
+  it("exposes read_terminal_output only when the snapshot reader is provided", async () => {
+    const registry = buildToolRegistry({
+      ...BASE,
+      readTerminalOutput: async () => ({
+        clientRequestId: "client-1",
+        text: "older output",
+        rangeLabel: "101~300줄 전",
+        returnedLines: 1,
+      }),
+    });
+    expect(registry.defs.map((def) => def.name)).toContain("read_terminal_output");
+    expect(registry.executors.has("read_terminal_output")).toBe(true);
+    await expect(
+      registry.executors.get("read_terminal_output")!(
+        { beforeRecentLines: 100, lines: 200 },
+        { signal: new AbortController().signal },
+      ),
+    ).resolves.toContain("older output");
+  });
 });

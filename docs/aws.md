@@ -1,13 +1,14 @@
 # AWS / SSM 설정 가이드
 
-Dolgate의 AWS 관련 기능(EC2 import, SSM shell 연결, AWS SFTP, SSM 포트 포워딩, ECS Exec/터널링)을 쓰기 위한 사전 조건과 IAM 권한 예시를 정리합니다.
+Dolgate의 AWS 관련 기능(EC2 import, EC2 SSH-over-SSM, SSM shell 연결, AWS SFTP, SSM 포트 포워딩, ECS Exec/터널링)을 쓰기 위한 사전 조건과 IAM 권한 예시를 정리합니다.
 빠른 점검만 필요하면 루트 [README](../README.md#aws--ssm-사용-전-확인)의 요약을 참고하세요.
 
 ## 사용 전 확인
 
-AWS 관련 기능은 전부 앱에 내장되어 있습니다. 세션 계열 기능은 내장 SSM 데이터 채널로 동작하고, 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)과 AWS API 호출은 AWS SDK로 처리합니다.
+AWS 관련 기능은 전부 앱에 내장되어 있습니다. EC2 터미널은 먼저 SSH-over-SSM을 시도하고, SSH 준비가 불가능한 경우 SSM shell로 fallback할 수 있습니다. 세션 계열 기능은 내장 SSM 데이터 채널로 동작하고, 프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)과 AWS API 호출은 AWS SDK로 처리합니다.
 
 - AWS EC2 Import
+- AWS EC2 SSH-over-SSM 연결
 - AWS SSM shell 연결
 - AWS ECS Exec 셸
 - AWS SFTP
@@ -19,6 +20,10 @@ AWS 관련 기능은 전부 앱에 내장되어 있습니다. 세션 계열 기�
 
 추가로 AWS Import는 대상 인스턴스가 **SSM managed instance** 상태여야 하고, SSH username/port 자동 확인을 위해 SSM Run Command를 사용합니다.
 현재 AWS Import는 **Linux/UNIX 계열 EC2 인스턴스 기준**으로 동작하며, Windows 인스턴스는 SSH import 대상으로 지원하지 않습니다.
+
+EC2 SSH-over-SSM과 AWS SFTP는 EC2 Instance Connect로 임시 공개키를 주입한 뒤 SSM 터널 위에서 SSH/SFTP를 엽니다. 따라서 대상 인스턴스에 sshd가 동작하고 있어야 하며, 사용자/역할에는 `ec2-instance-connect:SendSSHPublicKey` 권한이 필요합니다.
+
+SSH Agent Forwarding은 SSH 채널 기능이라 SSM 터널/서버 프록시 전송 방식과 별개로 동작합니다. AWS EC2 호스트에서 forwarding을 켜면 로컬 ssh-agent(1Password, `ssh-add` 등)를 EC2 세션 안으로 전달할 수 있으므로 신뢰하는 인스턴스에서만 사용하세요.
 
 ## AWS 권한 예시
 
@@ -75,7 +80,7 @@ AWS/SSM 계열 권한은 아래 두 범주로 구분합니다.
 - `sts:GetCallerIdentity`: 현재 프로필 인증 상태 확인
 - `ec2:DescribeRegions`, `ec2:DescribeInstances`: AWS import에서 프로필/리전/인스턴스 목록 조회
 - `ssm:DescribeInstanceInformation`: 인스턴스가 SSM managed 상태인지 확인
-- `ssm:StartSession`, `ssm:TerminateSession`, `ssmmessages:OpenDataChannel`: AWS shell, SFTP, 포트 포워딩, container tunnel
+- `ssm:StartSession`, `ssm:TerminateSession`, `ssmmessages:OpenDataChannel`: AWS shell, SSH-over-SSM 터널, SFTP, 포트 포워딩, container tunnel
 - `ssm:SendCommand`, `ssm:GetCommandInvocation`: SSH username/port 자동 확인
 - `ec2-instance-connect:SendSSHPublicKey`: AWS SFTP 및 SSH-over-SSM 계열 연결에서 임시 공개키 주입
 
@@ -102,6 +107,7 @@ Dolgate에서 사용하는 대표 문서는 아래와 같습니다.
 - `ec2-instance-connect:SendSSHPublicKey`는 **사용자/역할 권한**에 해당합니다.
 - 인스턴스 측 구성에서는 개별 IAM 액션보다 **SSM Agent / 인스턴스 프로파일 / OS 지원 상태**가 우선 확인 대상입니다.
 - SSH-over-SSM 계열 기능은 Linux/UNIX 기반 인스턴스를 기준으로 설명합니다.
+- SSH-over-SSM이 준비 전 실패하면 Dolgate는 일반 EC2 shell 접속에서 SSM shell fallback을 시도할 수 있습니다. host key trust/mismatch 계열 오류는 보안상 fallback하지 않고 사용자에게 그대로 노출됩니다.
 
 ## AWS ECS Exec 권한
 

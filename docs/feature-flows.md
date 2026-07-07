@@ -31,6 +31,14 @@ flowchart TD
 - 채팅 패널은 기본적으로 접힌 상태로 시작하고, 열면 참여자끼리 실시간 채팅이 가능합니다.
 - 세션이 종료되면 viewer 연결과 채팅 기록이 함께 정리됩니다.
 
+## AI Assistant
+
+- 터미널 세션에서 우측 AI 버튼 또는 `Cmd/Ctrl+I`로 AI 패널을 열고 질문을 보내면 renderer가 질문 시점의 호스트 정보와 터미널 출력 snapshot을 준비합니다.
+- 최근 100줄은 자동 컨텍스트로 들어가고, 더 이전 출력이 필요하면 main의 도구 호출이 renderer snapshot을 다시 읽습니다. 이 범위는 질문 시점에 고정되어 이후 터미널 출력으로 밀리지 않습니다.
+- LLM provider 호출, API 키 접근, 웹 검색/URL 읽기, SSH exec 도구 실행은 Electron main에서 처리합니다.
+- `inspect_command`는 숨은 SSH exec 채널로 읽기 전용 조회를 수행하고, `run_in_terminal`은 사용자가 보는 터미널에 명령을 입력합니다. 변경 명령은 승인 후 실행됩니다.
+- 응답이 끝나거나 취소되면 해당 요청의 터미널 snapshot과 임시 도구 상태를 정리합니다.
+
 ## AWS Import + AWS SFTP
 
 ### import

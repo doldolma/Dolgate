@@ -268,6 +268,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
   const handleFileDragOver = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
+      // 자식(AI 패널)이 이미 처리한 드래그면 SFTP 업로드 오버레이를 끄고 물러난다.
+      if (event.defaultPrevented) {
+        setIsFileDropActive(false);
+        return;
+      }
       if (!canReceiveFileUpload || !hasExternalFileDrop(event.dataTransfer)) {
         return;
       }
@@ -288,6 +293,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
   const handleFileDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
+      // 자식(AI 패널)이 이미 처리한 드롭이면 업로드하지 않는다.
+      if (event.defaultPrevented) {
+        setIsFileDropActive(false);
+        return;
+      }
       if (!canReceiveFileUpload || !hasExternalFileDrop(event.dataTransfer)) {
         return;
       }
@@ -393,40 +403,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         />
       ) : null}
 
-      {controller.canShareSession ? (
-        <TerminalSharePopover
-          anchorRef={controller.sharePopoverRef}
-          showHeader={showHeader}
-          open={controller.sharePopoverOpen}
-          actions={serialActions}
-          aiToggle={aiToggleButton}
-          canStartShare={controller.canStartShare}
-          shareCopyStatus={controller.shareCopyStatus}
-          shareState={controller.shareState}
-          onToggle={controller.toggleSharePopover}
-          onStartShare={() => {
-            void controller.handleStartShare();
-          }}
-          onCopyShareUrl={() => {
-            void controller.handleCopyShareUrl();
-          }}
-          onSetInputEnabled={controller.handleSetSessionShareInputMode}
-          onOpenChatWindow={controller.handleOpenShareChatWindow}
-          onStopShare={controller.handleStopShare}
-          canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
-        />
-      ) : (
-        // 공유 불가 세션엔 Share 팝오버가 없으므로 AI 토글만 같은 위치에 띄운다.
-        <div
-          className={cn(
-            'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
-            showHeader && 'right-[0.8rem] top-[0.8rem]',
-          )}
-        >
-          {aiToggleButton}
-        </div>
-      )}
-
       {showHeader ? (
         <TerminalPaneHeader
           sessionId={sessionId}
@@ -509,68 +485,104 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
-      <div
-        ref={controller.containerRef}
-        className={cn(
-          'relative m-[0.55rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
-          showHeader &&
-            'mx-[0.55rem] mb-[0.55rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
-          // tmux pane: 여백/라운드 제거 → 슬롯을 꽉 채워 컨테이너 px = tmux 셀 그리드.
-          isTmuxPane && 'm-0 rounded-none border-0',
-          // tmux control mode dead-zone 완화(최소·안전): 공유 크기 탓에 pane 렌더 영역보다
-          // cell grid 가 작아 생기는 빈 영역(.xterm 요소 중 .xterm-screen 바깥)을, 컨테이너와
-          // .xterm 배경을 패널 surface 로 맞춰 회색으로 튀지 않게 블렌딩한다. 실제 문자 셀
-          // (.xterm-screen)의 터미널 테마 배경은 건드리지 않고, xterm 크기/FitAddon 측정도
-          // 그대로 둬(렌더 안정성 보존) 그리드는 좌상단 정렬이되 여백이 배경과 동색이라 덜 띈다.
-          tab?.tmux && 'bg-[var(--surface)] [&_.xterm]:bg-[var(--surface)]',
-        )}
-        data-terminal-canvas="true"
-        data-tmux-pane={tab?.tmux ? 'true' : undefined}
-      >
-        {isFileDropActive ? (
-          <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center rounded-[6px] border-2 border-dashed border-[color-mix(in_srgb,var(--accent-strong)_60%,transparent)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]">
-            <span className="rounded-[6px] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] shadow-[var(--shadow)]">
-              여기로 업로드 → {getSessionCwd(sessionId) ?? '홈 디렉터리'}
-            </span>
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {controller.canShareSession ? (
+            <TerminalSharePopover
+              anchorRef={controller.sharePopoverRef}
+              showHeader={showHeader}
+              open={controller.sharePopoverOpen}
+              actions={serialActions}
+              aiToggle={aiToggleButton}
+              canStartShare={controller.canStartShare}
+              shareCopyStatus={controller.shareCopyStatus}
+              shareState={controller.shareState}
+              onToggle={controller.toggleSharePopover}
+              onStartShare={() => {
+                void controller.handleStartShare();
+              }}
+              onCopyShareUrl={() => {
+                void controller.handleCopyShareUrl();
+              }}
+              onSetInputEnabled={controller.handleSetSessionShareInputMode}
+              onOpenChatWindow={controller.handleOpenShareChatWindow}
+              onStopShare={controller.handleStopShare}
+              canOpenChatWindow={Boolean(onOpenSessionShareChatWindow)}
+            />
+          ) : (
+            // 공유 불가 세션엔 Share 팝오버가 없으므로 AI 토글만 같은 위치에 띄운다.
+            <div
+              className={cn(
+                'absolute right-[0.85rem] top-[0.85rem] z-[4] flex items-center',
+                showHeader && 'right-[0.8rem] top-[0.8rem]',
+              )}
+            >
+              {aiToggleButton}
+            </div>
+          )}
+
+          <div
+            ref={controller.containerRef}
+            className={cn(
+              'relative m-[0.55rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
+              showHeader &&
+                'mx-[0.55rem] mb-[0.55rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+              // tmux pane: 여백/라운드 제거 → 슬롯을 꽉 채워 컨테이너 px = tmux 셀 그리드.
+              isTmuxPane && 'm-0 rounded-none border-0',
+              // tmux control mode dead-zone 완화(최소·안전): 공유 크기 탓에 pane 렌더 영역보다
+              // cell grid 가 작아 생기는 빈 영역(.xterm 요소 중 .xterm-screen 바깥)을, 컨테이너와
+              // .xterm 배경을 패널 surface 로 맞춰 회색으로 튀지 않게 블렌딩한다. 실제 문자 셀
+              // (.xterm-screen)의 터미널 테마 배경은 건드리지 않고, xterm 크기/FitAddon 측정도
+              // 그대로 둬(렌더 안정성 보존) 그리드는 좌상단 정렬이되 여백이 배경과 동색이라 덜 띈다.
+              tab?.tmux && 'bg-[var(--surface)] [&_.xterm]:bg-[var(--surface)]',
+            )}
+            data-terminal-canvas="true"
+            data-tmux-pane={tab?.tmux ? 'true' : undefined}
+          >
+            {isFileDropActive ? (
+              <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center rounded-[6px] border-2 border-dashed border-[color-mix(in_srgb,var(--accent-strong)_60%,transparent)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]">
+                <span className="rounded-[6px] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] shadow-[var(--shadow)]">
+                  여기로 업로드 → {getSessionCwd(sessionId) ?? '홈 디렉터리'}
+                </span>
+              </div>
+            ) : null}
+            {/* tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")으로 한다.
+                pane 마다 떠 헷갈리던 floating │/─ 버튼은 제거했다. */}
+            {controller.shouldShowConnectionOverlay && isPrimaryTmuxOverlayPane ? (
+              <TerminalConnectionOverlay
+                error={tab?.status === 'error'}
+                title={controller.connectionOverlayTitle}
+                message={controller.connectionOverlayMessage}
+                steps={tab?.connectionHops}
+                showRetry={tab?.connectionProgress?.retryable !== false}
+                onRetry={() => {
+                  void onRetry?.();
+                }}
+                onClose={() => {
+                  void onClose?.();
+                }}
+                showCancel={
+                  tab?.connectionProgress?.stage === 'reconnecting' &&
+                  tab?.status !== 'error'
+                }
+                onCancel={() => {
+                  void onCancelReconnect?.();
+                }}
+              />
+            ) : null}
+            <TerminalAutocompleteOverlay
+              suggestions={controller.autocompleteSuggestions}
+              command={controller.autocompleteCommand}
+              anchor={controller.autocompleteAnchor}
+              selectedIndex={controller.autocompleteSelectedIndex}
+              onAccept={controller.acceptAutocompleteSuggestion}
+            />
+            <SnippetVariablesDialog
+              pending={controller.autocompletePendingSnippet}
+              onConfirm={controller.confirmAutocompleteSnippet}
+              onCancel={controller.cancelAutocompleteSnippet}
+            />
           </div>
-        ) : null}
-        {/* tmux pane 분할은 상단 윈도우 바의 "분할" 버튼(또는 Ctrl-b % / ")으로 한다.
-            pane 마다 떠 헷갈리던 floating │/─ 버튼은 제거했다. */}
-        {controller.shouldShowConnectionOverlay && isPrimaryTmuxOverlayPane ? (
-          <TerminalConnectionOverlay
-            error={tab?.status === 'error'}
-            title={controller.connectionOverlayTitle}
-            message={controller.connectionOverlayMessage}
-            steps={tab?.connectionHops}
-            showRetry={tab?.connectionProgress?.retryable !== false}
-            onRetry={() => {
-              void onRetry?.();
-            }}
-            onClose={() => {
-              void onClose?.();
-            }}
-            showCancel={
-              tab?.connectionProgress?.stage === 'reconnecting' &&
-              tab?.status !== 'error'
-            }
-            onCancel={() => {
-              void onCancelReconnect?.();
-            }}
-          />
-        ) : null}
-        <TerminalAutocompleteOverlay
-          suggestions={controller.autocompleteSuggestions}
-          command={controller.autocompleteCommand}
-          anchor={controller.autocompleteAnchor}
-          selectedIndex={controller.autocompleteSelectedIndex}
-          onAccept={controller.acceptAutocompleteSuggestion}
-        />
-        <SnippetVariablesDialog
-          pending={controller.autocompletePendingSnippet}
-          onConfirm={controller.confirmAutocompleteSnippet}
-          onCancel={controller.cancelAutocompleteSnippet}
-        />
-      </div>
+        </div>
         {aiPanelOpen ? (
           <AiChatPanel sessionId={sessionId} stableId={stableId} width={aiPanelWidth} />
         ) : null}

@@ -22,6 +22,8 @@ export interface TerminalHooks {
   getSelection: () => string;
   /** 커서 기준 최근 N줄 버퍼 텍스트(AI 컨텍스트 첨부용). */
   captureRecentText: (maxLines: number) => string;
+  /** 질문 시점에 고정할 전체 scrollback 텍스트 snapshot(AI anchored scrollback 조회용). */
+  captureTextSnapshot: () => string[];
 }
 
 const hooksByStableId = new Map<string, TerminalHooks>();
@@ -62,6 +64,11 @@ export function readTerminalSelection(stableId: string): string {
 /** 살아 있는 터미널(stableId)의 커서 기준 최근 출력 텍스트. 없으면 "". AI 컨텍스트 첨부용. */
 export function captureTerminalRecentText(stableId: string, maxLines: number): string {
   return hooksByStableId.get(stableId)?.captureRecentText(maxLines) ?? '';
+}
+
+/** 살아 있는 터미널(stableId)의 전체 텍스트 snapshot. 없으면 null. AI anchored scrollback 조회용. */
+export function captureTerminalTextSnapshot(stableId: string): string[] | null {
+  return hooksByStableId.get(stableId)?.captureTextSnapshot() ?? null;
 }
 
 /** 절전/잠금 복귀 시 모든 살아 있는 터미널을 강제 재렌더한다. */
@@ -171,4 +178,3 @@ export function loadScrollbackFromSession(sessionId: string): string | null {
     return null;
   }
 }
-
