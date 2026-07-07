@@ -173,6 +173,9 @@ export const ipcChannels = {
     apiKeyStatus: 'ai:api-key-status',
     setApiKey: 'ai:set-api-key',
     clearApiKey: 'ai:clear-api-key',
+    searchKeyStatus: 'ai:search-key-status',
+    setSearchKey: 'ai:set-search-key',
+    clearSearchKey: 'ai:clear-search-key',
     chat: 'ai:chat',
     cancelChat: 'ai:cancel-chat',
     // main → renderer 스트리밍 이벤트(delta/done/error). requestId 로 상관한다.

@@ -1,6 +1,7 @@
 import type {
   ActivityLogRecord,
   AiProviderId,
+  AiSearchBackend,
   AppSettings,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
@@ -1098,6 +1099,9 @@ export interface DesktopApi {
     apiKeyStatus: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
     setApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
     clearApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+    searchKeyStatus: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
+    setSearchKey: (backend: AiSearchBackend, key: string) => Promise<AiApiKeyStatus>;
+    clearSearchKey: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
     chat: (input: AiChatStartInput) => Promise<{ requestId: string }>;
     cancelChat: (requestId: string) => Promise<void>;
     onChatEvent: (listener: (event: AiChatEvent) => void) => () => void;

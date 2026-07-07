@@ -6,6 +6,7 @@ import type {
   AiChatEvent,
   AiChatStartInput,
   AiProviderId,
+  AiSearchBackend,
   AiTestConnectionInput,
   AiTestResult,
 } from "../../shared/ai";
@@ -34,6 +35,24 @@ export function registerAiIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.ai.clearApiKey,
     async (_event, providerId: AiProviderId): Promise<AiApiKeyStatus> =>
       ctx.aiService.clearApiKey(providerId),
+  );
+
+  ipcMain.handle(
+    ipcChannels.ai.searchKeyStatus,
+    async (_event, backend: AiSearchBackend): Promise<AiApiKeyStatus> =>
+      ctx.aiService.searchKeyStatus(backend),
+  );
+
+  ipcMain.handle(
+    ipcChannels.ai.setSearchKey,
+    async (_event, backend: AiSearchBackend, key: string): Promise<AiApiKeyStatus> =>
+      ctx.aiService.setSearchKey(backend, key),
+  );
+
+  ipcMain.handle(
+    ipcChannels.ai.clearSearchKey,
+    async (_event, backend: AiSearchBackend): Promise<AiApiKeyStatus> =>
+      ctx.aiService.clearSearchKey(backend),
   );
 
   // chat 은 invoke 로 시작해 { requestId } 를 즉시 반환하고, 이후 delta/done/error 는

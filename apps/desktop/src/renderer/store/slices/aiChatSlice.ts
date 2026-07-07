@@ -20,6 +20,7 @@ function emptyConversation(): AiConversation {
     streamingText: "",
     streaming: false,
     error: null,
+    toolActivity: null,
   };
 }
 
@@ -117,6 +118,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
             streamingText: "",
             streaming: true,
             error: null,
+            toolActivity: null,
           },
         },
       }));
@@ -177,6 +179,18 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
           };
         }
 
+        if (event.type === "tool") {
+          return {
+            aiConversations: {
+              ...state.aiConversations,
+              [sessionId]: {
+                ...conv,
+                toolActivity: event.tool.status === "running" ? event.tool.label : null,
+              },
+            },
+          };
+        }
+
         if (event.type === "done") {
           const finalText = conv.streamingText || event.result.text;
           const messages: AiChatMessage[] = finalText
@@ -191,6 +205,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
                 requestId: null,
                 streaming: false,
                 streamingText: "",
+                toolActivity: null,
               },
             },
           };
@@ -206,6 +221,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
               streaming: false,
               streamingText: "",
               error: event.error,
+              toolActivity: null,
             },
           },
         };

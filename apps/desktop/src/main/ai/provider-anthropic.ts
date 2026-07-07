@@ -1,9 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import type {
+  AiChatMessage,
   AiChatRequest,
   AiChatResult,
   AiFinishReason,
+  AiToolCall,
+  AiToolDef,
   AiTestResult,
 } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
@@ -44,20 +47,8 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   async chat(request: AiChatRequest, opts: ProviderChatOptions): Promise<AiChatResult> {
-    // system 메시지는 top-level 파라미터로 분리하고, 나머지만 messages[]로 보낸다.
-    const system = request.messages
-      .filter((message) => message.role === "system")
-      .map((message) => message.content)
-      .join("\n\n");
-    const messages = request.messages
-      .filter((message) => message.role !== "system")
-      .map((message) => ({
-        role: message.role as "user" | "assistant",
-        content: message.content,
-      }));
-
+    const { system, messages } = toAnthropicMessages(request.messages);
     const temperature = request.temperature ?? this.temperature;
-
     let text = "";
 
     const stream = this.client.messages.stream(
@@ -67,6 +58,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         messages,
         ...(system ? { system } : {}),
         ...(typeof temperature === "number" ? { temperature } : {}),
+        ...(request.tools?.length ? { tools: toAnthropicTools(request.tools) } : {}),
       },
       { signal: opts.signal },
     );
@@ -78,11 +70,22 @@ export class AnthropicAdapter implements ProviderAdapter {
 
     // finalMessage()는 스트림 완료 시 resolve, 에러/취소 시 reject → 상위(AiService)가 정규화.
     const final = await stream.finalMessage();
+    const toolCalls: AiToolCall[] = (final.content ?? [])
+      .filter((block): block is Anthropic.ToolUseBlock => block.type === "tool_use")
+      .map((block) => ({ id: block.id, name: block.name, argsJson: JSON.stringify(block.input ?? {}) }));
+    for (const call of toolCalls) {
+      opts.onDelta({ kind: "tool_call_start", id: call.id, name: call.name });
+    }
     const usage = final.usage
       ? { inputTokens: final.usage.input_tokens, outputTokens: final.usage.output_tokens }
       : undefined;
 
-    return { text, finishReason: mapAnthropicStopReason(final.stop_reason), usage };
+    return {
+      text,
+      finishReason: mapAnthropicStopReason(final.stop_reason),
+      toolCalls: toolCalls.length ? toolCalls : undefined,
+      usage,
+    };
   }
 }
 
@@ -95,4 +98,60 @@ function mapAnthropicStopReason(reason: string | null): AiFinishReason {
     default:
       return "stop";
   }
+}
+
+function toAnthropicTools(tools: AiToolDef[]): Anthropic.Tool[] {
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: tool.parameters as Anthropic.Tool.InputSchema,
+  }));
+}
+
+function safeParseJson(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
+}
+
+// 정규화된 메시지를 Anthropic 포맷으로. system 은 top-level 로 분리, tool 결과/호출은 content 블록으로.
+function toAnthropicMessages(messages: AiChatMessage[]): {
+  system: string;
+  messages: Anthropic.MessageParam[];
+} {
+  const systemParts: string[] = [];
+  const out: Anthropic.MessageParam[] = [];
+  for (const message of messages) {
+    if (message.role === "system") {
+      systemParts.push(message.content);
+      continue;
+    }
+    if (message.role === "tool") {
+      out.push({
+        role: "user",
+        content: (message.toolResults ?? []).map((result) => ({
+          type: "tool_result",
+          tool_use_id: result.toolCallId,
+          content: result.content,
+          is_error: result.isError,
+        })),
+      });
+      continue;
+    }
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      const blocks: Anthropic.ContentBlockParam[] = [];
+      if (message.content) {
+        blocks.push({ type: "text", text: message.content });
+      }
+      for (const call of message.toolCalls) {
+        blocks.push({ type: "tool_use", id: call.id, name: call.name, input: safeParseJson(call.argsJson) });
+      }
+      out.push({ role: "assistant", content: blocks });
+      continue;
+    }
+    out.push({ role: message.role as "user" | "assistant", content: message.content });
+  }
+  return { system: systemParts.join("\n\n"), messages: out };
 }
