@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
+  DEFAULT_AI_SETTINGS,
   DEFAULT_AUTO_RECONNECT_SETTINGS,
   DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampAiTemperature,
   clampAutoReconnectDelayMs,
   clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
@@ -25,6 +27,7 @@ import {
   isSshHostDraft,
   isSshHostRecord,
   isSerialHostRecord,
+  normalizeAiBaseUrl,
   normalizeSftpBrowserColumnWidths,
   normalizeServerUrl,
   normalizeGroupPath,
@@ -37,6 +40,7 @@ import type {
   ActivityLogCategory,
   ActivityLogLevel,
   ActivityLogRecord,
+  AiSettings,
   AppSettings,
   AppTheme,
   AuthType,
@@ -1270,6 +1274,7 @@ export class SettingsRepository {
         state.settings.autoReconnectMaxDelayMs ??
         DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       tmuxPrefixKey: state.settings.tmuxPrefixKey ?? 'C-b',
+      ai: state.settings.ai ?? { ...DEFAULT_AI_SETTINGS },
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       dismissedUpdateVersion: state.updater.dismissedVersion,
@@ -1426,6 +1431,35 @@ export class SettingsRepository {
 
       if (typeof input.tmuxPrefixKey === 'string' && input.tmuxPrefixKey.trim()) {
         state.settings.tmuxPrefixKey = input.tmuxPrefixKey.trim();
+        state.settings.updatedAt = nowIso();
+      }
+
+      // AI 설정. providerId enum / baseUrl 정규화 / temperature clamp 로 하위필드별 검증한다.
+      // API 키는 여기 오지 않는다(SecretStore 전용). 부분 병합이므로 현재값을 기준으로 덮어쓴다.
+      if (Object.prototype.hasOwnProperty.call(input, 'ai') && input.ai && typeof input.ai === 'object') {
+        const incoming = input.ai as Partial<AiSettings>;
+        const next: AiSettings = { ...(state.settings.ai ?? DEFAULT_AI_SETTINGS) };
+        if (typeof incoming.enabled === 'boolean') {
+          next.enabled = incoming.enabled;
+        }
+        if (incoming.providerId === 'openai-compat' || incoming.providerId === 'anthropic') {
+          next.providerId = incoming.providerId;
+        }
+        if (Object.prototype.hasOwnProperty.call(incoming, 'baseUrl')) {
+          next.baseUrl = normalizeAiBaseUrl(
+            typeof incoming.baseUrl === 'string' ? incoming.baseUrl : undefined
+          );
+        }
+        if (typeof incoming.model === 'string') {
+          next.model = incoming.model.trim();
+        }
+        if (Object.prototype.hasOwnProperty.call(incoming, 'temperature')) {
+          next.temperature =
+            typeof incoming.temperature === 'number'
+              ? clampAiTemperature(incoming.temperature)
+              : undefined;
+        }
+        state.settings.ai = next;
         state.settings.updatedAt = nowIso();
       }
 

@@ -39,6 +39,7 @@ import {
   buildUpdaterBridge,
   buildWindowBridge,
 } from "./bridges/system";
+import { buildAiBridge } from "./bridges/ai";
 
 export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
   return {
@@ -61,6 +62,7 @@ export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
     tabs: buildTabsBridge(ipcRenderer),
     updater: buildUpdaterBridge(ipcRenderer),
     settings: buildSettingsBridge(ipcRenderer),
+    ai: buildAiBridge(ipcRenderer),
     portForwards: buildPortForwardsBridge(ipcRenderer),
     dnsOverrides: buildDnsOverridesBridge(ipcRenderer),
     snippets: buildSnippetsBridge(ipcRenderer),

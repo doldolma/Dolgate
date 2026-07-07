@@ -1,4 +1,5 @@
 import type {
+  AiChatEvent,
   AuthState,
   ContainerConnectionProgressEvent,
   CoreEvent,
@@ -55,6 +56,7 @@ const sessionShareChatEventHub = createListenerHub<SessionShareChatEvent>();
 const systemResumeHub = createListenerHub<void>();
 const closeActiveTabHub = createListenerHub<void>();
 const tabCommandHub = createListenerHub<TabCommandPayload>();
+const aiChatEventHub = createListenerHub<AiChatEvent>();
 
 const streamListeners = new Map<string, Set<(chunk: Uint8Array) => void>>();
 const sessionBacklog = new Map<string, Uint8Array[]>();
@@ -295,6 +297,16 @@ export function subscribeTabCommand(
   listener: (payload: TabCommandPayload) => void,
 ): () => void {
   return tabCommandHub.subscribe(listener);
+}
+
+export function emitAiChatEvent(payload: AiChatEvent): void {
+  aiChatEventHub.emit(payload);
+}
+
+export function subscribeAiChatEvent(
+  listener: Listener<AiChatEvent>,
+): () => void {
+  return aiChatEventHub.subscribe(listener);
 }
 
 export function registerE2EWindowEvents(): void {

@@ -36,6 +36,7 @@ import { createSecretCoordinator } from "./ipc/coordinators/secret-coordinator";
 import { createSnapshotCoordinator } from "./ipc/coordinators/snapshot-coordinator";
 import { createSshKeyCoordinator } from "./ipc/coordinators/ssh-key-coordinator";
 import { createTunnelRegistry } from "./ipc/coordinators/tunnel-registry";
+import { AiService } from "./ai-service";
 
 export interface RegisterIpcDependencies {
   hosts: HostRepository;
@@ -95,6 +96,7 @@ export function createMainIpcContext(
   } = deps;
 
   const localFiles = new LocalFileService();
+  const aiService = new AiService(settings, secretStore);
   const queueSync = () => {
     void syncService.pushDirty().catch(() => undefined);
   };
@@ -220,6 +222,7 @@ export function createMainIpcContext(
     sessionShareService,
     sessionReplayService,
     localFiles,
+    aiService,
     portForwardLifecycleLogger,
     queueSync,
     getInitialBootstrapSnapshot:

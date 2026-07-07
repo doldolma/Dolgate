@@ -1064,6 +1064,7 @@ export interface AppSettings extends TerminalAppearanceSettings {
   autoReconnectMaxDelayMs: number;
   /** tmux prefix 키 토큰("C-b"/"C-a"/"C-Space" …). 비우면 Ctrl-b. control mode pane 에서 항상 동작. */
   tmuxPrefixKey?: string;
+  ai?: AiSettings;
   serverUrl: string;
   serverUrlOverride?: string | null;
   dismissedUpdateVersion?: string | null;
@@ -1140,6 +1141,62 @@ export function clampAutoReconnectDelayMs(value: number): number {
     MAX_AUTO_RECONNECT_DELAY_MS,
     Math.max(MIN_AUTO_RECONNECT_DELAY_MS, Math.round(value))
   );
+}
+
+// AiSettings는 SSH/EC2 세션용 AI 어시스턴트(v1: BYO API 키)의 공개 설정이다.
+// API 키는 여기 담지 않고 SecretStore(키체인, account: `ai:apiKey:<providerId>`)에만 저장하며,
+// 동기화 대상이 아니다(getSyncedTerminalPreferences가 터미널 테마만 직렬화 → 자동 로컬 유지).
+export type AiProviderId = 'openai-compat' | 'anthropic';
+
+export interface AiSettings {
+  enabled: boolean;
+  providerId: AiProviderId;
+  /** openai-compat 전용 베이스 URL(예: http://localhost:11434/v1). anthropic 은 무시. */
+  baseUrl?: string;
+  model: string;
+  /** 0..2 로 clamp. undefined 면 provider 기본값 사용. */
+  temperature?: number;
+}
+
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  enabled: false,
+  providerId: 'openai-compat',
+  baseUrl: 'https://api.openai.com/v1',
+  // 빈 값 → UI 가 모델 선택을 강제(폐기될 수 있는 모델 id 하드코딩 회피).
+  model: '',
+  temperature: undefined
+};
+
+export const MIN_AI_TEMPERATURE = 0;
+export const MAX_AI_TEMPERATURE = 2;
+
+// temperature 는 정수가 아니라 실수(0.0~2.0)이므로 round 하지 않는다.
+export function clampAiTemperature(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AI_SETTINGS.temperature ?? 0;
+  }
+  return Math.min(MAX_AI_TEMPERATURE, Math.max(MIN_AI_TEMPERATURE, value));
+}
+
+// AI 프로바이더 요청에 쓰는 베이스 URL 정규화.
+// 빈 값이면 undefined, http/https 만 허용, 후행 슬래시 제거, 파싱 실패 시 undefined.
+export function normalizeAiBaseUrl(value: string | undefined): string | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return undefined;
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return undefined;
+  }
 }
 
 // AutoReconnectPolicy는 호스트별 자동 재연결 정책 오버라이드를 표현한다.

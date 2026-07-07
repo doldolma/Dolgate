@@ -30,6 +30,7 @@ import type {
 import type { BrowserWindow, WebContents } from "electron";
 import type { AuthService } from "../auth-service";
 import type { AwsSsmTunnelService } from "../aws-ssm-tunnel-service";
+import type { AiService } from "../ai-service";
 import type { AwsService } from "../aws-service";
 import type { CoreManager } from "../core-manager";
 import type {
@@ -115,6 +116,7 @@ export interface MainIpcContext {
   xshellImportService: XshellImportService;
   sessionShareService: SessionShareService;
   sessionReplayService: SessionReplayService;
+  aiService: AiService;
   localFiles: LocalFileService;
   portForwardLifecycleLogger: PortForwardLifecycleLogger;
   queueSync: () => void;

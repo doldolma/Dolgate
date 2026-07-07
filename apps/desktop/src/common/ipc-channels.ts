@@ -168,6 +168,16 @@ export const ipcChannels = {
     get: 'settings:get',
     update: 'settings:update'
   },
+  ai: {
+    testConnection: 'ai:test-connection',
+    apiKeyStatus: 'ai:api-key-status',
+    setApiKey: 'ai:set-api-key',
+    clearApiKey: 'ai:clear-api-key',
+    chat: 'ai:chat',
+    cancelChat: 'ai:cancel-chat',
+    // main → renderer 스트리밍 이벤트(delta/done/error). requestId 로 상관한다.
+    chatEvent: 'ai:chat-event'
+  },
   notifications: {
     commandFinished: 'notifications:command-finished'
   },

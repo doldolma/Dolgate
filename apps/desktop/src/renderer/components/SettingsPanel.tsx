@@ -23,6 +23,7 @@ import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
+import { AiSettingsPanel } from './AiSettingsPanel';
 import {
   Button,
   FieldGroup,
@@ -88,7 +89,8 @@ const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'sftp', title: 'SFTP' },
   { id: 'security', title: 'Security' },
   { id: 'secrets', title: 'Saved Credentials' },
-  { id: 'aws-profiles', title: 'AWS Profiles' }
+  { id: 'aws-profiles', title: 'AWS Profiles' },
+  { id: 'ai', title: 'AI' }
 ];
 
 function renderTerminalThemePreview(
@@ -763,6 +765,10 @@ export function SettingsPanel({
       ) : null}
 
       {activeSection === 'aws-profiles' ? <AwsProfilesPanel hosts={hosts} /> : null}
+
+      {activeSection === 'ai' ? (
+        <AiSettingsPanel settings={settings.ai} onUpdateSettings={onUpdateSettings} />
+      ) : null}
     </div>
   );
 }
