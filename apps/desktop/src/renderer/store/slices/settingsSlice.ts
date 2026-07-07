@@ -220,7 +220,13 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
             const result = await api.sshKeys.install(input);
             await refreshHostAndKeychainState(set);
             return result;
-          }
+          },
+    // AI 설정 패널용 IPC 액션. 컴포넌트는 desktopApi 를 직접 못 쓰므로 스토어를 통해 노출한다.
+    testAiConnection: (input) => api.ai.testConnection(input),
+    setAiApiKey: (providerId, key) => api.ai.setApiKey(providerId, key),
+    clearAiApiKey: (providerId) => api.ai.clearApiKey(providerId),
+    getAiApiKeyStatus: (providerId) => api.ai.apiKeyStatus(providerId),
+    openExternalUrl: (url) => api.shell.openExternal(url)
   };
 
 }

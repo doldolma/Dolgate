@@ -105,6 +105,15 @@ export const defaultSettings: AppSettings = {
   autoReconnectMaxDelayMs: 8000,
   // tmux prefix 키(기본 Ctrl-b). control mode pane 에서 항상 가로채며, 키만 변경 가능.
   tmuxPrefixKey: "C-b",
+  // @shared의 DEFAULT_AI_SETTINGS를 인라인한다(위 command notification / auto reconnect 와 동일한
+  // vite dev export* 값-누락 회피). AiSettings 타입만 @shared에서 가져온다(값 import 금지).
+  ai: {
+    enabled: false,
+    providerId: "openai-compat",
+    baseUrl: "https://api.openai.com/v1",
+    model: "",
+    temperature: undefined,
+  },
   serverUrl: "https://ssh.doldolma.com",
   serverUrlOverride: null,
   dismissedUpdateVersion: null,

@@ -44,6 +44,10 @@ import type {
   SftpPrincipal,
   SecretMetadataRecord,
   SshKeyGenerateInput,
+  AiApiKeyStatus,
+  AiProviderId,
+  AiTestConnectionInput,
+  AiTestResult,
   SshKeyInstallInput,
   SshKeyInstallResult,
   SshKeyMaterialResult,
@@ -73,7 +77,7 @@ export type HomeSection =
   | "snippets"
   | "logs"
   | "settings";
-export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles";
+export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles" | "ai";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
@@ -906,6 +910,11 @@ interface AppStateParts {
   installSshPublicKey: (
     input: SshKeyInstallInput,
   ) => Promise<SshKeyInstallResult>;
+  testAiConnection: (input: AiTestConnectionInput) => Promise<AiTestResult>;
+  setAiApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
+  clearAiApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+  getAiApiKeyStatus: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+  openExternalUrl: (url: string) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
   dismissPendingCredentialRetry: () => void;
@@ -1248,6 +1257,11 @@ export type SettingsSlice = Pick<
   | "generateSshKey"
   | "copySshPublicKey"
   | "installSshPublicKey"
+  | "testAiConnection"
+  | "setAiApiKey"
+  | "clearAiApiKey"
+  | "getAiApiKeyStatus"
+  | "openExternalUrl"
 >;
 
 export type RuntimeEventSlice = Pick<

@@ -1,5 +1,6 @@
 import type {
   ActivityLogRecord,
+  AiProviderId,
   AppSettings,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
@@ -108,6 +109,13 @@ import type {
   WarpgateTargetSummary,
 } from "@dolssh/shared-core";
 import type { SyncPayloadV2 } from "@dolssh/shared-core";
+import type {
+  AiApiKeyStatus,
+  AiChatEvent,
+  AiChatStartInput,
+  AiTestConnectionInput,
+  AiTestResult,
+} from "./ai";
 
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
@@ -1084,6 +1092,15 @@ export interface DesktopApi {
   settings: {
     get: () => Promise<AppSettings>;
     update: (input: Partial<AppSettings>) => Promise<AppSettings>;
+  };
+  ai: {
+    testConnection: (input: AiTestConnectionInput) => Promise<AiTestResult>;
+    apiKeyStatus: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+    setApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
+    clearApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+    chat: (input: AiChatStartInput) => Promise<{ requestId: string }>;
+    cancelChat: (requestId: string) => Promise<void>;
+    onChatEvent: (listener: (event: AiChatEvent) => void) => () => void;
   };
   portForwards: {
     list: () => Promise<PortForwardListSnapshot>;

@@ -36,6 +36,8 @@ import type {
   SshPortForwardRuleRecord,
   SecretMetadataRecord,
   SnippetRecord,
+  AiProviderId,
+  AiSettings,
   TerminalFontFamilyId,
   TerminalThemeId
 } from '@shared';
@@ -47,9 +49,11 @@ import {
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  clampAiTemperature,
   clampAutoReconnectDelayMs,
   clampAutoReconnectMaxAttempts,
   clampCommandNotificationThresholdSeconds,
+  normalizeAiBaseUrl,
   normalizeHostEnvVars,
   normalizeJumpHostIds,
   normalizeSftpBrowserColumnWidths
@@ -98,6 +102,7 @@ export interface DesktopStateFile {
     autoReconnectBaseDelayMs: number;
     autoReconnectMaxDelayMs: number;
     tmuxPrefixKey: string;
+    ai: AiSettings | null;
     serverUrlOverride: string | null;
     updatedAt: string;
   };
@@ -177,6 +182,23 @@ function deepClone<T>(value: T): T {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+// 저장된 원본 AI 설정을 검증/정규화한다. 없거나 형식이 아니면 null(→ get()이 DEFAULT 폴백).
+function normalizeAiSettings(value: unknown): AiSettings | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const providerId: AiProviderId =
+    value.providerId === 'anthropic' ? 'anthropic' : 'openai-compat';
+  return {
+    enabled: typeof value.enabled === 'boolean' ? value.enabled : false,
+    providerId,
+    baseUrl: normalizeAiBaseUrl(typeof value.baseUrl === 'string' ? value.baseUrl : undefined),
+    model: typeof value.model === 'string' ? value.model : '',
+    temperature:
+      typeof value.temperature === 'number' ? clampAiTemperature(value.temperature) : undefined
+  };
 }
 
 function isTerminalThemeId(value: unknown): value is TerminalThemeId {
@@ -494,6 +516,7 @@ function createDefaultStateFile(): DesktopStateFile {
       autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
       autoReconnectMaxDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       tmuxPrefixKey: 'C-b',
+      ai: null,
       serverUrlOverride: null,
       updatedAt: timestamp
     },
@@ -918,6 +941,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.tmuxPrefixKey === 'string' && settings.tmuxPrefixKey.trim()
           ? settings.tmuxPrefixKey.trim()
           : 'C-b',
+      ai: normalizeAiSettings(settings.ai),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },

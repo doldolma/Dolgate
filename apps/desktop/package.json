@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@aws-sdk/client-cloudwatch": "^3.1028.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.1028.0",
     "@aws-sdk/client-ec2": "^3.1028.0",
@@ -78,6 +79,7 @@
     "fuse.js": "^7.0.0",
     "lucide-react": "^1.21.0",
     "nora-zmodemjs": "^1.1.1",
+    "openai": "^6.45.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tailwind-merge": "^3.3.1",

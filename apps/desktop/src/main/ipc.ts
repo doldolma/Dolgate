@@ -25,6 +25,7 @@ import type { UpdateService } from "./update-service";
 import type { WarpgateService } from "./warpgate-service";
 import type { XshellImportService } from "./xshell-import-service";
 import { createMainIpcContext } from "./ipc-context-factory";
+import { registerAiIpcHandlers } from "./ipc/ai";
 import { registerAuthIpcHandlers } from "./ipc/auth";
 import { registerAwsIpcHandlers } from "./ipc/aws";
 import { registerContainersIpcHandlers } from "./ipc/containers";
@@ -94,6 +95,7 @@ export function registerIpcHandlers(
     sessionReplayService,
   });
 
+  registerAiIpcHandlers(ctx);
   registerAuthIpcHandlers(ctx);
   registerSyncIpcHandlers(ctx);
   registerSessionShareIpcHandlers(ctx);

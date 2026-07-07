@@ -1,5 +1,6 @@
 import type { IpcRenderer } from "electron";
 import type {
+  AiChatEvent,
   AuthState,
   ContainerConnectionProgressEvent,
   CoreEvent,
@@ -14,6 +15,7 @@ import type {
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import {
+  emitAiChatEvent,
   emitAuthEvent,
   emitActivityLogsChanged,
   emitContainerConnectionProgress,
@@ -85,6 +87,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.updater.event, (_event, payload: UpdateEvent) => {
     emitUpdateEvent(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.ai.chatEvent, (_event, payload: AiChatEvent) => {
+    emitAiChatEvent(payload);
   });
 
   ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {
