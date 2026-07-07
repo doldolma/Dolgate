@@ -1147,6 +1147,8 @@ export function clampAutoReconnectDelayMs(value: number): number {
 // API 키는 여기 담지 않고 SecretStore(키체인, account: `ai:apiKey:<providerId>`)에만 저장하며,
 // 동기화 대상이 아니다(getSyncedTerminalPreferences가 터미널 테마만 직렬화 → 자동 로컬 유지).
 export type AiProviderId = 'openai-compat' | 'anthropic';
+// 웹 검색 백엔드. duckduckgo=키리스(스크레이프), tavily=BYO 키(더 안정·고품질).
+export type AiSearchBackend = 'duckduckgo' | 'tavily';
 
 export interface AiSettings {
   enabled: boolean;

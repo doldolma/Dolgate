@@ -44,6 +44,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const streaming = conversation?.streaming ?? false;
   const streamingText = conversation?.streamingText ?? '';
   const error = conversation?.error ?? null;
+  const toolActivity = conversation?.toolActivity ?? null;
 
   useEffect(() => {
     const node = transcriptRef.current;
@@ -174,6 +175,12 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
             </div>
           ),
         )}
+
+        {streaming && toolActivity ? (
+          <div className="self-start text-[0.8rem] italic text-[var(--text-soft)]">
+            {toolActivity}
+          </div>
+        ) : null}
 
         {streaming ? (
           <div

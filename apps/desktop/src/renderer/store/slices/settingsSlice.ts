@@ -226,6 +226,9 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
     setAiApiKey: (providerId, key) => api.ai.setApiKey(providerId, key),
     clearAiApiKey: (providerId) => api.ai.clearApiKey(providerId),
     getAiApiKeyStatus: (providerId) => api.ai.apiKeyStatus(providerId),
+    getAiSearchKeyStatus: (backend) => api.ai.searchKeyStatus(backend),
+    setAiSearchKey: (backend, key) => api.ai.setSearchKey(backend, key),
+    clearAiSearchKey: (backend) => api.ai.clearSearchKey(backend),
     openExternalUrl: (url) => api.shell.openExternal(url)
   };
 

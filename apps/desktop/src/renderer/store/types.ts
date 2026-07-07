@@ -49,6 +49,7 @@ import type {
   AiChatMessage,
   AiErrorPayload,
   AiProviderId,
+  AiSearchBackend,
   AiTestConnectionInput,
   AiTestResult,
   SshKeyInstallInput,
@@ -917,6 +918,9 @@ interface AppStateParts {
   setAiApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
   clearAiApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
   getAiApiKeyStatus: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
+  getAiSearchKeyStatus: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
+  setAiSearchKey: (backend: AiSearchBackend, key: string) => Promise<AiApiKeyStatus>;
+  clearAiSearchKey: (backend: AiSearchBackend) => Promise<AiApiKeyStatus>;
   openExternalUrl: (url: string) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
@@ -1264,6 +1268,9 @@ export type SettingsSlice = Pick<
   | "setAiApiKey"
   | "clearAiApiKey"
   | "getAiApiKeyStatus"
+  | "getAiSearchKeyStatus"
+  | "setAiSearchKey"
+  | "clearAiSearchKey"
   | "openExternalUrl"
 >;
 
@@ -1298,6 +1305,8 @@ export interface AiConversation {
   streamingText: string;
   streaming: boolean;
   error: AiErrorPayload | null;
+  // 스트리밍 중 실행 도구 표시(예: "🔍 웹 검색: …"). done/error에서 clear.
+  toolActivity: string | null;
 }
 
 export interface AiChatSlice {

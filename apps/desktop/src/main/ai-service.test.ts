@@ -22,6 +22,18 @@ vi.mock("./ai/provider-anthropic", () => ({
   },
 }));
 
+// 도구 registry 도 목으로 대체(네트워크 없는 도구 실행). web_search executor 만 노출.
+const toolsMock = vi.hoisted(() => ({
+  defs: [] as unknown[],
+  executor: vi.fn(),
+}));
+vi.mock("./ai/tools/registry", () => ({
+  buildToolRegistry: () => ({
+    defs: toolsMock.defs,
+    executors: new Map([["web_search", toolsMock.executor]]),
+  }),
+}));
+
 import { AiService } from "./ai-service";
 import type { AiChatEvent } from "../shared/ai";
 
@@ -49,7 +61,7 @@ function collectChat(service: AiService, requestId: string, request: unknown): P
     const events: AiChatEvent[] = [];
     service.startChat({ requestId, request: request as never }, (event) => {
       events.push(event);
-      if (event.type !== "delta") {
+      if (event.type === "done" || event.type === "error") {
         resolve(events);
       }
     });
@@ -144,6 +156,58 @@ describe("AiService.startChat", () => {
     service.cancelChat("r3");
     const events = await done;
     expect(events.at(-1)).toMatchObject({ type: "done", result: { finishReason: "aborted" } });
+  });
+});
+
+describe("AiService agent loop", () => {
+  beforeEach(() => {
+    adapterMocks.chat.mockReset();
+    toolsMock.defs = [];
+    toolsMock.executor.mockReset();
+  });
+
+  const AGENT_SETTINGS = {
+    enabled: true,
+    providerId: "openai-compat",
+    model: "m",
+    tools: { webSearch: true, fetchUrl: false },
+    search: { backend: "tavily" },
+  };
+
+  it("executes a tool call then finalizes with the model answer", async () => {
+    toolsMock.defs = [{ name: "web_search", parameters: { type: "object", properties: {} } }];
+    toolsMock.executor.mockResolvedValue("search results");
+    adapterMocks.chat
+      .mockResolvedValueOnce({
+        text: "",
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "c1", name: "web_search", argsJson: '{"query":"x"}' }],
+      })
+      .mockResolvedValueOnce({ text: "final answer", finishReason: "stop" });
+    const service = new AiService(makeSettings(AGENT_SETTINGS) as never, makeSecretStore() as never);
+    const events = await collectChat(service, "r1", {
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(toolsMock.executor).toHaveBeenCalledTimes(1);
+    expect(adapterMocks.chat).toHaveBeenCalledTimes(2);
+    const secondCallMessages = adapterMocks.chat.mock.calls[1][0].messages as Array<{ role: string }>;
+    expect(secondCallMessages.some((message) => message.role === "tool")).toBe(true);
+    expect(events.some((event) => event.type === "tool")).toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: "done", result: { text: "final answer" } });
+  });
+
+  it("emits an error after exceeding the tool iteration cap", async () => {
+    toolsMock.defs = [{ name: "web_search", parameters: { type: "object", properties: {} } }];
+    toolsMock.executor.mockResolvedValue("r");
+    adapterMocks.chat.mockResolvedValue({
+      text: "",
+      finishReason: "tool_calls",
+      toolCalls: [{ id: "c", name: "web_search", argsJson: "{}" }],
+    });
+    const service = new AiService(makeSettings(AGENT_SETTINGS) as never, makeSecretStore() as never);
+    const events = await collectChat(service, "r2", { model: "m", messages: [] });
+    expect(events.at(-1)).toMatchObject({ type: "error" });
   });
 });
 

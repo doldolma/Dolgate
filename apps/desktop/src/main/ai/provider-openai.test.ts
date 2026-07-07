@@ -83,4 +83,38 @@ describe("OpenAiAdapter", () => {
       expect.objectContaining({ baseURL: "http://localhost:11434/v1", apiKey: "dolgate-local" }),
     );
   });
+
+  it("accumulates streamed tool_calls by index and returns them", async () => {
+    mocks.create.mockResolvedValue(
+      streamOf([
+        {
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "web_search", arguments: '{"que' } }] },
+              finish_reason: null,
+            },
+          ],
+        },
+        {
+          choices: [
+            {
+              delta: { tool_calls: [{ index: 0, function: { arguments: 'ry":"x"}' } }] },
+              finish_reason: "tool_calls",
+            },
+          ],
+        },
+      ]),
+    );
+    const adapter = new OpenAiAdapter({ providerId: "openai-compat", model: "gpt", apiKey: "k" });
+    const result = await adapter.chat(
+      {
+        model: "gpt",
+        messages: [{ role: "user", content: "hi" }],
+        tools: [{ name: "web_search", parameters: { type: "object", properties: {} } }],
+      },
+      { signal: new AbortController().signal, onDelta: () => undefined },
+    );
+    expect(result.finishReason).toBe("tool_calls");
+    expect(result.toolCalls).toEqual([{ id: "c1", name: "web_search", argsJson: '{"query":"x"}' }]);
+  });
 });

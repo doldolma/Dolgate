@@ -1,9 +1,12 @@
 import OpenAI from "openai";
 
 import type {
+  AiChatMessage,
   AiChatRequest,
   AiChatResult,
   AiFinishReason,
+  AiToolCall,
+  AiToolDef,
   AiTestResult,
 } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
@@ -47,16 +50,18 @@ export class OpenAiAdapter implements ProviderAdapter {
   async chat(request: AiChatRequest, opts: ProviderChatOptions): Promise<AiChatResult> {
     let text = "";
     let finishReason: AiFinishReason = "stop";
+    // 스트리밍 tool_calls 는 index 별로 도착한다(id·name 1회, arguments 문자열 누적).
+    const toolAcc = new Map<number, { id: string; name: string; args: string; started: boolean }>();
 
     const stream = await this.client.chat.completions.create(
       {
         model: request.model || this.model,
-        messages: request.messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        messages: toOpenAiMessages(request.messages),
         temperature: request.temperature ?? this.temperature,
         max_tokens: request.maxTokens,
+        ...(request.tools?.length
+          ? { tools: toOpenAiTools(request.tools), tool_choice: "auto" as const }
+          : {}),
         stream: true,
       },
       { signal: opts.signal },
@@ -64,17 +69,40 @@ export class OpenAiAdapter implements ProviderAdapter {
 
     for await (const chunk of stream) {
       const choice = chunk.choices[0];
-      const delta = choice?.delta?.content;
-      if (typeof delta === "string" && delta.length > 0) {
-        text += delta;
-        opts.onDelta({ kind: "text", text: delta });
+      const content = choice?.delta?.content;
+      if (typeof content === "string" && content.length > 0) {
+        text += content;
+        opts.onDelta({ kind: "text", text: content });
+      }
+      for (const call of choice?.delta?.tool_calls ?? []) {
+        const entry = toolAcc.get(call.index) ?? { id: "", name: "", args: "", started: false };
+        if (call.id) {
+          entry.id = call.id;
+        }
+        if (call.function?.name) {
+          entry.name = call.function.name;
+        }
+        if (call.function?.arguments) {
+          entry.args += call.function.arguments;
+        }
+        toolAcc.set(call.index, entry);
+        if (!entry.started && entry.id && entry.name) {
+          entry.started = true;
+          opts.onDelta({ kind: "tool_call_start", id: entry.id, name: entry.name });
+        } else if (entry.started && call.function?.arguments) {
+          opts.onDelta({ kind: "tool_call_args", id: entry.id, argsDelta: call.function.arguments });
+        }
       }
       if (choice?.finish_reason) {
         finishReason = mapOpenAiFinishReason(choice.finish_reason);
       }
     }
 
-    return { text, finishReason };
+    const toolCalls: AiToolCall[] = [...toolAcc.values()]
+      .filter((entry) => entry.id && entry.name)
+      .map((entry) => ({ id: entry.id, name: entry.name, argsJson: entry.args || "{}" }));
+
+    return { text, finishReason, toolCalls: toolCalls.length ? toolCalls : undefined };
   }
 }
 
@@ -88,4 +116,47 @@ function mapOpenAiFinishReason(reason: string): AiFinishReason {
     default:
       return "stop";
   }
+}
+
+function toOpenAiTools(tools: AiToolDef[]): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
+}
+
+// 정규화된 메시지를 OpenAI 포맷으로. role:"tool"(다중 결과)은 tool_call_id 별 메시지로 펼친다.
+function toOpenAiMessages(
+  messages: AiChatMessage[],
+): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+  for (const message of messages) {
+    if (message.role === "tool") {
+      for (const result of message.toolResults ?? []) {
+        out.push({ role: "tool", tool_call_id: result.toolCallId, content: result.content });
+      }
+      continue;
+    }
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      out.push({
+        role: "assistant",
+        content: message.content || null,
+        tool_calls: message.toolCalls.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: { name: call.name, arguments: call.argsJson },
+        })),
+      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      continue;
+    }
+    out.push({
+      role: message.role,
+      content: message.content,
+    } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+  }
+  return out;
 }

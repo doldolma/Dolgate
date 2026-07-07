@@ -13,6 +13,8 @@ const AI_DEFAULTS: AiSettings = {
   temperature: undefined,
 };
 
+const TAVILY_KEYS_URL = 'https://app.tavily.com/';
+
 const PROVIDER_OPTIONS: Array<{ value: AiProviderId; label: string }> = [
   { value: 'openai-compat', label: 'OpenAI 호환 (OpenAI · Ollama · LM Studio · vLLM 등)' },
   { value: 'anthropic', label: 'Anthropic (Claude)' },
@@ -38,11 +40,16 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const clearAiApiKey = useAppStore((state) => state.clearAiApiKey);
   const getAiApiKeyStatus = useAppStore((state) => state.getAiApiKeyStatus);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
+  const getAiSearchKeyStatus = useAppStore((state) => state.getAiSearchKeyStatus);
+  const setAiSearchKey = useAppStore((state) => state.setAiSearchKey);
+  const clearAiSearchKey = useAppStore((state) => state.clearAiSearchKey);
 
   const [keyInput, setKeyInput] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<AiTestResult | null>(null);
+  const [searchKeyInput, setSearchKeyInput] = useState('');
+  const [hasSearchKey, setHasSearchKey] = useState(false);
 
   const update = useCallback(
     (patch: Partial<AiSettings>) => onUpdateSettings({ ai: { ...ai, ...patch } }),
@@ -67,6 +74,19 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     setKeyInput('');
     setResult(null);
   }, [providerId, refreshKeyStatus]);
+
+  const refreshSearchKeyStatus = useCallback(async () => {
+    try {
+      const status = await getAiSearchKeyStatus('tavily');
+      setHasSearchKey(status.hasKey);
+    } catch {
+      setHasSearchKey(false);
+    }
+  }, [getAiSearchKeyStatus]);
+
+  useEffect(() => {
+    void refreshSearchKeyStatus();
+  }, [refreshSearchKeyStatus]);
 
   async function handleTest() {
     setTesting(true);
@@ -109,6 +129,21 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     await clearAiApiKey(providerId);
     await refreshKeyStatus(providerId);
     setResult(null);
+  }
+
+  async function handleSaveSearchKey() {
+    const trimmed = searchKeyInput.trim();
+    if (!trimmed) {
+      return;
+    }
+    await setAiSearchKey('tavily', trimmed);
+    setSearchKeyInput('');
+    await refreshSearchKeyStatus();
+  }
+
+  async function handleClearSearchKey() {
+    await clearAiSearchKey('tavily');
+    await refreshSearchKeyStatus();
   }
 
   return (
@@ -238,6 +273,47 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                 ) : null}
               </div>
             ) : null}
+
+            <div className="mt-1 border-t border-[var(--border)] pt-3">
+              <SectionLabel>웹 검색</SectionLabel>
+            </div>
+
+            <FieldGroup label="Tavily 검색 API 키 (선택)">
+              <Input
+                type="password"
+                aria-label="Tavily Search API Key"
+                autoComplete="off"
+                placeholder={hasSearchKey ? '•••••••• (저장됨)' : 'tvly-… (선택)'}
+                value={searchKeyInput}
+                onChange={(event) => setSearchKeyInput(event.target.value)}
+              />
+              <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
+                웹 검색·URL 읽기는 기본으로 켜져 있고 키 없이 DuckDuckGo 로 검색합니다. Tavily 키를 넣으면 더 안정적·고품질 검색으로 업그레이드됩니다.
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleSaveSearchKey()}
+                  disabled={!searchKeyInput.trim()}
+                >
+                  키 저장
+                </Button>
+                {hasSearchKey ? (
+                  <Button variant="danger" onClick={() => void handleClearSearchKey()}>
+                    키 삭제
+                  </Button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ml-auto text-[0.85rem] font-medium text-[var(--accent-strong)] hover:underline"
+                  onClick={() => {
+                    void openExternalUrl(TAVILY_KEYS_URL);
+                  }}
+                >
+                  Tavily 키 발급 ↗
+                </button>
+              </div>
+            </FieldGroup>
           </>
         ) : null}
       </div>

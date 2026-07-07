@@ -1,16 +1,41 @@
-import type { AiProviderId } from "@dolssh/shared-core";
+import type { AiProviderId, AiSearchBackend } from "@dolssh/shared-core";
 
 // AI 어시스턴트의 provider-agnostic wire 타입. 데스크톱 전용(main 어댑터 + preload + 렌더러 공유).
 // shared-core 배럴의 export* 값-누락 footgun을 피하려고 shared-core가 아니라 여기에 둔다.
 // AiProviderId 만 shared-core에서 type으로 재사용(값이 아니므로 안전).
 // 재-export 해도 배럴 index 의 두 `export *`는 동일 심볼로 해석돼 충돌하지 않는다
 // (main 파일들이 로컬 ai.ts 상대경로로 AiProviderId 를 함께 가져오게 하기 위함).
-export type { AiProviderId };
+export type { AiProviderId, AiSearchBackend };
+
+// 도구(function calling) — provider-agnostic.
+export interface AiToolDef {
+  name: string;
+  description?: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+export interface AiToolCall {
+  id: string;
+  name: string;
+  // 원시 JSON 문자열(스트리밍 중 부분일 수 있음; 실행 시 JSON.parse).
+  argsJson: string;
+}
+export interface AiToolResult {
+  toolCallId: string;
+  content: string;
+  isError?: boolean;
+}
 
 export interface AiChatMessage {
-  role: "system" | "user" | "assistant";
-  // Phase 1은 평문 텍스트만. tool_result 파트는 이후 phase에서 확장.
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  // assistant 턴이 요청한 도구 호출(에이전트 루프 내부에서만 채워지고, 렌더러 표시 메시지엔 없음).
+  toolCalls?: AiToolCall[];
+  // role:"tool" 턴의 도구 실행 결과.
+  toolResults?: AiToolResult[];
 }
 
 export interface AiChatRequest {
@@ -18,7 +43,7 @@ export interface AiChatRequest {
   messages: AiChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  // tools?: AiToolDef[]; // 이후 phase 예약 — Phase 1에서는 채우지 않는다.
+  tools?: AiToolDef[];
 }
 
 // 스트리밍 델타. Phase 1은 text만 방출하고, tool_call_* 는 이후 phase를 위해
@@ -33,6 +58,8 @@ export type AiFinishReason = "stop" | "length" | "tool_calls" | "aborted" | "err
 export interface AiChatResult {
   text: string;
   finishReason: AiFinishReason;
+  // 어댑터가 이번 턴에 감지한 도구 호출(finishReason "tool_calls"일 때).
+  toolCalls?: AiToolCall[];
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 
@@ -75,9 +102,16 @@ export interface AiChatStartInput {
   request: AiChatRequest;
 }
 
+export type AiToolStatus = "running" | "done" | "error";
+
 // ai:chat-event 로 main→renderer 푸시되는 스트리밍 이벤트.
 export type AiChatEvent =
   | { requestId: string; type: "delta"; delta: AiChatDelta }
+  | {
+      requestId: string;
+      type: "tool";
+      tool: { id: string; name: string; status: AiToolStatus; label: string };
+    }
   | { requestId: string; type: "done"; result: AiChatResult }
   | { requestId: string; type: "error"; error: AiErrorPayload };
 
