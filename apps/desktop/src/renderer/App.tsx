@@ -18,6 +18,7 @@ import {
   getAuthState,
 } from './services/desktop/auth-window-updater';
 import {
+  useAiChatViewModel,
   useAppModalViewModel,
   useAppSettingsViewModel,
   useContainersViewModel,
@@ -94,6 +95,7 @@ export function App() {
   const sftpViewModel = useSftpViewModel();
   const settingsViewModel = useAppSettingsViewModel();
   const modalViewModel = useAppModalViewModel();
+  const aiViewModel = useAiChatViewModel();
 
   useEffect(() => {
     // 알림 권한이 아직 미결정(default)이면 앱 시작 시 한 번 요청해 macOS 권한
@@ -263,6 +265,7 @@ export function App() {
         onSessionShareEvent={sessionViewModel.handleSessionShareEvent}
         onSessionShareChatEvent={sessionViewModel.handleSessionShareChatEvent}
         onAuthEvent={handleAuthEvent}
+        onAiChatEvent={aiViewModel.handleAiChatEvent}
       />
       <NetworkBridge />
       <DesktopStateBridge

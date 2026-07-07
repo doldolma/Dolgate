@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     forward: null as ((event: unknown) => void) | null,
     sessionShare: null as ((event: unknown) => void) | null,
     sessionShareChat: null as ((event: unknown) => void) | null,
+    aiChat: null as ((event: unknown) => void) | null,
     auth: null as ((state: unknown) => void) | null,
     updater: null as ((event: { state: unknown }) => void) | null,
     windowState: null as ((state: unknown) => void) | null,
@@ -63,6 +64,12 @@ const mocks = vi.hoisted(() => {
         }),
         onChatEvent: vi.fn((listener: (event: unknown) => void) => {
           listeners.sessionShareChat = listener;
+          return vi.fn();
+        }),
+      },
+      ai: {
+        onChatEvent: vi.fn((listener: (event: unknown) => void) => {
+          listeners.aiChat = listener;
           return vi.fn();
         }),
       },
@@ -117,6 +124,7 @@ describe('renderer bridges', () => {
     mocks.listeners.forward = null;
     mocks.listeners.sessionShare = null;
     mocks.listeners.sessionShareChat = null;
+    mocks.listeners.aiChat = null;
     mocks.listeners.auth = null;
     mocks.listeners.updater = null;
     mocks.listeners.windowState = null;
@@ -140,6 +148,7 @@ describe('renderer bridges', () => {
         onSessionShareEvent={stableFn}
         onSessionShareChatEvent={stableFn}
         onAuthEvent={firstAuth}
+        onAiChatEvent={stableFn}
       />,
     );
 
@@ -154,6 +163,7 @@ describe('renderer bridges', () => {
         onSessionShareEvent={stableFn}
         onSessionShareChatEvent={stableFn}
         onAuthEvent={latestAuth}
+        onAiChatEvent={stableFn}
       />,
     );
 

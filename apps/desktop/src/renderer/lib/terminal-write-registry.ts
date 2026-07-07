@@ -18,6 +18,10 @@ export interface TerminalHooks {
   getSessionId: () => string;
   /** 현재 셀(글자 1칸) 픽셀 크기. tmux 워크스페이스 단위 client 리사이즈 계산용. */
   getCellSize: () => { width: number; height: number } | null;
+  /** xterm 현재 선택 텍스트(AI 컨텍스트 첨부용). */
+  getSelection: () => string;
+  /** 커서 기준 최근 N줄 버퍼 텍스트(AI 컨텍스트 첨부용). */
+  captureRecentText: (maxLines: number) => string;
 }
 
 const hooksByStableId = new Map<string, TerminalHooks>();
@@ -48,6 +52,16 @@ export function getTerminalCellSize(
   stableId: string,
 ): { width: number; height: number } | null {
   return hooksByStableId.get(stableId)?.getCellSize() ?? null;
+}
+
+/** 살아 있는 터미널(stableId)의 현재 선택 텍스트. 없으면 "". AI 컨텍스트 첨부용. */
+export function readTerminalSelection(stableId: string): string {
+  return hooksByStableId.get(stableId)?.getSelection() ?? '';
+}
+
+/** 살아 있는 터미널(stableId)의 커서 기준 최근 출력 텍스트. 없으면 "". AI 컨텍스트 첨부용. */
+export function captureTerminalRecentText(stableId: string, maxLines: number): string {
+  return hooksByStableId.get(stableId)?.captureRecentText(maxLines) ?? '';
 }
 
 /** 절전/잠금 복귀 시 모든 살아 있는 터미널을 강제 재렌더한다. */

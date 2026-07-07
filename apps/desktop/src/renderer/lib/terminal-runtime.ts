@@ -45,6 +45,10 @@ export interface TerminalRuntime {
   repaint: () => void;
   syncDisplayMetrics: () => void;
   focus: () => void;
+  /** xterm 현재 선택 텍스트(없으면 ""). AI 컨텍스트 첨부용. */
+  getSelection: () => string;
+  /** 커서 기준 최근 maxLines 줄의 버퍼 텍스트(후행 빈 줄 제거). AI 컨텍스트 첨부용. */
+  captureRecentText: (maxLines: number) => string;
   findNext: (term: string) => boolean;
   findPrevious: (term: string) => boolean;
   clearSearch: () => void;
@@ -289,6 +293,21 @@ function buildViewportSnapshot(terminal: Terminal): string {
   const cursorRow = Math.min(terminal.rows, Math.max(1, buffer.cursorY + 1));
   const cursorCol = Math.min(terminal.cols, Math.max(1, buffer.cursorX + 1));
   return `\u001b[2J\u001b[H${lines.join('\r\n')}\u001b[${cursorRow};${cursorCol}H`;
+}
+
+// 커서 기준 최근 maxLines 줄을 스크롤백 포함 버퍼에서 읽는다(후행 빈 줄 제거). AI 컨텍스트용.
+function buildRecentText(terminal: Terminal, maxLines: number): string {
+  const buffer = terminal.buffer.active;
+  const end = buffer.baseY + buffer.cursorY;
+  const start = Math.max(0, end - Math.max(1, maxLines) + 1);
+  const lines: string[] = [];
+  for (let y = start; y <= end; y += 1) {
+    lines.push(sanitizeTerminalLine(buffer.getLine(y)?.translateToString(true) ?? ''));
+  }
+  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') {
+    lines.pop();
+  }
+  return lines.join('\n');
 }
 
 const VIEWPORT_SERIALIZE_OPTIONS: ISerializeOptions = {
@@ -578,6 +597,8 @@ export function createTerminalRuntime({
       }
       return { width: cell.width, height: cell.height };
     },
+    getSelection: () => terminal.getSelection(),
+    captureRecentText: (maxLines: number) => buildRecentText(terminal, maxLines),
     write(data) {
       if (disposed) {
         return;

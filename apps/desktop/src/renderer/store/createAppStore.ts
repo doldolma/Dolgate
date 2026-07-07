@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import type { DesktopApi } from "@shared";
+import { createAiChatSlice } from "./slices/aiChatSlice";
 import { createCatalogSlice } from "./slices/catalogSlice";
 import { createContainersSlice } from "./slices/containersSlice";
 import { createNetworkSlice } from "./slices/networkSlice";
@@ -26,6 +27,7 @@ export function createAppStore(api: DesktopApi) {
       ...createSettingsSlice(deps),
       ...createRuntimeEventSlice(deps),
       ...createZmodemSlice(deps),
+      ...createAiChatSlice(deps),
     };
   });
 }

@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent } from 'react';
-import type { AuthState } from '@shared';
+import type { AiChatEvent, AuthState } from '@shared';
 import { desktopApi } from '../store/appStore';
 
 interface DesktopEventBridgeProps {
@@ -12,6 +12,7 @@ interface DesktopEventBridgeProps {
   onSessionShareEvent: (event: any) => void;
   onSessionShareChatEvent: (event: any) => void;
   onAuthEvent: (state: AuthState) => void;
+  onAiChatEvent: (event: AiChatEvent) => void;
 }
 
 export function DesktopEventBridge({
@@ -24,6 +25,7 @@ export function DesktopEventBridge({
   onSessionShareEvent,
   onSessionShareChatEvent,
   onAuthEvent,
+  onAiChatEvent,
 }: DesktopEventBridgeProps) {
   const handleCoreEvent = useEffectEvent(onCoreEvent);
   const handleSftpConnectionProgress = useEffectEvent(onSftpConnectionProgress);
@@ -36,6 +38,7 @@ export function DesktopEventBridge({
   const handleSessionShareEvent = useEffectEvent(onSessionShareEvent);
   const handleSessionShareChatEvent = useEffectEvent(onSessionShareChatEvent);
   const handleAuthEvent = useEffectEvent(onAuthEvent);
+  const handleAiChatEvent = useEffectEvent(onAiChatEvent);
 
   useEffect(() => {
     const offCore = desktopApi.ssh.onEvent((event) => {
@@ -77,6 +80,12 @@ export function DesktopEventBridge({
     const offAuth = desktopApi.auth.onEvent((state) => {
       handleAuthEvent(state);
     });
+    const offAiChat =
+      typeof desktopApi.ai?.onChatEvent === 'function'
+        ? desktopApi.ai.onChatEvent((event) => {
+            handleAiChatEvent(event);
+          })
+        : () => undefined;
 
     return () => {
       offCore();
@@ -88,6 +97,7 @@ export function DesktopEventBridge({
       offSessionShare();
       offSessionShareChat();
       offAuth();
+      offAiChat();
     };
   }, []);
 
