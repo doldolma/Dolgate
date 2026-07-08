@@ -14,6 +14,24 @@ type ActivityLogWriter = Pick<ActivityLogRepository, 'upsert'>;
 type HostLookup = Pick<HostRepository, 'getById'>;
 type PortForwardLookup = Pick<PortForwardRepository, 'getById'>;
 
+// 세션·SFTP·컨테이너 연결의 전송 계층으로 잠깐 열렸다 닫히는 내부 SSM 터널들의 runtimeId
+// 접두사. 사용자가 만든 포워딩 규칙이 아니라 연결의 구현 세부라 활동 로그(감사)에는 남기지
+// 않는다 — 안 그러면 EC2 SSH-over-SSM 연결마다 "내부 터널 + 세션" 2줄이 남고, 터널 줄은
+// 매칭되는 규칙이 없어 합성 runtimeId 가 라벨로 노출된다. 사용자용 터널(container-service-tunnel:
+// ·ecs-service-tunnel: 및 일반 SSH/SSM 규칙)은 그대로 로깅된다.
+const INTERNAL_TRANSPORT_TUNNEL_PREFIXES = [
+  'aws-ec2-ssh:', // EC2 SSH-over-SSM 전송 터널
+  'aws-ec2-install-key:', // EC2 Instance Connect 임시 키 주입 터널
+  'aws-sftp:', // AWS SFTP 전송 터널
+  'aws-sftp-probe:', // AWS SFTP 프리플라이트 프로브 터널
+  'aws-container-shell:', // 컨테이너 셸 전송 터널
+  'aws-containers:', // 컨테이너 리소스 조회 터널
+] as const;
+
+function isInternalTransportTunnel(ruleId: string): boolean {
+  return INTERNAL_TRANSPORT_TUNNEL_PREFIXES.some((prefix) => ruleId.startsWith(prefix));
+}
+
 interface ActivePortForwardLifecycleAttempt {
   logId: string;
   ruleId: string;
@@ -40,6 +58,10 @@ export class PortForwardLifecycleLogger {
 
   handleEvent(event: PortForwardRuntimeEvent): void {
     const runtime = event.runtime;
+    // 연결의 전송 계층으로 열리는 내부 터널은 감사 로그로 남기지 않는다(세션 로그만으로 충분).
+    if (isInternalTransportTunnel(runtime.ruleId)) {
+      return;
+    }
     if (runtime.status === 'starting') {
       this.ensureAttempt(runtime);
       return;
@@ -205,4 +227,5 @@ function resolvePortForwardMode(
 export const __testOnly = {
   resolvePortForwardMode,
   summarizePortForwardTarget,
+  isInternalTransportTunnel,
 };

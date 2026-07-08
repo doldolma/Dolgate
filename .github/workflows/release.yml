@@ -236,18 +236,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # ubuntu-latest 여유 디스크(~14GB)로는 Android SDK+NDK+Rust(russh)+node_modules+Gradle 캐시를
-      # 다 얹으면 "No space left on device"로 죽는다. 안 쓰는 프리인스톨을 비워 ~10GB+ 확보.
-      # android/tool-cache 는 이 잡이 쓰므로 유지, swap 은 빌드 메모리 여유 위해 유지.
+      # ubuntu-latest 여유 디스크(~14GB)로는 Android SDK+NDK+Rust(russh)+node_modules(AI SDK 추가로 1.5G급)+Gradle
+      # 를 다 얹으면 "No space left on device"로 죽는다. 우리 빌드가 안 쓰는 프리인스톨만 비워 ~11GB 확보.
+      # 지우는 건 전부 rm/prune 이라 수초~30초. large-packages(apt 제거, 1~3분)는 굳이 필요 없어 끔.
+      # android/tool-cache(Node·Java)는 이 잡이 쓰므로 유지, swap 은 빌드 메모리 여유 위해 유지.
+      # npm/Gradle/cargo 캐시는 별도 액션이 관리 → 이 스텝과 무관하게 그대로 재사용됨.
       - name: Free up runner disk space
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: false
           android: false
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
+          dotnet: true # ~1.6GB
+          haskell: true # ~5.6GB
+          large-packages: false # apt 제거는 느려서 제외(위 셋만으로 충분)
+          docker-images: true # ~4GB
           swap-storage: false
 
       - name: Set up Node.js

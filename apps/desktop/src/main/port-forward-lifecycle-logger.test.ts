@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ActivityLogRecord, HostRecord, PortForwardRuntimeEvent, PortForwardRuleRecord } from '@shared';
-import { PortForwardLifecycleLogger } from './port-forward-lifecycle-logger';
+import { PortForwardLifecycleLogger, __testOnly } from './port-forward-lifecycle-logger';
 
 function createRule(overrides: Partial<PortForwardRuleRecord> = {}): PortForwardRuleRecord {
   return {
@@ -196,5 +196,69 @@ describe('PortForwardLifecycleLogger', () => {
       stoppedAt: '2026-04-03T00:00:10.000Z',
       endReason: null,
     });
+  });
+
+  it('does not log internal transport tunnels (EC2 SSH-over-SSM, SFTP, container shells)', () => {
+    const upsert = vi.fn<(record: ActivityLogRecord) => ActivityLogRecord>().mockImplementation((record) => record);
+    const logger = new PortForwardLifecycleLogger(
+      { upsert },
+      { getById: vi.fn(() => null) },
+      { getById: vi.fn(() => createHost({ kind: 'aws-ec2', label: 'bastion' })) },
+      () => '2026-04-03T00:00:00.000Z',
+    );
+
+    // EC2 SSH-over-SSM 전송 터널의 전체 라이프사이클을 흘려도 감사 로그가 남지 않는다.
+    for (const prefix of [
+      'aws-ec2-ssh:host-1:abc',
+      'aws-ec2-install-key:host-1:def',
+      'aws-sftp:endpoint-1',
+      'aws-sftp-probe:host-1:ghi',
+      'aws-container-shell:host-1:jkl',
+      'aws-containers:endpoint-1',
+    ]) {
+      logger.handleEvent(createEvent('starting', { ruleId: prefix, updatedAt: '2026-04-03T00:00:00.000Z' }));
+      logger.handleEvent(createEvent('running', { ruleId: prefix, startedAt: '2026-04-03T00:00:00.000Z' }));
+      logger.handleEvent(createEvent('stopped', { ruleId: prefix, updatedAt: '2026-04-03T00:00:10.000Z' }));
+    }
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('still logs user-facing container/ecs tunnels and plain rules', () => {
+    const upsert = vi.fn<(record: ActivityLogRecord) => ActivityLogRecord>().mockImplementation((record) => record);
+    const logger = new PortForwardLifecycleLogger(
+      { upsert },
+      { getById: vi.fn(() => null) },
+      { getById: vi.fn(() => createHost()) },
+      () => '2026-04-03T00:00:00.000Z',
+    );
+
+    // container-service-tunnel: / ecs-service-tunnel: 는 사용자용이라 그대로 기록된다.
+    logger.handleEvent(
+      createEvent('running', {
+        ruleId: 'container-service-tunnel:xyz',
+        transport: 'container',
+        startedAt: '2026-04-03T00:00:00.000Z',
+      }),
+    );
+    logger.handleEvent(
+      createEvent('running', {
+        ruleId: 'ecs-service-tunnel:xyz',
+        transport: 'ecs-task',
+        startedAt: '2026-04-03T00:00:00.000Z',
+      }),
+    );
+
+    expect(upsert).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('isInternalTransportTunnel', () => {
+  it('matches internal transport prefixes but not user rules', () => {
+    expect(__testOnly.isInternalTransportTunnel('aws-ec2-ssh:host:uuid')).toBe(true);
+    expect(__testOnly.isInternalTransportTunnel('aws-container-shell:host:uuid')).toBe(true);
+    expect(__testOnly.isInternalTransportTunnel('container-service-tunnel:uuid')).toBe(false);
+    expect(__testOnly.isInternalTransportTunnel('ecs-service-tunnel:uuid')).toBe(false);
+    expect(__testOnly.isInternalTransportTunnel('rule-1')).toBe(false);
   });
 });
