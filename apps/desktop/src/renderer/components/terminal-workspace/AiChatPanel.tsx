@@ -179,13 +179,16 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
   const error = conversation?.error ?? null;
   const toolRuns = conversation?.toolRuns ?? [];
   const pendingApproval = conversation?.pendingApproval ?? null;
+  // 스트리밍 중 "생각중" 아래에 실시간 표시할 추론 트레이스(thinking 델타 누적).
+  // 답변이 시작되면 사라지고, 완료 후엔 메시지의 "작업 내역" 접기로 보존된다.
+  const generationTrace = conversation?.generationTrace ?? '';
 
   useEffect(() => {
     const node = transcriptRef.current;
     if (node) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [messages.length, streamingText, error]);
+  }, [messages.length, streamingText, generationTrace, error]);
 
   useEffect(() => {
     if (!attachNotice) {
@@ -509,7 +512,14 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
             {streamingText ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingText}</ReactMarkdown>
             ) : (
-              <ThinkingIndicator />
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <ThinkingIndicator />
+                {generationTrace ? (
+                  <div className={`break-words text-[var(--text-soft)] ${MARKDOWN_CLASSNAME}`}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{generationTrace}</ReactMarkdown>
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         ) : null}

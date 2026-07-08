@@ -120,6 +120,16 @@ function collectChat(service: AiService, requestId: string, request: unknown): P
   });
 }
 
+beforeEach(() => {
+  codexMocks.authStatus.mockReset();
+  codexMocks.authStatus.mockResolvedValue({
+    authenticated: true,
+    authMode: "chatgpt",
+    email: "dev@example.com",
+    planType: "pro",
+  });
+});
+
 describe("AiService key management", () => {
   beforeEach(() => {
     adapterMocks.chat.mockReset();
@@ -208,7 +218,7 @@ describe("AiService.startChat", () => {
         expect.objectContaining({ defs: toolsMock.defs }),
       );
       expect(codexMocks.ctor).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "codex", model: "" }),
+        expect.objectContaining({ providerId: "codex", model: "gpt-5.5" }),
         expect.objectContaining({ url: "http://127.0.0.1:9/mcp", token: "tok" }),
       );
       // 요청 페이로드에는 function-calling 도구가 실리지 않는다.
@@ -220,8 +230,44 @@ describe("AiService.startChat", () => {
     }
   });
 
-  it("codex MCP invoke routes through the shared tool executor (events + result)", async () => {
+  it("stops codex chats before SDK execution when the account is not authenticated", async () => {
+    codexMocks.authStatus.mockResolvedValue({
+      authenticated: false,
+      authMode: null,
+      email: null,
+      planType: null,
+    });
     adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+      makeSecretStore() as never,
+    );
+    const events = await collectChat(service, "r-codex-auth", {
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(events.at(-1)).toMatchObject({ type: "error", error: { reason: "auth" } });
+    expect(adapterMocks.chat).not.toHaveBeenCalled();
+    expect(codexMocks.registerMcp).not.toHaveBeenCalled();
+  });
+
+  it("normalizes stored non-Codex model ids before constructing the Codex adapter", async () => {
+    adapterMocks.chat.mockResolvedValue({ text: "ok", finishReason: "stop" });
+    const service = new AiService(
+      makeSettings({ enabled: true, providerId: "codex", model: "Qwen-AgentWorld-35B-A3B" }) as never,
+      makeSecretStore() as never,
+    );
+    await collectChat(service, "r-codex-model", {
+      model: "",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(codexMocks.ctor).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: "codex", model: "gpt-5.5" }),
+      undefined,
+    );
+  });
+
+  it("codex MCP invoke routes through the shared tool executor (events + result)", async () => {
     let binding: { invoke: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }> } | null =
       null;
     codexMocks.registerMcp.mockImplementation(async (input) => {
@@ -231,29 +277,102 @@ describe("AiService.startChat", () => {
     toolsMock.executor.mockResolvedValue("검색 결과 요약");
     toolsMock.defs = [{ name: "web_search" }];
     try {
+      adapterMocks.chat.mockImplementation(async () => {
+        expect(binding).not.toBeNull();
+        const ok = await binding!.invoke("web_search", { query: "dolgate" });
+        expect(ok).toEqual({ content: "검색 결과 요약", isError: undefined });
+        return { text: "ok", finishReason: "stop" };
+      });
       const service = new AiService(
         makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
         makeSecretStore() as never,
       );
-      await collectChat(service, "r-codex-invoke", {
+      const events = await collectChat(service, "r-codex-invoke", {
         model: "",
         messages: [{ role: "user", content: "hi" }],
       });
-      expect(binding).not.toBeNull();
-
-      const ok = await binding!.invoke("web_search", { query: "dolgate" });
       expect(toolsMock.executor).toHaveBeenCalledWith(
         { query: "dolgate" },
         expect.objectContaining({ signal: expect.anything() }),
       );
-      expect(ok).toEqual({ content: "검색 결과 요약", isError: undefined });
-
-      const unknown = await binding!.invoke("nope", {});
-      expect(unknown.isError).toBe(true);
-      expect(unknown.content).toContain("unknown tool");
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool",
+          tool: expect.objectContaining({ name: "web_search", status: "running" }),
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool",
+          tool: expect.objectContaining({ name: "web_search", status: "done" }),
+        }),
+      );
     } finally {
       toolsMock.defs = [];
       toolsMock.executor.mockReset();
+    }
+  });
+
+  it("codex MCP run_in_terminal uses the shared approval gate", async () => {
+    let binding: { invoke: (name: string, args: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }> } | null =
+      null;
+    codexMocks.registerMcp.mockImplementation(async (input) => {
+      binding = input;
+      return { url: "http://127.0.0.1:9/mcp", token: "tok", dispose: codexMocks.disposeMcp };
+    });
+    toolsMock.defs = [{ name: "run_in_terminal" }];
+    toolsMock.runExecutor.mockResolvedValue("typed into terminal");
+    adapterMocks.chat.mockImplementation(async () => {
+      expect(binding).not.toBeNull();
+      const result = await binding!.invoke("run_in_terminal", {
+        command: "rm -rf /tmp/dolgate-test",
+        changes_state: true,
+      });
+      expect(result).toEqual({ content: "typed into terminal", isError: undefined });
+      return { text: "ok", finishReason: "stop" };
+    });
+
+    try {
+      const service = new AiService(
+        makeSettings({ enabled: true, providerId: "codex", model: "" }) as never,
+        makeSecretStore() as never,
+      );
+      const events = await new Promise<AiChatEvent[]>((resolve) => {
+        const collected: AiChatEvent[] = [];
+        service.startChat(
+          {
+            requestId: "r-codex-run",
+            sessionId: "s1",
+            request: { model: "", messages: [{ role: "user", content: "run" }] } as never,
+          },
+          (event) => {
+            collected.push(event);
+            if (event.type === "approval-required") {
+              service.resolveApproval({
+                requestId: "r-codex-run",
+                toolCallId: event.approval.toolCallId,
+                approved: true,
+              });
+            }
+            if (event.type === "done" || event.type === "error") {
+              resolve(collected);
+            }
+          },
+        );
+      });
+
+      expect(events).toContainEqual(expect.objectContaining({ type: "approval-required" }));
+      expect(toolsMock.runExecutor).toHaveBeenCalledTimes(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "tool",
+          tool: expect.objectContaining({ name: "run_in_terminal", status: "running" }),
+        }),
+      );
+      expect(events.at(-1)).toMatchObject({ type: "done" });
+    } finally {
+      toolsMock.defs = [];
+      toolsMock.runExecutor.mockReset();
     }
   });
 

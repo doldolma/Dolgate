@@ -201,6 +201,39 @@ describe("aiChatSlice", () => {
     });
   });
 
+  it("accumulates thinking deltas into the live trace and keeps them on the final message", async () => {
+    const { slice, get } = harness(ENABLED);
+    await slice.sendAiMessage("s1", "왜 느려?");
+    const requestId = get().aiConversations["s1"].requestId!;
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "delta",
+      delta: { kind: "thinking", text: "**로그 확인**" },
+    });
+    slice.handleAiChatEvent({
+      requestId,
+      type: "delta",
+      delta: { kind: "thinking", text: "\n\n이제 답변 정리" },
+    });
+    // thinking 은 답변 스트리밍 영역이 아니라 작업 내역 트레이스에 실시간 누적된다.
+    expect(get().aiConversations["s1"].streamingText).toBe("");
+    expect(get().aiConversations["s1"].generationTrace).toBe("**로그 확인**\n\n이제 답변 정리");
+
+    slice.handleAiChatEvent({
+      requestId,
+      type: "done",
+      result: { text: "디스크가 꽉 찼습니다.", finishReason: "stop" },
+    });
+    const conv = get().aiConversations["s1"];
+    expect(conv.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "디스크가 꽉 찼습니다.",
+      generationTrace: "**로그 확인**\n\n이제 답변 정리",
+    });
+    expect(conv.generationTrace).toBe("");
+  });
+
   it("preserves streamed text that is cleared when a tool starts", async () => {
     const { slice, get } = harness(ENABLED);
     await slice.sendAiMessage("s1", "inspect it");

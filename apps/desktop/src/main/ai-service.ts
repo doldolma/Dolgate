@@ -32,6 +32,7 @@ import {
 } from "./ai/tools/read-terminal-output";
 import { AnthropicAdapter } from "./ai/provider-anthropic";
 import { CodexAdapter } from "./ai/provider-codex";
+import { normalizeCodexModel } from "./ai/codex-models";
 import {
   codexAuthStatus,
   codexLoginStart,
@@ -240,7 +241,12 @@ export class AiService {
       for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
         const result = await adapter.chat(
           { ...request, messages: trimMessages(messages, inputBudget), tools },
-          { signal: controller.signal, onDelta: (delta) => emit({ requestId, type: "delta", delta }) },
+          {
+            signal: controller.signal,
+            onDelta: (delta) => emit({ requestId, type: "delta", delta }),
+            // 어댑터 내장 도구 활동(codex web_search·로컬 실행)도 같은 tool 칩 스트림으로 표시.
+            onToolEvent: (tool) => emit({ requestId, type: "tool", tool }),
+          },
         );
         if (result.finishReason !== "tool_calls" || !result.toolCalls?.length) {
           emit({ requestId, type: "done", result });
@@ -461,13 +467,19 @@ export class AiService {
     if (!ai || !ai.enabled) {
       throw new AiRequestError("disabled", "AI 어시스턴트가 비활성화되어 있습니다.");
     }
+    if (ai.providerId === "codex") {
+      await this.assertCodexAuthenticated();
+    }
     const apiKey = (await this.secretStore.load(apiKeyAccount(ai.providerId))) ?? "";
     // openai-compat 로컬 서버는 키가 없을 수 있으나, anthropic 은 키 필수.
     // codex 는 API 키 대신 CODEX_HOME 로그인 세션을 쓴다(키 불필요).
     if (!apiKey && ai.providerId === "anthropic") {
       throw new AiRequestError("auth", "API 키가 설정되지 않았습니다.");
     }
-    const model = requestModel || ai.model;
+    const model =
+      ai.providerId === "codex"
+        ? normalizeCodexModel(requestModel || ai.model)
+        : requestModel || ai.model;
     // codex 는 모델 미지정 시 codex 기본 모델을 쓰므로 빈 값을 허용한다.
     if (!model && ai.providerId !== "codex") {
       throw new AiRequestError("model-not-found", "사용할 모델이 설정되지 않았습니다.");
@@ -480,6 +492,24 @@ export class AiService {
       apiKey,
       temperature: ai.temperature,
     };
+  }
+
+  private async assertCodexAuthenticated(): Promise<void> {
+    let status: CodexAuthStatus;
+    try {
+      status = await codexAuthStatus(getCodexAppServer());
+    } catch {
+      throw new AiRequestError(
+        "auth",
+        "Codex 로그인 상태를 확인하지 못했습니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
+      );
+    }
+    if (!status.authenticated) {
+      throw new AiRequestError(
+        "auth",
+        "Codex 로그인이 필요합니다. 설정에서 'Codex 로그인' 버튼을 눌러 주세요.",
+      );
+    }
   }
 
   private buildAdapter(config: ProviderConfig, codexMcp?: CodexMcpRegistration): ProviderAdapter {

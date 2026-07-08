@@ -126,10 +126,11 @@ export interface AiTerminalOutputResponse {
   error?: string;
 }
 
-// 스트리밍 델타. Phase 1은 text만 방출하고, tool_call_* 는 이후 phase를 위해
-// 미리 정의만 해 둔다(다운스트림 코드가 선컴파일되도록).
+// 스트리밍 델타. text 는 답변 본문, thinking 은 추론 요약(codex — 렌더러가 작업 내역
+// 트레이스에 누적). tool_call_* 는 이후 phase를 위해 미리 정의만 해 둔다.
 export type AiChatDelta =
   | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
   | { kind: "tool_call_start"; id: string; name: string }
   | { kind: "tool_call_args"; id: string; argsDelta: string };
 
@@ -195,14 +196,18 @@ export interface AiApprovalResponse {
 
 export type AiToolStatus = "running" | "done" | "error";
 
+// 도구 실행 상태 페이로드 — AiService 실행 경로와 어댑터 내장 도구(codex web_search 등)가 공유.
+export interface AiToolEvent {
+  id: string;
+  name: string;
+  status: AiToolStatus;
+  label: string;
+}
+
 // ai:chat-event 로 main→renderer 푸시되는 스트리밍 이벤트.
 export type AiChatEvent =
   | { requestId: string; type: "delta"; delta: AiChatDelta }
-  | {
-      requestId: string;
-      type: "tool";
-      tool: { id: string; name: string; status: AiToolStatus; label: string };
-    }
+  | { requestId: string; type: "tool"; tool: AiToolEvent }
   | {
       requestId: string;
       type: "approval-required";

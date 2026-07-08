@@ -1,13 +1,21 @@
 import { mergeConfig } from 'vite';
 import baseConfig from './vite.base.config';
 
+const externalMainDependencies = [
+  '@anthropic-ai/sdk',
+  /^@modelcontextprotocol\/sdk(\/.*)?$/,
+  'html-to-text',
+  'openai'
+];
+
 export default mergeConfig(baseConfig, {
   build: {
     rollupOptions: {
-      // @openai/codex-sdk pulls the Codex CLI package and native vendor payloads.
-      // Keep it as a runtime dependency so Vite does not try to crawl/bundle the
-      // CLI resources into the Electron main bundle during release packaging.
-      external: ['@openai/codex-sdk']
+      // AI provider/MCP packages have large server-side dependency graphs and
+      // are copied into the packaged app by sync-runtime-deps. Keep the Codex
+      // SDK bundled because it is ESM-only and cannot be required by the CJS
+      // Electron main entry at runtime.
+      external: externalMainDependencies
     }
   },
   test: {

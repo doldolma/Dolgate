@@ -1,6 +1,5 @@
 const fs = require('node:fs/promises');
 const { existsSync } = require('node:fs');
-const { execFileSync } = require('node:child_process');
 const { builtinModules } = require('node:module');
 const path = require('node:path');
 
@@ -9,7 +8,6 @@ const repoRoot = path.resolve(desktopRoot, '../..');
 const desktopPackage = require(path.join(desktopRoot, 'package.json'));
 
 const targetNodeModules = path.join(desktopRoot, 'node_modules');
-const cacheNodeModules = path.join(desktopRoot, '.runtime-deps-cache', 'node_modules');
 const markerPath = path.join(targetNodeModules, '.dolssh-runtime-deps.json');
 const REMOVE_RETRY_DELAY_MS = 150;
 
@@ -23,10 +21,6 @@ function isBuiltinDependency(packageName) {
 
 function packageNameToPath(packageName) {
   return path.join(targetNodeModules, ...packageName.split('/'));
-}
-
-function cachePackageNameToPath(packageName) {
-  return path.join(cacheNodeModules, ...packageName.split('/'));
 }
 
 async function sleep(ms) {
@@ -96,45 +90,12 @@ function shouldIncludeRuntimePackage(
   targetPlatform = resolveTargetPlatform(),
   targetArch = resolveTargetArch()
 ) {
+  void targetPlatform;
+  void targetArch;
   if (isCodexPlatformPackage(packageName)) {
-    return codexPlatformPackageTargets(
-      targetPlatform || process.platform,
-      targetArch || process.arch
-    ).includes(packageName);
+    return false;
   }
   return true;
-}
-
-function codexPlatformPackageTargets(
-  targetPlatform = resolveTargetPlatform() || process.platform,
-  targetArch = resolveTargetArch() || process.arch
-) {
-  if (targetPlatform === 'darwin' && targetArch === 'universal') {
-    return ['@openai/codex-darwin-arm64', '@openai/codex-darwin-x64'];
-  }
-  if (targetPlatform === 'darwin' && targetArch === 'arm64') {
-    return ['@openai/codex-darwin-arm64'];
-  }
-  if (targetPlatform === 'darwin' && targetArch === 'x64') {
-    return ['@openai/codex-darwin-x64'];
-  }
-  if (targetPlatform === 'win32' && targetArch === 'arm64') {
-    return ['@openai/codex-win32-arm64'];
-  }
-  if (targetPlatform === 'win32' && targetArch === 'x64') {
-    return ['@openai/codex-win32-x64'];
-  }
-  if (targetPlatform === 'linux' && targetArch === 'arm64') {
-    return ['@openai/codex-linux-arm64'];
-  }
-  if (targetPlatform === 'linux' && targetArch === 'x64') {
-    return ['@openai/codex-linux-x64'];
-  }
-  return [];
-}
-
-function shouldMaterializeOptionalPackage(packageName) {
-  return codexPlatformPackageTargets().includes(packageName);
 }
 
 async function readMarker() {
@@ -157,12 +118,7 @@ async function removePreviouslyCopiedPackages() {
 }
 
 function resolveInstalledPackageJson(packageName) {
-  const searchPaths = [repoRoot, desktopRoot, path.dirname(path.dirname(cacheNodeModules))];
-  const cacheManifestCandidate = path.join(cachePackageNameToPath(packageName), 'package.json');
-  if (existsSync(cacheManifestCandidate)) {
-    return cacheManifestCandidate;
-  }
-
+  const searchPaths = [repoRoot, desktopRoot];
   for (const searchRoot of searchPaths) {
     const manifestCandidate = path.join(
       searchRoot,
@@ -202,61 +158,6 @@ function resolveInstalledPackageJson(packageName) {
   }
 }
 
-function npmCommand() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
-}
-
-function resolveCodexOptionalPackageSpec(packageName) {
-  let codexManifestPath;
-  try {
-    codexManifestPath = resolveInstalledPackageJson('@openai/codex');
-  } catch {
-    return null;
-  }
-
-  const codexManifest = require(codexManifestPath);
-  const spec = codexManifest.optionalDependencies?.[packageName];
-  return typeof spec === 'string' ? spec : null;
-}
-
-async function materializeOptionalPackage(packageName) {
-  if (!shouldMaterializeOptionalPackage(packageName)) {
-    return null;
-  }
-
-  const destination = cachePackageNameToPath(packageName);
-  const manifestPath = path.join(destination, 'package.json');
-  if (existsSync(manifestPath)) {
-    return manifestPath;
-  }
-
-  const spec = resolveCodexOptionalPackageSpec(packageName);
-  if (!spec) {
-    return null;
-  }
-
-  const tempRoot = path.join(desktopRoot, '.runtime-deps-cache', 'tmp');
-  const tempDir = path.join(tempRoot, packageName.replaceAll('/', '__'));
-  await removePath(tempDir);
-  await fs.mkdir(tempDir, { recursive: true });
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  execFileSync(npmCommand(), ['pack', spec, '--pack-destination', tempDir], {
-    cwd: repoRoot,
-    stdio: 'ignore'
-  });
-  const tarball = (await fs.readdir(tempDir)).find((entry) => entry.endsWith('.tgz'));
-  if (!tarball) {
-    throw new Error(`${packageName} 패키지 tarball을 찾을 수 없습니다.`);
-  }
-  await removePath(destination);
-  await fs.mkdir(destination, { recursive: true });
-  execFileSync('tar', ['-xzf', path.join(tempDir, tarball), '-C', destination, '--strip-components', '1'], {
-    stdio: 'ignore'
-  });
-  await removePath(tempDir);
-  return manifestPath;
-}
-
 async function collectRuntimeDependencyGraph() {
   const targetPlatform = resolveTargetPlatform();
   const queue = Object.keys(desktopPackage.dependencies || {})
@@ -280,20 +181,21 @@ async function collectRuntimeDependencyGraph() {
       manifestPath = resolveInstalledPackageJson(entry.name);
     } catch (error) {
       if (entry.optional) {
-        manifestPath = await materializeOptionalPackage(entry.name);
-        if (!manifestPath) {
-          continue;
-        }
+        continue;
       } else {
         throw error;
       }
     }
     const manifestDirectory = path.dirname(manifestPath);
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    const resolvedPackageName = typeof manifest.name === 'string' ? manifest.name : entry.name;
+    if (visited.has(resolvedPackageName)) {
+      continue;
+    }
 
-    visited.add(entry.name);
+    visited.add(resolvedPackageName);
     packages.push({
-      name: entry.name,
+      name: resolvedPackageName,
       sourceDirectory: manifestDirectory
     });
 

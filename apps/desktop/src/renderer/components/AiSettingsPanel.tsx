@@ -26,9 +26,9 @@ const AI_DEFAULTS: AiSettings = {
 const TAVILY_KEYS_URL = 'https://app.tavily.com/';
 
 const PROVIDER_OPTIONS: Array<{ value: AiProviderId; label: string }> = [
+  { value: 'codex', label: 'Codex (ChatGPT 계정)' },
   { value: 'openai-compat', label: 'OpenAI 호환 (OpenAI · Ollama · LM Studio · vLLM 등)' },
   { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'codex', label: 'Codex (ChatGPT 계정)' },
 ];
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
@@ -57,8 +57,12 @@ const CODEX_MODEL_OPTIONS = [
 ];
 
 function withCodexDefaultModel(settings: AiSettings): AiSettings {
-  if (settings.providerId !== 'codex' || settings.model.trim()) {
+  if (settings.providerId !== 'codex') {
     return settings;
+  }
+  const model = settings.model.trim();
+  if (CODEX_MODEL_OPTIONS.some((option) => option.id === model)) {
+    return model === settings.model ? settings : { ...settings, model };
   }
   return { ...settings, model: DEFAULT_CODEX_MODEL };
 }
@@ -166,6 +170,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const [codexUsage, setCodexUsage] = useState<CodexUsage | null>(null);
   const [codexError, setCodexError] = useState<string | null>(null);
   const [codexLoggingIn, setCodexLoggingIn] = useState(false);
+  const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
   // 언마운트/프로바이더 전환 시 로그인 폴링을 멈추기 위한 세대 토큰.
   const codexPollGeneration = useRef(0);
 
@@ -185,9 +190,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const setField = useCallback((patch: Partial<AiSettings>) => {
     setSaved(false);
     setDraft((current) => {
+      const providerChanged = patch.providerId !== undefined && patch.providerId !== current.providerId;
       const next = { ...current, ...patch };
-      if (patch.providerId === 'codex' && !next.model.trim()) {
-        next.model = DEFAULT_CODEX_MODEL;
+      if (providerChanged && patch.model === undefined) {
+        next.model = '';
       }
       return next;
     });
@@ -253,6 +259,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   useEffect(() => {
     codexPollGeneration.current += 1;
     setCodexLoggingIn(false);
+    setCodexLoginUrl(null);
     if (providerId === 'codex') {
       setCodexStatus(null);
       void refreshCodexStatus();
@@ -270,9 +277,14 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   async function handleCodexLogin() {
     setCodexLoggingIn(true);
     setCodexError(null);
+    setCodexLoginUrl(null);
     const generation = ++codexPollGeneration.current;
     try {
       const { authUrl } = await codexLoginStart();
+      if (codexPollGeneration.current !== generation) {
+        return;
+      }
+      setCodexLoginUrl(authUrl);
       await openExternalUrl(authUrl);
       for (let attempt = 0; attempt < CODEX_LOGIN_POLL_MAX_ATTEMPTS; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, CODEX_LOGIN_POLL_INTERVAL_MS));
@@ -292,6 +304,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             } catch {
               setCodexUsage(null);
             }
+            setCodexLoginUrl(null);
             return;
           }
         } catch {
@@ -308,6 +321,25 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
         setCodexLoggingIn(false);
       }
     }
+  }
+
+  async function handleReopenCodexLogin() {
+    if (!codexLoginUrl) {
+      return;
+    }
+    try {
+      setCodexError(null);
+      await openExternalUrl(codexLoginUrl);
+    } catch (error) {
+      setCodexError(error instanceof Error ? error.message : '브라우저를 다시 열지 못했습니다.');
+    }
+  }
+
+  function handleCancelCodexLogin() {
+    codexPollGeneration.current += 1;
+    setCodexLoggingIn(false);
+    setCodexLoginUrl(null);
+    setCodexError(null);
   }
 
   async function handleCodexLogout() {
@@ -510,6 +542,20 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                         ? '다시 로그인'
                         : 'Codex 로그인'}
                   </Button>
+                  {codexLoggingIn ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => void handleReopenCodexLogin()}
+                        disabled={!codexLoginUrl}
+                      >
+                        브라우저 다시 열기
+                      </Button>
+                      <Button variant="secondary" onClick={handleCancelCodexLogin}>
+                        취소
+                      </Button>
+                    </>
+                  ) : null}
                   {codexStatus?.authenticated ? (
                     <Button variant="danger" onClick={() => void handleCodexLogout()}>
                       로그아웃
