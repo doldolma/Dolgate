@@ -236,6 +236,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # ubuntu-latest 여유 디스크(~14GB)로는 Android SDK+NDK+Rust(russh)+node_modules+Gradle 캐시를
+      # 다 얹으면 "No space left on device"로 죽는다. 안 쓰는 프리인스톨을 비워 ~10GB+ 확보.
+      # android/tool-cache 는 이 잡이 쓰므로 유지, swap 은 빌드 메모리 여유 위해 유지.
+      - name: Free up runner disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
