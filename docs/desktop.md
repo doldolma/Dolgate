@@ -1,6 +1,6 @@
 # Dolgate Desktop
 
-Dolgate Desktop은 macOS와 Windows를 위한 Electron 기반 SSH 워크스페이스입니다.  
+Dolgate Desktop은 Windows, macOS, Linux를 위한 Electron 기반 SSH 워크스페이스입니다.  
 여러 세션을 한 화면에서 다루고, 파일 전송과 포트 포워딩, 세션 공유, AWS/컨테이너 작업까지 하나의 UI에서 처리하는 것이 현재 데스크톱 앱의 중심 역할입니다.
 
 ## 현재 기능
@@ -102,7 +102,7 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 
 ## SSH Agent 인증과 Forwarding
 
-호스트 생성/수정 화면에서 **Auth Type = SSH Agent**를 선택하면 비밀번호나 키 파일을 Dolgate에 저장하지 않고 로컬 ssh-agent로 인증합니다. macOS의 `SSH_AUTH_SOCK`, launchctl agent, Windows OpenSSH agent, 1Password SSH Agent, `ssh-add`로 등록한 키를 사용할 수 있습니다.
+호스트 생성/수정 화면에서 **Auth Type = SSH Agent**를 선택하면 비밀번호나 키 파일을 Dolgate에 저장하지 않고 로컬 ssh-agent로 인증합니다. macOS·Linux의 `SSH_AUTH_SOCK`, launchctl agent, Windows OpenSSH agent, 1Password SSH Agent, `ssh-add`로 등록한 키를 사용할 수 있습니다.
 
 - **상태 확인**: SSH Agent 인증을 선택하면 로컬 agent 연결 가능 여부와 키 개수를 설정 화면에서 확인합니다.
 - **저장 방식**: agent 인증은 로컬 agent에 서명을 위임하므로 개인키 자체를 Dolgate 저장소나 sync-api에 저장하지 않습니다.

@@ -18,6 +18,17 @@ function resolveLinuxTargets() {
   return ['AppImage'];
 }
 
+// electron-packager는 mkdtemp(0700)로 스테이징한 디렉터리를 out/으로 그대로 옮기므로
+// prepackaged 디렉터리 최상위가 0700이 된다. fpm(deb)과 squashfs(AppImage)는 이 모드를
+// 그대로 보존해서 /opt/Dolgate 가 일반 사용자에게 접근 불가가 되므로, 패킹 전에 정규화한다.
+function normalizePrepackagedPermissions(arch) {
+  const prepackagedDir = path.join(desktopRoot, 'out', `dolgate-linux-${arch}`);
+  const result = spawnSync('chmod', ['-R', 'a+rX', prepackagedDir], { stdio: 'inherit' });
+  if (result.status !== 0) {
+    throw new Error(`prepackaged 디렉터리 권한 정규화에 실패했습니다: ${prepackagedDir}`);
+  }
+}
+
 function runElectronBuilder(targets, arch) {
   const electronBuilderCli = path.join(
     path.dirname(require.resolve('electron-builder/package.json')),
@@ -56,6 +67,36 @@ function requireDistFile(files, pattern) {
   }
 }
 
+// deb 안의 /opt/<App> 디렉터리가 일반 사용자도 접근 가능한 모드인지 확인한다(위 0700 문제의 회귀 방지).
+// dpkg-deb 는 리눅스에만 있으므로 없으면 건너뛴다(deb 자체가 리눅스에서만 빌드됨).
+function verifyDebDirectoryModes(fileName) {
+  const result = spawnSync('dpkg-deb', ['-c', path.join(distDirectory, fileName)], { encoding: 'utf8' });
+  if (result.error && result.error.code === 'ENOENT') {
+    return;
+  }
+  if (result.status !== 0) {
+    throw new Error(`${fileName}: dpkg-deb 로 내용을 확인하지 못했습니다.`);
+  }
+  const optDirLine = result.stdout.split('\n').find((line) => /\s\.\/opt\/[^/]+\/$/.test(line));
+  if (!optDirLine) {
+    throw new Error(`${fileName}: deb 안에서 /opt 앱 디렉터리를 찾지 못했습니다.`);
+  }
+  if (!optDirLine.startsWith('drwxr-xr-x')) {
+    throw new Error(
+      `${fileName}: /opt 앱 디렉터리 권한이 잘못되었습니다(${optDirLine.slice(0, 10)}). ` +
+        '일반 사용자가 접근할 수 없어 설치 후 앱이 실행되지 않습니다.',
+    );
+  }
+
+  // Ubuntu 23.10+ AppArmor userns 제한 대응: postinst 가 chrome-sandbox 를 항상 SUID 로 만들어야 한다.
+  const postinst = spawnSync('dpkg-deb', ['-I', path.join(distDirectory, fileName), 'postinst'], {
+    encoding: 'utf8',
+  });
+  if (postinst.status === 0 && !postinst.stdout.includes("chmod 4755 '/opt/Dolgate/chrome-sandbox'")) {
+    throw new Error(`${fileName}: postinst 에 chrome-sandbox SUID(4755) 설정이 없습니다.`);
+  }
+}
+
 function verifyDebArtifact(fileName) {
   const buffer = readFileSync(path.join(distDirectory, fileName));
   if (buffer.length < 1024 * 1024) {
@@ -87,6 +128,7 @@ function verifyArtifacts(expectDeb) {
   }
   for (const fileName of debFiles) {
     verifyDebArtifact(fileName);
+    verifyDebDirectoryModes(fileName);
   }
 
   console.log(`[linux-dist] 아티팩트 검증 완료: ${files.sort((a, b) => a.localeCompare(b)).join(', ')}`);
@@ -95,6 +137,7 @@ function verifyArtifacts(expectDeb) {
 function main() {
   const targets = resolveLinuxTargets();
   for (const arch of ARCHES) {
+    normalizePrepackagedPermissions(arch);
     runElectronBuilder(targets, arch);
   }
   verifyArtifacts(targets.includes('deb'));

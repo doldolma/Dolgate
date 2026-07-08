@@ -1,6 +1,6 @@
 # Dolgate
 
-Dolgate는 macOS, Windows, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다.
+Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다.
 호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
 
 ![Dolgate 홈 화면](./docs/hosts-workspace.png)
@@ -16,7 +16,7 @@ Dolgate는 macOS, Windows, iOS, Android에서 같은 서버 작업 환경을 이
 
 ## 구성
 
-- **Desktop** — macOS · Windows (Electron). 멀티 세션 터미널, SFTP, 포트 포워딩, 세션 공유, AWS/컨테이너 작업을 다루는 메인 앱입니다.
+- **Desktop** — Windows · macOS · Linux (Electron). 멀티 세션 터미널, SFTP, 포트 포워딩, 세션 공유, AWS/컨테이너 작업을 다루는 메인 앱입니다.
 - **Mobile** — iOS · Android (React Native). 동기화된 호스트/그룹과 세션 탭 워크스페이스를 중심으로 원격 세션에 접근합니다.
 - **sync-api** — 브라우저 로그인, 동기화 저장소, session share viewer, AWS SSM 브로커를 담당하는 서버입니다. 직접 띄울 수 있습니다(아래 [자체 호스팅](#자체-sync-api-호스팅) 참고).
 
@@ -75,7 +75,7 @@ Dolgate는 macOS, Windows, iOS, Android에서 같은 서버 작업 환경을 이
 ### 다운로드
 
 - 최신 데스크톱 빌드와 Android APK는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
-- 데스크톱은 macOS(dmg), Windows(exe), Linux(AppImage·deb)를 지원합니다.
+- 데스크톱은 Windows(exe), macOS(dmg), Linux(AppImage·deb)를 지원합니다.
 - iOS는 현재 개발/내부 빌드 중심으로 관리합니다.
 
 데스크톱 앱은 자동 업데이트를 지원합니다. 한 번 설치하면 새 버전이 나올 때 앱 안에서 바로 업데이트할 수 있습니다.

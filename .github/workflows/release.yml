@@ -210,6 +210,8 @@ jobs:
       - name: Build macOS release artifacts
         run: npm run release:dist:mac --workspace @dolssh/desktop
         env:
+          # renderer Vite 번들이 러너 기본 V8 힙(~2GB)을 초과해 OOM으로 죽은 사례 대응
+          NODE_OPTIONS: --max-old-space-size=4096
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
@@ -222,7 +224,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-mac
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-win:
@@ -272,12 +277,17 @@ jobs:
 
       - name: Build Windows release artifacts
         run: npm run release:dist:win --workspace @dolssh/desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Upload Windows release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-win
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-linux:
@@ -327,12 +337,17 @@ jobs:
 
       - name: Build Linux release artifacts
         run: npm run release:dist:linux --workspace @dolssh/desktop
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Upload Linux release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-linux
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-android:
