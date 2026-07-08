@@ -152,6 +152,15 @@ function buildDarwinUniversal(serviceDir, releaseRoot, targetRoot) {
   ensureExecutable(hostsHelperOutputPath);
 }
 
+function buildLinux(serviceDir, targetRoot, goarch) {
+  const outputPath = path.join(targetRoot, 'ssh-core');
+  const hostsHelperOutputPath = path.join(targetRoot, DNS_HELPER_BINARY_NAME);
+  buildGoBinary(serviceDir, outputPath, 'linux', goarch);
+  buildHostsHelperBinary(serviceDir, hostsHelperOutputPath, 'linux', goarch);
+  ensureExecutable(outputPath);
+  ensureExecutable(hostsHelperOutputPath);
+}
+
 function buildWindowsX64(serviceDir, targetRoot) {
   buildGoBinary(serviceDir, path.join(targetRoot, 'ssh-core.exe'), 'windows', 'amd64');
   const repoRoot = path.resolve(__dirname, '../../..');
@@ -191,6 +200,11 @@ function main() {
 
   if (platform === 'win32' && arch === 'x64') {
     buildWindowsX64(serviceDir, targetRoot);
+    return;
+  }
+
+  if (platform === 'linux' && (arch === 'x64' || arch === 'arm64')) {
+    buildLinux(serviceDir, targetRoot, arch === 'x64' ? 'amd64' : 'arm64');
     return;
   }
 
