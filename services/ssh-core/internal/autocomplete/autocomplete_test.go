@@ -79,6 +79,30 @@ func TestUnsupportedShell(t *testing.T) {
 	}
 }
 
+func TestNormalizeShellIntegrationShell(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{in: "bash", want: "bash"},
+		{in: "-zsh", want: "zsh"},
+		{in: "/usr/bin/fish", want: "fish"},
+		{in: `C:\Program Files\PowerShell\7\pwsh.exe`, want: "pwsh"},
+		{in: "powershell.exe", want: "powershell"},
+		{in: "cmd.exe", want: ""},
+		{in: "ksh", want: ""},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := NormalizeShellIntegrationShell(tc.in); got != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+	if got := NormalizeShell("fish"); got != "" {
+		t.Fatalf("fish must remain unsupported for autocomplete snapshots, got %q", got)
+	}
+}
+
 func TestShellIntegrationInitCommandParses(t *testing.T) {
 	command := strings.TrimRight(ShellIntegrationInitCommand(), "\r")
 	for _, shell := range []string{"bash", "zsh"} {
@@ -106,6 +130,74 @@ func TestShellIntegrationInitCommandStructure(t *testing.T) {
 	}
 	if !strings.HasPrefix(command, " ") {
 		t.Error("init command must start with a space for history hygiene")
+	}
+}
+
+func TestPowerShellIntegrationInitCommandRuns(t *testing.T) {
+	path, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		path, err = exec.LookPath("powershell")
+	}
+	if err != nil {
+		t.Skip("powershell not available")
+	}
+	command := strings.TrimRight(PowerShellIntegrationInitCommand(), "\r") + "; prompt"
+	output, err := exec.Command(path, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command).CombinedOutput()
+	if err != nil {
+		t.Fatalf("PowerShell failed to run init command: %v\n%s", err, output)
+	}
+	got := string(output)
+	for _, want := range []string{"]133;A", "]133;B", "]7;file:"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("PowerShell init output missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestPowerShellIntegrationInitCommandStructure(t *testing.T) {
+	command := PowerShellIntegrationInitCommand()
+	for _, want := range []string{
+		"function global:prompt", "__ds_cwd", "]133;", "]7;",
+		"AddToHistoryHandler", "Set-PSReadLineOption",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("PowerShell init command missing %q", want)
+		}
+	}
+	if !strings.HasPrefix(command, " ") {
+		t.Error("PowerShell init command must start with a space")
+	}
+	if !strings.HasSuffix(command, "\r") {
+		t.Error("PowerShell init command must end with carriage return")
+	}
+}
+
+func TestFishShellIntegrationInitCommandRuns(t *testing.T) {
+	path, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish not available")
+	}
+	command := strings.TrimRight(FishShellIntegrationInitCommand(), "\r")
+	if output, err := exec.Command(path, "-c", command).CombinedOutput(); err != nil {
+		t.Fatalf("fish failed to run init command: %v\n%s", err, output)
+	}
+}
+
+func TestFishShellIntegrationInitCommandStructure(t *testing.T) {
+	command := FishShellIntegrationInitCommand()
+	for _, want := range []string{
+		"fish_prompt", "fish_preexec", "fish_postexec", "]133;A",
+		"]133;C", `D;$status`, "]7;file://",
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("fish init command missing %q", want)
+		}
+	}
+	if !strings.HasPrefix(command, " ") {
+		t.Error("fish init command must start with a space")
+	}
+	if !strings.HasSuffix(command, "\r") {
+		t.Error("fish init command must end with carriage return")
 	}
 }
 

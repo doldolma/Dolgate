@@ -65,6 +65,14 @@ function parseExitCode(marker: string): number | null {
 
 export function parseCwdFromOsc7(data: string): string | null {
   // OSC 7 payload: file://<host><abs-path>
+  const windowsFileMatch = data.match(/^file:\/\/\/([A-Za-z]:\/.*)$/);
+  if (windowsFileMatch) {
+    try {
+      return decodeURIComponent(windowsFileMatch[1]).replace(/\//g, '\\');
+    } catch {
+      return windowsFileMatch[1].replace(/\//g, '\\');
+    }
+  }
   const match = data.match(/^file:\/\/[^/]*(\/.*)$/);
   if (!match) {
     return data || null;
@@ -276,6 +284,7 @@ export function useTerminalAutocomplete({
   const snippetsRef = useRef(snippets);
   const onCommandFinishedRef = useRef(onCommandFinished);
   const pendingSnippetRef = useRef(pendingSnippet);
+  const autocompleteUnsupported = capability?.status === 'unsupported';
 
   useEffect(() => {
     commandRef.current = command;
@@ -305,7 +314,11 @@ export function useTerminalAutocomplete({
   // Lazily load the Fig-derived spec for the leading command once the user is
   // typing arguments, so we can suggest options/subcommands they haven't used.
   useEffect(() => {
-    if (!enabled || !integrationReady) {
+    if (!enabled || !integrationReady || autocompleteUnsupported) {
+      if (commandSpecNameRef.current !== null) {
+        commandSpecNameRef.current = null;
+        setCommandSpec(null);
+      }
       return;
     }
     const leading = command.value.includes(' ')
@@ -336,7 +349,7 @@ export function useTerminalAutocomplete({
     return () => {
       cancelled = true;
     };
-  }, [command.value, enabled, integrationReady]);
+  }, [autocompleteUnsupported, command.value, enabled, integrationReady]);
 
   const runCompletionQuery = useCallback(
     (hostCommand: string): Promise<string> => {
@@ -391,12 +404,13 @@ export function useTerminalAutocomplete({
   // Resolve dynamic (file path / generator) completions over the aux channel.
   // Cache hits are synchronous (no host call); misses are debounced and deduped.
   useEffect(() => {
-    if (!enabled || !integrationReady) {
-      return;
-    }
     const value = command.value;
     const clear = () =>
       setDynamicSuggestions((prev) => (prev === EMPTY_DYNAMIC ? prev : EMPTY_DYNAMIC));
+    if (!enabled || !integrationReady || autocompleteUnsupported) {
+      clear();
+      return;
+    }
     const fresh = (generation: number) =>
       generation === dynamicGenerationRef.current && commandRef.current.value === value;
     const request = resolveDynamicCompletion(commandSpec, value);
@@ -477,6 +491,7 @@ export function useTerminalAutocomplete({
     }, DYNAMIC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [
+    autocompleteUnsupported,
     command.value,
     commandSpec,
     enabled,
@@ -685,7 +700,12 @@ export function useTerminalAutocomplete({
   );
 
   const suggestions = useMemo(() => {
-    if (!enabled || !integrationReady || dismissedValue === command.value) {
+    if (
+      !enabled ||
+      !integrationReady ||
+      autocompleteUnsupported ||
+      dismissedValue === command.value
+    ) {
       return [];
     }
     return getTerminalAutocompleteSuggestions(snapshot, command, {
@@ -706,6 +726,7 @@ export function useTerminalAutocomplete({
   }, [
     command,
     commandSpec,
+    autocompleteUnsupported,
     dismissedValue,
     dynamicSuggestions,
     enabled,

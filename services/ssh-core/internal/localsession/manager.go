@@ -136,8 +136,12 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if err != nil {
 		return err
 	}
+	command, ok := autocomplete.ShellIntegrationInitCommandForShell(session.runner.ShellKind())
+	if !ok {
+		return nil
+	}
 	session.handshake.Arm(false)
-	return session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand()))
+	return session.runner.Write([]byte(command))
 }
 
 // FlushShellIntegration releases any output the handshake filter is holding,

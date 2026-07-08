@@ -70,14 +70,31 @@ func Degraded(shell string, reason string) Result {
 }
 
 func NormalizeShell(value string) string {
-	base := strings.ToLower(filepath.Base(strings.TrimSpace(value)))
-	base = strings.TrimPrefix(base, "-")
+	base := normalizeShellName(value)
 	switch base {
 	case "bash", "zsh":
 		return base
 	default:
 		return ""
 	}
+}
+
+func NormalizeShellIntegrationShell(value string) string {
+	base := normalizeShellName(value)
+	switch base {
+	case "bash", "zsh", "fish", "pwsh", "powershell":
+		return base
+	default:
+		return ""
+	}
+}
+
+func normalizeShellName(value string) string {
+	base := strings.TrimSpace(value)
+	base = strings.ReplaceAll(base, "\\", "/")
+	base = filepath.Base(base)
+	base = strings.ToLower(strings.TrimPrefix(base, "-"))
+	return strings.TrimSuffix(base, ".exe")
 }
 
 func ParseSnapshot(data []byte, revision int) Result {
@@ -296,6 +313,30 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"$'%{\033]133;B\007%}';; esac; ` +
 	`fi`
 
+// fishIntegrationScript installs OSC 133 prompt/command lifecycle hooks without
+// replacing the user's fish_prompt. fish keeps its own completion UI; this only
+// reports prompt boundaries, cwd, and command lifecycle events to the terminal.
+const fishIntegrationScript = `if not set -q __ds_shell_integration_installed; ` +
+	`set -g __ds_shell_integration_installed 1; ` +
+	`function __ds_cwd; printf '\033]7;file://%s\007' (pwd); end; ` +
+	`function __ds_prompt --on-event fish_prompt; printf '\033]133;A\007'; __ds_cwd; printf '\033]133;B\007'; end; ` +
+	`function __ds_preexec --on-event fish_preexec; printf '\033]133;C\007'; end; ` +
+	`function __ds_postexec --on-event fish_postexec; printf "\033]133;D;$status\007"; end; ` +
+	`end`
+
+// powerShellIntegrationScript installs OSC 133 prompt/command lifecycle hooks
+// for Windows PowerShell / PowerShell 7. The prompt wrapper is the reliable
+// baseline; PSReadLine command-start hooks are best-effort because older or
+// stripped environments may not expose Set-PSReadLineOption.
+const powerShellIntegrationScript = `if (-not (Get-Variable -Name __ds_shell_integration_installed -Scope Global -ErrorAction SilentlyContinue)) { ` +
+	`Set-Variable -Name __ds_shell_integration_installed -Scope Global -Value $true; ` +
+	`function global:__ds_o { param([string]$Value) [Console]::Write(([char]27) + ']133;' + $Value + ([char]7)) }; ` +
+	`function global:__ds_cwd { try { $path = (Get-Location).ProviderPath; if ([string]::IsNullOrEmpty($path)) { $path = (Get-Location).Path }; $uri = [System.Uri]::new($path).AbsoluteUri; [Console]::Write(([char]27) + ']7;' + $uri + ([char]7)) } catch {} }; ` +
+	`$global:__ds_prompt = (Get-Command prompt -CommandType Function -ErrorAction SilentlyContinue).ScriptBlock; ` +
+	`function global:prompt { $global:__ds_last_success = $?; $global:__ds_last_exit = $LASTEXITCODE; if ($global:__ds_last_success) { $code = 0 } elseif ($null -ne $global:__ds_last_exit) { $code = [int]$global:__ds_last_exit } else { $code = 1 }; __ds_o ('D;' + $code); __ds_o 'A'; __ds_cwd; __ds_o 'B'; if ($global:__ds_prompt) { & $global:__ds_prompt } else { 'PS ' + $executionContext.SessionState.Path.CurrentLocation + ('>' * ($nestedPromptLevel + 1)) + ' ' } }; ` +
+	`try { $global:__ds_add_history = (Get-PSReadLineOption).AddToHistoryHandler; Set-PSReadLineOption -AddToHistoryHandler { param([string]$line) __ds_o 'C'; if ($global:__ds_add_history) { return & $global:__ds_add_history $line }; return $true } } catch {} ` +
+	`}`
+
 // ShellIntegrationInitCommand returns a one-line command, suitable for writing
 // straight into an interactive shell's stdin, that installs the OSC 133 hooks.
 // The leading space keeps it out of history when HISTCONTROL/HIST_IGNORE_SPACE
@@ -303,6 +344,31 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 // mirroring InBandProbeCommand.
 func ShellIntegrationInitCommand() string {
 	return " " + shellIntegrationScript + "; history -d $((HISTCMD-1)) >/dev/null 2>&1 || true\r"
+}
+
+// FishShellIntegrationInitCommand returns a one-line command suitable for fish
+// sessions. It intentionally does not enable Dolgate autocomplete snapshots.
+func FishShellIntegrationInitCommand() string {
+	return " " + fishIntegrationScript + "\r"
+}
+
+// PowerShellIntegrationInitCommand returns a one-line command suitable for
+// Windows local PowerShell sessions.
+func PowerShellIntegrationInitCommand() string {
+	return " " + powerShellIntegrationScript + "\r"
+}
+
+func ShellIntegrationInitCommandForShell(shell string) (string, bool) {
+	switch NormalizeShellIntegrationShell(shell) {
+	case "bash", "zsh":
+		return ShellIntegrationInitCommand(), true
+	case "fish":
+		return FishShellIntegrationInitCommand(), true
+	case "pwsh", "powershell":
+		return PowerShellIntegrationInitCommand(), true
+	default:
+		return "", false
+	}
 }
 
 // injectedCommandEcho is the visible text the shell echoes back for the injected

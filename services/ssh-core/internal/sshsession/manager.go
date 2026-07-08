@@ -438,7 +438,7 @@ func (m *Manager) KillTmuxSession(sessionID, sessionName string) error {
 const TmuxDetectCommand = "command -v tmux >/dev/null 2>&1 && { tmux -V; tmux list-sessions -F '#{session_name}\t#{session_windows}\t#{?session_attached,1,0}' 2>/dev/null; }"
 
 const remoteShellProbeTimeout = 2 * time.Second
-const remoteShellProbeCommand = `if [ -n "${BASH_VERSION:-}" ]; then printf 'bash\n'; elif [ -n "${ZSH_VERSION:-}" ]; then printf 'zsh\n'; fi`
+const remoteShellProbeCommand = `test -n "$BASH_VERSION" && printf 'bash\n'; test -n "$ZSH_VERSION" && printf 'zsh\n'; test -n "$version" && printf 'fish\n'; printf '%s\n' "$SHELL"`
 
 // ParseTmuxDetect는 "tmux -V" 첫 줄 + "list-sessions -F" 탭 구분 줄들을 파싱한다.
 func ParseTmuxDetect(out string) protocol.TmuxAvailablePayload {
@@ -594,27 +594,32 @@ func (m *Manager) installShellIntegrationIfSupported(sessionID string, session *
 	case shellIntegrationUnsupported:
 		return false, nil
 	}
-	if !remoteShellSupportsIntegration(session.client) {
+	shell := remoteShellIntegrationShell(session.client)
+	if shell == "" {
 		session.markShellIntegrationUnsupported()
 		return false, nil
 	}
-	return m.installShellIntegration(sessionID, session)
+	return m.installShellIntegration(sessionID, session, shell)
 }
 
 func remoteShellSupportsIntegration(client *ssh.Client) bool {
+	return remoteShellIntegrationShell(client) != ""
+}
+
+func remoteShellIntegrationShell(client *ssh.Client) string {
 	if client == nil {
-		return false
+		return ""
 	}
 	stdout, _, err := sshcmd.RunWithTimeout(client, remoteShellProbeCommand, remoteShellProbeTimeout)
 	if err != nil {
-		return false
+		return ""
 	}
-	return normalizeRemoteShellProbeOutput(stdout) != ""
+	return normalizeRemoteShellProbeOutput(stdout)
 }
 
 func normalizeRemoteShellProbeOutput(stdout []byte) string {
 	for _, field := range strings.Fields(string(stdout)) {
-		if shell := autocomplete.NormalizeShell(field); shell != "" {
+		if shell := autocomplete.NormalizeShellIntegrationShell(field); shell != "" {
 			return shell
 		}
 	}
@@ -637,7 +642,13 @@ func (h *sessionHandle) markShellIntegrationUnsupported() {
 
 // installShellIntegration는 핸드셰이크를 preserveMotd 모드로 arm하고 통합 init 명령을 셸
 // stdin에 1회만 쓴다. write 성공 후에만 installed 상태가 되므로 실패 시 재시도 가능하다.
-func (m *Manager) installShellIntegration(sessionID string, session *sessionHandle) (bool, error) {
+func (m *Manager) installShellIntegration(sessionID string, session *sessionHandle, shell string) (bool, error) {
+	command, ok := autocomplete.ShellIntegrationInitCommandForShell(shell)
+	if !ok {
+		session.markShellIntegrationUnsupported()
+		return false, nil
+	}
+
 	session.shellIntegrationMu.Lock()
 	switch session.shellIntegrationState {
 	case shellIntegrationInstalled, shellIntegrationUnsupported:
@@ -646,7 +657,7 @@ func (m *Manager) installShellIntegration(sessionID string, session *sessionHand
 	}
 
 	session.handshake.Arm(true)
-	if _, err := session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+	if _, err := session.stdin.Write([]byte(command)); err != nil {
 		flushed := session.handshake.Flush()
 		session.shellIntegrationState = shellIntegrationUnknown
 		session.shellIntegrationMu.Unlock()

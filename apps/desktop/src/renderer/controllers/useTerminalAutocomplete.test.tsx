@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CoreEvent } from '@shared';
-import { useTerminalAutocomplete } from './useTerminalAutocomplete';
+import { parseCwdFromOsc7, useTerminalAutocomplete } from './useTerminalAutocomplete';
 
 const mocks = vi.hoisted(() => ({
   prepare: vi.fn(async () => undefined),
@@ -29,6 +29,15 @@ describe('useTerminalAutocomplete', () => {
     mocks.query.mockClear();
     mocks.query.mockImplementation(async () => '');
     mocks.listener = null;
+  });
+
+  it('parses OSC 7 cwd payloads for Unix, Windows, and fallback values', () => {
+    expect(parseCwdFromOsc7('file://host/home/u')).toBe('/home/u');
+    expect(parseCwdFromOsc7('file:///C:/Users/Computer/My%20Folder')).toBe(
+      'C:\\Users\\Computer\\My Folder',
+    );
+    expect(parseCwdFromOsc7('C:\\raw\\path')).toBe('C:\\raw\\path');
+    expect(parseCwdFromOsc7('')).toBeNull();
   });
 
   it('does not probe or subscribe while the setting is disabled', () => {
@@ -132,6 +141,46 @@ describe('useTerminalAutocomplete', () => {
     await waitFor(() =>
       expect(result.current.suggestions[0]?.insertText).toBe('git status'),
     );
+  });
+
+  it('keeps autocomplete disabled for unsupported shells even after shell integration', async () => {
+    const sendInput = vi.fn();
+    const { result } = renderHook(() =>
+      useTerminalAutocomplete({
+        sessionId: 'session-1',
+        enabled: true,
+        connected: true,
+        lazyPrepare: false,
+        sendInput,
+      }),
+    );
+
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledWith('session-1'));
+    act(() => {
+      mocks.listener?.({
+        type: 'terminalAutocompleteSnapshot',
+        sessionId: 'session-1',
+        payload: {
+          shell: 'bash',
+          revision: 1,
+          history: ['git status'],
+          executables: [],
+          truncated: false,
+        },
+      });
+      mocks.listener?.({
+        type: 'terminalAutocompleteCapability',
+        sessionId: 'session-1',
+        payload: {
+          status: 'unsupported',
+          reasonCode: 'unsupported-shell',
+        },
+      });
+      result.current.handleShellMarker('A');
+      result.current.handleInput('git');
+    });
+
+    expect(result.current.suggestions).toEqual([]);
   });
 
   it('waits for the lazy AWS probe before replaying the first input', async () => {

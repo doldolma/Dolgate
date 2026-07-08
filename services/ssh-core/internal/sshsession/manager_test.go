@@ -215,7 +215,7 @@ func TestManagerEagerInstallsShellIntegrationForSupportedShell(t *testing.T) {
 	assertNoShellInput(t, server.shellInputs)
 }
 
-func TestManagerSkipsEagerShellIntegrationForUnsupportedShell(t *testing.T) {
+func TestManagerEagerInstallsShellIntegrationForFishShell(t *testing.T) {
 	server, _, cleanup := newSSHTestServer(t, withRemoteShell("/usr/bin/fish"))
 	defer cleanup()
 
@@ -238,6 +238,15 @@ func TestManagerSkipsEagerShellIntegrationForUnsupportedShell(t *testing.T) {
 		t.Fatalf("connect failed: %v", err)
 	}
 	waitForEvent(t, events, protocol.EventConnected)
+
+	input := waitForShellInput(t, server.shellInputs)
+	if !bytes.Contains(input, []byte("fish_prompt")) {
+		t.Fatalf("expected fish shell integration init input, got %q", input)
+	}
+
+	if err := manager.InstallShellIntegration("session-fish"); err != nil {
+		t.Fatalf("second install failed: %v", err)
+	}
 	assertNoShellInput(t, server.shellInputs)
 }
 
