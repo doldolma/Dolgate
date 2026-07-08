@@ -33,15 +33,15 @@ func TestInstallShellIntegrationInjectsOnce(t *testing.T) {
 	h := &sessionHandle{stdin: w, closed: make(chan struct{})}
 	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
 
-	installed, err := m.installShellIntegration("session-1", h)
+	installed, err := m.installShellIntegration("session-1", h, "bash")
 	if err != nil || !installed {
 		t.Fatalf("expected first install to succeed, installed=%v err=%v", installed, err)
 	}
-	installed, err = m.installShellIntegration("session-1", h)
+	installed, err = m.installShellIntegration("session-1", h, "bash")
 	if err != nil || installed {
 		t.Fatalf("expected second install to be no-op, installed=%v err=%v", installed, err)
 	}
-	installed, err = m.installShellIntegration("session-1", h)
+	installed, err = m.installShellIntegration("session-1", h, "bash")
 	if err != nil || installed {
 		t.Fatalf("expected third install to be no-op, installed=%v err=%v", installed, err)
 	}
@@ -67,7 +67,7 @@ func TestInstallShellIntegrationUnsupportedIsNoop(t *testing.T) {
 	}
 	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
 
-	installed, err := m.installShellIntegration("session-1", h)
+	installed, err := m.installShellIntegration("session-1", h, "bash")
 	if err != nil || installed {
 		t.Fatalf("expected unsupported install to be no-op, installed=%v err=%v", installed, err)
 	}
@@ -85,7 +85,7 @@ func TestInstallShellIntegrationWriteFailureCanRetry(t *testing.T) {
 	h := &sessionHandle{stdin: w, closed: make(chan struct{})}
 	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
 
-	installed, err := m.installShellIntegration("session-1", h)
+	installed, err := m.installShellIntegration("session-1", h, "bash")
 	if !errors.Is(err, writeErr) || installed {
 		t.Fatalf("expected write failure, installed=%v err=%v", installed, err)
 	}
@@ -97,7 +97,7 @@ func TestInstallShellIntegrationWriteFailureCanRetry(t *testing.T) {
 	}
 
 	w.err = nil
-	installed, err = m.installShellIntegration("session-1", h)
+	installed, err = m.installShellIntegration("session-1", h, "bash")
 	if err != nil || !installed {
 		t.Fatalf("expected retry to install, installed=%v err=%v", installed, err)
 	}
@@ -114,8 +114,10 @@ func TestNormalizeRemoteShellProbeOutput(t *testing.T) {
 	}{
 		{name: "bash capability", out: []byte("bash\n"), want: "bash"},
 		{name: "zsh capability", out: []byte("zsh\n"), want: "zsh"},
+		{name: "fish capability", out: []byte("fish\n"), want: "fish"},
+		{name: "fish path capability", out: []byte("/usr/bin/fish\n"), want: "fish"},
 		{name: "sh path remains unsupported without capability", out: []byte("/bin/sh\n"), want: ""},
-		{name: "unsupported", out: []byte("fish\n"), want: ""},
+		{name: "unsupported", out: []byte("ksh\n"), want: ""},
 		{name: "empty", out: nil, want: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
