@@ -75,6 +75,10 @@ module.exports = {
     perMachine: false,
     allowToChangeInstallationDirectory: false
   },
+  deb: {
+    // Ubuntu 23.10+ AppArmor userns 제한 대응: chrome-sandbox 를 항상 SUID(4755)로 설치한다.
+    afterInstall: path.resolve(__dirname, 'build/linux/deb-after-install.sh')
+  },
   linux: {
     icon: path.resolve(__dirname, 'build/icons/dolssh.png'),
     category: 'Development',
