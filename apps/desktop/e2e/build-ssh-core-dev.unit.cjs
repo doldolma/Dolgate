@@ -13,6 +13,7 @@ const {
   getDevBuildMarkerPath,
   getTargetRoot,
   readLockOwnerPid,
+  resolveDevBuildTarget,
   resolveRequiredOutputs,
 } = require("../scripts/build-ssh-core-dev.cjs");
 
@@ -351,7 +352,7 @@ test("skips unsupported platforms", async () => {
 
   try {
     const result = await ensureSshCoreDevBuild({
-      platform: "linux",
+      platform: "freebsd",
       repoRoot: fixture.repoRoot,
       desktopRoot: fixture.desktopRoot,
     });
@@ -360,6 +361,17 @@ test("skips unsupported platforms", async () => {
   } finally {
     await cleanupFixture(fixture);
   }
+});
+
+test("resolves the linux dev target from the host arch", () => {
+  assert.deepEqual(resolveDevBuildTarget({ platform: "linux", arch: "x64" }), {
+    platform: "linux",
+    arch: "x64",
+  });
+  assert.deepEqual(resolveDevBuildTarget({ platform: "linux", arch: "arm64" }), {
+    platform: "linux",
+    arch: "arm64",
+  });
 });
 
 test("acquireBuildLock records the owner pid and releases the lock", async () => {

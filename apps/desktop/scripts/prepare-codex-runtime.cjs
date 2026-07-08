@@ -22,6 +22,18 @@ const TARGETS = {
       packageName: '@openai/codex-win32-x64',
       triple: 'x86_64-pc-windows-msvc'
     }
+  ],
+  'linux/x64': [
+    {
+      packageName: '@openai/codex-linux-x64',
+      triple: 'x86_64-unknown-linux-musl'
+    }
+  ],
+  'linux/arm64': [
+    {
+      packageName: '@openai/codex-linux-arm64',
+      triple: 'aarch64-unknown-linux-musl'
+    }
   ]
 };
 

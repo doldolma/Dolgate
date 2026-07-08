@@ -79,6 +79,7 @@ jobs:
         os:
           - macos-latest
           - windows-latest
+          - ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -117,6 +118,12 @@ jobs:
           test -f apps/desktop/release/resources/win32/x64/bin/ssh-core.exe
           test -f apps/desktop/release/resources/win32/x64/bin/dolgate-dns-helper.exe
           test -f apps/desktop/release/resources/win32/x64/bin/aws-conpty-wrapper.exe
+
+      - name: Verify Linux desktop helper binaries
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          test -f apps/desktop/release/resources/linux/x64/bin/ssh-core
+          test -f apps/desktop/release/resources/linux/x64/bin/dolgate-dns-helper
 
   desktop-test:
     name: desktop test

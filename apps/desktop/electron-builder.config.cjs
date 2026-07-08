@@ -75,5 +75,20 @@ module.exports = {
     perMachine: false,
     allowToChangeInstallationDirectory: false
   },
+  linux: {
+    icon: path.resolve(__dirname, 'build/icons/dolssh.png'),
+    category: 'Development',
+    executableName: 'dolgate',
+    // 실제 타겟/arch는 scripts/build-linux-installers.cjs 가 CLI로 지정한다.
+    // (deb는 macOS ar가 아카이브를 깨뜨려서 리눅스 호스트에서만 빌드 가능)
+    target: [
+      {
+        target: 'AppImage'
+      },
+      {
+        target: 'deb'
+      }
+    ]
+  },
   afterSign: 'scripts/notarize.cjs'
 };

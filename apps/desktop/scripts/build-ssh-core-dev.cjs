@@ -10,13 +10,17 @@ const serviceRoot = path.join(repoRoot, "services", "ssh-core");
 const buildScriptPath = path.join(__dirname, "build-ssh-core.cjs");
 const forceBuild = process.env.DOLSSH_FORCE_BUILD_SSH_CORE === "1";
 
-function resolveDevBuildTarget({ platform = process.platform } = {}) {
+function resolveDevBuildTarget({ platform = process.platform, arch = process.arch } = {}) {
   if (platform === "win32") {
     return { platform: "win32", arch: "x64" };
   }
 
   if (platform === "darwin") {
     return { platform: "darwin", arch: "universal" };
+  }
+
+  if (platform === "linux") {
+    return { platform: "linux", arch: arch === "arm64" ? "arm64" : "x64" };
   }
 
   return null;
@@ -50,6 +54,10 @@ function getRequiredOutputNames(target) {
 
   if (target.platform === "win32" && target.arch === "x64") {
     return ["ssh-core.exe", "dolgate-dns-helper.exe", "aws-conpty-wrapper.exe"];
+  }
+
+  if (target.platform === "linux") {
+    return ["ssh-core", "dolgate-dns-helper"];
   }
 
   throw new Error(

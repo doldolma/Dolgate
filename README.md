@@ -75,17 +75,10 @@ Dolgate는 macOS, Windows, iOS, Android에서 같은 서버 작업 환경을 이
 ### 다운로드
 
 - 최신 데스크톱 빌드와 Android APK는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
+- 데스크톱은 macOS(dmg), Windows(exe), Linux(AppImage·deb)를 지원합니다.
 - iOS는 현재 개발/내부 빌드 중심으로 관리합니다.
 
-macOS 빌드는 Apple 공증이 포함되지 않았습니다.
-앱을 `Applications`로 옮긴 뒤 실행이 막히면 아래 명령으로 quarantine 속성을 제거한 후 다시 실행해 주세요.
-
-```bash
-xattr -dr com.apple.quarantine /Applications/dolgate.app
-```
-
-또한 위의 문제로 인해 현재는 **macOS에서 자동 업데이트를 지원하지 않습니다.**
-새 버전은 GitHub Releases에서 직접 다시 다운로드해 설치해야 합니다.
+데스크톱 앱은 자동 업데이트를 지원합니다. 한 번 설치하면 새 버전이 나올 때 앱 안에서 바로 업데이트할 수 있습니다.
 
 개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
 

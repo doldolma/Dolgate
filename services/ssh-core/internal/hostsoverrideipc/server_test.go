@@ -18,8 +18,11 @@ func TestSocketFileMode(t *testing.T) {
 	if got := socketFileMode("darwin"); got != 0o666 {
 		t.Fatalf("socketFileMode(darwin) = %o, want %o", got, 0o666)
 	}
-	if got := socketFileMode("linux"); got != 0o600 {
-		t.Fatalf("socketFileMode(linux) = %o, want %o", got, 0o600)
+	if got := socketFileMode("linux"); got != 0o666 {
+		t.Fatalf("socketFileMode(linux) = %o, want %o", got, 0o666)
+	}
+	if got := socketFileMode("freebsd"); got != 0o600 {
+		t.Fatalf("socketFileMode(freebsd) = %o, want %o", got, 0o600)
 	}
 }
 

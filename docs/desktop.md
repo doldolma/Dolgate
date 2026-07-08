@@ -203,11 +203,20 @@ Windows x64:
 npm run release:dist:win
 ```
 
+Linux x64/arm64 (AppImage, deb):
+
+```bash
+npm run release:dist:linux
+```
+
+deb는 리눅스 호스트에서만 생성됩니다(macOS의 `ar`가 deb 아카이브를 깨뜨려서, 로컬 macOS 빌드는 AppImage만 만듭니다). 정식 deb는 릴리즈 태그 푸시 시 GitHub Actions가 빌드합니다.
+
 GitHub Release 업로드:
 
 ```bash
 npm run release:publish:mac
 npm run release:publish:win
+npm run release:publish:linux
 npm run release:all
 ```
 
@@ -218,8 +227,7 @@ npm run release:all
 - 데스크톱은 `ssh-core`를 항상 상주시켜 두지 않고, 실제 SSH/SFTP/포트 포워딩 작업이 필요할 때 lazily 시작합니다.
 - 데스크톱은 `cmd/ssh-core` child process와 stdio framed protocol로 통신합니다.
 - `sync-api`는 로그인, 동기화, session share viewer를 담당합니다.
-- macOS 빌드는 현재 Apple 공증이 포함되지 않습니다.
-- 자동 업데이트는 GitHub Releases를 기준으로 동작하지만, macOS 설치 경험에는 별도 제약이 있을 수 있습니다.
+- 자동 업데이트는 GitHub Releases를 기준으로 동작합니다.
 
 ## AWS 사용 전 확인
 

@@ -11,15 +11,15 @@ const distDirectory = path.join(desktopRoot, 'release', 'dist');
 const rootPackage = require(path.join(repoRoot, 'package.json'));
 
 function parseTarget(value) {
-  if (value === 'mac' || value === 'win' || value === 'all') {
+  if (value === 'mac' || value === 'win' || value === 'linux' || value === 'all') {
     return value;
   }
 
-  throw new Error('사용법: node ./scripts/release-publish.cjs <mac|win|all>');
+  throw new Error('사용법: node ./scripts/release-publish.cjs <mac|win|linux|all>');
 }
 
 function getTargets(target) {
-  return target === 'all' ? ['mac', 'win'] : [target];
+  return target === 'all' ? ['mac', 'win', 'linux'] : [target];
 }
 
 function getNpmCommand() {

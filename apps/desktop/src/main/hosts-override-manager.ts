@@ -22,7 +22,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HELPER_READY_TIMEOUT_MS = 15_000;
 const HELPER_READY_POLL_INTERVAL_MS = 200;
 const HELPER_CONNECT_TIMEOUT_MS = 1_000;
-const DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH = 103;
+// unix socket 경로(sun_path)는 darwin 104바이트, linux 108바이트(NUL 포함)로 제한되므로 공통 안전 하한을 쓴다.
+const POSIX_MAX_UNIX_SOCKET_PATH_LENGTH = 103;
 
 export const HOSTS_MANAGED_BLOCK_START = '# >>> dolssh managed dns overrides >>>';
 export const HOSTS_MANAGED_BLOCK_END = '# <<< dolssh managed dns overrides <<<';
@@ -103,7 +104,7 @@ export interface HostsHelperLaunchOptions {
   logPath?: string;
 }
 
-interface PendingMacElevatedCommand {
+interface PendingElevatedCommand {
   state: {
     settled: boolean;
     error: unknown | null;
@@ -214,7 +215,8 @@ export function buildWindowsElevationCommand(helperPath: string, args: string[])
   return `$p = Start-Process -FilePath ${renderValue(helperPath)} -ArgumentList @(${args.map(renderValue).join(', ')}) -Verb RunAs -WindowStyle Hidden -PassThru; if ($null -eq $p) { exit 1 }`;
 }
 
-export function buildMacElevationCommand(
+// darwin(osascript do shell script)과 linux(pkexec가 /bin/bash -c로 감쌈) 모두 셸 문자열로 실행된다.
+export function buildPosixElevationCommand(
   helperPath: string,
   args: string[],
   logPath: string = '/dev/null',
@@ -223,8 +225,12 @@ export function buildMacElevationCommand(
   return `${[quoteShell(helperPath), ...args.map(quoteShell)].join(' ')} >${quoteShell(logPath)} 2>&1 </dev/null`;
 }
 
-function buildDarwinHelperLogPath(endpoint: string): string {
+function buildPosixHelperLogPath(endpoint: string): string {
   return `${endpoint}.log`;
+}
+
+function usesPosixElevatedLaunch(platform: NodeJS.Platform): boolean {
+  return platform === 'darwin' || platform === 'linux';
 }
 
 export function buildHostsHelperEndpoint(
@@ -235,20 +241,20 @@ export function buildHostsHelperEndpoint(
   if (platform === 'win32') {
     return `\\\\.\\pipe\\dolgate-dns-helper-${process.pid}-${id}`;
   }
-  if (platform === 'darwin') {
+  if (usesPosixElevatedLaunch(platform)) {
     const normalizedTempDirectory = tempDirectory.replace(/\\/g, '/');
     const compactId = id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(-10) || 'helper';
     const socketBasename = `dgdns-${process.pid}-${compactId}.sock`;
     const preferredEndpoint = path.posix.join(normalizedTempDirectory, socketBasename);
-    if (preferredEndpoint.length <= DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH) {
+    if (preferredEndpoint.length <= POSIX_MAX_UNIX_SOCKET_PATH_LENGTH) {
       return preferredEndpoint;
     }
     const fallbackEndpoint = path.posix.join('/tmp', socketBasename);
-    if (fallbackEndpoint.length <= DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH) {
+    if (fallbackEndpoint.length <= POSIX_MAX_UNIX_SOCKET_PATH_LENGTH) {
       return fallbackEndpoint;
     }
     throw new Error(
-      `Unable to build a valid Dolgate DNS Helper socket endpoint within ${DARWIN_MAX_UNIX_SOCKET_PATH_LENGTH} characters`,
+      `Unable to build a valid Dolgate DNS Helper socket endpoint within ${POSIX_MAX_UNIX_SOCKET_PATH_LENGTH} characters`,
     );
   }
   throw new Error(`Hosts overrides are not supported on platform: ${platform}`);
@@ -261,6 +267,20 @@ function resolveRepoRoot(): string {
   });
 }
 
+function resolveDevHelperResourceSegments(
+  platform: NodeJS.Platform,
+  arch: NodeJS.Architecture,
+): [string, string] {
+  if (platform === 'win32') {
+    return ['win32', 'x64'];
+  }
+  if (platform === 'linux') {
+    // build-ssh-core-dev.cjs 의 dev 타겟 아키텍처 매핑과 일치해야 한다.
+    return ['linux', arch === 'arm64' ? 'arm64' : 'x64'];
+  }
+  return ['darwin', 'universal'];
+}
+
 export function resolveHostsHelperPath(): string {
   const binaryName = DOLGATE_DNS_HELPER_BINARY_NAME;
   if (app.isPackaged) {
@@ -268,10 +288,16 @@ export function resolveHostsHelperPath(): string {
   }
 
   const repoRoot = resolveRepoRoot();
-  const devPath =
-    process.platform === 'win32'
-      ? path.join(repoRoot, 'apps', 'desktop', 'release', 'resources', 'win32', 'x64', 'bin', binaryName)
-      : path.join(repoRoot, 'apps', 'desktop', 'release', 'resources', 'darwin', 'universal', 'bin', binaryName);
+  const devPath = path.join(
+    repoRoot,
+    'apps',
+    'desktop',
+    'release',
+    'resources',
+    ...resolveDevHelperResourceSegments(process.platform, process.arch),
+    'bin',
+    binaryName,
+  );
   if (!existsSync(devPath)) {
     throw new Error(`Local Dolgate DNS Helper binary not found: ${devPath}`);
   }
@@ -283,10 +309,27 @@ export function resolveHostsFilePath(platform: NodeJS.Platform = process.platfor
     const systemRoot = env.SystemRoot?.trim() || env.windir?.trim() || 'C:\\Windows';
     return path.join(systemRoot, 'System32', 'drivers', 'etc', 'hosts');
   }
-  if (platform === 'darwin') {
+  // 이 함수는 HostsOverrideManager 생성자에서 앱 시작 시 호출되므로 지원 플랫폼에서 throw하면 앱이 부팅하지 못한다.
+  if (platform === 'darwin' || platform === 'linux') {
     return '/etc/hosts';
   }
   throw new Error(`Hosts overrides are not supported on platform: ${platform}`);
+}
+
+export function resolveHelperTempDirectory(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform === 'linux') {
+    // linux에서 socket은 0666으로 생성되므로(hostsoverrideipc.socketFileMode) 디렉터리 권한으로
+    // 다른 로컬 사용자의 접근을 막아야 한다. XDG_RUNTIME_DIR(/run/user/<uid>)은 user 소유 0700이라
+    // darwin의 user-private temp dir과 같은 전제를 만족한다. 없으면 /tmp 폴백(단일 사용자 환경 가정).
+    const runtimeDirectory = env.XDG_RUNTIME_DIR?.trim();
+    if (runtimeDirectory) {
+      return runtimeDirectory;
+    }
+  }
+  return tmpdir();
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -317,7 +360,9 @@ function isPermissionDeniedMessage(message: string): boolean {
   return /user did not grant permission/i.test(message);
 }
 
-async function runMacElevatedCommand(command: string): Promise<void> {
+// sudo-prompt는 darwin에선 osascript, linux에선 pkexec(또는 kdesudo)로 명령을 실행하며
+// 두 플랫폼 모두 취소 시 'User did not grant permission.' 메시지를 반환한다.
+async function runElevatedShellCommand(command: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     execWithSudoPrompt(
       command,
@@ -333,8 +378,8 @@ async function runMacElevatedCommand(command: string): Promise<void> {
   });
 }
 
-function startMacElevatedCommand(command: string): PendingMacElevatedCommand {
-  const state: PendingMacElevatedCommand['state'] = {
+function startElevatedShellCommand(command: string): PendingElevatedCommand {
+  const state: PendingElevatedCommand['state'] = {
     settled: false,
     error: null,
   };
@@ -357,7 +402,7 @@ function startMacElevatedCommand(command: string): PendingMacElevatedCommand {
   return { state, completion };
 }
 
-function toMacLaunchHostsOverrideError(error: unknown): HostsOverrideError {
+function toElevatedLaunchHostsOverrideError(error: unknown): HostsOverrideError {
   const rawError = normalizeUnknownErrorMessage(error);
   if (isPermissionDeniedMessage(rawError)) {
     return new HostsOverrideError(
@@ -386,29 +431,17 @@ async function launchElevatedHelper(options: HostsHelperLaunchOptions): Promise<
     ]);
     return;
   }
-  if (options.platform === 'darwin') {
+  if (usesPosixElevatedLaunch(options.platform)) {
     try {
-      await runMacElevatedCommand(
-        buildMacElevationCommand(
+      await runElevatedShellCommand(
+        buildPosixElevationCommand(
           options.helperPath,
           args,
-          options.logPath ?? buildDarwinHelperLogPath(options.endpoint),
+          options.logPath ?? buildPosixHelperLogPath(options.endpoint),
         ),
       );
     } catch (error) {
-      const rawError = normalizeUnknownErrorMessage(error);
-      if (isPermissionDeniedMessage(rawError)) {
-        throw new HostsOverrideError(
-          'permission-denied',
-          'DNS Override 권한 승인이 취소되었습니다.',
-          rawError,
-        );
-      }
-      throw new HostsOverrideError(
-        'helper-not-ready',
-        'Dolgate DNS Helper를 시작하지 못했습니다.',
-        rawError,
-      );
+      throw toElevatedLaunchHostsOverrideError(error);
     }
     return;
   }
@@ -655,7 +688,7 @@ export class HostsOverrideManager {
     this.platform = options?.platform ?? process.platform;
     this.hostsFilePath = options?.hostsFilePath ?? resolveHostsFilePath(this.platform);
     this.helperPathOverride = options?.helperPath ?? null;
-    this.tempDirectory = options?.tempDirectory ?? tmpdir();
+    this.tempDirectory = options?.tempDirectory ?? resolveHelperTempDirectory(this.platform);
     this.launchTimeoutMs = options?.launchTimeoutMs ?? HELPER_READY_TIMEOUT_MS;
     this.launchPollIntervalMs = options?.launchPollIntervalMs ?? HELPER_READY_POLL_INTERVAL_MS;
     this.connectTimeoutMs = options?.connectTimeoutMs ?? HELPER_CONNECT_TIMEOUT_MS;
@@ -826,12 +859,14 @@ export class HostsOverrideManager {
     const endpoint = buildHostsHelperEndpoint(this.platform, this.uuidFactory(), this.tempDirectory);
     const authToken = this.uuidFactory();
     const helperPath = this.helperPathOverride ?? resolveHostsHelperPath();
-    const helperLogPath = this.platform === 'darwin' ? buildDarwinHelperLogPath(endpoint) : null;
-    let pendingMacLaunch: PendingMacElevatedCommand | null = null;
+    const helperLogPath = usesPosixElevatedLaunch(this.platform) ? buildPosixHelperLogPath(endpoint) : null;
+    let pendingElevatedLaunch: PendingElevatedCommand | null = null;
 
-    if (this.platform === 'darwin' && !this.usesCustomLaunchHelper) {
-      pendingMacLaunch = startMacElevatedCommand(
-        buildMacElevationCommand(
+    // 권한 상승 실행(osascript/pkexec)은 helper 프로세스가 종료될 때까지 반환하지 않으므로,
+    // 완료를 기다리지 않고 실행 상태만 추적하면서 socket 연결을 폴링한다.
+    if (usesPosixElevatedLaunch(this.platform) && !this.usesCustomLaunchHelper) {
+      pendingElevatedLaunch = startElevatedShellCommand(
+        buildPosixElevationCommand(
           helperPath,
           buildHostsHelperServeArgs(endpoint, authToken, this.hostsFilePath),
           helperLogPath ?? undefined,
@@ -863,8 +898,8 @@ export class HostsOverrideManager {
     let lastError: Error | null = null;
 
     while (Date.now() < deadline) {
-      if (pendingMacLaunch?.state.settled && pendingMacLaunch.state.error) {
-        throw toMacLaunchHostsOverrideError(pendingMacLaunch.state.error);
+      if (pendingElevatedLaunch?.state.settled && pendingElevatedLaunch.state.error) {
+        throw toElevatedLaunchHostsOverrideError(pendingElevatedLaunch.state.error);
       }
       let client: HostsHelperClient | null = null;
       try {
@@ -890,8 +925,8 @@ export class HostsOverrideManager {
     }
 
     await this.cleanupEndpoint(endpoint);
-    if (pendingMacLaunch?.state.settled && pendingMacLaunch.state.error) {
-      throw toMacLaunchHostsOverrideError(pendingMacLaunch.state.error);
+    if (pendingElevatedLaunch?.state.settled && pendingElevatedLaunch.state.error) {
+      throw toElevatedLaunchHostsOverrideError(pendingElevatedLaunch.state.error);
     }
     const helperLogTail = await readHelperLaunchLogTail(helperLogPath);
     throw new HostsOverrideError(

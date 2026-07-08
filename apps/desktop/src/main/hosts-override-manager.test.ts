@@ -31,11 +31,13 @@ import {
   buildHostsHelperEndpoint,
   buildHostsHelperPayload,
   buildHostsHelperServeArgs,
-  buildMacElevationCommand,
+  buildPosixElevationCommand,
   buildWindowsElevationCommand,
   collectActiveDnsOverrideEntries,
   hasManagedHostsBlock,
   resolveDnsOverrideRecords,
+  resolveHelperTempDirectory,
+  resolveHostsFilePath,
 } from './hosts-override-manager';
 import type { DnsOverrideRecord, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 
@@ -186,18 +188,18 @@ describe('hosts override manager helpers', () => {
     ).toContain('Start-Process');
   });
 
-  it('renders the macOS elevation command for helper launch', () => {
+  it('renders the POSIX elevation command for helper launch', () => {
     expect(
-      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+      buildPosixElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
     ).toContain("'/tmp/dolgate-dns-helper' 'serve' '--endpoint' '/tmp/dolgate.sock'");
     expect(
-      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+      buildPosixElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
     ).not.toContain('with administrator privileges');
     expect(
-      buildMacElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
+      buildPosixElevationCommand('/tmp/dolgate-dns-helper', ['serve', '--endpoint', '/tmp/dolgate.sock']),
     ).not.toContain('nohup');
     expect(
-      buildMacElevationCommand(
+      buildPosixElevationCommand(
         '/tmp/dolgate-dns-helper',
         ['serve', '--endpoint', '/tmp/dolgate.sock'],
         '/tmp/dolgate-dns-helper.log',
@@ -218,6 +220,31 @@ describe('hosts override manager helpers', () => {
     );
     expect(fallbackEndpoint).toMatch(/\/tmp\/dgdns-\d+-6614174000\.sock$/);
     expect(fallbackEndpoint.length).toBeLessThanOrEqual(103);
+
+    const linuxEndpoint = buildHostsHelperEndpoint('linux', 'id-3', '/run/user/1000');
+    expect(linuxEndpoint).toMatch(/\/run\/user\/1000\/dgdns-\d+-id3\.sock$/);
+    expect(linuxEndpoint.length).toBeLessThanOrEqual(103);
+
+    const linuxFallbackEndpoint = buildHostsHelperEndpoint(
+      'linux',
+      '123e4567-e89b-12d3-a456-426614174000',
+      '/this/path/is/intentionally/long/enough/to/exceed/the/linux/unix/socket/path/length/limit/108',
+    );
+    expect(linuxFallbackEndpoint).toMatch(/\/tmp\/dgdns-\d+-6614174000\.sock$/);
+    expect(linuxFallbackEndpoint.length).toBeLessThanOrEqual(103);
+  });
+
+  it('resolves the hosts file path for POSIX platforms', () => {
+    expect(resolveHostsFilePath('darwin')).toBe('/etc/hosts');
+    expect(resolveHostsFilePath('linux')).toBe('/etc/hosts');
+    expect(() => resolveHostsFilePath('freebsd')).toThrow(/not supported/);
+  });
+
+  it('prefers XDG_RUNTIME_DIR for the linux helper socket directory', () => {
+    expect(resolveHelperTempDirectory('linux', { XDG_RUNTIME_DIR: '/run/user/1000' })).toBe('/run/user/1000');
+    expect(resolveHelperTempDirectory('linux', { XDG_RUNTIME_DIR: '  ' })).not.toBe('  ');
+    expect(resolveHelperTempDirectory('linux', {})).toBeTruthy();
+    expect(resolveHelperTempDirectory('darwin', { XDG_RUNTIME_DIR: '/run/user/1000' })).not.toBe('/run/user/1000');
   });
 
   it('exposes the branded helper binary name', () => {
@@ -265,6 +292,7 @@ describe('HostsOverrideManager', () => {
     existsSyncMock.mockReturnValue(false);
     try {
       expect(() => new HostsOverrideManager({ platform: 'darwin' })).not.toThrow();
+      expect(() => new HostsOverrideManager({ platform: 'linux' })).not.toThrow();
     } finally {
       existsSyncMock.mockReturnValue(true);
     }
@@ -477,6 +505,68 @@ describe('HostsOverrideManager', () => {
       platform: 'darwin',
       helperPath: '/tmp/dolgate-dns-helper',
       hostsFilePath: '/etc/hosts',
+      fileReader: async () => '',
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await expect(manager.ensureReady()).rejects.toMatchObject({
+      stage: 'permission-denied',
+      message: 'DNS Override 권한 승인이 취소되었습니다.',
+    });
+  });
+
+  it('uses sudo-prompt to launch the helper on linux and applies rewrites', async () => {
+    let hostsFileContent = '';
+    const client = {
+      send: vi.fn(async (request: { command: string; entries?: Array<{ address: string; hostname: string }> }) => {
+        if (request.command === 'rewrite-block') {
+          hostsFileContent = buildManagedHostsBlock(request.entries ?? []);
+        }
+        return { ok: true };
+      }),
+      close: vi.fn(),
+    };
+
+    const manager = new HostsOverrideManager({
+      platform: 'linux',
+      helperPath: '/usr/lib/dolgate/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      tempDirectory: '/run/user/1000',
+      fileReader: async () => hostsFileContent,
+      clientFactory: async () => client,
+      uuidFactory: (() => {
+        let sequence = 0;
+        return () => `id-${++sequence}`;
+      })(),
+      launchPollIntervalMs: 0,
+      launchTimeoutMs: 100,
+    });
+
+    await manager.rewrite([
+      { hostname: 'basket', address: '10.0.1.15', ruleId: 'dns-1' },
+    ]);
+
+    expect(sudoPromptSpies.exec).toHaveBeenCalledTimes(1);
+    const [command, options] = sudoPromptSpies.exec.mock.calls[0] ?? [];
+    expect(command).toContain('/usr/lib/dolgate/dolgate-dns-helper');
+    expect(command).toContain("'serve'");
+    expect(command).toContain('/run/user/1000/dgdns-');
+    expect(command).toContain('</dev/null');
+    expect(options).toMatchObject({ name: DOLGATE_DNS_HELPER_PROMPT_NAME });
+  });
+
+  it('surfaces a permission-denied error when the linux polkit prompt is cancelled', async () => {
+    sudoPromptSpies.exec.mockImplementationOnce((_command, options, callback) => {
+      const done = typeof options === 'function' ? options : callback;
+      done?.(new Error('User did not grant permission.'));
+    });
+
+    const manager = new HostsOverrideManager({
+      platform: 'linux',
+      helperPath: '/usr/lib/dolgate/dolgate-dns-helper',
+      hostsFilePath: '/etc/hosts',
+      tempDirectory: '/run/user/1000',
       fileReader: async () => '',
       launchPollIntervalMs: 0,
       launchTimeoutMs: 100,

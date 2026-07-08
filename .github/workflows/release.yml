@@ -59,6 +59,7 @@ jobs:
         os:
           - macos-latest
           - windows-latest
+          - ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -97,6 +98,12 @@ jobs:
           test -f apps/desktop/release/resources/win32/x64/bin/ssh-core.exe
           test -f apps/desktop/release/resources/win32/x64/bin/dolgate-dns-helper.exe
           test -f apps/desktop/release/resources/win32/x64/bin/aws-conpty-wrapper.exe
+
+      - name: Verify Linux desktop helper binaries
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          test -f apps/desktop/release/resources/linux/x64/bin/ssh-core
+          test -f apps/desktop/release/resources/linux/x64/bin/dolgate-dns-helper
 
   desktop-test:
     runs-on: ubuntu-latest
@@ -273,6 +280,61 @@ jobs:
           path: apps/desktop/release/dist/*
           if-no-files-found: error
 
+  build-linux:
+    runs-on: ubuntu-latest
+    needs:
+      - verify-version
+      - desktop-test
+      - mobile-test
+      - ssh-core-test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(linux/x64/7za)을 누락 설치하는
+      # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
+      - name: Pin npm (lockfile-verified version)
+        run: npm install -g npm@11.12.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify packaging binaries (7zip-bin self-heal)
+        shell: bash
+        run: |
+          check() { node -e "process.exit(require('fs').existsSync(require('7zip-bin').path7za) ? 0 : 1)"; }
+          if ! check; then
+            echo "::warning::7zip-bin binary missing after npm ci — re-extracting from registry"
+            ls -la node_modules/7zip-bin || true
+            npm pack 7zip-bin@5.2.0
+            rm -rf node_modules/7zip-bin
+            mkdir -p node_modules/7zip-bin
+            tar -xzf 7zip-bin-5.2.0.tgz -C node_modules/7zip-bin --strip-components 1
+            rm -f 7zip-bin-5.2.0.tgz
+            check
+          fi
+
+      - name: Build Linux release artifacts
+        run: npm run release:dist:linux --workspace @dolssh/desktop
+
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-linux
+          path: apps/desktop/release/dist/*
+          if-no-files-found: error
+
   build-android:
     runs-on: ubuntu-latest
     needs:
@@ -400,6 +462,7 @@ jobs:
       - verify-version
       - build-mac
       - build-win
+      - build-linux
       - build-android
     steps:
       - name: Download desktop release artifacts
