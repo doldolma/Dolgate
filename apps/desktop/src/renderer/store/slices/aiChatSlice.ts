@@ -274,6 +274,16 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
         const [sessionId, conv] = entry;
 
         if (event.type === "delta") {
+          if (event.delta.kind === "thinking") {
+            // 추론 요약(codex)을 실시간으로 작업 내역 트레이스에 누적한다 — 도구 호출 전
+            // 긴 추론 구간에도 진행이 보이게. 문단 구분은 어댑터가 델타에 포함해 보낸다.
+            return {
+              aiConversations: {
+                ...state.aiConversations,
+                [sessionId]: { ...conv, generationTrace: conv.generationTrace + event.delta.text },
+              },
+            };
+          }
           if (event.delta.kind !== "text") {
             return state;
           }

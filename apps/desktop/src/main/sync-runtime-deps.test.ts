@@ -13,28 +13,6 @@ const syncRuntimeDeps = require('../../scripts/sync-runtime-deps.cjs') as {
   resolveTargetPlatform: () => string | null;
 };
 
-function currentCodexPlatformPackage(): string | null {
-  if (process.platform === 'darwin' && process.arch === 'arm64') {
-    return '@openai/codex-darwin-arm64';
-  }
-  if (process.platform === 'darwin' && process.arch === 'x64') {
-    return '@openai/codex-darwin-x64';
-  }
-  if (process.platform === 'linux' && process.arch === 'arm64') {
-    return '@openai/codex-linux-arm64';
-  }
-  if (process.platform === 'linux' && process.arch === 'x64') {
-    return '@openai/codex-linux-x64';
-  }
-  if (process.platform === 'win32' && process.arch === 'arm64') {
-    return '@openai/codex-win32-arm64';
-  }
-  if (process.platform === 'win32' && process.arch === 'x64') {
-    return '@openai/codex-win32-x64';
-  }
-  return null;
-}
-
 describe('sync-runtime-deps target filtering', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -45,11 +23,11 @@ describe('sync-runtime-deps target filtering', () => {
     expect(syncRuntimeDeps.shouldIncludeRuntimePackage('react', 'win32')).toBe(true);
   });
 
-  it('keeps only the Codex native package for the target platform and architecture', () => {
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-win32-x64', 'win32', 'x64')).toBe(true);
+  it('excludes Codex native packages from app node_modules runtime sync', () => {
+    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-win32-x64', 'win32', 'x64')).toBe(false);
     expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-darwin-arm64', 'win32', 'x64')).toBe(false);
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-darwin-arm64', 'darwin', 'universal')).toBe(true);
-    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-darwin-x64', 'darwin', 'universal')).toBe(true);
+    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-darwin-arm64', 'darwin', 'universal')).toBe(false);
+    expect(syncRuntimeDeps.shouldIncludeRuntimePackage('@openai/codex-darwin-x64', 'darwin', 'universal')).toBe(false);
   });
 
   it('reads the target platform from the environment when present', () => {
@@ -65,15 +43,14 @@ describe('sync-runtime-deps target filtering', () => {
     );
   });
 
-  it('keeps the Codex wrapper package separate from the installed platform package alias', async () => {
+  it('keeps the Codex wrapper package separate from native release resources', async () => {
     const packages = await syncRuntimeDeps.collectRuntimeDependencyGraph();
     const packageNames = packages.map((runtimePackage) => runtimePackage.name);
-    const platformPackage = currentCodexPlatformPackage();
 
     expect(packageNames).toContain('@openai/codex');
-    if (platformPackage) {
-      expect(packageNames).toContain(platformPackage);
-    }
+    expect(packageNames).not.toContain('@openai/codex-darwin-arm64');
+    expect(packageNames).not.toContain('@openai/codex-darwin-x64');
+    expect(packageNames).not.toContain('@openai/codex-win32-x64');
   });
 
   it('removes read-only nested dependency trees', async () => {

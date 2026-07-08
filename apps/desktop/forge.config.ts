@@ -29,14 +29,17 @@ function resolveExtraResources(): string[] {
   const extraResources = [path.resolve(__dirname, 'config'), path.resolve(__dirname, 'assets')];
 
   const binDir = path.resolve(__dirname, `release/resources/${targetPlatform}/${targetArch}/bin`);
-  if (!existsSync(binDir)) {
+  const codexDir = path.resolve(__dirname, `release/resources/${targetPlatform}/${targetArch}/codex-cli`);
+  const missingReleaseResources = [binDir, codexDir].filter((resourcePath) => !existsSync(resourcePath));
+  if (missingReleaseResources.length > 0) {
     if (hasExplicitPackageTarget) {
-      throw new Error(`Bundled ssh-core resource directory not found: ${binDir}`);
+      throw new Error(`Bundled release resource directory not found: ${missingReleaseResources.join(', ')}`);
     }
     return extraResources;
   }
 
   extraResources.push(binDir);
+  extraResources.push(codexDir);
   return extraResources;
 }
 
@@ -54,9 +57,7 @@ function resolveAppIcon(): string {
 
 const config = {
   packagerConfig: {
-    asar: {
-      unpack: '**/node_modules/@openai/codex*/vendor/**'
-    },
+    asar: true,
     prune: false,
     executableName: 'dolgate',
     name: 'dolgate',
@@ -68,7 +69,7 @@ const config = {
     ],
     icon: resolveAppIcon(),
     osxUniversal: {
-      x64ArchFiles: '**/node_modules/@openai/codex-*/vendor/**/*'
+      x64ArchFiles: '**/codex-cli/vendor/**/*'
     },
     ignore: (file: string) => {
       if (!file) {

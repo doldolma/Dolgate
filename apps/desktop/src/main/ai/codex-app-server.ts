@@ -86,27 +86,56 @@ function nodeModulesRootsForCodex(): string[] {
   ];
 }
 
-function findCodexNativePackage(binaryName: string): { binaryPath: string; pathDirs: string[] } | null {
+interface CodexInstallation {
+  binaryPath: string;
+  pathDirs: string[];
+  managedPackageRoot?: string;
+}
+
+function findPackagedCodexRuntime(binaryName: string): CodexInstallation | null {
+  const target = platformTarget();
+  if (!target || !app.isPackaged) {
+    return null;
+  }
+
+  const packageRoot = path.join(process.resourcesPath, "codex-cli");
+  const targetRoot = path.join(packageRoot, "vendor", target.triple);
+  const binaryPath = path.join(targetRoot, "bin", binaryName);
+  if (!existsSync(binaryPath)) {
+    return null;
+  }
+
+  return {
+    binaryPath,
+    pathDirs: [path.join(targetRoot, "codex-path")].filter((dir) => existsSync(dir)),
+    managedPackageRoot: packageRoot,
+  };
+}
+
+function findCodexNativePackage(binaryName: string): CodexInstallation | null {
   const target = platformTarget();
   if (!target) {
     return null;
   }
 
   for (const root of nodeModulesRootsForCodex()) {
-    const packageRoot = path.join(root, ...target.pkg.split("/"), "vendor", target.triple);
-    const packageBinaryPath = path.join(packageRoot, "bin", binaryName);
+    const packageRoot = path.join(root, ...target.pkg.split("/"));
+    const vendorRoot = path.join(packageRoot, "vendor", target.triple);
+    const packageBinaryPath = path.join(vendorRoot, "bin", binaryName);
     if (existsSync(packageBinaryPath)) {
       return {
         binaryPath: packageBinaryPath,
-        pathDirs: [path.join(packageRoot, "codex-path")].filter((dir) => existsSync(dir)),
+        pathDirs: [path.join(vendorRoot, "codex-path")].filter((dir) => existsSync(dir)),
+        managedPackageRoot: packageRoot,
       };
     }
 
-    const legacyBinaryPath = path.join(packageRoot, "codex", binaryName);
+    const legacyBinaryPath = path.join(vendorRoot, "codex", binaryName);
     if (existsSync(legacyBinaryPath)) {
       return {
         binaryPath: legacyBinaryPath,
-        pathDirs: [path.join(packageRoot, "path")].filter((dir) => existsSync(dir)),
+        pathDirs: [path.join(vendorRoot, "path")].filter((dir) => existsSync(dir)),
+        managedPackageRoot: packageRoot,
       };
     }
   }
@@ -114,26 +143,33 @@ function findCodexNativePackage(binaryName: string): { binaryPath: string; pathD
   return null;
 }
 
+function findCodexInstallation(binaryName: string): CodexInstallation | null {
+  return findPackagedCodexRuntime(binaryName) ?? findCodexNativePackage(binaryName);
+}
+
 // codex 네이티브 바이너리 경로 해석.
-// - 패키지 앱: extraResource 로 실어둔 resources/bin/codex (ssh-core 와 동일한 배포 방식).
-//   없으면 app.asar.unpacked 의 플랫폼 패키지(vendor/<triple>/bin)를 사용한다.
+// - 패키지 앱: extraResource 로 실어둔 resources/codex-cli/vendor/<triple>/bin 을 우선 사용한다.
 // - dev: 워크스페이스 node_modules 의 플랫폼 패키지(vendor/<triple>/bin — 0.142+, 구버전은 codex/).
 // - 폴백: PATH 의 codex.
 export function resolveCodexBin(): string {
   const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
   if (app.isPackaged) {
+    const packagedInstallation = findPackagedCodexRuntime(binaryName);
+    if (packagedInstallation) {
+      return packagedInstallation.binaryPath;
+    }
     const resourceBinaryPath = path.join(process.resourcesPath, "bin", binaryName);
     if (existsSync(resourceBinaryPath)) {
       return resourceBinaryPath;
     }
     return findCodexNativePackage(binaryName)?.binaryPath ?? resourceBinaryPath;
   }
-  return findCodexNativePackage(binaryName)?.binaryPath ?? binaryName;
+  return findCodexInstallation(binaryName)?.binaryPath ?? binaryName;
 }
 
 export function resolveCodexPathDirs(): string[] {
   const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
-  return findCodexNativePackage(binaryName)?.pathDirs ?? [];
+  return findCodexInstallation(binaryName)?.pathDirs ?? [];
 }
 
 function pathEnvKey(env: Record<string, string>): string {
@@ -170,7 +206,13 @@ export function codexEnv(): Record<string, string> {
     }
   }
   env.CODEX_HOME = resolveCodexHome();
-  prependPathDirs(env, resolveCodexPathDirs());
+  const binaryName = process.platform === "win32" ? "codex.exe" : "codex";
+  const installation = findCodexInstallation(binaryName);
+  if (installation?.managedPackageRoot) {
+    env.CODEX_MANAGED_BY_NPM = "1";
+    env.CODEX_MANAGED_PACKAGE_ROOT = installation.managedPackageRoot;
+  }
+  prependPathDirs(env, installation?.pathDirs ?? []);
   return env;
 }
 

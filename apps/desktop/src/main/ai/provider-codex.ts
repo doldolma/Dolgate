@@ -4,7 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { Codex, type ThreadEvent, type ThreadItem, type UserInput } from "@openai/codex-sdk";
 
-import type { AiChatMessage, AiChatRequest, AiChatResult, AiTestResult } from "../../shared/ai";
+import type {
+  AiChatMessage,
+  AiChatRequest,
+  AiChatResult,
+  AiTestResult,
+  AiToolEvent,
+} from "../../shared/ai";
 import { mergeTextAttachments } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
 import { AiRequestError, normalizeAiError } from "./provider-errors";
@@ -15,6 +21,7 @@ import {
   resolveCodexBin,
   resolveCodexHome,
 } from "./codex-app-server";
+import { normalizeCodexModel } from "./codex-models";
 
 // codex 프로세스 env 에서 bearer 토큰을 읽게 할 변수 이름(mcp_servers.<name>.bearer_token_env_var).
 const MCP_TOKEN_ENV = "DOLGATE_MCP_TOKEN";
@@ -39,7 +46,7 @@ export class CodexAdapter implements ProviderAdapter {
     config: ProviderConfig,
     private readonly mcp?: CodexMcpEndpoint,
   ) {
-    this.model = config.model;
+    this.model = normalizeCodexModel(config.model);
   }
 
   async testConnection(): Promise<AiTestResult> {
@@ -61,7 +68,7 @@ export class CodexAdapter implements ProviderAdapter {
   }
 
   async chat(request: AiChatRequest, opts: ProviderChatOptions): Promise<AiChatResult> {
-    const model = request.model || this.model;
+    const model = normalizeCodexModel(request.model || this.model);
     const { prompt, imagePaths, cleanup } = await buildCodexInput(request.messages, {
       hasRemoteTools: Boolean(this.mcp),
     });
@@ -117,34 +124,60 @@ export class CodexAdapter implements ProviderAdapter {
       let lastAgentMessage = "";
       let usage: AiChatResult["usage"];
       let failure: string | null = null;
-      // agent_message 는 item.updated 마다 전체 텍스트가 다시 오므로 항목별 직전 길이와의 diff 를 델타로 방출.
+      // agent_message/reasoning 은 item.updated 마다 전체 텍스트가 다시 오므로 항목별 직전 길이와의 diff 를 델타로 방출.
       const emittedLengths = new Map<string, number>();
+      // reasoning 항목 사이 문단 구분용 — 새 항목의 첫 청크 앞에만 빈 줄을 붙인다.
+      let thinkingEmitted = false;
 
-      for await (const event of events) {
-        if (isAgentMessageEvent(event)) {
-          const item = event.item;
-          const previous = emittedLengths.get(item.id) ?? 0;
-          if (item.text.length > previous) {
-            const delta = item.text.slice(previous);
-            emittedLengths.set(item.id, item.text.length);
-            streamedText += delta;
-            opts.onDelta({ kind: "text", text: delta });
+      try {
+        for await (const event of events) {
+          if (isItemEvent(event)) {
+            const item = event.item;
+            if (item.type === "agent_message") {
+              const delta = itemTextGrowth(emittedLengths, item);
+              if (delta) {
+                streamedText += delta;
+                opts.onDelta({ kind: "text", text: delta });
+              }
+              if (event.type === "item.completed") {
+                lastAgentMessage = item.text;
+              }
+            } else if (item.type === "reasoning") {
+              // 추론 요약을 실시간 thinking 델타로 흘린다 — codex 는 추론이 길어(수십 초)
+              // 이걸 버리면 도구 호출 전까지 패널이 멈춘 것처럼 보인다.
+              const isNewItem = !emittedLengths.has(item.id);
+              const delta = itemTextGrowth(emittedLengths, item);
+              if (delta) {
+                opts.onDelta({
+                  kind: "thinking",
+                  text: isNewItem && thinkingEmitted ? `\n\n${delta}` : delta,
+                });
+                thinkingEmitted = true;
+              }
+            } else if (item.type === "web_search" || item.type === "command_execution") {
+              // codex 내장 활동은 dolgate MCP 브리지를 안 거쳐 침묵하므로 여기서 도구 칩으로 올린다.
+              // (dolssh 도구는 MCP invoke 시점에 AiService 가 칩을 올리므로 mcp_tool_call 은 제외.)
+              // command_execution 의 item.updated 는 출력 청크마다 와서 건너뛴다(칩 내용 불변).
+              if (event.type !== "item.updated" || item.type === "web_search") {
+                opts.onToolEvent?.(builtinToolEvent(item, event.type));
+              }
+            }
+            if (event.type === "item.completed") {
+              logCodexItem(item);
+            }
+          } else if (event.type === "turn.completed") {
+            usage = {
+              inputTokens: event.usage.input_tokens,
+              outputTokens: event.usage.output_tokens,
+            };
+          } else if (event.type === "turn.failed") {
+            failure = event.error.message;
+          } else if (event.type === "error") {
+            failure = event.message;
           }
-          if (event.type === "item.completed") {
-            lastAgentMessage = item.text;
-          }
-        } else if (event.type === "turn.completed") {
-          usage = {
-            inputTokens: event.usage.input_tokens,
-            outputTokens: event.usage.output_tokens,
-          };
-        } else if (event.type === "turn.failed") {
-          failure = event.error.message;
-        } else if (event.type === "error") {
-          failure = event.message;
-        } else if (event.type === "item.completed") {
-          logCodexItem(event.item);
         }
+      } catch (error) {
+        throw mapCodexFailure(failure ?? errorMessage(error));
       }
 
       if (failure) {
@@ -157,15 +190,46 @@ export class CodexAdapter implements ProviderAdapter {
   }
 }
 
-function isAgentMessageEvent(
-  event: ThreadEvent,
-): event is Extract<ThreadEvent, { type: "item.updated" | "item.completed" }> & {
-  item: { id: string; type: "agent_message"; text: string };
-} {
+type ItemEvent = Extract<ThreadEvent, { type: "item.started" | "item.updated" | "item.completed" }>;
+
+function isItemEvent(event: ThreadEvent): event is ItemEvent {
   return (
-    (event.type === "item.updated" || event.type === "item.completed") &&
-    event.item.type === "agent_message"
+    event.type === "item.started" ||
+    event.type === "item.updated" ||
+    event.type === "item.completed"
   );
+}
+
+// item.updated 는 항목의 전체 텍스트를 다시 보내므로, 직전 방출 길이 이후의 증가분만 돌려준다.
+function itemTextGrowth(emitted: Map<string, number>, item: { id: string; text: string }): string {
+  const previous = emitted.get(item.id) ?? 0;
+  if (item.text.length <= previous) {
+    return "";
+  }
+  emitted.set(item.id, item.text.length);
+  return item.text.slice(previous);
+}
+
+// codex 내장 도구(web_search·로컬 command_execution) 활동을 UI 도구 칩 이벤트로 변환한다.
+function builtinToolEvent(
+  item: Extract<ThreadItem, { type: "web_search" | "command_execution" }>,
+  eventType: ItemEvent["type"],
+): AiToolEvent {
+  if (item.type === "web_search") {
+    return {
+      id: item.id,
+      name: "web_search",
+      status: eventType === "item.completed" ? "done" : "running",
+      label: `🔍 웹 검색: ${item.query || "…"}`,
+    };
+  }
+  const failed = item.status === "failed" || (item.exit_code !== undefined && item.exit_code !== 0);
+  return {
+    id: item.id,
+    name: "command_execution",
+    status: eventType !== "item.completed" ? "running" : failed ? "error" : "done",
+    label: `💻 로컬 실행: ${item.command}`,
+  };
 }
 
 // codex 쪽 도구 활동을 main 로그로 남긴다 — 문제(도구 실패·의도치 않은 로컬 실행)를
@@ -199,13 +263,56 @@ function logCodexItem(item: ThreadItem): void {
 
 // codex 실패 메시지를 정규화 가능한 에러로. 로그인 만료가 제일 흔한 케이스라 별도 안내.
 function mapCodexFailure(message: string): Error {
-  if (/unauthorized|401|not\s*logged\s*in|login|auth/i.test(message)) {
+  const normalized = normalizeCodexFailureMessage(message);
+  if (/not supported when using Codex with a ChatGPT account|model metadata|unknown model/i.test(normalized)) {
+    return new AiRequestError(
+      "model-not-found",
+      "Codex에서 지원하지 않는 모델입니다. 설정에서 Codex 모델을 기본값으로 다시 저장해 주세요.",
+    );
+  }
+  if (/unauthorized|401|not\s*logged\s*in|login|auth/i.test(normalized)) {
     return new AiRequestError(
       "auth",
       "Codex 인증이 만료되었거나 로그인이 필요합니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
     );
   }
-  return new Error(message);
+  return new Error(normalized);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeCodexFailureMessage(message: string): string {
+  const extracted = extractCodexJsonMessage(message);
+  const stripped = extracted
+    .replace(/Codex Exec exited with (?:code \d+|signal [^:]+):/gi, "")
+    .replace(/Reading prompt from stdin\.\.\./gi, "")
+    .trim();
+  return stripped || "Codex 요청에 실패했습니다.";
+}
+
+function extractCodexJsonMessage(message: string): string {
+  const lines = message.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    if (!line.startsWith("{") || !line.endsWith("}")) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(line) as {
+        message?: unknown;
+        error?: { message?: unknown };
+        item?: { message?: unknown };
+      };
+      const candidate = parsed.error?.message ?? parsed.message ?? parsed.item?.message;
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate;
+      }
+    } catch {
+      // Keep scanning older lines.
+    }
+  }
+  return message;
 }
 
 const IMAGE_EXTENSIONS: Record<string, string> = {

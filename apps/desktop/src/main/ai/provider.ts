@@ -4,6 +4,7 @@ import type {
   AiChatResult,
   AiProviderId,
   AiTestResult,
+  AiToolEvent,
 } from "../../shared/ai";
 
 // AiService가 어댑터를 만들 때 넘기는 해석된 설정. apiKey는 SecretStore에서 읽어 채운다.
@@ -19,6 +20,9 @@ export interface ProviderConfig {
 export interface ProviderChatOptions {
   signal: AbortSignal;
   onDelta: (delta: AiChatDelta) => void;
+  // 어댑터 내부 에이전트 루프에서 실행되는 내장 도구 활동(codex web_search·로컬 실행 등)을
+  // AiService 실행 경로와 같은 tool 칩 스트림으로 올린다. dolssh 도구(MCP 경유)는 해당 없음.
+  onToolEvent?: (tool: AiToolEvent) => void;
 }
 
 // main 프로세스 전용 provider 어댑터. 모든 LLM egress는 이 뒤에 격리된다.

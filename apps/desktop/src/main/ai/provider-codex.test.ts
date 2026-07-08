@@ -42,6 +42,10 @@ async function* eventsOf(events: unknown[]) {
   }
 }
 
+async function* throwingEvents(message: string) {
+  throw new Error(message);
+}
+
 function makeAdapter(model = "gpt-5.5") {
   return new CodexAdapter({ providerId: "codex", model, apiKey: "" });
 }
@@ -135,6 +139,76 @@ describe("CodexAdapter.chat", () => {
     expect(result.text).toBe("DSM 7.3.2 입니다.");
   });
 
+  it("streams reasoning as thinking deltas (item diff + paragraph break between items)", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({
+      events: eventsOf([
+        { type: "item.started", item: { id: "r1", type: "reasoning", text: "" } },
+        { type: "item.updated", item: { id: "r1", type: "reasoning", text: "**로그 확인**" } },
+        { type: "item.completed", item: { id: "r1", type: "reasoning", text: "**로그 확인** 진행" } },
+        { type: "item.completed", item: { id: "r2", type: "reasoning", text: "이제 답변 정리" } },
+        { type: "item.completed", item: { id: "m1", type: "agent_message", text: "답입니다" } },
+      ]),
+    });
+    const thinking: string[] = [];
+    const texts: string[] = [];
+    const result = await makeAdapter().chat(
+      { model: "gpt-5.5", messages: [{ role: "user", content: "hi" }] },
+      {
+        signal: new AbortController().signal,
+        onDelta: (delta) => {
+          if (delta.kind === "thinking") {
+            thinking.push(delta.text);
+          } else if (delta.kind === "text") {
+            texts.push(delta.text);
+          }
+        },
+      },
+    );
+    // 같은 항목은 증가분만, 새 항목의 첫 청크에는 문단 구분이 붙는다.
+    expect(thinking).toEqual(["**로그 확인**", " 진행", "\n\n이제 답변 정리"]);
+    // 추론은 텍스트 델타/최종 답변에 섞이지 않는다.
+    expect(texts).toEqual(["답입니다"]);
+    expect(result.text).toBe("답입니다");
+  });
+
+  it("surfaces codex builtin activity (web_search, local command) as tool events", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({
+      events: eventsOf([
+        { type: "item.started", item: { id: "w1", type: "web_search", query: "dsm 7.3 release" } },
+        { type: "item.completed", item: { id: "w1", type: "web_search", query: "dsm 7.3 release" } },
+        {
+          type: "item.started",
+          item: { id: "c1", type: "command_execution", command: "ls /x", aggregated_output: "", status: "in_progress" },
+        },
+        {
+          // 출력 청크마다 오는 updated 는 칩 이벤트를 만들지 않는다.
+          type: "item.updated",
+          item: { id: "c1", type: "command_execution", command: "ls /x", aggregated_output: "no such file", status: "in_progress" },
+        },
+        {
+          type: "item.completed",
+          item: { id: "c1", type: "command_execution", command: "ls /x", aggregated_output: "no such file", exit_code: 1, status: "failed" },
+        },
+        { type: "item.completed", item: { id: "m1", type: "agent_message", text: "ok" } },
+      ]),
+    });
+    const tools: Array<{ id: string; name: string; status: string; label: string }> = [];
+    await makeAdapter().chat(
+      { model: "gpt-5.5", messages: [{ role: "user", content: "hi" }] },
+      {
+        signal: new AbortController().signal,
+        onDelta: () => {},
+        onToolEvent: (tool) => tools.push(tool),
+      },
+    );
+    expect(tools).toEqual([
+      { id: "w1", name: "web_search", status: "running", label: "🔍 웹 검색: dsm 7.3 release" },
+      { id: "w1", name: "web_search", status: "done", label: "🔍 웹 검색: dsm 7.3 release" },
+      { id: "c1", name: "command_execution", status: "running", label: "💻 로컬 실행: ls /x" },
+      { id: "c1", name: "command_execution", status: "error", label: "💻 로컬 실행: ls /x" },
+    ]);
+  });
+
   it("injects the dolgate MCP server config and token env when a binding is provided", async () => {
     sdkMocks.runStreamed.mockResolvedValue({
       events: eventsOf([
@@ -185,13 +259,22 @@ describe("CodexAdapter.chat", () => {
     expect(input[0].text).toContain("suggest commands for the user to run instead");
   });
 
-  it("omits the model option when empty (codex default model)", async () => {
+  it("uses the default Codex model when the model is empty", async () => {
     sdkMocks.runStreamed.mockResolvedValue({ events: eventsOf([]) });
     await makeAdapter("").chat(
       { model: "", messages: [{ role: "user", content: "hi" }] },
       { signal: new AbortController().signal, onDelta: () => {} },
     );
-    expect(sdkMocks.startThread.mock.calls[0][0]).not.toHaveProperty("model");
+    expect(sdkMocks.startThread.mock.calls[0][0]).toMatchObject({ model: "gpt-5.5" });
+  });
+
+  it("normalizes unsupported Codex models before starting the thread", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({ events: eventsOf([]) });
+    await makeAdapter("Qwen-AgentWorld-35B-A3B").chat(
+      { model: "", messages: [{ role: "user", content: "hi" }] },
+      { signal: new AbortController().signal, onDelta: () => {} },
+    );
+    expect(sdkMocks.startThread.mock.calls[0][0]).toMatchObject({ model: "gpt-5.5" });
   });
 
   it("writes image attachments to temp files, passes them as local_image, and cleans up", async () => {
@@ -233,6 +316,37 @@ describe("CodexAdapter.chat", () => {
         { signal: new AbortController().signal, onDelta: () => {} },
       ),
     ).rejects.toMatchObject({ name: "AiRequestError", reason: "auth" });
+  });
+
+  it("maps SDK exec auth stderr to an AiRequestError(auth)", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({
+      events: throwingEvents(
+        "Codex Exec exited with code 1: Reading prompt from stdin...\n" +
+          "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header",
+      ),
+    });
+    await expect(
+      makeAdapter().chat(
+        { model: "gpt-5.5", messages: [{ role: "user", content: "hi" }] },
+        { signal: new AbortController().signal, onDelta: () => {} },
+      ),
+    ).rejects.toMatchObject({ name: "AiRequestError", reason: "auth" });
+  });
+
+  it("maps unsupported ChatGPT-account models to model-not-found", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({
+      events: throwingEvents(
+        '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The ' +
+          "'Qwen-AgentWorld-35B-A3B' model is not supported when using Codex with a ChatGPT account." +
+          '"}}',
+      ),
+    });
+    await expect(
+      makeAdapter().chat(
+        { model: "gpt-5.5", messages: [{ role: "user", content: "hi" }] },
+        { signal: new AbortController().signal, onDelta: () => {} },
+      ),
+    ).rejects.toMatchObject({ name: "AiRequestError", reason: "model-not-found" });
   });
 
   it("throws plain errors for other stream failures", async () => {
