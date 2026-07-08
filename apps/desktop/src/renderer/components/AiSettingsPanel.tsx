@@ -657,8 +657,8 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                 role="status"
                 className={
                   result.ok
-                    ? 'rounded-[10px] border border-[color-mix(in_srgb,var(--success,#16a34a)_45%,transparent)] bg-[color-mix(in_srgb,var(--success,#16a34a)_12%,transparent)] px-3.5 py-2.5 text-[0.85rem] text-[var(--text)]'
-                    : 'rounded-[10px] border border-[color-mix(in_srgb,var(--danger,#dc2626)_45%,transparent)] bg-[color-mix(in_srgb,var(--danger,#dc2626)_12%,transparent)] px-3.5 py-2.5 text-[0.85rem] text-[var(--text)]'
+                    ? 'select-text rounded-[10px] border border-[color-mix(in_srgb,var(--success,#16a34a)_45%,transparent)] bg-[color-mix(in_srgb,var(--success,#16a34a)_12%,transparent)] px-3.5 py-2.5 text-[0.85rem] text-[var(--text)]'
+                    : 'select-text rounded-[10px] border border-[color-mix(in_srgb,var(--danger,#dc2626)_45%,transparent)] bg-[color-mix(in_srgb,var(--danger,#dc2626)_12%,transparent)] px-3.5 py-2.5 text-[0.85rem] text-[var(--text)]'
                 }
               >
                 <div className="font-semibold">{result.ok ? '연결 성공' : '연결 실패'}</div>
