@@ -222,7 +222,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-mac
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-win:
@@ -277,7 +280,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-win
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-linux:
@@ -332,7 +338,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-linux
-          path: apps/desktop/release/dist/*
+          path: |
+            apps/desktop/release/dist/*
+            !apps/desktop/release/dist/builder-*.yml
+            !apps/desktop/release/dist/builder-*.yaml
           if-no-files-found: error
 
   build-android:

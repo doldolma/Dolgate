@@ -283,6 +283,8 @@ async function collectArtifacts() {
   const entries = await fs.readdir(distDirectory, { withFileTypes: true }).catch(() => []);
   const files = entries
     .filter((entry) => entry.isFile())
+    // electron-builder 가 dist 에 남기는 내부 디버그/설정 파일은 릴리즈 자산이 아니다.
+    .filter((entry) => !/^builder-.*\.ya?ml$/.test(entry.name))
     .map((entry) => path.join(distDirectory, entry.name))
     .sort((left, right) => left.localeCompare(right));
 
