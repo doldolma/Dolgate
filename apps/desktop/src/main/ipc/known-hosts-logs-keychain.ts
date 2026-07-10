@@ -179,6 +179,10 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.sessionReplayService.get(recordingId),
   );
 
+  ipcMain.handle(ipcChannels.sessionReplays.storageUsage, async () =>
+    ctx.sessionReplayService.getStorageUsage(),
+  );
+
   ipcMain.handle(ipcChannels.keychain.list, async () => ctx.secretMetadata.list());
 
   ipcMain.handle(

@@ -221,6 +221,8 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
             await refreshHostAndKeychainState(set);
             return result;
           },
+    // 설정 화면의 리플레이 보관 용량 표시용. 컴포넌트는 desktopApi 를 직접 못 쓰므로 스토어로 노출.
+    loadSessionReplayStorageUsage: () => api.sessionReplays.storageUsage(),
     // AI 설정 패널용 IPC 액션. 컴포넌트는 desktopApi 를 직접 못 쓰므로 스토어를 통해 노출한다.
     testAiConnection: (input) => api.ai.testConnection(input),
     setAiApiKey: (providerId, key) => api.ai.setApiKey(providerId, key),
@@ -233,6 +235,7 @@ export function createSettingsSlice(deps: SliceDeps): SettingsSlice {
     getCodexAuthStatus: () => api.ai.codexAuthStatus(),
     codexLogout: () => api.ai.codexLogout(),
     getCodexUsage: () => api.ai.codexUsage(),
+    listCodexModels: () => api.ai.codexModels(),
     openExternalUrl: (url) => api.shell.openExternal(url)
   };
 

@@ -121,6 +121,7 @@ import type {
   AiTestResult,
   CodexAuthStatus,
   CodexLoginStart,
+  CodexModel,
   CodexUsage,
 } from "./ai";
 
@@ -814,6 +815,12 @@ export interface SshKeyMaterialResult {
   fingerprintSha256: string;
 }
 
+// 세션 리플레이 저장소가 디스크에서 차지하는 용량(설정 화면 표시용).
+export interface SessionReplayStorageUsage {
+  totalBytes: number;
+  recordingCount: number;
+}
+
 export type SshKeyInstallMode = "installOnly" | "installAndUse";
 
 export interface SshKeyInstallInput {
@@ -1121,6 +1128,7 @@ export interface DesktopApi {
     codexAuthStatus: () => Promise<CodexAuthStatus>;
     codexLogout: () => Promise<void>;
     codexUsage: () => Promise<CodexUsage>;
+    codexModels: () => Promise<CodexModel[]>;
   };
   portForwards: {
     list: () => Promise<PortForwardListSnapshot>;
@@ -1165,6 +1173,7 @@ export interface DesktopApi {
   sessionReplays: {
     open: (recordingId: string) => Promise<void>;
     get: (recordingId: string) => Promise<SessionReplayRecording>;
+    storageUsage: () => Promise<SessionReplayStorageUsage>;
   };
   keychain: {
     list: () => Promise<SecretMetadataRecord[]>;

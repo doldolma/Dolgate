@@ -677,6 +677,9 @@ export function HomeShell({
             onGenerateSshKey={settingsViewModel.generateSshKey}
             onCopySshPublicKey={settingsViewModel.copySshPublicKey}
             onInstallSshPublicKey={settingsViewModel.installSshPublicKey}
+            onLoadSessionReplayStorageUsage={
+              settingsViewModel.loadSessionReplayStorageUsage
+            }
             onLogout={loginController.logout}
           />
         ) : null}

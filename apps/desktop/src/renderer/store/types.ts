@@ -56,7 +56,9 @@ import type {
   AiTestResult,
   CodexAuthStatus,
   CodexLoginStart,
+  CodexModel,
   CodexUsage,
+  SessionReplayStorageUsage,
   SshKeyInstallInput,
   SshKeyInstallResult,
   SshKeyMaterialResult,
@@ -919,6 +921,7 @@ interface AppStateParts {
   installSshPublicKey: (
     input: SshKeyInstallInput,
   ) => Promise<SshKeyInstallResult>;
+  loadSessionReplayStorageUsage: () => Promise<SessionReplayStorageUsage>;
   testAiConnection: (input: AiTestConnectionInput) => Promise<AiTestResult>;
   setAiApiKey: (providerId: AiProviderId, key: string) => Promise<AiApiKeyStatus>;
   clearAiApiKey: (providerId: AiProviderId) => Promise<AiApiKeyStatus>;
@@ -930,6 +933,7 @@ interface AppStateParts {
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   codexLogout: () => Promise<void>;
   getCodexUsage: () => Promise<CodexUsage>;
+  listCodexModels: () => Promise<CodexModel[]>;
   openExternalUrl: (url: string) => Promise<void>;
   acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
   dismissPendingHostKeyPrompt: () => void;
@@ -1273,6 +1277,7 @@ export type SettingsSlice = Pick<
   | "generateSshKey"
   | "copySshPublicKey"
   | "installSshPublicKey"
+  | "loadSessionReplayStorageUsage"
   | "testAiConnection"
   | "setAiApiKey"
   | "clearAiApiKey"
@@ -1284,6 +1289,7 @@ export type SettingsSlice = Pick<
   | "getCodexAuthStatus"
   | "codexLogout"
   | "getCodexUsage"
+  | "listCodexModels"
   | "openExternalUrl"
 >;
 
