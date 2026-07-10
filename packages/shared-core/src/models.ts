@@ -125,7 +125,7 @@ export type ConnectionProgressStage =
 export const AWS_SFTP_DEFAULT_PORT = 22;
 export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 100;
 export const MIN_SESSION_REPLAY_RETENTION_COUNT = 10;
-export const MAX_SESSION_REPLAY_RETENTION_COUNT = 1000;
+export const MAX_SESSION_REPLAY_RETENTION_COUNT = 10000;
 export const MAX_HOST_STARTUP_COMMAND_LENGTH = 32 * 1024;
 
 export type HostStartupCommand =
