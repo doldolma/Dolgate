@@ -28,6 +28,7 @@ export function buildAiBridge(ipcRenderer: IpcRenderer): DesktopApi["ai"] {
     codexAuthStatus: () => ipcRenderer.invoke(ipcChannels.ai.codexAuthStatus),
     codexLogout: () => ipcRenderer.invoke(ipcChannels.ai.codexLogout),
     codexUsage: () => ipcRenderer.invoke(ipcChannels.ai.codexUsage),
+    codexModels: () => ipcRenderer.invoke(ipcChannels.ai.codexModels),
     // main→renderer 스트리밍 이벤트 구독(해제 함수 반환). requestId 로 필터링은 소비자(2단계) 몫.
     onChatEvent: (listener) => subscribeAiChatEvent(listener),
     onTerminalOutputRequest: (listener) => subscribeAiTerminalOutputRequest(listener),

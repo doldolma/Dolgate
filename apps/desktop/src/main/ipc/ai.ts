@@ -159,6 +159,7 @@ export function registerAiIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.ai.codexAuthStatus, async () => ctx.aiService.codexAuthStatus());
   ipcMain.handle(ipcChannels.ai.codexLogout, async () => ctx.aiService.codexLogout());
   ipcMain.handle(ipcChannels.ai.codexUsage, async () => ctx.aiService.codexUsage());
+  ipcMain.handle(ipcChannels.ai.codexModels, async () => ctx.aiService.codexListModels());
 
   // chat 은 invoke 로 시작해 { requestId } 를 즉시 반환하고, 이후 delta/done/error 는
   // ai:chat-event 로 초기 요청 window(event.sender)에 스트리밍한다.

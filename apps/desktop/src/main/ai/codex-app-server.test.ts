@@ -15,6 +15,7 @@ vi.mock("electron", () => ({
 import {
   CodexAppServerClient,
   codexAuthStatus,
+  codexListModels,
   codexLoginStart,
   codexLogout,
   codexUsage,
@@ -193,5 +194,50 @@ describe("codex auth helpers", () => {
       primary: null,
       secondary: null,
     });
+  });
+
+  it("codexListModels keeps server order, skips hidden entries, and falls back per field", async () => {
+    const { client } = makeClient({
+      "model/list": (request) => ({
+        id: request.id,
+        result: {
+          data: [
+            {
+              id: "gpt-5.6-sol",
+              model: "gpt-5.6-sol",
+              displayName: "GPT-5.6-Sol",
+              description: "Latest frontier agentic coding model.",
+              hidden: false,
+              isDefault: true,
+            },
+            {
+              id: "internal-preview",
+              model: "internal-preview",
+              displayName: "Internal",
+              hidden: true,
+              isDefault: false,
+            },
+            // displayName/description 없는 항목 — id 로 표시하고 설명은 null.
+            { model: "gpt-5.5" },
+          ],
+        },
+      }),
+    });
+    await expect(codexListModels(client)).resolves.toEqual([
+      {
+        id: "gpt-5.6-sol",
+        displayName: "GPT-5.6-Sol",
+        description: "Latest frontier agentic coding model.",
+        isDefault: true,
+      },
+      { id: "gpt-5.5", displayName: "gpt-5.5", description: null, isDefault: false },
+    ]);
+  });
+
+  it("codexListModels tolerates an empty/absent list", async () => {
+    const { client } = makeClient({
+      "model/list": (request) => ({ id: request.id, result: {} }),
+    });
+    await expect(codexListModels(client)).resolves.toEqual([]);
   });
 });

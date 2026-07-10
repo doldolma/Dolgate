@@ -21,7 +21,7 @@ import {
   resolveCodexBin,
   resolveCodexHome,
 } from "./codex-app-server";
-import { normalizeCodexModel } from "./codex-models";
+import { CODEX_AUTO_MODEL, normalizeCodexModel } from "./codex-models";
 
 // codex 프로세스 env 에서 bearer 토큰을 읽게 할 변수 이름(mcp_servers.<name>.bearer_token_env_var).
 const MCP_TOKEN_ENV = "DOLGATE_MCP_TOKEN";
@@ -102,7 +102,8 @@ export class CodexAdapter implements ProviderAdapter {
           : {}),
       });
       const thread = codex.startThread({
-        ...(model ? { model } : {}),
+        // "auto" 는 model 을 생략해 codex 가 권장 기본 모델을 고르게 한다(model/list 의 isDefault).
+        ...(model && model !== CODEX_AUTO_MODEL ? { model } : {}),
         // 원격(SSH) 세션 어시스턴트 컨텍스트 — codex 의 로컬 도구는 읽기전용으로 묶고
         // 승인 프롬프트 없이(대화형 아님) 돌린다. 작업 디렉토리는 CODEX_HOME 으로 고정.
         sandboxMode: "read-only",

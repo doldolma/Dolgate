@@ -259,22 +259,31 @@ describe("CodexAdapter.chat", () => {
     expect(input[0].text).toContain("suggest commands for the user to run instead");
   });
 
-  it("uses the default Codex model when the model is empty", async () => {
+  it("omits the model for auto so codex picks its recommended default", async () => {
     sdkMocks.runStreamed.mockResolvedValue({ events: eventsOf([]) });
     await makeAdapter("").chat(
       { model: "", messages: [{ role: "user", content: "hi" }] },
       { signal: new AbortController().signal, onDelta: () => {} },
     );
-    expect(sdkMocks.startThread.mock.calls[0][0]).toMatchObject({ model: "gpt-5.5" });
+    expect(sdkMocks.startThread.mock.calls[0][0].model).toBeUndefined();
   });
 
-  it("normalizes unsupported Codex models before starting the thread", async () => {
+  it("normalizes unsupported Codex models to auto (model omitted) before starting the thread", async () => {
     sdkMocks.runStreamed.mockResolvedValue({ events: eventsOf([]) });
     await makeAdapter("Qwen-AgentWorld-35B-A3B").chat(
       { model: "", messages: [{ role: "user", content: "hi" }] },
       { signal: new AbortController().signal, onDelta: () => {} },
     );
-    expect(sdkMocks.startThread.mock.calls[0][0]).toMatchObject({ model: "gpt-5.5" });
+    expect(sdkMocks.startThread.mock.calls[0][0].model).toBeUndefined();
+  });
+
+  it("passes explicitly selected models (gpt-5.6 family) through to the thread", async () => {
+    sdkMocks.runStreamed.mockResolvedValue({ events: eventsOf([]) });
+    await makeAdapter("gpt-5.6-sol").chat(
+      { model: "", messages: [{ role: "user", content: "hi" }] },
+      { signal: new AbortController().signal, onDelta: () => {} },
+    );
+    expect(sdkMocks.startThread.mock.calls[0][0]).toMatchObject({ model: "gpt-5.6-sol" });
   });
 
   it("writes image attachments to temp files, passes them as local_image, and cleans up", async () => {

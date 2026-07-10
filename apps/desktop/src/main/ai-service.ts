@@ -16,6 +16,7 @@ import type {
   AiTestResult,
   CodexAuthStatus,
   CodexLoginStart,
+  CodexModel,
   CodexUsage,
 } from "../shared/ai";
 import { mergeTextAttachments } from "../shared/ai";
@@ -32,9 +33,10 @@ import {
 } from "./ai/tools/read-terminal-output";
 import { AnthropicAdapter } from "./ai/provider-anthropic";
 import { CodexAdapter } from "./ai/provider-codex";
-import { normalizeCodexModel } from "./ai/codex-models";
+import { normalizeCodexModel, rememberCodexModels } from "./ai/codex-models";
 import {
   codexAuthStatus,
+  codexListModels,
   codexLoginStart,
   codexLogout,
   codexUsage,
@@ -535,6 +537,14 @@ export class AiService {
 
   async codexUsage(): Promise<CodexUsage> {
     return codexUsage(getCodexAppServer());
+  }
+
+  // 설정 UI 의 모델 select 용 — model/list 를 그대로 전달하고, 성공 시 main 검증
+  // allowlist(정적 ∪ 동적)에 id 들을 기억시켜 동적 목록에서 고른 모델이 통과하게 한다.
+  async codexListModels(): Promise<CodexModel[]> {
+    const models = await codexListModels(getCodexAppServer());
+    rememberCodexModels(models.map((model) => model.id));
+    return models;
   }
 
   async codexLogout(): Promise<void> {
