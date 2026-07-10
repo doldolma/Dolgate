@@ -168,6 +168,8 @@ export function buildSessionReplaysBridge(
       ipcRenderer.invoke(ipcChannels.sessionReplays.open, recordingId),
     get: (recordingId: string) =>
       ipcRenderer.invoke(ipcChannels.sessionReplays.get, recordingId),
+    storageUsage: () =>
+      ipcRenderer.invoke(ipcChannels.sessionReplays.storageUsage),
   };
 }
 

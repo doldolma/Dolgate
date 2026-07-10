@@ -191,7 +191,9 @@ export const ipcChannels = {
     codexAuthStatus: 'ai:codex-auth-status',
     codexLogout: 'ai:codex-logout',
     // Codex 요금제 사용량(rate limit) 조회.
-    codexUsage: 'ai:codex-usage'
+    codexUsage: 'ai:codex-usage',
+    // Codex 사용 가능 모델 목록(model/list) — 설정의 모델 select 용.
+    codexModels: 'ai:codex-models'
   },
   notifications: {
     commandFinished: 'notifications:command-finished'
@@ -232,7 +234,8 @@ export const ipcChannels = {
   },
   sessionReplays: {
     open: 'session-replays:open',
-    get: 'session-replays:get'
+    get: 'session-replays:get',
+    storageUsage: 'session-replays:storage-usage'
   },
   keychain: {
     list: 'keychain:list',

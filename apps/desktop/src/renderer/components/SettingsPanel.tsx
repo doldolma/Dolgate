@@ -5,6 +5,7 @@ import type {
   HostRecord,
   KnownHostRecord,
   SecretMetadataRecord,
+  SessionReplayStorageUsage,
   SshKeyGenerateInput,
   SshKeyInstallInput,
   SshKeyInstallResult,
@@ -17,6 +18,7 @@ import {
   MIN_SESSION_REPLAY_RETENTION_COUNT,
 } from '@shared';
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
@@ -60,6 +62,7 @@ interface SettingsPanelProps {
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
   onCopySshPublicKey: (secretRef: string) => Promise<void>;
   onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
+  onLoadSessionReplayStorageUsage?: () => Promise<SessionReplayStorageUsage>;
   onLogout: () => Promise<void>;
 }
 
@@ -82,6 +85,20 @@ const themeOptions: Array<{ value: AppTheme; title: string; description: string 
 ];
 
 const fontSizeOptions = Array.from({ length: 8 }, (_, index) => index + 11);
+
+function formatStorageBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
+  }
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let scaled = value;
+  let unitIndex = 0;
+  while (scaled >= 1024 && unitIndex < units.length - 1) {
+    scaled /= 1024;
+    unitIndex += 1;
+  }
+  return `${scaled >= 100 || unitIndex === 0 ? Math.round(scaled) : scaled.toFixed(1)} ${units[unitIndex]}`;
+}
 const macOnlyTerminalFonts = new Set<TerminalFontFamilyId>(['sf-mono', 'menlo', 'monaco']);
 
 const settingsSections: Array<{ id: SettingsSection; title: string }> = [
@@ -193,8 +210,38 @@ export function SettingsPanel({
   onGenerateSshKey,
   onCopySshPublicKey,
   onInstallSshPublicKey,
+  onLoadSessionReplayStorageUsage,
   onLogout
 }: SettingsPanelProps) {
+  // 리플레이 보관 설정 옆에 실제 디스크 사용량을 보여준다. 보관 개수를 줄이면 프루닝으로
+  // 용량이 줄 수 있으므로 retention 값이 바뀔 때마다 다시 조회한다.
+  const [replayStorageUsage, setReplayStorageUsage] =
+    useState<SessionReplayStorageUsage | null>(null);
+  useEffect(() => {
+    if (!onLoadSessionReplayStorageUsage || activeSection !== 'general') {
+      return;
+    }
+    let cancelled = false;
+    onLoadSessionReplayStorageUsage()
+      .then((usage) => {
+        if (!cancelled) {
+          setReplayStorageUsage(usage);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReplayStorageUsage(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    onLoadSessionReplayStorageUsage,
+    activeSection,
+    settings.sessionReplayRetentionCount,
+  ]);
+
   const visibleTerminalFontOptions =
     desktopPlatform === 'darwin'
       ? terminalFontOptions
@@ -395,6 +442,9 @@ export function SettingsPanel({
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   로컬에 보관할 종료된 세션 replay 개수입니다.
+                  {replayStorageUsage
+                    ? ` 현재 ${replayStorageUsage.recordingCount}개 · ${formatStorageBytes(replayStorageUsage.totalBytes)} 사용 중.`
+                    : ''}
                 </p>
               </FieldGroup>
 

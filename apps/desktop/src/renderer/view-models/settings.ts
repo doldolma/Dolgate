@@ -52,6 +52,9 @@ export function useSettingsViewModel() {
   const generateSshKey = useAppStore((state) => state.generateSshKey);
   const copySshPublicKey = useAppStore((state) => state.copySshPublicKey);
   const installSshPublicKey = useAppStore((state) => state.installSshPublicKey);
+  const loadSessionReplayStorageUsage = useAppStore(
+    (state) => state.loadSessionReplayStorageUsage,
+  );
 
   return {
     hosts,
@@ -73,5 +76,6 @@ export function useSettingsViewModel() {
     generateSshKey,
     copySshPublicKey,
     installSshPublicKey,
+    loadSessionReplayStorageUsage,
   };
 }

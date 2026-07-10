@@ -8,6 +8,7 @@ import {
   renameSync,
   rmdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -17,6 +18,7 @@ import type {
   CoreEvent,
   SessionReplayEntry,
   SessionReplayRecording,
+  SessionReplayStorageUsage,
 } from "@shared";
 import {
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
@@ -322,6 +324,35 @@ export class SessionReplayService {
 
   setOnRecordingsPruned(handler: () => void): void {
     this.onRecordingsPruned = handler;
+  }
+
+  // 현재 scope의 리플레이 디렉토리가 디스크에서 차지하는 용량(설정 화면 표시용).
+  // meta/events 파일 합산이며, 프루닝과 경합해 파일이 사라질 수 있어 stat 실패는 건너뛴다.
+  getStorageUsage(): SessionReplayStorageUsage {
+    const scope = this.activeScope;
+    if (!scope || !existsSync(scope.replayDirectoryPath)) {
+      return { totalBytes: 0, recordingCount: 0 };
+    }
+    let totalBytes = 0;
+    for (const fileName of readdirSync(scope.replayDirectoryPath)) {
+      if (
+        !fileName.endsWith(META_SUFFIX) &&
+        !fileName.endsWith(EVENTS_SUFFIX)
+      ) {
+        continue;
+      }
+      try {
+        totalBytes += statSync(
+          path.join(scope.replayDirectoryPath, fileName),
+        ).size;
+      } catch {
+        continue;
+      }
+    }
+    return {
+      totalBytes,
+      recordingCount: this.listExistingRecordingIds().size,
+    };
   }
 
   private startRecording(sessionId: string): void {
