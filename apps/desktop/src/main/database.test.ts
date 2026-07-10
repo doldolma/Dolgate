@@ -883,9 +883,9 @@ describe('SettingsRepository', () => {
     expect(clampedLow.sessionReplayRetentionCount).toBe(10);
 
     const clampedHigh = settings.update({
-      sessionReplayRetentionCount: 5000,
+      sessionReplayRetentionCount: 50000,
     });
-    expect(clampedHigh.sessionReplayRetentionCount).toBe(1000);
+    expect(clampedHigh.sessionReplayRetentionCount).toBe(10000);
   });
 
   it('stores and syncs the global terminal system theme mode', async () => {
