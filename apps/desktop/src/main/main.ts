@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   Menu,
   powerMonitor,
   type MenuItemConstructorOptions,
@@ -32,7 +33,7 @@ import { CoreManager } from './core-manager';
 import { registerIpcHandlers } from './ipc';
 import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
-import { SecretStore } from './secret-store';
+import { isSecureStorageUsable, SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
@@ -488,6 +489,23 @@ if (termiusHelperArgIndex >= 0) {
   });
 
   app.whenReady().then(async () => {
+    // OS 키체인(보안 저장소)을 못 쓰면 저장된 시크릿 복호화가 전부 실패해 호스트/로그인이
+    // 빈 상태로 뜬다(대표: 우분투 자동 로그인 → 키링 잠김 → basic_text 폴백). 조용히 빈
+    // 화면을 보여주는 대신 원인을 안내하고 종료한다. (mac 의 isEncryptionAvailable 은
+    // Keychain 존재 확인만 하는 즉시 반환이라 이 게이트로 권한 프롬프트가 뜨지 않는다.)
+    if (!isSecureStorageUsable()) {
+      dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'OS 키체인에 접근할 수 없습니다',
+        message:
+          'OS 키체인(보안 저장소)에 접근할 수 없어 저장된 호스트와 로그인 정보를 불러올 수 없습니다.',
+        detail:
+          'Linux 자동 로그인 세션에서는 키링(GNOME Keyring/KWallet)이 잠긴 채 시작되어 발생할 수 있습니다. 로그아웃 후 비밀번호로 다시 로그인하거나 키링 잠금을 해제한 뒤 앱을 다시 실행해 주세요.',
+        buttons: ['확인'],
+      });
+      app.exit(1);
+      return;
+    }
     // 앱 준비 이후에만 IPC와 창 생성을 시작한다.
     if (process.platform === 'win32') {
       // Squirrel.Windows가 등록하는 AppUserModelID와 일치시켜야 토스트 알림이
