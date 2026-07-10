@@ -1298,6 +1298,9 @@ export function useTerminalSessionViewController({
     // tmux pane 은 hostId 가 null 이라 host 가 undefined 다(이전엔 !host 로 early-return →
     // 공유 버튼이 눌려도 no-op). share 백엔드는 sessionId(tmux:<ctl>:<pane> 포함) 기준으로
     // 스트림을 중계하므로 host 없이도 동작한다 — transport 만 도출한다.
+    // 이 값은 추측(호스트 종류)일 뿐이고, main(SessionShareService.start)이 세션의 실제
+    // 전송(getSessionTransport)으로 재판정한다 — EC2 기본 연결은 SSH-over-SSM("ssh")이라
+    // 여기서 aws-ssm 으로 보내도 SSM 셸 폴백 세션만 aws-ssm 으로 공유된다.
     const transport = host?.kind === 'aws-ec2' ? 'aws-ssm' : 'ssh';
     await onStartSessionShare?.({
       sessionId,
