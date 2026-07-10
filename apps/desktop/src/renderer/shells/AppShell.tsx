@@ -55,6 +55,26 @@ export function AppShell({
   const [draggedSession, setDraggedSession] = useState<DraggedSessionPayload | null>(
     null,
   );
+
+  // 끌던 pane 헤더가 drop 전에 unmount 되면(드래그 중 세션 종료 등) 그 노드의 onDragEnd 가
+  // 오지 않아 draggedSession 이 영구히 남고, titlebar 탭 영역이 no-drag 로 고착돼 창 드래그가
+  // 먹통이 된다(AppTitleBar 의 isTabDragging 워치독과 같은 병). document 레벨 dragend/drop 과
+  // window blur 로 확실히 리셋한다 — drop 핸들러들이 먼저 실행된 뒤 도달하므로 중복 clear 는 무해.
+  useEffect(() => {
+    if (!draggedSession) {
+      return;
+    }
+    const reset = () => setDraggedSession(null);
+    document.addEventListener('dragend', reset);
+    document.addEventListener('drop', reset);
+    window.addEventListener('blur', reset);
+    return () => {
+      document.removeEventListener('dragend', reset);
+      document.removeEventListener('drop', reset);
+      window.removeEventListener('blur', reset);
+    };
+  }, [draggedSession]);
+
   const [isUpdateInstallConfirmOpen, setIsUpdateInstallConfirmOpen] =
     useState(false);
   const [secretEditRequest, setSecretEditRequest] =
