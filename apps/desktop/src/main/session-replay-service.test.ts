@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -658,5 +659,50 @@ describe("SessionReplayService", () => {
     expect(() => service.get(recordingId)).toThrow(
       "로그인된 계정의 Replay만 열 수 있습니다.",
     );
+  });
+
+  it("purges every recording file on account deletion (purgeAllRecordings)", () => {
+    const lifecycleStates = new Map<string, ReturnType<typeof createLifecycleState>>([
+      ["session-1", createLifecycleState()],
+    ]);
+    const coreManager = {
+      getSessionLifecycleState: vi.fn((sessionId: string) =>
+        lifecycleStates.get(sessionId) ?? null,
+      ),
+      attachSessionRecording: vi.fn(),
+    };
+    const onRecordingsPruned = vi.fn();
+    const service = activateService(
+      new SessionReplayService(
+        { get: () => ({ sessionReplayRetentionCount: 100 }) } as never,
+        coreManager as never,
+      ),
+    );
+    service.setOnRecordingsPruned(onRecordingsPruned);
+
+    service.handleTerminalEvent({
+      type: "connected",
+      sessionId: "session-1",
+      payload: { status: "connected" },
+    } as never);
+    const recordingId = coreManager.attachSessionRecording.mock.calls[0]?.[1];
+    service.handleTerminalStream(
+      "session-1",
+      new Uint8Array(Buffer.from("wipe-me\n", "utf8")),
+    );
+    service.handleTerminalEvent({
+      type: "closed",
+      sessionId: "session-1",
+      payload: { message: "closed" },
+    } as never);
+    expect(service.get(recordingId).sessionId).toBe("session-1");
+
+    const scope = resolveLocalHistoryScope(TEST_HISTORY_OWNER);
+    service.purgeAllRecordings();
+
+    expect(readdirSync(scope.replayDirectoryPath)).toEqual([]);
+    expect(service.listExistingRecordingIds().size).toBe(0);
+    expect(onRecordingsPruned).toHaveBeenCalled();
+    expect(() => service.get(recordingId)).toThrow();
   });
 });

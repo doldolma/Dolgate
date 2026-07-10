@@ -104,8 +104,16 @@ class SessionRequestError extends Error {
 }
 
 type SessionInvalidationContext = {
-  reason: "logout" | "auth-invalid" | "offline-expired" | "account-changed";
+  reason:
+    | "logout"
+    | "auth-invalid"
+    | "offline-expired"
+    | "account-changed"
+    | "account-deleted";
   purgeSyncedCache: boolean;
+  // 회원 탈퇴 — 동기화 캐시 외에 이 기기의 로컬 흔적(세션 리플레이·활동 로그·AI 키)까지
+  // 함께 지운다. 로그아웃(false)과 탈퇴(true)를 구분하는 플래그.
+  purgeLocalData?: boolean;
 };
 
 type SessionActivatedContext = {
@@ -574,6 +582,68 @@ export class AuthService {
     );
   }
 
+  // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제한 뒤(DELETE /auth/account),
+  // 로컬 세션을 로그아웃과 동일하게 정리한다. access 토큰이 마침 만료된 경우를 위해
+  // 401/403 이면 refresh 후 1회 재시도한다.
+  async deleteAccount(): Promise<void> {
+    const sessionUser =
+      this.state.status === "authenticated" ? this.state.session?.user : null;
+    const requestDelete = (): Promise<Response> =>
+      fetch(new URL("/auth/account", this.getServerUrl()), {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${this.getAccessToken()}`,
+        },
+      });
+
+    let response = await requestDelete();
+    if (response.status === 401 || response.status === 403) {
+      const refreshed = await this.refreshSession();
+      if (refreshed.status !== "authenticated") {
+        throw new Error("세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.");
+      }
+      response = await requestDelete();
+    }
+    if (!response.ok) {
+      const fallback = `회원 탈퇴에 실패했습니다. (${response.status})`;
+      const message = await response
+        .json()
+        .then((body: { error?: unknown }) =>
+          typeof body.error === "string" && body.error.trim()
+            ? body.error
+            : fallback,
+        )
+        .catch(() => fallback);
+      throw new Error(message);
+    }
+
+    if (sessionUser) {
+      this.log({
+        level: "info",
+        category: "audit",
+        message: "회원 탈퇴로 서버 계정과 데이터가 삭제되었습니다.",
+        metadata: {
+          userId: sessionUser.id,
+          email: sessionUser.email,
+        },
+      });
+    }
+    await this.clearSession(
+      {
+        status: "unauthenticated",
+        errorMessage: null,
+      },
+      {
+        reason: "account-deleted",
+        purgeSyncedCache: true,
+        removeRefreshToken: true,
+        removeOfflineCache: true,
+        // 탈퇴는 이 기기의 로컬 흔적(리플레이·로그·AI 키)까지 함께 지운다.
+        purgeLocalData: true,
+      },
+    );
+  }
+
   async forceUnauthenticated(errorMessage?: string): Promise<void> {
     if (
       errorMessage &&
@@ -797,6 +867,7 @@ export class AuthService {
       purgeSyncedCache: boolean;
       removeRefreshToken: boolean;
       removeOfflineCache: boolean;
+      purgeLocalData?: boolean;
     },
   ): Promise<void> {
     this.clearRefreshTimer();
@@ -829,6 +900,7 @@ export class AuthService {
     await this.notifySessionInvalidated({
       reason: options.reason,
       purgeSyncedCache: options.purgeSyncedCache,
+      purgeLocalData: options.purgeLocalData === true,
     });
     this.broadcast(this.state);
   }

@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
+import { DialogBackdrop } from './DialogBackdrop';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
@@ -31,6 +32,10 @@ import {
   FieldGroup,
   FontSelectField,
   Input,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalShell,
   OptionCard,
   SectionLabel,
   SelectField,
@@ -64,6 +69,8 @@ interface SettingsPanelProps {
   onInstallSshPublicKey: (input: SshKeyInstallInput) => Promise<SshKeyInstallResult>;
   onLoadSessionReplayStorageUsage?: () => Promise<SessionReplayStorageUsage>;
   onLogout: () => Promise<void>;
+  // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제한다(로컬 데이터는 유지).
+  onDeleteAccount?: () => Promise<void>;
 }
 
 const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
@@ -211,8 +218,13 @@ export function SettingsPanel({
   onCopySshPublicKey,
   onInstallSshPublicKey,
   onLoadSessionReplayStorageUsage,
-  onLogout
+  onLogout,
+  onDeleteAccount
 }: SettingsPanelProps) {
+  // 회원 탈퇴 확인 다이얼로그 상태.
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   // 리플레이 보관 설정 옆에 실제 디스크 사용량을 보여준다. 보관 개수를 줄이면 프루닝으로
   // 용량이 줄 수 있으므로 retention 값이 바뀔 때마다 다시 조회한다.
   const [replayStorageUsage, setReplayStorageUsage] =
@@ -717,10 +729,88 @@ export function SettingsPanel({
                 <dd className="m-0 break-all text-[var(--text)]">{settings.serverUrl || '—'}</dd>
               </div>
             </dl>
-            <Button variant="danger" onClick={async () => onLogout()}>
-              로그아웃
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="danger" onClick={async () => onLogout()}>
+                로그아웃
+              </Button>
+              {onDeleteAccount ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setDeleteAccountError(null);
+                    setDeleteAccountOpen(true);
+                  }}
+                >
+                  회원 탈퇴
+                </Button>
+              ) : null}
+            </div>
           </section>
+
+          {deleteAccountOpen && onDeleteAccount ? (
+            <DialogBackdrop
+              onDismiss={() => {
+                if (!deleteAccountBusy) {
+                  setDeleteAccountOpen(false);
+                }
+              }}
+            >
+              <ModalShell role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+                <ModalHeader className="block">
+                  <SectionLabel>Account</SectionLabel>
+                  <h3 id="delete-account-title">회원 탈퇴</h3>
+                </ModalHeader>
+                <ModalBody className="grid gap-3">
+                  <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
+                    서버에 저장된 모든 데이터(동기화된 호스트·시크릿·스니펫·계정 정보)가{' '}
+                    <strong>즉시 영구 삭제</strong>됩니다. 복구할 수 없으며, 로그인된 다른
+                    기기도 곧 로그아웃됩니다.
+                  </p>
+                  <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
+                    이 기기의 로컬 데이터(호스트·시크릿·세션 리플레이·활동 로그·AI 키)도 함께
+                    삭제됩니다.
+                  </p>
+                  {deleteAccountError ? (
+                    <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
+                      {deleteAccountError}
+                    </p>
+                  ) : null}
+                </ModalBody>
+                <ModalFooter>
+                  <Button
+                    variant="secondary"
+                    disabled={deleteAccountBusy}
+                    onClick={() => setDeleteAccountOpen(false)}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={deleteAccountBusy}
+                    onClick={async () => {
+                      setDeleteAccountBusy(true);
+                      setDeleteAccountError(null);
+                      try {
+                        await onDeleteAccount();
+                        // 성공하면 세션이 정리되며 로그인 화면으로 전환된다(auth 이벤트).
+                        setDeleteAccountOpen(false);
+                      } catch (error) {
+                        setDeleteAccountError(
+                          error instanceof Error && error.message.trim()
+                            ? error.message
+                            : '회원 탈퇴에 실패했습니다.',
+                        );
+                      } finally {
+                        setDeleteAccountBusy(false);
+                      }
+                    }}
+                  >
+                    {deleteAccountBusy ? '탈퇴 중...' : '탈퇴'}
+                  </Button>
+                </ModalFooter>
+              </ModalShell>
+            </DialogBackdrop>
+          ) : null}
         </>
       ) : null}
 

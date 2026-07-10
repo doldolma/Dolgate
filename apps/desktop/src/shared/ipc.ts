@@ -872,6 +872,8 @@ export interface DesktopApi {
     reopenBrowserLogin: () => Promise<void>;
     cancelBrowserLogin: () => Promise<void>;
     logout: () => Promise<void>;
+    // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제하고 로컬 세션을 정리한다.
+    deleteAccount: () => Promise<void>;
     onEvent: (listener: (state: AuthState) => void) => () => void;
   };
   sync: {

@@ -681,6 +681,7 @@ export function HomeShell({
               settingsViewModel.loadSessionReplayStorageUsage
             }
             onLogout={loginController.logout}
+            onDeleteAccount={loginController.deleteAccount}
           />
         ) : null}
             </main>

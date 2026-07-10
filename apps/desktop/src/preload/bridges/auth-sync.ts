@@ -17,6 +17,7 @@ export function buildAuthBridge(
     cancelBrowserLogin: () =>
       ipcRenderer.invoke(ipcChannels.auth.cancelBrowserLogin),
     logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),
+    deleteAccount: () => ipcRenderer.invoke(ipcChannels.auth.deleteAccount),
     onEvent: (listener) => subscribeAuthEvent(listener),
   };
 }

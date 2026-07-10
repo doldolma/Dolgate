@@ -647,6 +647,18 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.Status(http.StatusNoContent)
 	})
 
+	// 회원 탈퇴 — Bearer 인증 사용자의 모든 서버측 데이터(계정·인증·vault 키·기기 관찰·
+	// sync 레코드)를 단일 트랜잭션으로 즉시 영구 삭제한다. refresh 토큰이 함께 지워지므로
+	// 다른 기기는 다음 토큰 갱신(401)에서 로그아웃된다.
+	router.DELETE("/auth/account", authMiddleware(authService), func(ctx *gin.Context) {
+		userID := ctx.GetString("userId")
+		if err := authService.DeleteAccount(ctx.Request.Context(), userID); err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		}
+		ctx.Status(http.StatusNoContent)
+	})
+
 	sessionShareGroup := router.Group("/api/session-shares")
 	sessionShareGroup.Use(authMiddleware(authService))
 	sessionShareGroup.POST("", func(ctx *gin.Context) {
@@ -1002,6 +1014,22 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 	syncGroup := router.Group("/sync")
 	syncGroup.Use(authMiddleware(authService))
+	// 탈퇴 직후 아직 만료 전 access 토큰을 가진 기기가 sync 를 밀어 넣어 지운 데이터를
+	// 되살리는 것을 막고, 그 기기의 즉시 로그아웃(401 → refresh 실패)을 유도한다.
+	// JWT 는 stateless 라 토큰만으로는 탈퇴를 알 수 없으므로 유저 존재를 확인한다.
+	syncGroup.Use(func(ctx *gin.Context) {
+		exists, err := store.UserExists(ctx.Request.Context(), ctx.GetString("userId"))
+		if err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			ctx.Abort()
+			return
+		}
+		if !exists {
+			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "로그인이 필요합니다."})
+			return
+		}
+		ctx.Next()
+	})
 	syncGroup.GET("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
 

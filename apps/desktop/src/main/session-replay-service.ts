@@ -145,6 +145,30 @@ export class SessionReplayService {
     this.initialSizeBySession.clear();
   }
 
+  // 회원 탈퇴 — 현재 scope의 녹화 파일(meta/events)을 전부 삭제한다. 진행 중 녹화와
+  // 열린 리플레이 창도 정리한다. deactivate() 이전(scope가 살아 있을 때) 호출해야 한다.
+  purgeAllRecordings(): void {
+    const scope = this.activeScope;
+    if (!scope) {
+      return;
+    }
+    this.shutdown();
+    this.closeReplayWindows();
+    if (existsSync(scope.replayDirectoryPath)) {
+      for (const fileName of readdirSync(scope.replayDirectoryPath)) {
+        if (
+          fileName.endsWith(META_SUFFIX) ||
+          fileName.endsWith(EVENTS_SUFFIX)
+        ) {
+          rmSync(path.join(scope.replayDirectoryPath, fileName), {
+            force: true,
+          });
+        }
+      }
+    }
+    this.onRecordingsPruned?.();
+  }
+
   noteSessionConfigured(sessionId: string, cols: number, rows: number): void {
     this.initialSizeBySession.set(sessionId, { cols, rows });
   }

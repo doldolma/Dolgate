@@ -84,6 +84,15 @@ function searchKeyAccount(backend: AiSearchBackend): string {
   return `${SEARCH_KEY_ACCOUNT_PREFIX}${backend}`;
 }
 
+// 회원 탈퇴의 로컬 와이프가 지울 AI 자격증명 계정 목록(main 이 secretStore 로 직접 제거).
+// AI 설정(프로바이더/모델 선택)은 민감정보가 아니라 유지한다 — 키만 지운다.
+export const AI_STORED_KEY_SECRET_ACCOUNTS: readonly string[] = [
+  apiKeyAccount("codex"),
+  apiKeyAccount("openai-compat"),
+  apiKeyAccount("anthropic"),
+  searchKeyAccount("tavily"),
+];
+
 // AI 어시스턴트의 main 프로세스 소유 서비스. 모든 LLM egress 를 이 뒤에 격리한다.
 // - 설정은 SettingsRepository, API 키는 SecretStore(키체인)에서 매 호출 재조회(메모리 캐시 안 함).
 // - chat 스트리밍은 requestId 로 상관하고, emit 콜백(핸들러가 event.sender 로 구성)으로 렌더러에 푸시.

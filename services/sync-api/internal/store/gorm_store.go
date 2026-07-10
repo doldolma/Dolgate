@@ -532,3 +532,40 @@ func validateKind(kind syncmodel.Kind) error {
 		return fmt.Errorf("invalid sync kind: %s", kind)
 	}
 }
+
+// UserExists 는 탈퇴 여부 판별용 — "행 없음"은 (false, nil), 드라이버 에러만 err.
+func (s *GormStore) UserExists(ctx context.Context, userID string) (bool, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&userRow{}).Where("id = ?", userID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// DeleteUserData 는 회원 탈퇴용으로 사용자의 모든 행을 단일 트랜잭션으로 hard delete 한다.
+// sync_records 는 soft-delete 표시(deleted_at)와 무관하게 행 자체를 지운다("흔적 없이").
+func (s *GormStore) DeleteUserData(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("userID is required")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		targets := []struct {
+			model  any
+			column string
+		}{
+			{&syncRecordRow{}, "user_id"},
+			{&userVaultKeyRow{}, "user_id"},
+			{&userClientObservationRow{}, "user_id"},
+			{&refreshTokenRow{}, "user_id"},
+			{&exchangeCodeRow{}, "user_id"},
+			{&authIdentityRow{}, "user_id"},
+			{&userRow{}, "id"},
+		}
+		for _, target := range targets {
+			if err := tx.Where(target.column+" = ?", userID).Delete(target.model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}

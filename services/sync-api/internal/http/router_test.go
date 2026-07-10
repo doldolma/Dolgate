@@ -974,3 +974,109 @@ func TestTrustedProxiesAffectAuthRateLimitIdentity(t *testing.T) {
 		t.Fatalf("expected second untrusted proxy request to be rate limited, got %d: %s", secondRecorder.Code, secondRecorder.Body.String())
 	}
 }
+
+func TestAccountDeleteRemovesAllDataAndInvalidatesTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	signupBody := bytes.NewBufferString(`{"email":"delete-me@example.com","password":"supersecure"}`)
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", signupBody)
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected signup to succeed, got %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+	var signupResponse struct {
+		Tokens struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+
+	payload := syncmodel.Payload{
+		Hosts: []syncmodel.Record{
+			{ID: "host-1", EncryptedPayload: "ciphertext-host", UpdatedAt: "2026-03-21T15:00:00Z"},
+		},
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	postSync := httptest.NewRequest(http.MethodPost, "/sync", bytes.NewReader(payloadBytes))
+	postSync.Header.Set("Authorization", "Bearer "+signupResponse.Tokens.AccessToken)
+	postSync.Header.Set("Content-Type", "application/json")
+	postSyncRecorder := httptest.NewRecorder()
+	router.ServeHTTP(postSyncRecorder, postSync)
+	if postSyncRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected sync upsert to succeed, got %d", postSyncRecorder.Code)
+	}
+
+	// 미인증 삭제는 거부된다.
+	anonymousDelete := httptest.NewRequest(http.MethodDelete, "/auth/account", nil)
+	anonymousDeleteRecorder := httptest.NewRecorder()
+	router.ServeHTTP(anonymousDeleteRecorder, anonymousDelete)
+	if anonymousDeleteRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated delete to be rejected, got %d", anonymousDeleteRecorder.Code)
+	}
+
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/auth/account", nil)
+	deleteRequest.Header.Set("Authorization", "Bearer "+signupResponse.Tokens.AccessToken)
+	deleteRecorder := httptest.NewRecorder()
+	router.ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusNoContent {
+		t.Fatalf("expected account delete to succeed, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+
+	// refresh 토큰이 삭제됐으므로 다른 기기의 갱신은 401 → 로그아웃 흐름을 탄다.
+	refreshBody := bytes.NewBufferString(`{"refreshToken":"` + signupResponse.Tokens.RefreshToken + `"}`)
+	refreshRequest := httptest.NewRequest(http.MethodPost, "/auth/refresh", refreshBody)
+	refreshRequest.Header.Set("Content-Type", "application/json")
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refreshRequest)
+	if refreshRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected refresh after delete to fail with 401, got %d", refreshRecorder.Code)
+	}
+
+	// 아직 만료 전인 access 토큰으로도 sync 는 거부돼(유저 존재 확인) 지운 데이터가 부활하지 않는다.
+	resurrectSync := httptest.NewRequest(http.MethodPost, "/sync", bytes.NewReader(payloadBytes))
+	resurrectSync.Header.Set("Authorization", "Bearer "+signupResponse.Tokens.AccessToken)
+	resurrectSync.Header.Set("Content-Type", "application/json")
+	resurrectRecorder := httptest.NewRecorder()
+	router.ServeHTTP(resurrectRecorder, resurrectSync)
+	if resurrectRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected sync after delete to fail with 401, got %d", resurrectRecorder.Code)
+	}
+
+	// 같은 이메일로 재가입하면 완전히 새 계정 — 이전 데이터가 없어야 한다.
+	resignupBody := bytes.NewBufferString(`{"email":"delete-me@example.com","password":"supersecure"}`)
+	resignupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", resignupBody)
+	resignupRequest.Header.Set("Content-Type", "application/json")
+	resignupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(resignupRecorder, resignupRequest)
+	if resignupRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected re-signup to succeed, got %d: %s", resignupRecorder.Code, resignupRecorder.Body.String())
+	}
+	var resignupResponse struct {
+		Tokens struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(resignupRecorder.Body.Bytes(), &resignupResponse); err != nil {
+		t.Fatalf("decode re-signup response: %v", err)
+	}
+	getSync := httptest.NewRequest(http.MethodGet, "/sync", nil)
+	getSync.Header.Set("Authorization", "Bearer "+resignupResponse.Tokens.AccessToken)
+	getSyncRecorder := httptest.NewRecorder()
+	router.ServeHTTP(getSyncRecorder, getSync)
+	if getSyncRecorder.Code != http.StatusOK {
+		t.Fatalf("expected sync fetch to succeed, got %d", getSyncRecorder.Code)
+	}
+	var syncResponse syncmodel.Payload
+	if err := json.Unmarshal(getSyncRecorder.Body.Bytes(), &syncResponse); err != nil {
+		t.Fatalf("decode sync response: %v", err)
+	}
+	if len(syncResponse.Hosts) != 0 {
+		t.Fatalf("expected no hosts after account deletion, got %#v", syncResponse.Hosts)
+	}
+}

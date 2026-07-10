@@ -221,6 +221,8 @@ describe("AuthService offline bootstrap", () => {
     expect(onSessionInvalidated).toHaveBeenCalledWith({
       reason: "logout",
       purgeSyncedCache: true,
+      // 로그아웃은 로컬 데이터(리플레이·로그·AI 키)를 보존한다 — 와이프는 탈퇴 전용.
+      purgeLocalData: false,
     });
   });
 
@@ -513,5 +515,66 @@ describe("AuthService browser login recovery", () => {
     const state = service.getState();
     expect(state.status).toBe("unauthenticated");
     expect(state.errorMessage).toBeNull();
+  });
+
+  it("deletes the account on the server and clears the local session", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    await (
+      service as unknown as {
+        persistSession: (value: AuthSession) => Promise<void>;
+      }
+    ).persistSession(session);
+    const onSessionInvalidated = vi.fn();
+    service.setOnSessionInvalidated(onSessionInvalidated);
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await service.deleteAccount();
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/auth/account");
+    expect(init?.method).toBe("DELETE");
+    expect(
+      (init?.headers as Record<string, string>).Authorization,
+    ).toContain("Bearer ");
+    expect(service.getState().status).toBe("unauthenticated");
+    await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
+    // 탈퇴는 로그아웃과 달리 로컬 흔적(리플레이·로그·AI 키) 와이프까지 요청해야 한다.
+    expect(onSessionInvalidated).toHaveBeenCalledWith({
+      reason: "account-deleted",
+      purgeSyncedCache: true,
+      purgeLocalData: true,
+    });
+  });
+
+  it("keeps the session when account deletion fails on the server", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    await (
+      service as unknown as {
+        persistSession: (value: AuthSession) => Promise<void>;
+      }
+    ).persistSession(session);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "서버 오류가 발생했습니다." }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(service.deleteAccount()).rejects.toThrow(
+      "서버 오류가 발생했습니다.",
+    );
+    expect(service.getState().status).toBe("authenticated");
   });
 });

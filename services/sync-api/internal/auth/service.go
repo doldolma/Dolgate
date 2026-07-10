@@ -176,6 +176,15 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 	return s.store.DeleteRefreshToken(ctx, hashToken(refreshToken))
 }
 
+// DeleteAccount 는 회원 탈퇴 — 사용자의 모든 서버측 데이터를 즉시 영구 삭제한다.
+// refresh 토큰도 함께 지워지므로 다른 기기는 다음 토큰 갱신(401)에서 로그아웃된다.
+func (s *Service) DeleteAccount(ctx context.Context, userID string) error {
+	if userID == "" {
+		return errors.New("userID is required")
+	}
+	return s.store.DeleteUserData(ctx, userID)
+}
+
 func (s *Service) IssueExchangeCode(ctx context.Context, user store.User) (string, error) {
 	code, err := randomToken()
 	if err != nil {
