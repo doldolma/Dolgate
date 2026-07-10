@@ -502,6 +502,34 @@ describe('SettingsPanel', () => {
     );
   });
 
+  it('deletes the account only after the confirm dialog is accepted', async () => {
+    const onDeleteAccount = vi.fn().mockResolvedValue(undefined);
+    renderSettingsPanel({ onDeleteAccount });
+
+    fireEvent.click(screen.getByRole('button', { name: '회원 탈퇴' }));
+    expect(onDeleteAccount).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '탈퇴' }));
+    await waitFor(() => expect(onDeleteAccount).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('keeps the delete-account dialog open with the error when deletion fails', async () => {
+    const onDeleteAccount = vi.fn().mockRejectedValue(new Error('서버 오류가 발생했습니다.'));
+    renderSettingsPanel({ onDeleteAccount });
+
+    fireEvent.click(screen.getByRole('button', { name: '회원 탈퇴' }));
+    fireEvent.click(screen.getByRole('button', { name: '탈퇴' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('서버 오류가 발생했습니다.'),
+    );
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
   it('filters saved credentials by label and preserves actions', async () => {
     const {
       onEditSecret,

@@ -7,6 +7,7 @@ export const ipcChannels = {
     reopenBrowserLogin: 'auth:reopen-browser-login',
     cancelBrowserLogin: 'auth:cancel-browser-login',
     logout: 'auth:logout',
+    deleteAccount: 'auth:delete-account',
     event: 'auth:event'
   },
   sync: {

@@ -73,4 +73,12 @@ type Store interface {
 
 	ListSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind) ([]syncmodel.Record, error)
 	UpsertSyncRecords(ctx context.Context, userID string, kind syncmodel.Kind, records []syncmodel.Record) error
+
+	// 유저 존재 확인 — 탈퇴 직후 잔여 access 토큰의 sync 재유입(데이터 부활) 차단용.
+	// "행 없음"은 (false, nil), 드라이버 에러만 err 로 돌려준다.
+	UserExists(ctx context.Context, userID string) (bool, error)
+
+	// 회원 탈퇴 — 사용자의 모든 서버측 데이터(계정·인증·vault 키·기기 관찰·sync 레코드)를
+	// 단일 트랜잭션으로 즉시 hard delete 한다.
+	DeleteUserData(ctx context.Context, userID string) error
 }

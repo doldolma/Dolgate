@@ -24,6 +24,7 @@ import {
   SnippetRepository,
   SyncOutboxRepository
 } from './database';
+import { AI_STORED_KEY_SECRET_ACCOUNTS } from './ai-service';
 import { DesktopConfigService } from './app-config';
 import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
@@ -479,6 +480,16 @@ if (termiusHelperArgIndex >= 0) {
     await coreManager.shutdown({ finalizePortForwardsAsStopped: true });
     hostsOverrideManager.clearStaticOverrideStates();
     await rewriteDnsOverridesForCurrentState().catch(() => undefined);
+    if (context.purgeLocalData) {
+      // 회원 탈퇴 — 이 기기의 로컬 흔적까지 지운다: 세션 리플레이 파일(scope 가 살아 있는
+      // deactivate 이전에), 활동 로그, AI 자격증명 키. 호스트/시크릿/known hosts 등은
+      // 아래 purgeSyncedCache 가 지운다.
+      sessionReplayService.purgeAllRecordings();
+      activityLogRepository.clear();
+      for (const account of AI_STORED_KEY_SECRET_ACCOUNTS) {
+        await secretStore.remove(account).catch(() => undefined);
+      }
+    }
     sessionReplayService.deactivate();
     activityLogRepository.deactivate();
     if (context.purgeSyncedCache) {

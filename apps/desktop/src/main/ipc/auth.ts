@@ -22,4 +22,7 @@ export function registerAuthIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.auth.logout, async () => {
     await ctx.authService.logout();
   });
+  ipcMain.handle(ipcChannels.auth.deleteAccount, async () => {
+    await ctx.authService.deleteAccount();
+  });
 }

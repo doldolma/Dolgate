@@ -332,3 +332,84 @@ func TestGormStoreUserClientObservationsAllowUnknownClientMetadata(t *testing.T)
 		})
 	}
 }
+
+func TestGormStoreDeleteUserDataRemovesEveryUserRow(t *testing.T) {
+	store := openSQLiteTestStore(t)
+	ctx := context.Background()
+
+	user, err := store.CreateUser(ctx, "delete-me@example.com", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	keeper, err := store.CreateUser(ctx, "keeper@example.com", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser(keeper) error = %v", err)
+	}
+
+	// 삭제 대상 유저의 모든 테이블에 행을 심는다.
+	if err := store.SaveAuthIdentity(ctx, AuthIdentity{UserID: user.ID, Provider: "google", Subject: "sub-1", Email: user.Email, EmailVerified: true}); err != nil {
+		t.Fatalf("SaveAuthIdentity() error = %v", err)
+	}
+	if err := store.SaveRefreshToken(ctx, RefreshToken{UserID: user.ID, TokenHash: "token-hash", ExpiresAt: time.Now().Add(time.Hour), LastUsedAt: time.Now()}); err != nil {
+		t.Fatalf("SaveRefreshToken() error = %v", err)
+	}
+	if err := store.SaveExchangeCode(ctx, ExchangeCode{UserID: user.ID, CodeHash: "code-hash", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("SaveExchangeCode() error = %v", err)
+	}
+	if _, err := store.GetOrCreateUserVaultKey(ctx, user.ID); err != nil {
+		t.Fatalf("GetOrCreateUserVaultKey() error = %v", err)
+	}
+	if err := store.UpsertUserClientObservation(ctx, UserClientObservation{UserID: user.ID, ClientName: "desktop", ClientVersion: "1", Platform: "test", ClientInstallationID: "install-1", LastAuthEvent: "login", LastIP: "127.0.0.1", LastUserAgent: "test", ObservedAt: time.Now()}); err != nil {
+		t.Fatalf("UpsertUserClientObservation() error = %v", err)
+	}
+	if err := store.UpsertSyncRecords(ctx, user.ID, syncmodel.KindHosts, []syncmodel.Record{{ID: "host-1", EncryptedPayload: "cipher", UpdatedAt: "2026-03-21T15:00:00Z"}}); err != nil {
+		t.Fatalf("UpsertSyncRecords() error = %v", err)
+	}
+	// 다른 유저의 데이터는 남아야 한다.
+	if err := store.UpsertSyncRecords(ctx, keeper.ID, syncmodel.KindHosts, []syncmodel.Record{{ID: "host-keep", EncryptedPayload: "cipher", UpdatedAt: "2026-03-21T15:00:00Z"}}); err != nil {
+		t.Fatalf("UpsertSyncRecords(keeper) error = %v", err)
+	}
+
+	if exists, err := store.UserExists(ctx, user.ID); err != nil || !exists {
+		t.Fatalf("UserExists() before delete = %v, %v", exists, err)
+	}
+
+	if err := store.DeleteUserData(ctx, user.ID); err != nil {
+		t.Fatalf("DeleteUserData() error = %v", err)
+	}
+
+	if exists, err := store.UserExists(ctx, user.ID); err != nil || exists {
+		t.Fatalf("UserExists() after delete = %v, %v", exists, err)
+	}
+
+	// 대상 유저의 행이 모든 테이블에서 사라졌는지 raw count 로 확인한다.
+	for _, target := range []struct {
+		table  string
+		column string
+	}{
+		{"sync_records", "user_id"},
+		{"user_vault_keys", "user_id"},
+		{"user_client_observations", "user_id"},
+		{"refresh_tokens", "user_id"},
+		{"auth_exchange_codes", "user_id"},
+		{"auth_identities", "user_id"},
+		{"users", "id"},
+	} {
+		var count int64
+		if err := store.db.Table(target.table).Where(target.column+" = ?", user.ID).Count(&count).Error; err != nil {
+			t.Fatalf("count %s: %v", target.table, err)
+		}
+		if count != 0 {
+			t.Fatalf("expected %s to be empty for deleted user, got %d rows", target.table, count)
+		}
+	}
+
+	// keeper 데이터는 그대로.
+	records, err := store.ListSyncRecords(ctx, keeper.ID, syncmodel.KindHosts)
+	if err != nil {
+		t.Fatalf("ListSyncRecords(keeper) error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected keeper records to survive, got %d", len(records))
+	}
+}

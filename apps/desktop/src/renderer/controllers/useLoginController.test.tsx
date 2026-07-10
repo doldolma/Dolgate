@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   cancelBrowserLogin: vi.fn(),
   checkForUpdates: vi.fn(),
   closeWindow: vi.fn(),
+  deleteAccount: vi.fn(),
   dismissAvailableUpdate: vi.fn(),
   downloadUpdate: vi.fn(),
   installUpdateAndRestart: vi.fn(),
