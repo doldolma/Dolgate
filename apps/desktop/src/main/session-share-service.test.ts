@@ -138,6 +138,7 @@ function createServiceHarness() {
     write: vi.fn(),
     writeBinary: vi.fn(),
     sendControlSignal: vi.fn(),
+    getSessionTransport: vi.fn(() => undefined),
   };
 
   const service = new SessionShareService(
@@ -350,6 +351,7 @@ describe("SessionShareService viewer input relay", () => {
       write: vi.fn(),
       writeBinary: vi.fn(),
       sendControlSignal: vi.fn(),
+      getSessionTransport: vi.fn(() => undefined),
     };
     const service = new SessionShareService(
       authService as never,
@@ -410,6 +412,7 @@ describe("SessionShareService viewer input relay", () => {
       write: vi.fn(),
       writeBinary: vi.fn(),
       sendControlSignal: vi.fn(),
+      getSessionTransport: vi.fn(() => undefined),
     };
     const service = new SessionShareService(
       authService as never,
@@ -463,6 +466,7 @@ describe("SessionShareService viewer input relay", () => {
       write: vi.fn(),
       writeBinary: vi.fn(),
       sendControlSignal: vi.fn(),
+      getSessionTransport: vi.fn(() => undefined),
     };
     const service = new SessionShareService(
       authService as never,
@@ -554,5 +558,63 @@ describe("SessionShareService viewer input relay", () => {
 
     expect(chatWindow.close).toHaveBeenCalledTimes(1);
     expect(service.getOwnerChatSnapshot("session-1").messages).toEqual([]);
+  });
+});
+
+describe("SessionShareService start transport resolution", () => {
+  const originalFakeShareEnv = process.env.DOLSSH_E2E_FAKE_SESSION_SHARE;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = "1";
+  });
+
+  afterEach(() => {
+    if (originalFakeShareEnv == null) {
+      delete process.env.DOLSSH_E2E_FAKE_SESSION_SHARE;
+      return;
+    }
+    process.env.DOLSSH_E2E_FAKE_SESSION_SHARE = originalFakeShareEnv;
+  });
+
+  function buildStartInput(): any {
+    return {
+      sessionId: "session-start-1",
+      title: "EC2 Session",
+      transport: "aws-ssm" as const,
+      cols: 80,
+      rows: 24,
+      snapshot: "",
+      terminalAppearance,
+      viewportPx: null,
+    };
+  }
+
+  it("shares SSH-over-SSM sessions as ssh even when the renderer guessed aws-ssm", async () => {
+    const { service, coreManager } = createServiceHarness();
+    coreManager.getSessionTransport.mockReturnValue("ssh" as never);
+
+    await service.start(buildStartInput());
+
+    expect(coreManager.getSessionTransport).toHaveBeenCalledWith("session-start-1");
+    expect((service as any).shares.get("session-start-1").transport).toBe("ssh");
+  });
+
+  it("shares SSM shell sessions (direct and server-proxy) as aws-ssm", async () => {
+    const { service, coreManager } = createServiceHarness();
+    coreManager.getSessionTransport.mockReturnValue("aws-ssm-server-proxy" as never);
+
+    await service.start(buildStartInput());
+
+    expect((service as any).shares.get("session-start-1").transport).toBe("aws-ssm");
+  });
+
+  it("falls back to ssh for sessions the core has no transport for (tmux panes)", async () => {
+    const { service, coreManager } = createServiceHarness();
+    coreManager.getSessionTransport.mockReturnValue(undefined as never);
+
+    await service.start(buildStartInput());
+
+    expect((service as any).shares.get("session-start-1").transport).toBe("ssh");
   });
 });

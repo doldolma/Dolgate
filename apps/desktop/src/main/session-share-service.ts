@@ -233,6 +233,21 @@ export class SessionShareService {
   }
 
   async start(input: SessionShareStartInput): Promise<SessionShareState> {
+    // 뷰어의 Ctrl+C/Z/\ 처리 경로가 transport 로 갈리므로(aws-ssm 이면 interrupt 신호,
+    // ssh 면 raw 바이트) 세션의 "실제" 전송으로 판정한다. renderer 는 호스트 종류(aws-ec2)로
+    // 추측해 보내는데, EC2 기본 연결은 SSH-over-SSM(transport "ssh")이라 그 추측이 틀리면
+    // SSH 세션에 SSM interrupt 신호가 가서 코어(aws 매니저)가 세션을 못 찾고 무시된다
+    // (뷰어 Ctrl+C 무반응). SSM 셸(직접/서버프록시)만 aws-ssm 으로 태깅한다. 코어 맵에
+    // 없는 세션(tmux pane 가상 세션 등)은 SSM 셸일 수 없으므로 ssh 로 본다.
+    const actualTransport = this.coreManager.getSessionTransport(input.sessionId);
+    input = {
+      ...input,
+      transport:
+        actualTransport === "aws-ssm" ||
+        actualTransport === "aws-ssm-server-proxy"
+          ? "aws-ssm"
+          : "ssh",
+    };
     const existing = this.shares.get(input.sessionId);
     if (existing && (existing.state.status === "starting" || existing.state.status === "active")) {
       return existing.state;
