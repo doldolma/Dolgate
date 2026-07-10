@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let tempDir = "";
 let encryptionAvailable = true;
+let storageBackend = "gnome_libsecret";
 
 vi.mock("electron", () => ({
   app: {
@@ -15,12 +16,23 @@ vi.mock("electron", () => ({
   },
   safeStorage: {
     isEncryptionAvailable: vi.fn(() => encryptionAvailable),
+    getSelectedStorageBackend: vi.fn(() => storageBackend),
     encryptString: vi.fn((value: string) => Buffer.from(value, "utf8")),
     decryptString: vi.fn((value: Buffer) =>
       Buffer.from(value).toString("utf8"),
     ),
   },
 }));
+
+function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
+  const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: platform });
+  try {
+    return run();
+  } finally {
+    Object.defineProperty(process, "platform", original);
+  }
+}
 
 async function loadModules() {
   vi.resetModules();
@@ -37,6 +49,7 @@ async function loadModules() {
 beforeEach(() => {
   tempDir = mkdtempSync(path.join(os.tmpdir(), "dolssh-secret-store-"));
   encryptionAvailable = true;
+  storageBackend = "gnome_libsecret";
 });
 
 afterEach(() => {
@@ -83,5 +96,37 @@ describe("SecretStore", () => {
 
     await secretStore.save("secret:test", "top-secret");
     await expect(secretStore.load("secret:test")).resolves.toBe("top-secret");
+  });
+});
+
+describe("isSecureStorageUsable", () => {
+  it("is false when encryption is unavailable", async () => {
+    encryptionAvailable = false;
+    const { secretStoreModule } = await loadModules();
+    expect(secretStoreModule.isSecureStorageUsable()).toBe(false);
+  });
+
+  it("treats the Linux basic_text fallback (locked keyring) as unusable", async () => {
+    // 우분투 자동 로그인 등으로 키링이 잠기면 isEncryptionAvailable 은 true 인 채
+    // basic_text 로 폴백한다 — 이 조합을 사용 불가로 판정해야 한다.
+    storageBackend = "basic_text";
+    const { secretStoreModule } = await loadModules();
+    expect(withPlatform("linux", () => secretStoreModule.isSecureStorageUsable())).toBe(false);
+    // mac/win 은 백엔드 개념이 없어 영향 없음.
+    expect(withPlatform("darwin", () => secretStoreModule.isSecureStorageUsable())).toBe(true);
+    expect(withPlatform("win32", () => secretStoreModule.isSecureStorageUsable())).toBe(true);
+  });
+
+  it("is true on Linux with a real keyring backend", async () => {
+    storageBackend = "gnome_libsecret";
+    const { secretStoreModule } = await loadModules();
+    expect(withPlatform("linux", () => secretStoreModule.isSecureStorageUsable())).toBe(true);
+  });
+
+  it("honors the explicit insecure test override (e2e)", async () => {
+    encryptionAvailable = false;
+    process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS = "true";
+    const { secretStoreModule } = await loadModules();
+    expect(secretStoreModule.isSecureStorageUsable()).toBe(true);
   });
 });

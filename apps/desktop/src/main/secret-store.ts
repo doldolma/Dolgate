@@ -21,6 +21,31 @@ function allowInsecureSecretStorageForTests(): boolean {
   return process.env[insecureSecretStorageOverrideEnv] === "true";
 }
 
+// OS 보안 저장소가 "실제로" 쓸 만한지 — isEncryptionAvailable 만으로는 부족하다.
+// Linux 에서 키링이 잠겨 있으면(대표: 우분투 자동 로그인 → GNOME Keyring 미해제)
+// Chromium 이 조용히 basic_text(사실상 평문) 백엔드로 폴백하는데, 이때도
+// isEncryptionAvailable 은 true 라서 기존 키링-암호화 시크릿의 복호화가 전부 실패해
+// 호스트/로그인이 빈 상태로 뜬다. 그래서 Linux 는 선택된 백엔드까지 확인한다.
+// (mac/win 은 isEncryptionAvailable 판정으로 충분)
+export function isSecureStorageUsable(): boolean {
+  if (allowInsecureSecretStorageForTests()) {
+    return true;
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    return false;
+  }
+  if (process.platform === "linux") {
+    try {
+      if (safeStorage.getSelectedStorageBackend() === "basic_text") {
+        return false;
+      }
+    } catch {
+      // 백엔드 조회가 불가능한 환경이면 isEncryptionAvailable 판정만 쓴다.
+    }
+  }
+  return true;
+}
+
 function encodeSecret(secret: string): StoredEncryptedValue {
   if (safeStorage.isEncryptionAvailable()) {
     return {
