@@ -218,7 +218,7 @@ describe("AiService.startChat", () => {
         expect.objectContaining({ defs: toolsMock.defs }),
       );
       expect(codexMocks.ctor).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "codex", model: "gpt-5.5" }),
+        expect.objectContaining({ providerId: "codex", model: "auto" }),
         expect.objectContaining({ url: "http://127.0.0.1:9/mcp", token: "tok" }),
       );
       // 요청 페이로드에는 function-calling 도구가 실리지 않는다.
@@ -262,7 +262,7 @@ describe("AiService.startChat", () => {
       messages: [{ role: "user", content: "hi" }],
     });
     expect(codexMocks.ctor).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: "codex", model: "gpt-5.5" }),
+      expect.objectContaining({ providerId: "codex", model: "auto" }),
       undefined,
     );
   });

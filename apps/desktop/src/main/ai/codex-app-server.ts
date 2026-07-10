@@ -4,7 +4,13 @@ import { createInterface } from "node:readline";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
-import type { CodexAuthStatus, CodexLoginStart, CodexRateWindow, CodexUsage } from "../../shared/ai";
+import type {
+  CodexAuthStatus,
+  CodexLoginStart,
+  CodexModel,
+  CodexRateWindow,
+  CodexUsage,
+} from "../../shared/ai";
 
 // Codex(ChatGPT 계정) 연동의 main 프로세스 배관.
 // - 인증: `codex app-server` 자식 프로세스와 stdio JSON-RPC 로 통신(login/status/logout).
@@ -36,6 +42,17 @@ type RateLimitsResponse = {
     primary?: RateWindowResponse | null;
     secondary?: RateWindowResponse | null;
   } | null;
+};
+
+type ModelListResponse = {
+  data?: Array<{
+    id?: unknown;
+    model?: unknown;
+    displayName?: unknown;
+    description?: unknown;
+    hidden?: unknown;
+    isDefault?: unknown;
+  }> | null;
 };
 
 // npm 플랫폼 패키지 이름/vendor 트리플 매핑(@openai/codex bin/codex.js 와 동일한 규칙).
@@ -378,6 +395,35 @@ export async function codexUsage(client: CodexAppServerClient): Promise<CodexUsa
     primary: toRateWindow(limits?.primary),
     secondary: toRateWindow(limits?.secondary),
   };
+}
+
+// 사용 가능한 모델 목록(model/list) — 설정의 모델 select 용. 계정/플랜·바이너리 버전에 따라
+// 달라지므로 정적 목록 대신 이걸 신뢰한다. 숨김 모델은 제외하고 서버 순서를 유지한다.
+export async function codexListModels(client: CodexAppServerClient): Promise<CodexModel[]> {
+  const response = await client.request<ModelListResponse>("model/list", {});
+  const items = Array.isArray(response.data) ? response.data : [];
+  const models: CodexModel[] = [];
+  for (const item of items) {
+    const model = typeof item.model === "string" ? item.model.trim() : "";
+    const fallbackId = typeof item.id === "string" ? item.id.trim() : "";
+    const id = model || fallbackId;
+    if (!id || item.hidden === true) {
+      continue;
+    }
+    models.push({
+      id,
+      displayName:
+        typeof item.displayName === "string" && item.displayName.trim()
+          ? item.displayName.trim()
+          : id,
+      description:
+        typeof item.description === "string" && item.description.trim()
+          ? item.description.trim()
+          : null,
+      isDefault: item.isDefault === true,
+    });
+  }
+  return models;
 }
 
 // 앱 전역 공유 인스턴스(첫 사용 때 spawn). 앱 종료 시 정리.

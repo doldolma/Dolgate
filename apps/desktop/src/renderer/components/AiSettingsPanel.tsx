@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AiProviderId,
   AiSettings,
   AiTestResult,
   AppSettings,
   CodexAuthStatus,
+  CodexModel,
   CodexRateWindow,
   CodexUsage,
 } from '@shared';
@@ -31,41 +32,50 @@ const PROVIDER_OPTIONS: Array<{ value: AiProviderId; label: string }> = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
 ];
 
-const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+const DEFAULT_CODEX_MODEL = 'auto';
 
-const CODEX_MODEL_OPTIONS = [
+// 모델 미지정 센티널 — codex 가 권장 모델을 자동 선택한다(항상 목록 맨 위 고정).
+const CODEX_AUTO_OPTION = {
+  id: 'auto',
+  label: 'Auto (권장)',
+  description: 'Codex 권장 모델을 자동 선택 · 업데이트를 자동으로 따라감',
+};
+
+// model/list 조회 실패(미로그인 등) 시의 폴백 목록. 평소에는 codex 의 model/list 를
+// 실시간으로 가져와 대체한다(설명은 당시 응답의 description 원문을 한국어로 옮긴 것).
+const CODEX_FALLBACK_MODEL_OPTIONS = [
+  CODEX_AUTO_OPTION,
+  {
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    description: '최신 프론티어 에이전틱 코딩 모델',
+  },
+  {
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    description: '일상 작업용 균형형 에이전틱 코딩 모델',
+  },
+  {
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    description: '빠르고 저렴한 에이전틱 코딩 모델',
+  },
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
-    description: '최신 추천 모델 · 복잡한 코딩/도구 사용',
+    description: '복잡한 코딩·리서치·실무용 프론티어 모델 (이전 세대)',
   },
   {
     id: 'gpt-5.4',
     label: 'GPT-5.4',
-    description: '강한 범용 코딩/추론 모델',
+    description: '일상 코딩용 강력한 모델 (이전 세대)',
   },
   {
     id: 'gpt-5.4-mini',
     label: 'GPT-5.4 Mini',
-    description: '가볍고 빠른 작업 · 사용량 절약',
-  },
-  {
-    id: 'gpt-5.3-codex-spark',
-    label: 'GPT-5.3 Codex Spark',
-    description: 'Pro research preview · 빠른 반복 작업',
+    description: '작고 빠르고 저렴 · 단순한 코딩 작업',
   },
 ];
-
-function withCodexDefaultModel(settings: AiSettings): AiSettings {
-  if (settings.providerId !== 'codex') {
-    return settings;
-  }
-  const model = settings.model.trim();
-  if (CODEX_MODEL_OPTIONS.some((option) => option.id === model)) {
-    return model === settings.model ? settings : { ...settings, model };
-  }
-  return { ...settings, model: DEFAULT_CODEX_MODEL };
-}
 
 // codex 는 API 키 대신 브라우저 로그인(ChatGPT 계정)을 쓴다 — 키 발급 URL 없음.
 const API_KEY_HELP_URL: Record<Exclude<AiProviderId, 'codex'>, string> = {
@@ -154,6 +164,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const getCodexAuthStatus = useAppStore((state) => state.getCodexAuthStatus);
   const codexLogout = useAppStore((state) => state.codexLogout);
   const getCodexUsage = useAppStore((state) => state.getCodexUsage);
+  const listCodexModels = useAppStore((state) => state.listCodexModels);
 
   // 설정은 초안(draft)으로 편집하고 "설정 저장"을 눌러야만 반영된다(자동 저장 안 함 — 저장 안 하고 나가면 폐기).
   // API 키/Tavily 키는 키체인에 개별 저장(초안과 무관).
@@ -168,6 +179,8 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   // Codex 계정 상태. null = 아직 조회 전(확인 중 표시).
   const [codexStatus, setCodexStatus] = useState<CodexAuthStatus | null>(null);
   const [codexUsage, setCodexUsage] = useState<CodexUsage | null>(null);
+  // model/list 실시간 목록(로그인 상태에서 조회). null 이면 폴백 정적 목록 사용.
+  const [codexModels, setCodexModels] = useState<CodexModel[] | null>(null);
   const [codexError, setCodexError] = useState<string | null>(null);
   const [codexLoggingIn, setCodexLoggingIn] = useState(false);
   const [codexLoginUrl, setCodexLoginUrl] = useState<string | null>(null);
@@ -175,13 +188,45 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const codexPollGeneration = useRef(0);
 
   // 저장된 설정이 실제로 바뀌면(저장 완료·최초 로드) 초안을 다시 맞춘다. 편집 중(props 불변)엔 안 건드린다.
+  // 저장된 codex 모델이 목록 밖 값(구모델 등)이어도 강제 변환하지 않는다 — select 의
+  // "현재 설정값" 옵션으로 그대로 보여주고, 실행 시 main(normalizeCodexModel)이 auto 로 처리한다.
   useEffect(() => {
-    setDraft(withCodexDefaultModel(JSON.parse(aiKey) as AiSettings));
+    setDraft(JSON.parse(aiKey) as AiSettings);
   }, [aiKey]);
 
   const providerId = draft.providerId;
   const codexModelValue = draft.model.trim() || DEFAULT_CODEX_MODEL;
-  const hasKnownCodexModel = CODEX_MODEL_OPTIONS.some((model) => model.id === codexModelValue);
+  // 모델 select 옵션: Auto 고정 + model/list 실시간 목록(알려진 id 는 한국어 설명 유지,
+  // 새 id 는 서버 displayName/description 원문). 조회 전/실패 시엔 폴백 정적 목록.
+  const codexModelOptions = useMemo(() => {
+    if (!codexModels || codexModels.length === 0) {
+      return CODEX_FALLBACK_MODEL_OPTIONS;
+    }
+    const knownCopy = new Map(
+      CODEX_FALLBACK_MODEL_OPTIONS.map((option) => [option.id, option]),
+    );
+    const defaultModel = codexModels.find((model) => model.isDefault);
+    const autoOption = defaultModel
+      ? {
+          ...CODEX_AUTO_OPTION,
+          description: `Codex 권장 모델 자동 선택 (현재: ${defaultModel.displayName})`,
+        }
+      : CODEX_AUTO_OPTION;
+    return [
+      autoOption,
+      ...codexModels.map(
+        (model) =>
+          knownCopy.get(model.id) ?? {
+            id: model.id,
+            label: model.displayName,
+            description: model.description ?? '',
+          },
+      ),
+    ];
+  }, [codexModels]);
+  const hasKnownCodexModel = codexModelOptions.some(
+    (option) => option.id === codexModelValue,
+  );
   const dirty = JSON.stringify({ ...draft, model: draft.model.trim() }) !== aiKey;
   // openai-compat 은 Base URL 이 필수 — 어디에 붙을지 추측(기본 호스트 폴백)하지 않고 입력을 요구한다.
   const baseUrlMissing =
@@ -236,24 +281,32 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
       setCodexError(null);
       const status = await getCodexAuthStatus();
       setCodexStatus(status);
-      // 로그인 상태면 플랜 사용량도 함께 조회(실패해도 상태 표시는 유지).
+      // 로그인 상태면 플랜 사용량·모델 목록도 함께 조회(실패해도 상태 표시는 유지 —
+      // 모델 목록은 폴백 정적 목록으로 대체된다).
       if (status.authenticated) {
         try {
           setCodexUsage(await getCodexUsage());
         } catch {
           setCodexUsage(null);
         }
+        try {
+          setCodexModels(await listCodexModels());
+        } catch {
+          setCodexModels(null);
+        }
       } else {
         setCodexUsage(null);
+        setCodexModels(null);
       }
     } catch (error) {
       setCodexStatus(null);
       setCodexUsage(null);
+      setCodexModels(null);
       setCodexError(
         error instanceof Error ? error.message : 'Codex 상태를 확인하지 못했습니다.',
       );
     }
-  }, [getCodexAuthStatus, getCodexUsage]);
+  }, [getCodexAuthStatus, getCodexUsage, listCodexModels]);
 
   // codex 선택 시 상태 조회, 다른 프로바이더로 전환 시 진행 중이던 로그인 폴링 중단.
   useEffect(() => {
@@ -478,7 +531,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   {hasKnownCodexModel ? null : (
                     <option value={codexModelValue}>현재 설정값 - {codexModelValue}</option>
                   )}
-                  {CODEX_MODEL_OPTIONS.map((model) => (
+                  {codexModelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.label} - {model.description}
                     </option>
@@ -495,7 +548,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
               )}
               {providerId === 'codex' ? (
                 <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
-                  Codex CLI/SDK에 공개 모델 조회 API가 없어 공식 추천 모델 목록을 표시합니다. 기본값은 GPT-5.5입니다.
+                  {codexModels
+                    ? '내 계정에서 사용 가능한 모델 목록입니다(Codex에서 실시간 조회).'
+                    : 'Codex 로그인 후 계정에서 사용 가능한 모델 목록을 실시간으로 가져옵니다. 아래는 기본 목록입니다.'}{' '}
+                  기본값 Auto는 Codex 권장 모델을 자동으로 따라갑니다.
                 </span>
               ) : null}
             </FieldGroup>
