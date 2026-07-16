@@ -156,6 +156,9 @@ export interface DesktopStateFile {
   };
   secure: {
     refreshToken: StoredEncryptedValue | null;
+    // sync 대상이 아닌 앱 자체 시크릿(auth:*, ai:* 등).
+    // managedSecretsByRef 는 sync 스냅샷 적용 시 통째로 교체되므로 여기 두면 안 된다.
+    appSecretsByAccount: Record<string, StoredEncryptedValue>;
     managedSecretsByRef: Record<string, StoredEncryptedValue>;
     managedAwsProfilesById: Record<string, StoredEncryptedValue>;
   };
@@ -573,6 +576,7 @@ function createDefaultStateFile(): DesktopStateFile {
     },
     secure: {
       refreshToken: null,
+      appSecretsByAccount: {},
       managedSecretsByRef: {},
       managedAwsProfilesById: {}
     }
@@ -872,17 +876,32 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   const sync = isObject(value.sync) ? value.sync : {};
   const data = isObject(value.data) ? value.data : {};
   const secure = isObject(value.secure) ? value.secure : {};
+  const appSecrets = isObject(secure.appSecretsByAccount) ? secure.appSecretsByAccount : {};
   const managedSecrets = isObject(secure.managedSecretsByRef) ? secure.managedSecretsByRef : {};
   const managedAwsProfiles = isObject(secure.managedAwsProfilesById) ? secure.managedAwsProfilesById : {};
   const normalizedTerminalFontFamily = normalizeTerminalFontFamily(terminal.fontFamily, fallback.terminal.fontFamily);
   const normalizedTerminalWebglEnabled = normalizeTerminalWebglEnabled(terminal.webglEnabled);
 
+  const normalizedAppSecrets: Record<string, StoredEncryptedValue> = {};
+  for (const [account, record] of Object.entries(appSecrets)) {
+    const normalized = normalizeStoredEncryptedValue(record);
+    if (normalized) {
+      normalizedAppSecrets[account] = normalized;
+    }
+  }
+
   const normalizedManagedSecrets: Record<string, StoredEncryptedValue> = {};
   for (const [secretRef, record] of Object.entries(managedSecrets)) {
     const normalized = normalizeStoredEncryptedValue(record);
-    if (normalized) {
-      normalizedManagedSecrets[secretRef] = normalized;
+    if (!normalized) {
+      continue;
     }
+    // 과거 버전이 앱 시크릿(auth:*, ai:*)을 이 맵에 저장했다 — sync 교체에 지워지지 않게 이전한다.
+    if (!secretRef.startsWith('secret:')) {
+      normalizedAppSecrets[secretRef] ??= normalized;
+      continue;
+    }
+    normalizedManagedSecrets[secretRef] = normalized;
   }
   const normalizedManagedAwsProfiles: Record<string, StoredEncryptedValue> = {};
   for (const [profileId, record] of Object.entries(managedAwsProfiles)) {
@@ -1023,6 +1042,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     },
     secure: {
       refreshToken: normalizeStoredEncryptedValue(secure.refreshToken),
+      appSecretsByAccount: normalizedAppSecrets,
       managedSecretsByRef: normalizedManagedSecrets,
       managedAwsProfilesById: normalizedManagedAwsProfiles
     }
@@ -1210,12 +1230,16 @@ class DesktopStateStorage {
     return changed;
   }
 
+  // sync 스냅샷이 통째로 교체하는 맵은 managedSecretsByRef 뿐이므로,
+  // sync 관리 시크릿(secret:*)만 거기에 두고 나머지 계정은 appSecretsByAccount 에 격리한다.
   readSecureValue(account: string): StoredEncryptedValue | null {
     this.ensureLoaded();
     if (account === 'auth:refresh-token') {
       return this.state.secure.refreshToken ? { ...this.state.secure.refreshToken } : null;
     }
-    const record = this.state.secure.managedSecretsByRef[account];
+    const record = account.startsWith('secret:')
+      ? this.state.secure.managedSecretsByRef[account]
+      : this.state.secure.appSecretsByAccount[account];
     return record ? { ...record } : null;
   }
 
@@ -1226,7 +1250,11 @@ class DesktopStateStorage {
         draft.auth.updatedAt = nowIso();
         return;
       }
-      draft.secure.managedSecretsByRef[account] = { ...record };
+      if (account.startsWith('secret:')) {
+        draft.secure.managedSecretsByRef[account] = { ...record };
+        return;
+      }
+      draft.secure.appSecretsByAccount[account] = { ...record };
     });
   }
 
@@ -1237,7 +1265,11 @@ class DesktopStateStorage {
         draft.auth.updatedAt = nowIso();
         return;
       }
-      delete draft.secure.managedSecretsByRef[account];
+      if (account.startsWith('secret:')) {
+        delete draft.secure.managedSecretsByRef[account];
+        return;
+      }
+      delete draft.secure.appSecretsByAccount[account];
     });
   }
 

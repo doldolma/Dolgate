@@ -1,0 +1,77 @@
+{
+  "accessDecisions": [
+    {
+      "name": "missing cache stays locked",
+      "descriptorEpoch": 1,
+      "descriptorVerifier": "dek-a",
+      "cachedDekVerifier": null,
+      "cachedEpoch": null,
+      "expectedKind": "locked"
+    },
+    {
+      "name": "matching verifier restores the same generation",
+      "descriptorEpoch": 3,
+      "descriptorVerifier": "dek-a",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 3,
+      "expectedKind": "unlocked",
+      "expectedEpoch": 3
+    },
+    {
+      "name": "pre-epoch cache adopts a migrated generation",
+      "descriptorEpoch": 1,
+      "descriptorVerifier": "dek-a",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": null,
+      "expectedKind": "unlocked",
+      "expectedEpoch": 1
+    },
+    {
+      "name": "matching verifier adopts a newer descriptor epoch",
+      "descriptorEpoch": 5,
+      "descriptorVerifier": "dek-a",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 3,
+      "expectedKind": "unlocked",
+      "expectedEpoch": 5
+    },
+    {
+      "name": "new generation verifier mismatch locks",
+      "descriptorEpoch": 5,
+      "descriptorVerifier": "dek-b",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 3,
+      "expectedKind": "locked"
+    },
+    {
+      "name": "same generation verifier mismatch locks",
+      "descriptorEpoch": 3,
+      "descriptorVerifier": "dek-b",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 3,
+      "expectedKind": "locked"
+    },
+    {
+      "name": "stale descriptor cannot replace a newer cache",
+      "descriptorEpoch": 3,
+      "descriptorVerifier": "dek-b",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 5,
+      "expectedKind": "ignore-descriptor"
+    },
+    {
+      "name": "pre-verifier descriptor preserves an existing trust",
+      "descriptorEpoch": 2,
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 2,
+      "expectedKind": "unlocked-unverifiable",
+      "expectedEpoch": 2
+    },
+    {
+      "name": "old server descriptor is stale against a newer cache",
+      "cachedDekVerifier": "dek-a",
+      "cachedEpoch": 2,
+      "expectedKind": "ignore-descriptor"
+    }
+  ]
+}

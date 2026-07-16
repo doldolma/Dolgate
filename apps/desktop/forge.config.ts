@@ -25,6 +25,35 @@ function resolveDefaultTargetArch(platform: string): string {
 const targetArch =
   process.env.DOLSSH_TARGET_ARCH ?? resolveDefaultTargetArch(targetPlatform);
 
+// package/make/publish 는 리소스 누락 시 ssh-core 없는 앱이 만들어지므로 실패시키고,
+// start(dev) 는 번들 리소스를 쓰지 않으므로 경고만 남긴다.
+// forge CLI 는 서브커맨드를 electron-forge-package.js 같은 별도 프로세스로 실행하므로
+// argv 의 단어와 스크립트 파일명을 함께 본다.
+const forgePackagingCommands = new Set(['package', 'make', 'publish']);
+const isPackagingCommand = process.argv.some((arg) => {
+  const token = path.basename(arg);
+  return (
+    forgePackagingCommands.has(token) ||
+    /^electron-forge-(package|make|publish)\b/.test(token)
+  );
+});
+
+function resolvePrepareHint(missingPath: string): string {
+  if (missingPath.endsWith(`${path.sep}bin`)) {
+    return 'npm run prepare:ssh-core:dev';
+  }
+
+  if (targetPlatform === 'darwin') {
+    return 'npm run release:prepare:codex:mac';
+  }
+
+  if (targetPlatform === 'win32') {
+    return 'npm run release:prepare:codex:win';
+  }
+
+  return 'npm run release:prepare:codex:linux';
+}
+
 function resolveExtraResources(): string[] {
   const extraResources = [path.resolve(__dirname, 'config'), path.resolve(__dirname, 'assets')];
 
@@ -32,9 +61,13 @@ function resolveExtraResources(): string[] {
   const codexDir = path.resolve(__dirname, `release/resources/${targetPlatform}/${targetArch}/codex-cli`);
   const missingReleaseResources = [binDir, codexDir].filter((resourcePath) => !existsSync(resourcePath));
   if (missingReleaseResources.length > 0) {
-    if (hasExplicitPackageTarget) {
-      throw new Error(`Bundled release resource directory not found: ${missingReleaseResources.join(', ')}`);
+    const detail = missingReleaseResources
+      .map((resourcePath) => `${resourcePath} (fix: ${resolvePrepareHint(resourcePath)})`)
+      .join(', ');
+    if (hasExplicitPackageTarget || isPackagingCommand) {
+      throw new Error(`Bundled release resource directory not found: ${detail}`);
     }
+    console.warn(`[forge] Bundled release resource directory not found, packaging would omit ssh-core/codex-cli: ${detail}`);
     return extraResources;
   }
 

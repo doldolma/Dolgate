@@ -165,6 +165,16 @@ function createSyncService() {
     getAccessToken: vi.fn().mockReturnValue('access-token'),
     getServerUrl: vi.fn().mockReturnValue('https://ssh.doldolma.com'),
     getVaultKeyBase64: vi.fn().mockReturnValue(Buffer.alloc(32, 1).toString('base64')),
+    // E2EE 볼트 게이트 — 테스트 기본값은 잠금해제 상태(레거시 동작과 동일).
+    isVaultReadyForSync: vi.fn().mockReturnValue(true),
+    getVaultEpoch: vi.fn().mockReturnValue(null),
+    getVaultStatus: vi.fn().mockReturnValue('unlocked'),
+    getClientIdentificationHeaders: vi.fn().mockReturnValue({
+      'X-Dolgate-Client': 'desktop',
+      'X-Dolgate-Client-Version': '1.8.0',
+    }),
+    handleVaultDekRejected: vi.fn().mockResolvedValue(undefined),
+    noteServerVaultSupport: vi.fn(),
     refreshSession: vi.fn().mockResolvedValue({
       status: 'authenticated'
     })
@@ -356,6 +366,8 @@ describe('SyncService', () => {
     expect(service.getState()).toEqual({
       status: 'idle',
       lastSuccessfulSyncAt: null,
+      // 이전 계정의 데이터 변경 시각이 다음 계정으로 새지 않게 명시적으로 지운다.
+      lastDataChangeAt: null,
       pendingPush: false,
       errorMessage: null,
       awsProfilesServerSupport: 'unknown'

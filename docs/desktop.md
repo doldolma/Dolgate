@@ -100,6 +100,8 @@ generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apach
 - **안전장치**: 컨텍스트와 도구 결과는 시크릿 redaction을 거치며, 변경 가능성이 있는 명령은 사용자 승인 후 실행합니다. 진행 중인 응답과 도구 루프는 패널의 정지 버튼으로 중단할 수 있습니다.
 - **제약**: 호스트 exec 도구는 세션에 SSH client가 있는 경우에만 노출됩니다. 일반 SSH, Warpgate SSH, EC2 SSH-over-SSM은 같은 SSH 연결을 공유하고, raw SSM shell fallback처럼 SSH client가 없는 경로는 실행 도구가 제한될 수 있습니다.
 
+설계(주고받는 컨텍스트 구성, provider egress 경계, 도구 안전장치)는 [ai-assistant-design](./ai-assistant-design.md)에 정리돼 있습니다.
+
 ## SSH Agent 인증과 Forwarding
 
 호스트 생성/수정 화면에서 **Auth Type = SSH Agent**를 선택하면 비밀번호나 키 파일을 Dolgate에 저장하지 않고 로컬 ssh-agent로 인증합니다. macOS·Linux의 `SSH_AUTH_SOCK`, launchctl agent, Windows OpenSSH agent, 1Password SSH Agent, `ssh-add`로 등록한 키를 사용할 수 있습니다.
@@ -177,60 +179,8 @@ SFTP 패널을 열지 않고 **터미널에서 직접** 파일을 주고받는 �
 - **보관 개수**: 설정 > General의 **Session Replay Retention**에서 로컬에 남길 종료 세션 replay 개수를 조정합니다.
 - **용도**: 장애 조사, 작업 복기, 다른 사람에게 전달하기 전 화면 흐름 확인에 적합합니다. 실시간 공유가 필요하면 Session Share를 사용합니다.
 
-## 로컬 실행
+## 빌드 · 실행 · AWS
 
-```bash
-npm run dev:desktop
-```
-
-관련 개발 명령:
-
-- `npm run build --workspace @dolssh/desktop`
-- `npm run test:desktop`
-- `npm run typecheck:desktop`
-
-## 릴리즈 빌드
-
-macOS universal:
-
-```bash
-npm run release:dist:mac
-```
-
-Windows x64:
-
-```bash
-npm run release:dist:win
-```
-
-Linux x64/arm64 (AppImage, deb):
-
-```bash
-npm run release:dist:linux
-```
-
-deb는 리눅스 호스트에서만 생성됩니다(macOS의 `ar`가 deb 아카이브를 깨뜨려서, 로컬 macOS 빌드는 AppImage만 만듭니다). 정식 deb는 릴리즈 태그 푸시 시 GitHub Actions가 빌드합니다.
-
-GitHub Release 업로드:
-
-```bash
-npm run release:publish:mac
-npm run release:publish:win
-npm run release:publish:linux
-npm run release:all
-```
-
-릴리즈 태그와 저장소 공통 버전 정책은 [build-and-deploy](./build-and-deploy.md) 문서를 따릅니다.
-
-## 런타임 메모
-
-- 데스크톱은 `ssh-core`를 항상 상주시켜 두지 않고, 실제 SSH/SFTP/포트 포워딩 작업이 필요할 때 lazily 시작합니다.
-- 데스크톱은 `cmd/ssh-core` child process와 stdio framed protocol로 통신합니다.
-- `sync-api`는 로그인, 동기화, session share viewer를 담당합니다.
-- 자동 업데이트는 GitHub Releases를 기준으로 동작합니다.
-
-## AWS 사용 전 확인
-
-EC2 터미널은 SSH-over-SSM을 먼저 시도합니다. 공개키 주입이나 SSH 준비 단계에서 일반 SSH 연결을 열 수 없으면 SSM shell로 fallback할 수 있고, AWS SFTP · SSM 포트 포워딩 · ECS Exec/터널은 내장 SSM 데이터 채널로 동작합니다. AWS 프로필 인증(프로필 생성·검증, SSO 브라우저 로그인, AssumeRole)은 AWS SDK로 처리합니다. 기존 로컬 `~/.aws` 프로필은 가져오기로 사용할 수 있습니다.
-
-추가 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)를 참고하면 됩니다.
+- 로컬 개발 실행과 릴리즈 빌드(`release:dist:*` / `release:publish:*`)는 [build-and-deploy](./build-and-deploy.md)를 참고하세요.
+- AWS/SSM 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)에 있습니다.
+- 데스크톱 런타임 경계(ssh-core lazy 시작, `cmd/ssh-core` stdio framed IPC, sync-api 역할, GitHub Releases 자동 업데이트)는 [architecture](./architecture.md)에 정리돼 있습니다.

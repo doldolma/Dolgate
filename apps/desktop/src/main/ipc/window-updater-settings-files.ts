@@ -56,7 +56,11 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
   ipcMain.handle(
     ipcChannels.settings.update,
     async (_event, input: Partial<AppSettings>) => {
+      const previousServerUrl = ctx.settings.get().serverUrl;
       const nextSettings = ctx.settings.update(input);
+      if (nextSettings.serverUrl !== previousServerUrl) {
+        ctx.authService.resetServerVaultSupport();
+      }
       if (
         Object.prototype.hasOwnProperty.call(
           input,

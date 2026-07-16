@@ -1292,6 +1292,15 @@ export interface TerminalPreferencesRecord {
   updatedAt: string;
 }
 
+// E2EE 볼트 게이트가 렌더러에 보여줄 최소 상태. wrapped DEK/KDF 등 민감 재료는
+// 메인 프로세스에만 두고 status 만 내보낸다.
+export type AuthVaultStatus =
+  | 'legacy'
+  | 'setup-required'
+  | 'locked'
+  | 'unlocked'
+  | 'error';
+
 // AuthState는 desktop 로그인 게이트와 세션 복구가 읽는 최소 상태다.
 export interface AuthState {
   status: AuthStatus;
@@ -1302,17 +1311,31 @@ export interface AuthState {
     reason: string;
   } | null;
   errorMessage?: string | null;
+  // E2EE 볼트 게이트 상태. v2 도입 이전 코드가 만든 상태 객체에는 없다(= legacy 취급).
+  // canMigrate: legacy(v1) 계정이 E2EE 로 전환 가능한 서버에 붙어 있는지 —
+  // 셀프호스팅 구버전 서버에서는 전환 프롬프트를 띄우지 않기 위한 판별값.
+  vault?: {
+    status: AuthVaultStatus;
+    canMigrate?: boolean;
+    migrationRequired?: boolean;
+    errorMessage?: string;
+  } | null;
 }
 
 // SyncStatus는 초기 hydrate와 이후 push 재시도를 UI/서비스가 추적하기 위한 상태다.
 export interface SyncStatus {
   status: SyncBootstrapStatus;
   lastSuccessfulSyncAt?: string | null;
+  // 원격 스냅샷을 실제로 적용(200)했을 때만 갱신되는 타임스탬프. 304(변경 없음)에는
+  // 바뀌지 않는다. 폴링이 값이 달라졌을 때만 워크스페이스를 다시 읽어 낭비를 없앤다.
+  lastDataChangeAt?: string | null;
   pendingPush: boolean;
   errorMessage?: string | null;
   awsProfilesServerSupport?: AwsProfilesServerSupport;
   awsSsmServerSupport?: AwsProfilesServerSupport;
   awsSftpServerSupport?: AwsProfilesServerSupport;
+  // 서버가 E2EE 볼트(v2)를 지원하는지 — 기존(v1) 유저에게 전환 프롬프트를 띄울지 판단.
+  vaultE2eeServerSupport?: AwsProfilesServerSupport;
 }
 
 // UpdateReleaseInfo는 GitHub Releases에서 읽어온 배포 메타데이터를 정규화한 형태다.

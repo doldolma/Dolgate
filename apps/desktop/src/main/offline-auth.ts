@@ -1,5 +1,6 @@
 import { createPublicKey, createVerify } from 'node:crypto';
 import type { OfflineLease, SessionUser, VaultBootstrap } from '@shared';
+import { resolveVaultDescriptorState } from '@dolssh/shared-core';
 
 export interface OfflineSessionCache {
   serverUrl: string;
@@ -37,6 +38,14 @@ export function isOfflineSessionCache(value: unknown): value is OfflineSessionCa
   const vaultBootstrap = candidate.vaultBootstrap as Record<string, unknown> | undefined;
   const offlineLease = candidate.offlineLease as Record<string, unknown> | undefined;
 
+  let validVaultDescriptor = false;
+  try {
+    resolveVaultDescriptorState(vaultBootstrap as VaultBootstrap);
+    validVaultDescriptor = true;
+  } catch {
+    validVaultDescriptor = false;
+  }
+
   return (
     typeof candidate.serverUrl === 'string' &&
     typeof candidate.lastOnlineAt === 'string' &&
@@ -44,7 +53,7 @@ export function isOfflineSessionCache(value: unknown): value is OfflineSessionCa
     typeof user.id === 'string' &&
     typeof user.email === 'string' &&
     vaultBootstrap != null &&
-    typeof vaultBootstrap.keyBase64 === 'string' &&
+    validVaultDescriptor &&
     offlineLease != null &&
     typeof offlineLease.token === 'string' &&
     typeof offlineLease.issuedAt === 'string' &&

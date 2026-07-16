@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { BackHandler, FlatList, Platform, TextInput } from "react-native";
+import { Alert, BackHandler, FlatList, Platform, TextInput } from "react-native";
 import type {
   AuthState,
   GroupRecord,
@@ -566,6 +566,110 @@ describe("HomeScreen group browsing", () => {
       animated: true,
     });
 
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("navigates to the host form from the add button", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const addButton = tree!.root.findAll(
+      (node) =>
+        node.props.accessibilityLabel === "호스트 추가" &&
+        typeof node.props.onPress === "function",
+    )[0];
+    expect(addButton).toBeTruthy();
+    await act(async () => {
+      addButton.props.onPress();
+    });
+
+    expect(mockNavigate).toHaveBeenCalledWith("HostForm", undefined);
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  it("opens the long-press action sheet and routes edit, sftp and delete actions", async () => {
+    const deleteHostMock = jest.fn(async () => undefined);
+    const openSftpMock = jest.fn(async () => "sftp-1");
+    const connectMock = jest.fn(async (hostId: string) => `session:${hostId}`);
+    useMobileAppStore.setState({
+      deleteHost: deleteHostMock,
+      openSftpForSession: openSftpMock,
+      connectToHost: connectMock,
+    });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    const hostCard = tree!.root.findAll(
+      (node) => typeof node.props.onLongPress === "function",
+    )[0];
+    expect(hostCard).toBeTruthy();
+    await act(async () => {
+      hostCard.props.onLongPress();
+    });
+
+    const findSheetAction = (label: string) =>
+      tree!.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === label &&
+          typeof node.props.onPress === "function",
+      )[0];
+
+    // 수정 → HostForm 으로 이동.
+    await act(async () => {
+      findSheetAction("수정").props.onPress();
+    });
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "HostForm",
+      expect.objectContaining({ hostId: expect.any(String) }),
+    );
+
+    // 다시 열어 SFTP 연결 → 세션 연결 후 SFTP 탭 열고 Sessions 로 이동.
+    await act(async () => {
+      hostCard.props.onLongPress();
+    });
+    await act(async () => {
+      findSheetAction("SFTP 연결").props.onPress();
+    });
+    expect(connectMock).toHaveBeenCalled();
+    expect(openSftpMock).toHaveBeenCalledWith(
+      `session:${connectMock.mock.calls[0][0]}`,
+    );
+    expect(mockNavigate).toHaveBeenCalledWith("Sessions");
+
+    // 다시 열어 삭제 → 확인 Alert 를 거쳐 deleteHost 호출.
+    await act(async () => {
+      hostCard.props.onLongPress();
+    });
+    await act(async () => {
+      findSheetAction("삭제").props.onPress();
+    });
+    expect(deleteHostMock).not.toHaveBeenCalled();
+    const confirmButtons = alertSpy.mock.calls.at(-1)?.[2];
+    const confirmDelete = confirmButtons?.find(
+      (button) => button.text === "삭제",
+    );
+    expect(confirmDelete).toBeDefined();
+    await act(async () => {
+      confirmDelete?.onPress?.();
+    });
+    expect(deleteHostMock).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
     await act(async () => {
       jest.runOnlyPendingTimers();
       tree!.unmount();

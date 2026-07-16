@@ -18,6 +18,19 @@ export function buildAuthBridge(
       ipcRenderer.invoke(ipcChannels.auth.cancelBrowserLogin),
     logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),
     deleteAccount: () => ipcRenderer.invoke(ipcChannels.auth.deleteAccount),
+    setupVault: (passphrase) =>
+      ipcRenderer.invoke(ipcChannels.auth.setupVault, passphrase),
+    unlockVault: (passphrase) =>
+      ipcRenderer.invoke(ipcChannels.auth.unlockVault, passphrase),
+    resetVault: () => ipcRenderer.invoke(ipcChannels.auth.resetVault),
+    migrateVault: (passphrase) =>
+      ipcRenderer.invoke(ipcChannels.auth.migrateVault, passphrase),
+    changeVaultPassphrase: (currentPassphrase, nextPassphrase) =>
+      ipcRenderer.invoke(
+        ipcChannels.auth.changeVaultPassphrase,
+        currentPassphrase,
+        nextPassphrase,
+      ),
     onEvent: (listener) => subscribeAuthEvent(listener),
   };
 }

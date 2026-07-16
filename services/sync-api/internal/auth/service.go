@@ -25,6 +25,11 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrExpiredRefreshToken = errors.New("expired refresh token")
 var ErrInvalidExchangeCode = errors.New("invalid exchange code")
 
+// ErrVaultClientOutdated — E2EE(v2) 볼트 계정에 v2 를 모르는 구버전 클라이언트가 세션을
+// 요청했다. keyBase64 없는 세션을 내려주면 구버전이 정체불명 에러로 죽으므로, 라우터가
+// 이 에러를 426 + 업데이트 안내 문구로 바꿔 내려준다.
+var ErrVaultClientOutdated = errors.New("client update required for e2ee vault")
+
 // TokenPair는 클라이언트가 세션을 유지하는 데 필요한 최소 정보다.
 type TokenPair struct {
 	AccessToken      string `json:"accessToken"`
@@ -32,9 +37,56 @@ type TokenPair struct {
 	ExpiresInSeconds int    `json:"expiresInSeconds"`
 }
 
-type VaultBootstrap struct {
-	KeyBase64 string `json:"keyBase64"`
+// VaultKdfParams 는 동기화 암호에서 KEK 를 유도하는 파라미터다. 클라이언트가 볼트 설정 시
+// 정한 값을 서버는 그대로 보관·배포만 한다(파라미터 교체 여지를 위해 descriptor 에 포함).
+type VaultKdfParams struct {
+	Algorithm   string `json:"algorithm"`
+	SaltBase64  string `json:"saltBase64"`
+	MemoryKiB   int    `json:"memoryKib"`
+	TimeCost    int    `json:"timeCost"`
+	Parallelism int    `json:"parallelism"`
 }
+
+// VaultBootstrap 은 세션 응답에 실리는 볼트 descriptor 다.
+// version 0: 볼트 없음(신규 유저) — E2EE 지원 클라이언트가 설정 플로우를 시작한다.
+// version 1: 레거시 — 서버 보관 DEK 원문을 그대로 내려준다(기존 유저, 기존 동작).
+// version 2: E2EE — 동기화 암호로 감싼 DEK 만 내려준다. 서버는 복호화 불가.
+type VaultBootstrap struct {
+	Version          int    `json:"version"`
+	KeyBase64        string `json:"keyBase64,omitempty"`
+	WrappedDekBase64 string `json:"wrappedDekBase64,omitempty"`
+	// E2EERequired는 계정 floor가 이미 v2인데 과거 버그/롤링 배포로 v1 행이 남은
+	// 복구 상태다. 신클라이언트는 이 키로 즉시 마이그레이션하되 legacy sync는 금지한다.
+	E2EERequired bool `json:"e2eeRequired,omitempty"`
+	// Epoch 는 DEK 세대 번호(단조 증가)다. 클라이언트는 캐시한 epoch 과 비교해
+	// "descriptor 가 내 캐시보다 낡은 응답인지"(낮으면 무시) / "DEK 세대가 바뀌었는지"
+	// (높으면 verifier 로 재판정)를 순서 있게 판별한다. push 시 fence 헤더로도 쓴다.
+	// verifier 도입 이전에 만들어진 볼트는 0 일 수 있다.
+	Epoch int64 `json:"epoch,omitempty"`
+	// WrapRevision은 같은 epoch 안의 wrapped DEK/KDF 개정 번호다. 필드 도입 전 v2는 0이다.
+	WrapRevision int64 `json:"wrapRevision,omitempty"`
+	// DekVerifierBase64 는 클라이언트가 설정 시 제출한 DEK 공개 검증자
+	// (HMAC-SHA256(key=DEK, msg=고정라벨)). 캐시한 DEK 로 같은 값을 계산해 일치하면
+	// 그 DEK 가 이 볼트의 DEK 임이 증명된다 — 최초 신뢰 채택 없이 즉시 판정한다.
+	DekVerifierBase64 string          `json:"dekVerifierBase64,omitempty"`
+	Kdf               *VaultKdfParams `json:"kdf,omitempty"`
+}
+
+// VaultResolution 은 세션 발급 시 볼트 descriptor 를 어떻게 채울지 결정한다.
+type VaultResolution int
+
+const (
+	// VaultResolutionLegacy — v2 를 모르는 구버전 클라이언트. 볼트가 없으면 기존처럼
+	// v1 을 lazy 생성하고, v2 볼트를 만나면 ErrVaultClientOutdated 로 세션 발급을 거부한다.
+	VaultResolutionLegacy VaultResolution = iota
+	// VaultResolutionE2EE — v2 를 이해하는 클라이언트. 볼트가 없으면 생성하지 않고
+	// version 0 을 내려 설정 플로우를 태운다.
+	VaultResolutionE2EE
+	// VaultResolutionSkip — 세션이 앱 클라이언트로 전달되지 않는 내부 경로(브라우저 폼
+	// 로그인 등). 볼트를 조회·생성하지 않는다. 신규 유저가 웹 폼을 거쳤다는 이유만으로
+	// v1 볼트가 미리 생성되는 것을 막는 게 핵심이다.
+	VaultResolutionSkip
+)
 
 type OfflineLease struct {
 	Token                    string `json:"token"`
@@ -108,7 +160,7 @@ func NewService(
 	}, nil
 }
 
-func (s *Service) Signup(ctx context.Context, email string, password string, issuer string) (store.User, SessionBootstrap, error) {
+func (s *Service) Signup(ctx context.Context, email string, password string, issuer string, vaultResolution VaultResolution) (store.User, SessionBootstrap, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, err
@@ -117,11 +169,11 @@ func (s *Service) Signup(ctx context.Context, email string, password string, iss
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, err
 	}
-	session, err := s.issueSession(ctx, user, issuer)
+	session, err := s.issueSession(ctx, user, issuer, vaultResolution)
 	return user, session, err
 }
 
-func (s *Service) Login(ctx context.Context, email string, password string, issuer string) (store.User, SessionBootstrap, error) {
+func (s *Service) Login(ctx context.Context, email string, password string, issuer string, vaultResolution VaultResolution) (store.User, SessionBootstrap, error) {
 	user, err := s.store.GetUserByEmail(ctx, email)
 	if err != nil {
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
@@ -132,11 +184,11 @@ func (s *Service) Login(ctx context.Context, email string, password string, issu
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return store.User{}, SessionBootstrap{}, ErrInvalidCredentials
 	}
-	session, err := s.issueSession(ctx, user, issuer)
+	session, err := s.issueSession(ctx, user, issuer, vaultResolution)
 	return user, session, err
 }
 
-func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer string) (SessionBootstrap, error) {
+func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer string, vaultResolution VaultResolution) (SessionBootstrap, error) {
 	tokenHash := hashToken(refreshToken)
 	record, err := s.store.GetRefreshToken(ctx, tokenHash)
 	if err != nil {
@@ -166,7 +218,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string, issuer strin
 		return SessionBootstrap{}, err
 	}
 
-	return s.issueSessionWithRefresh(ctx, user, issuer, refreshToken, record.ExpiresAt)
+	return s.issueSessionWithRefresh(ctx, user, issuer, refreshToken, record.ExpiresAt, vaultResolution)
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken string) error {
@@ -200,7 +252,7 @@ func (s *Service) IssueExchangeCode(ctx context.Context, user store.User) (strin
 	return code, nil
 }
 
-func (s *Service) ExchangeCode(ctx context.Context, code string, issuer string) (SessionBootstrap, error) {
+func (s *Service) ExchangeCode(ctx context.Context, code string, issuer string, vaultResolution VaultResolution) (SessionBootstrap, error) {
 	record, err := s.store.ConsumeExchangeCode(ctx, hashToken(code))
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidExchangeCode
@@ -212,7 +264,7 @@ func (s *Service) ExchangeCode(ctx context.Context, code string, issuer string) 
 	if err != nil {
 		return SessionBootstrap{}, ErrInvalidExchangeCode
 	}
-	return s.issueSession(ctx, user, issuer)
+	return s.issueSession(ctx, user, issuer, vaultResolution)
 }
 
 func (s *Service) ResolveOIDCUser(ctx context.Context, provider string, subject string, email string, emailVerified bool) (store.User, error) {
@@ -291,12 +343,77 @@ func (s *Service) ParseAccessToken(token string) (*Claims, error) {
 	return claims, nil
 }
 
-func (s *Service) issueSession(ctx context.Context, user store.User, issuer string) (SessionBootstrap, error) {
-	tokens, refreshExpiresAt, err := s.issueTokens(ctx, user)
+// resolveVaultBootstrap 은 클라이언트 부류(resolution)에 맞는 볼트 descriptor 를 만든다.
+// 자세한 분기 의미는 VaultResolution 상수 주석 참고.
+func (s *Service) resolveVaultBootstrap(ctx context.Context, userID string, resolution VaultResolution) (VaultBootstrap, error) {
+	if resolution == VaultResolutionSkip {
+		return VaultBootstrap{Version: 0}, nil
+	}
+
+	state, err := s.store.GetUserVaultState(ctx, userID)
+	if err != nil {
+		return VaultBootstrap{}, err
+	}
+	if state.VersionFloor >= 2 && resolution != VaultResolutionE2EE {
+		return VaultBootstrap{}, ErrVaultClientOutdated
+	}
+	if state.Vault == nil {
+		if resolution == VaultResolutionE2EE {
+			return VaultBootstrap{Version: 0, Epoch: state.Epoch}, nil
+		}
+		// 구버전 클라이언트 — 기존 동작 그대로 v1 을 lazy 생성한다. 드물게 그 사이 다른
+		// 기기가 v2 를 만들었으면 생성 대신 기존 행이 돌아오므로 아래 버전 분기로 잡는다.
+		vault, createErr := s.store.GetOrCreateUserVaultKey(ctx, userID)
+		if createErr != nil {
+			if errors.Is(createErr, store.ErrVaultE2EERequired) {
+				return VaultBootstrap{}, ErrVaultClientOutdated
+			}
+			return VaultBootstrap{}, createErr
+		}
+		state.Vault = &vault
+	}
+	vault := *state.Vault
+
+	switch vault.Version {
+	case 1:
+		return VaultBootstrap{
+			Version:      1,
+			KeyBase64:    vault.KeyBase64,
+			Epoch:        vault.Epoch,
+			E2EERequired: state.VersionFloor >= 2,
+		}, nil
+	case 2:
+		if resolution != VaultResolutionE2EE {
+			return VaultBootstrap{}, ErrVaultClientOutdated
+		}
+		return VaultBootstrap{
+			Version:           2,
+			WrappedDekBase64:  vault.WrappedDekBase64,
+			Epoch:             vault.Epoch,
+			WrapRevision:      vault.WrapRevision,
+			DekVerifierBase64: vault.DekVerifier,
+			Kdf: &VaultKdfParams{
+				Algorithm:   vault.KdfAlgorithm,
+				SaltBase64:  vault.KdfSaltBase64,
+				MemoryKiB:   vault.KdfMemoryKiB,
+				TimeCost:    vault.KdfTimeCost,
+				Parallelism: vault.KdfParallelism,
+			},
+		}, nil
+	default:
+		return VaultBootstrap{}, fmt.Errorf("unsupported vault version %d for user %s", vault.Version, userID)
+	}
+}
+
+func (s *Service) issueSession(ctx context.Context, user store.User, issuer string, vaultResolution VaultResolution) (SessionBootstrap, error) {
+	// 볼트 게이트(구클라 × v2 계정 → ErrVaultClientOutdated/426)를 토큰 발급보다 먼저
+	// 수행한다 — 뒤에 두면 거부될 세션의 refresh token 행이 시도마다 쌓인다(전달되지
+	// 않아 사용 불가지만 idle TTL 까지 잔존하는 쓰레기).
+	vaultBootstrap, err := s.resolveVaultBootstrap(ctx, user.ID, vaultResolution)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
-	vaultKey, err := s.store.GetOrCreateUserVaultKey(ctx, user.ID)
+	tokens, refreshExpiresAt, err := s.issueTokens(ctx, user)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
@@ -309,7 +426,7 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 	session.User.ID = user.ID
 	session.User.Email = user.Email
 	session.Tokens = tokens
-	session.VaultBootstrap = VaultBootstrap{KeyBase64: vaultKey.KeyBase64}
+	session.VaultBootstrap = vaultBootstrap
 	session.OfflineLease = offlineLease
 	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
 	return session, nil
@@ -321,12 +438,12 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 // spurious logouts that rotation + reuse-detection caused on sleep/offline or
 // lost refresh responses. Response shape is identical to issueSession, so every
 // client version persists and reuses the returned token exactly as before.
-func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, issuer string, refreshToken string, refreshExpiresAt time.Time) (SessionBootstrap, error) {
+func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, issuer string, refreshToken string, refreshExpiresAt time.Time, vaultResolution VaultResolution) (SessionBootstrap, error) {
 	accessToken, err := s.signAccessToken(user)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
-	vaultKey, err := s.store.GetOrCreateUserVaultKey(ctx, user.ID)
+	vaultBootstrap, err := s.resolveVaultBootstrap(ctx, user.ID, vaultResolution)
 	if err != nil {
 		return SessionBootstrap{}, err
 	}
@@ -343,7 +460,7 @@ func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, 
 		RefreshToken:     refreshToken,
 		ExpiresInSeconds: int(s.accessTokenTTL.Seconds()),
 	}
-	session.VaultBootstrap = VaultBootstrap{KeyBase64: vaultKey.KeyBase64}
+	session.VaultBootstrap = vaultBootstrap
 	session.OfflineLease = offlineLease
 	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
 	return session, nil

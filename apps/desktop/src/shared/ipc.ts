@@ -874,6 +874,16 @@ export interface DesktopApi {
     logout: () => Promise<void>;
     // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제하고 로컬 세션을 정리한다.
     deleteAccount: () => Promise<void>;
+    // E2EE 볼트 — 동기화 암호 설정/잠금해제/초기화/변경.
+    setupVault: (passphrase: string) => Promise<void>;
+    unlockVault: (passphrase: string) => Promise<void>;
+    resetVault: () => Promise<void>;
+    changeVaultPassphrase: (
+      currentPassphrase: string,
+      nextPassphrase: string,
+    ) => Promise<void>;
+    // 기존(v1) 유저의 E2EE 전환.
+    migrateVault: (passphrase: string) => Promise<void>;
     onEvent: (listener: (state: AuthState) => void) => () => void;
   };
   sync: {

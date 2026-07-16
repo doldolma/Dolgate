@@ -67,6 +67,34 @@ export async function connectSftp(options, asyncOpts_) {
         throw __error;
     }
 }
+export async function deriveArgon2idKey(passphrase, salt, memoryKib, timeCost, parallelism, outputLength, asyncOpts_) {
+    const __stack = uniffiIsDebug ? new Error().stack : undefined;
+    try {
+        return await uniffiRustCallAsync(
+        /*rustCaller:*/ uniffiCaller,
+        /*rustFutureFunc:*/ () => {
+            return nativeModule().ubrn_uniffi_uniffi_russh_fn_func_derive_argon2id_key(FfiConverterArrayBuffer.lower(passphrase), FfiConverterArrayBuffer.lower(salt), FfiConverterUInt32.lower(memoryKib), FfiConverterUInt32.lower(timeCost), FfiConverterUInt32.lower(parallelism), FfiConverterUInt32.lower(outputLength));
+        },
+        /*pollFunc:*/ nativeModule()
+            .ubrn_ffi_uniffi_russh_rust_future_poll_rust_buffer,
+        /*cancelFunc:*/ nativeModule()
+            .ubrn_ffi_uniffi_russh_rust_future_cancel_rust_buffer,
+        /*completeFunc:*/ nativeModule()
+            .ubrn_ffi_uniffi_russh_rust_future_complete_rust_buffer,
+        /*freeFunc:*/ nativeModule()
+            .ubrn_ffi_uniffi_russh_rust_future_free_rust_buffer,
+        /*liftFunc:*/ FfiConverterArrayBuffer.lift.bind(FfiConverterArrayBuffer),
+        /*liftString:*/ FfiConverterString.lift,
+        /*asyncOpts:*/ asyncOpts_,
+        /*errorHandler:*/ FfiConverterTypeVaultKdfError.lift.bind(FfiConverterTypeVaultKdfError));
+    }
+    catch (__error) {
+        if (uniffiIsDebug && __error instanceof Error) {
+            __error.stack = __stack;
+        }
+        throw __error;
+    }
+}
 export function generateKeyPair(keyType) {
     return FfiConverterString.lift(uniffiCaller.rustCallWithError(
     /*liftError:*/ FfiConverterTypeSshError.lift.bind(FfiConverterTypeSshError),
@@ -1959,6 +1987,127 @@ const FfiConverterTypeTerminalType = (() => {
     }
     return new FFIConverter();
 })();
+// Error type: VaultKdfError
+// Enum: VaultKdfError
+export var VaultKdfError_Tags;
+(function (VaultKdfError_Tags) {
+    VaultKdfError_Tags["InvalidParams"] = "InvalidParams";
+    VaultKdfError_Tags["Derive"] = "Derive";
+})(VaultKdfError_Tags || (VaultKdfError_Tags = {}));
+export const VaultKdfError = (() => {
+    class InvalidParams_ extends UniffiError {
+        /**
+         * @private
+         * This field is private and should not be used, use `tag` instead.
+         */
+        [uniffiTypeNameSymbol] = 'VaultKdfError';
+        tag = VaultKdfError_Tags.InvalidParams;
+        inner;
+        constructor(v0) {
+            super('VaultKdfError', 'InvalidParams');
+            this.inner = Object.freeze([v0]);
+        }
+        static new(v0) {
+            return new InvalidParams_(v0);
+        }
+        static instanceOf(obj) {
+            return obj.tag === VaultKdfError_Tags.InvalidParams;
+        }
+        static hasInner(obj) {
+            return InvalidParams_.instanceOf(obj);
+        }
+        static getInner(obj) {
+            return obj.inner;
+        }
+    }
+    class Derive_ extends UniffiError {
+        /**
+         * @private
+         * This field is private and should not be used, use `tag` instead.
+         */
+        [uniffiTypeNameSymbol] = 'VaultKdfError';
+        tag = VaultKdfError_Tags.Derive;
+        inner;
+        constructor(v0) {
+            super('VaultKdfError', 'Derive');
+            this.inner = Object.freeze([v0]);
+        }
+        static new(v0) {
+            return new Derive_(v0);
+        }
+        static instanceOf(obj) {
+            return obj.tag === VaultKdfError_Tags.Derive;
+        }
+        static hasInner(obj) {
+            return Derive_.instanceOf(obj);
+        }
+        static getInner(obj) {
+            return obj.inner;
+        }
+    }
+    function instanceOf(obj) {
+        return obj[uniffiTypeNameSymbol] === 'VaultKdfError';
+    }
+    return Object.freeze({
+        instanceOf,
+        InvalidParams: InvalidParams_,
+        Derive: Derive_,
+    });
+})();
+// FfiConverter for enum VaultKdfError
+const FfiConverterTypeVaultKdfError = (() => {
+    const ordinalConverter = FfiConverterInt32;
+    class FFIConverter extends AbstractFfiConverterByteArray {
+        read(from) {
+            switch (ordinalConverter.read(from)) {
+                case 1:
+                    return new VaultKdfError.InvalidParams(FfiConverterString.read(from));
+                case 2:
+                    return new VaultKdfError.Derive(FfiConverterString.read(from));
+                default:
+                    throw new UniffiInternalError.UnexpectedEnumCase();
+            }
+        }
+        write(value, into) {
+            switch (value.tag) {
+                case VaultKdfError_Tags.InvalidParams: {
+                    ordinalConverter.write(1, into);
+                    const inner = value.inner;
+                    FfiConverterString.write(inner[0], into);
+                    return;
+                }
+                case VaultKdfError_Tags.Derive: {
+                    ordinalConverter.write(2, into);
+                    const inner = value.inner;
+                    FfiConverterString.write(inner[0], into);
+                    return;
+                }
+                default:
+                    // Throwing from here means that VaultKdfError_Tags hasn't matched an ordinal.
+                    throw new UniffiInternalError.UnexpectedEnumCase();
+            }
+        }
+        allocationSize(value) {
+            switch (value.tag) {
+                case VaultKdfError_Tags.InvalidParams: {
+                    const inner = value.inner;
+                    let size = ordinalConverter.allocationSize(1);
+                    size += FfiConverterString.allocationSize(inner[0]);
+                    return size;
+                }
+                case VaultKdfError_Tags.Derive: {
+                    const inner = value.inner;
+                    let size = ordinalConverter.allocationSize(2);
+                    size += FfiConverterString.allocationSize(inner[0]);
+                    return size;
+                }
+                default:
+                    throw new UniffiInternalError.UnexpectedEnumCase();
+            }
+        }
+    }
+    return new FFIConverter();
+})();
 export class ConnectProgressCallbackImpl extends UniffiAbstractObject {
     [uniffiTypeNameSymbol] = 'ConnectProgressCallbackImpl';
     [destructorGuardSymbol];
@@ -3199,6 +3348,10 @@ function uniffiEnsureInitialized() {
         30498) {
         throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_connect_sftp');
     }
+    if (nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_derive_argon2id_key() !==
+        24310) {
+        throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_derive_argon2id_key');
+    }
     if (nativeModule().ubrn_uniffi_uniffi_russh_checksum_func_generate_key_pair() !==
         37501) {
         throw new UniffiInternalError.ApiChecksumMismatch('uniffi_uniffi_russh_checksum_func_generate_key_pair');
@@ -3356,6 +3509,7 @@ export default Object.freeze({
         FfiConverterTypeTerminalPixelSize,
         FfiConverterTypeTerminalSize,
         FfiConverterTypeTerminalType,
+        FfiConverterTypeVaultKdfError,
     },
 });
 //# sourceMappingURL=uniffi_russh.js.map

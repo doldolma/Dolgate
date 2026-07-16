@@ -97,6 +97,49 @@ describe("SecretStore", () => {
     await secretStore.save("secret:test", "top-secret");
     await expect(secretStore.load("secret:test")).resolves.toBe("top-secret");
   });
+
+  it("keeps app secrets (auth:*, ai:*) when a sync snapshot replaces managed secrets wholesale", async () => {
+    const { stateStorageModule, secretStoreModule } = await loadModules();
+    const secretStore = new secretStoreModule.SecretStore();
+
+    await secretStore.save("auth:vault-dek", "dek-value");
+    await secretStore.save("ai:apiKey:anthropic", "sk-ant");
+
+    // sync-service 가 스냅샷 적용 시 수행하는 것과 동일한 통째 교체
+    stateStorageModule.getDesktopStateStorage().updateState((state) => {
+      state.secure.managedSecretsByRef = {
+        "secret:remote": {
+          encrypted: true,
+          value: Buffer.from("remote-secret", "utf8").toString("base64"),
+        },
+      };
+    });
+
+    await expect(secretStore.load("auth:vault-dek")).resolves.toBe("dek-value");
+    await expect(secretStore.load("ai:apiKey:anthropic")).resolves.toBe("sk-ant");
+    await expect(secretStore.load("secret:remote")).resolves.toBe("remote-secret");
+  });
+
+  it("migrates app secrets stored in managedSecretsByRef by older builds", async () => {
+    const first = await loadModules();
+    first.stateStorageModule.getDesktopStateStorage().updateState((state) => {
+      // 과거 빌드가 앱 시크릿을 sync 교체 대상 맵에 저장하던 레이아웃을 재현
+      state.secure.managedSecretsByRef["auth:vault-dek"] = {
+        encrypted: true,
+        value: Buffer.from("legacy-dek", "utf8").toString("base64"),
+      };
+    });
+
+    const second = await loadModules();
+    const secretStore = new second.secretStoreModule.SecretStore();
+    await expect(secretStore.load("auth:vault-dek")).resolves.toBe("legacy-dek");
+
+    // 이전 후에는 sync 통째 교체가 일어나도 지워지지 않는다
+    second.stateStorageModule.getDesktopStateStorage().updateState((state) => {
+      state.secure.managedSecretsByRef = {};
+    });
+    await expect(secretStore.load("auth:vault-dek")).resolves.toBe("legacy-dek");
+  });
 });
 
 describe("isSecureStorageUsable", () => {

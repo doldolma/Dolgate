@@ -5,6 +5,8 @@ import {
   fetchExchangeSession,
   getOrCreateClientInstallationId,
   refreshAuthSession,
+  resetClientInstallationIdCacheForTests,
+  saveStoredAuthSession,
 } from '../src/lib/mobile';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -75,6 +77,8 @@ describe('mobile auth client headers', () => {
 
   beforeEach(() => {
     storedInstallationId = null;
+    // 설치 ID 는 프로세스 수명 동안 메모이즈되므로 테스트 간에는 캐시를 비운다.
+    resetClientInstallationIdCacheForTests();
     setPlatformOs('ios');
     keychainMock.getGenericPassword.mockReset();
     keychainMock.setGenericPassword.mockReset();
@@ -151,5 +155,13 @@ describe('mobile auth client headers', () => {
       'existing-installation-id',
     );
     expect(keychainMock.setGenericPassword).not.toHaveBeenCalled();
+  });
+
+  it('rejects when Keychain reports that the auth session was not saved', async () => {
+    keychainMock.setGenericPassword.mockResolvedValueOnce(false);
+
+    await expect(saveStoredAuthSession(createAuthSession())).rejects.toThrow(
+      '인증 세션을 보안 저장소에 저장하지 못했습니다.',
+    );
   });
 });

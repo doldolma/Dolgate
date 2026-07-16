@@ -1,7 +1,7 @@
 # Dolgate 빌드 및 배포 가이드
 
-이 문서는 저장소 공통 버전 정책과 빌드/배포 절차만 다룹니다.  
-앱별 기능과 로컬 사용법은 [desktop](./desktop.md), [mobile](./mobile.md) 문서를 참고하세요.
+이 문서는 저장소 공통 버전 정책과 빌드/배포 절차를 다룹니다.
+데스크톱 기능은 [desktop](./desktop.md), 런타임 경계는 [architecture](./architecture.md)를 참고하세요.
 
 ## 한눈에 보기
 
@@ -97,7 +97,7 @@ Android 배포 산출물:
 - `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`
 - GitHub Release 업로드 이름: `Dolgate-android-vX.Y.Z.apk`
 
-데스크톱 빌드/업로드 세부는 [desktop](./desktop.md), 모바일 빌드 세부는 [mobile](./mobile.md)를 따릅니다.
+플랫폼별 빌드 명령은 아래 [데스크톱 릴리즈 빌드](#데스크톱-릴리즈-빌드)와 [모바일 빌드와 실행](#모바일-빌드와-실행)을 참고하세요.
 
 ### 공개 배포용 서명
 
@@ -134,6 +134,62 @@ GitHub Actions가 하나의 `vX.Y.Z` GitHub Release를 만들고, 데스크톱 �
 
 - `vX.Y.Z` 같은 태그가 push되면 GHCR에 `ghcr.io/doldolma/dolgate-sync-api:X.Y.Z`, `:X.Y`, `:latest`가 함께 생성됩니다.
 - `main` 브랜치 push만으로는 `sync-api` 운영 이미지를 새로 빌드하지 않습니다.
+
+## 데스크톱 릴리즈 빌드
+
+macOS universal:
+
+```bash
+npm run release:dist:mac
+```
+
+Windows x64:
+
+```bash
+npm run release:dist:win
+```
+
+Linux x64/arm64 (AppImage, deb):
+
+```bash
+npm run release:dist:linux
+```
+
+deb는 리눅스 호스트에서만 생성됩니다(macOS의 `ar`가 deb 아카이브를 깨뜨려서, 로컬 macOS 빌드는 AppImage만 만듭니다). 정식 deb는 릴리즈 태그 푸시 시 GitHub Actions가 빌드합니다.
+
+GitHub Release 업로드:
+
+```bash
+npm run release:publish:mac
+npm run release:publish:win
+npm run release:publish:linux
+npm run release:all
+```
+
+## 모바일 빌드와 실행
+
+로컬 실행:
+
+```bash
+npm run dev:mobile:ios
+npm run dev:mobile:android
+```
+
+- iOS와 Android를 동시에 실행해도 같은 Metro(`:8081`)를 공유합니다. 먼저 실행한 세션이 Metro를 띄우고 나중 세션은 재사용하며, 마지막 세션을 종료하면 Metro도 함께 정리됩니다.
+
+빌드:
+
+```bash
+npm run build:mobile:ios
+npm run build:mobile:android
+```
+
+산출물:
+
+- iOS: `apps/mobile/ios/build/derived-data/Build/Products/Release-iphoneos/Dolgate.app`
+- Android: `apps/mobile/android/app/build/outputs/apk/release/app-release.apk`
+
+Android release keystore 설정은 위 [공개 배포용 서명](#공개-배포용-서명)을 따릅니다. iOS는 현재 release `.app` 산출까지만 자동화하며, Android APK는 통합 GitHub Release에 함께 업로드됩니다.
 
 ## sync-api 빌드
 

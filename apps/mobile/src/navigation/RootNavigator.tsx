@@ -10,6 +10,14 @@ import { AuthLandingScreen } from "../screens/AuthLandingScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { SessionScreen } from "../screens/SessionScreen";
 import { AuthSettingsScreen, SettingsScreen } from "../screens/SettingsScreen";
+import { HostFormScreen } from "../screens/HostFormScreen";
+import {
+  VaultErrorScreen,
+  VaultMigrateScreen,
+  VaultSetupScreen,
+  VaultUnlockScreen,
+} from "../screens/VaultGateScreen";
+import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 
 export type AuthStackParamList = {
@@ -23,11 +31,18 @@ export type MainTabParamList = {
   Settings: undefined;
 };
 
+// 메인 탭 위에 얹히는 루트 스택 — 호스트 폼(생성·수정)을 모달로 띄운다.
+export type RootStackParamList = {
+  Main: undefined;
+  HostForm: { hostId?: string } | undefined;
+};
+
 interface RootNavigatorProps {
   authState: AuthState;
 }
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
+const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 export const MAIN_TAB_INITIAL_ROUTE = "Home";
 export const MAIN_TAB_BACK_BEHAVIOR = "fullHistory";
@@ -132,9 +147,63 @@ function isAppAccessible(authState: AuthState): boolean {
 export function RootNavigator({
   authState,
 }: RootNavigatorProps): React.JSX.Element {
+  const vault = useMobileAppStore((state) => state.vault);
+  const vaultMigrationDeferred = useMobileAppStore(
+    (state) => state.vaultMigrationDeferred,
+  );
+  const vaultE2eeServerSupport = useMobileAppStore(
+    (state) => state.syncStatus.vaultE2eeServerSupport,
+  );
+
   if (!isAppAccessible(authState)) {
     return <UnauthenticatedNavigator />;
   }
 
-  return <MainTabs />;
+  // E2EE 볼트 게이트 — 동기화 암호 설정/입력 전에는 복호화된 데이터가 없으므로
+  // 메인 탭 대신 해당 화면을 띄운다. unlocked 는 그대로 통과한다.
+  if (vault.status === "setup-required") {
+    return <VaultSetupScreen />;
+  }
+  if (vault.status === "locked") {
+    return <VaultUnlockScreen />;
+  }
+  if (vault.status === "error") {
+    return <VaultErrorScreen />;
+  }
+  // 기존(v1) 유저 전환 프롬프트 — 서버가 E2EE 를 지원하고, 온라인이며, 이번 실행에서
+  // "나중에"를 누르지 않았을 때만. 오프라인 캐시 상태에서는 전환할 수 없으므로 건너뛴다.
+  if (
+    vault.status === "legacy" &&
+    authState.status === "authenticated" &&
+    (vault.migrationRequired ||
+      (vaultE2eeServerSupport === "supported" && !vaultMigrationDeferred))
+  ) {
+    return <VaultMigrateScreen />;
+  }
+
+  return <AuthenticatedNavigator />;
+}
+
+function AuthenticatedNavigator(): React.JSX.Element {
+  const { colors } = useTheme();
+
+  return (
+    <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Screen name="Main" component={MainTabs} />
+      <RootStack.Screen
+        name="HostForm"
+        component={HostFormScreen}
+        options={({ route }) => ({
+          presentation: "modal",
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: colors.card,
+          },
+          headerTintColor: colors.text,
+          headerShadowVisible: false,
+          title: route.params?.hostId ? "호스트 수정" : "호스트 추가",
+        })}
+      />
+    </RootStack.Navigator>
+  );
 }

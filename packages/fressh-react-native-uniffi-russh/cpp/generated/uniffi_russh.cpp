@@ -377,6 +377,14 @@ extern "C" {
     /*handle*/ uint64_t uniffi_uniffi_russh_fn_func_connect_sftp(
         RustBuffer options
     );
+    /*handle*/ uint64_t uniffi_uniffi_russh_fn_func_derive_argon2id_key(
+        RustBuffer passphrase,
+        RustBuffer salt,
+        uint32_t memory_kib,
+        uint32_t time_cost,
+        uint32_t parallelism,
+        uint32_t output_length
+    );
     RustBuffer uniffi_uniffi_russh_fn_func_generate_key_pair(
         RustBuffer key_type,
         RustCallStatus *uniffi_out_err
@@ -605,6 +613,8 @@ extern "C" {
     uint16_t uniffi_uniffi_russh_checksum_func_connect(
     );
     uint16_t uniffi_uniffi_russh_checksum_func_connect_sftp(
+    );
+    uint16_t uniffi_uniffi_russh_checksum_func_derive_argon2id_key(
     );
     uint16_t uniffi_uniffi_russh_checksum_func_generate_key_pair(
     );
@@ -3992,6 +4002,14 @@ NativeUniffiRussh::NativeUniffiRussh(
             return this->cpp_uniffi_uniffi_russh_fn_func_connect_sftp(rt, thisVal, args, count);
         }
     );
+    props["ubrn_uniffi_uniffi_russh_fn_func_derive_argon2id_key"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_fn_func_derive_argon2id_key"),
+        6,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_uniffi_russh_fn_func_derive_argon2id_key(rt, thisVal, args, count);
+        }
+    );
     props["ubrn_uniffi_uniffi_russh_fn_func_generate_key_pair"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_fn_func_generate_key_pair"),
@@ -4446,6 +4464,14 @@ NativeUniffiRussh::NativeUniffiRussh(
         0,
         [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
             return this->cpp_uniffi_uniffi_russh_checksum_func_connect_sftp(rt, thisVal, args, count);
+        }
+    );
+    props["ubrn_uniffi_uniffi_russh_checksum_func_derive_argon2id_key"] = jsi::Function::createFromHostFunction(
+        rt,
+        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_uniffi_russh_checksum_func_derive_argon2id_key"),
+        0,
+        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
+            return this->cpp_uniffi_uniffi_russh_checksum_func_derive_argon2id_key(rt, thisVal, args, count);
         }
     );
     props["ubrn_uniffi_uniffi_russh_checksum_func_generate_key_pair"] = jsi::Function::createFromHostFunction(
@@ -5359,6 +5385,13 @@ jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_connect_sftp(jsi::
 
         return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
+jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_derive_argon2id_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_uniffi_russh_fn_func_derive_argon2id_key(uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]), uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[1]), uniffi_jsi::Bridging<uint32_t>::fromJs(rt, callInvoker, args[2]), uniffi_jsi::Bridging<uint32_t>::fromJs(rt, callInvoker, args[3]), uniffi_jsi::Bridging<uint32_t>::fromJs(rt, callInvoker, args[4]), uniffi_jsi::Bridging<uint32_t>::fromJs(rt, callInvoker, args[5])
+        );
+
+
+        return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
+}
 jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_fn_func_generate_key_pair(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         RustCallStatus status = uniffi::uniffi_russh::Bridging<RustCallStatus>::rustSuccess(rt);
         auto value = uniffi_uniffi_russh_fn_func_generate_key_pair(uniffi::uniffi_russh::Bridging<RustBuffer>::fromJs(rt, callInvoker, args[0]),
@@ -5801,6 +5834,13 @@ jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_connect(jsi:
 }
 jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_connect_sftp(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         auto value = uniffi_uniffi_russh_checksum_func_connect_sftp(
+        );
+
+
+        return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
+}
+jsi::Value NativeUniffiRussh::cpp_uniffi_uniffi_russh_checksum_func_derive_argon2id_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
+        auto value = uniffi_uniffi_russh_checksum_func_derive_argon2id_key(
         );
 
 

@@ -43,6 +43,10 @@ russh-sftp = "2.1.1"
 # Secure RNG for key generation (OsRng).
 rand = "0.8"
 
+# E2EE 동기화 볼트의 KEK 유도(Argon2id). RustCrypto 순수 Rust 구현이라 iOS/Android
+# 크로스컴파일에 별도 C 툴체인 부담이 없다.
+argon2 = "0.5"
+
 # Handy but currently optional; you can remove it if unused.
 once_cell = "1.21.3"
 
@@ -55,6 +59,10 @@ async-trait = "0.1"
 [build-dependencies]
 # UniFFI build helper to generate bindings at compile time.
 uniffi = { workspace = true, features = ["build"] }
+
+[dev-dependencies]
+# vault KDF 테스트가 shared-core 의 공유 테스트 벡터(JSON)를 파싱하는 데 쓴다.
+serde_json = "1"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Library outputs

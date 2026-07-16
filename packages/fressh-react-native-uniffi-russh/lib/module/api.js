@@ -310,6 +310,12 @@ function validateCertificate(certificate) {
         return { valid: false, error: e };
     }
 }
+function toArrayBuffer(bytes) {
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+async function deriveArgon2idKey(passphrase, salt, params) {
+    return new Uint8Array(await GeneratedRussh.deriveArgon2idKey(toArrayBuffer(passphrase), toArrayBuffer(salt), params.memoryKib, params.timeCost, params.parallelism, params.outputLength));
+}
 // #endregion
 export { SshError, SshError_Tags } from "./generated/uniffi_russh.js";
 export const RnRussh = {
@@ -319,5 +325,6 @@ export const RnRussh = {
     generateKeyPair,
     validatePrivateKey,
     validateCertificate,
+    deriveArgon2idKey,
 };
 //# sourceMappingURL=api.js.map

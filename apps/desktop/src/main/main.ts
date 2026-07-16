@@ -50,6 +50,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const TERMIUS_HELPER_FLAG = '--dolssh-termius-helper';
 
+// dev 전용: vite 가 `?v=` 버전 쿼리 모듈을 immutable(1년) 캐시로 내려주는데, Electron 의
+// 디스크 캐시가 이를 앱 재시작 후에도 재사용해 "코드는 고쳤는데 창은 옛 모듈" 상태가
+// 될 수 있다(모듈 로드 크래시가 캐시되면 빈 화면으로 고착). dev 에서는 HTTP 캐시를
+// 통째로 꺼서 이 클래스의 문제를 원천 차단한다. 패키징 앱에는 영향이 없다.
+if (!app.isPackaged) {
+  app.commandLine.appendSwitch('disable-http-cache');
+}
+
 // Cmd+W 를 "창 닫기"가 아니라 "현재 탭 닫기"(크롬식)로 바꾸기 위해 커스텀 메뉴를 쓴다.
 // 기본 메뉴엔 Window>Close(Cmd+W, 창 닫기)가 있어 이를 대체해야 한다. 표준 역할
 // (앱/편집/보기 — 복사·붙여넣기·종료 등)은 그대로 유지한다. Cmd+Shift+W 가 창 닫기.
@@ -399,7 +407,7 @@ if (termiusHelperArgIndex >= 0) {
     });
 
     if (process.platform === 'win32') {
-      window.removeMenu();
+      window.setMenuBarVisibility(false);
     }
 
     wireWindowStateEvents(window);

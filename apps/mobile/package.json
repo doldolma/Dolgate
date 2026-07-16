@@ -1,6 +1,6 @@
 {
   "name": "@dolssh/mobile",
-  "version": "1.7.10",
+  "version": "1.8.0",
   "private": true,
   "scripts": {
     "dev:android": "node ./scripts/dev-android.cjs",
@@ -16,6 +16,7 @@
     "@fressh/react-native-uniffi-russh": "^0.0.5",
     "@fressh/react-native-xtermjs-webview": "^0.0.8",
     "@noble/ciphers": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-navigation/bottom-tabs": "^7.15.9",
     "@react-navigation/native": "^7.2.2",

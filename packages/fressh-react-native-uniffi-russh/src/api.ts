@@ -246,6 +246,20 @@ type RusshApi = {
   ) =>
     | { valid: true; error?: never }
     | { valid: false; error: GeneratedRussh.SshError };
+  /**
+   * E2EE 동기화 볼트의 KEK 유도(Argon2id, RFC 9106). 파라미터 계약은
+   * packages/shared-core/src/vault.ts 의 Argon2idDerive 를 따른다.
+   */
+  deriveArgon2idKey: (
+    passphrase: Uint8Array,
+    salt: Uint8Array,
+    params: {
+      memoryKib: number;
+      timeCost: number;
+      parallelism: number;
+      outputLength: number;
+    },
+  ) => Promise<Uint8Array>;
 };
 
 // #endregion
@@ -676,6 +690,35 @@ function validateCertificate(
   }
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+async function deriveArgon2idKey(
+  passphrase: Uint8Array,
+  salt: Uint8Array,
+  params: {
+    memoryKib: number;
+    timeCost: number;
+    parallelism: number;
+    outputLength: number;
+  },
+): Promise<Uint8Array> {
+  return new Uint8Array(
+    await GeneratedRussh.deriveArgon2idKey(
+      toArrayBuffer(passphrase),
+      toArrayBuffer(salt),
+      params.memoryKib,
+      params.timeCost,
+      params.parallelism,
+      params.outputLength,
+    ),
+  );
+}
+
 // #endregion
 
 export { SshError, SshError_Tags } from "./generated/uniffi_russh";
@@ -687,4 +730,5 @@ export const RnRussh = {
   generateKeyPair,
   validatePrivateKey,
   validateCertificate,
+  deriveArgon2idKey,
 } satisfies RusshApi;

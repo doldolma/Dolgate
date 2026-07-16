@@ -1,0 +1,42 @@
+{
+  "kdf": [
+    {
+      "passphrase": "correct horse battery staple",
+      "saltBase64": "srKysrKysrKysrKysrKysg==",
+      "memoryKib": 8192,
+      "timeCost": 3,
+      "parallelism": 1,
+      "kekBase64": "ckDiwZJZCC9qdDxXY3KwV45D/Sq7/4HG/MX+S0vf0vA="
+    },
+    {
+      "passphrase": "동기화-암호-테스트",
+      "saltBase64": "WlpaWlpaWlpaWlpaWlpaWg==",
+      "memoryKib": 8192,
+      "timeCost": 3,
+      "parallelism": 1,
+      "kekBase64": "pBDj70hq6lBsewukzBik/CFPOgpv5o49sJTR6pqfxE0="
+    },
+    {
+      "passphrase": "correct horse battery staple",
+      "saltBase64": "srKysrKysrKysrKysrKysg==",
+      "memoryKib": 16384,
+      "timeCost": 2,
+      "parallelism": 2,
+      "kekBase64": "vLQNbHA8MJGE5zpyyvx0HuzR8+RIi7uojUn7eSuUFgM="
+    }
+  ],
+  "wrap": [
+    {
+      "kekBase64": "ERERERERERERERERERERERERERERERERERERERERERE=",
+      "dekBase64": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+      "ivBase64": "MzMzMzMzMzMzMzMz",
+      "wrappedBase64": "MzMzMzMzMzMzMzMzpqFwZOiwVw6QmslPhQnBCiTqLRao+6eO2mgrp4GsqAhVozSBTKujAULjYep3TmyS"
+    },
+    {
+      "kekBase64": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=",
+      "dekBase64": "zc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc0=",
+      "ivBase64": "7+/v7+/v7+/v7+/v",
+      "wrappedBase64": "7+/v7+/v7+/v7+/vzJ7K/jUoYiJ9HsImfICcLPG/QPTQ7QL0EyAi9y/i5NBrEyXIrwalhBcL1AIJSSlR"
+    }
+  ]
+}
