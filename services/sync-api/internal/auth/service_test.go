@@ -46,7 +46,7 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 
-	user, signupSession, err := service.Signup(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com")
+	user, signupSession, err := service.Signup(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 		t.Fatalf("signup result = %+v / %+v", user, signupSession)
 	}
 
-	loginUser, loginSession, err := service.Login(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com")
+	loginUser, loginSession, err := service.Login(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 		t.Fatalf("claims = %+v, want user %q", claims, user.ID)
 	}
 
-	refreshed, err := service.Refresh(ctx, loginSession.Tokens.RefreshToken, "https://ssh.doldolma.com")
+	refreshed, err := service.Refresh(ctx, loginSession.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Refresh() error = %v", err)
 	}
@@ -78,14 +78,14 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 		t.Fatal("Refresh() should slide the same refresh token in place, not rotate it")
 	}
 
-	if _, err := service.Refresh(ctx, loginSession.Tokens.RefreshToken, "https://ssh.doldolma.com"); err != nil {
+	if _, err := service.Refresh(ctx, loginSession.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
 		t.Fatalf("Refresh(same token reused) error = %v", err)
 	}
 
 	if err := service.Logout(ctx, refreshed.Tokens.RefreshToken); err != nil {
 		t.Fatalf("Logout() error = %v", err)
 	}
-	if _, err := service.Refresh(ctx, refreshed.Tokens.RefreshToken, "https://ssh.doldolma.com"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, err := service.Refresh(ctx, refreshed.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Refresh(logged out token) error = %v, want %v", err, ErrInvalidCredentials)
 	}
 }
@@ -94,13 +94,13 @@ func TestRefreshSlidesTokenAndIgnoresLegacyRotationState(t *testing.T) {
 	ctx := context.Background()
 	service, backingStore := newTestService(t)
 
-	_, session, err := service.Signup(ctx, "slide@example.com", "hunter2", "https://ssh.doldolma.com")
+	_, session, err := service.Signup(ctx, "slide@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
 
 	// 같은 토큰으로 반복 갱신해도 회전 없이 계속 성공하고 동일 토큰이 유지된다(슬라이딩 idle).
-	refreshed, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com")
+	refreshed, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Refresh() error = %v", err)
 	}
@@ -122,7 +122,7 @@ func TestRefreshSlidesTokenAndIgnoresLegacyRotationState(t *testing.T) {
 		t.Fatalf("SaveRefreshToken() error = %v", err)
 	}
 
-	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com"); err != nil {
+	if _, err := service.Refresh(ctx, session.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
 		t.Fatalf("Refresh(legacy superseded token) should succeed under sliding idle, got %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestSessionBootstrapIncludesOfflineLeaseBoundedByRefreshExpiry(t *testing.T
 	ctx := context.Background()
 	service, _ := newTestService(t)
 
-	_, session, err := service.Signup(ctx, "lease@example.com", "hunter2", "https://ssh.doldolma.com")
+	_, session, err := service.Signup(ctx, "lease@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
@@ -189,15 +189,15 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 
-	if _, _, err := service.Signup(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com"); err != nil {
+	if _, _, err := service.Signup(ctx, "user@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
 
-	if _, _, err := service.Login(ctx, "user@example.com", "wrong-password", "https://ssh.doldolma.com"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, err := service.Login(ctx, "user@example.com", "wrong-password", "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Login(wrong password) error = %v, want %v", err, ErrInvalidCredentials)
 	}
 
-	if _, _, err := service.Login(ctx, "missing@example.com", "hunter2", "https://ssh.doldolma.com"); !errors.Is(err, ErrInvalidCredentials) {
+	if _, _, err := service.Login(ctx, "missing@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Login(missing user) error = %v, want %v", err, ErrInvalidCredentials)
 	}
 }
@@ -206,7 +206,7 @@ func TestExchangeCodeIsSingleUse(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 
-	user, _, err := service.Signup(ctx, "exchange@example.com", "hunter2", "https://ssh.doldolma.com")
+	user, _, err := service.Signup(ctx, "exchange@example.com", "hunter2", "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("Signup() error = %v", err)
 	}
@@ -216,7 +216,7 @@ func TestExchangeCodeIsSingleUse(t *testing.T) {
 		t.Fatalf("IssueExchangeCode() error = %v", err)
 	}
 
-	session, err := service.ExchangeCode(ctx, code, "https://ssh.doldolma.com")
+	session, err := service.ExchangeCode(ctx, code, "https://ssh.doldolma.com", VaultResolutionLegacy)
 	if err != nil {
 		t.Fatalf("ExchangeCode() error = %v", err)
 	}
@@ -224,7 +224,7 @@ func TestExchangeCodeIsSingleUse(t *testing.T) {
 		t.Fatalf("ExchangeCode().User.ID = %q, want %q", session.User.ID, user.ID)
 	}
 
-	if _, err := service.ExchangeCode(ctx, code, "https://ssh.doldolma.com"); !errors.Is(err, ErrInvalidExchangeCode) {
+	if _, err := service.ExchangeCode(ctx, code, "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidExchangeCode) {
 		t.Fatalf("ExchangeCode(second use) error = %v, want %v", err, ErrInvalidExchangeCode)
 	}
 }

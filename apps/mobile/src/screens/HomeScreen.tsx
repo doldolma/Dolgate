@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   BackHandler,
   FlatList,
   Pressable,
@@ -26,9 +27,13 @@ import {
 } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import Ionicons from "react-native-vector-icons/Ionicons";
+import { HostActionSheet } from "../components/HostActionSheet";
 import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
 import { formatRelativeTime } from "../lib/mobile";
-import type { MainTabParamList } from "../navigation/RootNavigator";
+import type {
+  MainTabParamList,
+  RootStackParamList,
+} from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -47,7 +52,8 @@ type HomeListItem =
 export function HomeScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
-  const navigation = useNavigation<NavigationProp<MainTabParamList>>();
+  const navigation =
+    useNavigation<NavigationProp<MainTabParamList & RootStackParamList>>();
   const listRef = useRef<FlatList<HomeListItem> | null>(null);
   const searchInputRef = useRef<TextInput | null>(null);
   const scrollToTopRef = useRef<{ scrollToTop: () => void }>({
@@ -62,6 +68,13 @@ export function HomeScreen(): React.JSX.Element {
   const sessions = useMobileAppStore((state) => state.sessions);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const connectToHost = useMobileAppStore((state) => state.connectToHost);
+  const openSftpForSession = useMobileAppStore(
+    (state) => state.openSftpForSession,
+  );
+  const deleteHost = useMobileAppStore((state) => state.deleteHost);
+  const [actionSheetHost, setActionSheetHost] = useState<HostRecord | null>(
+    null,
+  );
   const isSearching = query.trim().length > 0;
   useScrollToTop(scrollToTopRef);
 
@@ -256,6 +269,67 @@ export function HomeScreen(): React.JSX.Element {
     };
   }, [currentGroupPath, isSearching]);
 
+  const handleConnect = useCallback(
+    async (host: HostRecord) => {
+      setActionSheetHost(null);
+      const sessionId = await connectToHost(host.id);
+      if (sessionId) {
+        navigation.navigate("Sessions");
+      }
+    },
+    [connectToHost, navigation],
+  );
+
+  // SFTP 는 라이브 세션 위에 열린다 — 세션이 없으면 먼저 연결부터 만든다.
+  const handleConnectSftp = useCallback(
+    async (host: HostRecord) => {
+      setActionSheetHost(null);
+      const sessionId = await connectToHost(host.id);
+      if (!sessionId) {
+        return;
+      }
+      await openSftpForSession(sessionId);
+      navigation.navigate("Sessions");
+    },
+    [connectToHost, navigation, openSftpForSession],
+  );
+
+  const handleEditHost = useCallback(
+    (host: HostRecord) => {
+      setActionSheetHost(null);
+      navigation.navigate("HostForm", { hostId: host.id });
+    },
+    [navigation],
+  );
+
+  const handleDeleteHost = useCallback(
+    (host: HostRecord) => {
+      Alert.alert(
+        "호스트 삭제",
+        `"${host.label}" 호스트를 삭제할까요? 동기화된 다른 기기에서도 함께 제거됩니다.`,
+        [
+          { text: "취소", style: "cancel" },
+          {
+            text: "삭제",
+            style: "destructive",
+            onPress: () => {
+              setActionSheetHost(null);
+              void deleteHost(host.id).catch((error) => {
+                Alert.alert(
+                  "호스트 삭제 실패",
+                  error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "호스트를 삭제하지 못했습니다.",
+                );
+              });
+            },
+          },
+        ],
+      );
+    },
+    [deleteHost],
+  );
+
   const statusBanner = useMemo(() => {
     if (auth.status === "offline-authenticated") {
       return {
@@ -326,21 +400,38 @@ export function HomeScreen(): React.JSX.Element {
           },
         ]}
       >
-        <TextInput
-          ref={searchInputRef}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="호스트 검색"
-          placeholderTextColor={palette.mutedText}
-          style={[
-            styles.searchInput,
-            {
-              color: palette.text,
-              borderColor: palette.border,
-              backgroundColor: palette.input,
-            },
-          ]}
-        />
+        <View style={styles.searchRow}>
+          <TextInput
+            ref={searchInputRef}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="호스트 검색"
+            placeholderTextColor={palette.mutedText}
+            style={[
+              styles.searchInput,
+              styles.searchRowInput,
+              {
+                color: palette.text,
+                borderColor: palette.border,
+                backgroundColor: palette.input,
+              },
+            ]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="호스트 추가"
+            onPress={() => navigation.navigate("HostForm", undefined)}
+            style={[
+              styles.addHostButton,
+              {
+                backgroundColor: palette.accentSoft,
+                borderColor: palette.accent,
+              },
+            ]}
+          >
+            <Ionicons name="add" size={24} color={palette.accent} />
+          </Pressable>
+        </View>
 
         {statusBanner ? (
           <View
@@ -489,12 +580,8 @@ export function HomeScreen(): React.JSX.Element {
 
             return (
               <Pressable
-                onPress={async () => {
-                  const sessionId = await connectToHost(item.host.id);
-                  if (sessionId) {
-                    navigation.navigate("Sessions");
-                  }
-                }}
+                onPress={() => void handleConnect(item.host)}
+                onLongPress={() => setActionSheetHost(item.host)}
                 style={[
                   styles.hostCard,
                   {
@@ -541,6 +628,15 @@ export function HomeScreen(): React.JSX.Element {
             );
           }}
         />
+
+        <HostActionSheet
+          host={actionSheetHost}
+          onClose={() => setActionSheetHost(null)}
+          onConnect={(host) => void handleConnect(host)}
+          onConnectSftp={(host) => void handleConnectSftp(host)}
+          onEdit={handleEditHost}
+          onDelete={handleDeleteHost}
+        />
       </View>
     </IosEdgeSwipeBack>
   );
@@ -549,6 +645,22 @@ export function HomeScreen(): React.JSX.Element {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
+  },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  searchRowInput: {
+    flex: 1,
+  },
+  addHostButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   searchInput: {
     borderWidth: 1,

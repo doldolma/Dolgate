@@ -15,6 +15,7 @@ import {
 import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HostBrowser } from '../components/HostBrowser';
 import { HostDrawer } from '../components/HostDrawer';
+import { changeVaultPassphrase } from '../services/desktop/auth-window-updater';
 import { getJumpHostCandidates } from '../components/HostForm';
 import { LogsPanel } from '../components/LogsPanel';
 import { OpenSshImportDialog } from '../components/OpenSshImportDialog';
@@ -682,6 +683,8 @@ export function HomeShell({
             }
             onLogout={loginController.logout}
             onDeleteAccount={loginController.deleteAccount}
+            vaultStatus={authState.vault?.status ?? null}
+            onChangeVaultPassphrase={changeVaultPassphrase}
           />
         ) : null}
             </main>

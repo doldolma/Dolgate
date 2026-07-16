@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.7.10",
+  "version": "1.8.0",
   "license": "MIT",
   "private": true,
   "workspaces": [
@@ -51,6 +51,7 @@
     "test:ssh-core": "cd services/ssh-core && go test ./... -cover",
     "test:sync-api": "cd services/sync-api && go test ./... -cover",
     "test:services": "npm run test:ssh-core && npm run test:sync-api",
+    "test:vault": "npm run test:desktop:main -- vault auth-service && npm run test:mobile -- --runInBand vault && cd services/sync-api && go test ./internal/store ./internal/auth ./internal/http -run 'Vault|Sync'",
     "test:smoke": "npm run test:desktop:smoke",
     "test:all": "npm run check && npm run test:smoke",
     "typecheck": "npm-run-all --parallel typecheck:desktop typecheck:mobile",

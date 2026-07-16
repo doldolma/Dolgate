@@ -2,7 +2,9 @@ package http
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -18,6 +20,9 @@ import (
 
 	"dolssh/services/sync-api/internal/auth"
 	"dolssh/services/sync-api/internal/store"
+	// NewRouter 의 파라미터 이름(store)이 패키지를 가리므로 핸들러 안에서 sentinel 에러를
+	// 참조할 때는 이 별칭을 쓴다.
+	storepkg "dolssh/services/sync-api/internal/store"
 	syncmodel "dolssh/services/sync-api/internal/sync"
 )
 
@@ -74,10 +79,15 @@ type serverInfoResponse struct {
 type serverInfoCapabilities struct {
 	Sync     serverInfoSyncCapabilities    `json:"sync"`
 	Sessions serverInfoSessionCapabilities `json:"sessions"`
+	Vault    serverInfoVaultCapabilities   `json:"vault"`
 }
 
 type serverInfoSyncCapabilities struct {
 	AWSProfiles bool `json:"awsProfiles"`
+}
+
+type serverInfoVaultCapabilities struct {
+	E2EE bool `json:"e2ee"`
 }
 
 type serverInfoSessionCapabilities struct {
@@ -120,13 +130,186 @@ type exchangeRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
+// vaultSetupRequest 는 볼트 설정(POST)과 암호 변경(PUT)이 공유하는 바디다.
+type vaultSetupRequest struct {
+	WrappedDekBase64 string `json:"wrappedDekBase64" binding:"required"`
+	// DekVerifierBase64 는 클라이언트가 DEK 에서 유도한 공개 검증자(HMAC-SHA256, 32바이트).
+	// 설정(POST)에서는 필수, 암호 변경(PUT)에서는 선택 — 비어 있지 않으면 verifier 가 없는
+	// 기존 볼트에 지연 백필된다.
+	DekVerifierBase64 string              `json:"dekVerifierBase64"`
+	Kdf               vaultKdfParamsInput `json:"kdf" binding:"required"`
+	// 변이를 시작할 때 클라이언트가 관찰한 세대. pointer로 누락과 epoch 0을 구분한다.
+	ExpectedEpoch *int64 `json:"expectedEpoch"`
+	// PUT에서 현재 descriptor verifier의 기대값. 빈 문자열도 "verifier 없음"이라는
+	// 명시적인 precondition이므로 pointer로 누락과 구분한다.
+	ExpectedDekVerifierBase64 *string `json:"expectedDekVerifierBase64"`
+	// PUT에서 현재 wrapper 개정의 기대값. 누락은 필드 도입 전 클라이언트의 0으로 취급한다.
+	ExpectedWrapRevision *int64 `json:"expectedWrapRevision"`
+}
+
+type vaultResetRequest struct {
+	ExpectedEpoch *int64 `json:"expectedEpoch"`
+}
+
+type vaultKdfParamsInput struct {
+	Algorithm   string `json:"algorithm"`
+	SaltBase64  string `json:"saltBase64"`
+	MemoryKiB   int    `json:"memoryKib"`
+	TimeCost    int    `json:"timeCost"`
+	Parallelism int    `json:"parallelism"`
+}
+
+func (r vaultSetupRequest) toUserVaultKey(userID string) storepkg.UserVaultKey {
+	return storepkg.UserVaultKey{
+		UserID:           userID,
+		Version:          2,
+		DekVerifier:      strings.TrimSpace(r.DekVerifierBase64),
+		WrappedDekBase64: strings.TrimSpace(r.WrappedDekBase64),
+		KdfAlgorithm:     strings.TrimSpace(r.Kdf.Algorithm),
+		KdfSaltBase64:    strings.TrimSpace(r.Kdf.SaltBase64),
+		KdfMemoryKiB:     r.Kdf.MemoryKiB,
+		KdfTimeCost:      r.Kdf.TimeCost,
+		KdfParallelism:   r.Kdf.Parallelism,
+	}
+}
+
+// validateVaultDekVerifier 는 verifier 형식(base64 32바이트 = HMAC-SHA256 출력)을 검사한다.
+func validateVaultDekVerifier(value string) bool {
+	verifier, err := base64.StdEncoding.DecodeString(strings.TrimSpace(value))
+	return err == nil && len(verifier) == 32
+}
+
+// validateVaultSetupRequest 는 클라이언트 버그로 깨진 볼트가 저장되는 것을 막는 형식 검증이다.
+// 통과하지 못하면 사용자에게 보여줄 메시지를 돌려준다(빈 문자열 = 통과).
+// requireVerifier 는 설정(POST)에서만 true — 새 볼트에는 verifier 가 반드시 있어야 다른
+// 기기들이 로컬 검증으로 합류할 수 있다. 암호 변경(PUT)은 기존 볼트 유지라 선택이다.
+func validateVaultSetupRequest(request vaultSetupRequest, requireVerifier bool) string {
+	if request.ExpectedEpoch == nil || *request.ExpectedEpoch < 0 {
+		return "볼트 세대 정보가 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."
+	}
+	wrapped, err := base64.StdEncoding.DecodeString(strings.TrimSpace(request.WrappedDekBase64))
+	if err != nil || len(wrapped) < 44 || len(wrapped) > 128 {
+		// GCM wrap 최소 크기 = iv(12) + DEK(32) ... 태그 포함 60 이 정상이지만 포맷 여지를 둔다.
+		return "잘못된 볼트 키 형식입니다."
+	}
+	trimmedVerifier := strings.TrimSpace(request.DekVerifierBase64)
+	if requireVerifier && trimmedVerifier == "" {
+		return "볼트 검증자가 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."
+	}
+	if trimmedVerifier != "" && !validateVaultDekVerifier(trimmedVerifier) {
+		return "잘못된 볼트 검증자 형식입니다."
+	}
+	if strings.TrimSpace(request.Kdf.Algorithm) != "argon2id" {
+		return "지원하지 않는 KDF 알고리즘입니다."
+	}
+	salt, err := base64.StdEncoding.DecodeString(strings.TrimSpace(request.Kdf.SaltBase64))
+	if err != nil || len(salt) < 16 || len(salt) > 64 {
+		return "잘못된 KDF salt 형식입니다."
+	}
+	// 현재 앱이 실제로 검증한 Argon2id 프로필만 저장한다. 범위 허용은 손상된 descriptor 가
+	// 범위 안의 고비용 조합으로 클라이언트를 장시간 점유하는 여지를 남긴다.
+	if request.Kdf.MemoryKiB != 64*1024 || request.Kdf.TimeCost != 3 || request.Kdf.Parallelism != 1 {
+		return "지원하지 않는 KDF 파라미터입니다."
+	}
+	return ""
+}
+
 const (
 	clientHeaderName               = "X-Dolgate-Client"
 	clientVersionHeaderName        = "X-Dolgate-Client-Version"
 	clientPlatformHeaderName       = "X-Dolgate-Platform"
 	clientInstallationIDHeaderName = "X-Dolgate-Client-Installation-Id"
 	unknownClientObservationValue  = "unknown"
+	// push 시 클라이언트가 자기 DEK 세대(epoch)를 실어 보내는 헤더. 서버는 이 값을
+	// revision bump 의 WHERE 조건(fence)으로 써서 옛 세대의 쓰기를 커밋 시점에 거부한다.
+	vaultEpochHeader = "X-Dolgate-Vault-Epoch"
 )
+
+// push 거부 응답의 code 필드 — 클라이언트가 상황을 구분해 대응하도록 한다.
+const (
+	// 볼트 자체가 없음(초기화 직후 재설정 전) — 세션 갱신으로 재합류.
+	vaultResetCode = "vault_reset"
+	// 볼트는 있으나 DEK 세대가 다름 — 클라이언트는 세션을 갱신해 재판정한다(verifier
+	// 불일치면 잠금). 코드 문자열은 dekId 시절 값을 유지해 클라이언트 매핑 churn 을 피한다.
+	vaultDekMismatchCode = "vault_dek_mismatch"
+)
+
+// E2EE(vault v2) descriptor 를 이해하는 첫 클라이언트 버전. 이 미만(또는 헤더 없음)은
+// keyBase64 없는 세션을 파싱하지 못하므로 레거시로 취급한다. 릴리스 버전 확정 시 갱신.
+var e2eeMinimumClientVersions = map[string]string{
+	"desktop": "1.8.0",
+	"mobile":  "1.8.0",
+}
+
+// 구버전 클라이언트에 v2 계정 세션을 거부할 때 내려주는 안내. 데스크톱의
+// normalizeAuthInvalidErrorMessage 치환 패턴(unauthorized|로그인이 필요|세션이 만료 등)에
+// 걸리지 않는 문구여야 원문 그대로 로그인 화면에 표시된다. 상태코드도 같은 이유로
+// 401/403(치환)·5xx(오프라인 폴백 유도)를 피해 426 을 쓴다.
+const vaultClientOutdatedMessage = "이 계정은 종단간 암호화가 적용되어 있습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요."
+
+// parseClientVersion 은 "1.7.10"·"1.8.0-beta.1" 류 버전 문자열에서 숫자 세그먼트를 뽑는다.
+// 프리릴리스 접미사는 무시한다(게이팅 목적에는 major.minor.patch 로 충분).
+func parseClientVersion(value string) ([3]int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return [3]int{}, false
+	}
+	var parsed [3]int
+	segments := strings.SplitN(trimmed, ".", 3)
+	for index, segment := range segments {
+		digits := segment
+		for cut, char := range segment {
+			if char < '0' || char > '9' {
+				digits = segment[:cut]
+				break
+			}
+		}
+		if digits == "" {
+			// 첫 세그먼트부터 숫자가 없으면 버전이 아니다. 뒤쪽 세그먼트가 프리릴리스
+			// 라벨뿐이면("1.8.beta") 거기서 멈추고 나머지는 0 으로 둔다.
+			if index == 0 {
+				return [3]int{}, false
+			}
+			break
+		}
+		number, err := strconv.Atoi(digits)
+		if err != nil {
+			return [3]int{}, false
+		}
+		parsed[index] = number
+	}
+	return parsed, true
+}
+
+func isClientVersionAtLeast(version string, minimum string) bool {
+	parsedVersion, ok := parseClientVersion(version)
+	if !ok {
+		return false
+	}
+	parsedMinimum, ok := parseClientVersion(minimum)
+	if !ok {
+		return false
+	}
+	for index := 0; index < 3; index++ {
+		if parsedVersion[index] != parsedMinimum[index] {
+			return parsedVersion[index] > parsedMinimum[index]
+		}
+	}
+	return true
+}
+
+// resolveVaultResolution 은 요청 헤더로 클라이언트가 E2EE descriptor 를 이해하는지 판정한다.
+func resolveVaultResolution(ctx *gin.Context) auth.VaultResolution {
+	clientName := strings.TrimSpace(ctx.GetHeader(clientHeaderName))
+	minimum, known := e2eeMinimumClientVersions[clientName]
+	if !known {
+		return auth.VaultResolutionLegacy
+	}
+	if !isClientVersionAtLeast(ctx.GetHeader(clientVersionHeaderName), minimum) {
+		return auth.VaultResolutionLegacy
+	}
+	return auth.VaultResolutionE2EE
+}
 
 type browserLoginForm struct {
 	Email       string `form:"email"`
@@ -226,6 +409,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 					AWSSftp:           config.AwsSftpBridge != nil && config.AwsSsmRuntime.Enabled,
 					AWSSsoBrowserFlow: awsSsoMobileRuntime.browserFlowSupported(),
 				},
+				Vault: serverInfoVaultCapabilities{
+					E2EE: true,
+				},
 			},
 		})
 	})
@@ -320,7 +506,9 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
+		// 이 세션은 앱으로 전달되지 않고 곧장 exchange code 로 바뀐다 — 볼트를 건드리지
+		// 않아야 신규 유저가 웹 폼을 거쳤다는 이유로 v1 볼트가 미리 생성되지 않는다.
+		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
 				Title:              "Sign in to Dolgate",
@@ -415,7 +603,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx))
+		// 브라우저 폼 로그인과 동일 — 세션이 앱으로 가지 않으므로 볼트 생성을 건너뛴다.
+		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
 		if err != nil {
 			renderLoginPage(ctx, loginPageData{
 				Title:              "Create your Dolgate account",
@@ -555,7 +744,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
+		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
@@ -577,8 +766,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 
-		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx))
+		_, session, err := authService.Login(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
+			if errors.Is(err, auth.ErrVaultClientOutdated) {
+				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+				return
+			}
 			status := http.StatusUnauthorized
 			if !errors.Is(err, auth.ErrInvalidCredentials) {
 				status = http.StatusBadRequest
@@ -602,8 +795,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
 			return
 		}
-		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx))
+		session, err := authService.ExchangeCode(ctx.Request.Context(), request.Code, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
+			if errors.Is(err, auth.ErrVaultClientOutdated) {
+				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+				return
+			}
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
@@ -623,8 +820,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
 			return
 		}
-		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx))
+		session, err := authService.Refresh(ctx.Request.Context(), request.RefreshToken, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
+			if errors.Is(err, auth.ErrVaultClientOutdated) {
+				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+				return
+			}
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
@@ -1012,12 +1213,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 	})
 
-	syncGroup := router.Group("/sync")
-	syncGroup.Use(authMiddleware(authService))
-	// 탈퇴 직후 아직 만료 전 access 토큰을 가진 기기가 sync 를 밀어 넣어 지운 데이터를
-	// 되살리는 것을 막고, 그 기기의 즉시 로그아웃(401 → refresh 실패)을 유도한다.
-	// JWT 는 stateless 라 토큰만으로는 탈퇴를 알 수 없으므로 유저 존재를 확인한다.
-	syncGroup.Use(func(ctx *gin.Context) {
+	// 탈퇴 직후 아직 만료 전 access 토큰을 가진 기기의 쓰기(지운 데이터 부활, 볼트 재생성)를
+	// 막고, 그 기기의 즉시 로그아웃(401 → refresh 실패)을 유도한다. JWT 는 stateless 라
+	// 토큰만으로는 탈퇴를 알 수 없으므로 유저 존재를 확인한다.
+	requireExistingUser := func(ctx *gin.Context) {
 		exists, err := store.UserExists(ctx.Request.Context(), ctx.GetString("userId"))
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
@@ -1029,112 +1228,222 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		ctx.Next()
+	}
+
+	// E2EE 볼트(v2) 관리. 세션 발급 응답의 vaultBootstrap descriptor 와 짝을 이룬다.
+	vaultGroup := router.Group("/auth/vault")
+	vaultGroup.Use(authMiddleware(authService), requireExistingUser)
+	// 볼트 설정 — 신규 유저의 최초 설정과 (Phase B) v1 유저의 E2EE 전환을 겸한다.
+	// v1 행이 있으면 같은 트랜잭션에서 서버 보관 DEK 원문을 지우며 v2 로 교체된다.
+	vaultGroup.POST("", func(ctx *gin.Context) {
+		userID := ctx.GetString("userId")
+		var request vaultSetupRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			return
+		}
+		if message := validateVaultSetupRequest(request, true); message != "" {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": message})
+			return
+		}
+		vault, err := store.CreateUserVaultV2(
+			ctx.Request.Context(),
+			request.toUserVaultKey(userID),
+			storepkg.VaultMutationPrecondition{ExpectedEpoch: *request.ExpectedEpoch},
+		)
+		if err != nil {
+			if errors.Is(err, storepkg.ErrVaultEpochMismatch) {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 볼트가 변경되었습니다. 세션을 갱신한 뒤 다시 시도해 주세요.", "code": vaultDekMismatchCode})
+				return
+			}
+			if errors.Is(err, storepkg.ErrVaultConflict) {
+				// 다른 기기가 먼저 설정했다 — 클라이언트는 세션을 갱신해 descriptor 를
+				// 받아 잠금해제 플로우로 전환한다.
+				ctx.JSON(http.StatusConflict, gin.H{"error": "다른 기기에서 이미 동기화 암호를 설정했습니다. 그 암호로 잠금을 해제해 주세요."})
+				return
+			}
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		}
+		// 방금 시작된 DEK 세대를 돌려줘 클라이언트가 세션 재갱신 없이 캐시하게 한다.
+		ctx.JSON(http.StatusOK, gin.H{"epoch": vault.Epoch, "wrapRevision": vault.WrapRevision})
 	})
+	// 동기화 암호 변경(rewrap) — DEK 자체는 바뀌지 않으므로 다른 기기의 캐시는 계속 유효하고
+	// epoch 도 그대로다. verifier 가 없는 볼트(도입 이전 생성)에는 요청의 verifier 를 백필한다.
+	vaultGroup.PUT("", func(ctx *gin.Context) {
+		userID := ctx.GetString("userId")
+		var request vaultSetupRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			return
+		}
+		if message := validateVaultSetupRequest(request, false); message != "" {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": message})
+			return
+		}
+		if request.ExpectedDekVerifierBase64 == nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "볼트 검증 조건이 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."})
+			return
+		}
+		if request.ExpectedWrapRevision == nil || *request.ExpectedWrapRevision < 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "볼트 wrapper 개정 정보가 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."})
+			return
+		}
+		expectedVerifier := strings.TrimSpace(*request.ExpectedDekVerifierBase64)
+		expectedWrapRevision := *request.ExpectedWrapRevision
+		vault, err := store.UpdateUserVaultV2(
+			ctx.Request.Context(),
+			request.toUserVaultKey(userID),
+			storepkg.VaultMutationPrecondition{
+				ExpectedEpoch:        *request.ExpectedEpoch,
+				ExpectedDekVerifier:  &expectedVerifier,
+				ExpectedWrapRevision: &expectedWrapRevision,
+			},
+		)
+		if err != nil {
+			if errors.Is(err, storepkg.ErrVaultEpochMismatch) {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 볼트가 변경되었습니다. 세션을 갱신한 뒤 다시 시도해 주세요.", "code": vaultDekMismatchCode})
+				return
+			}
+			if errors.Is(err, storepkg.ErrVaultNotFound) || errors.Is(err, storepkg.ErrVaultConflict) {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "변경할 동기화 암호 볼트가 없습니다. 세션을 갱신한 뒤 다시 시도해 주세요."})
+				return
+			}
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"epoch": vault.Epoch, "wrapRevision": vault.WrapRevision})
+	})
+	// 볼트 초기화 — 동기화 암호 분실 최후 수단. 볼트와 모든 sync 레코드를 지운다(복구 불가).
+	// 계정은 남으므로 사용자는 곧바로 새 동기화 암호를 설정해 다시 시작한다.
+	vaultGroup.POST("/reset", func(ctx *gin.Context) {
+		userID := ctx.GetString("userId")
+		var request vaultResetRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil || request.ExpectedEpoch == nil || *request.ExpectedEpoch < 0 {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "볼트 세대 정보가 누락되었습니다. 앱을 최신 버전으로 업데이트해 주세요."})
+			return
+		}
+		epoch, err := store.ResetUserVault(ctx.Request.Context(), userID, *request.ExpectedEpoch)
+		if err != nil {
+			if errors.Is(err, storepkg.ErrVaultEpochMismatch) {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 볼트가 변경되었습니다. 세션을 갱신한 뒤 다시 시도해 주세요.", "code": vaultDekMismatchCode})
+				return
+			}
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"epoch": epoch})
+	})
+
+	syncGroup := router.Group("/sync")
+	syncGroup.Use(authMiddleware(authService))
+	syncGroup.Use(requireExistingUser)
 	syncGroup.GET("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
 
-		groups, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups)
+		// revision + 모든 kind 를 단일 읽기 트랜잭션으로 일관 스냅샷으로 읽는다.
+		// revision 과 데이터가 어긋나(새 ETag + 옛 데이터) 변경을 놓치는 일이 없도록 한다.
+		revision, payload, err := store.GetSyncSnapshot(ctx.Request.Context(), userID)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
-		hosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		secrets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		knownHosts, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		portForwards, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		dnsOverrides, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		preferences, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		awsProfiles, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		snippets, err := store.ListSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets)
-		if err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+		etag := fmt.Sprintf("\"%d\"", revision)
+		ctx.Header("ETag", etag)
+		// 변경 없음 → 본문 없이 304. 폴링이 idle 일 때 초경량이 되는 지점이다.
+		// (구버전 클라는 If-None-Match 를 안 보내므로 항상 200 전체를 받는다.)
+		if match := strings.TrimSpace(ctx.GetHeader("If-None-Match")); match != "" && match == etag {
+			ctx.Status(http.StatusNotModified)
 			return
 		}
 
-		ctx.JSON(http.StatusOK, syncmodel.Payload{
-			Groups:       groups,
-			Hosts:        hosts,
-			Secrets:      secrets,
-			KnownHosts:   knownHosts,
-			PortForwards: portForwards,
-			DNSOverrides: dnsOverrides,
-			Preferences:  preferences,
-			AWSProfiles:  awsProfiles,
-			Snippets:     snippets,
-		})
+		ctx.JSON(http.StatusOK, payload)
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
+		// 볼트 행이 없으면 push 를 거부한다. 초기화(reset) 직후 다른 기기가 옛 DEK 로
+		// 아직 unlocked 인 채 잔여 access 토큰으로 push 해서 서버를 "옛 키 + 새 키"
+		// 혼합 상태로 오염시키는 레이스를 막는다(그 기기는 409 를 받고 볼트 플로우로
+		// 전환한다). pull(GET)은 무해하므로 막지 않는다. 신규 유저는 볼트 설정 전
+		// push 할 일이 없고, 구버전 클라는 로그인 시 v1 볼트가 lazy 생성돼 있다.
+		vaultState, err := store.GetUserVaultState(ctx.Request.Context(), userID)
+		if err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		}
+		rawEpoch := strings.TrimSpace(ctx.GetHeader(vaultEpochHeader))
+		// 계정이 한 번이라도 v2가 됐다면 reset 뒤 볼트 행이 없어도 구클라이언트는
+		// 계속 426이다. 여기서 먼저 막아 v1 lazy 재생성과 잔여 무헤더 push를 차단한다.
+		if vaultState.VersionFloor >= 2 && rawEpoch == "" && resolveVaultResolution(ctx) != auth.VaultResolutionE2EE {
+			ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+			return
+		}
+		if vaultState.Vault == nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 볼트가 없습니다. 세션을 갱신한 뒤 다시 시도해 주세요.", "code": vaultResetCode})
+			return
+		}
+		vault := *vaultState.Vault
+		headerEpoch, epochParseErr := strconv.ParseInt(rawEpoch, 10, 64)
+		epochHeaderValid := rawEpoch != "" && epochParseErr == nil
+		if vaultState.VersionFloor >= 2 && vault.Version < 2 {
+			// 과거 버그/롤링 배포로 남은 v1 행은 신클라이언트가 즉시 마이그레이션해야 한다.
+			// 그 전에는 어떤 형식의 sync payload도 받지 않는다.
+			ctx.JSON(http.StatusConflict, gin.H{"error": "종단간 암호화 전환을 완료한 뒤 다시 시도해 주세요.", "code": vaultDekMismatchCode})
+			return
+		}
+		if vault.Version >= 2 {
+			// 구버전 클라(E2EE descriptor 미이해)가 v2 볼트에 push 하는 것을 막는다.
+			// v1 시절 받은 access 토큰이 15분간 남아 있어 세션 발급 426 게이트를 우회할 수
+			// 있는데, 그 창에서 옛 키로 push 하면 볼트가 오염된다. 여기서 거부하고 업데이트
+			// 안내를 준다. epoch 헤더 존재 자체가 E2EE 능력의 증거이므로(구버전은 이 헤더를
+			// 모른다) 클라 식별 헤더가 없어도 epoch 헤더가 있으면 통과시킨다.
+			// (v1 볼트에는 적용 안 됨 — 구버전이 계속 쓸 수 있어야 한다.)
+			if rawEpoch == "" && resolveVaultResolution(ctx) != auth.VaultResolutionE2EE {
+				ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": vaultClientOutdatedMessage})
+				return
+			}
+			// v2 push 에는 유효한 epoch 헤더가 필수다. 실제 세대 대조는 아래
+			// ApplyPushRecords 의 fence(트랜잭션 내 WHERE vault_epoch = ?)가 한다 —
+			// 여기서 미리 비교해도 커밋 전에 초기화/재설정이 끼어들 수 있기 때문이다.
+			if !epochHeaderValid {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.", "code": vaultDekMismatchCode})
+				return
+			}
+		} else if epochHeaderValid {
+			// E2EE 기기가 epoch 헤더로 push 하는데 볼트가 v1 이다 — 초기화 후 구버전 클라
+			// 로그인이 v1 을 lazy 재생성한 경우다. 받아주면 v1 볼트에 v2 암호문이 섞여
+			// 구버전 기기가 복호화하지 못한다. 옛 세대 기기로 취급해 재판정시킨다.
+			ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.", "code": vaultDekMismatchCode})
+			return
+		}
 		var payload syncmodel.Payload
 		if err := ctx.ShouldBindJSON(&payload); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindGroups, payload.Groups); err != nil {
+		// 모든 kind upsert + revision bump 를 단일 트랜잭션으로(원자성). 데이터가 커밋됐는데
+		// revision 은 옛 값인 창이 없어야 다른 기기가 304 로 변경을 놓치지 않는다.
+		fence := storepkg.VaultPushFence{Epoch: vault.Epoch, Version: vault.Version}
+		if vault.Version >= 2 {
+			fence.Epoch = headerEpoch
+		}
+		revision, err := store.ApplyPushRecords(ctx.Request.Context(), userID, payload, fence)
+		if err != nil {
+			if errors.Is(err, storepkg.ErrVaultEpochMismatch) {
+				ctx.JSON(http.StatusConflict, gin.H{"error": "동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.", "code": vaultDekMismatchCode})
+				return
+			}
+			// 클라이언트가 보낸 레코드 자체의 문제(잘못된 타임스탬프 등)는 400 — 재시도해도
+			// 영원히 실패하는 것을 5xx 로 위장해 서버 알림을 오염시키지 않는다.
+			if errors.Is(err, storepkg.ErrBadSyncRecord) {
+				logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+				return
+			}
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
 		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindHosts, payload.Hosts); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSecrets, payload.Secrets); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindKnownHosts, payload.KnownHosts); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPortForwards, payload.PortForwards); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindDNSOverrides, payload.DNSOverrides); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindPreferences, payload.Preferences); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindAWSProfiles, payload.AWSProfiles); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		if err := store.UpsertSyncRecords(ctx.Request.Context(), userID, syncmodel.KindSnippets, payload.Snippets); err != nil {
-			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
-			return
-		}
-		ctx.Status(http.StatusAccepted)
+		// 새 revision 을 돌려줘 push 한 기기가 자기 push 를 다시 pull 하지 않게 한다.
+		ctx.JSON(http.StatusAccepted, gin.H{"revision": revision})
 	})
 
 	return router, nil

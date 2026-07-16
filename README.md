@@ -12,6 +12,7 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 - **AI 어시스턴트** — `Cmd/Ctrl+I`로 열어 현재 SSH 세션의 호스트 정보와 최근 터미널 출력을 바탕으로 질문하고, 승인된 도구로 조회·실행을 도와줍니다.
 - **세션 녹화 및 재생** — 종료된 터미널 세션을 로컬에만 저장하고, 타임라인으로 다시 볼 수 있습니다.
 - **동기화를 self-host로** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다.
+- **종단간 암호화 동기화 (zero-knowledge)** — 동기화 데이터는 기기에서 암호화된 뒤 저장되고, 복호화 키는 사용자의 동기화 암호로만 풀립니다. 서버는 원문 키를 갖지 않아 동기화된 데이터에 접근할 수 없습니다.
 - **세션 공유 & 협업** — 실행 중인 세션을 브라우저 viewer 링크로 공유하고 실시간 채팅으로 함께 봅니다.
 
 ## 구성
@@ -64,6 +65,13 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 - Session Share, 브라우저 viewer, 실시간 채팅
 - OpenSSH / Xshell / Termius import
 
+**동기화 & 보안**
+
+- 종단간 암호화(E2EE) — 호스트·자격 증명·스니펫 등 동기화 데이터는 기기에서 암호화되어 서버에는 암호문만 저장됩니다
+- Zero-knowledge — 암호화 키(DEK)는 사용자의 동기화 암호(Argon2id)로 감싸 보관되며, 서버는 원문 키를 저장하지 않습니다. 동기화 암호를 잊으면 서버도 복구해 줄 수 없습니다
+
+자세한 설계는 [데이터 보호 문서](./docs/data-protection.md)를 참고하세요.
+
 **그 외**
 
 - 자동 업데이트 · 셀프호스팅 sync-api
@@ -82,14 +90,6 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
 
-### 로컬 개발 진입점
-
-```bash
-npm run dev:desktop
-npm run dev:mobile:ios
-npm run dev:mobile:android
-npm run dev:api
-```
 
 ## 자체 sync-api 호스팅
 
@@ -148,11 +148,10 @@ SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 �
 ## 문서
 
 - [Desktop 문서](./docs/desktop.md)
-- [Mobile 문서](./docs/mobile.md)
 - [AI 어시스턴트](./docs/ai-assistant-design.md)
 - [AWS / SSM 설정 가이드](./docs/aws.md)
-- [기능 흐름](./docs/feature-flows.md)
 - [아키텍처](./docs/architecture.md)
+- [데이터 보호 (E2EE)](./docs/data-protection.md)
 - [빌드 및 배포](./docs/build-and-deploy.md)
 - [sync-api 자체 호스팅 가이드](./docs/sync-api-self-hosting.md)
 - [ssh-core IPC 프로토콜](./docs/ipc-protocol.md)

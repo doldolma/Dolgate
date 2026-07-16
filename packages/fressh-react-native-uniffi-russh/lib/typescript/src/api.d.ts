@@ -197,6 +197,12 @@ declare function validateCertificate(certificate: string): {
     valid: false;
     error: GeneratedRussh.SshError;
 };
+declare function deriveArgon2idKey(passphrase: Uint8Array, salt: Uint8Array, params: {
+    memoryKib: number;
+    timeCost: number;
+    parallelism: number;
+    outputLength: number;
+}): Promise<Uint8Array>;
 export { SshError, SshError_Tags } from "./generated/uniffi_russh";
 export declare const RnRussh: {
     uniffiInitAsync: typeof GeneratedRussh.uniffiInitAsync;
@@ -205,5 +211,6 @@ export declare const RnRussh: {
     generateKeyPair: typeof generateKeyPair;
     validatePrivateKey: typeof validatePrivateKey;
     validateCertificate: typeof validateCertificate;
+    deriveArgon2idKey: typeof deriveArgon2idKey;
 };
 //# sourceMappingURL=api.d.ts.map

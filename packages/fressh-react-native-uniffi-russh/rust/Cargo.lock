@@ -2272,6 +2272,7 @@ dependencies = [
 name = "uniffi-russh"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "async-trait",
  "base64",
  "bytes",
@@ -2282,6 +2283,7 @@ dependencies = [
  "russh",
  "russh-keys",
  "russh-sftp",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "uniffi",

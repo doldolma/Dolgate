@@ -48,6 +48,9 @@ function createContext() {
       get: vi.fn(),
       update: vi.fn(),
     },
+    authService: {
+      resetServerVaultSupport: vi.fn(),
+    },
     sessionReplayService: {
       prune: vi.fn(),
     },
@@ -137,5 +140,29 @@ describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
         filters: expect.anything(),
       }),
     );
+  });
+
+  it("resets cached vault capability only when the effective server URL changes", async () => {
+    const ctx = createContext();
+    ctx.settings.get.mockReturnValue({ serverUrl: "https://old.example.com" });
+    ctx.settings.update.mockReturnValue({
+      serverUrl: "https://new.example.com",
+    });
+
+    registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
+    const handler = getRegisteredHandler(ipcChannels.settings.update);
+
+    await handler({}, { serverUrlOverride: "https://new.example.com" });
+
+    expect(ctx.authService.resetServerVaultSupport).toHaveBeenCalledOnce();
+
+    ctx.authService.resetServerVaultSupport.mockClear();
+    ctx.settings.update.mockReturnValue({
+      serverUrl: "https://old.example.com",
+    });
+
+    await handler({}, { theme: "dark" });
+
+    expect(ctx.authService.resetServerVaultSupport).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,12 @@ import type {
   TerminalPreferencesRecord
 } from '@shared';
 import {
+  formatSyncRevisionEtag,
+  isVaultEpochRejectionCode,
+  parseSyncRevisionEtag,
+  VAULT_EPOCH_HEADER,
+} from '@shared';
+import {
   GroupRepository,
   HostRepository,
   KnownHostRepository,
@@ -44,6 +50,24 @@ export class SyncAuthenticationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SyncAuthenticationError';
+  }
+}
+
+// 서버가 push 를 stale DEK(다른 기기의 초기화 후 재설정으로 교체됨)로 판정해 거부했다.
+// 일반 오류로 재시도하면 영원히 실패하므로, 캐시 DEK 를 버리고 재잠금해야 한다.
+export class SyncVaultDekMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncVaultDekMismatchError';
+  }
+}
+
+// pull 한 레코드를 캐시 DEK 로 복호화하지 못했다 — 다른 기기가 초기화 후 재설정해 DEK 가
+// 교체됐다는 신호다(우리 DEK 로 만든 데이터라면 복호화가 실패할 리 없다). 재잠금 대상.
+export class SyncVaultDecodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SyncVaultDecodeError';
   }
 }
 
@@ -179,17 +203,24 @@ function encodeEncryptedPayload(plaintext: string, keyBase64: string): string {
 }
 
 function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
-  const envelope = JSON.parse(payload) as {
-    v: number;
-    iv: string;
-    tag: string;
-    ciphertext: string;
-  };
-  const key = Buffer.from(keyBase64, 'base64');
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
-  const plaintext = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]).toString('utf8');
-  return JSON.parse(plaintext) as T;
+  try {
+    const envelope = JSON.parse(payload) as {
+      v: number;
+      iv: string;
+      tag: string;
+      ciphertext: string;
+    };
+    const key = Buffer.from(keyBase64, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+    const plaintext = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]).toString('utf8');
+    return JSON.parse(plaintext) as T;
+  } catch (error) {
+    // GCM 인증 실패(잘못된 DEK) 등 — stale DEK 신호로 올려보내 재잠금을 유도한다.
+    throw new SyncVaultDecodeError(
+      error instanceof Error ? error.message : '동기화 데이터를 복호화하지 못했습니다.',
+    );
+  }
 }
 
 async function toApiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -232,6 +263,29 @@ async function toApiError(response: Response, fallback: string): Promise<Error> 
   return new Error(message);
 }
 
+// 409 응답은 body 의 code 로 종류를 구분한다. vault_dek_mismatch(DEK 세대 불일치)와
+// vault_reset(볼트 삭제 직후, 재설정 전) 모두 "이 DEK 로는 더 못 간다" 신호이므로 같은
+// 재판정 플로우로 보낸다 — 세션을 갱신하면 epoch/verifier 재해석이 올바른 상태(잠금 또는
+// 설정 게이트)로 이끌고, 30초 폴링이 전체 스냅샷 재암호화를 반복하는 hot loop 도 사라진다.
+// toApiErrorMessage 는 message 만 추출해 code 가 유실되므로 여기서 직접 읽는다.
+async function toConflictError(response: Response, fallback: string): Promise<Error> {
+  const text = (await response.text()).trim();
+  let message = '';
+  let code = '';
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; code?: unknown };
+    message = typeof parsed.error === 'string' ? parsed.error : '';
+    code = typeof parsed.code === 'string' ? parsed.code : '';
+  } catch {
+    // JSON 이 아니면 fallback 메시지를 쓴다.
+  }
+  const resolvedMessage = message || `${fallback} (${response.status})`;
+  if (isVaultEpochRejectionCode(code)) {
+    return new SyncVaultDekMismatchError(resolvedMessage);
+  }
+  return new Error(resolvedMessage);
+}
+
 export function isSyncAuthenticationError(error: unknown): error is SyncAuthenticationError {
   return error instanceof SyncAuthenticationError;
 }
@@ -249,7 +303,11 @@ export class SyncService {
   private state: SyncStatus;
   private pushTimer: NodeJS.Timeout | null = null;
   private pushPromise: Promise<SyncStatus> | null = null;
+  private bootstrapPromise: Promise<SyncStatus> | null = null;
   private queuedPushAfterCurrent = false;
+  // 마지막으로 서버와 맞춘 리비전(ETag). 폴링의 If-None-Match 로 보내 변경 없으면 304 로
+  // 조기 종료한다. 프로세스 메모리에만 두고, 재시작 시 첫 부트스트랩이 전체를 받아 다시 채운다.
+  private lastSyncRevision: string | null = null;
   private onAppliedSnapshot: (() => void | Promise<void>) | null = null;
 
   constructor(
@@ -299,7 +357,25 @@ export class SyncService {
     return this.state;
   }
 
+  // 볼트 라이프사이클 이벤트(잠금해제·설정·초기화)에서 호출 — ETag 는 "적용한 상태"의
+  // 표식이므로 새 DEK 세대에는 무효다(304 로 새 세대 스냅샷을 건너뛰지 않게 지운다).
+  resetVaultRecoveryState(): void {
+    this.lastSyncRevision = null;
+  }
+
   async bootstrap(): Promise<SyncStatus> {
+    // 잠금해제 IPC 와 렌더러 하이드레이션이 동시에 부를 수 있다 — 같은 스냅샷을 두 번
+    // push/pull 하거나 ETag 저장이 엇갈리지 않게 한 번에 하나만 돈다.
+    if (this.bootstrapPromise) {
+      return this.bootstrapPromise;
+    }
+    this.bootstrapPromise = this.runBootstrap().finally(() => {
+      this.bootstrapPromise = null;
+    });
+    return this.bootstrapPromise;
+  }
+
+  private async runBootstrap(): Promise<SyncStatus> {
     if (isE2ESyncDisabled()) {
       this.patchState({
         status: 'ready',
@@ -312,6 +388,11 @@ export class SyncService {
 
     if (this.authService.getState().status === 'offline-authenticated') {
       return this.pause('오프라인 모드에서는 동기화를 일시 중지합니다.');
+    }
+
+    // E2EE 볼트가 잠겨 있으면 복호화 키가 없다 — 잠금해제(vault IPC)가 다시 부트스트랩한다.
+    if (!this.authService.isVaultReadyForSync()) {
+      return this.pause('동기화 암호를 입력하면 동기화를 시작합니다.');
     }
 
     const hadPendingLocalChanges = this.hasPendingLocalChanges();
@@ -341,7 +422,8 @@ export class SyncService {
       }
 
       let remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport);
-      if (totalRecordCount(remote) === 0) {
+      // remote 가 비어 있으면(신규/서버 유실) 로컬을 재업로드해 복구한다.
+      if (remote.payload !== null && totalRecordCount(remote.payload) === 0) {
         const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport);
         if (totalRecordCount(local) > 0) {
           await this.pushSnapshot(local);
@@ -349,16 +431,30 @@ export class SyncService {
         }
       }
 
-      const hadAwsProfileConflicts = await this.applyRemoteSnapshotAtomically(
-        remote,
-        awsProfilesServerSupport
-      );
+      // payload === null 은 304(마지막 동기화 이후 서버 변경 없음) — 적용을 건너뛴다.
+      const applied = remote.payload !== null;
+      const hadAwsProfileConflicts = applied
+        ? await this.applyRemoteSnapshotAtomically(
+            remote.payload as SyncPayloadV2,
+            awsProfilesServerSupport,
+          )
+        : false;
+      // "저장된 리비전 = 실제로 적용한 상태" 불변식: apply 가 성공한 지금에서야 ETag 를
+      // 저장한다(decode 실패 시 저장되지 않아, 재잠금 후 unlock 이 304 에 갇히지 않는다).
+      if (applied && remote.etag) {
+        this.lastSyncRevision = remote.etag;
+      }
       this.outbox.clearMany(
         this.listSyncableDeletions(awsProfilesServerSupport)
       );
       this.patchState({
         status: 'ready',
         lastSuccessfulSyncAt: new Date().toISOString(),
+        // 실제 적용(200)일 때만 데이터 변경 시각을 갱신 — 304 는 그대로 둬서 렌더러
+        // 폴링이 불필요한 워크스페이스 재조회를 건너뛰게 한다.
+        lastDataChangeAt: applied
+          ? new Date().toISOString()
+          : this.state.lastDataChangeAt ?? null,
         pendingPush: hadAwsProfileConflicts,
         errorMessage: null
       });
@@ -366,6 +462,27 @@ export class SyncService {
         this.scheduleRetry();
       }
     } catch (error) {
+      // 볼트 세대 문제(push 409) 또는 pull 복호화 실패 — 둘 다 같은 재판정으로 보낸다:
+      // 세션을 갱신해 최신 descriptor 의 epoch/verifier 로 재해석한다(비파괴 — refresh
+      // 실패 시 아무것도 잃지 않고 다음 폴링이 재시도한다).
+      if (
+        error instanceof SyncVaultDekMismatchError ||
+        error instanceof SyncVaultDecodeError
+      ) {
+        await this.authService.handleVaultDekRejected();
+        if (
+          error instanceof SyncVaultDecodeError &&
+          this.authService.getVaultStatus() === 'unlocked'
+        ) {
+          // 재판정 후에도 verifier 가 이 DEK 를 증명한다(세대 그대로) — 복호화 실패의
+          // 원인은 DEK 가 아니라 데이터 손상이다. 재잠금해 봐야 같은 DEK 를 다시 받을
+          // 뿐이므로(무한 재입력 루프) 오류로 표시한다.
+          return this.pause(
+            '동기화 데이터를 복호화할 수 없습니다. 데이터가 손상되었을 수 있습니다.',
+          );
+        }
+        return this.pause(error.message);
+      }
       this.patchState({
         status: 'error',
         errorMessage: error instanceof Error ? error.message : '초기 동기화에 실패했습니다.',
@@ -397,6 +514,10 @@ export class SyncService {
 
     if (this.authService.getState().status === 'offline-authenticated') {
       return this.pause('오프라인 모드에서는 변경 내용을 로컬에 보관하고 나중에 동기화합니다.');
+    }
+
+    if (!this.authService.isVaultReadyForSync()) {
+      return this.pause('동기화 암호를 입력하면 변경 내용을 동기화합니다.');
     }
 
     if (this.pushPromise) {
@@ -432,12 +553,19 @@ export class SyncService {
           errorMessage: null
         });
       } catch (error) {
-        this.patchState({
-          status: 'error',
-          pendingPush: true,
-          errorMessage: error instanceof Error ? error.message : '동기화 업로드에 실패했습니다.'
-        });
-        this.scheduleRetry();
+        if (error instanceof SyncVaultDekMismatchError) {
+          // 옛 세대 push 거부 — 재시도해도 영원히 실패하므로 재판정으로 전환하고
+          // 재시도 스케줄을 걸지 않는다(재잠금 후 새 암호 잠금해제가 다시 부트스트랩한다).
+          await this.authService.handleVaultDekRejected();
+          this.pause(error.message);
+        } else {
+          this.patchState({
+            status: 'error',
+            pendingPush: true,
+            errorMessage: error instanceof Error ? error.message : '동기화 업로드에 실패했습니다.'
+          });
+          this.scheduleRetry();
+        }
       } finally {
         this.pushPromise = null;
         this.queuedPushAfterCurrent = false;
@@ -476,16 +604,28 @@ export class SyncService {
     this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
+    // 다음 계정이 옛 계정의 ETag 로 조건부 GET 해서 잘못 304 받는 걸 막는다.
+    this.resetVaultRecoveryState();
     this.stateStorage.updateSyncDataOwner({
       userId: null,
       serverUrl: null
     });
-    this.patchState(defaultSyncStatus());
+    // patchState 는 병합이라 이전 계정의 lastDataChangeAt 이 남는다 — 명시적으로 지운다.
+    this.patchState({ ...defaultSyncStatus(), lastDataChangeAt: null });
   }
 
   private withAccessToken(init: RequestInit | undefined, accessToken: string): RequestInit {
     const headers = new Headers(init?.headers ?? {});
     headers.set('Authorization', `Bearer ${accessToken}`);
+    // 클라 식별 헤더 — 서버의 v2 push 버전 게이트(426)가 이 클라이언트를 구버전으로
+    // 오인하지 않게 한다(세션 발급에만 붙던 헤더를 /sync 에도 붙인다).
+    for (const [name, value] of Object.entries(
+      this.authService.getClientIdentificationHeaders(),
+    )) {
+      if (!headers.has(name)) {
+        headers.set(name, value);
+      }
+    }
     return {
       ...init,
       headers
@@ -494,8 +634,12 @@ export class SyncService {
 
   private async fetchWithAuthRetry(url: URL, init: RequestInit, fallback: string): Promise<Response> {
     let response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
-    if (response.ok) {
+    // 304 Not Modified 는 조건부 GET 의 정상 결과(변경 없음)이므로 통과시킨다.
+    if (response.ok || response.status === 304) {
       return response;
+    }
+    if (response.status === 409) {
+      throw await toConflictError(response, fallback);
     }
 
     const firstFailureMessage = await toApiErrorMessage(response, fallback);
@@ -509,30 +653,71 @@ export class SyncService {
     }
 
     response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
-    if (!response.ok) {
+    if (!response.ok && response.status !== 304) {
+      if (response.status === 409) {
+        throw await toConflictError(response, fallback);
+      }
       throw await toApiError(response, fallback);
     }
     return response;
   }
 
+  // 조건부 GET. lastSyncRevision 은 여기서 절대 저장하지 않는다 — "저장된 리비전은 실제로
+  // 적용한 상태만 가리킨다" 는 불변식을 지키기 위해, 저장은 apply 성공 후 호출자가 한다.
+  // (fetch 시점에 저장하면 decode 실패→재잠금→새 암호 unlock 후 304 를 받아 새 스냅샷을
+  // 영영 적용하지 못하는 창이 생긴다 — 모바일에서 고친 것과 동일한 버그.)
   private async fetchRemoteSnapshot(
-    awsProfilesServerSupport: AwsProfilesServerSupport
-  ): Promise<SyncPayloadV2> {
-    const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {}, '동기화 데이터 조회에 실패했습니다.');
-    return normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>, {
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    options?: { ignoreEtag?: boolean }
+  ): Promise<{ payload: SyncPayloadV2 | null; etag: string | null }> {
+    const headers: Record<string, string> = {};
+    if (!options?.ignoreEtag && this.lastSyncRevision) {
+      headers['If-None-Match'] = this.lastSyncRevision;
+    }
+    const response = await this.fetchWithAuthRetry(
+      new URL('/sync', this.authService.getServerUrl()),
+      { headers },
+      '동기화 데이터 조회에 실패했습니다.',
+    );
+    if (response.status === 304) {
+      return { payload: null, etag: this.lastSyncRevision };
+    }
+    const etag = response.headers.get('etag');
+    const payload = normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>, {
       includeAwsProfiles: this.shouldSyncAwsProfiles(awsProfilesServerSupport),
     });
+    return { payload, etag };
   }
 
   private async pushSnapshot(payload: SyncPayloadV2): Promise<void> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    // 암호화에 쓴 DEK 의 세대(epoch)를 실어 보낸다 — 서버가 트랜잭션 안에서 fence 로
+    // 대조해, 다른 기기의 초기화/재설정과 겹친 push 를 커밋 시점에 거부한다(409).
+    const vaultEpoch = this.authService.getVaultEpoch();
+    if (vaultEpoch !== null) {
+      headers[VAULT_EPOCH_HEADER] = String(vaultEpoch);
+    }
     const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify(payload)
     }, '동기화 업로드에 실패했습니다.');
-    void response;
+    // push 응답의 리비전은 "직전 pull 리비전 + 1"일 때만 저장한다. 그보다 크면 내 push
+    // 이전에 다른 기기의 변경이 끼어 있다는 뜻 — 그대로 저장하면 다음 폴링이 304 로 그
+    // 변경들을 영영 건너뛴다. 옛 ETag 를 유지해 다음 폴링이 200 전체를 받게 한다.
+    try {
+      const body = (await response.json()) as { revision?: number };
+      if (typeof body.revision === 'number') {
+        const lastPulled = parseSyncRevisionEtag(this.lastSyncRevision);
+        if (lastPulled !== null && body.revision <= lastPulled + 1) {
+          this.lastSyncRevision = formatSyncRevisionEtag(body.revision);
+        }
+      }
+    } catch {
+      // 구버전 서버는 본문이 없을 수 있다 — 그러면 다음 폴링이 전체를 한 번 당긴다(무해).
+    }
   }
 
   private async buildEncryptedSnapshot(
@@ -846,12 +1031,17 @@ export class SyncService {
     try {
       const response = await fetch(new URL('/api/info', this.authService.getServerUrl()));
       if (!response.ok) {
+        this.authService.noteServerVaultSupport(false);
         return 'unsupported';
       }
-      return resolveAwsProfilesServerSupport(
-        (await response.json()) as Partial<ServerInfoResponse>
+      const serverInfo = (await response.json()) as Partial<ServerInfoResponse>;
+      // 셀프호스팅 구버전 서버(vault capability 없음)에서는 E2EE 전환 프롬프트를 숨긴다.
+      this.authService.noteServerVaultSupport(
+        serverInfo.capabilities?.vault?.e2ee === true
       );
+      return resolveAwsProfilesServerSupport(serverInfo);
     } catch {
+      // 네트워크 실패는 판단 보류 — 기존 값을 유지한다.
       return 'unsupported';
     }
   }

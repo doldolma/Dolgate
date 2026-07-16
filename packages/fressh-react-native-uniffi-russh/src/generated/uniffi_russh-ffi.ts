@@ -212,6 +212,14 @@ interface NativeModuleInterface {
   ): bigint;
   ubrn_uniffi_uniffi_russh_fn_func_connect(options: Uint8Array): bigint;
   ubrn_uniffi_uniffi_russh_fn_func_connect_sftp(options: Uint8Array): bigint;
+  ubrn_uniffi_uniffi_russh_fn_func_derive_argon2id_key(
+    passphrase: Uint8Array,
+    salt: Uint8Array,
+    memoryKib: number,
+    timeCost: number,
+    parallelism: number,
+    outputLength: number,
+  ): bigint;
   ubrn_uniffi_uniffi_russh_fn_func_generate_key_pair(
     keyType: Uint8Array,
     uniffi_out_err: UniffiRustCallStatus,
@@ -370,6 +378,7 @@ interface NativeModuleInterface {
   ): void;
   ubrn_uniffi_uniffi_russh_checksum_func_connect(): number;
   ubrn_uniffi_uniffi_russh_checksum_func_connect_sftp(): number;
+  ubrn_uniffi_uniffi_russh_checksum_func_derive_argon2id_key(): number;
   ubrn_uniffi_uniffi_russh_checksum_func_generate_key_pair(): number;
   ubrn_uniffi_uniffi_russh_checksum_func_validate_certificate(): number;
   ubrn_uniffi_uniffi_russh_checksum_func_validate_private_key(): number;

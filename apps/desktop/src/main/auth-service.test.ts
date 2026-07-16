@@ -27,6 +27,25 @@ vi.mock("electron", () => ({
   },
 }));
 
+// 상태 머신 테스트는 Argon2 구현 자체가 아니라 descriptor/cache 전이를 검증한다.
+// 프로덕션 지원 프로필(64MiB/3/1)은 유지하되 KDF primitive만 빠른 결정 함수로 대체한다.
+vi.mock("./vault-crypto", () => ({
+  desktopArgon2idDerive: vi.fn(
+    async (
+      passphrase: Uint8Array,
+      salt: Uint8Array,
+      params: { outputLength: number },
+    ) => {
+      const output = new Uint8Array(params.outputLength);
+      [...passphrase, ...salt].forEach((value, index) => {
+        const target = index % output.length;
+        output[target] = (output[target] + value + index) & 0xff;
+      });
+      return output;
+    },
+  ),
+}));
+
 function base64url(value: string): string {
   return Buffer.from(value, "utf8").toString("base64url");
 }
@@ -119,9 +138,10 @@ async function createService(serverUrl = "https://ssh.doldolma.com") {
       },
     }),
   };
+  let currentServerUrl = serverUrl;
   const settings = {
     get: () => ({
-      serverUrl,
+      serverUrl: currentServerUrl,
     }),
   };
 
@@ -132,6 +152,9 @@ async function createService(serverUrl = "https://ssh.doldolma.com") {
       configService as never,
       settings as never,
     ),
+    setServerUrl: (nextServerUrl: string) => {
+      currentServerUrl = nextServerUrl;
+    },
   };
 }
 
@@ -192,6 +215,37 @@ describe("AuthService offline bootstrap", () => {
       userId: session.user.id,
       serverUrl: `${serverUrl}/`,
     });
+  });
+
+  it("restores a persisted version-0 reset descriptor as setup-required", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    const resetSession: AuthSession = {
+      ...session,
+      vaultBootstrap: { version: 0, epoch: 6 },
+    };
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      "auth:offline-session-cache",
+      JSON.stringify({
+        serverUrl: `${serverUrl}/`,
+        user: session.user,
+        vaultBootstrap: resetSession.vaultBootstrap,
+        offlineLease: session.offlineLease,
+        lastOnlineAt: session.syncServerTime,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network down")),
+    );
+
+    const state = await service.bootstrap();
+
+    expect(state.status).toBe("offline-authenticated");
+    expect(state.vault?.status).toBe("setup-required");
+    expect(state.session?.vaultBootstrap).toEqual({ version: 0, epoch: 6 });
   });
 
   it("activates local account history on login and invalidates it on logout", async () => {
@@ -539,9 +593,9 @@ describe("AuthService browser login recovery", () => {
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(url)).toContain("/auth/account");
     expect(init?.method).toBe("DELETE");
-    expect(
-      (init?.headers as Record<string, string>).Authorization,
-    ).toContain("Bearer ");
+    expect((init?.headers as Record<string, string>).Authorization).toContain(
+      "Bearer ",
+    );
     expect(service.getState().status).toBe("unauthenticated");
     await expect(secretStore.load("auth:refresh-token")).resolves.toBeNull();
     // 탈퇴는 로그아웃과 달리 로컬 흔적(리플레이·로그·AI 키) 와이프까지 요청해야 한다.
@@ -576,5 +630,1096 @@ describe("AuthService browser login recovery", () => {
       "서버 오류가 발생했습니다.",
     );
     expect(service.getState().status).toBe("authenticated");
+  });
+});
+
+describe("AuthService E2EE vault", () => {
+  const VAULT_TEST_KDF = {
+    algorithm: "argon2id",
+    saltBase64: Buffer.alloc(16, 0xb2).toString("base64"),
+    memoryKib: 64 * 1024,
+    timeCost: 3,
+    parallelism: 1,
+  };
+
+  async function buildWrappedDek(passphrase: string): Promise<{
+    wrappedDekBase64: string;
+    dekBase64: string;
+    dekVerifierBase64: string;
+  }> {
+    const {
+      deriveVaultKek,
+      wrapVaultDek,
+      createVaultDek,
+      computeVaultDekVerifier,
+    } = await import("@dolssh/shared-core");
+    const { desktopArgon2idDerive } = await import("./vault-crypto");
+    const dek = createVaultDek();
+    const kek = await deriveVaultKek(
+      desktopArgon2idDerive,
+      passphrase,
+      VAULT_TEST_KDF,
+    );
+    return {
+      wrappedDekBase64: wrapVaultDek(dek, kek),
+      dekBase64: Buffer.from(dek).toString("base64"),
+      dekVerifierBase64: computeVaultDekVerifier(dek),
+    };
+  }
+
+  function createV2Session(
+    serverUrl: string,
+    wrappedDekBase64: string,
+    options?: {
+      epoch?: number;
+      wrapRevision?: number;
+      dekVerifierBase64?: string;
+    },
+  ): AuthSession {
+    const session = createSession(serverUrl);
+    return {
+      ...session,
+      vaultBootstrap: {
+        version: 2,
+        wrappedDekBase64,
+        kdf: VAULT_TEST_KDF,
+        ...(options?.epoch !== undefined ? { epoch: options.epoch } : {}),
+        ...(options?.wrapRevision !== undefined
+          ? { wrapRevision: options.wrapRevision }
+          : {}),
+        ...(options?.dekVerifierBase64
+          ? { dekVerifierBase64: options.dekVerifierBase64 }
+          : {}),
+      },
+    };
+  }
+
+  // JSON 캐시({dekBase64, epoch})에서 DEK 만 뽑는다. 이전 포맷(base64 원문)도 지원.
+  function cachedDekOf(raw: string | null): string | null {
+    if (!raw) {
+      return null;
+    }
+    if (!raw.trim().startsWith("{")) {
+      return raw;
+    }
+    return (JSON.parse(raw) as { dekBase64?: string }).dekBase64 ?? null;
+  }
+
+  function stubSessionRefresh(session: AuthSession): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === "/auth/refresh") {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => session,
+          text: async () => JSON.stringify(session),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("gates a v2 session as locked and unlocks with the correct passphrase", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const passphrase = "correct horse battery";
+    const { wrappedDekBase64, dekBase64 } = await buildWrappedDek(passphrase);
+    const session = createV2Session(serverUrl, wrappedDekBase64);
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.status).toBe("authenticated");
+    expect(state.vault?.status).toBe("locked");
+    expect(service.isVaultReadyForSync()).toBe(false);
+    expect(() => service.getVaultKeyBase64()).toThrow(
+      "동기화 잠금 해제가 필요합니다.",
+    );
+
+    await expect(service.unlockVault("wrong-passphrase")).rejects.toThrow(
+      "동기화 암호가 올바르지 않습니다.",
+    );
+    expect(service.getState().vault?.status).toBe("locked");
+
+    await service.unlockVault(passphrase);
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.isVaultReadyForSync()).toBe(true);
+    expect(service.getVaultKeyBase64()).toBe(dekBase64);
+    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+      dekBase64,
+    );
+    expect(
+      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+    ).toMatchObject({
+      owner: { serverUrl: `${serverUrl}/`, userId: session.user.id },
+      wrapRevision: 0,
+    });
+  });
+
+  it("rejects an unwrapped DEK that does not match the descriptor verifier", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const wrappedVault = await buildWrappedDek("correct-passphrase");
+    const differentVault = await buildWrappedDek("different-passphrase");
+    const session = createV2Session(serverUrl, wrappedVault.wrappedDekBase64, {
+      epoch: 4,
+      dekVerifierBase64: differentVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+    await service.bootstrap();
+
+    await expect(service.unlockVault("correct-passphrase")).rejects.toThrow(
+      "동기화 볼트의 키 검증에 실패했습니다.",
+    );
+    expect(service.getState().vault?.status).toBe("locked");
+    await expect(secretStore.load("auth:vault-dek")).resolves.toBeNull();
+  });
+
+  it("keeps the unlocked memory state when secure cache persistence fails", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const passphrase = "correct-passphrase";
+    const vault = await buildWrappedDek(passphrase);
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 2,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+    await service.bootstrap();
+    const originalSave = secretStore.save.bind(secretStore);
+    vi.spyOn(secretStore, "save").mockImplementation(
+      async (account: string, value: string) => {
+        if (account === "auth:vault-dek") {
+          throw new Error("secure storage unavailable");
+        }
+        return originalSave(account, value);
+      },
+    );
+
+    await service.unlockVault(passphrase);
+
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(vault.dekBase64);
+  });
+
+  it("rejects a desktop DEK cache owned by another account", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const currentVault = await buildWrappedDek("current-passphrase");
+    const foreignVault = await buildWrappedDek("foreign-passphrase");
+    const session = createV2Session(serverUrl, currentVault.wrappedDekBase64, {
+      epoch: 2,
+      wrapRevision: 1,
+      dekVerifierBase64: currentVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({
+        version: 2,
+        owner: { serverUrl: `${serverUrl}/`, userId: "other-user" },
+        dekBase64: foreignVault.dekBase64,
+        epoch: 9,
+        wrapRevision: 4,
+        wrappedDekBase64: foreignVault.wrappedDekBase64,
+        kdf: VAULT_TEST_KDF,
+        dekVerifierBase64: foreignVault.dekVerifierBase64,
+      }),
+    );
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+
+    expect(state.vault?.status).toBe("locked");
+    await expect(secretStore.load("auth:vault-dek")).resolves.toBeNull();
+  });
+
+  it("blocks legacy sync when the server requires E2EE migration", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session: AuthSession = {
+      ...createSession(serverUrl),
+      vaultBootstrap: {
+        version: 1,
+        keyBase64: Buffer.alloc(32, 1).toString("base64"),
+        epoch: 3,
+        e2eeRequired: true,
+      },
+    };
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+
+    expect(state.vault).toMatchObject({
+      status: "legacy",
+      migrationRequired: true,
+    });
+    expect(service.isVaultReadyForSync()).toBe(false);
+    expect(() => service.getVaultKeyBase64()).toThrow(
+      "동기화 잠금 해제가 필요합니다.",
+    );
+  });
+
+  it("blocks sync with an explicit error when the vault descriptor is unsupported", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = {
+      ...createSession(serverUrl),
+      vaultBootstrap: { version: 99 },
+    } as unknown as AuthSession;
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault).toMatchObject({
+      status: "error",
+      errorMessage: expect.stringContaining("앱을 업데이트"),
+    });
+    expect(service.isVaultReadyForSync()).toBe(false);
+    expect(() => service.getVaultKeyBase64()).toThrow("앱을 업데이트");
+  });
+
+  it("rejects a new vault passphrase shorter than four characters", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session: AuthSession = {
+      ...createSession(serverUrl),
+      vaultBootstrap: { version: 0, epoch: 0 },
+    };
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    const fetchMock = stubSessionRefresh(session);
+
+    await service.bootstrap();
+    await expect(service.setupVault("abc")).rejects.toThrow(
+      "동기화 암호는 4자 이상이어야 합니다.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(service.getState().vault?.status).toBe("setup-required");
+  });
+
+  it("restores the unlocked state from the cached DEK without a passphrase", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const { wrappedDekBase64, dekBase64, dekVerifierBase64 } =
+      await buildWrappedDek("any-passphrase");
+    const session = createV2Session(serverUrl, wrappedDekBase64, {
+      epoch: 1,
+      dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    // 이전 포맷(base64 원문, epoch 없음) 캐시 — verifier 일치가 곧 증명이므로
+    // 재입력 없이 unlocked 로 복원되고 epoch 이 채택된다.
+    await secretStore.save("auth:vault-dek", dekBase64);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(dekBase64);
+    expect(service.getVaultEpoch()).toBe(1);
+    // verifier가 확인된 descriptor와 함께 coherent v2 cache로 승격된다.
+    expect(
+      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+    ).toMatchObject({
+      version: 2,
+      dekBase64,
+      epoch: 1,
+      wrappedDekBase64,
+      dekVerifierBase64,
+    });
+  });
+
+  it("refuses to rewrap when the cached DEK and wrapped descriptor disagree", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const cachedVault = await buildWrappedDek("cached-pass");
+    const wrappedVault = await buildWrappedDek("descriptor-pass");
+    const corruptSession = createV2Session(
+      serverUrl,
+      wrappedVault.wrappedDekBase64,
+      {
+        epoch: 2,
+        // 서버 verifier는 캐시 DEK를 가리키지만 wrapped 값은 다른 DEK를 푸는 비정상 조합.
+        dekVerifierBase64: cachedVault.dekVerifierBase64,
+      },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      corruptSession.tokens.refreshToken,
+    );
+    await secretStore.save("auth:vault-dek", cachedVault.dekBase64);
+    stubSessionRefresh(corruptSession);
+    await service.bootstrap();
+
+    await expect(
+      service.changeVaultPassphrase("descriptor-pass", "next-pass"),
+    ).rejects.toThrow("로컬 볼트 캐시와 서버 키가 일치하지 않습니다.");
+  });
+
+  it("changes the passphrase with a wrapper revision CAS", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const currentPassphrase = "current-passphrase";
+    const vault = await buildWrappedDek(currentPassphrase);
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 2,
+      wrapRevision: 3,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+    let rewrapBody: Record<string, unknown> | null = null;
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => session,
+            text: async () => JSON.stringify(session),
+          } as Response;
+        }
+        if (pathname === "/auth/vault" && init?.method === "PUT") {
+          rewrapBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => ({ epoch: 2, wrapRevision: 4 }),
+            text: async () => JSON.stringify({ epoch: 2, wrapRevision: 4 }),
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      }),
+    );
+
+    await service.bootstrap();
+    await service.unlockVault(currentPassphrase);
+    await service.changeVaultPassphrase(currentPassphrase, "next-passphrase");
+
+    expect(rewrapBody).toMatchObject({
+      expectedEpoch: 2,
+      expectedWrapRevision: 3,
+      expectedDekVerifierBase64: vault.dekVerifierBase64,
+    });
+    expect(
+      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+    ).toMatchObject({
+      epoch: 2,
+      wrapRevision: 4,
+      owner: { serverUrl: `${serverUrl}/`, userId: session.user.id },
+    });
+    const offlineCache = JSON.parse(
+      (await secretStore.load("auth:offline-session-cache")) as string,
+    ) as { vaultBootstrap: AuthSession["vaultBootstrap"] };
+    expect(offlineCache.vaultBootstrap.wrapRevision).toBe(4);
+  });
+
+  it("relocks via handleVaultDekRejected when the refreshed descriptor proves a new DEK generation", async () => {
+    // sync-service 가 push 409(vault_reset/vault_dek_mismatch) 또는 pull 복호화 실패를
+    // 만나면 이 훅을 부른다 — 세션을 갱신해 최신 descriptor 의 epoch/verifier 로 재판정
+    // 하고, 진짜 세대 교체면 캐시를 버리고 잠금으로 되돌려 새 동기화 암호를 받게 한다.
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const oldVault = await buildWrappedDek("old-pass");
+    const newVault = await buildWrappedDek("new-pass");
+    const oldSession = createV2Session(serverUrl, oldVault.wrappedDekBase64, {
+      epoch: 1,
+      dekVerifierBase64: oldVault.dekVerifierBase64,
+    });
+
+    await secretStore.save(
+      "auth:refresh-token",
+      oldSession.tokens.refreshToken,
+    );
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({ dekBase64: oldVault.dekBase64, epoch: 1 }),
+    );
+    stubSessionRefresh(oldSession);
+
+    await service.bootstrap();
+    expect(service.getState().vault?.status).toBe("unlocked");
+
+    // 다른 기기가 초기화+재설정 — 서버는 epoch 3 + 새 verifier 를 내려준다.
+    stubSessionRefresh(
+      createV2Session(serverUrl, newVault.wrappedDekBase64, {
+        epoch: 3,
+        dekVerifierBase64: newVault.dekVerifierBase64,
+      }),
+    );
+    await service.handleVaultDekRejected();
+
+    expect(service.getState().vault?.status).toBe("locked");
+    expect(service.isVaultReadyForSync()).toBe(false);
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+
+  it("does not destroy the DEK cache when handleVaultDekRejected cannot refresh (non-destructive)", async () => {
+    // 재판정의 근거(새 descriptor)를 얻지 못했으면 캐시를 파괴하지 않는다 — 파괴하면
+    // 옛 wrapped 기준의 잘못된 잠금 화면(새 암호가 거부되는 루프)이 생긴다. 인증 상태는
+    // 기존 refresh 실패 경로(오프라인 폴백 등)를 그대로 따르되, DEK 캐시는 살아남아
+    // 다음 성공 refresh 의 verifier 재판정이 재입력 없이 unlocked 로 복원할 수 있어야 한다.
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const vault = await buildWrappedDek("any-pass");
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 1,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({ dekBase64: vault.dekBase64, epoch: 1 }),
+    );
+    stubSessionRefresh(session);
+    await service.bootstrap();
+    expect(service.getState().vault?.status).toBe("unlocked");
+
+    // refresh 실패(네트워크 두절) — DEK 캐시가 지워지면 안 된다.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    await service.handleVaultDekRejected();
+
+    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+      vault.dekBase64,
+    );
+  });
+
+  it("relocks and drops the cached DEK when the descriptor verifier changes (reset on another device)", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const staleVault = await buildWrappedDek("old-pass");
+    const freshVault = await buildWrappedDek("new-pass");
+    const freshSession = createV2Session(
+      serverUrl,
+      freshVault.wrappedDekBase64,
+      { epoch: 3, dekVerifierBase64: freshVault.dekVerifierBase64 },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      freshSession.tokens.refreshToken,
+    );
+    // 다른 기기의 초기화 이전에 캐시된 옛 DEK(옛 세대 epoch 1).
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({ dekBase64: staleVault.dekBase64, epoch: 1 }),
+    );
+    stubSessionRefresh(freshSession);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("locked");
+    expect(service.isVaultReadyForSync()).toBe(false);
+    // 옛 DEK 로 push 하지 못하도록 캐시가 비워져야 한다.
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+
+  it("keeps the freshly unlocked state when a later session descriptor epoch lags (own re-setup)", async () => {
+    // 회귀: 로컬이 새 세대(epoch 5)로 unlocked 인데 refresh 가 낡은 세대(epoch 3)
+    // descriptor 를 실어오면 재잠금하면 안 된다 — epoch 규칙(낮으면 무시)이 방금 만든
+    // DEK 를 보호한다. 하드 경로 보호는 서버 push fence 가 맡는다.
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const passphrase = "correct horse battery";
+    const currentVault = await buildWrappedDek(passphrase);
+    const staleVault = await buildWrappedDek("stale-pass");
+    const freshSession = createV2Session(
+      serverUrl,
+      currentVault.wrappedDekBase64,
+      { epoch: 5, dekVerifierBase64: currentVault.dekVerifierBase64 },
+    );
+    const staleSession = createV2Session(
+      serverUrl,
+      staleVault.wrappedDekBase64,
+      { epoch: 3, dekVerifierBase64: staleVault.dekVerifierBase64 },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      freshSession.tokens.refreshToken,
+    );
+    stubSessionRefresh(freshSession);
+
+    await service.bootstrap();
+    await service.unlockVault(passphrase);
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.getVaultEpoch()).toBe(5);
+
+    // 낡은 epoch descriptor 로 refresh 가 돌아와도 unlocked 유지, DEK 캐시 보존.
+    stubSessionRefresh(staleSession);
+    await service.refreshSession();
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(currentVault.dekBase64);
+    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+      currentVault.dekBase64,
+    );
+  });
+
+  it("persists the floored descriptor when a stale refresh arrives after own re-setup", async () => {
+    // 서버 epoch 은 단조 — 내 unlocked epoch(5)보다 낮은 v2 descriptor(3)는 증명
+    // 가능하게 낡은 in-flight 응답이다. 그대로 저장하면 저장 세션이 캐시보다 낡아져
+    // 콜드 부팅이 "새 DEK + 옛 wrapped" 조합을 만든다 — 게시·저장 모두 합성 descriptor
+    // 로 치환(floor)되어야 한다.
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const passphrase = "correct horse battery";
+    const currentVault = await buildWrappedDek(passphrase);
+    const staleVault = await buildWrappedDek("stale-pass");
+    const freshSession = createV2Session(
+      serverUrl,
+      currentVault.wrappedDekBase64,
+      { epoch: 5, dekVerifierBase64: currentVault.dekVerifierBase64 },
+    );
+    const staleSession = createV2Session(
+      serverUrl,
+      staleVault.wrappedDekBase64,
+      { epoch: 3, dekVerifierBase64: staleVault.dekVerifierBase64 },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      freshSession.tokens.refreshToken,
+    );
+    stubSessionRefresh(freshSession);
+    await service.bootstrap();
+    await service.unlockVault(passphrase);
+    expect(service.getVaultEpoch()).toBe(5);
+
+    stubSessionRefresh(staleSession);
+    await service.refreshSession();
+
+    // 게시된 세션과 오프라인 캐시 모두 낡은 descriptor 가 아니라 합성(epoch 5,
+    // 현재 wrapped)이어야 한다.
+    const published = service.getState().session;
+    expect(published?.vaultBootstrap.epoch).toBe(5);
+    expect(published?.vaultBootstrap.wrappedDekBase64).toBe(
+      currentVault.wrappedDekBase64,
+    );
+    const offlineCacheRaw = await secretStore.load(
+      "auth:offline-session-cache",
+    );
+    expect(offlineCacheRaw).toBeTruthy();
+    const offlineCache = JSON.parse(offlineCacheRaw as string) as {
+      vaultBootstrap?: { epoch?: number; wrappedDekBase64?: string };
+    };
+    expect(offlineCache.vaultBootstrap?.epoch).toBe(5);
+    expect(offlineCache.vaultBootstrap?.wrappedDekBase64).toBe(
+      currentVault.wrappedDekBase64,
+    );
+  });
+
+  it("keeps the latest wrapper when a stale rewrap descriptor arrives", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const passphrase = "latest-passphrase";
+    const currentVault = await buildWrappedDek(passphrase);
+    const staleVault = await buildWrappedDek("stale-passphrase");
+    const currentSession = createV2Session(
+      serverUrl,
+      currentVault.wrappedDekBase64,
+      {
+        epoch: 5,
+        wrapRevision: 2,
+        dekVerifierBase64: currentVault.dekVerifierBase64,
+      },
+    );
+    const staleSession = createV2Session(
+      serverUrl,
+      staleVault.wrappedDekBase64,
+      {
+        epoch: 5,
+        wrapRevision: 1,
+        dekVerifierBase64: currentVault.dekVerifierBase64,
+      },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      currentSession.tokens.refreshToken,
+    );
+    stubSessionRefresh(currentSession);
+    await service.bootstrap();
+    await service.unlockVault(passphrase);
+
+    stubSessionRefresh(staleSession);
+    await service.refreshSession();
+
+    expect(service.getState().vault?.status).toBe("unlocked");
+    const cache = JSON.parse(
+      (await secretStore.load("auth:vault-dek")) as string,
+    ) as { wrappedDekBase64: string; wrapRevision: number };
+    expect(cache).toMatchObject({
+      wrappedDekBase64: currentVault.wrappedDekBase64,
+      wrapRevision: 2,
+    });
+    const offlineCache = JSON.parse(
+      (await secretStore.load("auth:offline-session-cache")) as string,
+    ) as { vaultBootstrap: AuthSession["vaultBootstrap"] };
+    expect(offlineCache.vaultBootstrap).toMatchObject({
+      wrappedDekBase64: currentVault.wrappedDekBase64,
+      wrapRevision: 2,
+    });
+  });
+
+  it("verifies a pre-epoch cache against the descriptor verifier and adopts the epoch", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const vault = await buildWrappedDek("any-passphrase");
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 2,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    // epoch 도입 이전 빌드가 캐시한 DEK(base64 원문) — verifier 일치가 곧 암호학적
+    // 증명이므로 임시 신뢰(adopt) 같은 중간 상태 없이 곧바로 unlocked 다.
+    await secretStore.save("auth:vault-dek", vault.dekBase64);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(vault.dekBase64);
+    expect(service.getVaultEpoch()).toBe(2);
+    expect(
+      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+    ).toMatchObject({
+      version: 2,
+      dekBase64: vault.dekBase64,
+      epoch: 2,
+      wrappedDekBase64: vault.wrappedDekBase64,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+  });
+
+  it("restores unlocked from the cache when the stored descriptor lags the cached epoch (cold boot)", async () => {
+    // 재설정 성공 직후 descriptor refresh 가 실패한 채 재시작한 경우: 저장 세션의
+    // descriptor 는 옛 세대(epoch 1)인데 캐시는 새 세대(epoch 3)다. epoch 규칙이
+    // 낡은 descriptor 를 무시하되, 콜드 부팅에서는 캐시를 진실로 삼아 unlocked 로
+    // 복원해야 한다(none 으로 뜨면 오프라인 복원이 깨진다).
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const staleVault = await buildWrappedDek("old-pass");
+    const freshVault = await buildWrappedDek("new-pass");
+    const staleSession = createV2Session(
+      serverUrl,
+      staleVault.wrappedDekBase64,
+      {
+        epoch: 1,
+        dekVerifierBase64: staleVault.dekVerifierBase64,
+      },
+    );
+
+    await secretStore.save(
+      "auth:refresh-token",
+      staleSession.tokens.refreshToken,
+    );
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({
+        version: 2,
+        owner: { serverUrl: `${serverUrl}/`, userId: staleSession.user.id },
+        dekBase64: freshVault.dekBase64,
+        epoch: 3,
+        wrapRevision: 0,
+        wrappedDekBase64: freshVault.wrappedDekBase64,
+        kdf: VAULT_TEST_KDF,
+        dekVerifierBase64: freshVault.dekVerifierBase64,
+      }),
+    );
+    stubSessionRefresh(staleSession);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(freshVault.dekBase64);
+    expect(service.getVaultEpoch()).toBe(3);
+    // 캐시(새 세대)는 파괴되지 않는다.
+    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+      freshVault.dekBase64,
+    );
+    // 최신 캐시의 wrapper/KDF도 함께 복원되어 낡은 descriptor와 섞이지 않는다.
+    await expect(
+      service.changeVaultPassphrase("old-pass", "next-pass"),
+    ).rejects.toThrow("현재 동기화 암호가 올바르지 않습니다.");
+  });
+
+  it("locks a pre-epoch cache whose DEK does not match the descriptor verifier", async () => {
+    // 옛 오염 시나리오의 결정판: pre-epoch 캐시가 실제로는 초기화 이전의 죽은 DEK 인
+    // 경우 — verifier 불일치로 즉시 판별돼 잠기고 캐시가 정리된다(과거 adopt 는 이
+    // 경우를 구분하지 못해 미검증 상태 기계가 필요했다).
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const deadVault = await buildWrappedDek("dead-pass");
+    const liveVault = await buildWrappedDek("live-pass");
+    const session = createV2Session(serverUrl, liveVault.wrappedDekBase64, {
+      epoch: 2,
+      dekVerifierBase64: liveVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save("auth:vault-dek", deadVault.dekBase64);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("locked");
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+
+  it("sets up a new vault for a version-0 session and uploads the wrapped DEK", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    const setupSession: AuthSession = {
+      ...session,
+      vaultBootstrap: { version: 0, epoch: 0 },
+    };
+
+    await secretStore.save(
+      "auth:refresh-token",
+      setupSession.tokens.refreshToken,
+    );
+
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => setupSession,
+            text: async () => JSON.stringify(setupSession),
+          } as Response;
+        }
+        if (pathname === "/auth/vault" && init?.method === "POST") {
+          capturedBodies.push(
+            JSON.parse(String(init.body)) as Record<string, unknown>,
+          );
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => ({ epoch: 1 }),
+            text: async () => JSON.stringify({ epoch: 1 }),
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("setup-required");
+    expect(service.isVaultReadyForSync()).toBe(false);
+
+    await service.setupVault("new-sync-passphrase");
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.isVaultReadyForSync()).toBe(true);
+    // setup 직후 늦게 도착한 v0(epoch 0)는 로컬 v2(epoch 1)를 덮지 않는다.
+    expect(service.getState().session?.vaultBootstrap).toMatchObject({
+      version: 2,
+      epoch: 1,
+    });
+
+    const body = capturedBodies[0] as {
+      wrappedDekBase64: string;
+      dekVerifierBase64: string;
+      kdf: { algorithm: string };
+    };
+    expect(body.wrappedDekBase64).toBeTruthy();
+    // 다른 기기들이 캐시 DEK 를 로컬 검증할 근거 — 설정 요청에 반드시 실린다.
+    expect(body.dekVerifierBase64).toBeTruthy();
+    expect(body.kdf.algorithm).toBe("argon2id");
+    // 업로드된 wrapped DEK 를 같은 암호로 풀면 로컬 키와 일치해야 한다.
+    const { deriveVaultKek, unwrapVaultDek } =
+      await import("@dolssh/shared-core");
+    const { desktopArgon2idDerive } = await import("./vault-crypto");
+    const kek = await deriveVaultKek(
+      desktopArgon2idDerive,
+      "new-sync-passphrase",
+      body.kdf as typeof VAULT_TEST_KDF,
+    );
+    const unwrapped = unwrapVaultDek(body.wrappedDekBase64, kek);
+    expect(Buffer.from(unwrapped).toString("base64")).toBe(
+      service.getVaultKeyBase64(),
+    );
+  });
+
+  it("does not apply an in-flight vault setup after the server changes", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore, setServerUrl } =
+      await createService(serverUrl);
+    const setupSession: AuthSession = {
+      ...createSession(serverUrl),
+      vaultBootstrap: { version: 0, epoch: 0 },
+    };
+    await secretStore.save(
+      "auth:refresh-token",
+      setupSession.tokens.refreshToken,
+    );
+
+    let resolveVaultResponse!: (response: Response) => void;
+    const vaultResponse = new Promise<Response>((resolve) => {
+      resolveVaultResponse = resolve;
+    });
+    let markVaultRequestStarted!: () => void;
+    const vaultRequestStarted = new Promise<void>((resolve) => {
+      markVaultRequestStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          return new Response(JSON.stringify(setupSession), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (pathname === "/auth/vault" && init?.method === "POST") {
+          markVaultRequestStarted();
+          return vaultResponse;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      }),
+    );
+
+    await service.bootstrap();
+    const setupPromise = service.setupVault("new-sync-passphrase");
+    await vaultRequestStarted;
+    setServerUrl("https://other.example.com");
+    resolveVaultResponse(
+      new Response(JSON.stringify({ epoch: 1, wrapRevision: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await expect(setupPromise).rejects.toThrow(
+      "로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.",
+    );
+    expect(service.getState().vault?.status).toBe("setup-required");
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+
+  it("persists the reset epoch as a version-0 descriptor before the next refresh", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const vault = await buildWrappedDek("forgotten-passphrase");
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 5,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      "auth:vault-dek",
+      JSON.stringify({ dekBase64: vault.dekBase64, epoch: 5 }),
+    );
+    let resetExpectedEpoch: number | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => session,
+            text: async () => JSON.stringify(session),
+          } as Response;
+        }
+        if (pathname === "/auth/vault/reset" && init?.method === "POST") {
+          resetExpectedEpoch = (
+            JSON.parse(String(init.body)) as { expectedEpoch?: number }
+          ).expectedEpoch;
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => ({ epoch: 6 }),
+            text: async () => JSON.stringify({ epoch: 6 }),
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      }),
+    );
+
+    await service.bootstrap();
+    await service.resetVault();
+
+    expect(service.getState().vault?.status).toBe("setup-required");
+    expect(resetExpectedEpoch).toBe(5);
+    expect(service.getState().session?.vaultBootstrap).toEqual({
+      version: 0,
+      epoch: 6,
+    });
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    const offlineCache = JSON.parse(
+      (await secretStore.load("auth:offline-session-cache")) as string,
+    ) as { vaultBootstrap: AuthSession["vaultBootstrap"] };
+    expect(offlineCache.vaultBootstrap).toEqual({ version: 0, epoch: 6 });
+  });
+
+  it("keeps legacy v1 sessions untouched and clears the DEK on logout", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore, setServerUrl } =
+      await createService(serverUrl);
+    const session = createSession(serverUrl);
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save("auth:vault-dek", "stale-dek");
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const pathname = new URL(String(input)).pathname;
+      if (pathname === "/auth/refresh") {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => session,
+          text: async () => JSON.stringify(session),
+        } as Response;
+      }
+      if (pathname === "/auth/logout") {
+        return {
+          ok: true,
+          status: 204,
+          headers: new Headers(),
+          json: async () => ({}),
+          text: async () => "",
+        } as Response;
+      }
+      throw new Error(`unexpected fetch: ${pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = await service.bootstrap();
+    // v1 세션은 legacy — 캐시된 DEK 가 있어도 세션의 keyBase64 를 그대로 쓴다.
+    expect(state.vault?.status).toBe("legacy");
+    expect(service.getVaultKeyBase64()).toBe(session.vaultBootstrap.keyBase64);
+    expect(service.isVaultReadyForSync()).toBe(true);
+    // 서버의 E2EE 지원이 확인되기 전에는 전환 프롬프트 대상이 아니다
+    // (셀프호스팅 구버전 서버 배려). sync 가 /api/info 로 확인해 주면 켜진다.
+    expect(state.vault?.canMigrate).toBe(false);
+    service.noteServerVaultSupport(true);
+    expect(service.getState().vault?.canMigrate).toBe(true);
+    setServerUrl("https://legacy.example.com");
+    service.resetServerVaultSupport();
+    expect(service.getState().vault?.canMigrate).toBe(false);
+    service.noteServerVaultSupport(true);
+    expect(service.getState().vault?.canMigrate).toBe(true);
+    service.noteServerVaultSupport(false);
+    expect(service.getState().vault?.canMigrate).toBe(false);
+
+    await service.logout();
+    expect(service.getState().vault ?? null).toBeNull();
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+
+  it("pre-seeds the legacy key and migrates the vault by wrapping the same DEK", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const legacySession = createSession(serverUrl);
+    const legacyKeyBase64 = legacySession.vaultBootstrap.keyBase64 as string;
+    const passphrase = "migration-passphrase";
+
+    await secretStore.save(
+      "auth:refresh-token",
+      legacySession.tokens.refreshToken,
+    );
+
+    let migrated = false;
+    let capturedBody: {
+      wrappedDekBase64: string;
+      kdf: typeof VAULT_TEST_KDF;
+    } | null = null;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          const session = migrated
+            ? {
+                ...legacySession,
+                vaultBootstrap: {
+                  version: 2,
+                  wrappedDekBase64: capturedBody?.wrappedDekBase64 ?? "",
+                  kdf: capturedBody?.kdf ?? VAULT_TEST_KDF,
+                },
+              }
+            : legacySession;
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => session,
+            text: async () => JSON.stringify(session),
+          } as Response;
+        }
+        if (pathname === "/auth/vault" && init?.method === "POST") {
+          capturedBody = JSON.parse(String(init.body)) as typeof capturedBody;
+          migrated = true;
+          return {
+            ok: true,
+            status: 204,
+            headers: new Headers(),
+            json: async () => ({}),
+            text: async () => "",
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("legacy");
+    // pre-seeding — v1 키가 DEK 캐시에 선저장된다(비동기라 한 틱 대기).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+      legacyKeyBase64,
+    );
+
+    await service.migrateVault(passphrase);
+
+    expect(service.getState().vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(legacyKeyBase64);
+    // 업로드된 wrapped 를 같은 암호로 풀면 기존 DEK 가 나와야 한다(로테이션 없음).
+    const { deriveVaultKek, unwrapVaultDek } =
+      await import("@dolssh/shared-core");
+    const { desktopArgon2idDerive } = await import("./vault-crypto");
+    const kek = await deriveVaultKek(
+      desktopArgon2idDerive,
+      passphrase,
+      capturedBody!.kdf,
+    );
+    expect(
+      Buffer.from(unwrapVaultDek(capturedBody!.wrappedDekBase64, kek)).toString(
+        "base64",
+      ),
+    ).toBe(legacyKeyBase64);
+    // 전환 후 refresh 로 v2 세션을 받아도 unlocked 가 유지된다.
+    expect(service.getState().session?.vaultBootstrap.version).toBe(2);
   });
 });

@@ -5,6 +5,9 @@ export declare function connect(options: ConnectOptions, asyncOpts_?: {
 export declare function connectSftp(options: ConnectOptions, asyncOpts_?: {
     signal: AbortSignal;
 }): Promise<SftpConnectionInterface>;
+export declare function deriveArgon2idKey(passphrase: ArrayBuffer, salt: ArrayBuffer, memoryKib: number, timeCost: number, parallelism: number, outputLength: number, asyncOpts_?: {
+    signal: AbortSignal;
+}): Promise<ArrayBuffer>;
 export declare function generateKeyPair(keyType: KeyType): string;
 export declare function validateCertificate(certificateText: string): string;
 export declare function validatePrivateKey(privateKeyContent: string, passphrase: string | undefined): string;
@@ -1298,6 +1301,156 @@ export declare enum TerminalType {
     Xterm = 5,
     Xterm256 = 6
 }
+export declare enum VaultKdfError_Tags {
+    InvalidParams = "InvalidParams",
+    Derive = "Derive"
+}
+export declare const VaultKdfError: Readonly<{
+    instanceOf: (obj: any) => obj is VaultKdfError;
+    InvalidParams: {
+        new (v0: string): {
+            readonly tag: VaultKdfError_Tags.InvalidParams;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        "new"(v0: string): {
+            readonly tag: VaultKdfError_Tags.InvalidParams;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        instanceOf(obj: any): obj is {
+            readonly tag: VaultKdfError_Tags.InvalidParams;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        hasInner(obj: any): obj is {
+            readonly tag: VaultKdfError_Tags.InvalidParams;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        getInner(obj: {
+            readonly tag: VaultKdfError_Tags.InvalidParams;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        }): Readonly<[string]>;
+        isError(error: unknown): error is Error;
+        captureStackTrace(targetObject: object, constructorOpt?: Function): void;
+        prepareStackTrace(err: Error, stackTraces: NodeJS.CallSite[]): any;
+        stackTraceLimit: number;
+    };
+    Derive: {
+        new (v0: string): {
+            readonly tag: VaultKdfError_Tags.Derive;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        "new"(v0: string): {
+            readonly tag: VaultKdfError_Tags.Derive;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        instanceOf(obj: any): obj is {
+            readonly tag: VaultKdfError_Tags.Derive;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        hasInner(obj: any): obj is {
+            readonly tag: VaultKdfError_Tags.Derive;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        };
+        getInner(obj: {
+            readonly tag: VaultKdfError_Tags.Derive;
+            readonly inner: Readonly<[string]>;
+            /**
+             * @private
+             * This field is private and should not be used, use `tag` instead.
+             */
+            readonly [uniffiTypeNameSymbol]: "VaultKdfError";
+            name: string;
+            message: string;
+            stack?: string;
+            cause?: unknown;
+        }): Readonly<[string]>;
+        isError(error: unknown): error is Error;
+        captureStackTrace(targetObject: object, constructorOpt?: Function): void;
+        prepareStackTrace(err: Error, stackTraces: NodeJS.CallSite[]): any;
+        stackTraceLimit: number;
+    };
+}>;
+export type VaultKdfError = InstanceType<(typeof VaultKdfError)[keyof Omit<typeof VaultKdfError, 'instanceOf'>]>;
 export interface ConnectProgressCallback {
     onChange(status: SshConnectionProgressEvent): void;
 }
@@ -1763,6 +1916,13 @@ declare const _default: Readonly<{
             allocationSize(value: TerminalType): number;
             lift(value: UniffiByteArray): TerminalType;
             lower(value: TerminalType): UniffiByteArray;
+        };
+        FfiConverterTypeVaultKdfError: {
+            read(from: RustBuffer): VaultKdfError;
+            write(value: VaultKdfError, into: RustBuffer): void;
+            allocationSize(value: VaultKdfError): number;
+            lift(value: UniffiByteArray): VaultKdfError;
+            lower(value: VaultKdfError): UniffiByteArray;
         };
     };
 }>;

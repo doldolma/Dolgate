@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   AppTheme,
+  AuthVaultStatus,
   GlobalTerminalThemeId,
   HostRecord,
   KnownHostRecord,
@@ -16,6 +17,7 @@ import type {
 import {
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -43,6 +45,7 @@ import {
   Tabs,
   ToggleSwitch,
 } from '../ui';
+import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
 
 // shared-core의 clampCommandNotificationThresholdSeconds 범위와 동일하게 유지.
 // @shared value를 직접 import하면 vite dev에서 export* 누락 이슈가 있어 인라인.
@@ -71,6 +74,12 @@ interface SettingsPanelProps {
   onLogout: () => Promise<void>;
   // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제한다(로컬 데이터는 유지).
   onDeleteAccount?: () => Promise<void>;
+  // E2EE 볼트(v2) 사용자의 동기화 암호 변경. v1(레거시) 사용자에게는 섹션이 숨겨진다.
+  vaultStatus?: AuthVaultStatus | null;
+  onChangeVaultPassphrase?: (
+    currentPassphrase: string,
+    nextPassphrase: string,
+  ) => Promise<void>;
 }
 
 const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
@@ -207,6 +216,8 @@ export function SettingsPanel({
   keychainEntries,
   savedCredentialsSearchQuery,
   currentUserEmail = null,
+  vaultStatus = null,
+  onChangeVaultPassphrase,
   desktopPlatform,
   onSelectSection,
   onSavedCredentialsSearchQueryChange,
@@ -225,6 +236,16 @@ export function SettingsPanel({
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  // 동기화 암호 변경 폼 상태.
+  const [currentVaultPassphrase, setCurrentVaultPassphrase] = useState('');
+  const [nextVaultPassphrase, setNextVaultPassphrase] = useState('');
+  const [confirmVaultPassphrase, setConfirmVaultPassphrase] = useState('');
+  const [vaultPassphraseBusy, setVaultPassphraseBusy] = useState(false);
+  const [vaultPassphraseError, setVaultPassphraseError] = useState<string | null>(null);
+  const [vaultPassphraseNotice, setVaultPassphraseNotice] = useState<string | null>(null);
+  const newVaultPassphraseValidationMessage = nextVaultPassphrase
+    ? validateNewVaultPassphrase(nextVaultPassphrase)
+    : null;
   // 리플레이 보관 설정 옆에 실제 디스크 사용량을 보여준다. 보관 개수를 줄이면 프루닝으로
   // 용량이 줄 수 있으므로 retention 값이 바뀔 때마다 다시 조회한다.
   const [replayStorageUsage, setReplayStorageUsage] =
@@ -747,6 +768,91 @@ export function SettingsPanel({
             </div>
           </section>
 
+          {vaultStatus === 'unlocked' && onChangeVaultPassphrase ? (
+            <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
+              <div className="mb-4">
+                <SectionLabel>Session</SectionLabel>
+                <h3>동기화 암호</h3>
+              </div>
+              <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
+                동기화 데이터는 종단간 암호화되어 서버도 볼 수 없습니다. 암호를
+                변경해도 다른 기기는 다시 입력할 필요가 없습니다.
+              </p>
+              <div className="grid max-w-[26rem] gap-3">
+                <Input
+                  type="password"
+                  value={currentVaultPassphrase}
+                  placeholder="현재 동기화 암호"
+                  onChange={(event) => setCurrentVaultPassphrase(event.target.value)}
+                />
+                <Input
+                  type="password"
+                  value={nextVaultPassphrase}
+                  placeholder="새 동기화 암호"
+                  onChange={(event) => setNextVaultPassphrase(event.target.value)}
+                />
+                <Input
+                  type="password"
+                  value={confirmVaultPassphrase}
+                  placeholder="새 동기화 암호 확인"
+                  onChange={(event) => setConfirmVaultPassphrase(event.target.value)}
+                />
+                {newVaultPassphraseValidationMessage ? (
+                  <p className="m-0 text-sm text-[var(--warning-text,var(--text-soft))]">
+                    {newVaultPassphraseValidationMessage}
+                  </p>
+                ) : null}
+                {vaultPassphraseError ? (
+                  <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
+                    {vaultPassphraseError}
+                  </p>
+                ) : null}
+                {vaultPassphraseNotice ? (
+                  <p className="m-0 text-sm text-[var(--text-soft)]">
+                    {vaultPassphraseNotice}
+                  </p>
+                ) : null}
+                <div>
+                  <Button
+                    variant="secondary"
+                    disabled={
+                      vaultPassphraseBusy ||
+                      !currentVaultPassphrase ||
+                      validateNewVaultPassphrase(nextVaultPassphrase) !== null ||
+                      nextVaultPassphrase !== confirmVaultPassphrase
+                    }
+                    onClick={async () => {
+                      setVaultPassphraseBusy(true);
+                      setVaultPassphraseError(null);
+                      setVaultPassphraseNotice(null);
+                      try {
+                        await onChangeVaultPassphrase(
+                          currentVaultPassphrase,
+                          nextVaultPassphrase,
+                        );
+                        setCurrentVaultPassphrase('');
+                        setNextVaultPassphrase('');
+                        setConfirmVaultPassphrase('');
+                        setVaultPassphraseNotice(
+                          '동기화 암호를 변경했습니다. 다른 기기는 다시 입력할 필요가 없습니다.',
+                        );
+                      } catch (error) {
+                        const fallback = '동기화 암호 변경에 실패했습니다.';
+                        setVaultPassphraseError(
+                          normalizeErrorMessage(error, fallback) || fallback,
+                        );
+                      } finally {
+                        setVaultPassphraseBusy(false);
+                      }
+                    }}
+                  >
+                    {vaultPassphraseBusy ? '변경 중...' : '암호 변경'}
+                  </Button>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           {deleteAccountOpen && onDeleteAccount ? (
             <DialogBackdrop
               onDismiss={() => {
@@ -795,10 +901,9 @@ export function SettingsPanel({
                         // 성공하면 세션이 정리되며 로그인 화면으로 전환된다(auth 이벤트).
                         setDeleteAccountOpen(false);
                       } catch (error) {
+                        const fallback = '회원 탈퇴에 실패했습니다.';
                         setDeleteAccountError(
-                          error instanceof Error && error.message.trim()
-                            ? error.message
-                            : '회원 탈퇴에 실패했습니다.',
+                          normalizeErrorMessage(error, fallback) || fallback,
                         );
                       } finally {
                         setDeleteAccountBusy(false);

@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { Platform, TextInput } from "react-native";
+import { Alert, Platform, TextInput } from "react-native";
 import type { AuthState } from "@dolssh/shared-core";
 import { APP_VERSION } from "../src/lib/app-metadata";
 import {
@@ -109,6 +109,19 @@ function resetStore(): void {
     pendingServerKeyPrompt: null,
     pendingCredentialPrompt: null,
   });
+}
+
+function createOfflineAuthenticatedState(): AuthState {
+  const base = createAuthenticatedState();
+  return {
+    ...base,
+    status: "offline-authenticated",
+    offline: {
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      lastOnlineAt: new Date().toISOString(),
+      reason: "network",
+    },
+  };
 }
 
 function createAuthenticatedState(): AuthState {
@@ -275,6 +288,80 @@ describe("SettingsScreen server save navigation", () => {
     expect(text).not.toContain(
       "저장된 캐시를 먼저 보여주고 최신 상태를 확인하는 중입니다.",
     );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("deletes the account only after both confirmation alerts", async () => {
+    const deleteAccountMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      deleteAccount: deleteAccountMock,
+    });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    const deleteButton = findPressableByText(tree!.root, "회원 탈퇴");
+    await act(async () => {
+      deleteButton.props.onPress();
+    });
+
+    // 1단계 경고에서 "계속"을 누르기 전에는 아무 일도 일어나지 않는다.
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy.mock.calls[0][0]).toBe("회원 탈퇴");
+    expect(deleteAccountMock).not.toHaveBeenCalled();
+
+    const firstButtons = alertSpy.mock.calls[0][2];
+    const continueButton = firstButtons?.find(
+      (button) => button.text === "계속",
+    );
+    expect(continueButton).toBeDefined();
+    await act(async () => {
+      continueButton?.onPress?.();
+    });
+
+    // 2단계 최종 확인에서 "영구 삭제"를 눌러야 스토어 액션이 호출된다.
+    expect(alertSpy).toHaveBeenCalledTimes(2);
+    expect(alertSpy.mock.calls[1][0]).toBe("정말 탈퇴할까요?");
+    expect(deleteAccountMock).not.toHaveBeenCalled();
+
+    const secondButtons = alertSpy.mock.calls[1][2];
+    const confirmButton = secondButtons?.find(
+      (button) => button.text === "영구 삭제",
+    );
+    expect(confirmButton).toBeDefined();
+    await act(async () => {
+      confirmButton?.onPress?.();
+    });
+
+    expect(deleteAccountMock).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("hides the delete account button while using the offline cache", async () => {
+    useMobileAppStore.setState({
+      auth: createOfflineAuthenticatedState(),
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    expect(() => findPressableByText(tree!.root, "로그아웃")).not.toThrow();
+    expect(() => findPressableByText(tree!.root, "회원 탈퇴")).toThrow();
 
     await act(async () => {
       tree!.unmount();

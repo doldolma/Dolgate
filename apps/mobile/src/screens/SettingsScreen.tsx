@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { validateNewVaultPassphrase } from "@dolssh/shared-core";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,15 +37,25 @@ function SettingsContent({
     topOffset: mode === "auth" ? 14 : 10,
   });
   const auth = useMobileAppStore((state) => state.auth);
+  const vault = useMobileAppStore((state) => state.vault);
   const settings = useMobileAppStore((state) => state.settings);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const knownHosts = useMobileAppStore((state) => state.knownHosts);
   const secretMetadata = useMobileAppStore((state) => state.secretMetadata);
   const logout = useMobileAppStore((state) => state.logout);
+  const deleteAccount = useMobileAppStore((state) => state.deleteAccount);
+  const changeVaultPassphrase = useMobileAppStore(
+    (state) => state.changeVaultPassphrase,
+  );
   const updateSettings = useMobileAppStore((state) => state.updateSettings);
 
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [currentPassphraseDraft, setCurrentPassphraseDraft] = useState("");
+  const [nextPassphraseDraft, setNextPassphraseDraft] = useState("");
+  const [confirmPassphraseDraft, setConfirmPassphraseDraft] = useState("");
+  const [changingPassphrase, setChangingPassphrase] = useState(false);
 
   useEffect(() => {
     setServerUrlDraft(settings.serverUrl);
@@ -79,6 +91,86 @@ function SettingsContent({
     if (saved) {
       onServerUrlSaved?.();
     }
+  };
+
+  const handleDeleteAccount = async (): Promise<void> => {
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      // 성공하면 auth가 unauthenticated로 바뀌며 로그인 화면으로 전환된다.
+    } catch (error) {
+      Alert.alert(
+        "회원 탈퇴 실패",
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "회원 탈퇴에 실패했습니다.",
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const canChangePassphrase =
+    !changingPassphrase &&
+    currentPassphraseDraft.length > 0 &&
+    validateNewVaultPassphrase(nextPassphraseDraft) === null &&
+    nextPassphraseDraft === confirmPassphraseDraft;
+  const nextPassphraseValidationMessage = nextPassphraseDraft
+    ? validateNewVaultPassphrase(nextPassphraseDraft)
+    : null;
+
+  const handleChangePassphrase = async (): Promise<void> => {
+    if (!canChangePassphrase) {
+      return;
+    }
+    setChangingPassphrase(true);
+    try {
+      await changeVaultPassphrase(currentPassphraseDraft, nextPassphraseDraft);
+      setCurrentPassphraseDraft("");
+      setNextPassphraseDraft("");
+      setConfirmPassphraseDraft("");
+      Alert.alert(
+        "동기화 암호 변경 완료",
+        "다른 기기는 다시 입력할 필요 없이 그대로 사용할 수 있습니다.",
+      );
+    } catch (error) {
+      Alert.alert(
+        "동기화 암호 변경 실패",
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "동기화 암호 변경에 실패했습니다.",
+      );
+    } finally {
+      setChangingPassphrase(false);
+    }
+  };
+
+  const confirmDeleteAccount = (): void => {
+    Alert.alert(
+      "회원 탈퇴",
+      "서버에 저장된 모든 데이터(동기화된 호스트·시크릿·계정 정보)가 즉시 영구 삭제됩니다. 복구할 수 없으며, 로그인된 다른 기기도 곧 로그아웃됩니다.",
+      [
+        { text: "취소", style: "cancel" },
+        {
+          text: "계속",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "정말 탈퇴할까요?",
+              "이 기기의 로컬 데이터(호스트·자격 증명)도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+              [
+                { text: "취소", style: "cancel" },
+                {
+                  text: "영구 삭제",
+                  style: "destructive",
+                  onPress: () => void handleDeleteAccount(),
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -141,19 +233,133 @@ function SettingsContent({
               {syncStatus.errorMessage}
             </Text>
           ) : null}
+          <View style={styles.row}>
+            <Pressable
+              onPress={() => void logout()}
+              style={[
+                styles.secondaryButton,
+                {
+                  backgroundColor: palette.surfaceAlt,
+                  borderColor: palette.border,
+                },
+              ]}
+            >
+              <Text style={[styles.secondaryText, { color: palette.text }]}>
+                로그아웃
+              </Text>
+            </Pressable>
+            {auth.status === "authenticated" ? (
+              <Pressable
+                disabled={deletingAccount}
+                onPress={confirmDeleteAccount}
+                style={[
+                  styles.secondaryButton,
+                  {
+                    backgroundColor: palette.surfaceAlt,
+                    borderColor: palette.border,
+                    opacity: deletingAccount ? 0.55 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={[styles.secondaryText, { color: palette.danger }]}
+                >
+                  {deletingAccount ? "탈퇴 중..." : "회원 탈퇴"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {showFullSettings && vault.status === "unlocked" ? (
+        <View
+          style={[
+            styles.section,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>
+            동기화 암호
+          </Text>
+          <Text style={[styles.body, { color: palette.mutedText }]}>
+            동기화 데이터는 종단간 암호화되어 서버도 볼 수 없습니다. 암호를
+            변경해도 다른 기기는 다시 입력할 필요가 없습니다.
+          </Text>
+          <TextInput
+            value={currentPassphraseDraft}
+            onChangeText={setCurrentPassphraseDraft}
+            placeholder="현재 동기화 암호"
+            placeholderTextColor={palette.mutedText}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[
+              styles.input,
+              {
+                color: palette.text,
+                borderColor: palette.border,
+                backgroundColor: palette.input,
+              },
+            ]}
+          />
+          <TextInput
+            value={nextPassphraseDraft}
+            onChangeText={setNextPassphraseDraft}
+            placeholder="새 동기화 암호"
+            placeholderTextColor={palette.mutedText}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[
+              styles.input,
+              {
+                color: palette.text,
+                borderColor: palette.border,
+                backgroundColor: palette.input,
+              },
+            ]}
+          />
+          <TextInput
+            value={confirmPassphraseDraft}
+            onChangeText={setConfirmPassphraseDraft}
+            placeholder="새 동기화 암호 확인"
+            placeholderTextColor={palette.mutedText}
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[
+              styles.input,
+              {
+                color: palette.text,
+                borderColor: palette.border,
+                backgroundColor: palette.input,
+              },
+            ]}
+          />
+          {nextPassphraseValidationMessage ? (
+            <Text style={[styles.errorText, { color: palette.warning }]}>
+              {nextPassphraseValidationMessage}
+            </Text>
+          ) : null}
           <Pressable
-            onPress={() => void logout()}
+            disabled={!canChangePassphrase}
+            onPress={() => void handleChangePassphrase()}
             style={[
               styles.secondaryButton,
               {
                 backgroundColor: palette.surfaceAlt,
                 borderColor: palette.border,
                 alignSelf: "flex-start",
+                opacity: canChangePassphrase ? 1 : 0.55,
               },
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              로그아웃
+              {changingPassphrase ? "변경 중..." : "암호 변경"}
             </Text>
           </Pressable>
         </View>

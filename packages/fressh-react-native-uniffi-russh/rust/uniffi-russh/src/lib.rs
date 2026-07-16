@@ -10,5 +10,6 @@ pub mod ssh_connection;
 pub mod ssh_shell;
 pub mod ssh_sftp;
 pub mod utils;
+pub mod vault_kdf;
 
 uniffi::setup_scaffolding!();

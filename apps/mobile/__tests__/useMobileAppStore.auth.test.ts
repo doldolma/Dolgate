@@ -121,14 +121,22 @@ function createAuthenticatedState(
   };
 }
 
-function createJsonResponse(body: unknown, status = 200): Response {
+function createJsonResponse(
+  body: unknown,
+  status = 200,
+  etag?: string,
+): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === "etag" ? (etag ?? null) : null,
+    },
     json: async () => body,
     text: async () =>
       typeof body === "string" ? body : JSON.stringify(body),
-  } as Response;
+  } as unknown as Response;
 }
 
 function resetStore(
@@ -487,6 +495,158 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.syncStatus.status).toBe("ready");
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
       .toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
+  });
+
+  it("deletes the account remotely and clears local state without a logout call", async () => {
+    const session = createAuthSession();
+    const host: SshHostRecord = {
+      id: "host-1",
+      kind: "ssh",
+      label: "Test host",
+      hostname: "example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/account" && init?.method === "DELETE") {
+        return createJsonResponse("", 204);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+        hosts: [host],
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().deleteAccount();
+    });
+
+    const state = useMobileAppStore.getState();
+    expect(state.auth.status).toBe("unauthenticated");
+    expect(state.auth.session).toBeNull();
+    expect(state.hosts).toEqual([]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/auth/account"]);
+    for (const service of [
+      "dolgate.mobile.auth-session",
+      "dolgate.mobile.managed-secrets",
+      "dolgate.mobile.managed-aws-profiles",
+      "dolgate.mobile.aws-sso-tokens",
+    ]) {
+      expect(keychainMock.resetGenericPassword).toHaveBeenCalledWith({
+        service,
+      });
+    }
+  });
+
+  it("retries account deletion once after refreshing an expired access token", async () => {
+    const staleSession = createAuthSession();
+    const refreshedSession = createAuthSession({
+      tokens: {
+        accessToken: "fresh-access-token",
+        refreshToken: "fresh-refresh-token",
+        expiresInSeconds: 900,
+      },
+    });
+    const deleteAuthHeaders: Array<string | undefined> = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/account") {
+        const headers = init?.headers as
+          | Record<string, string>
+          | undefined;
+        deleteAuthHeaders.push(headers?.authorization);
+        if (deleteAuthHeaders.length === 1) {
+          return createJsonResponse({ error: "expired" }, 401);
+        }
+        return createJsonResponse("", 204);
+      }
+      if (path === "/auth/refresh") {
+        return createJsonResponse(refreshedSession);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(staleSession),
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().deleteAccount();
+    });
+
+    expect(deleteAuthHeaders).toEqual([
+      "Bearer access-token",
+      "Bearer fresh-access-token",
+    ]);
+    expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/auth/account", "/auth/refresh", "/auth/account"]);
+  });
+
+  it("keeps the current session when account deletion fails on the server", async () => {
+    const session = createAuthSession();
+    fetchMock.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/account") {
+        return createJsonResponse({ error: "서버 오류가 발생했습니다." }, 500);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(session),
+      });
+    });
+
+    await expect(
+      useMobileAppStore.getState().deleteAccount(),
+    ).rejects.toThrow("서버 오류가 발생했습니다.");
+
+    const state = useMobileAppStore.getState();
+    expect(state.auth.status).toBe("authenticated");
+    expect(state.auth.session?.tokens.accessToken).toBe("access-token");
+    expect(keychainMock.resetGenericPassword).not.toHaveBeenCalled();
+  });
+
+  it("rejects account deletion while running on the offline cache", async () => {
+    await act(async () => {
+      resetStore({
+        auth: {
+          status: "offline-authenticated",
+          session: createAuthSession(),
+          offline: {
+            expiresAt: "2026-04-14T00:00:00.000Z",
+            lastOnlineAt: "2026-04-13T00:00:00.000Z",
+            reason: "network",
+          },
+          errorMessage: null,
+        },
+      });
+    });
+
+    await expect(
+      useMobileAppStore.getState().deleteAccount(),
+    ).rejects.toThrow("온라인 로그인 상태에서만 회원 탈퇴할 수 있습니다.");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().auth.status).toBe(
+      "offline-authenticated",
+    );
   });
 
   it("resolves startup auth gating without waiting for refresh to finish", async () => {

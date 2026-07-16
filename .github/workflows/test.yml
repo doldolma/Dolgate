@@ -57,6 +57,35 @@ jobs:
   sync-api-test:
     name: sync-api test
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: dolgate
+          POSTGRES_PASSWORD: dolgate
+          POSTGRES_DB: dolgate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dolgate -d dolgate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: dolgate
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SYNC_API_POSTGRES_DSN: host=127.0.0.1 user=dolgate password=dolgate dbname=dolgate port=5432 sslmode=disable
+      SYNC_API_MYSQL_DSN: root:root@tcp(127.0.0.1:3306)/dolgate?charset=utf8mb4&parseTime=True&loc=UTC
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -69,6 +98,10 @@ jobs:
       - name: Run sync-api tests
         working-directory: services/sync-api
         run: go test ./... -cover
+
+      - name: Stress vault lifecycle races
+        working-directory: services/sync-api
+        run: go test -race ./internal/store ./internal/http -run 'Vault|Sync' -count=3
 
   ssh-core-test:
     name: ssh-core test (${{ matrix.os }})
