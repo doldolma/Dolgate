@@ -1285,6 +1285,8 @@ export class AwsService {
     string,
     AwsPendingSsoPreparation
   >();
+  private readonly inFlightSsoPreparationRoots = new Set<string>();
+  private managedProfileArtifactsGeneration = 0;
   private readonly ecsServiceListCache = new Map<
     string,
     { expiresAt: number; value: string[] }
@@ -1319,6 +1321,7 @@ export class AwsService {
     string,
     EC2InstanceConnectClient
   >();
+  private managedProfilesReadyTask: Promise<void> | null = null;
   private hasBackfilledManagedSsoCache = false;
   private readonly profileRepository: AwsProfileRepository;
   private readonly awsProfileRootDir: string;
@@ -1694,10 +1697,19 @@ export class AwsService {
   }
 
   private async ensureManagedProfilesReady(): Promise<void> {
-    if (this.profileRepository.listMetadata().length === 0) {
-      await this.migrateManagedProfilesFromFilesIfNeeded();
-    }
+    await this.initializeManagedProfiles();
     await this.backfillManagedSsoCacheFromExternalRootIfNeeded();
+  }
+
+  async initializeManagedProfiles(): Promise<void> {
+    if (!this.managedProfilesReadyTask) {
+      const task = this.materializeManagedProfiles();
+      this.managedProfilesReadyTask = task.catch((error) => {
+        this.managedProfilesReadyTask = null;
+        throw error;
+      });
+    }
+    await this.managedProfilesReadyTask;
   }
 
   private getManagedProfileByName(profileName: string): ManagedAwsProfilePayload | null {
@@ -1725,99 +1737,6 @@ export class AwsService {
       .digest("hex")
       .slice(0, 12);
     return `dolssh-${digest}`;
-  }
-
-  private buildManagedProfilePayloadsFromDocuments(
-    documents: Awaited<ReturnType<typeof loadAwsProfileDocuments>>,
-  ): ManagedAwsProfilePayload[] {
-    const profileNames = listAwsProfileNames(documents);
-    const profileIdsByName = new Map(profileNames.map((profileName) => [profileName, randomUUID()]));
-    const payloads: ManagedAwsProfilePayload[] = [];
-
-    for (const profileName of profileNames) {
-      const snapshot = inspectAwsProfileDocuments(documents, profileName);
-      const values = snapshot.mergedValues;
-      const region = values.region?.trim() || null;
-      const ssoSession = values.sso_session?.trim() || null;
-      const ssoSessionValues = ssoSession ? getAwsSsoSessionValues(documents, ssoSession) : {};
-      const ssoStartUrl =
-        values.sso_start_url?.trim() ||
-        ssoSessionValues.sso_start_url?.trim() ||
-        null;
-      const ssoRegion =
-        values.sso_region?.trim() ||
-        ssoSessionValues.sso_region?.trim() ||
-        null;
-      const ssoAccountId = values.sso_account_id?.trim() || null;
-      const ssoRoleName = values.sso_role_name?.trim() || null;
-      const roleArn = values.role_arn?.trim() || null;
-      const sourceProfileName = values.source_profile?.trim() || null;
-      const accessKeyId = values.aws_access_key_id?.trim() || null;
-      const secretAccessKey = values.aws_secret_access_key?.trim() || null;
-      const updatedAt = new Date().toISOString();
-      const id = profileIdsByName.get(profileName) ?? randomUUID();
-
-      if (ssoStartUrl && ssoRegion && ssoAccountId && ssoRoleName) {
-        payloads.push({
-          id,
-          kind: "sso",
-          name: profileName,
-          region,
-          ssoStartUrl,
-          ssoRegion,
-          ssoAccountId,
-          ssoRoleName,
-          updatedAt,
-        });
-        continue;
-      }
-
-      if (roleArn && sourceProfileName) {
-        const sourceProfileId = profileIdsByName.get(sourceProfileName);
-        if (!sourceProfileId) {
-          continue;
-        }
-        payloads.push({
-          id,
-          kind: "role",
-          name: profileName,
-          region,
-          roleArn,
-          sourceProfileId,
-          updatedAt,
-        });
-        continue;
-      }
-
-      if (accessKeyId && secretAccessKey) {
-        payloads.push({
-          id,
-          kind: "static",
-          name: profileName,
-          region,
-          accessKeyId,
-          secretAccessKey,
-          updatedAt,
-        });
-      }
-
-    }
-
-    return payloads;
-  }
-
-  async migrateManagedProfilesFromFilesIfNeeded(): Promise<void> {
-    if (this.profileRepository.listMetadata().length > 0) {
-      await this.materializeManagedProfiles();
-      return;
-    }
-
-    const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    const payloads = this.buildManagedProfilePayloadsFromDocuments(documents);
-    if (payloads.length > 0) {
-      this.profileRepository.replaceAll(payloads);
-    }
-    await this.materializeManagedProfiles();
   }
 
   async materializeManagedProfiles(): Promise<void> {
@@ -1902,6 +1821,53 @@ export class AwsService {
       credentialSections.length > 0 ? `${credentialSections.join("\n").trimEnd()}\n` : "",
       "utf8",
     );
+  }
+
+  async purgeManagedProfileArtifacts(): Promise<void> {
+    this.managedProfileArtifactsGeneration += 1;
+    const preparationHomeDirs = new Set([
+      ...this.inFlightSsoPreparationRoots,
+      ...[...this.pendingSsoPreparations.values()].map(
+        (preparation) => preparation.homeDir,
+      ),
+    ]);
+    this.profileRepository.replaceAll([]);
+    this.pendingSsoPreparations.clear();
+    this.inFlightSsoPreparationRoots.clear();
+    this.ecsServiceListCache.clear();
+    this.ecsServiceListInFlight.clear();
+    this.ecsTaskDefinitionCache.clear();
+    this.ecsTaskDefinitionInFlight.clear();
+    this.ecsServiceActionContextCache.clear();
+    this.ecsServiceActionContextInFlight.clear();
+    this.cloudWatchClientCache.clear();
+    this.cloudWatchLogsClientCache.clear();
+    this.ecsClientCache.clear();
+    this.ec2ClientCache.clear();
+    this.ssmClientCache.clear();
+    this.ec2InstanceConnectClientCache.clear();
+    this.hasBackfilledManagedSsoCache = false;
+
+    const cleanupResults = await Promise.allSettled([
+      ...[...preparationHomeDirs].map((homeDir) =>
+        this.destroyTempAwsRoot(homeDir),
+      ),
+      rm(path.join(this.awsProfileRootDir, "sso", "cache"), {
+        recursive: true,
+        force: true,
+      }),
+      rm(path.join(this.awsProfileRootDir, "cli", "cache"), {
+        recursive: true,
+        force: true,
+      }),
+    ]);
+    await this.materializeManagedProfiles();
+    const cleanupFailure = cleanupResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (cleanupFailure) {
+      throw cleanupFailure.reason;
+    }
   }
 
   private getAwsRootEnvPatch(
@@ -2104,7 +2070,12 @@ export class AwsService {
   }
 
   private async destroyTempAwsRoot(homeDir: string): Promise<void> {
-    await rm(homeDir, { recursive: true, force: true });
+    await rm(homeDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
   }
 
   private pruneExpiredSsoPreparations(): void {
@@ -2910,7 +2881,11 @@ export class AwsService {
       };
     }
 
+    const preparationGeneration = this.managedProfileArtifactsGeneration;
     await this.ensureManagedProfilesReady();
+    if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
+      throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+    }
     this.pruneExpiredSsoPreparations();
 
     const profileName = normalizeAwsProfileName(input.profileName);
@@ -2929,7 +2904,11 @@ export class AwsService {
 
     const ssoSessionName = await this.buildUniqueSsoSessionName(profileName);
     const tempRoot = await this.createTempAwsRoot();
+    this.inFlightSsoPreparationRoots.add(tempRoot.homeDir);
     try {
+      if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
+        throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+      }
       const documents = await loadAwsProfileDocuments(tempRoot.awsRootDir);
       setAwsProfileKeyValueInDocuments(
         documents,
@@ -3014,8 +2993,12 @@ export class AwsService {
       if (!defaultAccountId || !defaultRoleName) {
         throw new Error("선택 가능한 AWS SSO account/role 조합을 찾지 못했습니다.");
       }
+      if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
+        throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+      }
 
       const preparationToken = randomUUID();
+      this.inFlightSsoPreparationRoots.delete(tempRoot.homeDir);
       this.pendingSsoPreparations.set(preparationToken, {
         preparationToken,
         profileName,
@@ -3043,6 +3026,7 @@ export class AwsService {
         defaultRoleName,
       };
     } catch (error) {
+      this.inFlightSsoPreparationRoots.delete(tempRoot.homeDir);
       await this.destroyTempAwsRoot(tempRoot.homeDir);
       throw error;
     }

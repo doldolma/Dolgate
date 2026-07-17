@@ -1,12 +1,13 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { AwsProfileDetails } from '@shared';
+import type { AwsProfileDetails, ManagedAwsProfilePayload } from '@shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AwsService,
   buildSshMetadataProbeCommands,
 } from './aws-service';
+import { AwsProfileRepository } from './database';
 import { resetDesktopStateStorageForTests } from './state-storage';
 
 vi.mock('electron', () => ({
@@ -26,6 +27,16 @@ vi.mock('electron', () => ({
 }));
 
 const tempDirectories: string[] = [];
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 async function createTempAwsProfileDir() {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'dolssh-aws-profiles-'));
@@ -53,6 +64,69 @@ async function writeAwsProfileFiles(
     input.credentials ?? '',
     'utf8',
   );
+}
+
+const MANAGED_PROFILE_UPDATED_AT = '2026-07-17T00:00:00.000Z';
+
+function managedStaticProfile(
+  name: string,
+  overrides: Partial<Extract<ManagedAwsProfilePayload, { kind: 'static' }>> = {},
+): Extract<ManagedAwsProfilePayload, { kind: 'static' }> {
+  return {
+    id: `profile:${name}`,
+    kind: 'static',
+    name,
+    region: null,
+    accessKeyId: `AKIA${name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12)}`,
+    secretAccessKey: `${name}-secret`,
+    updatedAt: MANAGED_PROFILE_UPDATED_AT,
+    ...overrides,
+  };
+}
+
+function managedSsoProfile(
+  name: string,
+  overrides: Partial<Extract<ManagedAwsProfilePayload, { kind: 'sso' }>> = {},
+): Extract<ManagedAwsProfilePayload, { kind: 'sso' }> {
+  return {
+    id: `profile:${name}`,
+    kind: 'sso',
+    name,
+    region: null,
+    ssoStartUrl: 'https://example.awsapps.com/start',
+    ssoRegion: 'ap-northeast-2',
+    ssoAccountId: '123456789012',
+    ssoRoleName: 'AdministratorAccess',
+    updatedAt: MANAGED_PROFILE_UPDATED_AT,
+    ...overrides,
+  };
+}
+
+function managedRoleProfile(
+  name: string,
+  sourceProfileId: string,
+  overrides: Partial<Extract<ManagedAwsProfilePayload, { kind: 'role' }>> = {},
+): Extract<ManagedAwsProfilePayload, { kind: 'role' }> {
+  return {
+    id: `profile:${name}`,
+    kind: 'role',
+    name,
+    region: null,
+    sourceProfileId,
+    roleArn: 'arn:aws:iam::123456789012:role/Admin',
+    updatedAt: MANAGED_PROFILE_UPDATED_AT,
+    ...overrides,
+  };
+}
+
+function createManagedAwsService(
+  rootDir: string,
+  profiles: ManagedAwsProfilePayload[] = [],
+  externalRootDir = rootDir,
+): AwsService {
+  const repository = new AwsProfileRepository();
+  repository.replaceAll(profiles);
+  return new AwsService(repository, rootDir, externalRootDir);
 }
 
 async function writeSsoCacheToken(
@@ -293,7 +367,13 @@ describe('AwsService.buildServerProxySessionEnvSpec', () => {
       'utf8',
     );
 
-    const service = new AwsService(rootDir);
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('prod', {
+        region: 'ap-southeast-2',
+        accessKeyId: 'AKIATEST123',
+        secretAccessKey: 'secret-value',
+      }),
+    ]);
 
     await expect(
       service.buildServerProxySessionEnvSpec('prod', 'ap-southeast-2'),
@@ -318,7 +398,7 @@ describe('AwsService.buildServerProxySessionEnvSpec', () => {
 describe('AwsService.createProfile', () => {
   it('validates credentials first and writes the new profile when they are valid', async () => {
     const rootDir = await createTempAwsProfileDir();
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
@@ -359,11 +439,13 @@ describe('AwsService.createProfile', () => {
 
   it('rejects duplicate profile names before validation or writes', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[profile dolssh-prod]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: ['[dolssh-prod]', 'aws_access_key_id = AKIAEXISTING', 'aws_secret_access_key = secret', ''].join('\n'),
-    });
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('dolssh-prod', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIAEXISTING',
+        secretAccessKey: 'secret',
+      }),
+    ]) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
@@ -390,7 +472,7 @@ describe('AwsService.createProfile', () => {
 
   it('does not write a region when it is omitted', async () => {
     const rootDir = await createTempAwsProfileDir();
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'static';
@@ -493,16 +575,13 @@ describe('AwsService.createProfile', () => {
 
   it('translates AssumeRole access denied errors for role profiles', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[default]',
-        'aws_access_key_id = AKIADEFAULT1234',
-        'aws_secret_access_key = default-secret',
-        '',
-      ].join('\n'),
-    });
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('default', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIADEFAULT1234',
+        secretAccessKey: 'default-secret',
+      }),
+    ]) as unknown as {
       stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -537,17 +616,13 @@ describe('AwsService.createProfile', () => {
 
   it('validates role profiles by assuming the role with the selected source profile', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[default]',
-        'aws_access_key_id = AKIADEFAULT1234',
-        'aws_secret_access_key = default-secret',
-        '',
-      ].join('\n'),
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('default', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIADEFAULT1234',
+        secretAccessKey: 'default-secret',
+      }),
+    ]) as unknown as {
       stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -585,21 +660,9 @@ describe('AwsService.createProfile', () => {
 
   it('translates invalid or expired SSO sessions during role validation', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[default]',
-        'sso_session = gridwiz',
-        'sso_account_id = 123456789012',
-        'sso_role_name = developer',
-        '',
-        '[sso-session gridwiz]',
-        'sso_start_url = https://example.awsapps.com/start',
-        'sso_region = ap-northeast-2',
-        '',
-      ].join('\n'),
-      credentials: '',
-    });
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedSsoProfile('default', { ssoRoleName: 'developer' }),
+    ]) as unknown as {
       stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -633,16 +696,13 @@ describe('AwsService.createProfile', () => {
 
   it('translates RoleArn parameter validation errors during role validation', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[default]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[default]',
-        'aws_access_key_id = AKIADEFAULT1234',
-        'aws_secret_access_key = default-secret',
-        '',
-      ].join('\n'),
-    });
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('default', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIADEFAULT1234',
+        secretAccessKey: 'default-secret',
+      }),
+    ]) as unknown as {
       stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       createProfile: (input: {
         kind: 'role';
@@ -683,7 +743,7 @@ describe('AwsService.createProfile', () => {
     const awsRootDir = path.join(homeDir, '.aws');
     await writeAwsProfileFiles(awsRootDir, {});
 
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       listProfiles: ReturnType<typeof vi.fn>;
       stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       pendingSsoPreparations: Map<string, unknown>;
@@ -833,6 +893,163 @@ describe('AwsService.createProfile', () => {
 });
 
 describe('AwsService AWS profile management', () => {
+  it('removes pending SSO preparation roots when account artifacts are purged', async () => {
+    const managedRootDir = await createTempAwsProfileDir();
+    const preparationHomeDir = await createTempAwsProfileDir();
+    const preparationAwsRootDir = path.join(preparationHomeDir, '.aws');
+    await writeSsoCacheToken(preparationAwsRootDir, 'pending.json', {
+      accessToken: 'pending-token',
+    });
+    const service = createManagedAwsService(managedRootDir) as unknown as {
+      pendingSsoPreparations: Map<string, Record<string, unknown>>;
+      purgeManagedProfileArtifacts: () => Promise<void>;
+    };
+    service.pendingSsoPreparations.set('pending-token', {
+      preparationToken: 'pending-token',
+      profileName: 'corp-sso',
+      ssoSessionName: 'corp-sso',
+      ssoStartUrl: 'https://example.awsapps.com/start',
+      ssoRegion: 'ap-northeast-2',
+      region: 'ap-northeast-2',
+      awsRootDir: preparationAwsRootDir,
+      homeDir: preparationHomeDir,
+      expiresAt: Date.now() + 60_000,
+      accounts: [],
+      rolesByAccountId: {},
+    });
+
+    await service.purgeManagedProfileArtifacts();
+
+    expect(service.pendingSsoPreparations.size).toBe(0);
+    await expect(
+      readFile(path.join(preparationAwsRootDir, 'sso', 'cache', 'pending.json')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cancels an in-flight SSO preparation across an account purge', async () => {
+    const managedRootDir = await createTempAwsProfileDir();
+    const preparationHomeDir = await createTempAwsProfileDir();
+    const preparationAwsRootDir = path.join(preparationHomeDir, '.aws');
+    await writeAwsProfileFiles(preparationAwsRootDir, {});
+    const login = createDeferred<{ accessToken: string }>();
+    const service = createManagedAwsService(managedRootDir) as unknown as {
+      createTempAwsRoot: ReturnType<typeof vi.fn>;
+      performSsoLoginForRoot: ReturnType<typeof vi.fn>;
+      listSsoAccounts: ReturnType<typeof vi.fn>;
+      listSsoRolesForAccount: ReturnType<typeof vi.fn>;
+      pendingSsoPreparations: Map<string, unknown>;
+      prepareSsoProfile: (input: {
+        profileName: string;
+        ssoStartUrl: string;
+        ssoRegion: string;
+        region?: string | null;
+      }) => Promise<unknown>;
+      purgeManagedProfileArtifacts: () => Promise<void>;
+    };
+    service.createTempAwsRoot = vi.fn().mockResolvedValue({
+      homeDir: preparationHomeDir,
+      awsRootDir: preparationAwsRootDir,
+    });
+    service.performSsoLoginForRoot = vi.fn().mockReturnValue(login.promise);
+    service.listSsoAccounts = vi.fn().mockResolvedValue([
+      {
+        accountId: '123456789012',
+        accountName: 'Example',
+        emailAddress: 'aws@example.com',
+      },
+    ]);
+    service.listSsoRolesForAccount = vi.fn().mockResolvedValue([
+      { accountId: '123456789012', roleName: 'AdministratorAccess' },
+    ]);
+
+    const preparation = service.prepareSsoProfile({
+      profileName: 'corp-sso',
+      ssoStartUrl: 'https://example.awsapps.com/start',
+      ssoRegion: 'ap-northeast-2',
+      region: 'ap-northeast-2',
+    });
+    await vi.waitFor(() => {
+      expect(service.performSsoLoginForRoot).toHaveBeenCalledOnce();
+    });
+
+    await service.purgeManagedProfileArtifacts();
+    await expect(readFile(path.join(preparationAwsRootDir, 'config'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
+    login.resolve({ accessToken: 'late-token' });
+    await expect(preparation).rejects.toThrow(
+      '계정이 변경되어 AWS SSO 로그인을 취소했습니다.',
+    );
+    expect(service.pendingSsoPreparations.size).toBe(0);
+  });
+
+  it('treats managed files as runtime output and does not restore stale account profiles', async () => {
+    const managedRootDir = await createTempAwsProfileDir();
+    const externalRootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(managedRootDir, {
+      config: ['[profile legacy]', 'region = ap-northeast-2', ''].join('\n'),
+      credentials: [
+        '[legacy]',
+        'aws_access_key_id = AKIALEGACY1234',
+        'aws_secret_access_key = legacy-secret',
+        '',
+      ].join('\n'),
+    });
+    await writeSsoCacheToken(managedRootDir, 'old-account.json', {
+      accessToken: 'old-account-token',
+    });
+
+    const repository = new AwsProfileRepository();
+    const service = new AwsService(
+      repository,
+      managedRootDir,
+      externalRootDir,
+    );
+
+    await expect(service.listProfiles()).resolves.toEqual([]);
+    await expect(readFile(path.join(managedRootDir, 'config'), 'utf8')).resolves.toBe('');
+    await expect(readFile(path.join(managedRootDir, 'credentials'), 'utf8')).resolves.toBe('');
+
+    repository.upsert({
+      id: 'current-profile',
+      kind: 'static',
+      name: 'current',
+      region: 'ap-northeast-2',
+      accessKeyId: 'AKIACURRENT1234',
+      secretAccessKey: 'current-secret',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    });
+    await service.materializeManagedProfiles();
+    await service.purgeManagedProfileArtifacts();
+
+    await expect(service.listProfiles()).resolves.toEqual([]);
+    await expect(readFile(path.join(managedRootDir, 'config'), 'utf8')).resolves.toBe('');
+    await expect(readFile(path.join(managedRootDir, 'credentials'), 'utf8')).resolves.toBe('');
+    await expect(
+      readFile(path.join(managedRootDir, 'sso', 'cache', 'old-account.json'), 'utf8'),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // A stale process may rewrite the old runtime files after the purge. A
+    // restarted app still overwrites them from the empty state source of truth.
+    await writeAwsProfileFiles(managedRootDir, {
+      credentials: [
+        '[legacy]',
+        'aws_access_key_id = AKIALEGACY1234',
+        'aws_secret_access_key = legacy-secret',
+        '',
+      ].join('\n'),
+    });
+    const restartedService = new AwsService(
+      repository,
+      managedRootDir,
+      externalRootDir,
+    );
+
+    await expect(restartedService.listProfiles()).resolves.toEqual([]);
+    await expect(readFile(path.join(managedRootDir, 'credentials'), 'utf8')).resolves.toBe('');
+  });
+
   it('copies the local sso cache into temp aws roots for profile validation', async () => {
     const rootDir = await createTempAwsProfileDir();
     await writeAwsProfileFiles(rootDir, {
@@ -874,40 +1091,18 @@ describe('AwsService AWS profile management', () => {
     await service.destroyTempAwsRoot(tempRoot.homeDir);
   });
 
-  it('classifies profile details by config shape and never exposes raw secrets', async () => {
+  it('classifies managed profile details and never exposes raw secrets', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[profile static-profile]',
-        'region = ap-northeast-2',
-        '',
-        '[profile sso-profile]',
-        'sso_session = corp-session',
-        'sso_account_id = 123456789012',
-        'sso_role_name = AdministratorAccess',
-        '',
-        '[profile role-profile]',
-        'role_arn = arn:aws:iam::123456789012:role/Admin',
-        'source_profile = static-profile',
-        '',
-        '[profile process-profile]',
-        'credential_process = node scripts/aws-creds.js',
-        '',
-        '[profile unknown-profile]',
-        'region = us-east-1',
-        '',
-        '[sso-session corp-session]',
-        'sso_start_url = https://example.awsapps.com/start',
-        'sso_region = ap-northeast-2',
-      ].join('\n'),
-      credentials: [
-        '[static-profile]',
-        'aws_access_key_id = AKIATEST12345678',
-        'aws_secret_access_key = secret-value',
-      ].join('\n'),
+    const staticProfile = managedStaticProfile('static-profile', {
+      region: 'ap-northeast-2',
+      accessKeyId: 'AKIATEST12345678',
+      secretAccessKey: 'secret-value',
     });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      staticProfile,
+      managedSsoProfile('sso-profile'),
+      managedRoleProfile('role-profile', staticProfile.id),
+    ]) as unknown as {
       getProfileStatusFromRoot: ReturnType<typeof vi.fn>;
       getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
     };
@@ -949,28 +1144,17 @@ describe('AwsService AWS profile management', () => {
       roleArn: 'arn:aws:iam::123456789012:role/Admin',
       sourceProfile: 'static-profile',
     });
-    await expect(service.getProfileDetails('process-profile')).resolves.toMatchObject({
-      kind: 'unknown',
-      credentialProcess: null,
-    });
-    await expect(service.getProfileDetails('unknown-profile')).resolves.toMatchObject({
-      kind: 'unknown',
-    });
   });
 
   it('uses a shorter timeout when loading profile details', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[static-profile]',
-        'aws_access_key_id = AKIATEST12345678',
-        'aws_secret_access_key = secret-value',
-        '',
-      ].join('\n'),
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('static-profile', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIATEST12345678',
+        secretAccessKey: 'secret-value',
+      }),
+    ]) as unknown as {
       readConfigValue: ReturnType<typeof vi.fn>;
       stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileDetails: (profileName: string) => Promise<AwsProfileDetails>;
@@ -1035,7 +1219,11 @@ describe('AwsService AWS profile management', () => {
       'utf8',
     );
 
-    const service = new AwsService(managedRootDir, externalRootDir);
+    const service = createManagedAwsService(
+      managedRootDir,
+      [],
+      externalRootDir,
+    );
 
     await expect(
       service.importExternalProfiles({
@@ -1128,15 +1316,6 @@ describe('AwsService AWS profile management', () => {
   it('skips importing external profiles when the managed store already has the same profile name', async () => {
     const managedRootDir = await createTempAwsProfileDir();
     const externalRootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(managedRootDir, {
-      config: ['[profile shared-profile]', 'region = us-east-1', ''].join('\n'),
-      credentials: [
-        '[shared-profile]',
-        'aws_access_key_id = AKIAMANAGED1234',
-        'aws_secret_access_key = managed-secret',
-        '',
-      ].join('\n'),
-    });
     await writeAwsProfileFiles(externalRootDir, {
       config: ['[profile shared-profile]', 'region = ap-northeast-2', ''].join('\n'),
       credentials: [
@@ -1147,7 +1326,17 @@ describe('AwsService AWS profile management', () => {
       ].join('\n'),
     });
 
-    const service = new AwsService(managedRootDir, externalRootDir);
+    const service = createManagedAwsService(
+      managedRootDir,
+      [
+        managedStaticProfile('shared-profile', {
+          region: 'us-east-1',
+          accessKeyId: 'AKIAMANAGED1234',
+          secretAccessKey: 'managed-secret',
+        }),
+      ],
+      externalRootDir,
+    );
 
     await expect(
       service.importExternalProfiles({
@@ -1172,17 +1361,13 @@ describe('AwsService AWS profile management', () => {
 
   it('removes region from the config file when updating a static profile without a region', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[static-profile]',
-        'aws_access_key_id = AKIAOLDVALUE',
-        'aws_secret_access_key = old-secret',
-        '',
-      ].join('\n'),
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('static-profile', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIAOLDVALUE',
+        secretAccessKey: 'old-secret',
+      }),
+    ]) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
         profileName: string;
@@ -1214,36 +1399,19 @@ describe('AwsService AWS profile management', () => {
 
   it('updates static, sso, and role profile regions without validating aws auth', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[profile source-static]',
-        'region = ap-northeast-2',
-        '',
-        '[profile corp-sso]',
-        'sso_session = corp-session',
-        'sso_account_id = 123456789012',
-        'sso_role_name = ReadOnly',
-        'region = us-west-2',
-        '',
-        '[sso-session corp-session]',
-        'sso_region = ap-northeast-2',
-        'sso_start_url = https://example.awsapps.com/start',
-        'sso_registration_scopes = sso:account:access',
-        '',
-        '[profile assume-admin]',
-        'role_arn = arn:aws:iam::123456789012:role/Admin',
-        'source_profile = source-static',
-        '',
-      ].join('\n'),
-      credentials: [
-        '[source-static]',
-        'aws_access_key_id = AKIASOURCE1234',
-        'aws_secret_access_key = source-secret',
-        '',
-      ].join('\n'),
+    const sourceProfile = managedStaticProfile('source-static', {
+      region: 'ap-northeast-2',
+      accessKeyId: 'AKIASOURCE1234',
+      secretAccessKey: 'source-secret',
     });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      sourceProfile,
+      managedSsoProfile('corp-sso', {
+        region: 'us-west-2',
+        ssoRoleName: 'ReadOnly',
+      }),
+      managedRoleProfile('assume-admin', sourceProfile.id),
+    ]) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       stsAssumeRoleWithSourceProfile: ReturnType<typeof vi.fn>;
       updateProfileRegion: (input: {
@@ -1294,17 +1462,13 @@ describe('AwsService AWS profile management', () => {
 
   it('removes a profile region when saving a blank region-only update', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[static-profile]',
-        'aws_access_key_id = AKIAOLDVALUE',
-        'aws_secret_access_key = old-secret',
-        '',
-      ].join('\n'),
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('static-profile', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIAOLDVALUE',
+        secretAccessKey: 'old-secret',
+      }),
+    ]) as unknown as {
       updateProfileRegion: (input: {
         profileName: string;
         region?: string | null;
@@ -1323,12 +1487,7 @@ describe('AwsService AWS profile management', () => {
 
   it('rejects region-only updates for missing managed profiles', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: '',
-      credentials: '',
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       updateProfileRegion: (input: {
         profileName: string;
         region?: string | null;
@@ -1345,16 +1504,13 @@ describe('AwsService AWS profile management', () => {
 
   it('translates SignatureDoesNotMatch during static profile updates', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: ['[profile static-profile]', 'region = ap-northeast-2', ''].join('\n'),
-      credentials: [
-        '[static-profile]',
-        'aws_access_key_id = AKIAOLDVALUE',
-        'aws_secret_access_key = old-secret',
-        '',
-      ].join('\n'),
-    });
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedStaticProfile('static-profile', {
+        region: 'ap-northeast-2',
+        accessKeyId: 'AKIAOLDVALUE',
+        secretAccessKey: 'old-secret',
+      }),
+    ]) as unknown as {
       stsGetCallerIdentityWithStaticCredentials: ReturnType<typeof vi.fn>;
       updateProfile: (input: {
         profileName: string;
@@ -1389,7 +1545,7 @@ describe('AwsService AWS profile management', () => {
 
   it('translates SSO login preparation failures', async () => {
     const rootDir = await createTempAwsProfileDir();
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       listProfiles: ReturnType<typeof vi.fn>;
       performSsoLoginForRoot: ReturnType<typeof vi.fn>;
       prepareSsoProfile: (input: {
@@ -1423,7 +1579,7 @@ describe('AwsService AWS profile management', () => {
 
   it('translates SSO account loading failures after login', async () => {
     const rootDir = await createTempAwsProfileDir();
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir) as unknown as {
       listProfiles: ReturnType<typeof vi.fn>;
       performSsoLoginForRoot: ReturnType<typeof vi.fn>;
       listSsoAccounts: ReturnType<typeof vi.fn>;
@@ -1461,25 +1617,15 @@ describe('AwsService AWS profile management', () => {
 
   it('renames the default profile sections and rewrites source_profile references', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[default]',
-        'region = ap-northeast-2',
-        '',
-        '[profile assume-admin]',
-        'role_arn = arn:aws:iam::123456789012:role/Admin',
-        'source_profile = default',
-        '',
-      ].join('\n'),
-      credentials: [
-        '[default]',
-        'aws_access_key_id = AKIADEFAULT1234',
-        'aws_secret_access_key = secret-value',
-        '',
-      ].join('\n'),
+    const defaultProfile = managedStaticProfile('default', {
+      region: 'ap-northeast-2',
+      accessKeyId: 'AKIADEFAULT1234',
+      secretAccessKey: 'secret-value',
     });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      defaultProfile,
+      managedRoleProfile('assume-admin', defaultProfile.id),
+    ]) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
       renameProfile: (input: { profileName: string; nextProfileName: string }) => Promise<void>;
@@ -1508,27 +1654,10 @@ describe('AwsService AWS profile management', () => {
 
   it('keeps a shared sso-session when another local profile still references it', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[profile primary-sso]',
-        'sso_session = corp-session',
-        'sso_account_id = 123456789012',
-        'sso_role_name = AdministratorAccess',
-        '',
-        '[profile backup-sso]',
-        'sso_session = corp-session',
-        'sso_account_id = 123456789012',
-        'sso_role_name = AdministratorAccess',
-        '',
-        '[sso-session corp-session]',
-        'sso_start_url = https://example.awsapps.com/start',
-        'sso_region = ap-northeast-2',
-        '',
-      ].join('\n'),
-      credentials: '',
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedSsoProfile('primary-sso'),
+      managedSsoProfile('backup-sso'),
+    ]) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
       deleteProfile: (profileName: string) => Promise<void>;
@@ -1550,22 +1679,9 @@ describe('AwsService AWS profile management', () => {
 
   it('deletes the default profile and removes an orphaned sso-session section', async () => {
     const rootDir = await createTempAwsProfileDir();
-    await writeAwsProfileFiles(rootDir, {
-      config: [
-        '[default]',
-        'sso_session = corp-session',
-        'sso_account_id = 123456789012',
-        'sso_role_name = AdministratorAccess',
-        '',
-        '[sso-session corp-session]',
-        'sso_start_url = https://example.awsapps.com/start',
-        'sso_region = ap-northeast-2',
-        '',
-      ].join('\n'),
-      credentials: '',
-    });
-
-    const service = new AwsService(rootDir) as unknown as {
+    const service = createManagedAwsService(rootDir, [
+      managedSsoProfile('default'),
+    ]) as unknown as {
       ensureAwsCliAvailable: ReturnType<typeof vi.fn>;
       listProfiles: ReturnType<typeof vi.fn>;
       deleteProfile: (profileName: string) => Promise<void>;

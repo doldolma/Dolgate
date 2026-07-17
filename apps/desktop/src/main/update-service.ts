@@ -136,7 +136,8 @@ export class UpdateService {
       autoUpdater.setFeedURL(githubReleaseFeed);
     }
 
-    autoUpdater.autoDownload = false;
+    // 새 릴리즈는 백그라운드에서 미리 받아 두고, 적용 시점만 사용자가 선택한다.
+    autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
     autoUpdater.allowDowngrade = false;

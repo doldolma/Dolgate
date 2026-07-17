@@ -179,6 +179,27 @@ function createSyncService() {
       status: 'authenticated'
     })
   };
+  Object.assign(authService, {
+    captureSyncContext: vi.fn(() => ({
+      userId: 'user-1',
+      serverUrl: new URL(authService.getServerUrl()).toString(),
+      accessToken: authService.getAccessToken(),
+      vaultKeyBase64: authService.getVaultKeyBase64(),
+      vaultEpoch: authService.getVaultEpoch(),
+    })),
+    isSyncContextCurrent: vi.fn(
+      (context: {
+        userId: string;
+        serverUrl: string;
+        vaultKeyBase64: string;
+        vaultEpoch: number | null;
+      }) =>
+        context.userId === 'user-1' &&
+        context.serverUrl === new URL(authService.getServerUrl()).toString() &&
+        context.vaultKeyBase64 === authService.getVaultKeyBase64() &&
+        context.vaultEpoch === authService.getVaultEpoch(),
+    ),
+  });
   const hosts = {
     list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()

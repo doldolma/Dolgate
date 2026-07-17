@@ -50,6 +50,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const TERMIUS_HELPER_FLAG = '--dolssh-termius-helper';
 
+const userDataOverride = process.env.DOLSSH_USER_DATA_DIR?.trim();
+if (userDataOverride) {
+  app.setPath('userData', path.resolve(userDataOverride));
+}
+
 // dev 전용: vite 가 `?v=` 버전 쿼리 모듈을 immutable(1년) 캐시로 내려주는데, Electron 의
 // 디스크 캐시가 이를 앱 재시작 후에도 재사용해 "코드는 고쳤는데 창은 옛 모듈" 상태가
 // 될 수 있다(모듈 로드 크래시가 캐시되면 빈 화면으로 고착). dev 에서는 HTTP 캐시를
@@ -297,6 +302,9 @@ if (termiusHelperArgIndex >= 0) {
     void reconcileAwsHostProfileReferences().catch(() => undefined);
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
   });
+  syncService.setOnPurgedSyncedCache(() =>
+    awsService.purgeManagedProfileArtifacts()
+  );
 
   authService.setOnSessionActivated((owner) => {
     activityLogRepository.activate(owner);
@@ -559,7 +567,7 @@ if (termiusHelperArgIndex >= 0) {
       sessionReplayService
     );
     registerNotificationsIpcHandlers(notificationService);
-    await awsService.migrateManagedProfilesFromFilesIfNeeded();
+    await awsService.initializeManagedProfiles();
     await reconcileAwsHostProfileReferences();
     installApplicationMenu();
     await createWindow();

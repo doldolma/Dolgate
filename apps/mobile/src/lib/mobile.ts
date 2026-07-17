@@ -61,6 +61,9 @@ const VAULT_CACHE_V2_SERVICE = 'dolgate.mobile.vault-cache-v2';
 // 이전 포맷('dolgate' 초기, 'dekid:*' dekId 시절)은 epoch 없음(null)으로 읽는다 —
 // verifier 가 정체성을 증명하므로 epoch 부재는 순서 비교 불가일 뿐 위험하지 않다.
 const VAULT_EPOCH_USERNAME_PREFIX = 'epoch:';
+export const VAULT_MUTATION_TIMEOUT_MS = 30_000;
+export const VAULT_MUTATION_TIMEOUT_MESSAGE =
+  '동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
 
 const CLIENT_HEADER_NAME = 'X-Dolgate-Client';
 const CLIENT_VERSION_HEADER_NAME = 'X-Dolgate-Client-Version';
@@ -588,7 +591,10 @@ async function fetchVaultMutation(
   url: string,
   init: RequestInit,
 ): Promise<VaultMutationResult> {
-  const response = await fetchWithOptions(url, init);
+  const response = await fetchWithOptions(url, init, {
+    timeoutMs: VAULT_MUTATION_TIMEOUT_MS,
+    timeoutMessage: VAULT_MUTATION_TIMEOUT_MESSAGE,
+  });
   if (!response.ok) {
     throw await toApiError(response);
   }
@@ -1183,22 +1189,34 @@ async function fetchWithOptions(
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, options.timeoutMs);
+  const timeoutError = new Error(
+    options.timeoutMessage ?? '요청 시간이 초과되었습니다.',
+  );
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(timeoutError);
+    }, options.timeoutMs);
+  });
 
   try {
-    return await fetch(url, {
-      ...init,
-      signal: controller.signal,
-    });
+    return await Promise.race([
+      fetch(url, {
+        ...init,
+        signal: controller.signal,
+      }),
+      timeoutPromise,
+    ]);
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error(options.timeoutMessage ?? '요청 시간이 초과되었습니다.');
+    if (error === timeoutError || (error instanceof Error && error.name === 'AbortError')) {
+      throw timeoutError;
     }
     throw error;
   } finally {
-    clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 

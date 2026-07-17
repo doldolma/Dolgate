@@ -20,7 +20,7 @@
     "postinstall": "npm run sync:runtime-deps",
     "predev": "npm run prepare:ssh-core:dev",
     "prebuild": "npm run generate:icons && npm run sync:runtime-deps",
-    "dev": "electron-forge start",
+    "dev": "cross-env DOLSSH_USER_DATA_DIR=.tmp/dev-user-data electron-forge start",
     "build": "electron-forge package",
     "make": "electron-forge make",
     "release:clean": "node -e \"const fs=require('node:fs'); fs.rmSync('release/dist',{recursive:true,force:true});\"",

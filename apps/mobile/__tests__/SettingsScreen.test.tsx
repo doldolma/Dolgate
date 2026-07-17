@@ -1,6 +1,6 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { Alert, Platform, TextInput } from "react-native";
+import { Alert, Modal, Platform, TextInput } from "react-native";
 import type { AuthState } from "@dolssh/shared-core";
 import { APP_VERSION } from "../src/lib/app-metadata";
 import {
@@ -364,6 +364,84 @@ describe("SettingsScreen server save navigation", () => {
     expect(() => findPressableByText(tree!.root, "회원 탈퇴")).toThrow();
 
     await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("opens sync passphrase changes explicitly and clears drafts when cancelled", async () => {
+    const originalChangeVaultPassphrase =
+      useMobileAppStore.getState().changeVaultPassphrase;
+    const changeVaultPassphraseMock = jest.fn(async () => undefined);
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      vault: {
+        status: "unlocked",
+        dekBase64: "a2V5",
+        epoch: 1,
+        wrapRevision: 1,
+      },
+      changeVaultPassphrase: changeVaultPassphraseMock,
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    expect(
+      tree!.root.findAllByProps({ placeholder: "현재 동기화 암호" }),
+    ).toHaveLength(0);
+    await act(async () => {
+      findPressableByText(tree!.root, "암호 변경").props.onPress();
+    });
+
+    let modal = tree!.root.findByType(Modal);
+    let currentInput = modal.findByProps({
+      placeholder: "현재 동기화 암호",
+    });
+    await act(async () => {
+      currentInput.props.onChangeText("current-passphrase");
+      findPressableByText(modal, "취소").props.onPress();
+    });
+
+    expect(tree!.root.findAllByType(Modal)).toHaveLength(0);
+    await act(async () => {
+      findPressableByText(tree!.root, "암호 변경").props.onPress();
+    });
+    modal = tree!.root.findByType(Modal);
+    currentInput = modal.findByProps({ placeholder: "현재 동기화 암호" });
+    expect(currentInput.props.value).toBe("");
+
+    await act(async () => {
+      currentInput.props.onChangeText("current-passphrase");
+      modal
+        .findByProps({ placeholder: "새 동기화 암호" })
+        .props.onChangeText("next-passphrase");
+      modal
+        .findByProps({ placeholder: "새 동기화 암호 확인" })
+        .props.onChangeText("next-passphrase");
+    });
+    modal = tree!.root.findByType(Modal);
+    await act(async () => {
+      findPressableByText(modal, "암호 변경").props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(changeVaultPassphraseMock).toHaveBeenCalledWith(
+      "current-passphrase",
+      "next-passphrase",
+    );
+    expect(tree!.root.findAllByType(Modal)).toHaveLength(0);
+    expect(alertSpy).toHaveBeenCalledWith("동기화 암호 변경 완료");
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      useMobileAppStore.setState({
+        changeVaultPassphrase: originalChangeVaultPassphrase,
+      });
       tree!.unmount();
     });
   });

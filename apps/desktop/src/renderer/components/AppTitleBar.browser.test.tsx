@@ -72,6 +72,49 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
 }
 
 describe('AppTitleBar update popover', () => {
+  it('downloads available updates automatically and only offers installation when ready', () => {
+    const onDownloadUpdate = vi.fn().mockResolvedValue(undefined);
+    const onInstallUpdate = vi.fn().mockResolvedValue(undefined);
+    const release = {
+      version: '1.1.0',
+      releaseName: 'Dolgate 1.1.0',
+      releaseNotes: null,
+      publishedAt: null,
+    };
+    const { unmount } = renderTitleBar({
+      updateState: {
+        ...createUpdateState(),
+        status: 'available',
+        release,
+      },
+      onDownloadUpdate,
+      onInstallUpdate,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '업데이트 상태 보기' }));
+
+    expect(screen.getByText(/백그라운드 다운로드를 준비/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '다운로드' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '나중에' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '업데이트 확인' })).not.toBeInTheDocument();
+    expect(onDownloadUpdate).not.toHaveBeenCalled();
+
+    unmount();
+    renderTitleBar({
+      updateState: {
+        ...createUpdateState(),
+        status: 'downloaded',
+        release,
+      },
+      onDownloadUpdate,
+      onInstallUpdate,
+    });
+    fireEvent.click(screen.getByRole('button', { name: '업데이트 상태 보기' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '재시작하여 업데이트' }));
+    expect(onInstallUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it('closes when clicking outside the update menu', () => {
     renderTitleBar();
 

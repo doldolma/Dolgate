@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
@@ -369,10 +369,10 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '편집' }));
     fireEvent.click(screen.getByRole('button', { name: '삭제' }));
 
-    await waitFor(() =>
-      expect(settingsServiceMocks.copySavedCredentialPassword).toHaveBeenCalledWith('secret-1'),
-    );
-    expect(screen.getByText('비밀번호를 클립보드에 복사했습니다.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(settingsServiceMocks.copySavedCredentialPassword).toHaveBeenCalledWith('secret-1');
+      expect(screen.getByText('비밀번호를 클립보드에 복사했습니다.')).toBeInTheDocument();
+    });
     expect(onEditSecret).toHaveBeenCalledWith('secret-1');
     expect(onRemoveSecret).toHaveBeenCalledWith('secret-1');
   });
@@ -528,6 +528,50 @@ describe('SettingsPanel', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('서버 오류가 발생했습니다.'),
     );
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('opens sync passphrase changes explicitly and clears drafts when cancelled', async () => {
+    const onChangeVaultPassphrase = vi.fn().mockResolvedValue(undefined);
+    renderSettingsPanel({
+      vaultStatus: 'unlocked',
+      onChangeVaultPassphrase,
+    });
+
+    expect(screen.queryByLabelText('현재 동기화 암호')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '암호 변경' }));
+
+    let dialog = screen.getByRole('dialog', { name: '동기화 암호 변경' });
+    fireEvent.change(within(dialog).getByLabelText('현재 동기화 암호'), {
+      target: { value: 'current-passphrase' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '취소' }));
+
+    expect(screen.queryByRole('dialog', { name: '동기화 암호 변경' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '암호 변경' }));
+    dialog = screen.getByRole('dialog', { name: '동기화 암호 변경' });
+    expect(within(dialog).getByLabelText('현재 동기화 암호')).toHaveValue('');
+
+    fireEvent.change(within(dialog).getByLabelText('현재 동기화 암호'), {
+      target: { value: 'current-passphrase' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('새 동기화 암호'), {
+      target: { value: 'next-passphrase' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('새 동기화 암호 확인'), {
+      target: { value: 'next-passphrase' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '암호 변경' }));
+
+    await waitFor(() =>
+      expect(onChangeVaultPassphrase).toHaveBeenCalledWith(
+        'current-passphrase',
+        'next-passphrase',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '동기화 암호 변경' })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('동기화 암호를 변경했습니다.')).toBeInTheDocument();
   });
 
   it('filters saved credentials by label and preserves actions', async () => {

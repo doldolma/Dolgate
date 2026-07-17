@@ -92,6 +92,8 @@ import {
   postVaultReset,
   postVaultSetup,
   putVaultRewrap,
+  VAULT_MUTATION_TIMEOUT_MESSAGE,
+  VAULT_MUTATION_TIMEOUT_MS,
   refreshAuthSession,
   saveStoredVaultDek,
   sanitizeTerminalSnapshot,
@@ -4126,6 +4128,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             const received = await refreshAuthSession(
               operationContext?.serverUrl ?? get().settings.serverUrl,
               session,
+              {
+                timeoutMs: VAULT_MUTATION_TIMEOUT_MS,
+                timeoutMessage: VAULT_MUTATION_TIMEOUT_MESSAGE,
+              },
             );
             if (operationContext) {
               assertVaultOperationContext(operationContext);
