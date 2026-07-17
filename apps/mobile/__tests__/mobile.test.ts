@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { AuthSession } from '@dolssh/shared-core';
+import { createVaultKdfDescriptor, type AuthSession } from '@dolssh/shared-core';
 import { APP_VERSION } from '../src/lib/app-metadata';
 import {
   fetchExchangeSession,
@@ -7,6 +7,7 @@ import {
   refreshAuthSession,
   resetClientInstallationIdCacheForTests,
   saveStoredAuthSession,
+  putVaultRewrap,
 } from '../src/lib/mobile';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -163,5 +164,38 @@ describe('mobile auth client headers', () => {
     await expect(saveStoredAuthSession(createAuthSession())).rejects.toThrow(
       '인증 세션을 보안 저장소에 저장하지 못했습니다.',
     );
+  });
+});
+
+describe('mobile vault mutations', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('times out even when the native fetch promise never settles', async () => {
+    jest.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = jest.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>(() => undefined);
+    }) as typeof fetch;
+    const request = putVaultRewrap(
+      'https://ssh.doldolma.com',
+      'access-token',
+      {
+        wrappedDekBase64: 'wrapped-dek',
+        dekVerifierBase64: 'verifier',
+        kdf: createVaultKdfDescriptor(),
+        expectedEpoch: 1,
+      },
+    );
+    const rejection = expect(request).rejects.toThrow(
+      '동기화 암호 요청 시간이 초과되었습니다.',
+    );
+
+    await jest.advanceTimersByTimeAsync(30_000);
+
+    await rejection;
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

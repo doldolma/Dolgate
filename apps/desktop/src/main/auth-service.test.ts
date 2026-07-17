@@ -173,6 +173,49 @@ beforeEach(() => {
 });
 
 describe("AuthService offline bootstrap", () => {
+  it("captures the account, server, DEK and epoch as one sync context", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore, setServerUrl } =
+      await createService(serverUrl);
+    const session = createSession(serverUrl);
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    await service.bootstrap();
+    const context = service.captureSyncContext();
+
+    expect(context).toEqual({
+      userId: session.user.id,
+      serverUrl: `${serverUrl}/`,
+      accessToken: session.tokens.accessToken,
+      vaultKeyBase64: session.vaultBootstrap.keyBase64,
+      vaultEpoch: null,
+    });
+    expect(service.isSyncContextCurrent(context)).toBe(true);
+    expect(
+      service.isSyncContextCurrent({
+        ...context,
+        vaultKeyBase64: Buffer.alloc(32, 9).toString("base64"),
+      }),
+    ).toBe(false);
+    expect(
+      service.isSyncContextCurrent({
+        ...context,
+        vaultEpoch: 1,
+      }),
+    ).toBe(false);
+    setServerUrl("https://other.example.com");
+    expect(service.isSyncContextCurrent(context)).toBe(false);
+  });
+
   it("enters offline-authenticated when refresh fails but a valid offline lease is cached", async () => {
     const serverUrl = "https://ssh.doldolma.com";
     const { service, secretStore } = await createService(serverUrl);
@@ -1028,6 +1071,42 @@ describe("AuthService E2EE vault", () => {
       (await secretStore.load("auth:offline-session-cache")) as string,
     ) as { vaultBootstrap: AuthSession["vaultBootstrap"] };
     expect(offlineCache.vaultBootstrap.wrapRevision).toBe(4);
+  });
+
+  it("times out a stalled vault mutation request", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    stubSessionRefresh(session);
+    await service.bootstrap();
+
+    vi.useFakeTimers();
+    try {
+      let requestSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          requestSignal = init?.signal ?? undefined;
+          return new Promise<Response>(() => undefined);
+        }),
+      );
+      const request = (
+        service as unknown as {
+          requestVaultApi: (method: string, pathname: string) => Promise<unknown>;
+        }
+      ).requestVaultApi("PUT", "/auth/vault");
+      const rejection = expect(request).rejects.toThrow(
+        "동기화 암호 요청 시간이 초과되었습니다.",
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await rejection;
+      expect(requestSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("relocks via handleVaultDekRejected when the refreshed descriptor proves a new DEK generation", async () => {

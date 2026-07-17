@@ -74,7 +74,6 @@ func main() {
 	awsSshTunnelRelay := httpserver.NewAwsSshTunnelRelay(awsSsmRuntime)
 	defer awsSshTunnelRelay.Close()
 	awsSsoMobileManager := httpserver.NewAwsSsoMobileManager()
-	log.Printf("AWS SSM runtime enabled (in-process data channel + AWS SDK)")
 	router, err := httpserver.NewRouter(dbStore, authService, httpserver.RouterConfig{
 		LocalAuthEnabled:   cfg.Auth.Local.Enabled,
 		LocalSignupEnabled: cfg.Auth.Local.SignupEnabled,

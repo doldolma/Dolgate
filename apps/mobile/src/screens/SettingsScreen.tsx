@@ -4,6 +4,9 @@ import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import {
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -52,6 +55,7 @@ function SettingsContent({
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [changePassphraseOpen, setChangePassphraseOpen] = useState(false);
   const [currentPassphraseDraft, setCurrentPassphraseDraft] = useState("");
   const [nextPassphraseDraft, setNextPassphraseDraft] = useState("");
   const [confirmPassphraseDraft, setConfirmPassphraseDraft] = useState("");
@@ -60,6 +64,16 @@ function SettingsContent({
   useEffect(() => {
     setServerUrlDraft(settings.serverUrl);
   }, [settings.serverUrl]);
+
+  useEffect(() => {
+    if (vault.status === "unlocked") {
+      return;
+    }
+    setChangePassphraseOpen(false);
+    setCurrentPassphraseDraft("");
+    setNextPassphraseDraft("");
+    setConfirmPassphraseDraft("");
+  }, [vault.status]);
 
   const validationMessage = useMemo(
     () => getSettingsValidationMessage(serverUrlDraft),
@@ -129,10 +143,8 @@ function SettingsContent({
       setCurrentPassphraseDraft("");
       setNextPassphraseDraft("");
       setConfirmPassphraseDraft("");
-      Alert.alert(
-        "동기화 암호 변경 완료",
-        "다른 기기는 다시 입력할 필요 없이 그대로 사용할 수 있습니다.",
-      );
+      setChangePassphraseOpen(false);
+      Alert.alert("동기화 암호 변경 완료");
     } catch (error) {
       Alert.alert(
         "동기화 암호 변경 실패",
@@ -143,6 +155,23 @@ function SettingsContent({
     } finally {
       setChangingPassphrase(false);
     }
+  };
+
+  const openChangePassphrase = (): void => {
+    setCurrentPassphraseDraft("");
+    setNextPassphraseDraft("");
+    setConfirmPassphraseDraft("");
+    setChangePassphraseOpen(true);
+  };
+
+  const closeChangePassphrase = (): void => {
+    if (changingPassphrase) {
+      return;
+    }
+    setCurrentPassphraseDraft("");
+    setNextPassphraseDraft("");
+    setConfirmPassphraseDraft("");
+    setChangePassphraseOpen(false);
   };
 
   const confirmDeleteAccount = (): void => {
@@ -286,80 +315,21 @@ function SettingsContent({
             동기화 암호
           </Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            동기화 데이터는 종단간 암호화되어 서버도 볼 수 없습니다. 암호를
-            변경해도 다른 기기는 다시 입력할 필요가 없습니다.
+            동기화 암호가 설정되어 있습니다. 잊지 않도록 안전하게 보관해 주세요.
           </Text>
-          <TextInput
-            value={currentPassphraseDraft}
-            onChangeText={setCurrentPassphraseDraft}
-            placeholder="현재 동기화 암호"
-            placeholderTextColor={palette.mutedText}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.input,
-              {
-                color: palette.text,
-                borderColor: palette.border,
-                backgroundColor: palette.input,
-              },
-            ]}
-          />
-          <TextInput
-            value={nextPassphraseDraft}
-            onChangeText={setNextPassphraseDraft}
-            placeholder="새 동기화 암호"
-            placeholderTextColor={palette.mutedText}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.input,
-              {
-                color: palette.text,
-                borderColor: palette.border,
-                backgroundColor: palette.input,
-              },
-            ]}
-          />
-          <TextInput
-            value={confirmPassphraseDraft}
-            onChangeText={setConfirmPassphraseDraft}
-            placeholder="새 동기화 암호 확인"
-            placeholderTextColor={palette.mutedText}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              styles.input,
-              {
-                color: palette.text,
-                borderColor: palette.border,
-                backgroundColor: palette.input,
-              },
-            ]}
-          />
-          {nextPassphraseValidationMessage ? (
-            <Text style={[styles.errorText, { color: palette.warning }]}>
-              {nextPassphraseValidationMessage}
-            </Text>
-          ) : null}
           <Pressable
-            disabled={!canChangePassphrase}
-            onPress={() => void handleChangePassphrase()}
+            onPress={openChangePassphrase}
             style={[
               styles.secondaryButton,
               {
                 backgroundColor: palette.surfaceAlt,
                 borderColor: palette.border,
                 alignSelf: "flex-start",
-                opacity: canChangePassphrase ? 1 : 0.55,
               },
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              {changingPassphrase ? "변경 중..." : "암호 변경"}
+              암호 변경
             </Text>
           </Pressable>
         </View>
@@ -565,6 +535,137 @@ function SettingsContent({
           Version {APP_VERSION}
         </Text>
       </View>
+      {changePassphraseOpen &&
+      showFullSettings &&
+      vault.status === "unlocked" ? (
+        <Modal
+          animationType="fade"
+          transparent
+          visible
+          onRequestClose={closeChangePassphrase}
+        >
+          <KeyboardAvoidingView
+            style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <ScrollView
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View
+                style={[
+                  styles.modalCard,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.border,
+                  },
+                ]}
+              >
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: palette.text }]}>
+                    동기화 암호 변경
+                  </Text>
+                  <Text style={[styles.body, { color: palette.mutedText }]}>
+                    현재 암호를 확인한 후 새 암호로 변경합니다.
+                  </Text>
+                </View>
+                <TextInput
+                  value={currentPassphraseDraft}
+                  onChangeText={setCurrentPassphraseDraft}
+                  placeholder="현재 동기화 암호"
+                  placeholderTextColor={palette.mutedText}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.input,
+                    {
+                      color: palette.text,
+                      borderColor: palette.border,
+                      backgroundColor: palette.input,
+                    },
+                  ]}
+                />
+                <TextInput
+                  value={nextPassphraseDraft}
+                  onChangeText={setNextPassphraseDraft}
+                  placeholder="새 동기화 암호"
+                  placeholderTextColor={palette.mutedText}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.input,
+                    {
+                      color: palette.text,
+                      borderColor: palette.border,
+                      backgroundColor: palette.input,
+                    },
+                  ]}
+                />
+                <TextInput
+                  value={confirmPassphraseDraft}
+                  onChangeText={setConfirmPassphraseDraft}
+                  placeholder="새 동기화 암호 확인"
+                  placeholderTextColor={palette.mutedText}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={[
+                    styles.input,
+                    {
+                      color: palette.text,
+                      borderColor: palette.border,
+                      backgroundColor: palette.input,
+                    },
+                  ]}
+                />
+                {nextPassphraseValidationMessage ? (
+                  <Text style={[styles.errorText, { color: palette.warning }]}>
+                    {nextPassphraseValidationMessage}
+                  </Text>
+                ) : null}
+                <View style={styles.modalActions}>
+                  <Pressable
+                    disabled={changingPassphrase}
+                    onPress={closeChangePassphrase}
+                    style={[
+                      styles.secondaryButton,
+                      {
+                        backgroundColor: palette.surfaceAlt,
+                        borderColor: palette.border,
+                        opacity: changingPassphrase ? 0.55 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.secondaryText, { color: palette.text }]}>
+                      취소
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={!canChangePassphrase}
+                    onPress={() => void handleChangePassphrase()}
+                    style={[
+                      styles.secondaryButton,
+                      {
+                        backgroundColor: palette.accent,
+                        borderColor: palette.accent,
+                        opacity: canChangePassphrase ? 1 : 0.55,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.secondaryText, styles.primaryButtonText]}
+                    >
+                      {changingPassphrase ? "변경 중..." : "암호 변경"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Modal>
+      ) : null}
     </ScrollView>
   );
 }
@@ -658,6 +759,40 @@ const styles = StyleSheet.create({
   secondaryText: {
     fontSize: 14,
     fontWeight: "700",
+  },
+  primaryButtonText: {
+    color: "#ffffff",
+  },
+  modalOverlay: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 460,
+    alignSelf: "center",
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 18,
+    gap: 12,
+  },
+  modalHeader: {
+    gap: 6,
+    marginBottom: 2,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 2,
   },
   themeChip: {
     borderWidth: 1,

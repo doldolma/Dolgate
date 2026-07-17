@@ -589,9 +589,7 @@ export function AppTitleBar({
   onDetachSessionToStandalone,
   onReorderDynamicTab,
   onCheckForUpdates,
-  onDownloadUpdate,
   onInstallUpdate,
-  onDismissUpdate,
   onOpenReleasePage,
   onMinimizeWindow,
   onMaximizeWindow,
@@ -713,14 +711,19 @@ export function AppTitleBar({
   const showBadge = shouldShowBadge(updateState);
   const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
   const releaseUrl = resolveReleaseUrl(updateState);
-  const showDownloadAction = updateState.status === 'available';
   const showInstallAction = updateState.status === 'downloaded';
-  const showCheckAction = updateState.enabled && !showDownloadAction && !showInstallAction;
-  const showDevDisabledAction = !updateState.enabled && !showDownloadAction && !showInstallAction;
+  const showCheckAction =
+    updateState.enabled &&
+    (updateState.status === 'idle' ||
+      updateState.status === 'upToDate' ||
+      updateState.status === 'error');
+  const showDevDisabledAction = !updateState.enabled;
+  const isAutoDownloading =
+    updateState.status === 'available' || updateState.status === 'downloading';
   const titleText = showInstallAction
     ? '업데이트를 적용할 준비가 됐습니다'
-    : showDownloadAction
-      ? '새 Dolgate 버전을 사용할 수 있습니다'
+    : isAutoDownloading
+      ? '업데이트를 다운로드하고 있습니다'
       : '앱 업데이트';
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
@@ -1596,6 +1599,9 @@ export function AppTitleBar({
                 ) : null}
 
                 {updateState.status === 'upToDate' ? <p>현재 최신 버전을 사용 중입니다.</p> : null}
+                {updateState.status === 'available' ? (
+                  <p>새 버전을 확인했습니다. 백그라운드 다운로드를 준비하고 있습니다.</p>
+                ) : null}
                 {updateState.status === 'downloading' ? (
                   <p>업데이트를 다운로드하는 중입니다. {formatProgressPercent(updateState)}</p>
                 ) : null}
@@ -1616,7 +1622,7 @@ export function AppTitleBar({
                 </Button>
                 {showCheckAction ? (
                   <Button variant="primary" onClick={onCheckForUpdates}>
-                    업데이트 확인
+                    {updateState.status === 'error' ? '다시 시도' : '업데이트 확인'}
                   </Button>
                 ) : null}
                 {showDevDisabledAction ? (
@@ -1624,26 +1630,9 @@ export function AppTitleBar({
                     개발 실행에서는 비활성
                   </Button>
                 ) : null}
-                {showDownloadAction ? (
-                  <>
-                    <Button variant="primary" onClick={onDownloadUpdate}>
-                      다운로드
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={async () => {
-                        if (updateState.release?.version) {
-                          await onDismissUpdate(updateState.release.version);
-                        }
-                      }}
-                    >
-                      나중에
-                    </Button>
-                  </>
-                ) : null}
                 {showInstallAction ? (
                   <Button variant="primary" onClick={onInstallUpdate}>
-                    재시작 후 업데이트
+                    재시작하여 업데이트
                   </Button>
                 ) : null}
               </div>

@@ -236,7 +236,8 @@ export function SettingsPanel({
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
-  // 동기화 암호 변경 폼 상태.
+  // 동기화 암호 변경 다이얼로그 상태.
+  const [vaultPassphraseOpen, setVaultPassphraseOpen] = useState(false);
   const [currentVaultPassphrase, setCurrentVaultPassphrase] = useState('');
   const [nextVaultPassphrase, setNextVaultPassphrase] = useState('');
   const [confirmVaultPassphrase, setConfirmVaultPassphrase] = useState('');
@@ -274,6 +275,16 @@ export function SettingsPanel({
     activeSection,
     settings.sessionReplayRetentionCount,
   ]);
+  useEffect(() => {
+    if (vaultStatus === 'unlocked') {
+      return;
+    }
+    setVaultPassphraseOpen(false);
+    setCurrentVaultPassphrase('');
+    setNextVaultPassphrase('');
+    setConfirmVaultPassphrase('');
+    setVaultPassphraseError(null);
+  }, [vaultStatus]);
 
   const visibleTerminalFontOptions =
     desktopPlatform === 'darwin'
@@ -336,6 +347,51 @@ export function SettingsPanel({
     sftpConflictPolicy: SftpConflictPolicy,
   ) {
     await onUpdateSettings({ sftpConflictPolicy });
+  }
+
+  function resetVaultPassphraseForm() {
+    setCurrentVaultPassphrase('');
+    setNextVaultPassphrase('');
+    setConfirmVaultPassphrase('');
+    setVaultPassphraseError(null);
+  }
+
+  function openVaultPassphraseDialog() {
+    resetVaultPassphraseForm();
+    setVaultPassphraseNotice(null);
+    setVaultPassphraseOpen(true);
+  }
+
+  function closeVaultPassphraseDialog() {
+    if (vaultPassphraseBusy) {
+      return;
+    }
+    resetVaultPassphraseForm();
+    setVaultPassphraseOpen(false);
+  }
+
+  async function handleChangeVaultPassphrase() {
+    if (!onChangeVaultPassphrase) {
+      return;
+    }
+    setVaultPassphraseBusy(true);
+    setVaultPassphraseError(null);
+    try {
+      await onChangeVaultPassphrase(
+        currentVaultPassphrase,
+        nextVaultPassphrase,
+      );
+      resetVaultPassphraseForm();
+      setVaultPassphraseOpen(false);
+      setVaultPassphraseNotice('동기화 암호를 변경했습니다.');
+    } catch (error) {
+      const fallback = '동기화 암호 변경에 실패했습니다.';
+      setVaultPassphraseError(
+        normalizeErrorMessage(error, fallback) || fallback,
+      );
+    } finally {
+      setVaultPassphraseBusy(false);
+    }
   }
 
   return (
@@ -775,82 +831,95 @@ export function SettingsPanel({
                 <h3>동기화 암호</h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
-                동기화 데이터는 종단간 암호화되어 서버도 볼 수 없습니다. 암호를
-                변경해도 다른 기기는 다시 입력할 필요가 없습니다.
+                동기화 암호가 설정되어 있습니다. 잊지 않도록 안전하게 보관해 주세요.
               </p>
-              <div className="grid max-w-[26rem] gap-3">
-                <Input
-                  type="password"
-                  value={currentVaultPassphrase}
-                  placeholder="현재 동기화 암호"
-                  onChange={(event) => setCurrentVaultPassphrase(event.target.value)}
-                />
-                <Input
-                  type="password"
-                  value={nextVaultPassphrase}
-                  placeholder="새 동기화 암호"
-                  onChange={(event) => setNextVaultPassphrase(event.target.value)}
-                />
-                <Input
-                  type="password"
-                  value={confirmVaultPassphrase}
-                  placeholder="새 동기화 암호 확인"
-                  onChange={(event) => setConfirmVaultPassphrase(event.target.value)}
-                />
-                {newVaultPassphraseValidationMessage ? (
-                  <p className="m-0 text-sm text-[var(--warning-text,var(--text-soft))]">
-                    {newVaultPassphraseValidationMessage}
+              {vaultPassphraseNotice ? (
+                <p className="m-0 mb-3 text-sm text-[var(--text-soft)]">
+                  {vaultPassphraseNotice}
+                </p>
+              ) : null}
+              <Button variant="secondary" onClick={openVaultPassphraseDialog}>
+                암호 변경
+              </Button>
+            </section>
+          ) : null}
+
+          {vaultStatus === 'unlocked' &&
+          vaultPassphraseOpen &&
+          onChangeVaultPassphrase ? (
+            <DialogBackdrop
+              dismissDisabled={vaultPassphraseBusy}
+              onDismiss={closeVaultPassphraseDialog}
+            >
+              <ModalShell
+                size="sm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="change-vault-passphrase-title"
+              >
+                <ModalHeader className="block">
+                  <SectionLabel>Security</SectionLabel>
+                  <h3 id="change-vault-passphrase-title">동기화 암호 변경</h3>
+                </ModalHeader>
+                <ModalBody className="grid gap-3">
+                  <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
+                    현재 암호를 확인한 후 새 암호로 변경합니다.
                   </p>
-                ) : null}
-                {vaultPassphraseError ? (
-                  <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
-                    {vaultPassphraseError}
-                  </p>
-                ) : null}
-                {vaultPassphraseNotice ? (
-                  <p className="m-0 text-sm text-[var(--text-soft)]">
-                    {vaultPassphraseNotice}
-                  </p>
-                ) : null}
-                <div>
+                  <Input
+                    type="password"
+                    value={currentVaultPassphrase}
+                    placeholder="현재 동기화 암호"
+                    aria-label="현재 동기화 암호"
+                    onChange={(event) => setCurrentVaultPassphrase(event.target.value)}
+                  />
+                  <Input
+                    type="password"
+                    value={nextVaultPassphrase}
+                    placeholder="새 동기화 암호"
+                    aria-label="새 동기화 암호"
+                    onChange={(event) => setNextVaultPassphrase(event.target.value)}
+                  />
+                  <Input
+                    type="password"
+                    value={confirmVaultPassphrase}
+                    placeholder="새 동기화 암호 확인"
+                    aria-label="새 동기화 암호 확인"
+                    onChange={(event) => setConfirmVaultPassphrase(event.target.value)}
+                  />
+                  {newVaultPassphraseValidationMessage ? (
+                    <p className="m-0 text-sm text-[var(--warning-text,var(--text-soft))]">
+                      {newVaultPassphraseValidationMessage}
+                    </p>
+                  ) : null}
+                  {vaultPassphraseError ? (
+                    <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
+                      {vaultPassphraseError}
+                    </p>
+                  ) : null}
+                </ModalBody>
+                <ModalFooter>
                   <Button
                     variant="secondary"
+                    disabled={vaultPassphraseBusy}
+                    onClick={closeVaultPassphraseDialog}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    variant="primary"
                     disabled={
                       vaultPassphraseBusy ||
                       !currentVaultPassphrase ||
                       validateNewVaultPassphrase(nextVaultPassphrase) !== null ||
                       nextVaultPassphrase !== confirmVaultPassphrase
                     }
-                    onClick={async () => {
-                      setVaultPassphraseBusy(true);
-                      setVaultPassphraseError(null);
-                      setVaultPassphraseNotice(null);
-                      try {
-                        await onChangeVaultPassphrase(
-                          currentVaultPassphrase,
-                          nextVaultPassphrase,
-                        );
-                        setCurrentVaultPassphrase('');
-                        setNextVaultPassphrase('');
-                        setConfirmVaultPassphrase('');
-                        setVaultPassphraseNotice(
-                          '동기화 암호를 변경했습니다. 다른 기기는 다시 입력할 필요가 없습니다.',
-                        );
-                      } catch (error) {
-                        const fallback = '동기화 암호 변경에 실패했습니다.';
-                        setVaultPassphraseError(
-                          normalizeErrorMessage(error, fallback) || fallback,
-                        );
-                      } finally {
-                        setVaultPassphraseBusy(false);
-                      }
-                    }}
+                    onClick={() => void handleChangeVaultPassphrase()}
                   >
                     {vaultPassphraseBusy ? '변경 중...' : '암호 변경'}
                   </Button>
-                </div>
-              </div>
-            </section>
+                </ModalFooter>
+              </ModalShell>
+            </DialogBackdrop>
           ) : null}
 
           {deleteAccountOpen && onDeleteAccount ? (

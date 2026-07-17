@@ -49,6 +49,9 @@ const LEGACY_VAULT_DEK_ID_ACCOUNT = "auth:vault-dek-id";
 const LOOPBACK_CALLBACK_HOST = "127.0.0.1";
 const OFFLINE_RETRY_INITIAL_DELAY_MS = 30_000;
 const OFFLINE_RETRY_MAX_DELAY_MS = 15 * 60_000;
+const VAULT_API_REQUEST_TIMEOUT_MS = 30_000;
+const VAULT_API_REQUEST_TIMEOUT_MESSAGE =
+  "동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
 const CLIENT_HEADER_NAME = "X-Dolgate-Client";
 const CLIENT_VERSION_HEADER_NAME = "X-Dolgate-Client-Version";
 const CLIENT_PLATFORM_HEADER_NAME = "X-Dolgate-Platform";
@@ -472,6 +475,14 @@ interface ActivityLogInput {
   category: "audit";
   message: string;
   metadata?: Record<string, unknown> | null;
+}
+
+export interface AuthSyncContext {
+  userId: string;
+  serverUrl: string;
+  accessToken: string;
+  vaultKeyBase64: string;
+  vaultEpoch: number | null;
 }
 
 export class AuthService {
@@ -977,6 +988,40 @@ export class AuthService {
     return this.state.session.vaultBootstrap.keyBase64;
   }
 
+  // 한 번의 sync가 사용할 계정/서버/DEK 세대를 원자적으로 캡처한다. SyncService는
+  // 비동기 작업 중 이 값들을 다시 읽지 않아 reset/setup 사이에 서로 다른 세대의
+  // DEK와 epoch이 섞이지 않게 한다.
+  captureSyncContext(): AuthSyncContext {
+    const session = this.state.session;
+    if (this.state.status !== "authenticated" || !session) {
+      throw new Error("온라인 로그인 상태에서만 동기화할 수 있습니다.");
+    }
+    return {
+      userId: session.user.id,
+      serverUrl: normalizeServerUrl(this.getServerUrl()),
+      accessToken: session.tokens.accessToken,
+      vaultKeyBase64: this.getVaultKeyBase64(),
+      vaultEpoch:
+        this.vaultState.status === "unlocked" ? this.vaultState.epoch : null,
+    };
+  }
+
+  // access token은 같은 계정에서 refresh될 수 있으므로 정체성 비교에서 제외한다.
+  // 계정/서버/DEK/epoch 중 하나라도 바뀌면 이전 sync context는 폐기 대상이다.
+  isSyncContextCurrent(context: AuthSyncContext): boolean {
+    try {
+      const current = this.captureSyncContext();
+      return (
+        current.userId === context.userId &&
+        current.serverUrl === context.serverUrl &&
+        current.vaultKeyBase64 === context.vaultKeyBase64 &&
+        current.vaultEpoch === context.vaultEpoch
+      );
+    } catch {
+      return false;
+    }
+  }
+
   // sync-service 게이트 — 볼트가 잠겨 있으면 동기화를 시작하지 않는다.
   isVaultReadyForSync(): boolean {
     return (
@@ -992,66 +1037,86 @@ export class AuthService {
     body?: unknown,
     operationContext?: VaultOperationContext,
   ): Promise<VaultMutationResponse | null> {
-    const requestOnce = (): Promise<Response> => {
+    const controller = new AbortController();
+    let timeout: NodeJS.Timeout | null = null;
+    const timeoutError = new Error(VAULT_API_REQUEST_TIMEOUT_MESSAGE);
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(timeoutError);
+      }, VAULT_API_REQUEST_TIMEOUT_MS);
+    });
+    const operation = async (): Promise<VaultMutationResponse | null> => {
+      const requestOnce = (): Promise<Response> => {
+        if (operationContext) {
+          this.assertVaultOperationContext(operationContext);
+        }
+        return fetch(
+          new URL(pathname, operationContext?.serverUrl ?? this.getServerUrl()),
+          {
+            method,
+            headers: {
+              Authorization: `Bearer ${this.getAccessToken()}`,
+              "Content-Type": "application/json",
+            },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            signal: controller.signal,
+          },
+        );
+      };
+
+      // access 토큰이 마침 만료된 경우를 위해 401/403 이면 refresh 후 1회 재시도한다.
+      let response = await requestOnce();
       if (operationContext) {
         this.assertVaultOperationContext(operationContext);
       }
-      return fetch(
-        new URL(pathname, operationContext?.serverUrl ?? this.getServerUrl()),
-        {
-          method,
-          headers: {
-            Authorization: `Bearer ${this.getAccessToken()}`,
-            "Content-Type": "application/json",
-          },
-          body: body === undefined ? undefined : JSON.stringify(body),
-        },
-      );
+      if (response.status === 401 || response.status === 403) {
+        const refreshed = await this.refreshSession();
+        if (operationContext) {
+          this.assertVaultOperationContext(operationContext);
+        }
+        if (refreshed.status !== "authenticated") {
+          throw new VaultApiError(
+            "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+          );
+        }
+        response = await requestOnce();
+      }
+      if (operationContext) {
+        this.assertVaultOperationContext(operationContext);
+      }
+      if (!response.ok) {
+        const message = await toApiErrorMessage(
+          response,
+          `요청이 실패했습니다. (${response.status})`,
+        );
+        if (operationContext) {
+          this.assertVaultOperationContext(operationContext);
+        }
+        throw new VaultApiError(message, response.status);
+      }
+      // 설정/변경/초기화는 새 descriptor에 사용할 {epoch}를 돌려준다. 이전 서버의
+      // 204 응답도 허용해 롤링 업데이트 중에는 호출 자체가 깨지지 않게 한다.
+      if (response.status === 204) {
+        return null;
+      }
+      try {
+        const result = (await response.json()) as VaultMutationResponse;
+        if (operationContext) {
+          this.assertVaultOperationContext(operationContext);
+        }
+        return result;
+      } catch {
+        return null;
+      }
     };
 
-    // access 토큰이 마침 만료된 경우를 위해 401/403 이면 refresh 후 1회 재시도한다.
-    let response = await requestOnce();
-    if (operationContext) {
-      this.assertVaultOperationContext(operationContext);
-    }
-    if (response.status === 401 || response.status === 403) {
-      const refreshed = await this.refreshSession();
-      if (operationContext) {
-        this.assertVaultOperationContext(operationContext);
-      }
-      if (refreshed.status !== "authenticated") {
-        throw new VaultApiError(
-          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
-        );
-      }
-      response = await requestOnce();
-    }
-    if (operationContext) {
-      this.assertVaultOperationContext(operationContext);
-    }
-    if (!response.ok) {
-      const message = await toApiErrorMessage(
-        response,
-        `요청이 실패했습니다. (${response.status})`,
-      );
-      if (operationContext) {
-        this.assertVaultOperationContext(operationContext);
-      }
-      throw new VaultApiError(message, response.status);
-    }
-    // 설정/변경/초기화는 새 descriptor에 사용할 {epoch}를 돌려준다. 이전 서버의
-    // 204 응답도 허용해 롤링 업데이트 중에는 호출 자체가 깨지지 않게 한다.
-    if (response.status === 204) {
-      return null;
-    }
     try {
-      const result = (await response.json()) as VaultMutationResponse;
-      if (operationContext) {
-        this.assertVaultOperationContext(operationContext);
+      return await Promise.race([operation(), timeoutPromise]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
       }
-      return result;
-    } catch {
-      return null;
     }
   }
 

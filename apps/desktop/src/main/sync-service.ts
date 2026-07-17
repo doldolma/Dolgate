@@ -36,7 +36,7 @@ import {
   type SyncDeletionRecord
 } from './database';
 import { encodeSecretForStorage, SecretStore } from './secret-store';
-import { AuthService } from './auth-service';
+import { AuthService, type AuthSyncContext } from './auth-service';
 import { getDesktopStateStorage } from './state-storage';
 import {
   AUTH_INVALID_ERROR_MESSAGE,
@@ -45,6 +45,23 @@ import {
 } from './auth-error-message';
 
 const RETRY_DELAY_MS = 30_000;
+
+interface SyncLease extends AuthSyncContext {
+  generation: number;
+  signal: AbortSignal;
+}
+
+interface SyncTask {
+  generation: number;
+  promise: Promise<SyncStatus>;
+}
+
+class StaleSyncLeaseError extends Error {
+  constructor() {
+    super('동기화 작업의 계정 또는 볼트 세대가 변경되었습니다.');
+    this.name = 'StaleSyncLeaseError';
+  }
+}
 
 export class SyncAuthenticationError extends Error {
   constructor(message: string) {
@@ -302,13 +319,17 @@ export class SyncService {
   private readonly stateStorage = getDesktopStateStorage();
   private state: SyncStatus;
   private pushTimer: NodeJS.Timeout | null = null;
-  private pushPromise: Promise<SyncStatus> | null = null;
-  private bootstrapPromise: Promise<SyncStatus> | null = null;
-  private queuedPushAfterCurrent = false;
+  private pushTask: SyncTask | null = null;
+  private bootstrapTask: SyncTask | null = null;
+  private queuedPushGeneration: number | null = null;
+  private syncGeneration = 0;
+  private syncAbortController = new AbortController();
+  private operationTail: Promise<void> = Promise.resolve();
   // 마지막으로 서버와 맞춘 리비전(ETag). 폴링의 If-None-Match 로 보내 변경 없으면 304 로
   // 조기 종료한다. 프로세스 메모리에만 두고, 재시작 시 첫 부트스트랩이 전체를 받아 다시 채운다.
   private lastSyncRevision: string | null = null;
   private onAppliedSnapshot: (() => void | Promise<void>) | null = null;
+  private onPurgedSyncedCache: (() => void | Promise<void>) | null = null;
 
   constructor(
     private readonly authService: AuthService,
@@ -331,15 +352,77 @@ export class SyncService {
     return this.state;
   }
 
-  setOnAppliedSnapshot(listener: (() => void | Promise<void>) | null): void {
-    this.onAppliedSnapshot = listener;
+  private captureSyncLease(): SyncLease {
+    return {
+      ...this.authService.captureSyncContext(),
+      generation: this.syncGeneration,
+      signal: this.syncAbortController.signal,
+    };
   }
 
-  pause(errorMessage?: string | null): SyncStatus {
+  private isSyncLeaseActive(lease: SyncLease): boolean {
+    return (
+      lease.generation === this.syncGeneration &&
+      !lease.signal.aborted &&
+      this.authService.isSyncContextCurrent(lease)
+    );
+  }
+
+  private assertSyncLeaseActive(lease: SyncLease): void {
+    if (!this.isSyncLeaseActive(lease)) {
+      throw new StaleSyncLeaseError();
+    }
+  }
+
+  private invalidateSyncGeneration(options?: {
+    resetRevision?: boolean;
+  }): void {
+    this.syncGeneration += 1;
+    this.syncAbortController.abort();
+    this.syncAbortController = new AbortController();
+    // 새 generation은 abort를 무시하는 이전 로컬 IO를 기다리지 않는다. 이전 tail은
+    // lease guard로 결과를 버리고, 새 세대는 독립 queue에서 즉시 시작한다.
+    this.operationTail = Promise.resolve();
+    this.queuedPushGeneration = null;
     if (this.pushTimer) {
       clearTimeout(this.pushTimer);
       this.pushTimer = null;
     }
+    if (options?.resetRevision) {
+      this.lastSyncRevision = null;
+    }
+  }
+
+  private enqueueSyncOperation(
+    lease: SyncLease,
+    operation: () => Promise<SyncStatus>,
+  ): Promise<SyncStatus> {
+    const previous = this.operationTail;
+    const result = previous
+      .catch(() => undefined)
+      .then(async () => {
+        if (!this.isSyncLeaseActive(lease)) {
+          return this.state;
+        }
+        return operation();
+      });
+    this.operationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  setOnAppliedSnapshot(listener: (() => void | Promise<void>) | null): void {
+    this.onAppliedSnapshot = listener;
+  }
+
+  setOnPurgedSyncedCache(listener: (() => void | Promise<void>) | null): void {
+    this.onPurgedSyncedCache = listener;
+  }
+
+  pause(errorMessage?: string | null): SyncStatus {
+    this.invalidateSyncGeneration();
 
     this.patchState({
       status: 'paused',
@@ -360,22 +443,15 @@ export class SyncService {
   // 볼트 라이프사이클 이벤트(잠금해제·설정·초기화)에서 호출 — ETag 는 "적용한 상태"의
   // 표식이므로 새 DEK 세대에는 무효다(304 로 새 세대 스냅샷을 건너뛰지 않게 지운다).
   resetVaultRecoveryState(): void {
-    this.lastSyncRevision = null;
+    this.invalidateSyncGeneration({ resetRevision: true });
+    this.patchState({
+      status: 'paused',
+      pendingPush: this.hasPendingLocalChanges(),
+      errorMessage: null,
+    });
   }
 
   async bootstrap(): Promise<SyncStatus> {
-    // 잠금해제 IPC 와 렌더러 하이드레이션이 동시에 부를 수 있다 — 같은 스냅샷을 두 번
-    // push/pull 하거나 ETag 저장이 엇갈리지 않게 한 번에 하나만 돈다.
-    if (this.bootstrapPromise) {
-      return this.bootstrapPromise;
-    }
-    this.bootstrapPromise = this.runBootstrap().finally(() => {
-      this.bootstrapPromise = null;
-    });
-    return this.bootstrapPromise;
-  }
-
-  private async runBootstrap(): Promise<SyncStatus> {
     if (isE2ESyncDisabled()) {
       this.patchState({
         status: 'ready',
@@ -390,11 +466,29 @@ export class SyncService {
       return this.pause('오프라인 모드에서는 동기화를 일시 중지합니다.');
     }
 
-    // E2EE 볼트가 잠겨 있으면 복호화 키가 없다 — 잠금해제(vault IPC)가 다시 부트스트랩한다.
     if (!this.authService.isVaultReadyForSync()) {
       return this.pause('동기화 암호를 입력하면 동기화를 시작합니다.');
     }
 
+    const lease = this.captureSyncLease();
+    // 잠금해제 IPC와 렌더러 하이드레이션이 동시에 부를 수 있다. 같은 generation만
+    // 공유하고, reset 등으로 무효화된 이전 task는 완료를 기다리지 않고 새 task를 연다.
+    if (this.bootstrapTask?.generation === lease.generation) {
+      return this.bootstrapTask.promise;
+    }
+    const promise = this.enqueueSyncOperation(lease, () =>
+      this.runBootstrap(lease),
+    ).finally(() => {
+      if (this.bootstrapTask?.generation === lease.generation) {
+        this.bootstrapTask = null;
+      }
+    });
+    this.bootstrapTask = { generation: lease.generation, promise };
+    return promise;
+  }
+
+  private async runBootstrap(lease: SyncLease): Promise<SyncStatus> {
+    this.assertSyncLeaseActive(lease);
     const hadPendingLocalChanges = this.hasPendingLocalChanges();
     this.patchState({
       status: 'syncing',
@@ -406,7 +500,8 @@ export class SyncService {
       const previousAwsProfilesServerSupport =
         this.state.awsProfilesServerSupport ?? 'unknown';
       const awsProfilesServerSupport =
-        await this.fetchAwsProfilesServerSupport();
+        await this.fetchAwsProfilesServerSupport(lease);
+      this.assertSyncLeaseActive(lease);
       const shouldBackfillAwsProfiles =
         previousAwsProfilesServerSupport === 'unsupported' &&
         awsProfilesServerSupport === 'supported';
@@ -415,19 +510,23 @@ export class SyncService {
       });
 
       if (hadPendingLocalChanges || shouldBackfillAwsProfiles) {
-        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport);
+        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport, lease);
+        this.assertSyncLeaseActive(lease);
         if (totalRecordCount(local) > 0) {
-          await this.pushSnapshot(local);
+          await this.pushSnapshot(local, lease);
         }
       }
 
-      let remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport);
+      let remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease);
+      this.assertSyncLeaseActive(lease);
       // remote 가 비어 있으면(신규/서버 유실) 로컬을 재업로드해 복구한다.
       if (remote.payload !== null && totalRecordCount(remote.payload) === 0) {
-        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport);
+        const local = await this.buildEncryptedSnapshot(true, awsProfilesServerSupport, lease);
+        this.assertSyncLeaseActive(lease);
         if (totalRecordCount(local) > 0) {
-          await this.pushSnapshot(local);
-          remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport);
+          await this.pushSnapshot(local, lease);
+          remote = await this.fetchRemoteSnapshot(awsProfilesServerSupport, lease);
+          this.assertSyncLeaseActive(lease);
         }
       }
 
@@ -437,8 +536,10 @@ export class SyncService {
         ? await this.applyRemoteSnapshotAtomically(
             remote.payload as SyncPayloadV2,
             awsProfilesServerSupport,
+            lease,
           )
         : false;
+      this.assertSyncLeaseActive(lease);
       // "저장된 리비전 = 실제로 적용한 상태" 불변식: apply 가 성공한 지금에서야 ETag 를
       // 저장한다(decode 실패 시 저장되지 않아, 재잠금 후 unlock 이 304 에 갇히지 않는다).
       if (applied && remote.etag) {
@@ -462,6 +563,12 @@ export class SyncService {
         this.scheduleRetry();
       }
     } catch (error) {
+      if (
+        error instanceof StaleSyncLeaseError ||
+        !this.isSyncLeaseActive(lease)
+      ) {
+        return this.state;
+      }
       // 볼트 세대 문제(push 409) 또는 pull 복호화 실패 — 둘 다 같은 재판정으로 보낸다:
       // 세션을 갱신해 최신 descriptor 의 epoch/verifier 로 재해석한다(비파괴 — refresh
       // 실패 시 아무것도 잃지 않고 다음 폴링이 재시도한다).
@@ -470,6 +577,11 @@ export class SyncService {
         error instanceof SyncVaultDecodeError
       ) {
         await this.authService.handleVaultDekRejected();
+        // refresh를 기다리는 동안 사용자가 reset/setup 등 새 볼트 전환을 시작했다면,
+        // 옛 복구 결과가 새 계정/서버/DEK context를 다시 pause하지 않게 한다.
+        if (!this.isSyncLeaseActive(lease)) {
+          return this.state;
+        }
         if (
           error instanceof SyncVaultDecodeError &&
           this.authService.getVaultStatus() === 'unlocked'
@@ -520,16 +632,20 @@ export class SyncService {
       return this.pause('동기화 암호를 입력하면 변경 내용을 동기화합니다.');
     }
 
-    if (this.pushPromise) {
-      this.queuedPushAfterCurrent = true;
-      return this.pushPromise;
+    const lease = this.captureSyncLease();
+    if (this.pushTask?.generation === lease.generation) {
+      this.queuedPushGeneration = lease.generation;
+      return this.pushTask.promise;
     }
 
-    this.pushPromise = (async () => {
+    const promise = this.enqueueSyncOperation(lease, async () => {
       try {
         let shouldContinuePush = false;
         do {
-          this.queuedPushAfterCurrent = false;
+          this.assertSyncLeaseActive(lease);
+          if (this.queuedPushGeneration === lease.generation) {
+            this.queuedPushGeneration = null;
+          }
           this.patchState({
             status: this.state.status === 'idle' ? 'syncing' : this.state.status,
             pendingPush: true,
@@ -537,12 +653,15 @@ export class SyncService {
           });
           const snapshot = await this.buildEncryptedSnapshotResult(
             true,
-            this.state.awsProfilesServerSupport ?? 'unknown'
+            this.state.awsProfilesServerSupport ?? 'unknown',
+            lease,
           );
-          await this.pushSnapshot(snapshot.payload);
+          this.assertSyncLeaseActive(lease);
+          await this.pushSnapshot(snapshot.payload, lease);
+          this.assertSyncLeaseActive(lease);
           this.outbox.clearMany(snapshot.includedDeletions);
           shouldContinuePush =
-            this.queuedPushAfterCurrent ||
+            this.queuedPushGeneration === lease.generation ||
             this.listSyncableDeletions(this.state.awsProfilesServerSupport ?? 'unknown').length > 0;
         } while (shouldContinuePush);
 
@@ -553,10 +672,19 @@ export class SyncService {
           errorMessage: null
         });
       } catch (error) {
+        if (
+          error instanceof StaleSyncLeaseError ||
+          !this.isSyncLeaseActive(lease)
+        ) {
+          return this.state;
+        }
         if (error instanceof SyncVaultDekMismatchError) {
           // 옛 세대 push 거부 — 재시도해도 영원히 실패하므로 재판정으로 전환하고
           // 재시도 스케줄을 걸지 않는다(재잠금 후 새 암호 잠금해제가 다시 부트스트랩한다).
           await this.authService.handleVaultDekRejected();
+          if (!this.isSyncLeaseActive(lease)) {
+            return this.state;
+          }
           this.pause(error.message);
         } else {
           this.patchState({
@@ -566,18 +694,30 @@ export class SyncService {
           });
           this.scheduleRetry();
         }
-      } finally {
-        this.pushPromise = null;
-        this.queuedPushAfterCurrent = false;
       }
       return this.state;
-    })();
+    }).finally(() => {
+      // enqueueSyncOperation이 callback 실행 전에 stale lease를 건너뛰어도 task는
+      // 반드시 해제돼야 다음 push가 완료된 Promise에 영구 합류하지 않는다.
+      if (this.pushTask?.generation === lease.generation) {
+        this.pushTask = null;
+      }
+      if (this.queuedPushGeneration === lease.generation) {
+        this.queuedPushGeneration = null;
+      }
+    });
 
-    return this.pushPromise;
+    this.pushTask = { generation: lease.generation, promise };
+    return promise;
   }
 
   async exportDecryptedSnapshot(): Promise<SyncPayloadV2> {
-    return this.buildEncryptedSnapshot(true, this.state.awsProfilesServerSupport ?? 'unknown');
+    const lease = this.captureSyncLease();
+    return this.buildEncryptedSnapshot(
+      true,
+      this.state.awsProfilesServerSupport ?? 'unknown',
+      lease,
+    );
   }
 
   markDeleted(kind: SyncRecordKind, recordId: string): void {
@@ -593,6 +733,9 @@ export class SyncService {
   }
 
   async purgeSyncedCache(): Promise<void> {
+    // purge보다 먼저 이전 작업을 무효화한다. secret 정리 중 늦게 도착한 pull이 방금
+    // 비운 저장소를 다시 채우는 일을 막는다.
+    this.invalidateSyncGeneration({ resetRevision: true });
     // 로그아웃 이후에는 서버에서 다시 hydrate하므로, 동기화 대상 secret은 source와 무관하게 모두 제거한다.
     await this.purgeAllSecrets();
     this.hosts.replaceAll([]);
@@ -604,14 +747,21 @@ export class SyncService {
     this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
-    // 다음 계정이 옛 계정의 ETag 로 조건부 GET 해서 잘못 304 받는 걸 막는다.
-    this.resetVaultRecoveryState();
     this.stateStorage.updateSyncDataOwner({
       userId: null,
       serverUrl: null
     });
     // patchState 는 병합이라 이전 계정의 lastDataChangeAt 이 남는다 — 명시적으로 지운다.
     this.patchState({ ...defaultSyncStatus(), lastDataChangeAt: null });
+    try {
+      await this.onPurgedSyncedCache?.();
+    } catch (error) {
+      // 계정 경계 bookkeeping은 이미 완료됐다. 런타임 파일 정리 실패가 로그아웃이나
+      // 다음 계정 로그인을 막지 않게 하고, 다음 materialize에서 다시 정리할 수 있게 둔다.
+      console.error('[sync] failed to purge account-scoped runtime artifacts', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private withAccessToken(init: RequestInit | undefined, accessToken: string): RequestInit {
@@ -632,8 +782,21 @@ export class SyncService {
     };
   }
 
-  private async fetchWithAuthRetry(url: URL, init: RequestInit, fallback: string): Promise<Response> {
-    let response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+  private async fetchWithAuthRetry(
+    lease: SyncLease,
+    url: URL,
+    init: RequestInit,
+    fallback: string,
+  ): Promise<Response> {
+    this.assertSyncLeaseActive(lease);
+    let response = await fetch(
+      url,
+      this.withAccessToken(
+        { ...init, signal: lease.signal },
+        lease.accessToken,
+      ),
+    );
+    this.assertSyncLeaseActive(lease);
     // 304 Not Modified 는 조건부 GET 의 정상 결과(변경 없음)이므로 통과시킨다.
     if (response.ok || response.status === 304) {
       return response;
@@ -643,16 +806,25 @@ export class SyncService {
     }
 
     const firstFailureMessage = await toApiErrorMessage(response, fallback);
+    this.assertSyncLeaseActive(lease);
     if (!isLikelyAuthError(response, firstFailureMessage)) {
       throw new Error(firstFailureMessage);
     }
 
     const refreshed = await this.authService.refreshSession();
+    this.assertSyncLeaseActive(lease);
     if (refreshed.status !== 'authenticated') {
       throw new SyncAuthenticationError(firstFailureMessage || AUTH_INVALID_ERROR_MESSAGE);
     }
 
-    response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+    response = await fetch(
+      url,
+      this.withAccessToken(
+        { ...init, signal: lease.signal },
+        this.authService.getAccessToken(),
+      ),
+    );
+    this.assertSyncLeaseActive(lease);
     if (!response.ok && response.status !== 304) {
       if (response.status === 409) {
         throw await toConflictError(response, fallback);
@@ -668,6 +840,7 @@ export class SyncService {
   // 영영 적용하지 못하는 창이 생긴다 — 모바일에서 고친 것과 동일한 버그.)
   private async fetchRemoteSnapshot(
     awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
     options?: { ignoreEtag?: boolean }
   ): Promise<{ payload: SyncPayloadV2 | null; etag: string | null }> {
     const headers: Record<string, string> = {};
@@ -675,7 +848,8 @@ export class SyncService {
       headers['If-None-Match'] = this.lastSyncRevision;
     }
     const response = await this.fetchWithAuthRetry(
-      new URL('/sync', this.authService.getServerUrl()),
+      lease,
+      new URL('/sync', lease.serverUrl),
       { headers },
       '동기화 데이터 조회에 실패했습니다.',
     );
@@ -686,29 +860,39 @@ export class SyncService {
     const payload = normalizeSyncPayload((await response.json()) as Partial<SyncPayloadV2>, {
       includeAwsProfiles: this.shouldSyncAwsProfiles(awsProfilesServerSupport),
     });
+    this.assertSyncLeaseActive(lease);
     return { payload, etag };
   }
 
-  private async pushSnapshot(payload: SyncPayloadV2): Promise<void> {
+  private async pushSnapshot(
+    payload: SyncPayloadV2,
+    lease: SyncLease,
+  ): Promise<void> {
+    this.assertSyncLeaseActive(lease);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
     // 암호화에 쓴 DEK 의 세대(epoch)를 실어 보낸다 — 서버가 트랜잭션 안에서 fence 로
     // 대조해, 다른 기기의 초기화/재설정과 겹친 push 를 커밋 시점에 거부한다(409).
-    const vaultEpoch = this.authService.getVaultEpoch();
-    if (vaultEpoch !== null) {
-      headers[VAULT_EPOCH_HEADER] = String(vaultEpoch);
+    if (lease.vaultEpoch !== null) {
+      headers[VAULT_EPOCH_HEADER] = String(lease.vaultEpoch);
     }
-    const response = await this.fetchWithAuthRetry(new URL('/sync', this.authService.getServerUrl()), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload)
-    }, '동기화 업로드에 실패했습니다.');
+    const response = await this.fetchWithAuthRetry(
+      lease,
+      new URL('/sync', lease.serverUrl),
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      },
+      '동기화 업로드에 실패했습니다.',
+    );
     // push 응답의 리비전은 "직전 pull 리비전 + 1"일 때만 저장한다. 그보다 크면 내 push
     // 이전에 다른 기기의 변경이 끼어 있다는 뜻 — 그대로 저장하면 다음 폴링이 304 로 그
     // 변경들을 영영 건너뛴다. 옛 ETag 를 유지해 다음 폴링이 200 전체를 받게 한다.
     try {
       const body = (await response.json()) as { revision?: number };
+      this.assertSyncLeaseActive(lease);
       if (typeof body.revision === 'number') {
         const lastPulled = parseSyncRevisionEtag(this.lastSyncRevision);
         if (lastPulled !== null && body.revision <= lastPulled + 1) {
@@ -722,17 +906,24 @@ export class SyncService {
 
   private async buildEncryptedSnapshot(
     includeDeletions: boolean,
-    awsProfilesServerSupport: AwsProfilesServerSupport = this.state.awsProfilesServerSupport ?? 'unknown'
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
   ): Promise<SyncPayloadV2> {
-    const snapshot = await this.buildEncryptedSnapshotResult(includeDeletions, awsProfilesServerSupport);
+    const snapshot = await this.buildEncryptedSnapshotResult(
+      includeDeletions,
+      awsProfilesServerSupport,
+      lease,
+    );
     return snapshot.payload;
   }
 
   private async buildEncryptedSnapshotResult(
     includeDeletions: boolean,
-    awsProfilesServerSupport: AwsProfilesServerSupport = this.state.awsProfilesServerSupport ?? 'unknown'
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
   ): Promise<{ payload: SyncPayloadV2; includedDeletions: SyncDeletionRecord[] }> {
-    const vaultKeyBase64 = this.authService.getVaultKeyBase64();
+    this.assertSyncLeaseActive(lease);
+    const vaultKeyBase64 = lease.vaultKeyBase64;
     const groups = this.groups.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const hosts = this.hosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const knownHosts = this.knownHosts.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
@@ -753,6 +944,7 @@ export class SyncService {
     const secrets: SyncRecord[] = [];
     for (const entry of secretEntries) {
       const secret = await loadManagedSecret(this.secretStore, entry.secretRef);
+      this.assertSyncLeaseActive(lease);
       if (!secret) {
         continue;
       }
@@ -841,9 +1033,11 @@ export class SyncService {
 
   private async applyRemoteSnapshotAtomically(
     payload: SyncPayloadV2,
-    awsProfilesServerSupport: AwsProfilesServerSupport
+    awsProfilesServerSupport: AwsProfilesServerSupport,
+    lease: SyncLease,
   ): Promise<boolean> {
-    const vaultKeyBase64 = this.authService.getVaultKeyBase64();
+    this.assertSyncLeaseActive(lease);
+    const vaultKeyBase64 = lease.vaultKeyBase64;
     const shouldSyncAwsProfiles = this.shouldSyncAwsProfiles(awsProfilesServerSupport);
 
     const groups = payload.groups
@@ -918,6 +1112,9 @@ export class SyncService {
       ])
     );
 
+    // updateState는 동기식 단일 커밋이다. 그 직전에 lease를 확인해 reset/setup 뒤의
+    // 늦은 pull이 새 세대의 로컬 상태를 덮어쓰지 못하게 한다.
+    this.assertSyncLeaseActive(lease);
     this.stateStorage.updateState((state) => {
       state.data.groups = groups;
       state.data.hosts = hosts;
@@ -952,6 +1149,7 @@ export class SyncService {
       }
     });
     await this.onAppliedSnapshot?.();
+    this.assertSyncLeaseActive(lease);
     return hadAwsProfileConflicts;
   }
 
@@ -1027,22 +1225,39 @@ export class SyncService {
       .filter((record) => shouldSyncAwsProfiles || record.kind !== 'awsProfiles');
   }
 
-  private async fetchAwsProfilesServerSupport(): Promise<AwsProfilesServerSupport> {
+  private async fetchAwsProfilesServerSupport(
+    lease: SyncLease,
+  ): Promise<AwsProfilesServerSupport> {
     try {
-      const response = await fetch(new URL('/api/info', this.authService.getServerUrl()));
+      const response = await fetch(new URL('/api/info', lease.serverUrl), {
+        signal: lease.signal,
+      });
+      this.assertSyncLeaseActive(lease);
       if (!response.ok) {
-        this.authService.noteServerVaultSupport(false);
-        return 'unsupported';
+        // 구서버처럼 info endpoint 자체가 없거나 구현되지 않은 경우는 hard unsupported다.
+        // 5xx(501 제외)와 인증/프록시 오류는 구서버로 오인하지 않고 마지막 판정을 유지한다.
+        if ([404, 405, 501].includes(response.status)) {
+          this.authService.noteServerVaultSupport(false);
+          return 'unsupported';
+        }
+        return this.state.awsProfilesServerSupport ?? 'unknown';
       }
       const serverInfo = (await response.json()) as Partial<ServerInfoResponse>;
+      this.assertSyncLeaseActive(lease);
       // 셀프호스팅 구버전 서버(vault capability 없음)에서는 E2EE 전환 프롬프트를 숨긴다.
       this.authService.noteServerVaultSupport(
         serverInfo.capabilities?.vault?.e2ee === true
       );
       return resolveAwsProfilesServerSupport(serverInfo);
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof StaleSyncLeaseError ||
+        !this.isSyncLeaseActive(lease)
+      ) {
+        throw new StaleSyncLeaseError();
+      }
       // 네트워크 실패는 판단 보류 — 기존 값을 유지한다.
-      return 'unsupported';
+      return this.state.awsProfilesServerSupport ?? 'unknown';
     }
   }
 }
