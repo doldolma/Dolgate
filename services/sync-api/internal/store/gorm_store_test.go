@@ -15,6 +15,7 @@ import (
 	"time"
 
 	syncmodel "dolssh/services/sync-api/internal/sync"
+	"gorm.io/gorm"
 )
 
 func testStringPtr(value string) *string {
@@ -233,7 +234,14 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 			ctx := context.Background()
 			store := tc.open(t)
 
-			if err := store.UpsertSyncRecords(ctx, "user-1", syncmodel.KindHosts, []syncmodel.Record{
+			// 유저 행 선잠금(lockUserRowTx)이 실제 users 행을 요구하므로(postgres/mysql),
+			// 실서비스 흐름처럼 유저를 만들고 시작한다.
+			user, err := store.CreateUser(ctx, "records@example.com", "hash")
+			if err != nil {
+				t.Fatalf("CreateUser() error = %v", err)
+			}
+
+			if err := store.UpsertSyncRecords(ctx, user.ID, syncmodel.KindHosts, []syncmodel.Record{
 				{
 					ID:               "host-1",
 					EncryptedPayload: "newer",
@@ -248,7 +256,7 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 				t.Fatalf("UpsertSyncRecords() initial error = %v", err)
 			}
 
-			if err := store.UpsertSyncRecords(ctx, "user-1", syncmodel.KindHosts, []syncmodel.Record{
+			if err := store.UpsertSyncRecords(ctx, user.ID, syncmodel.KindHosts, []syncmodel.Record{
 				{
 					ID:               "host-1",
 					EncryptedPayload: "older",
@@ -258,7 +266,7 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 				t.Fatalf("UpsertSyncRecords() stale update error = %v", err)
 			}
 
-			records, err := store.ListSyncRecords(ctx, "user-1", syncmodel.KindHosts)
+			records, err := store.ListSyncRecords(ctx, user.ID, syncmodel.KindHosts)
 			if err != nil {
 				t.Fatalf("ListSyncRecords() error = %v", err)
 			}
@@ -270,6 +278,33 @@ func TestGormStoreSyncRecordsPreferNewestPayload(t *testing.T) {
 			}
 			if records[1].ID != "host-1" || records[1].EncryptedPayload != "newer" {
 				t.Fatalf("records[1] = %+v, want preserved newer payload", records[1])
+			}
+		})
+	}
+}
+
+// 탈퇴(hard delete) 후 뒤늦게 도착한 push 가 삭제된 유저의 레코드를 부활시키면 안 된다.
+// postgres/mysql 은 유저 행 선잠금(lockUserRowTx)이 존재 확인을 겸해 record not found 로
+// 거부한다. sqlite 는 FOR UPDATE 미지원으로 잠금을 건너뛰어 이 보장이 store 단에 없으므로
+// (존재 확인은 상위 인증 레이어 몫) 스킵한다.
+func TestGormStoreUpsertSyncRecordsRejectsMissingUser(t *testing.T) {
+	for _, tc := range storeTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "sqlite" {
+				t.Skip("sqlite 는 유저 행 잠금을 건너뛰어 store 단 존재 확인이 없다")
+			}
+			ctx := context.Background()
+			store := tc.open(t)
+
+			err := store.UpsertSyncRecords(ctx, "no-such-user", syncmodel.KindHosts, []syncmodel.Record{
+				{
+					ID:               "host-1",
+					EncryptedPayload: "payload",
+					UpdatedAt:        "2025-01-01T00:00:00Z",
+				},
+			})
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("UpsertSyncRecords() error = %v, want gorm.ErrRecordNotFound", err)
 			}
 		})
 	}
