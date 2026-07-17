@@ -38,6 +38,7 @@ import { isSecureStorageUsable, SecretStore } from './secret-store';
 import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
+import { matchCloseActiveTab, matchTabCommand } from './tab-shortcuts';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
 import { NotificationService } from './notification-service';
@@ -416,6 +417,26 @@ if (termiusHelperArgIndex >= 0) {
 
     if (process.platform === 'win32') {
       window.setMenuBarVisibility(false);
+    }
+
+    // Win/Linux 탭 단축키는 메뉴 accelerator 만으론 안 된다: accelerator 가 렌더러가
+    // 소비하지 않은 키에만 발동하는데 xterm 이 Ctrl+Tab 등을 먼저 삼킨다(홈 탭에서만
+    // 동작하던 원인). 렌더러 도달 전 단계에서 가로채 탭 명령(이동·재열기·닫기)으로
+    // 보낸다. preventDefault 로 이벤트가 소비되므로 남겨둔 메뉴 accelerator 와 이중
+    // 발동은 없다.
+    if (process.platform !== 'darwin') {
+      window.webContents.on('before-input-event', (event, input) => {
+        const command = matchTabCommand(input);
+        if (command) {
+          event.preventDefault();
+          window.webContents.send(ipcChannels.window.tabCommand, command);
+          return;
+        }
+        if (matchCloseActiveTab(input)) {
+          event.preventDefault();
+          window.webContents.send(ipcChannels.window.closeActiveTab);
+        }
+      });
     }
 
     wireWindowStateEvents(window);
