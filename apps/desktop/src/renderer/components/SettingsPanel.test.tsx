@@ -530,6 +530,60 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
+  it('resets the sync vault only after the confirm dialog is accepted', async () => {
+    const onResetVault = vi.fn().mockResolvedValue(undefined);
+    renderSettingsPanel({
+      vaultStatus: 'unlocked',
+      onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
+      onResetVault,
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '동기화 암호를 잊으셨나요? 초기화' }),
+    );
+    expect(onResetVault).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '동기화 초기화' })).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '서버 데이터 삭제하고 새로 시작' }),
+    );
+    await waitFor(() => expect(onResetVault).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('keeps the vault reset dialog open with the error when reset fails', async () => {
+    const onResetVault = vi.fn().mockRejectedValue(new Error('서버에 연결할 수 없습니다.'));
+    renderSettingsPanel({
+      vaultStatus: 'unlocked',
+      onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
+      onResetVault,
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '동기화 암호를 잊으셨나요? 초기화' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: '서버 데이터 삭제하고 새로 시작' }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('서버에 연결할 수 없습니다.'),
+    );
+    expect(screen.getByRole('dialog', { name: '동기화 초기화' })).toBeInTheDocument();
+  });
+
+  it('hides the vault reset entry without onResetVault (legacy/v1 vaults)', () => {
+    renderSettingsPanel({
+      vaultStatus: 'unlocked',
+      onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(
+      screen.queryByRole('button', { name: '동기화 암호를 잊으셨나요? 초기화' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('opens sync passphrase changes explicitly and clears drafts when cancelled', async () => {
     const onChangeVaultPassphrase = vi.fn().mockResolvedValue(undefined);
     renderSettingsPanel({

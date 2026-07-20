@@ -80,6 +80,10 @@ interface SettingsPanelProps {
     currentPassphrase: string,
     nextPassphrase: string,
   ) => Promise<void>;
+  // 동기화 볼트 초기화(암호 분실 시 최후 수단). 서버 동기화 데이터를 지우고 새 암호 설정
+  // 게이트로 이동한다. 설정 진입 = 볼트가 unlocked 이므로 이 기기의 로컬 데이터는 유지되어
+  // 새 암호로 다시 업로드된다(자연 복구). v1(레거시)에는 숨김.
+  onResetVault?: () => Promise<void>;
 }
 
 const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
@@ -218,6 +222,7 @@ export function SettingsPanel({
   currentUserEmail = null,
   vaultStatus = null,
   onChangeVaultPassphrase,
+  onResetVault,
   desktopPlatform,
   onSelectSection,
   onSavedCredentialsSearchQueryChange,
@@ -247,6 +252,10 @@ export function SettingsPanel({
   const newVaultPassphraseValidationMessage = nextVaultPassphrase
     ? validateNewVaultPassphrase(nextVaultPassphrase)
     : null;
+  // 동기화 볼트 초기화(암호 분실) 확인 다이얼로그 상태.
+  const [vaultResetOpen, setVaultResetOpen] = useState(false);
+  const [vaultResetBusy, setVaultResetBusy] = useState(false);
+  const [vaultResetError, setVaultResetError] = useState<string | null>(null);
   // 리플레이 보관 설정 옆에 실제 디스크 사용량을 보여준다. 보관 개수를 줄이면 프루닝으로
   // 용량이 줄 수 있으므로 retention 값이 바뀔 때마다 다시 조회한다.
   const [replayStorageUsage, setReplayStorageUsage] =
@@ -284,6 +293,8 @@ export function SettingsPanel({
     setNextVaultPassphrase('');
     setConfirmVaultPassphrase('');
     setVaultPassphraseError(null);
+    setVaultResetOpen(false);
+    setVaultResetError(null);
   }, [vaultStatus]);
 
   const visibleTerminalFontOptions =
@@ -391,6 +402,25 @@ export function SettingsPanel({
       );
     } finally {
       setVaultPassphraseBusy(false);
+    }
+  }
+
+  async function handleResetVault() {
+    if (!onResetVault) {
+      return;
+    }
+    setVaultResetBusy(true);
+    setVaultResetError(null);
+    try {
+      await onResetVault();
+      // 성공하면 볼트가 setup-required 로 바뀌어 앱 전체가 동기화 암호 설정 게이트로
+      // 전환된다(이 패널은 언마운트). 다이얼로그 닫기는 위 vaultStatus effect 가 겸한다.
+      setVaultResetOpen(false);
+    } catch (error) {
+      const fallback = '동기화 볼트 초기화에 실패했습니다.';
+      setVaultResetError(normalizeErrorMessage(error, fallback) || fallback);
+    } finally {
+      setVaultResetBusy(false);
     }
   }
 
@@ -841,6 +871,20 @@ export function SettingsPanel({
               <Button variant="secondary" onClick={openVaultPassphraseDialog}>
                 암호 변경
               </Button>
+              {onResetVault ? (
+                <div className="mt-4 border-t border-[var(--border)] pt-3">
+                  <button
+                    type="button"
+                    className="cursor-pointer border-none bg-transparent p-0 text-[0.82rem] font-semibold text-[var(--danger-text)]"
+                    onClick={() => {
+                      setVaultResetError(null);
+                      setVaultResetOpen(true);
+                    }}
+                  >
+                    동기화 암호를 잊으셨나요? 초기화
+                  </button>
+                </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -916,6 +960,61 @@ export function SettingsPanel({
                     onClick={() => void handleChangeVaultPassphrase()}
                   >
                     {vaultPassphraseBusy ? '변경 중...' : '암호 변경'}
+                  </Button>
+                </ModalFooter>
+              </ModalShell>
+            </DialogBackdrop>
+          ) : null}
+
+          {vaultStatus === 'unlocked' && vaultResetOpen && onResetVault ? (
+            <DialogBackdrop
+              dismissDisabled={vaultResetBusy}
+              onDismiss={() => {
+                if (!vaultResetBusy) {
+                  setVaultResetOpen(false);
+                }
+              }}
+            >
+              <ModalShell
+                size="sm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="reset-vault-title"
+              >
+                <ModalHeader className="block">
+                  <SectionLabel>Security</SectionLabel>
+                  <h3 id="reset-vault-title">동기화 초기화</h3>
+                </ModalHeader>
+                <ModalBody className="grid gap-3">
+                  <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
+                    서버의 동기화 데이터가 <strong>모두 삭제</strong>되고, 새 동기화 암호
+                    설정 화면으로 이동합니다. 이 작업은 되돌릴 수 없습니다.
+                  </p>
+                  <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
+                    이 기기의 로컬 데이터(호스트·시크릿·스니펫)는 유지되며, 새 암호를
+                    설정하면 다시 암호화되어 업로드됩니다. 다른 기기는 다음 동기화 때 새
+                    암호 입력이 필요하고, 서버에만 있던 데이터는 복구할 수 없습니다.
+                  </p>
+                  {vaultResetError ? (
+                    <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
+                      {vaultResetError}
+                    </p>
+                  ) : null}
+                </ModalBody>
+                <ModalFooter>
+                  <Button
+                    variant="secondary"
+                    disabled={vaultResetBusy}
+                    onClick={() => setVaultResetOpen(false)}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    variant="danger"
+                    disabled={vaultResetBusy}
+                    onClick={() => void handleResetVault()}
+                  >
+                    {vaultResetBusy ? '초기화 중...' : '서버 데이터 삭제하고 새로 시작'}
                   </Button>
                 </ModalFooter>
               </ModalShell>
