@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dolgate — 서버 작업 환경을 모든 기기에서</title>
-  <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스. 호스트·세션·스니펫을 종단간 암호화로 동기화하고, sync 서버까지 직접 호스팅할 수 있습니다." />
+  <title>Dolgate — 오픈소스 SSH 워크스페이스</title>
+  <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 쓰는 오픈소스 SSH 워크스페이스. 터미널·SFTP·포트 포워딩·tmux를 한 앱에서 다루고, 호스트·키·스니펫은 종단간 암호화로 동기화합니다. 동기화 서버 self-host 지원." />
   <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e18" />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb" />
-  <meta property="og:title" content="Dolgate — SSH 워크스페이스" />
-  <meta property="og:description" content="데스크톱과 모바일에서 같은 서버 작업 환경을 이어 쓰는 오픈소스 SSH 워크스페이스" />
+  <meta property="og:title" content="Dolgate — 오픈소스 SSH 워크스페이스" />
+  <meta property="og:description" content="데스크톱에서 모바일로 끊김 없이 이어지는 오픈소스 SSH 워크스페이스" />
   <meta property="og:image" content="./assets/hosts-workspace.png" />
   <style>
     :root {
@@ -123,6 +123,7 @@
     .hero p.sub {
       margin: 18px auto 0; max-width: 640px;
       color: var(--text-soft); font-size: clamp(1rem, 1.6vw, 1.13rem);
+      word-break: keep-all; /* 한국어 줄바꿈을 단어 단위로 — 어절 중간 꺾임 방지 */
     }
     .platforms {
       margin-top: 14px; font-family: var(--mono); font-size: .85rem; color: var(--text-soft);
@@ -247,10 +248,10 @@
 
 <header class="hero">
   <div class="wrap">
-    <h1>서버 작업 환경을,<br /><span class="accent">모든 기기에서 이어서.</span></h1>
+    <h1>오픈소스 SSH 워크스페이스,<br /><span class="accent">데스크톱에서 모바일로 끊김 없이.</span></h1>
     <p class="sub">
-      Dolgate는 데스크톱과 모바일에서 같은 호스트·세션·스니펫을 이어 쓰는 SSH 워크스페이스입니다.
-      동기화는 종단간 암호화(E2EE)되고, 동기화 서버까지 직접 호스팅할 수 있습니다.
+      일반 SSH부터 EC2 SSM, tmux, SFTP, 포트 포워딩까지 한 앱에서.
+      호스트·키·스니펫은 종단간 암호화(E2EE)로 동기화되고, 동기화 서버도 직접 띄울 수 있습니다.
     </p>
     <div class="platforms">
       <span>Windows</span><span>macOS</span><span>Linux</span><span>iOS</span><span>Android</span>
