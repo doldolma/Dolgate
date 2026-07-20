@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dolgate — 서버 작업 환경을 모든 기기에서</title>
+  <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스. 호스트·세션·스니펫을 종단간 암호화로 동기화하고, sync 서버까지 직접 호스팅할 수 있습니다." />
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e18" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb" />
+  <meta property="og:title" content="Dolgate — SSH 워크스페이스" />
+  <meta property="og:description" content="데스크톱과 모바일에서 같은 서버 작업 환경을 이어 쓰는 오픈소스 SSH 워크스페이스" />
+  <meta property="og:image" content="./assets/hosts-workspace.png" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e18;
+      --bg-soft: #11152355;
+      --panel: #141728;
+      --panel-2: #181c30;
+      --line: #262b45;
+      --line-strong: #34406e;
+      --nav-bg: #0b0e18cc;
+      --text: #e8ebf5;
+      --text-soft: #9aa3c0;
+      --accent: #2d7cff;
+      --accent-soft: #2d7cff2b;
+      --green: #35d49a;
+      --shadow: 0 30px 80px -20px #000c, 0 0 0 1px #ffffff08 inset;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace;
+    }
+    /* 테마 규칙: 기본은 OS 설정(auto), 토글로 고르면 data-theme 가 미디어쿼리를 이긴다.
+       라이트 변수 블록은 auto(미디어쿼리)와 수동(data-theme) 두 곳에 동일하게 유지할 것. */
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        color-scheme: light;
+        --bg: #f6f7fb;
+        --bg-soft: #ffffff99;
+        --panel: #ffffff;
+        --panel-2: #eef1f8;
+        --line: #dde2f0;
+        --line-strong: #b9c3e2;
+        --nav-bg: #f6f7fbcc;
+        --text: #181c2e;
+        --text-soft: #5a6382;
+        --accent: #2361e8;
+        --accent-soft: #2361e81f;
+        --green: #0b9e6f;
+        --shadow: 0 24px 60px -24px #1a234055, 0 0 0 1px #ffffff inset;
+      }
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --bg-soft: #ffffff99;
+      --panel: #ffffff;
+      --panel-2: #eef1f8;
+      --line: #dde2f0;
+      --line-strong: #b9c3e2;
+      --nav-bg: #f6f7fbcc;
+      --text: #181c2e;
+      --text-soft: #5a6382;
+      --accent: #2361e8;
+      --accent-soft: #2361e81f;
+      --green: #0b9e6f;
+      --shadow: 0 24px 60px -24px #1a234055, 0 0 0 1px #ffffff inset;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(14px);
+      background: var(--nav-bg);
+      border-bottom: 1px solid var(--line);
+    }
+    .nav-inner { display: flex; align-items: center; gap: 28px; height: 60px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; }
+    .brand img { width: 26px; height: 26px; border-radius: 6px; }
+    .nav-links { display: flex; gap: 22px; font-size: .92rem; color: var(--text-soft); }
+    .nav-links a:hover { color: var(--text); }
+    .nav-spacer { flex: 1; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 9px 18px; border-radius: 10px; font-size: .95rem; font-weight: 600;
+      border: 1px solid var(--line); color: var(--text);
+      transition: border-color .15s, background .15s, transform .15s;
+    }
+    .btn:hover { border-color: var(--line-strong); background: var(--panel); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #3f89ff; border-color: #3f89ff; transform: translateY(-1px); }
+    .btn-sm { padding: 7px 14px; font-size: .88rem; }
+    .theme-toggle {
+      width: 36px; height: 36px; padding: 0; justify-content: center;
+      font-size: 1rem; line-height: 1; cursor: pointer;
+      background: transparent; font-family: var(--mono);
+    }
+
+    /* ── hero ── */
+    .hero { padding: 88px 0 40px; text-align: center; position: relative; overflow: hidden; }
+    .hero::before {
+      content: ""; position: absolute; inset: -40% -20% auto;  height: 130%;
+      background:
+        radial-gradient(600px 300px at 30% 10%, #2d7cff22, transparent 70%),
+        radial-gradient(500px 280px at 70% 5%, #35d49a14, transparent 70%);
+      pointer-events: none;
+    }
+    .hero > .wrap { position: relative; }
+    .hero h1 { font-size: clamp(1.9rem, 4.6vw, 3.1rem); line-height: 1.25; letter-spacing: -0.02em; }
+    .hero h1 .accent { color: var(--accent); }
+    .hero p.sub {
+      margin: 18px auto 0; max-width: 640px;
+      color: var(--text-soft); font-size: clamp(1rem, 1.6vw, 1.13rem);
+    }
+    .platforms {
+      margin-top: 14px; font-family: var(--mono); font-size: .85rem; color: var(--text-soft);
+      display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+    }
+    .platforms span::before { content: "▸ "; color: var(--green); }
+    .cta { margin-top: 30px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    .shot-frame {
+      margin: 56px auto 0; max-width: 960px;
+      border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .shot-bar {
+      display: flex; align-items: center; gap: 6px; padding: 10px 14px;
+      border-bottom: 1px solid var(--line); background: var(--panel-2);
+    }
+    .shot-bar i { width: 11px; height: 11px; border-radius: 50%; background: #3a4160; }
+    .shot-bar i:nth-child(1) { background: #ff5f57; } .shot-bar i:nth-child(2) { background: #febc2e; } .shot-bar i:nth-child(3) { background: #28c840; }
+    .shot-bar em { margin-left: 10px; font-style: normal; font-family: var(--mono); font-size: .78rem; color: var(--text-soft); }
+
+    /* ── sections ── */
+    section { padding: 84px 0; }
+    .sec-label { font-family: var(--mono); font-size: .82rem; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
+    h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); margin-top: 10px; letter-spacing: -0.01em; }
+    .sec-sub { color: var(--text-soft); margin-top: 12px; max-width: 620px; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 24px 22px; transition: border-color .15s, transform .15s;
+    }
+    .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .card .ico { font-size: 1.4rem; }
+    .card h3 { margin-top: 12px; font-size: 1.03rem; }
+    .card p { margin-top: 8px; color: var(--text-soft); font-size: .92rem; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 34px; }
+    .chip {
+      font-family: var(--mono); font-size: .82rem; color: var(--text-soft);
+      border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; background: var(--bg-soft);
+    }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; margin-top: 40px; }
+    .split .shot-frame { margin: 0; }
+
+    /* ── security ── */
+    .sec-list { margin-top: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .sec-item {
+      display: flex; gap: 14px; padding: 20px; border: 1px solid var(--line);
+      border-radius: 14px; background: var(--panel);
+    }
+    .sec-item .mark { color: var(--green); font-family: var(--mono); font-weight: 700; }
+    .sec-item b { display: block; margin-bottom: 4px; }
+    .sec-item span { color: var(--text-soft); font-size: .92rem; }
+
+    /* ── code block ── */
+    /* 코드 블록은 라이트 모드에서도 터미널답게 다크 고정 */
+    pre {
+      margin-top: 30px; padding: 22px; border-radius: 14px; overflow-x: auto;
+      background: #0d1020; border: 1px solid #262b45;
+      font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: #c6cdea;
+    }
+    pre .c { color: #5b6485; } pre .k { color: #7fb3ff; } pre .s { color: #8ce3bd; }
+
+    /* ── download ── */
+    .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-top: 40px; }
+    .dl {
+      text-align: center; padding: 26px 16px; border: 1px solid var(--line); border-radius: 14px;
+      background: var(--panel); transition: border-color .15s, transform .15s;
+    }
+    a.dl:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .dl .os { font-size: 1.6rem; }
+    .dl b { display: block; margin-top: 10px; }
+    .dl span { display: block; margin-top: 4px; font-size: .82rem; color: var(--text-soft); }
+    .note { margin-top: 22px; font-size: .85rem; color: var(--text-soft); }
+    .note code { font-family: var(--mono); background: var(--panel-2); border: 1px solid var(--line); padding: 2px 7px; border-radius: 6px; font-size: .8rem; }
+
+    footer { border-top: 1px solid var(--line); padding: 36px 0 48px; }
+    .foot { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--text-soft); font-size: .88rem; }
+    .foot .spacer { flex: 1; }
+    .foot a:hover { color: var(--text); }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .dl-grid { grid-template-columns: 1fr 1fr; }
+      .split { grid-template-columns: 1fr; }
+      .sec-list { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+    @media (max-width: 560px) {
+      .grid { grid-template-columns: 1fr; }
+      .dl-grid { grid-template-columns: 1fr; }
+      section { padding: 60px 0; }
+    }
+  </style>
+  <script>
+    // FOUC 방지: 저장된 테마를 첫 페인트 전에 적용. 저장값 없으면 OS 설정(auto).
+    (() => {
+      const t = localStorage.getItem("dolgate-theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    })();
+  </script>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <a class="brand" href="#"><img src="./assets/icon-192.png" alt="" />Dolgate</a>
+    <div class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#security">보안</a>
+      <a href="#selfhost">Self-host</a>
+      <a href="#download">다운로드</a>
+    </div>
+    <div class="nav-spacer"></div>
+    <button class="btn theme-toggle" id="theme-toggle" type="button" title="테마 전환" aria-label="테마 전환">◐</button>
+    <a class="btn btn-sm" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>서버 작업 환경을,<br /><span class="accent">모든 기기에서 이어서.</span></h1>
+    <p class="sub">
+      Dolgate는 데스크톱과 모바일에서 같은 호스트·세션·스니펫을 이어 쓰는 SSH 워크스페이스입니다.
+      동기화는 종단간 암호화(E2EE)되고, 동기화 서버까지 직접 호스팅할 수 있습니다.
+    </p>
+    <div class="platforms">
+      <span>Windows</span><span>macOS</span><span>Linux</span><span>iOS</span><span>Android</span>
+    </div>
+    <div class="cta">
+      <a class="btn btn-primary" id="hero-download" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">⬇ 최신 버전 다운로드</a>
+      <a class="btn" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">소스 보기 — MIT 오픈소스</a>
+    </div>
+
+    <figure class="shot-frame">
+      <div class="shot-bar"><i></i><i></i><i></i><em>dolgate — hosts &amp; workspace</em></div>
+      <img src="./assets/hosts-workspace.png" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
+    </figure>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="sec-label">Features</div>
+    <h2>터미널에서 필요한 것들, 한 앱에</h2>
+    <p class="sec-sub">일반 SSH부터 AWS SSM, 컨테이너, tmux까지 — 서버 작업의 전 과정을 하나의 워크스페이스로 다룹니다.</p>
+
+    <div class="grid">
+      <div class="card"><div class="ico">🖥️</div><h3>SSH / SSM 워크스페이스</h3>
+        <p>일반 SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서. SSH Agent 인증과 Agent Forwarding 지원.</p></div>
+      <div class="card"><div class="ico">🪟</div><h3>tmux control mode</h3>
+        <p>원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로. 탭을 닫아도 detach라 세션이 살아 있고, 다시 붙으면 이어집니다.</p></div>
+      <div class="card"><div class="ico">🤖</div><h3>AI 어시스턴트</h3>
+        <p>현재 세션의 호스트 정보와 터미널 출력을 바탕으로 질문하고, 조회는 자동·변경은 승인 후 실행. OpenAI 호환 · Claude · Codex 지원.</p></div>
+      <div class="card"><div class="ico">🎬</div><h3>세션 녹화 · 재생</h3>
+        <p>종료된 터미널 세션을 타임라인으로 다시 봅니다. 녹화는 로컬에만 저장되고 서버로 전송되지 않습니다.</p></div>
+      <div class="card"><div class="ico">🔁</div><h3>E2EE 동기화, self-host로</h3>
+        <p>호스트·시크릿·스니펫을 종단간 암호화로 데스크톱↔모바일 동기화. 동기화 서버(sync-api)는 Docker 한 줄로 직접 띄울 수도 있습니다.</p></div>
+      <div class="card"><div class="ico">👥</div><h3>세션 공유 &amp; 협업</h3>
+        <p>실행 중인 세션을 브라우저 viewer 링크로 공유하고, 실시간 채팅으로 함께 봅니다.</p></div>
+    </div>
+
+    <div class="chips">
+      <span class="chip">명령어 자동완성 (Fig 스펙 + 동적 값)</span>
+      <span class="chip">스니펫 {{변수}}</span>
+      <span class="chip">듀얼 패널 SFTP + 드래그 업로드</span>
+      <span class="chip">ZMODEM(sz) 다운로드</span>
+      <span class="chip">원격 파일 인앱 편집 · sudo 저장</span>
+      <span class="chip">점프 호스트(ProxyJump)</span>
+      <span class="chip">Local / Remote / Dynamic 포워딩</span>
+      <span class="chip">Docker · Podman 모니터링/터널</span>
+      <span class="chip">mosh</span>
+      <span class="chip">명령 완료 OS 알림</span>
+      <span class="chip">OpenSSH · Xshell · Termius 가져오기</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap split">
+    <div>
+      <div class="sec-label">Network</div>
+      <h2>포트 포워딩과 터널을 눈으로</h2>
+      <p class="sec-sub">
+        Local / Remote / Dynamic 포워딩과 SSM 포워딩, 컨테이너 터널을 목록으로 관리합니다.
+        점프 호스트를 거치는 연결도 저장된 호스트를 ProxyJump로 지정하면 끝.
+      </p>
+    </div>
+    <figure class="shot-frame">
+      <div class="shot-bar"><i></i><i></i><i></i><em>dolgate — port forwarding</em></div>
+      <img src="./assets/port-forwarding.png" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
+    </figure>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <div class="sec-label">Security</div>
+    <h2>비밀번호와 키를 맡길 수 있게</h2>
+    <p class="sec-sub">SSH 클라이언트의 기본기는 비밀 관리입니다. Dolgate의 원칙은 단순합니다 — 비밀값은 평문으로 어디에도 남지 않습니다. 자세한 설계는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/data-protection.md" target="_blank" rel="noopener">데이터 보호 문서</a>에 공개되어 있습니다.</p>
+
+    <div class="sec-list">
+      <div class="sec-item"><div class="mark">✓</div><div>
+        <b>OS 보안 저장소에만 저장</b>
+        <span>비밀번호·개인키·API 키는 macOS Keychain / Windows DPAPI / iOS Keychain / Android Keystore 기반으로 암호화됩니다. 안전한 저장소가 없으면 평문 폴백 없이 저장을 거부합니다.</span>
+      </div></div>
+      <div class="sec-item"><div class="mark">✓</div><div>
+        <b>종단간 암호화(E2EE) 동기화</b>
+        <span>동기화 데이터는 업로드 전에 기기에서 AES-256-GCM으로 암호화되고, 암호화 키는 이용자가 설정한 동기화 암호로만 열립니다. 관리형 서버든 자체 호스팅이든, 운영자는 원문을 복호화할 수 없습니다.</span>
+      </div></div>
+      <div class="sec-item"><div class="mark">✓</div><div>
+        <b>필요한 것만 동기화</b>
+        <span>터미널 출력, 세션 녹화, 활동 로그, AI API 키는 서버로 전송되지 않고 기기에만 남습니다.</span>
+      </div></div>
+      <div class="sec-item"><div class="mark">✓</div><div>
+        <b>신뢰를 강요하지 않음</b>
+        <span>전체 코드가 공개되어 있어 직접 검증할 수 있고, 동기화 서버까지 본인 인프라에 직접 호스팅할 수 있습니다.</span>
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<section id="selfhost">
+  <div class="wrap">
+    <div class="sec-label">Self-host</div>
+    <h2>동기화 서버를 내 손에</h2>
+    <p class="sec-sub">
+      브라우저 로그인과 동기화를 담당하는 <code style="font-family:var(--mono)">sync-api</code>는 단일 컨테이너입니다.
+      띄운 뒤 앱 로그인 화면에서 서버 주소만 바꾸면 됩니다.
+    </p>
+    <pre><span class="c"># docker-compose.yml</span>
+<span class="k">services</span>:
+  <span class="k">sync-api</span>:
+    <span class="k">image</span>: <span class="s">ghcr.io/doldolma/dolgate-sync-api:latest</span>
+    <span class="k">restart</span>: <span class="s">unless-stopped</span>
+    <span class="k">ports</span>: [<span class="s">"8080:8080"</span>]
+    <span class="k">volumes</span>: [<span class="s">dolgate-sync-api-data:/app/data</span>]
+
+<span class="k">volumes</span>:
+  <span class="k">dolgate-sync-api-data</span>:</pre>
+    <p class="note">상세 설정은 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/sync-api-self-hosting.md" target="_blank" rel="noopener">자체 호스팅 가이드</a>를 참고하세요.</p>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="sec-label">Download</div>
+    <h2>지금 시작하기</h2>
+    <p class="sec-sub">모든 플랫폼이 하나의 버전으로 함께 릴리즈되고, 데스크톱 앱은 자동 업데이트를 지원합니다. <span class="latest-version" style="font-family:var(--mono); color:var(--accent)"></span></p>
+
+    <div class="dl-grid">
+      <a class="dl" data-dl="mac" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
+        <div class="os">🍎</div><b>macOS</b><span>.dmg · Apple Silicon/Intel</span>
+      </a>
+      <a class="dl" data-dl="win" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
+        <div class="os">🪟</div><b>Windows</b><span>NSIS 설치본 · x64</span>
+      </a>
+      <a class="dl" data-dl="linux" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
+        <div class="os">🐧</div><b>Linux</b><span>AppImage · x86_64</span>
+      </a>
+      <a class="dl" data-dl="android" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
+        <div class="os">🤖</div><b>Android</b><span>APK · arm64</span>
+      </a>
+      <div class="dl">
+        <div class="os">📱</div><b>iOS</b><span>App Store 준비 중</span>
+      </div>
+    </div>
+
+    <p class="note">
+      Linux <code>deb</code> 패키지와 ARM64 빌드는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 받을 수 있습니다.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 doldolma · MIT License</span>
+    <div class="spacer"></div>
+    <a href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/doldolma/dolgate/tree/main/docs" target="_blank" rel="noopener">문서</a>
+    <a href="https://github.com/doldolma/dolgate/releases" target="_blank" rel="noopener">릴리즈</a>
+    <a href="https://github.com/doldolma/dolgate/blob/main/PRIVACY.md" target="_blank" rel="noopener">개인정보 처리방침</a>
+  </div>
+</footer>
+
+<script>
+  // 테마 토글: 시스템(auto) → 라이트 → 다크 순환. 수동 선택만 localStorage 에 기억.
+  (() => {
+    const KEY = "dolgate-theme";
+    const root = document.documentElement;
+    const btn = document.getElementById("theme-toggle");
+    const metas = document.querySelectorAll('meta[name="theme-color"]');
+    const COLORS = { dark: "#0b0e18", light: "#f6f7fb" };
+    const ICONS = { auto: "◐", light: "☀", dark: "☾" };
+    const LABELS = { auto: "시스템 설정 따름", light: "라이트", dark: "다크" };
+    const ORDER = ["auto", "light", "dark"];
+    const current = () => {
+      const t = localStorage.getItem(KEY);
+      return t === "light" || t === "dark" ? t : "auto";
+    };
+    const apply = (mode) => {
+      if (mode === "auto") delete root.dataset.theme;
+      else root.dataset.theme = mode;
+      metas.forEach((m) => {
+        const scheme = (m.media || "").includes("dark") ? "dark" : "light";
+        m.content = mode === "auto" ? COLORS[scheme] : COLORS[mode];
+      });
+      btn.textContent = ICONS[mode];
+      btn.title = `테마: ${LABELS[mode]} (클릭해서 전환)`;
+      btn.setAttribute("aria-label", btn.title);
+    };
+    btn.addEventListener("click", () => {
+      const next = ORDER[(ORDER.indexOf(current()) + 1) % ORDER.length];
+      if (next === "auto") localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, next);
+      apply(next);
+    });
+    apply(current());
+  })();
+</script>
+
+<script>
+  // 다운로드 버튼을 최신 릴리스의 실제 파일 URL로 배선한다.
+  // GitHub API 조회 실패 시(오프라인·rate limit 등) 기본 href(릴리스 페이지)로 폴백.
+  (async () => {
+    try {
+      const res = await fetch("https://api.github.com/repos/doldolma/Dolgate/releases/latest", {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+      if (!res.ok) return;
+      const rel = await res.json();
+      const assets = rel.assets || [];
+      const find = (re) => assets.find((a) => re.test(a.name))?.browser_download_url;
+      const urls = {
+        mac: find(/mac-universal\.dmg$/),
+        win: find(/win-x64\.exe$/),
+        linux: find(/linux-x86_64\.AppImage$/),
+        android: find(/^Dolgate-android-.*\.apk$/),
+      };
+
+      // 플랫폼 타일: 실제 파일 직링크로 교체
+      document.querySelectorAll("[data-dl]").forEach((el) => {
+        const url = urls[el.dataset.dl];
+        if (url) {
+          el.href = url;
+          el.removeAttribute("target"); // 직다운로드는 새 탭 불필요
+        }
+      });
+
+      // 버전 표기
+      if (rel.tag_name) {
+        document.querySelectorAll(".latest-version").forEach((el) => {
+          el.textContent = rel.tag_name;
+        });
+      }
+
+      // 히어로 버튼: 방문자 OS 감지해서 그 파일을 바로 다운로드
+      const ua = navigator.userAgent;
+      const os = /Android/i.test(ua) ? "android"
+        : /iPhone|iPad|iPod/i.test(ua) ? null // iOS 는 스토어 준비 중 — 릴리스 페이지 유지
+        : /Mac/i.test(ua) ? "mac"
+        : /Win/i.test(ua) ? "win"
+        : /Linux/i.test(ua) ? "linux"
+        : null;
+      const hero = document.getElementById("hero-download");
+      if (hero && os && urls[os]) {
+        const NAMES = { mac: "macOS", win: "Windows", linux: "Linux", android: "Android" };
+        hero.href = urls[os];
+        hero.removeAttribute("target");
+        hero.textContent = `⬇ ${NAMES[os]}용 다운로드 ${rel.tag_name || ""}`.trimEnd();
+      }
+    } catch {
+      /* 폴백: 릴리스 페이지 링크 유지 */
+    }
+  })();
+</script>
+
+</body>
+</html>
