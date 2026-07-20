@@ -247,18 +247,17 @@ jobs:
         with:
           targets: ${{ env.MOBILE_RUSSH_ANDROID_TARGETS }}
 
-      - name: Cache mobile russh Cargo build
+      - name: Cache mobile russh Cargo dependencies
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/cargo-ndk
             ~/.cargo/registry
             ~/.cargo/git
-            packages/fressh-react-native-uniffi-russh/rust/target
-          key: mobile-russh-cargo-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-${{ hashFiles('packages/fressh-react-native-uniffi-russh/rust/Cargo.lock', 'packages/fressh-react-native-uniffi-russh/rust/rust-toolchain.toml', 'package-lock.json') }}
+          key: mobile-russh-cargo-deps-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-${{ hashFiles('packages/fressh-react-native-uniffi-russh/rust/Cargo.lock', 'packages/fressh-react-native-uniffi-russh/rust/rust-toolchain.toml', 'package-lock.json') }}
           restore-keys: |
-            mobile-russh-cargo-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-
-            mobile-russh-cargo-${{ runner.os }}-
+            mobile-russh-cargo-deps-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-
+            mobile-russh-cargo-deps-${{ runner.os }}-
 
       - name: Run mobile russh Rust tests
         working-directory: packages/fressh-react-native-uniffi-russh/rust
