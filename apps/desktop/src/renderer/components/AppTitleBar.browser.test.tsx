@@ -393,9 +393,10 @@ describe('AppTitleBar update popover', () => {
     const pill = sessionButton.closest('.group');
 
     expect(pill).toBeTruthy();
-    // 활성 세션탭은 흰 배경 + 어두운 글자로 비활성(옅은 배경/밝은 글자)과 또렷이 구분된다.
-    expect(pill?.className).toContain('bg-[rgba(255,255,255,0.96)]');
-    expect(sessionButton.className).toContain('text-[var(--chrome-bg)]');
+    // 활성 세션탭은 콘텐츠 배경(--app-bg)에 도킹된 색 + 본문 글자색으로 비활성(옅은
+    // 배경/밝은 글자)과 구분된다 — 다크 테마에서 흰 알약이 튀지 않게 테마 토큰 사용.
+    expect(pill?.className).toContain('bg-[var(--app-bg)]');
+    expect(sessionButton.className).toContain('text-[var(--text)]');
   });
 
   it('hides the native scrollbar and shows edge fades when the titlebar tab strip overflows', () => {
