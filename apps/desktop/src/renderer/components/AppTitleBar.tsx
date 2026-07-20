@@ -516,22 +516,24 @@ function countWorkspacePanes(workspace: WorkspaceTab): number {
 }
 
 // 풀하이트 브라우저 탭: 윗모서리만 둥글고(아래는 네모) 바 하단 경계선에 붙는다.
-// 활성=흰 배경 + 어두운 글자, 비활성=투명(바에 녹아듦) + 밝은 글자.
+// 활성=콘텐츠 배경(--app-bg)으로 아래 영역에 도킹된 것처럼 이어지고(테마 무관 — 다크에서
+// 흰 탭이 붕 뜨지 않게), 비활성=투명(바에 녹아듦) + 밝은 글자. 크롬은 두 테마 모두 어두움.
 function getTitlebarTabClass(active: boolean): string {
   const base =
     'h-full gap-2 !rounded-t-[10px] !rounded-b-none border-transparent px-[0.95rem] py-0 text-[0.86rem]';
   if (active) {
-    return `${base} bg-[rgba(255,255,255,0.97)] text-[var(--chrome-bg)] shadow-none hover:text-[var(--chrome-bg)]`;
+    return `${base} bg-[var(--app-bg)] text-[var(--text)] shadow-none hover:text-[var(--text)]`;
   }
 
   return `${base} bg-transparent text-[rgba(243,247,251,0.74)] shadow-none hover:bg-[rgba(255,255,255,0.08)] hover:text-white`;
 }
 
 // 세션탭은 도킹하지 않고 위아래 여백을 두고 떠 있는 알약(self-center). 비활성도 옅은
-// 배경+테두리로 경계가 보여 "어디까지 탭인지" 알 수 있게 한다. 활성은 흰 배경으로 또렷이.
+// 배경+테두리로 경계가 보여 "어디까지 탭인지" 알 수 있게 한다. 활성은 콘텐츠 배경색으로
+// 또렷이(정적 탭과 동일 규칙 — 다크 테마에서 흰 알약이 튀지 않게).
 function getTitlebarDynamicTabContainerClass(active: boolean): string {
   if (active) {
-    return 'border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.96)] shadow-none';
+    return 'border-[rgba(255,255,255,0.16)] bg-[var(--app-bg)] shadow-none';
   }
 
   return 'border-[rgba(255,255,255,0.1)] bg-[rgba(255,255,255,0.07)] shadow-none hover:bg-[rgba(255,255,255,0.12)]';
@@ -541,7 +543,7 @@ function getTitlebarDynamicTabButtonClass(active: boolean): string {
   return cn(
     'min-w-0 justify-start rounded-none border-transparent bg-transparent px-3 py-[0.3rem] shadow-none hover:bg-transparent',
     active
-      ? 'text-[var(--chrome-bg)] hover:text-[var(--chrome-bg)]'
+      ? 'text-[var(--text)] hover:text-[var(--text)]'
       : 'text-[rgba(243,247,251,0.82)] hover:text-white',
   );
 }
@@ -1475,7 +1477,7 @@ export function AppTitleBar({
                   className={cn(
                     'inline-flex h-6 w-6 items-center justify-center rounded-full text-[0.9rem]',
                     item.active
-                      ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
+                      ? 'bg-[var(--accent-surface)] text-[var(--accent-strong)]'
                       : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
                   )}
                   aria-hidden="true"
@@ -1487,7 +1489,7 @@ export function AppTitleBar({
                   className={cn(
                     'ml-auto inline-flex min-w-[1.5rem] items-center justify-center rounded-full px-2 py-0.5 text-[0.7rem] font-semibold',
                     item.active
-                      ? 'bg-[color-mix(in_srgb,var(--accent-strong)_12%,white_88%)] text-[var(--accent-strong)]'
+                      ? 'bg-[var(--accent-surface)] text-[var(--accent-strong)]'
                       : 'bg-[rgba(255,255,255,0.08)] text-[rgba(243,247,251,0.78)]',
                   )}
                 >
