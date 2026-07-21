@@ -36,6 +36,7 @@ import { useScreenPadding } from '../lib/screen-layout';
 import {
   TERMINAL_PRIMARY_SHORTCUTS,
   TERMINAL_SECONDARY_SHORTCUTS,
+  stripTerminalQueryReplies,
   translateTerminalInputEventToSequence,
   type NativeTerminalInputEvent,
 } from '../lib/terminal-input';
@@ -138,7 +139,9 @@ export function SessionScreen(): React.JSX.Element {
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(56);
   const isAndroid = Platform.OS === 'android';
-  const useTerminalInputOverlay = isAndroid;
+  // iOS도 네이티브 입력 오버레이를 쓴다 — WebView(xterm) 직접 입력은 iOS WKWebView에서
+  // 한글 IME 조합이 글자마다 끊겨 자모가 분리된다(조합은 네이티브 UITextView에서만 안전).
+  const useTerminalInputOverlay = true;
   const keyboardClosedViewportHeightRef = useRef(height);
   const terminalViewportSizeRef = useRef<{
     width: number;
@@ -357,9 +360,11 @@ export function SessionScreen(): React.JSX.Element {
     sessionId: renderedTerminalSession?.id ?? null,
     terminalVisible,
   };
+  // 소프트 키보드가 떠 있는 동안은 네이티브 오버레이가 입력을 담당하므로 WebView(xterm)
+  // 직접 입력을 막아 이중 입력을 방지한다. 키보드가 없을 때(하드웨어 키보드 등)는 허용.
   directTerminalInputSuppressedRef.current = isAndroid
     ? keyboardRequestedVisible || keyboardVisible
-    : false;
+    : keyboardVisible;
   const toolbarKeyboardInset = getKeyboardDockInset({
     keyboardVisible,
     keyboardInset: keyboardInset + (isAndroid ? safeAreaInsets.bottom : 0),
@@ -456,7 +461,6 @@ export function SessionScreen(): React.JSX.Element {
 
   useEffect(() => {
     if (
-      !isAndroid ||
       !useTerminalInputOverlay ||
       !terminalReady ||
       !activeSession ||
@@ -469,7 +473,6 @@ export function SessionScreen(): React.JSX.Element {
   }, [
     activeSession,
     focusRequestedTerminalInput,
-    isAndroid,
     terminalReady,
     terminalVisible,
     useTerminalInputOverlay,
@@ -503,8 +506,9 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    focusTerminal();
-  }, [focusRequestedTerminalInput, focusTerminal]);
+    setInputFocused(true);
+    focusRequestedTerminalInput(true);
+  }, [focusRequestedTerminalInput]);
 
   const closeKeyboard = useCallback(() => {
     setKeyboardVisible(false);
@@ -517,9 +521,10 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
+    setInputFocused(false);
     Keyboard.dismiss();
-    blurTerminal();
-  }, [blurTerminal, focusRequestedTerminalInput]);
+    nativeTerminalInputRef.current?.blur();
+  }, [focusRequestedTerminalInput]);
 
   const toggleKeyboard = useCallback(() => {
     if (keyboardToggleActive) {
@@ -596,14 +601,9 @@ export function SessionScreen(): React.JSX.Element {
       return;
     }
 
-    if (isAndroid) {
-      setInputFocused(true);
-      focusRequestedTerminalInput(true);
-      return;
-    }
-
-    focusTerminal();
-  }, [activeSession, focusRequestedTerminalInput, focusTerminal, isAndroid]);
+    setInputFocused(true);
+    focusRequestedTerminalInput(true);
+  }, [activeSession, focusRequestedTerminalInput]);
 
   useEffect(() => {
     if (
@@ -696,11 +696,7 @@ export function SessionScreen(): React.JSX.Element {
         if (!terminalVisible) {
           return;
         }
-        if (isAndroid) {
-          focusRequestedTerminalInput(true);
-          return;
-        }
-        focusTerminal();
+        focusRequestedTerminalInput(true);
       },
       onData: chunk => {
         terminal.write(chunk);
@@ -741,9 +737,6 @@ export function SessionScreen(): React.JSX.Element {
   ]);
 
   const resetNativeInputBuffer = () => {
-    if (!isAndroid) {
-      return;
-    }
     setNativeInputClearToken(value => value + 1);
   };
 
@@ -759,11 +752,17 @@ export function SessionScreen(): React.JSX.Element {
     const inputState = terminalInputStateRef.current;
     if (
       !inputState.terminalVisible ||
-      (Platform.OS === 'android' && directTerminalInputSuppressedRef.current)
+      directTerminalInputSuppressedRef.current
     ) {
       return;
     }
-    sendSessionInput(value);
+    // xterm 자동 질의 응답은 걸러낸다 — 셸 에코와 만나면 무한 핑퐁이 된다
+    // (stripTerminalQueryReplies 주석 참고).
+    const sanitized = stripTerminalQueryReplies(value);
+    if (!sanitized) {
+      return;
+    }
+    sendSessionInput(sanitized);
   };
 
   const sendTranslatedInput = (event: NativeTerminalInputEvent) => {
@@ -777,11 +776,7 @@ export function SessionScreen(): React.JSX.Element {
   const sendShortcut = (event: NativeTerminalInputEvent) => {
     sendTranslatedInput(event);
     resetNativeInputBuffer();
-    if (isAndroid) {
-      focusRequestedTerminalInput(true);
-      return;
-    }
-    focusTerminal();
+    focusRequestedTerminalInput(true);
   };
 
   if (!activeTab) {
@@ -855,12 +850,8 @@ export function SessionScreen(): React.JSX.Element {
                   } else {
                     setActiveConnectionTab({ kind: tab.kind, id: session.id });
                   }
-                  if (isTerminal && isAndroid) {
-                    focusRequestedTerminalInput(true);
-                    return;
-                  }
                   if (isTerminal) {
-                    focusTerminal();
+                    focusRequestedTerminalInput(true);
                   }
                 }}
                 style={[
@@ -1034,11 +1025,7 @@ export function SessionScreen(): React.JSX.Element {
             accessibilityLabel={`${activeSession.title} 세션 재연결`}
             onPress={async () => {
               await resumeSession(activeSession.id);
-              if (isAndroid) {
-                focusRequestedTerminalInput(true);
-                return;
-              }
-              focusTerminal();
+              focusRequestedTerminalInput(true);
             }}
             style={[
               styles.inlineBannerButton,
@@ -1113,7 +1100,7 @@ export function SessionScreen(): React.JSX.Element {
                   },
                 ]}
                 onTouchEnd={
-                  isAndroid && terminalVisible
+                  terminalVisible
                     ? () => focusRequestedTerminalInput(true)
                     : undefined
                 }

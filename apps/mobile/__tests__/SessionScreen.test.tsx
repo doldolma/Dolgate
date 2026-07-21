@@ -516,7 +516,9 @@ describe('SessionScreen', () => {
     });
   });
 
-  it('does not render the native terminal input overlay on iOS', async () => {
+  it('renders the native terminal input overlay on iOS', async () => {
+    // iOS도 네이티브 입력 오버레이를 쓴다 — WebView(xterm) 직접 입력은 한글 IME 조합이
+    // 깨져 자모가 분리되기 때문(SessionScreen.useTerminalInputOverlay 참고).
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
       tree = renderer.create(<SessionScreen />);
@@ -525,7 +527,7 @@ describe('SessionScreen', () => {
     const nativeInputs = tree!.root.findAll(
       node => (node.type as unknown) === 'TerminalInputView',
     );
-    expect(nativeInputs).toHaveLength(0);
+    expect(nativeInputs).toHaveLength(1);
 
     await act(async () => {
       tree!.unmount();
@@ -560,7 +562,7 @@ describe('SessionScreen', () => {
     });
   });
 
-  it('toggles the iOS keyboard through terminal focus and blur only', async () => {
+  it('toggles the iOS keyboard through the native terminal input overlay', async () => {
     const dismissKeyboard = jest
       .spyOn(Keyboard, 'dismiss')
       .mockImplementation(() => undefined);
@@ -570,6 +572,7 @@ describe('SessionScreen', () => {
     });
 
     mockTerminalHandle!.focus.mockClear();
+    mockNativeTerminalInputHandle!.focus.mockClear();
 
     const openKeyboardButton = tree!.root.findByProps({
       accessibilityLabel: '키보드 열기',
@@ -580,10 +583,11 @@ describe('SessionScreen', () => {
       jest.runOnlyPendingTimers();
     });
 
-    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
-    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).toHaveBeenCalled();
+    expect(mockTerminalHandle!.focus).not.toHaveBeenCalled();
 
     mockTerminalHandle!.blur.mockClear();
+    mockNativeTerminalInputHandle!.blur.mockClear();
 
     await act(async () => {
       emitKeyboardEvent('keyboardDidShow', {
@@ -600,9 +604,9 @@ describe('SessionScreen', () => {
       jest.runOnlyPendingTimers();
     });
 
-    expect(mockTerminalHandle!.blur).toHaveBeenCalled();
     expect(dismissKeyboard).toHaveBeenCalled();
-    expect(mockNativeTerminalInputHandle!.blur).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.blur).toHaveBeenCalled();
+    expect(mockTerminalHandle!.blur).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
@@ -667,6 +671,7 @@ describe('SessionScreen', () => {
     });
 
     mockTerminalHandle!.focus.mockClear();
+    mockNativeTerminalInputHandle!.focus.mockClear();
 
     const secondTab = tree!.root.findByProps({
       accessibilityLabel: 'Docker-ubuntu Connecting 세션 탭',
@@ -678,8 +683,8 @@ describe('SessionScreen', () => {
     });
 
     expect(setActiveSessionTab).toHaveBeenCalledWith('session-2');
-    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
-    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).toHaveBeenCalled();
+    expect(mockTerminalHandle!.focus).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
@@ -723,6 +728,7 @@ describe('SessionScreen', () => {
     });
 
     mockTerminalHandle!.focus.mockClear();
+    mockNativeTerminalInputHandle!.focus.mockClear();
 
     const reconnectButton = tree!.root.findByProps({
       accessibilityLabel: 'Synology 세션 재연결',
@@ -734,8 +740,8 @@ describe('SessionScreen', () => {
     });
 
     expect(resumeSession).toHaveBeenCalledWith('session-1');
-    expect(mockTerminalHandle!.focus).toHaveBeenCalled();
-    expect(mockNativeTerminalInputHandle!.focus).not.toHaveBeenCalled();
+    expect(mockNativeTerminalInputHandle!.focus).toHaveBeenCalled();
+    expect(mockTerminalHandle!.focus).not.toHaveBeenCalled();
 
     await act(async () => {
       tree!.unmount();
@@ -1362,8 +1368,8 @@ describe('SessionScreen', () => {
       ['Enter', '\r'],
       ['Backspace', '\u007f'],
       ['Delete', '\u001b[3~'],
-      ['Home', '\u001b[H'],
-      ['End', '\u001b[F'],
+      ['Home', '\u001b[1~'],
+      ['End', '\u001b[4~'],
       ['PageUp', '\u001b[5~'],
       ['PageDown', '\u001b[6~'],
       [':', ':'],

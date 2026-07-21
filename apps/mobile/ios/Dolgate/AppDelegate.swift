@@ -128,6 +128,11 @@ private final class TerminalInputTextView: UITextView {
     ]
   }
 
+  // pressesBegan 은 키를 누르고 있어도 반복 이벤트가 오지 않으므로(시스템 키 반복은
+  // 텍스트 입력 계층에서만 합성됨) 하드웨어 특수키는 자체 타이머로 반복을 구현한다.
+  private var keyRepeatTimer: Timer?
+  private var repeatingKey: (key: TerminalInputSpecialKey, ctrl: Bool)?
+
   override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
     guard let key = presses.first?.key else {
       super.pressesBegan(presses, with: event)
@@ -136,10 +141,52 @@ private final class TerminalInputTextView: UITextView {
 
     if let terminalKey = terminalKey(for: key) {
       terminalInputView?.handleSpecialKey(terminalKey.key, ctrl: terminalKey.ctrl)
+      startKeyRepeat(terminalKey)
       return
     }
 
     super.pressesBegan(presses, with: event)
+  }
+
+  override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    stopKeyRepeat()
+    super.pressesEnded(presses, with: event)
+  }
+
+  override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+    stopKeyRepeat()
+    super.pressesCancelled(presses, with: event)
+  }
+
+  private func startKeyRepeat(_ terminalKey: (key: TerminalInputSpecialKey, ctrl: Bool)) {
+    stopKeyRepeat()
+    // Ctrl 조합은 반복하지 않는다 (Ctrl+C 연타 방지).
+    if terminalKey.ctrl {
+      return
+    }
+    repeatingKey = terminalKey
+    keyRepeatTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: false) { [weak self] _ in
+      guard let self else {
+        return
+      }
+      self.keyRepeatTimer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
+        guard let self, let repeating = self.repeatingKey else {
+          return
+        }
+        self.terminalInputView?.handleSpecialKey(repeating.key, ctrl: repeating.ctrl)
+      }
+    }
+  }
+
+  private func stopKeyRepeat() {
+    keyRepeatTimer?.invalidate()
+    keyRepeatTimer = nil
+    repeatingKey = nil
+  }
+
+  override func resignFirstResponder() -> Bool {
+    stopKeyRepeat()
+    return super.resignFirstResponder()
   }
 
   private func terminalKey(for key: UIKey) -> (key: TerminalInputSpecialKey, ctrl: Bool)? {
@@ -302,17 +349,24 @@ final class TerminalInputContainerView: UIView, UITextViewDelegate {
   }
 
   func textViewDidChange(_ textView: UITextView) {
+    // IME 조합(marked text) 중에 텍스트나 셀렉션을 건드리면 iOS가 조합을 그 자리에서
+    // 커밋해 버린다 — 한글이 자모 단위로 분리되는 원인. 조합 중에는 delta만 흘리고
+    // 텍스트 정규화·캐럿 이동은 조합이 끝난 뒤로 미룬다.
+    let isComposing = textView.markedTextRange != nil
+
     let normalizedValue = textView.text
       .replacingOccurrences(of: "\r", with: "")
       .replacingOccurrences(of: "\n", with: "")
 
-    if textView.text != normalizedValue {
+    if !isComposing && textView.text != normalizedValue {
       textView.text = normalizedValue
     }
 
     let delta = diff(previousValue, normalizedValue)
     if delta.deleteCount == 0 && delta.insertText.isEmpty {
-      moveCaretToEnd()
+      if !isComposing {
+        moveCaretToEnd()
+      }
       return
     }
 
@@ -322,10 +376,15 @@ final class TerminalInputContainerView: UIView, UITextViewDelegate {
       "deleteCount": delta.deleteCount,
       "insertText": delta.insertText,
     ])
-    moveCaretToEnd()
+    if !isComposing {
+      moveCaretToEnd()
+    }
   }
 
   func textViewDidChangeSelection(_ textView: UITextView) {
+    if textView.markedTextRange != nil {
+      return
+    }
     moveCaretToEnd()
   }
 
@@ -394,6 +453,15 @@ final class TerminalInputContainerView: UIView, UITextViewDelegate {
 
   private func moveCaretToEnd() {
     let endPosition = textView.endOfDocument
+    // 이미 캐럿이 끝에 있으면 selection 을 건드리지 않는다. 프로그램적 selection 설정은
+    // 값이 같아도 키보드의 조합 상태를 리셋한다 — iOS 한글 키보드는 marked text 없이
+    // 키보드 내부 상태로 조합하므로, 매 글자마다 이걸 호출하면 자모가 분리된다.
+    if let selected = textView.selectedTextRange,
+       selected.isEmpty,
+       textView.compare(selected.start, to: endPosition) == .orderedSame
+    {
+      return
+    }
     let selection = textView.textRange(from: endPosition, to: endPosition)
     textView.selectedTextRange = selection
   }
