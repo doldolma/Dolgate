@@ -49,6 +49,10 @@ const TERMINAL_RESET_BYTES = Uint8Array.from(
   Buffer.from('\u001b[3J\u001b[2J\u001b[H', 'utf8'),
 );
 
+// 터미널 준비 워치독 파라미터 — initialized 신호 유실 시 WebView 리마운트 간격/횟수.
+const TERMINAL_READY_RETRY_DELAY_MS = 2000;
+const TERMINAL_READY_RETRY_LIMIT = 4;
+
 function resetTerminalViewport(terminal: XtermWebViewHandle) {
   terminal.write(TERMINAL_RESET_BYTES);
 }
@@ -120,6 +124,9 @@ export function SessionScreen(): React.JSX.Element {
     terminalVisible: false,
   });
   const [terminalReady, setTerminalReady] = useState(false);
+  // 터미널 준비 워치독 — nonce 가 바뀌면 WebView 를 리마운트해 로드를 처음부터 다시 시도한다.
+  const [terminalRetryNonce, setTerminalRetryNonce] = useState(0);
+  const terminalRetryCountRef = useRef(0);
   const [nativeInputFocusToken, setNativeInputFocusToken] = useState(0);
   const [nativeInputClearToken, setNativeInputClearToken] = useState(0);
   const [inputFocused, setInputFocused] = useState(true);
@@ -382,6 +389,31 @@ export function SessionScreen(): React.JSX.Element {
     terminalViewportSizeRef.current = null;
     restoredConnectedSnapshotSessionIdRef.current = null;
   }, [renderedTerminalSession]);
+
+  // 터미널 준비 워치독: 벤더드 xterm WebView 페이지는 로드 후 200ms 에 initialized 를
+  // "딱 한 번" 쏘고 재시도가 없다(그 시점에 xterm 렌더가 늦으면 신호가 영영 유실 —
+  // dist-internal 번들이라 페이지 쪽 수정 불가). 신호가 유실되면 "터미널 준비 중"
+  // 오버레이가 남는데, WebView 를 리마운트하면 로드부터 다시 시도되어 회복된다
+  // (홈→복귀 시 우연히 회복되던 것의 자동화). 세션당 제한 횟수만 재시도한다.
+  const renderedTerminalSessionId = renderedTerminalSession?.id ?? null;
+
+  useEffect(() => {
+    terminalRetryCountRef.current = 0;
+  }, [renderedTerminalSessionId]);
+
+  useEffect(() => {
+    if (terminalReady || !renderedTerminalSessionId) {
+      return;
+    }
+    if (terminalRetryCountRef.current >= TERMINAL_READY_RETRY_LIMIT) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      terminalRetryCountRef.current += 1;
+      setTerminalRetryNonce(nonce => nonce + 1);
+    }, TERMINAL_READY_RETRY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [terminalReady, renderedTerminalSessionId, terminalRetryNonce]);
 
   const focusTerminal = useCallback(() => {
     if (Platform.OS === 'android') {
@@ -1087,6 +1119,7 @@ export function SessionScreen(): React.JSX.Element {
                 }
               >
                 <XtermJsWebView
+                  key={`terminal-retry-${terminalRetryNonce}`}
                   ref={terminalRef}
                   style={styles.terminal}
                   logger={terminalLogger}
