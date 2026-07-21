@@ -9,6 +9,7 @@ const { resolvePackagedAppLaunch } = require("./packaged-app-launch.cjs");
 const desktopMainPath = path.resolve(__dirname, "../.vite/build/main.js");
 const timestamp = "2025-01-01T00:00:00.000Z";
 const fakeAwsSessionReadyMarker = "READY:FAKE_AWS_SSM";
+const smokeAwsProfileId = "aws-profile-smoke-default";
 
 async function writeDesktopState(userDataDir) {
   const storageDir = path.join(userDataDir, "storage");
@@ -60,6 +61,7 @@ async function writeDesktopState(userDataDir) {
               id: "aws-1",
               kind: "aws-ec2",
               label: "Smoke AWS",
+              awsProfileId: smokeAwsProfileId,
               awsProfileName: "default",
               awsRegion: "ap-northeast-2",
               awsInstanceId: "i-smoke-test",
@@ -113,6 +115,14 @@ async function writeDesktopState(userDataDir) {
           ],
           portForwards: [],
           secretMetadata: [],
+          awsProfiles: [
+            {
+              id: smokeAwsProfileId,
+              name: "default",
+              kind: "static",
+              updatedAt: timestamp,
+            },
+          ],
           syncOutbox: [],
         },
         secure: {
