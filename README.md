@@ -94,37 +94,19 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 ## 자체 sync-api 호스팅
 
 브라우저 로그인과 동기화를 직접 운영하려면 `sync-api`를 별도 서버에 띄우면 됩니다.
-가장 단순한 시작점은 Docker Compose로 `sync-api` 단일 컨테이너를 실행하는 것입니다.
-
-상세 설정과 운영 가이드는 [sync-api 자체 호스팅 가이드](./docs/sync-api-self-hosting.md)를 참고해 주세요.
-
-```yaml
-services:
-  sync-api:
-    image: ghcr.io/doldolma/dolgate-sync-api:latest
-    container_name: dolgate-sync-api
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    volumes:
-      - dolgate-sync-api-data:/app/data
-
-volumes:
-  dolgate-sync-api-data:
-```
-
-실행:
+단일 컨테이너라 `docker run` 한 줄이면 시작할 수 있습니다.
 
 ```bash
-docker compose up -d
+docker run -d --name dolgate-sync-api \
+  -p 8080:8080 -v dolgate-sync-api-data:/app/data \
+  ghcr.io/doldolma/dolgate-sync-api:latest
+
 curl http://127.0.0.1:8080/healthz
 ```
 
-운영에서는 `latest` 대신 버전 태그 고정을 권장합니다.
-
-```yaml
-image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
-```
+운영에서는 `latest` 대신 버전 태그 고정(`ghcr.io/doldolma/dolgate-sync-api:X.Y.Z`)을
+권장합니다. Docker Compose 구성, 리버스 프록시, MySQL 등 상세 설정과 운영 가이드는
+[sync-api 자체 호스팅 가이드](./docs/sync-api-self-hosting.md)를 참고해 주세요.
 
 데스크톱 앱에서는 로그인 화면의 톱니바퀴를 눌러 `Login Server`를 self-host 주소로 바꾸면 됩니다.
 ![Login Server 설정 화면](docs/login.png)

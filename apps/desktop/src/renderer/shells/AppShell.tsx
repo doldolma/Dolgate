@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
 import { AppTitleBar } from '../components/AppTitleBar';
 import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
@@ -188,57 +189,63 @@ export function AppShell({
 
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--shell-background)]">
-      <AppTitleBar
-        desktopPlatform={desktopPlatform}
-        tabs={sessionViewModel.tabs}
-        workspaces={sessionViewModel.workspaces}
-        tmuxGroups={sessionViewModel.tmuxGroups}
-        hosts={homeViewModel.hosts}
-        tabStrip={sessionViewModel.tabStrip}
-        activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
-        draggedSession={draggedSession}
-        updateState={updateState}
-        windowState={windowState}
-        onSelectHome={homeViewModel.activateHome}
-        onSelectSftp={sftpViewModel.activateSftp}
-        onSelectContainers={containersViewModel.activateContainers}
-        hasOpenContainers={containersViewModel.containerTabs.length > 0}
-        onSelectSession={sessionViewModel.activateSession}
-        onSelectWorkspace={sessionViewModel.activateWorkspace}
-        onCloseSession={sessionViewModel.disconnectTab}
-        onCloseWorkspace={sessionViewModel.closeWorkspace}
-        onSelectTmuxGroup={sessionViewModel.activateTmuxGroup}
-        onCloseTmuxGroup={(tmuxGroupId) => {
-          const group = sessionViewModel.tmuxGroups.find(
-            (item) => item.id === tmuxGroupId,
-          );
-          if (group) {
-            void sessionViewModel.detachTmuxWorkspace(group.activeWorkspaceId);
-          }
-        }}
-        onNewTmuxWindow={sessionViewModel.tmuxNewWindowInWorkspace}
-        onStartSessionDrag={(sessionId) => {
-          setDraggedSession({ sessionId, source: 'standalone-tab' });
-        }}
-        onEndSessionDrag={() => {
-          setDraggedSession(null);
-        }}
-        onDetachSessionToStandalone={sessionViewModel.detachSessionFromWorkspace}
-        onReorderDynamicTab={sessionViewModel.reorderDynamicTab}
-        onCheckForUpdates={loginController.checkForUpdates}
-        onDownloadUpdate={loginController.downloadUpdate}
-        onInstallUpdate={handleInstallUpdate}
-        onDismissUpdate={loginController.dismissAvailableUpdate}
-        onOpenReleasePage={async (url) => {
-          await loginController.runUpdaterAction(() =>
-            loginController.openExternalUrl(url),
-          );
-        }}
-        onMinimizeWindow={loginController.minimizeWindow}
-        onMaximizeWindow={loginController.maximizeWindow}
-        onRestoreWindow={loginController.restoreWindow}
-        onCloseWindow={loginController.closeWindow}
-      />
+      {/* Keep the native drag region outside scroll/composited shell ancestors. Electron can
+          drop nested app-region hit targets after those layers scroll or repaint. */}
+      {createPortal(
+        <AppTitleBar
+          desktopPlatform={desktopPlatform}
+          tabs={sessionViewModel.tabs}
+          workspaces={sessionViewModel.workspaces}
+          tmuxGroups={sessionViewModel.tmuxGroups}
+          hosts={homeViewModel.hosts}
+          tabStrip={sessionViewModel.tabStrip}
+          activeWorkspaceTab={homeViewModel.activeWorkspaceTab}
+          draggedSession={draggedSession}
+          updateState={updateState}
+          windowState={windowState}
+          onSelectHome={homeViewModel.activateHome}
+          onSelectSftp={sftpViewModel.activateSftp}
+          onSelectContainers={containersViewModel.activateContainers}
+          hasOpenContainers={containersViewModel.containerTabs.length > 0}
+          onSelectSession={sessionViewModel.activateSession}
+          onSelectWorkspace={sessionViewModel.activateWorkspace}
+          onCloseSession={sessionViewModel.disconnectTab}
+          onCloseWorkspace={sessionViewModel.closeWorkspace}
+          onSelectTmuxGroup={sessionViewModel.activateTmuxGroup}
+          onCloseTmuxGroup={(tmuxGroupId) => {
+            const group = sessionViewModel.tmuxGroups.find(
+              (item) => item.id === tmuxGroupId,
+            );
+            if (group) {
+              void sessionViewModel.detachTmuxWorkspace(group.activeWorkspaceId);
+            }
+          }}
+          onNewTmuxWindow={sessionViewModel.tmuxNewWindowInWorkspace}
+          onStartSessionDrag={(sessionId) => {
+            setDraggedSession({ sessionId, source: 'standalone-tab' });
+          }}
+          onEndSessionDrag={() => {
+            setDraggedSession(null);
+          }}
+          onDetachSessionToStandalone={sessionViewModel.detachSessionFromWorkspace}
+          onReorderDynamicTab={sessionViewModel.reorderDynamicTab}
+          onCheckForUpdates={loginController.checkForUpdates}
+          onDownloadUpdate={loginController.downloadUpdate}
+          onInstallUpdate={handleInstallUpdate}
+          onDismissUpdate={loginController.dismissAvailableUpdate}
+          onOpenReleasePage={async (url) => {
+            await loginController.runUpdaterAction(() =>
+              loginController.openExternalUrl(url),
+            );
+          }}
+          onMinimizeWindow={loginController.minimizeWindow}
+          onMaximizeWindow={loginController.maximizeWindow}
+          onRestoreWindow={loginController.restoreWindow}
+          onCloseWindow={loginController.closeWindow}
+        />,
+        document.body,
+      )}
+      <div aria-hidden className="h-[2.95rem] flex-none" />
 
       <div className="relative flex-1 min-h-0">
         <HomeShell

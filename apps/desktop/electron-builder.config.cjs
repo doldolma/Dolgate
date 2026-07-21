@@ -3,7 +3,7 @@ const path = require('node:path');
 module.exports = {
   appId: 'com.doldolma.dolgate',
   productName: 'Dolgate',
-  electronVersion: '35.0.0',
+  electronVersion: '42.7.0',
   artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
   protocols: [
     {

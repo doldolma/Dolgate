@@ -399,7 +399,7 @@ if (termiusHelperArgIndex >= 0) {
       minHeight: 700,
       show: false,
       backgroundColor: '#0d141a',
-      ...(process.platform === 'win32' ? { frame: false } : {}),
+      ...(process.platform === 'win32' || process.platform === 'linux' ? { frame: false } : {}),
       ...(process.platform === 'darwin'
         ? {
             titleBarStyle: 'hiddenInset' as const,
@@ -415,7 +415,7 @@ if (termiusHelperArgIndex >= 0) {
       }
     });
 
-    if (process.platform === 'win32') {
+    if (process.platform !== 'darwin') {
       window.setMenuBarVisibility(false);
     }
 

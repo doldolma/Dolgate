@@ -217,6 +217,27 @@ describe('AppTitleBar update popover', () => {
     expect(pill?.className).toContain('[-webkit-app-region:no-drag]');
   });
 
+  it('renders custom window controls on Linux', () => {
+    const onMinimizeWindow = vi.fn().mockResolvedValue(undefined);
+    const onMaximizeWindow = vi.fn().mockResolvedValue(undefined);
+    const onCloseWindow = vi.fn().mockResolvedValue(undefined);
+
+    renderTitleBar({
+      desktopPlatform: 'linux',
+      onMinimizeWindow,
+      onMaximizeWindow,
+      onCloseWindow,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '최소화' }));
+    fireEvent.click(screen.getByRole('button', { name: '최대화' }));
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+
+    expect(onMinimizeWindow).toHaveBeenCalledTimes(1);
+    expect(onMaximizeWindow).toHaveBeenCalledTimes(1);
+    expect(onCloseWindow).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps fixed workspace tabs outside the scrollable session strip', () => {
     const tab = createSessionTab();
     const { container } = renderTitleBar({
@@ -468,8 +489,15 @@ describe('AppTitleBar update popover', () => {
     Object.defineProperty(tabStrip, 'scrollLeft', {
       configurable: true,
       get: () => scrollLeft,
+      set: (value: number) => {
+        scrollLeft = value;
+      },
     });
 
+    fireEvent.wheel(tabStrip, { deltaX: 0, deltaY: 120 });
+    expect(scrollLeft).toBe(120);
+
+    scrollLeft = 0;
     fireEvent.scroll(tabStrip);
     expect(screen.queryByTestId('titlebar-tab-strip-fade-left')).not.toBeInTheDocument();
     expect(screen.getByTestId('titlebar-tab-strip-fade-right')).toBeInTheDocument();
