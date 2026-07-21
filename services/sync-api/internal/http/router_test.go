@@ -829,6 +829,139 @@ func TestOIDCOnlyLoginRedirectsImmediately(t *testing.T) {
 	}
 }
 
+func oidcHideOnIOSTestConfig(oidcServerURL string, hideOnIOS bool) httpserver.RouterConfig {
+	return httpserver.RouterConfig{
+		LocalAuthEnabled:   true,
+		LocalSignupEnabled: true,
+		OIDC: httpserver.OIDCConfig{
+			Enabled:      true,
+			DisplayName:  "Google",
+			IssuerURL:    oidcServerURL,
+			ClientID:     "dolgate-desktop",
+			ClientSecret: "secret",
+			RedirectURL:  "http://127.0.0.1/callback",
+			HideOnIOS:    hideOnIOS,
+		},
+	}
+}
+
+func requestLoginPage(t *testing.T, router http.Handler, target string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, target, nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected page for %s, got %d: %s", target, recorder.Code, recorder.Body.String())
+	}
+	return recorder.Body.String()
+}
+
+func TestOIDCHiddenOnIOSBrowserLoginWhenFlagEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oidcServer := createOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	router := createTestRouterWithConfig(t, oidcHideOnIOSTestConfig(oidcServer.URL, true))
+
+	// iOS 앱에서 연 로그인/회원가입 — OIDC 버튼 숨김, 이메일/비번 폼은 유지.
+	for _, path := range []string{"/login", "/signup"} {
+		body := requestLoginPage(t, router, path+"?client=dolgate-mobile&redirect_uri=dolgate://auth/callback&state=test-state&platform=ios")
+		if strings.Contains(body, "/auth/oidc/start") {
+			t.Fatalf("expected OIDC button hidden on iOS %s page, got %s", path, body)
+		}
+		if !strings.Contains(body, `name="email"`) {
+			t.Fatalf("expected local auth form on iOS %s page, got %s", path, body)
+		}
+	}
+
+	// 안드로이드와 데스크톱(platform 없음)은 그대로 노출.
+	for _, target := range []string{
+		"/login?client=dolgate-mobile&redirect_uri=dolgate://auth/callback&state=test-state&platform=android",
+		"/login?client=dolgate-desktop&redirect_uri=dolgate://auth/callback&state=test-state",
+	} {
+		body := requestLoginPage(t, router, target)
+		if !strings.Contains(body, "/auth/oidc/start") {
+			t.Fatalf("expected OIDC button visible for %s, got %s", target, body)
+		}
+	}
+}
+
+func TestOIDCVisibleOnIOSWhenHideFlagDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oidcServer := createOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	router := createTestRouterWithConfig(t, oidcHideOnIOSTestConfig(oidcServer.URL, false))
+
+	body := requestLoginPage(t, router, "/login?client=dolgate-mobile&redirect_uri=dolgate://auth/callback&state=test-state&platform=ios")
+	if !strings.Contains(body, "/auth/oidc/start") {
+		t.Fatalf("expected OIDC button visible when flag disabled, got %s", body)
+	}
+}
+
+func TestOIDCHideOnIOSSurvivesLoginFormRerender(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oidcServer := createOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	router := createTestRouterWithConfig(t, oidcHideOnIOSTestConfig(oidcServer.URL, true))
+
+	// GET 페이지가 platform 을 hidden 필드로 실어 두는지부터 확인한다.
+	getBody := requestLoginPage(t, router, "/login?client=dolgate-mobile&redirect_uri=dolgate://auth/callback&state=test-state&platform=ios")
+	if !strings.Contains(getBody, `name="platform" value="ios"`) {
+		t.Fatalf("expected hidden platform field on iOS login page, got %s", getBody)
+	}
+
+	// 잘못된 자격증명으로 폼 제출 → 에러 재렌더에서도 OIDC 버튼이 숨겨진 채 유지돼야 한다.
+	form := url.Values{
+		"email":        {"nobody@example.com"},
+		"password":     {"wrong-password"},
+		"client":       {"dolgate-mobile"},
+		"redirect_uri": {"dolgate://auth/callback"},
+		"state":        {"test-state"},
+		"platform":     {"ios"},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected rerendered login page, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, "/auth/oidc/start") {
+		t.Fatalf("expected OIDC button hidden on rerendered iOS login page, got %s", body)
+	}
+	if !strings.Contains(body, `name="platform" value="ios"`) {
+		t.Fatalf("expected hidden platform field preserved on rerender, got %s", body)
+	}
+}
+
+func TestOIDCHideOnIOSIgnoredWhenLocalAuthDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oidcServer := createOIDCTestServer(t)
+	defer oidcServer.Close()
+
+	config := oidcHideOnIOSTestConfig(oidcServer.URL, true)
+	config.LocalAuthEnabled = false
+	config.LocalSignupEnabled = false
+	router := createTestRouterWithConfig(t, config)
+
+	// 로컬 인증이 꺼진 서버에서 숨기면 iOS 의 로그인 수단이 없어지므로 플래그를 무시하고
+	// 기존 OIDC 즉시 리다이렉트를 유지한다.
+	request := httptest.NewRequest(http.MethodGet, "/login?client=dolgate-mobile&redirect_uri=dolgate://auth/callback&state=test-state&platform=ios", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("expected redirect, got %d", recorder.Code)
+	}
+	if !strings.HasPrefix(recorder.Header().Get("Location"), "/auth/oidc/start?") {
+		t.Fatalf("unexpected redirect location: %s", recorder.Header().Get("Location"))
+	}
+}
+
 func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouter(t)
