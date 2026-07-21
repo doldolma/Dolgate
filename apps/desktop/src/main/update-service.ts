@@ -1,10 +1,16 @@
-import { BrowserWindow, app } from 'electron';
+import { BrowserWindow, Notification, app } from 'electron';
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from 'electron-updater';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { SettingsRepository } from './database';
+
+// deb/rpm 설치본에서 설치 직후 app.relaunch()로 자동 재시작하면 Ubuntu 24.04+의
+// AppArmor/샌드박스 초기화와 충돌해 SIGTRAP 크래시 다이얼로그가 뜬다(수동 재실행은 정상).
+// AppImage(process.env.APPIMAGE 설정됨)는 electron-updater의 검증된 경로라 자동 재시작을 유지한다.
+const requiresManualRelaunchAfterInstall =
+  process.platform === 'linux' && !process.env.APPIMAGE;
 
 const githubReleaseFeed = {
   provider: 'github',
@@ -141,6 +147,9 @@ export class UpdateService {
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
     autoUpdater.allowDowngrade = false;
+    if (requiresManualRelaunchAfterInstall) {
+      autoUpdater.autoRunAppAfterInstall = false;
+    }
 
     autoUpdater.on('checking-for-update', () => {
       this.patchState({
@@ -280,6 +289,13 @@ export class UpdateService {
   }
 
   quitAndInstall(): void {
+    if (requiresManualRelaunchAfterInstall && Notification.isSupported()) {
+      // 자동 재시작을 껐으므로 설치 후 앱이 종료된 채로 남는다 — 사용자가 다시 열도록 안내.
+      new Notification({
+        title: 'Dolgate 업데이트',
+        body: '업데이트를 설치합니다. 설치가 끝나면 Dolgate를 다시 열어 주세요.'
+      }).show();
+    }
     autoUpdater.quitAndInstall(false, true);
   }
 
