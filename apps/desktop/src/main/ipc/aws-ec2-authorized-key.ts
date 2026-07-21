@@ -40,11 +40,10 @@ export async function installAwsEc2AuthorizedKeyOverSsm(
     host,
     allowBrowserLogin: true,
   });
-  const profileName =
-    ctx.awsService.resolveManagedProfileNameOrFallback(
-      hydratedHost.awsProfileId,
-      hydratedHost.awsProfileName,
-    ) ?? hydratedHost.awsProfileName;
+  const profileName = ctx.awsService.requireManagedProfileName(
+    hydratedHost.awsProfileId,
+    hydratedHost.awsProfileName,
+  );
   const sshPort = getAwsEc2HostSshPort(hydratedHost);
   const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
     hostname: buildAwsSsmKnownHostIdentity({

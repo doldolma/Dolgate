@@ -1724,11 +1724,20 @@ export class AwsService {
     return this.profileRepository.resolveNameById(profileId);
   }
 
-  resolveManagedProfileNameOrFallback(
+  requireManagedProfileName(
     profileId: string | null | undefined,
-    fallbackProfileName: string | null | undefined,
-  ): string | null {
-    return this.resolveManagedProfileName(profileId) ?? fallbackProfileName?.trim() ?? null;
+    displayName: string | null | undefined,
+  ): string {
+    const profileName = this.resolveManagedProfileName(profileId);
+    if (profileName) {
+      return profileName;
+    }
+    const label = displayName?.trim();
+    throw new Error(
+      label
+        ? `연결된 AWS 프로필 "${label}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`
+        : "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
+    );
   }
 
   private buildManagedSsoSessionKey(startUrl: string, ssoRegion: string): string {

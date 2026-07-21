@@ -159,6 +159,36 @@ describe("resolveAwsSessionForHost", () => {
     expect(mockStsSend).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["profile-deleted", null])(
+    "does not resolve a host profile by name when its profile ID is %s",
+    async (profileId) => {
+      const host = createAwsHost();
+      host.awsProfileId = profileId;
+      host.awsProfileName = "prod";
+      const profiles: ManagedAwsProfilePayload[] = [
+        {
+          id: "profile-current",
+          name: "prod",
+          kind: "static",
+          region: "ap-northeast-2",
+          accessKeyId: "AKIASTATIC",
+          secretAccessKey: "secret",
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      await expect(
+        resolveAwsSessionForHost({
+          host,
+          profiles,
+          serverUrl: "https://ssh.doldolma.com",
+          authAccessToken: "access-token",
+        }),
+      ).rejects.toThrow("이 호스트에 연결할 AWS 프로필을 찾을 수 없습니다.");
+      expect(mockStsSend).not.toHaveBeenCalled();
+    },
+  );
+
   it("assumes a role profile through its source profile", async () => {
     const host = createAwsHost();
     host.awsProfileId = "profile-role";

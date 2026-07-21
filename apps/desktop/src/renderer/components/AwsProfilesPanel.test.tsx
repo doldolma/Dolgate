@@ -49,12 +49,16 @@ function createProfileDetails(
   }
 }
 
-function createAwsHost(profileName: string): HostRecord {
+function createAwsHost(
+  profileName: string,
+  profileId: string | null,
+  label = `host-${profileName}`,
+): HostRecord {
   return {
     id: `aws-host:${profileName}`,
     kind: 'aws-ec2',
-    label: `host-${profileName}`,
-    awsProfileId: null,
+    label,
+    awsProfileId: profileId,
     awsProfileName: profileName,
     awsRegion: 'ap-northeast-2',
     awsInstanceId: 'i-1234567890',
@@ -76,7 +80,7 @@ function createAwsHost(profileName: string): HostRecord {
 }
 
 function installMockApi(input?: {
-  profiles?: Array<{ name: string }>
+  profiles?: Array<{ id?: string | null; name: string }>
   externalProfiles?: Array<{ name: string }>
   detailsByProfileName?: Record<string, AwsProfileDetails>
   externalDetailsByProfileName?: Record<string, AwsProfileDetails>
@@ -638,7 +642,7 @@ describe('AwsProfilesPanel', () => {
 
   it('shows rename warnings for host references and source_profile references', async () => {
     const { api } = installMockApi({
-      profiles: [{ name: 'default' }],
+      profiles: [{ id: 'profile-default', name: 'default' }],
       detailsByProfileName: {
         default: createProfileDetails({
           referencedByProfileNames: ['assume-admin'],
@@ -646,7 +650,14 @@ describe('AwsProfilesPanel', () => {
       },
     })
 
-    render(<AwsProfilesPanel hosts={[createAwsHost('default')]} />)
+    render(
+      <AwsProfilesPanel
+        hosts={[
+          createAwsHost('default', 'profile-default'),
+          createAwsHost('default', 'profile-deleted', 'host-stale-default'),
+        ]}
+      />,
+    )
 
     await screen.findByRole('heading', { name: 'default' })
 
@@ -658,6 +669,7 @@ describe('AwsProfilesPanel', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getAllByText('host-default (aws-ec2)').length).toBeGreaterThan(0)
+    expect(screen.queryByText('host-stale-default (aws-ec2)')).not.toBeInTheDocument()
     expect(screen.getAllByText('assume-admin').length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('새 프로필명'), {
@@ -680,7 +692,7 @@ describe('AwsProfilesPanel', () => {
 
   it('shows delete warnings including orphaned sso-session information', async () => {
     const { api } = installMockApi({
-      profiles: [{ name: 'corp-sso' }],
+      profiles: [{ id: 'profile-corp-sso', name: 'corp-sso' }],
       detailsByProfileName: {
         'corp-sso': createProfileDetails({
           profileName: 'corp-sso',
@@ -695,7 +707,11 @@ describe('AwsProfilesPanel', () => {
       },
     })
 
-    render(<AwsProfilesPanel hosts={[createAwsHost('corp-sso')]} />)
+    render(
+      <AwsProfilesPanel
+        hosts={[createAwsHost('corp-sso', 'profile-corp-sso')]}
+      />,
+    )
 
     await screen.findByRole('heading', { name: 'corp-sso' })
 

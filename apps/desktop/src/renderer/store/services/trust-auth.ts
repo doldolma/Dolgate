@@ -22,6 +22,18 @@ import {
 type StoreSetter = SliceDeps["set"];
 
 export function createTrustAuthServices({ api, get }: SliceDeps) {
+  const requireAwsProfileId = (
+    profileId: string | null | undefined,
+    profileName: string,
+  ): string => {
+    if (profileId) {
+      return profileId;
+    }
+    throw new Error(
+      `연결된 AWS 프로필 "${profileName}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`,
+    );
+  };
+
   const hasTrustedHostKey = (hostId: string): boolean => {
     const state = get();
     const host = state.hosts.find((item) => item.id === hostId);
@@ -60,6 +72,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
   };
 
   const loginAwsSsoProfile = async (
+    profileId: string | null | undefined,
     profileName: string,
     reportProgress: (
       message: string,
@@ -69,12 +82,13 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       },
     ) => void,
   ) => {
+    const requiredProfileId = requireAwsProfileId(profileId, profileName);
     reportProgress(`브라우저에서 ${profileName} AWS 로그인을 진행하는 중입니다.`, {
       blockingKind: "browser",
       stage: "browser-login",
     });
     try {
-      await api.aws.login(profileName);
+      await api.aws.loginById(requiredProfileId);
     } catch (error) {
       throw new Error(
         error instanceof Error
@@ -84,7 +98,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     }
 
     reportProgress(`${profileName} 프로필 로그인 결과를 확인하는 중입니다.`);
-    const refreshedStatus = await api.aws.getProfileStatus(profileName);
+    const refreshedStatus = await api.aws.getProfileStatusById(requiredProfileId);
     if (!refreshedStatus.isAuthenticated) {
       throw new Error(
         refreshedStatus.errorMessage ||
@@ -95,6 +109,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
   };
 
   const ensureAwsSsoProfileAuthenticationIfNeeded = async (
+    profileId: string | null | undefined,
     profileName: string,
     reportProgress?: (
       message: string,
@@ -104,13 +119,15 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       },
     ) => void,
   ) => {
+    const requiredProfileId = requireAwsProfileId(profileId, profileName);
     reportProgress?.(`${profileName} 프로필 인증 상태를 확인하는 중입니다.`);
-    const status = await api.aws.getProfileStatus(profileName);
+    const status = await api.aws.getProfileStatusById(requiredProfileId);
     if (status.isAuthenticated || !status.isSsoProfile) {
       return status;
     }
 
     return loginAwsSsoProfile(
+      requiredProfileId,
       profileName,
       reportProgress ??
         (() => {
@@ -130,6 +147,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     ) => void,
   ) => {
     const status = await ensureAwsSsoProfileAuthenticationIfNeeded(
+      host.awsProfileId,
       host.awsProfileName,
       reportProgress,
     );

@@ -278,11 +278,10 @@ export function createHostCoordinator(deps: {
           emitProgress: emitConnectionProgress,
         });
 
-        const resolvedProfileName =
-          awsService.resolveManagedProfileNameOrFallback(
-            hydratedHost.awsProfileId,
-            hydratedHost.awsProfileName,
-          ) ?? hydratedHost.awsProfileName;
+        const resolvedProfileName = awsService.requireManagedProfileName(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        );
         const knownHostPort = getAwsEc2HostSshPort(hydratedHost);
 
         let probed: HostKeyProbeResult;

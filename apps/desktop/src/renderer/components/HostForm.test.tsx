@@ -741,6 +741,38 @@ describe('HostForm', () => {
     );
   });
 
+  it.each([
+    { profileId: 'profile-deleted', selectedValue: 'profile-deleted' },
+    { profileId: null, selectedValue: 'missing:prod-admin' },
+  ])(
+    'does not match an AWS profile by name when the stored profile ID is $profileId',
+    async ({ profileId, selectedValue }) => {
+      const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+      render(
+        <HostForm
+          host={createAwsHost({
+            awsProfileId: profileId,
+            awsProfileName: 'prod-admin',
+          })}
+          keychainEntries={keychainEntries}
+          groupOptions={groupOptions}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      const missingOption = await screen.findByRole('option', {
+        name: 'prod-admin (앱 프로필 없음)',
+      });
+      const profileSelect = screen.getByLabelText('AWS Profile') as HTMLSelectElement;
+
+      expect(profileSelect.value).toBe(selectedValue);
+      expect((missingOption as HTMLOptionElement).selected).toBe(true);
+      expect((missingOption as HTMLOptionElement).disabled).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
+
   it('allows changing the AWS profile for an existing AWS host', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const ref = createRef<HostFormHandle>();

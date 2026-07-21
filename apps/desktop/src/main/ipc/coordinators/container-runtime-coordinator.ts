@@ -152,11 +152,10 @@ export function createContainerRuntimeCoordinator(deps: {
       const sshPort = getAwsEc2HostSshPort(hydratedHost);
       const trustedHostKeysBase64 = hostCoordinator.requireTrustedHostKeys({
         hostname: buildAwsSsmKnownHostIdentity({
-          profileName:
-            awsService.resolveManagedProfileNameOrFallback(
-              hydratedHost.awsProfileId,
-              hydratedHost.awsProfileName,
-            ) ?? hydratedHost.awsProfileName,
+          profileName: awsService.requireManagedProfileName(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ),
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
         }),
@@ -181,11 +180,10 @@ export function createContainerRuntimeCoordinator(deps: {
         // 서버 프록시(bastion): sync-api가 서버(허용된) IP에서 SSM 터널을 열고 EIC 키를
         // 주입하며, ssh-core는 그 위로 WebSocket을 타고 컨테이너 런타임에 SSH로 붙는다.
         // 데스크톱은 로컬 터널도 EIC 푸시도 하지 않는다(IP 제한 VPC용). SFTP/컨테이너 셸과 동일.
-        const proxyProfileName =
-          awsService.resolveManagedProfileNameOrFallback(
-            hydratedHost.awsProfileId,
-            hydratedHost.awsProfileName,
-          ) ?? hydratedHost.awsProfileName;
+        const proxyProfileName = awsService.requireManagedProfileName(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        );
         emitContainersConnectionProgress({
           endpointId,
           hostId: hydratedHost.id,
@@ -239,11 +237,10 @@ export function createContainerRuntimeCoordinator(deps: {
       }
 
       await awsService.sendSshPublicKey({
-        profileName:
-          awsService.resolveManagedProfileNameOrFallback(
-            hydratedHost.awsProfileId,
-            hydratedHost.awsProfileName,
-          ) ?? hydratedHost.awsProfileName,
+        profileName: awsService.requireManagedProfileName(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        ),
         region: hydratedHost.awsRegion,
         instanceId: hydratedHost.awsInstanceId,
         availabilityZone,
@@ -255,11 +252,10 @@ export function createContainerRuntimeCoordinator(deps: {
       try {
         const tunnel = await awsSsmTunnelService.start({
           runtimeId: `aws-containers:${endpointId}`,
-          profileName:
-            awsService.resolveManagedProfileNameOrFallback(
-              hydratedHost.awsProfileId,
-              hydratedHost.awsProfileName,
-            ) ?? hydratedHost.awsProfileName,
+          profileName: awsService.requireManagedProfileName(
+            hydratedHost.awsProfileId,
+            hydratedHost.awsProfileName,
+          ),
           region: hydratedHost.awsRegion,
           instanceId: hydratedHost.awsInstanceId,
           bindAddress: "127.0.0.1",

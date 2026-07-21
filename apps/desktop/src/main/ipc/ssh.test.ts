@@ -35,7 +35,7 @@ function createContext() {
       append: vi.fn(),
     },
     awsService: {
-      resolveManagedProfileNameOrFallback: vi.fn(),
+      requireManagedProfileName: vi.fn(),
       buildManagedSessionEnvSpec: vi.fn(),
       buildServerProxySessionEnvSpec: vi.fn(),
       shouldUseInProcessSsm: vi.fn(() => false),
@@ -341,7 +341,7 @@ describe("registerSshIpcHandlers", () => {
       awsInstanceId: "i-123",
       awsSsmServerProxyEnabled: false,
     });
-    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue("managed-prod");
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
     ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
       env: { AWS_CONFIG_FILE: "/managed/config" },
       unsetEnv: ["AWS_PROFILE"],
@@ -386,7 +386,7 @@ describe("registerSshIpcHandlers", () => {
       awsInstanceId: "i-123",
       awsSsmServerProxyEnabled: false,
     });
-    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue("managed-prod");
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
     ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
       env: { AWS_CONFIG_FILE: "/managed/config" },
       unsetEnv: ["AWS_PROFILE"],
@@ -454,7 +454,7 @@ describe("registerSshIpcHandlers", () => {
       awsInstanceId: "i-123",
       awsSsmServerProxyEnabled: true,
     });
-    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue("managed-prod");
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
     ctx.awsService.buildServerProxySessionEnvSpec.mockResolvedValue({
       env: {
         AWS_ACCESS_KEY_ID: "AKIATEST",
@@ -515,7 +515,7 @@ describe("registerSshIpcHandlers", () => {
       awsSsmServerProxyEnabled: false,
       ...hostOverrides,
     });
-    ctx.awsService.resolveManagedProfileNameOrFallback.mockReturnValue(
+    ctx.awsService.requireManagedProfileName.mockReturnValue(
       "managed-prod",
     );
     ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({

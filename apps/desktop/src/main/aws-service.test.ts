@@ -1696,6 +1696,24 @@ describe('AwsService AWS profile management', () => {
     expect(config).not.toContain('[default]');
     expect(config).not.toContain('[sso-session corp-session]');
   });
+
+  it('requires an exact managed profile ID and uses the name only in errors', async () => {
+    const rootDir = await createTempAwsProfileDir();
+    const profile = managedStaticProfile('prod-admin');
+    const service = createManagedAwsService(rootDir, [profile]);
+
+    expect(service.requireManagedProfileName(profile.id, 'stale-name')).toBe(
+      'prod-admin',
+    );
+    expect(() =>
+      service.requireManagedProfileName('deleted-profile-id', 'prod-admin'),
+    ).toThrow(
+      '연결된 AWS 프로필 "prod-admin"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.',
+    );
+    expect(() => service.requireManagedProfileName(null, 'prod-admin')).toThrow(
+      '연결된 AWS 프로필 "prod-admin"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.',
+    );
+  });
 });
 
 describe('AwsService EC2 helpers', () => {

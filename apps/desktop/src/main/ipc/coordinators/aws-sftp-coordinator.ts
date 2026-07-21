@@ -263,11 +263,10 @@ export function createAwsSftpCoordinator(deps: {
     sanitizeDiagnosticDetails({
       hostId: host.id,
       hostLabel: host.label,
-      profileName:
-        awsService.resolveManagedProfileNameOrFallback(
-          host.awsProfileId,
-          host.awsProfileName,
-        ) ?? host.awsProfileName,
+      profileName: awsService.requireManagedProfileName(
+        host.awsProfileId,
+        host.awsProfileName,
+      ),
       region: host.awsRegion,
       instanceId: host.awsInstanceId,
       availabilityZone: host.awsAvailabilityZone ?? null,
@@ -318,10 +317,10 @@ export function createAwsSftpCoordinator(deps: {
     }
 
     const summary = await awsService.describeEc2Instance(
-      awsService.resolveManagedProfileNameOrFallback(
+      awsService.requireManagedProfileName(
         host.awsProfileId,
         host.awsProfileName,
-      ) ?? host.awsProfileName,
+      ),
       host.awsRegion,
       host.awsInstanceId,
     );
@@ -370,11 +369,10 @@ export function createAwsSftpCoordinator(deps: {
     try {
       const hydratedHost = await hydrateHostForSftp(currentHost);
       const metadata = await awsService.loadHostSshMetadata({
-        profileName:
-          awsService.resolveManagedProfileNameOrFallback(
-            hydratedHost.awsProfileId,
-            hydratedHost.awsProfileName,
-          ) ?? hydratedHost.awsProfileName,
+        profileName: awsService.requireManagedProfileName(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        ),
         region: hydratedHost.awsRegion,
         instanceId: hydratedHost.awsInstanceId,
       });
@@ -483,11 +481,10 @@ export function createAwsSftpCoordinator(deps: {
     let currentStage: AwsSftpProgressStage = "checking-profile";
 
     try {
-      const resolvedProfileName =
-        awsService.resolveManagedProfileNameOrFallback(
-          host.awsProfileId,
-          host.awsProfileName,
-        ) ?? host.awsProfileName;
+      const resolvedProfileName = awsService.requireManagedProfileName(
+        host.awsProfileId,
+        host.awsProfileName,
+      );
       emitProgress({
         endpointId,
         hostId: host.id,
@@ -537,10 +534,10 @@ export function createAwsSftpCoordinator(deps: {
       });
       const refreshedHost = await hydrateHostForSftp(host);
       const isManaged = await awsService.isManagedInstance(
-        awsService.resolveManagedProfileNameOrFallback(
+        awsService.requireManagedProfileName(
           refreshedHost.awsProfileId,
           refreshedHost.awsProfileName,
-        ) ?? refreshedHost.awsProfileName,
+        ),
         refreshedHost.awsRegion,
         refreshedHost.awsInstanceId,
       );

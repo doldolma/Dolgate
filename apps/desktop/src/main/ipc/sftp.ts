@@ -49,11 +49,10 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             allowBrowserLogin: true,
           }));
         const sshPort = getAwsEc2HostSshPort(hydratedHost);
-        const profileName =
-          ctx.awsService.resolveManagedProfileNameOrFallback(
-            hydratedHost.awsProfileId,
-            hydratedHost.awsProfileName,
-          ) ?? hydratedHost.awsProfileName;
+        const profileName = ctx.awsService.requireManagedProfileName(
+          hydratedHost.awsProfileId,
+          hydratedHost.awsProfileName,
+        );
         let trustedHostKeysBase64: string[];
         try {
           trustedHostKeysBase64 = ctx.requireTrustedHostKeys({

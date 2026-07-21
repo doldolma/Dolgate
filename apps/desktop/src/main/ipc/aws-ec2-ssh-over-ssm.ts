@@ -66,11 +66,10 @@ export async function connectAwsEc2OverSsm(
     allowBrowserLogin: true,
     emitProgress: (event) => ctx.emitContainersConnectionProgress(event),
   });
-  const profileName =
-    ctx.awsService.resolveManagedProfileNameOrFallback(
-      hydratedHost.awsProfileId,
-      hydratedHost.awsProfileName,
-    ) ?? hydratedHost.awsProfileName;
+  const profileName = ctx.awsService.requireManagedProfileName(
+    hydratedHost.awsProfileId,
+    hydratedHost.awsProfileName,
+  );
   const sshPort = getAwsEc2HostSshPort(hydratedHost);
   emitProgress(
     "probing-host-key",

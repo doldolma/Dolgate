@@ -663,7 +663,7 @@ describe("createAppStore sessions and auth recovery", () => {
 
   it("updates pending AWS SSH tabs from SSH-over-SSM preflight progress events", async () => {
     const api = createMockApi();
-    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+    api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
       profileName: "default",
       available: true,
       isSsoProfile: false,
@@ -1160,7 +1160,7 @@ describe("createAppStore sessions and auth recovery", () => {
 
   it("prompts for host key trust before connecting an untrusted AWS EC2 host over SSM", async () => {
     const api = createMockApi();
-    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+    api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
       profileName: "default",
       available: true,
       isSsoProfile: false,
@@ -1570,6 +1570,7 @@ describe("createAppStore sessions and auth recovery", () => {
         id: "aws-host-1",
         kind: "aws-ec2",
         label: "AWS Prod",
+        awsProfileId: "profile-sso",
         awsProfileName: "sso-profile",
         awsRegion: "ap-northeast-2",
         awsInstanceId: "i-1234567890",
@@ -1584,7 +1585,7 @@ describe("createAppStore sessions and auth recovery", () => {
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ]);
-    api.aws.getProfileStatus = vi
+    api.aws.getProfileStatusById = vi
       .fn()
       .mockResolvedValueOnce({
         profileName: "sso-profile",
@@ -1611,10 +1612,33 @@ describe("createAppStore sessions and auth recovery", () => {
     await store.getState().bootstrap();
     await store.getState().connectHost("aws-host-1", 120, 32);
 
-    expect(api.aws.login).toHaveBeenCalledWith("sso-profile");
+    expect(api.aws.loginById).toHaveBeenCalledWith("profile-sso");
     expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().tabs[0]?.title).toBe("AWS Prod");
     expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+
+  it("blocks AWS host connections that have no profile ID", async () => {
+    const api = createMockApi();
+    api.hosts.list = vi.fn().mockResolvedValue([
+      {
+        ...createAwsEc2Host(),
+        awsProfileId: null,
+        awsProfileName: "default",
+      },
+    ]);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("aws-host-1", 120, 32);
+
+    expect(api.aws.getProfileStatusById).not.toHaveBeenCalled();
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().tabs[0]).toMatchObject({
+      status: "error",
+      errorMessage:
+        '연결된 AWS 프로필 "default"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.',
+    });
   });
 
   it("surfaces a targeted AWS credential message for non-SSO profiles and does not open a session", async () => {
@@ -1624,6 +1648,7 @@ describe("createAppStore sessions and auth recovery", () => {
         id: "aws-host-2",
         kind: "aws-ec2",
         label: "AWS Legacy",
+        awsProfileId: "profile-legacy",
         awsProfileName: "legacy-profile",
         awsRegion: "us-east-1",
         awsInstanceId: "i-9999999999",
@@ -1638,7 +1663,7 @@ describe("createAppStore sessions and auth recovery", () => {
         updatedAt: "2025-01-01T00:00:00.000Z",
       },
     ]);
-    api.aws.getProfileStatus = vi.fn().mockResolvedValue({
+    api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
       profileName: "legacy-profile",
       available: true,
       isSsoProfile: false,
@@ -1654,7 +1679,7 @@ describe("createAppStore sessions and auth recovery", () => {
 
     await store.getState().connectHost("aws-host-2", 120, 32);
 
-    expect(api.aws.login).not.toHaveBeenCalled();
+    expect(api.aws.loginById).not.toHaveBeenCalled();
     expect(api.ssh.connect).not.toHaveBeenCalled();
     expect(store.getState().tabs[0]?.status).toBe("error");
     expect(store.getState().tabs[0]?.errorMessage).toBe(
@@ -1669,6 +1694,7 @@ describe("createAppStore sessions and auth recovery", () => {
         id: "aws-host-1",
         kind: "aws-ec2",
         label: "AWS Prod",
+        awsProfileId: "profile-sso",
         awsProfileName: "sso-profile",
         awsRegion: "ap-northeast-2",
         awsInstanceId: "i-1234567890",
@@ -1686,20 +1712,20 @@ describe("createAppStore sessions and auth recovery", () => {
 
     const firstStatus =
       createDeferred<
-        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatus"]>>
+        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatusById"]>>
       >();
     const secondStatus =
       createDeferred<
-        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatus"]>>
+        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatusById"]>>
       >();
     const login = createDeferred<void>();
     const connect = createDeferred<{ sessionId: string }>();
 
-    api.aws.getProfileStatus = vi
+    api.aws.getProfileStatusById = vi
       .fn()
       .mockImplementationOnce(() => firstStatus.promise)
       .mockImplementationOnce(() => secondStatus.promise);
-    api.aws.login = vi.fn().mockImplementation(() => login.promise);
+    api.aws.loginById = vi.fn().mockImplementation(() => login.promise);
     api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
 
     const store = createAppStore(api);
@@ -1769,6 +1795,7 @@ describe("createAppStore sessions and auth recovery", () => {
         id: "aws-host-1",
         kind: "aws-ec2",
         label: "AWS Prod",
+        awsProfileId: "profile-sso",
         awsProfileName: "sso-profile",
         awsRegion: "ap-northeast-2",
         awsInstanceId: "i-1234567890",
@@ -1786,9 +1813,9 @@ describe("createAppStore sessions and auth recovery", () => {
 
     const status =
       createDeferred<
-        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatus"]>>
+        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatusById"]>>
       >();
-    api.aws.getProfileStatus = vi.fn().mockImplementation(() => status.promise);
+    api.aws.getProfileStatusById = vi.fn().mockImplementation(() => status.promise);
 
     const store = createAppStore(api);
     await store.getState().bootstrap();
@@ -1796,7 +1823,7 @@ describe("createAppStore sessions and auth recovery", () => {
     const firstConnect = store.getState().connectHost("aws-host-1", 120, 32);
     const secondConnect = store.getState().connectHost("aws-host-1", 120, 32);
 
-    expect(api.aws.getProfileStatus).toHaveBeenCalledTimes(1);
+    expect(api.aws.getProfileStatusById).toHaveBeenCalledTimes(1);
     await flushMicrotasks();
     expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
       "checking-profile",

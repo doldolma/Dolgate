@@ -83,7 +83,7 @@ describe("registerContainersIpcHandlers", () => {
       consumeAwsSftpPreflight,
       resolveAwsSftpPreflight,
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         sendSshPublicKey,
       },
       requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),
@@ -168,7 +168,7 @@ describe("registerContainersIpcHandlers", () => {
       consumeAwsSftpPreflight,
       resolveAwsSftpPreflight,
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       },
       requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),
@@ -241,7 +241,7 @@ describe("registerContainersIpcHandlers", () => {
         .fn()
         .mockReturnValue("/usr/bin/docker exec -it container-1 /bin/sh"),
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       },
       requireTrustedHostKeys: vi.fn().mockReturnValue(["AAAATEST"]),

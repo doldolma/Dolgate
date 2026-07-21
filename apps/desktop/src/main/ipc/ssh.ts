@@ -66,7 +66,7 @@ function buildAwsEc2SshOverSsmSignature(host: AwsEc2HostRecord): string {
     host.awsSshUsername?.trim() || null,
     host.awsAvailabilityZone ?? null,
     host.awsSsmServerProxyEnabled === true,
-    host.awsProfileId ?? host.awsProfileName,
+    host.awsProfileId ?? null,
   ]);
 }
 
@@ -159,11 +159,10 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isAwsEc2HostRecord(host)) {
-        const profileName =
-          ctx.awsService.resolveManagedProfileNameOrFallback(
-            host.awsProfileId,
-            host.awsProfileName,
-          ) ?? host.awsProfileName;
+        const profileName = ctx.awsService.requireManagedProfileName(
+          host.awsProfileId,
+          host.awsProfileName,
+        );
         const title = input.title?.trim() || host.label;
         const connectionInput = {
           profileName,
