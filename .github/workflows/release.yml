@@ -127,6 +127,10 @@ jobs:
         run: npm ci
 
       - name: Ensure Electron binary is installed
+        # Electron 42+ 는 --version 검증에서도 Chromium 샌드박스를 초기화하는데,
+        # CI 러너의 chrome-sandbox 는 setuid root 가 아니라 FATAL 로 죽는다. CI 한정 비활성화.
+        env:
+          ELECTRON_DISABLE_SANDBOX: "1"
         run: npm run ensure:electron --workspace @dolssh/desktop
 
       - name: Run desktop tests
