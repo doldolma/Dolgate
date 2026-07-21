@@ -127,13 +127,7 @@ jobs:
         run: npm ci
 
       - name: Ensure Electron binary is installed
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: ""
-        run: |
-          rm -rf node_modules/electron/dist node_modules/electron/path.txt
-          node node_modules/electron/install.js
-          test -f node_modules/electron/path.txt
-          node -e "console.log(require('electron'))"
+        run: npm run ensure:electron --workspace @dolssh/desktop
 
       - name: Run desktop tests
         run: npm run test:desktop

@@ -3,9 +3,9 @@ import { getEmptyReleaseMessage } from './AppTitleBar';
 import { getWindowControlDescriptors } from './DesktopWindowControls';
 
 describe('getWindowControlDescriptors', () => {
-  it('returns no custom window controls outside Windows', () => {
+  it.each(['darwin', 'unknown'] as const)('returns no custom window controls on %s', (platform) => {
     const controls = getWindowControlDescriptors(
-      'darwin',
+      platform,
       { isMaximized: false },
       {
         onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
@@ -16,6 +16,21 @@ describe('getWindowControlDescriptors', () => {
     );
 
     expect(controls).toEqual([]);
+  });
+
+  it('shows custom window controls on Linux', () => {
+    const controls = getWindowControlDescriptors(
+      'linux',
+      { isMaximized: false },
+      {
+        onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
+        onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
+        onRestoreWindow: vi.fn().mockResolvedValue(undefined),
+        onCloseWindow: vi.fn().mockResolvedValue(undefined)
+      }
+    );
+
+    expect(controls.map((control) => control.ariaLabel)).toEqual(['최소화', '최대화', '닫기']);
   });
 
   it('switches maximize control descriptor to restore when maximized', () => {

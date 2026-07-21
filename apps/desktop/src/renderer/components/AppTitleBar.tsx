@@ -1063,7 +1063,7 @@ export function AppTitleBar({
       className={cn(
         // 상단바 chrome 배경 전체를 창 드래그 영역으로 둔다(macOS·Windows 공통). 실제 탭/버튼처럼
         // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
-        'relative flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem] [-webkit-app-region:drag]',
+        'fixed inset-x-0 top-0 z-[7] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem] [-webkit-app-region:drag]',
         desktopPlatform === 'darwin' && 'pl-[5.4rem] max-[1040px]:pl-[4.8rem] max-[760px]:px-[4.8rem] max-[760px]:pr-[0.9rem]',
       )}
     >

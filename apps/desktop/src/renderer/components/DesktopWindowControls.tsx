@@ -29,7 +29,7 @@ export function getWindowControlDescriptors(
   windowState: DesktopWindowState,
   actions: WindowControlActions
 ): WindowControlDescriptor[] {
-  if (desktopPlatform !== 'win32') {
+  if (desktopPlatform !== 'win32' && desktopPlatform !== 'linux') {
     return [];
   }
 
