@@ -147,6 +147,7 @@ export function buildBrowserLoginUrl(serverUrl: string, state: string): string {
   loginUrl.searchParams.set('client', AUTH_CLIENT_ID);
   loginUrl.searchParams.set('redirect_uri', AUTH_REDIRECT_URI);
   loginUrl.searchParams.set('state', state);
+  loginUrl.searchParams.set('platform', resolveMobileClientPlatform());
   return loginUrl.toString();
 }
 

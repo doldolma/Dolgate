@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import { createVaultKdfDescriptor, type AuthSession } from '@dolssh/shared-core';
 import { APP_VERSION } from '../src/lib/app-metadata';
 import {
+  buildBrowserLoginUrl,
   fetchExchangeSession,
   getOrCreateClientInstallationId,
   refreshAuthSession,
@@ -165,6 +166,30 @@ describe('mobile auth client headers', () => {
       '인증 세션을 보안 저장소에 저장하지 못했습니다.',
     );
   });
+});
+
+describe('buildBrowserLoginUrl', () => {
+  afterEach(() => {
+    if (platformOsDescriptor) {
+      Object.defineProperty(Platform, 'OS', platformOsDescriptor);
+    }
+  });
+
+  // 서버는 platform=ios 일 때만(OIDC_HIDE_ON_IOS 서버에서) OIDC 버튼을 숨기므로,
+  // 로그인 URL 이 플랫폼을 정확히 실어 보내야 한다.
+  it.each(['ios', 'android'] as const)(
+    'includes platform=%s in the browser login url',
+    (os) => {
+      setPlatformOs(os);
+      const url = new URL(
+        buildBrowserLoginUrl('https://ssh.doldolma.com', 'state-token'),
+      );
+      expect(url.pathname).toBe('/login');
+      expect(url.searchParams.get('client')).toBe('dolgate-mobile');
+      expect(url.searchParams.get('state')).toBe('state-token');
+      expect(url.searchParams.get('platform')).toBe(os);
+    },
+  );
 });
 
 describe('mobile vault mutations', () => {

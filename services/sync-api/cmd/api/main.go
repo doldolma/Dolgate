@@ -108,6 +108,7 @@ func main() {
 			ClientSecret: cfg.Auth.OIDC.ClientSecret,
 			RedirectURL:  cfg.Auth.OIDC.RedirectURL,
 			Scopes:       cfg.Auth.OIDC.Scopes,
+			HideOnIOS:    cfg.Auth.OIDC.HideOnIOS,
 		},
 		AwsSsoMobile:      awsSsoMobileManager,
 		AwsSessionBridge:  awsSessionBridge,

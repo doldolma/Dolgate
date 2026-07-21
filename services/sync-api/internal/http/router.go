@@ -104,6 +104,10 @@ type OIDCConfig struct {
 	ClientSecret string
 	RedirectURL  string
 	Scopes       []string
+	// HideOnIOS 는 iOS 앱에서 연 브라우저 로그인(platform=ios)에서만 OIDC 버튼을 숨긴다.
+	// 로컬 인증이 꺼진 서버에서는 숨기면 iOS 에 남는 로그인 수단이 없어지므로 무시된다
+	// (oidcVisibleForPlatform 참고).
+	HideOnIOS bool
 }
 
 type oidcRuntime struct {
@@ -317,6 +321,7 @@ type browserLoginForm struct {
 	Client      string `form:"client"`
 	RedirectURI string `form:"redirect_uri"`
 	State       string `form:"state"`
+	Platform    string `form:"platform"`
 }
 
 type browserSignupForm struct {
@@ -325,6 +330,7 @@ type browserSignupForm struct {
 	Client      string `form:"client"`
 	RedirectURI string `form:"redirect_uri"`
 	State       string `form:"state"`
+	Platform    string `form:"platform"`
 }
 
 type loginPageData struct {
@@ -335,6 +341,7 @@ type loginPageData struct {
 	Client             string
 	RedirectURI        string
 	State              string
+	Platform           string
 	LocalAuthEnabled   bool
 	LocalSignupEnabled bool
 	OIDCEnabled        bool
@@ -439,9 +446,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
 			State:              ctx.Query("state"),
+			Platform:           browserLoginPlatform(ctx),
 			LocalAuthEnabled:   config.LocalAuthEnabled,
 			LocalSignupEnabled: config.LocalSignupEnabled,
-			OIDCEnabled:        oidcRuntime != nil,
+			OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 			OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 			ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
 		})
@@ -458,9 +466,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   config.LocalAuthEnabled,
 				LocalSignupEnabled: config.LocalSignupEnabled,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
 			})
@@ -476,9 +485,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   config.LocalAuthEnabled,
 				LocalSignupEnabled: config.LocalSignupEnabled,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
 			})
@@ -493,9 +503,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   config.LocalAuthEnabled,
 				LocalSignupEnabled: config.LocalSignupEnabled,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
 			})
@@ -518,9 +529,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   config.LocalAuthEnabled,
 				LocalSignupEnabled: config.LocalSignupEnabled,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 				ShowSignupLink:     config.LocalAuthEnabled && config.LocalSignupEnabled,
 			})
@@ -550,9 +562,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
 			State:              ctx.Query("state"),
+			Platform:           browserLoginPlatform(ctx),
 			LocalAuthEnabled:   true,
 			LocalSignupEnabled: true,
-			OIDCEnabled:        oidcRuntime != nil,
+			OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 			OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 			ShowSignupLink:     false,
 		})
@@ -574,9 +587,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   true,
 				LocalSignupEnabled: true,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 			})
 			return
@@ -591,9 +605,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   true,
 				LocalSignupEnabled: true,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 			})
 			return
@@ -614,9 +629,10 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
 				State:              form.State,
+				Platform:           form.Platform,
 				LocalAuthEnabled:   true,
 				LocalSignupEnabled: true,
-				OIDCEnabled:        oidcRuntime != nil,
+				OIDCEnabled:        oidcVisibleForPlatform(config, oidcRuntime, browserLoginPlatform(ctx)),
 				OIDCDisplayName:    oidcButtonLabel(oidcRuntime),
 			})
 			return
@@ -1506,6 +1522,29 @@ func oidcButtonLabel(runtime *oidcRuntime) string {
 	return "SSO"
 }
 
+// browserLoginPlatform 은 브라우저 로그인 요청이 실어 보낸 플랫폼 식별자(ios/android)를
+// 돌려준다. 앱이 로그인 URL 을 열 때는 쿼리로, 폼 제출 후 재렌더에서는 hidden 필드로 온다.
+func browserLoginPlatform(ctx *gin.Context) string {
+	if platform := strings.TrimSpace(ctx.Query("platform")); platform != "" {
+		return platform
+	}
+	return strings.TrimSpace(ctx.PostForm("platform"))
+}
+
+// oidcVisibleForPlatform — HideOnIOS 가 켜진 서버는 iOS 앱에서 연 브라우저 로그인에 한해
+// OIDC 버튼을 숨긴다. 로컬 인증이 꺼진 서버에서 숨기면 iOS 에 남는 로그인 수단이 없어지므로
+// 그 경우 플래그를 무시한다 — 덕분에 로컬 인증 없이 OIDC 단독인 서버의 즉시 리다이렉트
+// 동작도 그대로 유지된다.
+func oidcVisibleForPlatform(config RouterConfig, runtime *oidcRuntime, platform string) bool {
+	if runtime == nil {
+		return false
+	}
+	if config.OIDC.HideOnIOS && config.LocalAuthEnabled && platform == "ios" {
+		return false
+	}
+	return true
+}
+
 func validateDesktopRedirectURI(raw string) error {
 	if raw == "" {
 		return errors.New("missing redirect_uri")
@@ -1759,6 +1798,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
             <input type="hidden" name="client" value="{{ .Client }}" />
             <input type="hidden" name="redirect_uri" value="{{ .RedirectURI }}" />
             <input type="hidden" name="state" value="{{ .State }}" />
+            <input type="hidden" name="platform" value="{{ .Platform }}" />
             <label>Email
               <input type="email" name="email" value="{{ .Email }}" required />
             </label>
@@ -1769,7 +1809,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
           </form>
         {{ end }}
         {{ if and .ShowSignupLink (not .IsSignup) }}
-          <div class="foot">계정이 없나요? <a href="/signup?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}" style="color:#b9c8ff">회원가입</a></div>
+          <div class="foot">계정이 없나요? <a href="/signup?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}&platform={{ .Platform }}" style="color:#b9c8ff">회원가입</a></div>
         {{ end }}
         {{ if and .LocalAuthEnabled .OIDCEnabled }}
           <div class="divider"></div>

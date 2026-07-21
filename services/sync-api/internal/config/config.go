@@ -65,6 +65,9 @@ type OIDCConfig struct {
 	ClientSecret string   `json:"clientSecret"`
 	RedirectURL  string   `json:"redirectUrl"`
 	Scopes       []string `json:"scopes"`
+	// HideOnIOS 는 iOS 앱에서 연 브라우저 로그인(platform=ios)에서만 OIDC 버튼을 숨기는
+	// opt-in 플래그다. 기본값(false)에서는 동작 변화가 없다.
+	HideOnIOS bool `json:"hideOnIos"`
 }
 
 func defaultConfig() AppConfig {
@@ -149,6 +152,7 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.OIDC.ClientSecret = getenv("OIDC_CLIENT_SECRET", cfg.Auth.OIDC.ClientSecret)
 	cfg.Auth.OIDC.RedirectURL = getenv("OIDC_REDIRECT_URL", cfg.Auth.OIDC.RedirectURL)
 	cfg.Auth.OIDC.Scopes = getenvCSV("OIDC_SCOPES", cfg.Auth.OIDC.Scopes)
+	cfg.Auth.OIDC.HideOnIOS = getenv("OIDC_HIDE_ON_IOS", boolToString(cfg.Auth.OIDC.HideOnIOS)) == "true"
 }
 
 func validateConfig(cfg AppConfig) error {

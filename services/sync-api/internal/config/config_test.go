@@ -16,6 +16,7 @@ func TestLoadUsesDefaultsAndEnvironmentWithoutConfigFile(t *testing.T) {
 	t.Setenv("OIDC_ENABLED", "true")
 	t.Setenv("OIDC_DISPLAY_NAME", "Workspace SSO")
 	t.Setenv("OIDC_SCOPES", "openid,profile,email")
+	t.Setenv("OIDC_HIDE_ON_IOS", "true")
 
 	cfg, source, err := Load()
 	if err != nil {
@@ -38,6 +39,9 @@ func TestLoadUsesDefaultsAndEnvironmentWithoutConfigFile(t *testing.T) {
 	}
 	if len(cfg.Auth.OIDC.Scopes) != 3 || cfg.Auth.OIDC.Scopes[0] != "openid" {
 		t.Fatalf("cfg.Auth.OIDC.Scopes = %#v", cfg.Auth.OIDC.Scopes)
+	}
+	if !cfg.Auth.OIDC.HideOnIOS {
+		t.Fatalf("cfg.Auth.OIDC.HideOnIOS = false, want true")
 	}
 }
 
