@@ -10,7 +10,7 @@
   },
   "main": ".vite/build/main.js",
   "scripts": {
-    "ensure:electron": "install-electron && electron --version",
+    "ensure:electron": "install-electron && electron --no-sandbox --version",
     "generate:icons": "node ./scripts/generate-icons.cjs",
     "generate:specs": "node ./scripts/generate-command-specs.cjs",
     "sync:runtime-deps": "node ./scripts/sync-runtime-deps.cjs",
