@@ -189,7 +189,7 @@
       background: #0d1020; border: 1px solid #262b45;
       font-family: var(--mono); font-size: .84rem; line-height: 1.7; color: #c6cdea;
     }
-    pre .c { color: #5b6485; } pre .k { color: #7fb3ff; } pre .s { color: #8ce3bd; }
+    pre .k { color: #7fb3ff; } pre .s { color: #8ce3bd; }
     /* 코드 블록 복사 버튼 — 블록이 다크 고정이라 버튼 색도 pre 팔레트에 맞춘다 */
     .copy-btn {
       position: absolute; top: 10px; right: 10px;
@@ -368,8 +368,7 @@
       브라우저 로그인과 동기화를 담당하는 <code style="font-family:var(--mono)">sync-api</code>는 단일 컨테이너입니다.
       띄운 뒤 앱 로그인 화면에서 서버 주소만 바꾸면 됩니다.
     </p>
-    <pre><span class="c"># 단일 컨테이너 — 한 줄이면 시작</span>
-<span class="k">docker run</span> -d --name dolgate-sync-api \
+    <pre><span class="k">docker run</span> -d --name dolgate-sync-api \
   -p <span class="s">8080:8080</span> -v <span class="s">dolgate-sync-api-data:/app/data</span> \
   <span class="s">ghcr.io/doldolma/dolgate-sync-api:latest</span></pre>
     <p class="note">상세 설정은 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/sync-api-self-hosting.md" target="_blank" rel="noopener">자체 호스팅 가이드</a>를 참고하세요.</p>
@@ -510,13 +509,10 @@
 </script>
 
 <script>
-  // 코드 블록 복사 버튼 — 주석(#) 줄은 빼고 실행 명령만 복사한다.
+  // 코드 블록마다 복사 버튼을 붙인다. 블록엔 실행 명령만 담는다(주석 넣지 말 것 —
+  // 복사 결과에 그대로 포함된다).
   document.querySelectorAll("pre").forEach((pre) => {
-    const command = pre.innerText
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("#"))
-      .join("\n")
-      .trim();
+    const command = pre.innerText.trim();
     if (!command) {
       return;
     }
