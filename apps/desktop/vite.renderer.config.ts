@@ -13,11 +13,15 @@ const workspaceReactDomEntry = fileURLToPath(new URL('../../node_modules/react-d
 const workspaceLucideReactEntry = fileURLToPath(
   new URL('../../node_modules/lucide-react', import.meta.url),
 );
+// zustand 도 같은 오염 경로로 중첩 복사본이 생기면 vite-node 가 중첩본으로 해석하다
+// 모듈을 못 찾아 렌더러 테스트가 깨진다(TermiusImportDialog 등). dedupe 로 루트 단일본에
+// 고정한다. 주의: zustand 는 디렉터리 alias 를 걸면 dev 서버가 exports 맵을 우회해
+// CJS 진입점을 집어 named export(useStore)가 깨진다 — alias 말고 dedupe 만 쓸 것.
 
 export default mergeConfig(baseConfig, {
   root: 'src/renderer',
   resolve: {
-    dedupe: ['lucide-react'],
+    dedupe: ['lucide-react', 'zustand'],
     alias: {
       react: workspaceReactEntry,
       'react-dom': workspaceReactDomEntry,
