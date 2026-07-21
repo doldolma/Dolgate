@@ -48,7 +48,7 @@ describe("registerAwsIpcHandlers", () => {
         listRegions: vi.fn(),
         listEc2Instances: vi.fn(),
         listEcsClusters: vi.fn(),
-        resolveManagedProfileNameOrFallback: vi.fn(),
+        requireManagedProfileName: vi.fn(),
         describeEcsClusterSnapshot: vi.fn(),
         describeEcsClusterUtilization: vi.fn(),
         describeEcsServiceActionContext: vi.fn(),
@@ -61,7 +61,7 @@ describe("registerAwsIpcHandlers", () => {
       },
       queueSync,
       hosts: {
-        backfillAwsProfileReferences: vi.fn(() => []),
+        refreshAwsProfileNameCaches: vi.fn(() => []),
         getById: vi.fn(),
       },
       assertAwsEcsHost: vi.fn(),
@@ -84,6 +84,49 @@ describe("registerAwsIpcHandlers", () => {
     expect(queueSync).toHaveBeenCalledTimes(1);
   });
 
+  it("resolves host authentication operations by managed profile ID", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const requireManagedProfileName = vi.fn().mockReturnValue("prod-admin");
+    const getProfileStatus = vi.fn().mockResolvedValue({
+      profileName: "prod-admin",
+      available: true,
+      isSsoProfile: true,
+      isAuthenticated: false,
+      missingTools: [],
+    });
+    const login = vi.fn().mockResolvedValue(undefined);
+
+    registerAwsIpcHandlers({
+      awsService: {
+        requireManagedProfileName,
+        getProfileStatus,
+        login,
+      },
+    } as any);
+
+    await handlers.get(ipcChannels.aws.getProfileStatusById)?.(
+      {},
+      "profile-prod",
+    );
+    await handlers.get(ipcChannels.aws.loginById)?.({}, "profile-prod");
+
+    expect(requireManagedProfileName).toHaveBeenNthCalledWith(
+      1,
+      "profile-prod",
+      null,
+    );
+    expect(requireManagedProfileName).toHaveBeenNthCalledWith(
+      2,
+      "profile-prod",
+      null,
+    );
+    expect(getProfileStatus).toHaveBeenCalledWith("prod-admin");
+    expect(login).toHaveBeenCalledWith("prod-admin");
+  });
+
   it("updates an aws profile region and queues sync", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
@@ -95,7 +138,7 @@ describe("registerAwsIpcHandlers", () => {
 
     registerAwsIpcHandlers({
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn(),
+        requireManagedProfileName: vi.fn(),
         updateProfileRegion,
       },
       queueSync,
@@ -147,7 +190,7 @@ describe("registerAwsIpcHandlers", () => {
 
     registerAwsIpcHandlers({
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         startEcsExecSession,
         describeEcsServiceActionContext,
         invalidateEcsServiceActionContext,
@@ -237,7 +280,7 @@ describe("registerAwsIpcHandlers", () => {
 
     registerAwsIpcHandlers({
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable,
         ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
         shouldUseInProcessSsm: vi.fn().mockReturnValue(true),
@@ -323,7 +366,7 @@ describe("registerAwsIpcHandlers", () => {
 
     registerAwsIpcHandlers({
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+        requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
         ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
         resolveEcsTaskTunnelTargetForTask,

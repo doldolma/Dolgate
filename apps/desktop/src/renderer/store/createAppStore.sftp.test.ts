@@ -724,6 +724,7 @@ describe("createAppStore sftp", () => {
       id: "aws-new",
       kind: "aws-ec2",
       label: "AWS New",
+      awsProfileId: "profile-default",
       awsProfileName: "default",
       awsRegion: "ap-northeast-2",
       awsInstanceId: "i-new",
@@ -751,6 +752,7 @@ describe("createAppStore sftp", () => {
       label: "AWS New",
       groupName: "Servers",
       terminalThemeId: null,
+      awsProfileId: "profile-default",
       awsProfileName: "default",
       awsRegion: "ap-northeast-2",
       awsInstanceId: "i-new",
@@ -775,6 +777,7 @@ describe("createAppStore sftp", () => {
         id: "aws-host-1",
         kind: "aws-ec2",
         label: "AWS Prod",
+        awsProfileId: "profile-default",
         awsProfileName: "default",
         awsRegion: "ap-northeast-2",
         awsInstanceId: "i-aws-prod",
@@ -822,7 +825,7 @@ describe("createAppStore sftp", () => {
     expect(store.getState().sftp.rightPane.endpoint?.id).toBe(
       connectInput?.endpointId,
     );
-    expect(api.aws.getProfileStatus).not.toHaveBeenCalled();
+    expect(api.aws.getProfileStatusById).not.toHaveBeenCalled();
     expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
   });
 
@@ -869,6 +872,7 @@ describe("createAppStore sftp", () => {
         id: "aws-host-legacy",
         kind: "aws-ec2",
         label: "AWS Legacy",
+        awsProfileId: "profile-default",
         awsProfileName: "default",
         awsRegion: "ap-northeast-2",
         awsInstanceId: "i-legacy",
@@ -907,7 +911,7 @@ describe("createAppStore sftp", () => {
 
     await store.getState().connectSftpHost("right", "aws-host-legacy");
 
-    expect(api.aws.getProfileStatus).not.toHaveBeenCalled();
+    expect(api.aws.getProfileStatusById).not.toHaveBeenCalled();
     expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
     expect(api.knownHosts.probeHost).toHaveBeenCalled();
     expect(api.sftp.connect).toHaveBeenCalled();

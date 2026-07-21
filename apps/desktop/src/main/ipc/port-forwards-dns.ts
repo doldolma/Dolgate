@@ -30,10 +30,10 @@ export function registerPortForwardAndDnsIpcHandlers(
     awsProfileId?: string | null;
     awsProfileName: string;
   }): string =>
-    ctx.awsService.resolveManagedProfileNameOrFallback(
+    ctx.awsService.requireManagedProfileName(
       host.awsProfileId,
       host.awsProfileName,
-    ) ?? host.awsProfileName;
+    );
 
   const buildUserFacingDnsOverrideErrorMessage = (
     failure: ReturnType<typeof describeHostsOverrideManagerFailure>,

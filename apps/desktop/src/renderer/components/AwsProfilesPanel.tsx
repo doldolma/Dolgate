@@ -119,11 +119,12 @@ function getAwsProfileHostReferences(
   hosts: HostRecord[],
   profile: Pick<AwsProfileSummary, 'id' | 'name'>,
 ): Array<{ id: string; label: string; kind: 'aws-ec2' | 'aws-ecs' }> {
+  if (!profile.id) {
+    return []
+  }
   return hosts
     .filter((host) => isAwsEc2HostRecord(host) || isAwsEcsHostRecord(host))
-    .filter((host) =>
-      profile.id ? host.awsProfileId === profile.id : host.awsProfileName === profile.name,
-    )
+    .filter((host) => host.awsProfileId === profile.id)
     .map((host) => ({
       id: host.id,
       label: host.label,

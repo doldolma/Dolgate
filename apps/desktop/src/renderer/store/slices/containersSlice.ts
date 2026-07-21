@@ -413,7 +413,12 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             if (!host || !isAwsEcsHostRecord(host)) {
               return;
             }
-            await api.aws.login(host.awsProfileName);
+            if (!host.awsProfileId) {
+              throw new Error(
+                `연결된 AWS 프로필 "${host.awsProfileName}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`,
+              );
+            }
+            await api.aws.loginById(host.awsProfileId);
           },
     selectHostContainer: async (hostId, containerId) => {
             const host = get().hosts.find((item) => item.id === hostId);

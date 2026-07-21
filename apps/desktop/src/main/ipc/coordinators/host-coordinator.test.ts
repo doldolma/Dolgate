@@ -51,7 +51,7 @@ function createCoordinator(
           }),
     },
     awsService: {
-      resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+      requireManagedProfileName: vi.fn((_id, name) => name),
       buildServerProxySessionEnvSpec: vi.fn().mockResolvedValue({
         env: { AWS_ACCESS_KEY_ID: "AKIA" },
         unsetEnv: [],

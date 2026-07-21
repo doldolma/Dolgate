@@ -173,7 +173,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       hosts: { getById: vi.fn(() => awsHost) },
       assertAwsEc2Host: vi.fn(),
       awsService: {
-        resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+        requireManagedProfileName: vi.fn((_id, name) => name),
         getProfileStatus: vi
           .fn()
           .mockResolvedValue({ isAuthenticated: true, isSsoProfile: false }),

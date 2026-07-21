@@ -33,7 +33,7 @@ function createCoordinator(overrides: Record<string, unknown> = {}) {
     },
     knownHosts: {},
     awsService: {
-      resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+      requireManagedProfileName: vi.fn((_id, name) => name),
       sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       buildServerProxySessionEnvSpec: vi.fn().mockResolvedValue({
         env: { AWS_ACCESS_KEY_ID: "AKIA" },

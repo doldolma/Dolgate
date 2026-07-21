@@ -37,7 +37,7 @@ function createCoordinator(
       getById: vi.fn(() => host),
     },
     awsService: {
-      resolveManagedProfileNameOrFallback: vi.fn((_id, name) => name),
+      requireManagedProfileName: vi.fn((_id, name) => name),
       getProfileStatus: vi.fn().mockResolvedValue({ isAuthenticated: true }),
       login: vi.fn().mockResolvedValue(undefined),
       shouldUseInProcessSsm: vi.fn(() => false),

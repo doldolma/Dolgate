@@ -16,10 +16,10 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     awsProfileId?: string | null;
     awsProfileName: string;
   }): string =>
-    ctx.awsService.resolveManagedProfileNameOrFallback(
+    ctx.awsService.requireManagedProfileName(
       host.awsProfileId,
       host.awsProfileName,
-    ) ?? host.awsProfileName;
+    );
 
   const shouldRetryEcsExecSelectionError = (error: unknown): boolean => {
     const message = error instanceof Error ? error.message : "";
@@ -68,7 +68,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.aws.importExternalProfiles,
     async (_event, input: { profileNames: string[] }) => {
       const result = await ctx.awsService.importExternalProfiles(input);
-      const updatedHosts = ctx.hosts.backfillAwsProfileReferences(
+      const updatedHosts = ctx.hosts.refreshAwsProfileNameCaches(
         (await ctx.awsService.listProfiles())
           .filter((profile) => profile.id)
           .map((profile) => ({ id: profile.id!, name: profile.name }))
@@ -126,8 +126,22 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       ctx.awsService.getProfileStatus(profileName),
   );
 
+  ipcMain.handle(
+    ipcChannels.aws.getProfileStatusById,
+    async (_event, profileId: string) =>
+      ctx.awsService.getProfileStatus(
+        ctx.awsService.requireManagedProfileName(profileId, null),
+      ),
+  );
+
   ipcMain.handle(ipcChannels.aws.login, async (_event, profileName: string) => {
     await ctx.awsService.login(profileName);
+  });
+
+  ipcMain.handle(ipcChannels.aws.loginById, async (_event, profileId: string) => {
+    await ctx.awsService.login(
+      ctx.awsService.requireManagedProfileName(profileId, null),
+    );
   });
 
   ipcMain.handle(

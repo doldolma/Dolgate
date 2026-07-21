@@ -59,8 +59,12 @@ export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
       ipcRenderer.invoke(ipcChannels.aws.deleteProfile, profileName),
     getProfileStatus: (profileName: string) =>
       ipcRenderer.invoke(ipcChannels.aws.getProfileStatus, profileName),
+    getProfileStatusById: (profileId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.getProfileStatusById, profileId),
     login: (profileName: string) =>
       ipcRenderer.invoke(ipcChannels.aws.login, profileName),
+    loginById: (profileId: string) =>
+      ipcRenderer.invoke(ipcChannels.aws.loginById, profileId),
     listRegions: (profileName: string) =>
       ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
     listEc2Instances: (profileName: string, region: string) =>

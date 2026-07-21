@@ -937,7 +937,9 @@ export interface DesktopApi {
     renameProfile: (input: AwsProfileRenameInput) => Promise<void>;
     deleteProfile: (profileName: string) => Promise<void>;
     getProfileStatus: (profileName: string) => Promise<AwsProfileStatus>;
+    getProfileStatusById: (profileId: string) => Promise<AwsProfileStatus>;
     login: (profileName: string) => Promise<void>;
+    loginById: (profileId: string) => Promise<void>;
     listRegions: (profileName: string) => Promise<string[]>;
     listEc2Instances: (
       profileName: string,

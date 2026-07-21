@@ -574,6 +574,7 @@ export function createContainersServices(deps: SliceDeps) {
       await beginContainerLifecycle(set, hostId);
       const profileStatus =
         await trustServices.ensureAwsSsoProfileAuthenticationIfNeeded(
+          host.awsProfileId,
           host.awsProfileName,
           reportAuthProgress,
         );
@@ -594,6 +595,7 @@ export function createContainersServices(deps: SliceDeps) {
           isAwsSsoAuthenticationErrorMessage(message)
         ) {
           await trustServices.loginAwsSsoProfile(
+            host.awsProfileId,
             host.awsProfileName,
             reportAuthProgress,
           );

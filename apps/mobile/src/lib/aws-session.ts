@@ -119,14 +119,10 @@ function resolveManagedProfileForHost(
   profiles: ManagedAwsProfilePayload[],
   host: AwsEc2HostRecord,
 ): ManagedAwsProfilePayload | null {
-  if (host.awsProfileId) {
-    const exact = profiles.find((profile) => profile.id === host.awsProfileId);
-    if (exact) {
-      return exact;
-    }
+  if (!host.awsProfileId) {
+    return null;
   }
-
-  return profiles.find((profile) => profile.name === host.awsProfileName) ?? null;
+  return profiles.find((profile) => profile.id === host.awsProfileId) ?? null;
 }
 
 async function resolveManagedProfileCredentials(input: {

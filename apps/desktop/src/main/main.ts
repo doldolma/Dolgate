@@ -283,7 +283,7 @@ if (termiusHelperArgIndex >= 0) {
     await hostsOverrideManager.clear();
   };
   const reconcileAwsHostProfileReferences = async () => {
-    const updatedHosts = hostRepository.backfillAwsProfileReferences(
+    const updatedHosts = hostRepository.refreshAwsProfileNameCaches(
       awsProfileRepository.listMetadata().map((profile) => ({
         id: profile.id,
         name: profile.name

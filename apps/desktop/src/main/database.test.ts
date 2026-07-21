@@ -348,6 +348,47 @@ describe('HostRepository', () => {
     });
   });
 
+  it('refreshes AWS profile names only for an exact profile ID match', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+    const createAwsHost = (
+      id: string,
+      awsProfileId: string | null,
+      awsProfileName: string,
+    ) =>
+      hosts.create(id, {
+        kind: 'aws-ec2',
+        label: id,
+        awsProfileId,
+        awsProfileName,
+        awsRegion: 'ap-northeast-2',
+        awsInstanceId: `i-${id}`,
+      });
+
+    createAwsHost('valid-profile', 'profile-current', 'old-name');
+    createAwsHost('deleted-profile', 'profile-deleted', 'shared-name');
+    createAwsHost('missing-profile-id', null, 'shared-name');
+
+    const updated = hosts.refreshAwsProfileNameCaches([
+      { id: 'profile-current', name: 'renamed-profile' },
+      { id: 'profile-replacement', name: 'shared-name' },
+    ]);
+
+    expect(updated.map((host) => host.id)).toEqual(['valid-profile']);
+    expect(hosts.getById('valid-profile')).toMatchObject({
+      awsProfileId: 'profile-current',
+      awsProfileName: 'renamed-profile',
+    });
+    expect(hosts.getById('deleted-profile')).toMatchObject({
+      awsProfileId: 'profile-deleted',
+      awsProfileName: 'shared-name',
+    });
+    expect(hosts.getById('missing-profile-id')).toMatchObject({
+      awsProfileId: null,
+      awsProfileName: 'shared-name',
+    });
+  });
+
   it('keeps persisted AWS SFTP metadata after reloading state storage', async () => {
     const { HostRepository } = await loadRepositoriesWithStateFile({
       schemaVersion: 1,

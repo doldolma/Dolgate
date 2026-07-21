@@ -76,6 +76,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn: "arn:aws:ecs:ap-northeast-2:123456789012:cluster/prod",
@@ -109,7 +110,7 @@ describe("createAppStore containers", () => {
     const api = createMockApi();
     const profileStatus =
       createDeferred<
-        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatus"]>>
+        Awaited<ReturnType<DesktopApi["aws"]["getProfileStatusById"]>>
       >();
     const snapshot =
       createDeferred<
@@ -119,7 +120,7 @@ describe("createAppStore containers", () => {
       createDeferred<
         Awaited<ReturnType<DesktopApi["aws"]["loadEcsClusterUtilization"]>>
       >();
-    api.aws.getProfileStatus = vi.fn().mockReturnValue(profileStatus.promise);
+    api.aws.getProfileStatusById = vi.fn().mockReturnValue(profileStatus.promise);
     api.aws.loadEcsClusterSnapshot = vi.fn().mockReturnValue(snapshot.promise);
     api.aws.loadEcsClusterUtilization = vi
       .fn()
@@ -205,7 +206,7 @@ describe("createAppStore containers", () => {
 
   it("starts AWS SSO login before loading an ECS cluster when the SSO profile is expired", async () => {
     const api = createMockApi();
-    api.aws.getProfileStatus = vi
+    api.aws.getProfileStatusById = vi
       .fn()
       .mockResolvedValueOnce({
         id: "default",
@@ -238,7 +239,7 @@ describe("createAppStore containers", () => {
 
     await store.getState().connectHost("ecs-host-1", 120, 32);
 
-    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loginById).toHaveBeenCalledWith("profile-default");
     expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledWith("ecs-host-1");
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
@@ -252,7 +253,7 @@ describe("createAppStore containers", () => {
   it("shows browser-login progress while ECS waits for AWS SSO login", async () => {
     const api = createMockApi();
     const login = createDeferred<void>();
-    api.aws.getProfileStatus = vi
+    api.aws.getProfileStatusById = vi
       .fn()
       .mockResolvedValueOnce({
         id: "default",
@@ -276,7 +277,7 @@ describe("createAppStore containers", () => {
         errorMessage: null,
         missingTools: [],
       });
-    api.aws.login = vi.fn().mockReturnValue(login.promise);
+    api.aws.loginById = vi.fn().mockReturnValue(login.promise);
     const store = createAppStore(api);
     await store.getState().bootstrap();
 
@@ -299,7 +300,7 @@ describe("createAppStore containers", () => {
     login.resolve();
     await connectPromise;
 
-    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loginById).toHaveBeenCalledWith("profile-default");
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1")
         ?.connectionProgress,
@@ -317,7 +318,7 @@ describe("createAppStore containers", () => {
 
     await store.getState().loginAwsProfileForEcsHost("ecs-host-1");
 
-    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loginById).toHaveBeenCalledWith("profile-default");
   });
 
   it("ignores on-demand ECS SSO login for missing or non-ECS hosts", async () => {
@@ -328,12 +329,12 @@ describe("createAppStore containers", () => {
     await store.getState().loginAwsProfileForEcsHost("missing-host");
     await store.getState().loginAwsProfileForEcsHost("host-1");
 
-    expect(api.aws.login).not.toHaveBeenCalled();
+    expect(api.aws.loginById).not.toHaveBeenCalled();
   });
 
   it("recovers an ECS snapshot load once when the first request reports an expired SSO session", async () => {
     const api = createMockApi();
-    api.aws.getProfileStatus = vi
+    api.aws.getProfileStatusById = vi
       .fn()
       .mockResolvedValueOnce({
         profileName: "default",
@@ -387,7 +388,7 @@ describe("createAppStore containers", () => {
 
     await store.getState().connectHost("ecs-host-1", 120, 32);
 
-    expect(api.aws.login).toHaveBeenCalledWith("default");
+    expect(api.aws.loginById).toHaveBeenCalledWith("profile-default");
     expect(api.aws.loadEcsClusterSnapshot).toHaveBeenCalledTimes(2);
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "ecs-host-1"),
@@ -410,6 +411,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn:
@@ -517,6 +519,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn:
@@ -584,6 +587,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn:
@@ -701,6 +705,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn:
@@ -987,6 +992,7 @@ describe("createAppStore containers", () => {
           id: "ecs-host-1",
           kind: "aws-ecs",
           label: "prod cluster",
+          awsProfileId: "profile-default",
           awsProfileName: "default",
           awsRegion: "ap-northeast-2",
           awsEcsClusterArn:

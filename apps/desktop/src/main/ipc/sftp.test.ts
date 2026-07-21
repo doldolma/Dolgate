@@ -50,7 +50,7 @@ function createContext(host = createAwsHost()) {
     consumeAwsSftpPreflight: vi.fn().mockReturnValue(host),
     resolveAwsSftpPreflight: vi.fn(),
     awsService: {
-      resolveManagedProfileNameOrFallback: vi.fn().mockReturnValue("default"),
+      requireManagedProfileName: vi.fn().mockReturnValue("default"),
       sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
     },
     requireTrustedHostKey: vi.fn().mockReturnValue("AAAATEST"),

@@ -47,7 +47,7 @@ describe("connectAwsEc2OverSsm", () => {
     const ctx = {
       resolveAwsSftpPreflight: vi.fn().mockResolvedValue(host),
       awsService: {
-        resolveManagedProfileNameOrFallback: vi
+        requireManagedProfileName: vi
           .fn()
           .mockReturnValue("managed-profile"),
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
@@ -144,7 +144,7 @@ describe("connectAwsEc2OverSsm", () => {
     const ctx = {
       resolveAwsSftpPreflight: vi.fn().mockResolvedValue(host),
       awsService: {
-        resolveManagedProfileNameOrFallback: vi
+        requireManagedProfileName: vi
           .fn()
           .mockReturnValue("managed-profile"),
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),

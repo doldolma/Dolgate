@@ -932,11 +932,10 @@ export class HostRepository {
     return updatedHosts;
   }
 
-  backfillAwsProfileReferences(
+  refreshAwsProfileNameCaches(
     profiles: Array<{ id: string; name: string }>
   ): HostRecord[] {
     const byId = new Map(profiles.map((profile) => [profile.id, profile.name]));
-    const byName = new Map(profiles.map((profile) => [profile.name, profile.id]));
     const updatedHosts: HostRecord[] = [];
     const timestamp = nowIso();
 
@@ -946,23 +945,14 @@ export class HostRepository {
           return entry;
         }
 
-        let nextProfileId = entry.awsProfileId ?? null;
-        let nextProfileName = entry.awsProfileName;
-
-        if (!nextProfileId) {
-          nextProfileId = byName.get(entry.awsProfileName) ?? null;
-        }
-        if (nextProfileId && byId.has(nextProfileId)) {
-          nextProfileName = byId.get(nextProfileId) ?? entry.awsProfileName;
-        }
-
-        if (nextProfileId === (entry.awsProfileId ?? null) && nextProfileName === entry.awsProfileName) {
+        const profileId = entry.awsProfileId ?? null;
+        const nextProfileName = profileId ? byId.get(profileId) : null;
+        if (!nextProfileName || nextProfileName === entry.awsProfileName) {
           return entry;
         }
 
         const nextRecord = {
           ...entry,
-          awsProfileId: nextProfileId,
           awsProfileName: nextProfileName,
           updatedAt: timestamp
         };
