@@ -27,6 +27,7 @@ import {
   useSessionWorkspaceViewModel,
   useSftpViewModel,
 } from './view-models/appViewModels';
+import { desktopApi } from './store/appStore';
 
 function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   if (theme === 'light' || theme === 'dark') {
@@ -153,6 +154,7 @@ export function App() {
   );
 
   const authBootstrapStartedRef = useRef(false);
+  const launchIntentConsumedRef = useRef(false);
   const activeHydrationUserIdRef = useRef<string | null>(null);
   const hydratedOnlineSessionUserIdRef = useRef<string | null>(null);
   // 마지막으로 워크스페이스를 다시 읽은 시점의 sync 데이터 변경 타임스탬프. 폴링이 이 값이
@@ -333,6 +335,24 @@ export function App() {
     };
   }, [pollableUserId, refreshSyncedWorkspaceData]);
 
+  useEffect(() => {
+    if (!isAuthReady || launchIntentConsumedRef.current) {
+      return;
+    }
+    launchIntentConsumedRef.current = true;
+    if (typeof desktopApi.window.consumeLaunchIntent !== 'function') {
+      return;
+    }
+    void desktopApi.window
+      .consumeLaunchIntent()
+      .then((intent) => {
+        if (intent?.type === 'connect-host') {
+          return homeViewModel.connectHost(intent.hostId, 120, 32);
+        }
+      })
+      .catch(() => undefined);
+  }, [homeViewModel.connectHost, isAuthReady]);
+
   const bridgeLayer = (
     <>
       <AuthBootstrapBridge
@@ -356,6 +376,11 @@ export function App() {
         onSessionShareEvent={sessionViewModel.handleSessionShareEvent}
         onSessionShareChatEvent={sessionViewModel.handleSessionShareChatEvent}
         onAuthEvent={handleAuthEvent}
+        onWorkspaceChanged={() => {
+          if (isAuthReady) {
+            void homeViewModel.refreshSyncedWorkspaceData();
+          }
+        }}
         onAiChatEvent={aiViewModel.handleAiChatEvent}
       />
       <NetworkBridge />

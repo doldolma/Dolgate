@@ -45,6 +45,7 @@ export {
   Search,
   Download,
   SquareTerminal,
+  AppWindow,
   Columns2,
   Rows2,
   Circle,

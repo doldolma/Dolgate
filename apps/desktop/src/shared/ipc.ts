@@ -125,6 +125,11 @@ import type {
   CodexUsage,
 } from "./ai";
 
+export type DesktopWindowLaunchIntent = {
+  type: "connect-host";
+  hostId: string;
+};
+
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
   | "health"
@@ -895,6 +900,7 @@ export interface DesktopApi {
   bootstrap: {
     getInitialSnapshot: () => Promise<DesktopBootstrapSnapshot>;
     getSyncedWorkspaceSnapshot: () => Promise<DesktopSyncedWorkspaceSnapshot>;
+    onWorkspaceChanged: (listener: () => void) => () => void;
   };
   hosts: {
     list: () => Promise<HostRecord[]>;
@@ -1092,6 +1098,9 @@ export interface DesktopApi {
   };
   window: {
     getState: () => Promise<DesktopWindowState>;
+    openNew: () => Promise<void>;
+    openHost: (hostId: string) => Promise<void>;
+    consumeLaunchIntent: () => Promise<DesktopWindowLaunchIntent | null>;
     minimize: () => Promise<void>;
     maximize: () => Promise<void>;
     restore: () => Promise<void>;

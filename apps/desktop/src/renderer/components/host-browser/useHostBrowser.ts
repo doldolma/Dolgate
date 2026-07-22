@@ -337,6 +337,7 @@ export interface UseHostBrowserParams {
   onRemoveHost: (hostId: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onConnectHost: (hostId: string) => Promise<void>;
+  onOpenHostInNewWindow?: (hostId: string) => Promise<void>;
   onConnectHostTmux?: (hostId: string) => Promise<void>;
   onOpenHostContainers: (hostId: string) => Promise<void>;
   onOpenSftp?: (hostId: string) => void | Promise<void>;

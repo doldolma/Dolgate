@@ -1160,6 +1160,7 @@ export function createMockApi(): DesktopApi {
       knownHosts: await api.knownHosts.list(),
       keychainEntries: await api.keychain.list(),
     })),
+    onWorkspaceChanged: vi.fn(() => () => undefined),
   };
 
   return api;

@@ -13,6 +13,7 @@ interface DesktopEventBridgeProps {
   onSessionShareEvent: (event: any) => void;
   onSessionShareChatEvent: (event: any) => void;
   onAuthEvent: (state: AuthState) => void;
+  onWorkspaceChanged?: () => void;
   onAiChatEvent: (event: AiChatEvent) => void;
 }
 
@@ -26,6 +27,7 @@ export function DesktopEventBridge({
   onSessionShareEvent,
   onSessionShareChatEvent,
   onAuthEvent,
+  onWorkspaceChanged,
   onAiChatEvent,
 }: DesktopEventBridgeProps) {
   const handleCoreEvent = useEffectEvent(onCoreEvent);
@@ -39,6 +41,7 @@ export function DesktopEventBridge({
   const handleSessionShareEvent = useEffectEvent(onSessionShareEvent);
   const handleSessionShareChatEvent = useEffectEvent(onSessionShareChatEvent);
   const handleAuthEvent = useEffectEvent(onAuthEvent);
+  const handleWorkspaceChanged = useEffectEvent(onWorkspaceChanged ?? (() => undefined));
   const handleAiChatEvent = useEffectEvent(onAiChatEvent);
 
   useEffect(() => {
@@ -81,6 +84,12 @@ export function DesktopEventBridge({
     const offAuth = desktopApi.auth.onEvent((state) => {
       handleAuthEvent(state);
     });
+    const offWorkspaceChanged =
+      typeof desktopApi.bootstrap?.onWorkspaceChanged === 'function'
+        ? desktopApi.bootstrap.onWorkspaceChanged(() => {
+            handleWorkspaceChanged();
+          })
+        : () => undefined;
     const offAiChat =
       typeof desktopApi.ai?.onChatEvent === 'function'
         ? desktopApi.ai.onChatEvent((event) => {
@@ -105,6 +114,7 @@ export function DesktopEventBridge({
       offSessionShare();
       offSessionShareChat();
       offAuth();
+      offWorkspaceChanged();
       offAiChat();
       offAiTerminalOutput();
     };

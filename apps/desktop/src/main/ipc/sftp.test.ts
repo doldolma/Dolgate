@@ -90,6 +90,14 @@ function createContext(host = createAwsHost()) {
       stop: vi.fn().mockResolvedValue(undefined),
     },
     coreManager: {
+      registerSftpEndpointOwner: vi.fn(),
+      releaseSftpEndpointOwner: vi.fn(),
+      assertSftpEndpointOwner: vi.fn(),
+      assertSftpTransferOwner: vi.fn(),
+      runWithSessionOwner: vi.fn(
+        (_ownerWebContentsId: number, action: () => Promise<unknown>) =>
+          action(),
+      ),
       sftpConnect: vi.fn().mockResolvedValue({
         id: "endpoint-aws",
         kind: "remote",
@@ -98,6 +106,7 @@ function createContext(host = createAwsHost()) {
         path: "/home/ubuntu",
         connectedAt: "2025-01-01T00:00:00.000Z",
       }),
+      startSftpTransfer: vi.fn().mockResolvedValue({ id: "transfer-1" }),
     },
     trackAwsSftpTunnelRuntime: vi.fn(),
     clearAwsSftpPreflight: vi.fn(),
@@ -111,6 +120,76 @@ describe("registerSftpIpcHandlers", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("registers endpoint ownership before emitting connection progress", async () => {
+    const ctx = createContext(createAwsHost({ awsSshUsername: null }));
+    registerSftpIpcHandlers(ctx);
+
+    const handler = ipcHandlers.get(ipcChannels.sftp.connect);
+    await expect(
+      handler?.(
+        { sender: { id: 41 } },
+        {
+          hostId: "aws-host-1",
+          endpointId: "endpoint-owned",
+        },
+      ),
+    ).rejects.toThrow("자동으로 SSH 사용자명을 확인하지 못했습니다.");
+
+    expect(ctx.coreManager.registerSftpEndpointOwner).toHaveBeenCalledWith(
+      "endpoint-owned",
+      41,
+    );
+    expect(ctx.coreManager.runWithSessionOwner).toHaveBeenCalledWith(
+      41,
+      expect.any(Function),
+    );
+    expect(
+      ctx.coreManager.registerSftpEndpointOwner.mock.invocationCallOrder[0],
+    ).toBeLessThan(ctx.emitSftpConnectionProgress.mock.invocationCallOrder[0]);
+    expect(ctx.coreManager.releaseSftpEndpointOwner).toHaveBeenCalledWith(
+      "endpoint-owned",
+      41,
+    );
+  });
+
+  it("binds new transfers to the requesting window and validates remote endpoints", async () => {
+    const ctx = createContext();
+    registerSftpIpcHandlers(ctx);
+
+    const input = {
+      source: { kind: "local" as const, path: "/tmp/local" },
+      target: {
+        kind: "remote" as const,
+        endpointId: "endpoint-owned",
+        path: "/tmp/remote",
+      },
+      items: [
+        {
+          name: "file.txt",
+          path: "/tmp/local/file.txt",
+          isDirectory: false,
+          size: 10,
+        },
+      ],
+      conflictResolution: "overwrite" as const,
+    };
+    const handler = ipcHandlers.get(ipcChannels.sftp.startTransfer);
+
+    await expect(handler?.({ sender: { id: 41 } }, input)).resolves.toEqual({
+      id: "transfer-1",
+    });
+
+    expect(ctx.coreManager.assertSftpEndpointOwner).toHaveBeenCalledWith(
+      "endpoint-owned",
+      41,
+    );
+    expect(ctx.coreManager.runWithSessionOwner).toHaveBeenCalledWith(
+      41,
+      expect.any(Function),
+    );
+    expect(ctx.coreManager.startSftpTransfer).toHaveBeenCalledWith(input);
   });
 
   it("emits a missing-username diagnostic when AWS SSH metadata has no username", async () => {

@@ -33,6 +33,7 @@ import {
   emitUpdateEvent,
   emitWarpgateImportEvent,
   emitWindowState,
+  emitWorkspaceChanged,
 } from "./state";
 
 let bindingsRegistered = false;
@@ -100,6 +101,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.auth.event, (_event, payload: AuthState) => {
     emitAuthEvent(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.bootstrap.workspaceChanged, () => {
+    emitWorkspaceChanged();
   });
 
   ipcRenderer.on(

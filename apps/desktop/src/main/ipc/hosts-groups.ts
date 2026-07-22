@@ -26,7 +26,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.hosts.create,
-    async (_event, draft: HostDraft, secrets?: HostSecretInput) => {
+    async (event, draft: HostDraft, secrets?: HostSecretInput) => {
       const hostId = randomUUID();
       const existingSecretRef = isSshHostDraft(draft)
         ? (draft.secretRef ?? null)
@@ -61,13 +61,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         groupName: record.groupName ?? null,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
     },
   );
 
   ipcMain.handle(
     ipcChannels.hosts.update,
-    async (_event, id: string, draft: HostDraft, secrets?: HostSecretInput) => {
+    async (event, id: string, draft: HostDraft, secrets?: HostSecretInput) => {
       const current = ctx.hosts.getById(id);
       if (!current) {
         throw new Error("Host not found");
@@ -133,11 +134,12 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         groupName: record.groupName ?? null,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
     },
   );
 
-  ipcMain.handle(ipcChannels.hosts.remove, async (_event, id: string) => {
+  ipcMain.handle(ipcChannels.hosts.remove, async (event, id: string) => {
     const current = ctx.hosts.getById(id);
     ctx.syncOutbox.upsertDeletion("hosts", id);
     ctx.hosts.remove(id);
@@ -150,13 +152,15 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       });
     }
     ctx.queueSync();
+    ctx.emitWorkspaceChanged?.(event?.sender);
   });
 
   ipcMain.handle(
     ipcChannels.hosts.setFavorite,
-    async (_event, id: string, favorite: boolean) => {
+    async (event, id: string, favorite: boolean) => {
       const record = ctx.hosts.setFavorite(id, favorite);
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return record;
     },
   );
@@ -165,7 +169,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.create,
-    async (_event, name: string, parentPath?: string | null) => {
+    async (event, name: string, parentPath?: string | null) => {
       const group = ctx.groups.create(randomUUID(), name, parentPath);
       ctx.activityLogs.append("info", "audit", "그룹을 생성했습니다.", {
         groupId: group.id,
@@ -174,13 +178,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         parentPath: group.parentPath ?? null,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return group;
     },
   );
 
   ipcMain.handle(
     ipcChannels.groups.remove,
-    async (_event, path: string, mode: GroupRemoveMode) => {
+    async (event, path: string, mode: GroupRemoveMode) => {
       const result = ctx.groups.remove(path, mode);
       for (const groupId of result.removedGroupIds) {
         ctx.syncOutbox.upsertDeletion("groups", groupId);
@@ -195,6 +200,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         removedHostCount: result.removedHostIds.length,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return {
         groups: result.groups,
         hosts: result.hosts,
@@ -204,7 +210,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.groups.move,
-    async (_event, path: string, targetParentPath: string | null) => {
+    async (event, path: string, targetParentPath: string | null) => {
       const result = ctx.groups.move(path, targetParentPath);
       ctx.activityLogs.append("info", "audit", "그룹을 이동했습니다.", {
         path,
@@ -212,13 +218,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         nextPath: result.nextPath,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return result;
     },
   );
 
   ipcMain.handle(
     ipcChannels.groups.rename,
-    async (_event, path: string, name: string) => {
+    async (event, path: string, name: string) => {
       const result = ctx.groups.rename(path, name);
       ctx.activityLogs.append("info", "audit", "그룹 이름을 변경했습니다.", {
         path,
@@ -226,6 +233,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         name,
       });
       ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return result;
     },
   );

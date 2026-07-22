@@ -269,6 +269,7 @@ export function createMainIpcContext(
       containerRuntimeCoordinator.startContainerTunnelRuntime,
     resolveWindowFromSender: coreEventBridge.resolveWindowFromSender,
     buildWindowState: coreEventBridge.buildWindowState,
+    emitWorkspaceChanged: coreEventBridge.emitWorkspaceChanged,
     persistSecret: secretCoordinator.persistSecret,
     persistImportedSecret: secretCoordinator.persistImportedSecret,
     loadSecrets: secretCoordinator.loadSecrets,

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, AwsEcsHostRecord, MainIpcContext } from "./context";
+import { runWithIpcSessionOwner } from "./session-owner";
 
 export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   const resolveHostProfileName = (host: {
@@ -267,7 +268,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.aws.openEcsExecShell,
-    async (_event, input: {
+    async (event, input: {
       hostId: string;
       serviceName: string;
       taskArn: string;
@@ -275,7 +276,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       cols: number;
       rows: number;
       command?: string;
-    }) => {
+    }) => runWithIpcSessionOwner(ctx, event, async () => {
       try {
         const host = ctx.hosts.getById(input.hostId);
         ctx.assertAwsEcsHost(host);
@@ -355,7 +356,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
       } catch (error) {
         throw ctx.normalizeEcsExecPermissionError(error);
       }
-    },
+    }),
   );
 
   ipcMain.handle(

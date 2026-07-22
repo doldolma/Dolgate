@@ -52,6 +52,42 @@ function createBridge() {
 }
 
 describe("core event bridge", () => {
+  it("routes SFTP connection progress through the endpoint owner", () => {
+    const { deps, bridge } = createBridge();
+    deps.coreManager.sendSftpConnectionProgressToOwner = vi.fn(() => true);
+    const event = {
+      endpointId: "sftp-owned",
+      hostId: "host-1",
+      stage: "connecting-sftp" as const,
+      message: "connecting",
+    };
+
+    bridge.emitSftpConnectionProgress(event);
+
+    expect(
+      deps.coreManager.sendSftpConnectionProgressToOwner,
+    ).toHaveBeenCalledWith("sftp-owned", event);
+  });
+
+  it("routes Container connection progress through endpoint subscribers", () => {
+    const { deps, bridge } = createBridge();
+    deps.coreManager.sendContainersConnectionProgressToSubscribers = vi.fn(
+      () => true,
+    );
+    const event = {
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      stage: "connecting-containers" as const,
+      message: "connecting",
+    };
+
+    bridge.emitContainersConnectionProgress(event);
+
+    expect(
+      deps.coreManager.sendContainersConnectionProgressToSubscribers,
+    ).toHaveBeenCalledWith("containers:host-1", event);
+  });
+
   it("persists pending secrets on connected events", async () => {
     const { deps, bridge, terminalHandler } = createBridge();
     bridge.pendingSessionSecrets.set("session-1", {

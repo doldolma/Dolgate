@@ -4,13 +4,14 @@ import {
   dialog,
   Menu,
   powerMonitor,
+  screen,
   type MenuItemConstructorOptions,
 } from 'electron';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { isStaticDnsOverrideRecord } from '@shared';
-import type { DesktopWindowState } from '@shared';
+import type { DesktopWindowLaunchIntent, DesktopWindowState } from '@shared';
 import {
   ActivityLogRepository,
   AwsProfileRepository,
@@ -67,7 +68,7 @@ if (!app.isPackaged) {
 // Cmd+W 를 "창 닫기"가 아니라 "현재 탭 닫기"(크롬식)로 바꾸기 위해 커스텀 메뉴를 쓴다.
 // 기본 메뉴엔 Window>Close(Cmd+W, 창 닫기)가 있어 이를 대체해야 한다. 표준 역할
 // (앱/편집/보기 — 복사·붙여넣기·종료 등)은 그대로 유지한다. Cmd+Shift+W 가 창 닫기.
-function installApplicationMenu(): void {
+function installApplicationMenu(openNewWindow: () => void): void {
   const isMac = process.platform === 'darwin';
   const sendTabCommand = (payload: import('@shared').TabCommandPayload) => {
     BrowserWindow.getFocusedWindow()?.webContents.send(
@@ -76,9 +77,20 @@ function installApplicationMenu(): void {
     );
   };
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? [{ role: 'appMenu' as const }]
-      : [{ label: '파일', submenu: [{ role: 'quit' as const }] }]),
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: '파일',
+      submenu: [
+        {
+          label: '새 창',
+          accelerator: 'CmdOrCtrl+N',
+          click: openNewWindow,
+        },
+        ...(!isMac
+          ? [{ type: 'separator' as const }, { role: 'quit' as const }]
+          : []),
+      ],
+    },
     { role: 'editMenu' },
     { role: 'viewMenu' },
     {
@@ -259,6 +271,15 @@ if (termiusHelperArgIndex >= 0) {
   const notificationService = new NotificationService();
   let isQuitting = false;
   let pendingAuthCallbackUrl: string | null = null;
+  const launchIntentsByWindowId = new Map<number, DesktopWindowLaunchIntent>();
+
+  const broadcastWorkspaceChanged = () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.bootstrap.workspaceChanged);
+      }
+    }
+  };
 
   const rewriteDnsOverridesForCurrentState = async () => {
     const overrides = dnsOverrideRepository.list();
@@ -292,6 +313,7 @@ if (termiusHelperArgIndex >= 0) {
     if (updatedHosts.length === 0) {
       return;
     }
+    broadcastWorkspaceChanged();
     if (authService.getState().status === 'authenticated') {
       void syncService.pushDirty().catch(() => undefined);
       return;
@@ -302,6 +324,7 @@ if (termiusHelperArgIndex >= 0) {
     void awsService.materializeManagedProfiles().catch(() => undefined);
     void reconcileAwsHostProfileReferences().catch(() => undefined);
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
+    broadcastWorkspaceChanged();
   });
   syncService.setOnPurgedSyncedCache(() =>
     awsService.purgeManagedProfileArtifacts()
@@ -390,11 +413,31 @@ if (termiusHelperArgIndex >= 0) {
     window.on('unmaximize', emitState);
   }
 
-  async function createWindow(): Promise<void> {
+  async function createWindow(
+    launchIntent?: DesktopWindowLaunchIntent,
+  ): Promise<BrowserWindow> {
+    const sourceWindow = BrowserWindow.getFocusedWindow();
+    const sourceBounds = sourceWindow?.getNormalBounds();
+    const defaultBounds = { width: 1440, height: 900 };
+    const nextBounds = sourceBounds
+      ? (() => {
+          const display = screen.getDisplayMatching(sourceBounds);
+          const width = Math.min(sourceBounds.width, display.workArea.width);
+          const height = Math.min(sourceBounds.height, display.workArea.height);
+          const x = Math.min(
+            Math.max(display.workArea.x, sourceBounds.x + 24),
+            display.workArea.x + display.workArea.width - width,
+          );
+          const y = Math.min(
+            Math.max(display.workArea.y, sourceBounds.y + 24),
+            display.workArea.y + display.workArea.height - height,
+          );
+          return { width, height, x, y };
+        })()
+      : defaultBounds;
     // renderer는 항상 preload를 거쳐서만 시스템 기능을 사용하게 강제한다.
     const window = new BrowserWindow({
-      width: 1440,
-      height: 900,
+      ...nextBounds,
       minWidth: 1080,
       minHeight: 700,
       show: false,
@@ -413,6 +456,13 @@ if (termiusHelperArgIndex >= 0) {
         contextIsolation: true,
         nodeIntegration: false
       }
+    });
+
+    if (launchIntent) {
+      launchIntentsByWindowId.set(window.id, launchIntent);
+    }
+    window.on('closed', () => {
+      launchIntentsByWindowId.delete(window.id);
     });
 
     if (process.platform !== 'darwin') {
@@ -469,6 +519,7 @@ if (termiusHelperArgIndex >= 0) {
       window.show();
     }
     window.focus();
+    return window;
   }
 
   const hasSingleInstanceLock = shouldRequestSingleInstanceLock({
@@ -492,7 +543,12 @@ if (termiusHelperArgIndex >= 0) {
       }
     }
 
-    const window = BrowserWindow.getAllWindows()[0];
+    if (argv.includes('--new-window') && app.isReady()) {
+      void createWindow();
+      return;
+    }
+
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     if (window) {
       if (window.isMinimized()) {
         window.restore();
@@ -585,12 +641,35 @@ if (termiusHelperArgIndex >= 0) {
       opensshImportService,
       xshellImportService,
       sessionShareService,
-      sessionReplayService
+      sessionReplayService,
+      {
+        openWindow: async (intent) => {
+          await createWindow(intent);
+        },
+        consumeLaunchIntent: (windowId) => {
+          const intent = launchIntentsByWindowId.get(windowId) ?? null;
+          launchIntentsByWindowId.delete(windowId);
+          return intent;
+        },
+      },
     );
     registerNotificationsIpcHandlers(notificationService);
     await awsService.initializeManagedProfiles();
     await reconcileAwsHostProfileReferences();
-    installApplicationMenu();
+    const openNewWindow = () => {
+      void createWindow();
+    };
+    installApplicationMenu(openNewWindow);
+    if (process.platform === 'darwin') {
+      app.dock?.setMenu(
+        Menu.buildFromTemplate([
+          {
+            label: '새 창',
+            click: openNewWindow,
+          },
+        ]),
+      );
+    }
     await createWindow();
     void restoreDnsOverridesForStartup()
       .then(() => rewriteDnsOverridesForCurrentState())

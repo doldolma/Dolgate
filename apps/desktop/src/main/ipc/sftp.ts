@@ -15,7 +15,7 @@ import {
   type SftpWriteFileInput,
   type TransferStartInput,
 } from "@shared";
-import { ipcMain } from "electron";
+import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type {
   AwsEc2HostRecord,
@@ -30,11 +30,81 @@ import {
   buildAwsWsProxyTarget,
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
+import { runWithIpcSessionOwner } from "./session-owner";
+
+function resolveOwnerWebContentsId(
+  event: IpcMainInvokeEvent | null,
+): number | undefined {
+  return event?.sender?.id;
+}
+
+async function runWithSftpEndpointOwner<T>(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  endpointId: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const ownerWebContentsId = resolveOwnerWebContentsId(event);
+  if (ownerWebContentsId === undefined) {
+    return action();
+  }
+  ctx.coreManager.registerSftpEndpointOwner(
+    endpointId,
+    ownerWebContentsId,
+  );
+  try {
+    return await ctx.coreManager.runWithSessionOwner(
+      ownerWebContentsId,
+      action,
+    );
+  } catch (error) {
+    ctx.coreManager.releaseSftpEndpointOwner(endpointId, ownerWebContentsId);
+    throw error;
+  }
+}
+
+function assertSftpEndpointAccess(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  endpointId: string,
+): void {
+  const ownerWebContentsId = resolveOwnerWebContentsId(event);
+  if (ownerWebContentsId !== undefined) {
+    ctx.coreManager.assertSftpEndpointOwner(endpointId, ownerWebContentsId);
+  }
+}
+
+function assertSftpTransferAccess(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  jobId: string,
+): void {
+  const ownerWebContentsId = resolveOwnerWebContentsId(event);
+  if (ownerWebContentsId !== undefined) {
+    ctx.coreManager.assertSftpTransferOwner(jobId, ownerWebContentsId);
+  }
+}
+
+function assertTransferEndpointAccess(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  input: TransferStartInput,
+): void {
+  if (input.source.kind === "remote") {
+    assertSftpEndpointAccess(ctx, event, input.source.endpointId);
+  }
+  if (input.target.kind === "remote") {
+    assertSftpEndpointAccess(ctx, event, input.target.endpointId);
+  }
+  if (input.retryOfJobId) {
+    assertSftpTransferAccess(ctx, event, input.retryOfJobId);
+  }
+}
 
 export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.sftp.connect,
-    async (_event, input: DesktopSftpConnectInput) => {
+    async (event, input: DesktopSftpConnectInput) => runWithSftpEndpointOwner(ctx, event, input.endpointId, async () => {
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -297,12 +367,13 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
       }
 
       return endpoint;
-    },
+    }),
   );
 
   ipcMain.handle(
     ipcChannels.sftp.disconnect,
-    async (_event, endpointId: string) => {
+    async (event, endpointId: string) => {
+      assertSftpEndpointAccess(ctx, event, endpointId);
       try {
         await ctx.coreManager.sftpDisconnect(endpointId);
       } finally {
@@ -311,87 +382,108 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
-  ipcMain.handle(ipcChannels.sftp.list, async (_event, input: SftpListInput) =>
-    ctx.coreManager.sftpList(input),
+  ipcMain.handle(
+    ipcChannels.sftp.list,
+    async (event, input: SftpListInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
+      return ctx.coreManager.sftpList(input);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.mkdir,
-    async (_event, input: SftpMkdirInput) => {
+    async (event, input: SftpMkdirInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpMkdir(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.rename,
-    async (_event, input: SftpRenameInput) => {
+    async (event, input: SftpRenameInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpRename(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.chmod,
-    async (_event, input: SftpChmodInput) => {
+    async (event, input: SftpChmodInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpChmod(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.chown,
-    async (_event, input: SftpChownInput) => {
+    async (event, input: SftpChownInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpChown(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.listPrincipals,
-    async (_event, input: SftpListPrincipalsInput) =>
-      ctx.coreManager.sftpListPrincipals(input),
+    async (event, input: SftpListPrincipalsInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
+      return ctx.coreManager.sftpListPrincipals(input);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.delete,
-    async (_event, input: SftpDeleteInput) => {
+    async (event, input: SftpDeleteInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpDelete(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.readFile,
-    async (_event, input: SftpReadFileInput) =>
-      ctx.coreManager.sftpReadFile(input),
+    async (event, input: SftpReadFileInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
+      return ctx.coreManager.sftpReadFile(input);
+    },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.writeFile,
-    async (_event, input: SftpWriteFileInput) => {
+    async (event, input: SftpWriteFileInput) => {
+      assertSftpEndpointAccess(ctx, event, input.endpointId);
       await ctx.coreManager.sftpWriteFile(input);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.startTransfer,
-    async (_event, input: TransferStartInput) =>
-      ctx.coreManager.startSftpTransfer(input),
+    async (event, input: TransferStartInput) => {
+      assertTransferEndpointAccess(ctx, event, input);
+      return runWithIpcSessionOwner(ctx, event, () =>
+        ctx.coreManager.startSftpTransfer(input),
+      );
+    },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.cancelTransfer,
-    async (_event, jobId: string) => {
+    async (event, jobId: string) => {
+      assertSftpTransferAccess(ctx, event, jobId);
       await ctx.coreManager.cancelSftpTransfer(jobId);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.pauseTransfer,
-    async (_event, jobId: string) => {
+    async (event, jobId: string) => {
+      assertSftpTransferAccess(ctx, event, jobId);
       await ctx.coreManager.pauseSftpTransfer(jobId);
     },
   );
 
   ipcMain.handle(
     ipcChannels.sftp.resumeTransfer,
-    async (_event, jobId: string) => {
+    async (event, jobId: string) => {
+      assertSftpTransferAccess(ctx, event, jobId);
       await ctx.coreManager.resumeSftpTransfer(jobId);
     },
   );

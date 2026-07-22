@@ -31,6 +31,7 @@ export function ShortcutsDialog({ open, onClose }: ShortcutsDialogProps) {
     {
       title: '일반',
       items: [
+        { label: '새 창', keys: [cmd, 'N'] },
         { label: '호스트 검색', keys: [cmd, 'K'] },
         { label: '검색 / 찾기', keys: [cmd, 'F'] },
       ],

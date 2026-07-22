@@ -1,5 +1,6 @@
 import { BrowserWindow, app } from "electron";
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   existsSync,
@@ -945,8 +946,12 @@ export class CoreManager {
   private shutdownPromise: Promise<void> | null = null;
   private isShuttingDown = false;
   private readonly windows = new Set<BrowserWindow>();
+  private readonly windowsByWebContentsId = new Map<number, BrowserWindow>();
+  private readonly sessionOwnerStorage = new AsyncLocalStorage<number>();
+  private readonly sessionOwnerById = new Map<string, number>();
   private readonly tabs = new Map<string, TerminalTab>();
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
+  private readonly sftpEndpointOwnerById = new Map<string, number>();
   private readonly sftpLifecycleByEndpointId = new Map<
     string,
     SftpLifecycleState
@@ -960,6 +965,14 @@ export class CoreManager {
     string,
     ContainersEndpointRuntime
   >();
+  private readonly containerSubscriberIdsByEndpoint = new Map<
+    string,
+    Set<number>
+  >();
+  private readonly pendingContainerInteractiveEventByEndpoint = new Map<
+    string,
+    CoreEvent<Record<string, unknown>>
+  >();
   private readonly containerLifecycleByScopeId = new Map<
     string,
     ContainerLifecycleState
@@ -969,6 +982,7 @@ export class CoreManager {
     Map<string, string>
   >();
   private readonly transferJobs = new Map<string, TransferJob>();
+  private readonly transferOwnerById = new Map<string, number>();
   private readonly portForwardDefinitions = new Map<
     string,
     PortForwardDefinition
@@ -1214,14 +1228,155 @@ export class CoreManager {
   }
 
   registerWindow(window: BrowserWindow): void {
+    const ownerWebContentsId = window.webContents.id;
     this.windows.add(window);
+    this.windowsByWebContentsId.set(ownerWebContentsId, window);
     window.on("closed", () => {
       this.windows.delete(window);
+      this.windowsByWebContentsId.delete(ownerWebContentsId);
+      this.disconnectSessionsOwnedBy(ownerWebContentsId);
+      void this.disconnectSftpResourcesOwnedBy(ownerWebContentsId);
+      void this.releaseContainerSubscriptionsOwnedBy(ownerWebContentsId);
     });
   }
 
-  listTabs(): TerminalTab[] {
-    return Array.from(this.tabs.values());
+  runWithSessionOwner<T>(
+    ownerWebContentsId: number,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    return this.sessionOwnerStorage.run(ownerWebContentsId, action);
+  }
+
+  registerSftpEndpointOwner(
+    endpointId: string,
+    ownerWebContentsId: number,
+  ): void {
+    const existingOwner = this.sftpEndpointOwnerById.get(endpointId);
+    if (
+      existingOwner !== undefined &&
+      existingOwner !== ownerWebContentsId
+    ) {
+      throw new Error("다른 창에서 사용 중인 SFTP 연결입니다.");
+    }
+    this.sftpEndpointOwnerById.set(endpointId, ownerWebContentsId);
+  }
+
+  releaseSftpEndpointOwner(
+    endpointId: string,
+    ownerWebContentsId?: number,
+  ): void {
+    const existingOwner = this.sftpEndpointOwnerById.get(endpointId);
+    if (
+      ownerWebContentsId === undefined ||
+      existingOwner === ownerWebContentsId
+    ) {
+      this.sftpEndpointOwnerById.delete(endpointId);
+    }
+  }
+
+  assertSftpEndpointOwner(
+    endpointId: string,
+    ownerWebContentsId: number,
+  ): void {
+    if (this.sftpEndpointOwnerById.get(endpointId) !== ownerWebContentsId) {
+      throw new Error("이 창에 속한 SFTP 연결이 아닙니다.");
+    }
+  }
+
+  assertSftpTransferOwner(
+    jobId: string,
+    ownerWebContentsId: number,
+  ): void {
+    if (this.transferOwnerById.get(jobId) !== ownerWebContentsId) {
+      throw new Error("이 창에 속한 파일 전송이 아닙니다.");
+    }
+  }
+
+  sendSftpConnectionProgressToOwner(
+    endpointId: string,
+    payload: unknown,
+  ): boolean {
+    return this.sendToSftpEndpointOwner(
+      endpointId,
+      ipcChannels.sftp.connectionProgress,
+      payload,
+    );
+  }
+
+  registerContainerSubscriber(
+    endpointId: string,
+    ownerWebContentsId: number,
+  ): void {
+    const subscribers =
+      this.containerSubscriberIdsByEndpoint.get(endpointId) ?? new Set<number>();
+    subscribers.add(ownerWebContentsId);
+    this.containerSubscriberIdsByEndpoint.set(endpointId, subscribers);
+  }
+
+  releaseContainerSubscriber(
+    endpointId: string,
+    ownerWebContentsId: number,
+  ): { released: boolean; remainingSubscribers: number } {
+    const subscribers = this.containerSubscriberIdsByEndpoint.get(endpointId);
+    if (!subscribers) {
+      return { released: false, remainingSubscribers: 0 };
+    }
+    const wasInteractiveOwner =
+      subscribers.values().next().value === ownerWebContentsId;
+    const released = subscribers.delete(ownerWebContentsId);
+    if (released && wasInteractiveOwner && subscribers.size > 0) {
+      const pendingEvent =
+        this.pendingContainerInteractiveEventByEndpoint.get(endpointId);
+      if (pendingEvent) {
+        this.sendToContainerSubscribers(
+          endpointId,
+          ipcChannels.ssh.event,
+          pendingEvent,
+          true,
+        );
+      }
+    }
+    if (subscribers.size === 0) {
+      this.pendingContainerInteractiveEventByEndpoint.delete(endpointId);
+    }
+    return {
+      released,
+      remainingSubscribers: subscribers.size,
+    };
+  }
+
+  assertContainerSubscriber(
+    endpointId: string,
+    ownerWebContentsId: number,
+  ): void {
+    if (
+      !this.containerSubscriberIdsByEndpoint
+        .get(endpointId)
+        ?.has(ownerWebContentsId)
+    ) {
+      throw new Error("이 창에서 연 Container 탭이 아닙니다.");
+    }
+  }
+
+  sendContainersConnectionProgressToSubscribers(
+    endpointId: string,
+    payload: unknown,
+  ): boolean {
+    return this.sendToContainerSubscribers(
+      endpointId,
+      ipcChannels.containers.connectionProgress,
+      payload,
+    );
+  }
+
+  listTabs(ownerWebContentsId?: number): TerminalTab[] {
+    const tabs = Array.from(this.tabs.values());
+    if (ownerWebContentsId === undefined) {
+      return tabs;
+    }
+    return tabs.filter(
+      (tab) => this.resolveSessionOwnerId(tab.sessionId) === ownerWebContentsId,
+    );
   }
 
   listPortForwardRuntimes(): PortForwardRuntimeRecord[] {
@@ -1497,6 +1652,7 @@ export class CoreManager {
     await this.start();
     // 세션 ID는 Electron 쪽에서 먼저 발급해서 탭과 SSH 세션을 동일한 식별자로 묶는다.
     const sessionId = randomUUID();
+    this.assignCurrentSessionOwner(sessionId);
     const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
     if (startupCommand) {
       this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
@@ -1797,6 +1953,11 @@ export class CoreManager {
       runtimeCommand,
       unsupportedReason,
     });
+    const subscribers = this.containerSubscriberIdsByEndpoint.get(endpointId);
+    if (subscribers && subscribers.size === 0) {
+      await this.containersDisconnect(endpointId).catch(() => undefined);
+      throw new Error("Container 탭을 연 창이 모두 닫혔습니다.");
+    }
     return { runtime, runtimeCommand, unsupportedReason };
   }
 
@@ -2175,6 +2336,7 @@ export class CoreManager {
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
+    this.assignCurrentSessionOwner(sessionId);
     const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
     if (startupCommand) {
       this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
@@ -2245,6 +2407,7 @@ export class CoreManager {
     startupCommand?: string;
   }): Promise<{ sessionId: string }> {
     const sessionId = randomUUID();
+    const ownerWebContentsId = this.sessionOwnerStorage.getStore();
     const startupCommand = this.normalizeStartupCommand(payload.startupCommand);
     if (startupCommand) {
       this.pendingStartupCommandsBySessionId.set(sessionId, startupCommand);
@@ -2272,8 +2435,21 @@ export class CoreManager {
         if (settled) {
           return;
         }
+        if (
+          ownerWebContentsId !== undefined &&
+          !this.windowsByWebContentsId.has(ownerWebContentsId)
+        ) {
+          settled = true;
+          clearTimeout(openTimeout);
+          this.clearPendingStartupCommand(sessionId);
+          socket.close();
+          reject(new Error("연결을 요청한 창이 닫혔습니다."));
+          return;
+        }
         settled = true;
         clearTimeout(openTimeout);
+
+        this.assignSessionOwner(sessionId, ownerWebContentsId);
 
         this.sessionTransportById.set(sessionId, "aws-ssm-server-proxy");
         this.sessionLifecycleById.set(sessionId, {
@@ -2576,6 +2752,7 @@ export class CoreManager {
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
+    this.assignCurrentSessionOwner(sessionId);
     this.sessionTransportById.set(sessionId, "local-shell");
     if (payload.lifecycle) {
       this.sessionLifecycleById.set(sessionId, {
@@ -2631,6 +2808,7 @@ export class CoreManager {
   ): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
+    this.assignCurrentSessionOwner(sessionId);
     this.sessionTransportById.set(sessionId, "serial");
     const targetDescription =
       payload.transport === "local"
@@ -3078,6 +3256,7 @@ export class CoreManager {
       hostId: string;
     },
   ): Promise<SftpEndpointSummary> {
+    this.assignCurrentSftpEndpointOwner(payload.endpointId);
     await this.start();
     const { endpointId, ...connectPayload } = payload;
     this.startSftpLifecycle(payload);
@@ -3135,6 +3314,7 @@ export class CoreManager {
       );
       this.sftpEndpoints.delete(endpointId);
       this.finalizeSftpLifecycle(endpointId, "closed", null);
+      this.sftpEndpointOwnerById.delete(endpointId);
     } catch (error) {
       this.finalizeSftpLifecycle(endpointId, "error", toErrorMessage(error));
       throw error;
@@ -3362,6 +3542,7 @@ export class CoreManager {
       updatedAt: now,
       request: input,
     };
+    this.assignCurrentTransferOwner(jobId);
     this.transferJobs.set(jobId, job);
     this.broadcastTransferEvent({ job });
     this.sendControl({
@@ -3880,6 +4061,96 @@ export class CoreManager {
     }
   }
 
+  disconnectSessionsOwnedBy(ownerWebContentsId: number): void {
+    for (const [sessionId, ownerId] of Array.from(this.sessionOwnerById)) {
+      if (ownerId === ownerWebContentsId) {
+        this.disconnect(sessionId);
+      }
+    }
+  }
+
+  private async disconnectSftpResourcesOwnedBy(
+    ownerWebContentsId: number,
+  ): Promise<void> {
+    const activeTransferJobIds = Array.from(this.transferOwnerById)
+      .filter(([, ownerId]) => ownerId === ownerWebContentsId)
+      .map(([jobId]) => jobId)
+      .filter((jobId) => {
+        const status = this.transferJobs.get(jobId)?.status;
+        return (
+          status !== undefined &&
+          status !== "completed" &&
+          status !== "failed" &&
+          status !== "cancelled"
+        );
+      });
+    for (const jobId of activeTransferJobIds) {
+      await this.cancelSftpTransfer(jobId).catch(() => undefined);
+    }
+    for (const [jobId, ownerId] of Array.from(this.transferOwnerById)) {
+      if (ownerId !== ownerWebContentsId) {
+        continue;
+      }
+      const status = this.transferJobs.get(jobId)?.status;
+      if (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled"
+      ) {
+        this.transferOwnerById.delete(jobId);
+      }
+    }
+
+    const endpointIds = Array.from(this.sftpEndpointOwnerById)
+      .filter(([, ownerId]) => ownerId === ownerWebContentsId)
+      .map(([endpointId]) => endpointId);
+    for (const endpointId of endpointIds) {
+      try {
+        await this.sftpDisconnect(endpointId);
+      } catch {
+        // The owning window is already gone; shutdown cleanup is best-effort.
+      } finally {
+        this.releaseSftpEndpointOwner(endpointId, ownerWebContentsId);
+      }
+    }
+  }
+
+  private async releaseContainerSubscriptionsOwnedBy(
+    ownerWebContentsId: number,
+  ): Promise<void> {
+    const endpointIds = Array.from(this.containerSubscriberIdsByEndpoint)
+      .filter(([, subscribers]) => subscribers.has(ownerWebContentsId))
+      .map(([endpointId]) => endpointId);
+    for (const endpointId of endpointIds) {
+      const { remainingSubscribers } = this.releaseContainerSubscriber(
+        endpointId,
+        ownerWebContentsId,
+      );
+      if (remainingSubscribers > 0) {
+        continue;
+      }
+      if (this.getContainersEndpointRuntime(endpointId)) {
+        try {
+          await this.containersDisconnect(endpointId);
+        } catch (error) {
+          this.broadcastTerminalEvent({
+            type: "containersError",
+            endpointId,
+            payload: { message: toErrorMessage(error) },
+          });
+        }
+      }
+      const lifecycleId = this.getContainerLifecycleId(endpointId);
+      if (lifecycleId) {
+        this.finalizeContainerLifecycleForScope(
+          endpointId,
+          lifecycleId,
+          "Container 탭을 연 창이 모두 닫혔습니다.",
+        );
+      }
+    }
+  }
+
   disconnect(sessionId: string): void {
     this.desiredResizeBySession.delete(sessionId);
     this.sentResizeBySession.delete(sessionId);
@@ -3903,6 +4174,7 @@ export class CoreManager {
           message: "client requested disconnect",
         },
       });
+      this.sessionOwnerById.delete(sessionId);
       return;
     }
     this.sendControl({
@@ -4158,6 +4430,7 @@ export class CoreManager {
     this.desiredResizeBySession.delete(sessionId);
     this.sentResizeBySession.delete(sessionId);
     this.sessionLifecycleById.delete(sessionId);
+    this.sessionOwnerById.delete(sessionId);
   }
 
   private handleControlEvent(event: CoreEvent<Record<string, unknown>>): void {
@@ -4188,6 +4461,13 @@ export class CoreManager {
         this.transferJobs.set(next.job.id, next.job);
         this.recordSftpTransferLifecycle(next.job);
         this.clearSftpPartialRecordsForJob(next.job.id);
+        const ownerWebContentsId = this.transferOwnerById.get(next.job.id);
+        if (
+          ownerWebContentsId !== undefined &&
+          !this.windowsByWebContentsId.has(ownerWebContentsId)
+        ) {
+          this.transferOwnerById.delete(next.job.id);
+        }
       }
       return;
     }
@@ -4326,6 +4606,7 @@ export class CoreManager {
           }
           this.sessionLifecycleById.delete(event.sessionId);
           this.broadcastTerminalEvent(event);
+          this.sessionOwnerById.delete(event.sessionId);
           return;
         }
         // 코어 이벤트를 탭 상태로 축약해 renderer가 바로 표시할 수 있게 한다.
@@ -4432,6 +4713,9 @@ export class CoreManager {
         }
       }
       this.broadcastTerminalEvent(event);
+      if (event.type === "closed") {
+        this.sessionOwnerById.delete(event.sessionId);
+      }
       return;
     }
 
@@ -4639,11 +4923,15 @@ export class CoreManager {
     this.rejectAllPendingSessionReady("SSH core process stopped");
     this.tabs.clear();
     this.sftpEndpoints.clear();
+    this.sftpEndpointOwnerById.clear();
     this.sftpLifecycleByEndpointId.clear();
     this.containerEndpoints.clear();
+    this.containerSubscriberIdsByEndpoint.clear();
+    this.pendingContainerInteractiveEventByEndpoint.clear();
     this.containerLifecycleByScopeId.clear();
     this.containerNamesByEndpointId.clear();
     this.transferJobs.clear();
+    this.transferOwnerById.clear();
     this.portForwardDefinitions.clear();
     this.portForwardRuntimes.clear();
     this.desiredResizeBySession.clear();
@@ -4663,6 +4951,7 @@ export class CoreManager {
     this.startupCommandFlushStateBySessionId.clear();
     this.pendingStartupCommandsBySessionId.clear();
     this.sessionLifecycleById.clear();
+    this.sessionOwnerById.clear();
   }
 
   private buildForwardRuntime(
@@ -4725,7 +5014,60 @@ export class CoreManager {
   private broadcastTerminalEvent(
     event: CoreEvent<Record<string, unknown>>,
   ): void {
-    // 여러 윈도우가 열려 있어도 동일한 코어 상태를 함께 받도록 fan-out 한다.
+    if (
+      event.endpointId &&
+      this.sendToSftpEndpointOwner(
+        event.endpointId,
+        ipcChannels.ssh.event,
+        event,
+      )
+    ) {
+      void this.onTerminalEvent?.(event);
+      return;
+    }
+    if (
+      event.endpointId &&
+      this.containerSubscriberIdsByEndpoint.has(event.endpointId)
+    ) {
+      const isInteractiveChallenge =
+        event.type === "keyboardInteractiveChallenge";
+      const isInteractiveResolution =
+        event.type === "keyboardInteractiveResolved";
+      if (isInteractiveChallenge) {
+        this.pendingContainerInteractiveEventByEndpoint.set(
+          event.endpointId,
+          event,
+        );
+      }
+      if (
+        this.sendToContainerSubscribers(
+          event.endpointId,
+          ipcChannels.ssh.event,
+          event,
+          isInteractiveChallenge || isInteractiveResolution,
+        )
+      ) {
+        if (
+          isInteractiveResolution ||
+          event.type === "containersConnected" ||
+          event.type === "containersDisconnected" ||
+          event.type === "containersError"
+        ) {
+          this.pendingContainerInteractiveEventByEndpoint.delete(
+            event.endpointId,
+          );
+        }
+        void this.onTerminalEvent?.(event);
+        return;
+      }
+    }
+    if (
+      event.sessionId &&
+      this.sendToSessionOwner(event.sessionId, ipcChannels.ssh.event, event)
+    ) {
+      void this.onTerminalEvent?.(event);
+      return;
+    }
     for (const window of this.windows) {
       if (!window.isDestroyed()) {
         window.webContents.send(ipcChannels.ssh.event, event);
@@ -4735,6 +5077,17 @@ export class CoreManager {
   }
 
   private broadcastTransferEvent(event: TransferJobEvent): void {
+    const ownerWebContentsId = this.transferOwnerById.get(event.job.id);
+    if (
+      ownerWebContentsId !== undefined &&
+      this.sendToWindowOwner(
+        ownerWebContentsId,
+        ipcChannels.sftp.transferEvent,
+        event,
+      )
+    ) {
+      return;
+    }
     for (const window of this.windows) {
       if (!window.isDestroyed()) {
         window.webContents.send(ipcChannels.sftp.transferEvent, event);
@@ -4760,12 +5113,15 @@ export class CoreManager {
     // 출력이 들어올 때마다 프롬프트가 떴는지 보고 그때 startup command를 보낸다.
     this.noteOutputForStartupCommand(metadata.sessionId, payload);
     // 터미널 데이터는 별도 채널로 보내 renderer store를 거치지 않고 xterm으로 직결한다.
-    for (const window of this.windows) {
-      if (!window.isDestroyed()) {
-        window.webContents.send(ipcChannels.ssh.data, {
-          sessionId: metadata.sessionId,
-          chunk: new Uint8Array(payload),
-        });
+    const streamPayload = {
+      sessionId: metadata.sessionId,
+      chunk: new Uint8Array(payload),
+    };
+    if (!this.sendToSessionOwner(metadata.sessionId, ipcChannels.ssh.data, streamPayload)) {
+      for (const window of this.windows) {
+        if (!window.isDestroyed()) {
+          window.webContents.send(ipcChannels.ssh.data, streamPayload);
+        }
       }
     }
     void this.onTerminalStream?.(metadata.sessionId, new Uint8Array(payload));
@@ -4780,6 +5136,113 @@ export class CoreManager {
         capture.truncated = true;
       }
     }
+  }
+
+  private assignCurrentSessionOwner(sessionId: string): void {
+    this.assignSessionOwner(sessionId, this.sessionOwnerStorage.getStore());
+  }
+
+  private assignCurrentSftpEndpointOwner(endpointId: string): void {
+    const ownerWebContentsId =
+      this.sessionOwnerStorage.getStore() ??
+      this.sftpEndpointOwnerById.get(endpointId);
+    if (ownerWebContentsId === undefined) {
+      return;
+    }
+    if (!this.windowsByWebContentsId.has(ownerWebContentsId)) {
+      throw new Error("연결을 요청한 창이 닫혔습니다.");
+    }
+    this.registerSftpEndpointOwner(endpointId, ownerWebContentsId);
+  }
+
+  private assignCurrentTransferOwner(jobId: string): void {
+    const ownerWebContentsId = this.sessionOwnerStorage.getStore();
+    if (ownerWebContentsId === undefined) {
+      return;
+    }
+    if (!this.windowsByWebContentsId.has(ownerWebContentsId)) {
+      throw new Error("파일 전송을 요청한 창이 닫혔습니다.");
+    }
+    this.transferOwnerById.set(jobId, ownerWebContentsId);
+  }
+
+  private assignSessionOwner(
+    sessionId: string,
+    ownerWebContentsId: number | undefined,
+  ): void {
+    if (ownerWebContentsId !== undefined) {
+      this.sessionOwnerById.set(sessionId, ownerWebContentsId);
+    }
+  }
+
+  private resolveSessionOwnerId(sessionId: string): number | undefined {
+    const directOwner = this.sessionOwnerById.get(sessionId);
+    if (directOwner !== undefined) {
+      return directOwner;
+    }
+    if (!sessionId.startsWith("tmux:")) {
+      return undefined;
+    }
+    const controlSessionId = sessionId.slice(
+      "tmux:".length,
+      sessionId.lastIndexOf(":"),
+    );
+    return this.sessionOwnerById.get(controlSessionId);
+  }
+
+  private sendToSessionOwner(
+    sessionId: string,
+    channel: string,
+    payload: unknown,
+  ): boolean {
+    const ownerWebContentsId = this.resolveSessionOwnerId(sessionId);
+    if (ownerWebContentsId === undefined) {
+      return false;
+    }
+    return this.sendToWindowOwner(ownerWebContentsId, channel, payload);
+  }
+
+  private sendToSftpEndpointOwner(
+    endpointId: string,
+    channel: string,
+    payload: unknown,
+  ): boolean {
+    const ownerWebContentsId = this.sftpEndpointOwnerById.get(endpointId);
+    if (ownerWebContentsId === undefined) {
+      return false;
+    }
+    return this.sendToWindowOwner(ownerWebContentsId, channel, payload);
+  }
+
+  private sendToContainerSubscribers(
+    endpointId: string,
+    channel: string,
+    payload: unknown,
+    firstSubscriberOnly = false,
+  ): boolean {
+    const subscribers = this.containerSubscriberIdsByEndpoint.get(endpointId);
+    if (!subscribers) {
+      return false;
+    }
+    const ownerIds = firstSubscriberOnly
+      ? Array.from(subscribers).slice(0, 1)
+      : Array.from(subscribers);
+    for (const ownerWebContentsId of ownerIds) {
+      this.sendToWindowOwner(ownerWebContentsId, channel, payload);
+    }
+    return true;
+  }
+
+  private sendToWindowOwner(
+    ownerWebContentsId: number,
+    channel: string,
+    payload: unknown,
+  ): boolean {
+    const window = this.windowsByWebContentsId.get(ownerWebContentsId);
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(channel, payload);
+    }
+    return true;
   }
 
   private startSftpLifecycle(
