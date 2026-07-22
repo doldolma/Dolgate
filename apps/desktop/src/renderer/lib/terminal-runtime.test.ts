@@ -126,7 +126,8 @@ describe('terminal-runtime', () => {
       lineHeight: 1,
       letterSpacing: 0,
       minimumContrastRatio: 1,
-      macOptionIsMeta: false
+      macOptionIsMeta: false,
+      macOptionClickForcesSelection: true
     });
     expect(terminal.loadAddon).toHaveBeenNthCalledWith(1, fitAddon);
     expect(terminal.loadAddon).toHaveBeenNthCalledWith(2, searchAddon);
