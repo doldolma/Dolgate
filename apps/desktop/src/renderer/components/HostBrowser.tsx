@@ -68,6 +68,8 @@ export function HostBrowser({ hostEditor, ...props }: HostBrowserProps) {
       ? hb.hosts.find((entry) => entry.id === contextMenu.hostIds[0]) ?? null
       : null;
   const contextMenuIsEcs = contextMenuHost ? isAwsEcsHostRecord(contextMenuHost) : false;
+  const groupExportHostIds =
+    contextMenu?.kind === 'group' ? hb.getHostIdsInGroupTrees(contextMenu.groupPaths) : [];
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[240px_minmax(0,1fr)_minmax(360px,400px)] max-[1320px]:grid-cols-[220px_minmax(0,1fr)_340px] max-[1040px]:grid-cols-1">
@@ -282,6 +284,23 @@ export function HostBrowser({ hostEditor, ...props }: HostBrowserProps) {
                   >
                     이름 변경
                   </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-[0.7rem] rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--text)] transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                    disabled={groupExportHostIds.length === 0}
+                    onClick={() => {
+                      hb.setContextMenu(null);
+                      if (groupExportHostIds.length > 0) {
+                        hb.onExportHosts(groupExportHostIds);
+                      }
+                    }}
+                  >
+                    <Download className={CTX_ICON} aria-hidden />
+                    내보내기... ({groupExportHostIds.length}개 호스트)
+                  </button>
+
+                  <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
+
                   <button
                     type="button"
                     className="flex w-full items-center rounded-[10px] px-[0.9rem] py-[0.7rem] text-left text-[var(--danger-text)] transition-colors duration-150 hover:bg-[var(--danger-bg)]"

@@ -340,6 +340,7 @@ interface AwsProfileSelectOption {
   profileId: string | null;
   profileName: string;
   isMissingCurrent?: boolean;
+  isUnconfigured?: boolean;
 }
 
 function isHostDraftValid(draft: HostDraft): boolean {
@@ -697,12 +698,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ? options.some((option) => option.profileId === currentProfileId)
       : false;
     if (!hasCurrentOption) {
-      options.unshift({
-        value: currentProfileId ?? `missing:${currentProfileName}`,
-        profileId: currentProfileId,
-        profileName: currentProfileName || 'Unknown',
-        isMissingCurrent: true,
-      });
+      options.unshift(
+        currentProfileId || currentProfileName
+          ? {
+              value: currentProfileId ?? `missing:${currentProfileName}`,
+              profileId: currentProfileId,
+              profileName: currentProfileName || 'Unknown',
+              isMissingCurrent: true,
+            }
+          : {
+              value: '',
+              profileId: null,
+              profileName: '프로필 선택',
+              isUnconfigured: true,
+            },
+      );
     }
     return options;
   }, [awsProfiles, draft, isAwsDraft]);
@@ -710,7 +720,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     if (!isAwsDraft) {
       return '';
     }
-    return draft.awsProfileId ?? `missing:${draft.awsProfileName.trim()}`;
+    const profileName = draft.awsProfileName.trim();
+    return draft.awsProfileId ?? (profileName ? `missing:${profileName}` : '');
   }, [draft, isAwsDraft]);
 
   useEffect(() => {
@@ -1530,7 +1541,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
             >
               {awsProfileOptions.map((profile) => (
-                <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent}>
+                <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent || profile.isUnconfigured}>
                   {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
                 </option>
               ))}
@@ -1681,7 +1692,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
             >
               {awsProfileOptions.map((profile) => (
-                <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent}>
+                <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent || profile.isUnconfigured}>
                   {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
                 </option>
               ))}

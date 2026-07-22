@@ -52,6 +52,9 @@ const OFFLINE_RETRY_MAX_DELAY_MS = 15 * 60_000;
 const VAULT_API_REQUEST_TIMEOUT_MS = 30_000;
 const VAULT_API_REQUEST_TIMEOUT_MESSAGE =
   "동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS = 10_000;
+const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE =
+  "비밀번호 변경 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
 const CLIENT_HEADER_NAME = "X-Dolgate-Client";
 const CLIENT_VERSION_HEADER_NAME = "X-Dolgate-Client-Version";
 const CLIENT_PLATFORM_HEADER_NAME = "X-Dolgate-Platform";
@@ -933,6 +936,15 @@ export class AuthService {
       );
     }
 
+    const controller = new AbortController();
+    let timeout: NodeJS.Timeout | null = null;
+    const timeoutError = new Error(ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE);
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(timeoutError);
+      }, ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS);
+    });
     const requestChange = async (): Promise<Response> => {
       const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
       if (!refreshToken) {
@@ -945,26 +957,38 @@ export class AuthService {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ currentPassword, newPassword, refreshToken }),
+        signal: controller.signal,
       });
     };
 
-    let response = await requestChange();
-    if (response.status === 401 || response.status === 403) {
-      const refreshed = await this.refreshSession();
-      if (refreshed.status !== "authenticated") {
-        throw new Error(
-          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
-        );
+    try {
+      await Promise.race([
+        (async () => {
+          let response = await requestChange();
+          if (response.status === 401 || response.status === 403) {
+            const refreshed = await this.refreshSession();
+            if (refreshed.status !== "authenticated") {
+              throw new Error(
+                "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+              );
+            }
+            response = await requestChange();
+          }
+          if (!response.ok) {
+            throw new Error(
+              await toApiErrorMessage(
+                response,
+                "로그인 비밀번호를 변경하지 못했습니다.",
+              ),
+            );
+          }
+        })(),
+        timeoutPromise,
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
       }
-      response = await requestChange();
-    }
-    if (!response.ok) {
-      throw new Error(
-        await toApiErrorMessage(
-          response,
-          "로그인 비밀번호를 변경하지 못했습니다.",
-        ),
-      );
     }
 
     const session =

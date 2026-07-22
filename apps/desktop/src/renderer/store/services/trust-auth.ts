@@ -29,8 +29,11 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     if (profileId) {
       return profileId;
     }
+    const label = profileName.trim();
     throw new Error(
-      `연결된 AWS 프로필 "${profileName}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`,
+      label
+        ? `연결된 AWS 프로필 "${label}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`
+        : "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 선택해 주세요.",
     );
   };
 

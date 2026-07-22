@@ -18,6 +18,7 @@ import {
 } from "@shared";
 import { randomUUID } from "node:crypto";
 import type {
+  DolgateImportItemCounts,
   DolgateImportPreview,
   DolgateImportResult,
   HostExportPreview,
@@ -61,6 +62,7 @@ interface ImportPlan {
   awsProfileMetadata: AwsProfileMetadataRecord[];
   snippets: SnippetRecord[];
   skippedCount: number;
+  skippedCounts: DolgateImportItemCounts;
   warnings: string[];
 }
 
@@ -450,20 +452,24 @@ export function buildDolgateHostBundle(
   for (const hostId of rootHostIds) {
     collectHost(hostId, new Set<string>());
   }
-  const hosts = state.data.hosts.filter((record) => includedHostIds.has(record.id));
+  const selectedHosts = state.data.hosts.filter((record) => includedHostIds.has(record.id));
+  const profileMetadataById = new Map(
+    state.data.awsProfiles.map((record) => [record.id, record]),
+  );
 
   const secretRefs = new Set<string>();
   const profileIds = new Set<string>();
+  const availableProfileIdsByHostId = new Map<string, string>();
   const snippetIds = new Set<string>();
-  for (const host of hosts) {
+  for (const host of selectedHosts) {
     if (host.kind === "ssh" && host.secretRef) {
       secretRefs.add(host.secretRef);
     }
     if (host.kind === "aws-ec2" || host.kind === "aws-ecs") {
-      if (!host.awsProfileId) {
-        throw new Error(`${host.label}: AWS 프로필 ID가 없어 내보낼 수 없습니다.`);
+      if (host.awsProfileId && profileMetadataById.has(host.awsProfileId)) {
+        profileIds.add(host.awsProfileId);
+        availableProfileIdsByHostId.set(host.id, host.awsProfileId);
       }
-      profileIds.add(host.awsProfileId);
     }
     if (
       "startupCommand" in host &&
@@ -473,39 +479,62 @@ export function buildDolgateHostBundle(
     }
   }
 
-  const profileMetadataById = new Map(
-    state.data.awsProfiles.map((record) => [record.id, record]),
-  );
   const awsProfiles: ManagedAwsProfilePayload[] = [];
   const loadedProfileIds = new Set<string>();
-  const collectProfile = (profileId: string, visiting: Set<string>) => {
+  const unavailableProfileIds = new Set<string>();
+  const collectProfile = (profileId: string, visiting: Set<string>): boolean => {
     if (loadedProfileIds.has(profileId)) {
-      return;
+      return true;
+    }
+    if (unavailableProfileIds.has(profileId)) {
+      return false;
     }
     if (visiting.has(profileId)) {
       throw new Error("AWS 역할 프로필 연결에 순환 참조가 있습니다.");
     }
     const metadata = profileMetadataById.get(profileId);
-    if (!metadata) {
-      throw new Error("연결된 AWS 프로필을 찾을 수 없습니다.");
+    const storedProfile = state.secure.managedAwsProfilesById[profileId];
+    if (!metadata || !storedProfile) {
+      unavailableProfileIds.add(profileId);
+      return false;
     }
     const payload = parseAwsProfile(
       decodeJsonRecord<ManagedAwsProfilePayload>(
-        state.secure.managedAwsProfilesById[profileId],
+        storedProfile,
         metadata.name,
       ),
     );
     visiting.add(profileId);
-    if (payload.kind === "role") {
-      collectProfile(payload.sourceProfileId, visiting);
+    if (payload.kind === "role" && !collectProfile(payload.sourceProfileId, visiting)) {
+      visiting.delete(profileId);
+      unavailableProfileIds.add(profileId);
+      return false;
     }
     visiting.delete(profileId);
     awsProfiles.push({ ...payload, id: metadata.id, name: metadata.name });
     loadedProfileIds.add(profileId);
+    return true;
   };
   for (const profileId of profileIds) {
     collectProfile(profileId, new Set<string>());
   }
+  const hosts = selectedHosts.map((host) => {
+    if (host.kind === "aws-ec2" || host.kind === "aws-ecs") {
+      const availableProfileId = availableProfileIdsByHostId.get(host.id);
+      return {
+        ...host,
+        awsProfileId:
+          availableProfileId && loadedProfileIds.has(availableProfileId)
+            ? availableProfileId
+            : null,
+        awsProfileName:
+          availableProfileId && loadedProfileIds.has(availableProfileId)
+            ? host.awsProfileName
+            : "",
+      };
+    }
+    return host;
+  });
 
   const secrets = [...secretRefs].map((secretRef) => {
     const payload = parseSecret(
@@ -613,10 +642,29 @@ export function buildHostTransferImportPlan(
   const now = new Date().toISOString();
   const warnings: string[] = [];
   let skippedCount = 0;
-  const takeNew = <T>(items: T[], existingIds: Set<string>, idOf: (item: T) => string) =>
+  const skippedCounts: DolgateImportItemCounts = {
+    hosts: 0,
+    groups: 0,
+    secrets: 0,
+    awsProfiles: 0,
+    snippets: 0,
+    portForwards: 0,
+    dnsOverrides: 0,
+    knownHosts: 0,
+  };
+  const recordSkip = (kind: keyof DolgateImportItemCounts) => {
+    skippedCount += 1;
+    skippedCounts[kind] += 1;
+  };
+  const takeNew = <T>(
+    items: T[],
+    existingIds: Set<string>,
+    idOf: (item: T) => string,
+    kind: keyof DolgateImportItemCounts,
+  ) =>
     items.filter((item) => {
       if (existingIds.has(idOf(item))) {
-        skippedCount += 1;
+        recordSkip(kind);
         return false;
       }
       return true;
@@ -624,10 +672,10 @@ export function buildHostTransferImportPlan(
 
   const existingGroupIds = new Set(state.data.groups.map((record) => record.id));
   const existingGroupPaths = new Set(state.data.groups.map((record) => record.path));
-  const groups = takeNew(bundle.groups, existingGroupIds, (record) => record.id)
+  const groups = takeNew(bundle.groups, existingGroupIds, (record) => record.id, "groups")
     .filter((record) => {
       if (existingGroupPaths.has(record.path)) {
-        skippedCount += 1;
+        recordSkip("groups");
         return false;
       }
       existingGroupPaths.add(record.path);
@@ -642,6 +690,7 @@ export function buildHostTransferImportPlan(
     bundle.awsProfiles,
     existingProfileIds,
     (record) => record.id,
+    "awsProfiles",
   ).map((record) => {
     let name = record.name;
     if (usedProfileNames.has(name)) {
@@ -669,26 +718,31 @@ export function buildHostTransferImportPlan(
     bundle.secrets,
     new Set(state.data.secretMetadata.map((record) => record.secretRef)),
     (record) => record.secretRef,
+    "secrets",
   ).map((record) => ({ ...record, updatedAt: now }));
   const secretMetadata = secrets.map((record) => buildSecretMetadata(record, now));
   const snippets = takeNew(
     bundle.snippets,
     new Set(state.data.snippets.map((record) => record.id)),
     (record) => record.id,
+    "snippets",
   ).map((record) => ({ ...record, updatedAt: now }));
   const hosts = takeNew(
     bundle.hosts,
     new Set(state.data.hosts.map((record) => record.id)),
     (record) => record.id,
+    "hosts",
   ).map((record) => {
     if (record.kind !== "aws-ec2" && record.kind !== "aws-ecs") {
       return { ...record, updatedAt: now };
     }
+    const profileName = record.awsProfileId
+      ? profileNameById.get(record.awsProfileId)
+      : null;
     return {
       ...record,
-      awsProfileName:
-        (record.awsProfileId ? profileNameById.get(record.awsProfileId) : null) ??
-        record.awsProfileName,
+      awsProfileId: profileName ? record.awsProfileId : null,
+      awsProfileName: profileName ?? "",
       updatedAt: now,
     };
   });
@@ -696,6 +750,7 @@ export function buildHostTransferImportPlan(
     bundle.portForwards,
     new Set(state.data.portForwards.map((record) => record.id)),
     (record) => record.id,
+    "portForwards",
   ).map((record) => ({ ...record, updatedAt: now }));
 
   const knownEndpointKeys = new Map(
@@ -708,6 +763,7 @@ export function buildHostTransferImportPlan(
     bundle.knownHosts,
     new Set(state.data.knownHosts.map((record) => record.id)),
     (record) => record.id,
+    "knownHosts",
   )
     .filter((record) => {
       const key = `${record.host.toLocaleLowerCase()}\u0000${record.port}`;
@@ -716,7 +772,7 @@ export function buildHostTransferImportPlan(
         knownEndpointKeys.set(key, record);
         return true;
       }
-      skippedCount += 1;
+      recordSkip("knownHosts");
       if (existing.fingerprintSha256 !== record.fingerprintSha256) {
         warnings.push(`${record.host}:${record.port}의 host key가 달라 가져오지 않았습니다.`);
       }
@@ -731,6 +787,7 @@ export function buildHostTransferImportPlan(
     bundle.dnsOverrides,
     new Set(state.data.dnsOverrides.map((record) => record.id)),
     (record) => record.id,
+    "dnsOverrides",
   )
     .filter((record) => {
       const key = record.hostname.toLocaleLowerCase();
@@ -738,7 +795,7 @@ export function buildHostTransferImportPlan(
         dnsHostnames.add(key);
         return true;
       }
-      skippedCount += 1;
+      recordSkip("dnsOverrides");
       warnings.push(`${record.hostname} DNS override가 이미 있어 가져오지 않았습니다.`);
       return false;
     })
@@ -815,6 +872,7 @@ export function buildHostTransferImportPlan(
     awsProfileMetadata,
     snippets,
     skippedCount,
+    skippedCounts,
     warnings,
   };
 }
@@ -831,6 +889,7 @@ function toImportPreview(snapshotId: string, plan: ImportPlan): DolgateImportPre
     dnsOverrideCount: plan.dnsOverrides.length,
     knownHostCount: plan.knownHosts.length,
     skippedCount: plan.skippedCount,
+    skippedCounts: plan.skippedCounts,
     warnings: plan.warnings,
   };
 }
@@ -846,6 +905,7 @@ function toImportResult(plan: ImportPlan): DolgateImportResult {
     importedDnsOverrideCount: plan.dnsOverrides.length,
     importedKnownHostCount: plan.knownHosts.length,
     skippedCount: plan.skippedCount,
+    skippedCounts: plan.skippedCounts,
     warnings: plan.warnings,
   };
 }

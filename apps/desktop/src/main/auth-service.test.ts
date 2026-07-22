@@ -709,6 +709,29 @@ describe("AuthService account password", () => {
     });
     expect(service.getState().session?.user.passwordState).toBe("set");
   });
+
+  it("times out a stalled password change request", async () => {
+    vi.useFakeTimers();
+    try {
+      const serverUrl = "https://ssh.doldolma.com";
+      const { service } = await createService(serverUrl);
+      await (
+        service as unknown as {
+          persistSession: (value: AuthSession) => Promise<void>;
+        }
+      ).persistSession(createSession(serverUrl));
+      vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+      const request = service.changeAccountPassword("old-password", "new-password");
+      const rejection = expect(request).rejects.toThrow(
+        "비밀번호 변경 요청 시간이 초과되었습니다.",
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("AuthService E2EE vault", () => {

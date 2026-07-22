@@ -141,6 +141,7 @@ const hosts: HostRecord[] = [
     id: 'aws-1',
     kind: 'aws-ec2',
     label: 'AWS App',
+    awsProfileId: 'profile-default',
     awsProfileName: 'default',
     awsRegion: 'ap-northeast-2',
     awsInstanceId: 'i-aws',
@@ -366,6 +367,64 @@ afterEach(() => {
 });
 
 describe('HostBrowser helpers', () => {
+  it.each([
+    {
+      kind: 'aws-ec2' as const,
+      host: hosts.find((host) => host.id === 'aws-1')!,
+      expectedProfileName: 'default',
+    },
+    {
+      kind: 'aws-ecs' as const,
+      host: {
+        id: 'ecs-1',
+        kind: 'aws-ecs' as const,
+        label: 'AWS ECS',
+        awsProfileId: 'profile-production',
+        awsProfileName: 'production',
+        awsRegion: 'ap-northeast-2',
+        awsEcsClusterArn:
+          'arn:aws:ecs:ap-northeast-2:123456789012:cluster/production',
+        awsEcsClusterName: 'production',
+        groupName: null,
+        tags: [],
+        terminalThemeId: null,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+      },
+      expectedProfileName: 'production',
+    },
+  ])('shows the configured profile in the $kind Overview', ({ host, expectedProfileName }) => {
+    renderBrowser({
+      groups: [],
+      hosts: [host],
+      selectedHostId: host.id,
+    });
+
+    const heading = screen.getByRole('heading', { name: 'Host Information' });
+    const section = heading.parentElement?.parentElement;
+    expect(section).not.toBeNull();
+    const profileLabel = within(section as HTMLElement).getByText('Profile');
+    expect(profileLabel).toBeInTheDocument();
+    expect(profileLabel.parentElement).toHaveTextContent(expectedProfileName);
+  });
+
+  it('shows an unconfigured AWS profile explicitly in Overview', () => {
+    const host = {
+      ...(hosts.find((entry) => entry.id === 'aws-1') as Extract<
+        HostRecord,
+        { kind: 'aws-ec2' }
+      >),
+      awsProfileId: null,
+      awsProfileName: '',
+    };
+
+    renderBrowser({ groups: [], hosts: [host], selectedHostId: host.id });
+
+    const heading = screen.getByRole('heading', { name: 'Host Information' });
+    const section = heading.parentElement?.parentElement;
+    expect(within(section as HTMLElement).getByText('Not configured')).toBeInTheDocument();
+  });
+
   it('normalizes group paths and checks membership within the current tree', () => {
     expect(normalizeGroupPath('  Servers // Nested  ')).toBe('Servers/Nested');
     expect(isGroupWithinPath('Servers/Nested', 'Servers')).toBe(true);
@@ -1135,6 +1194,41 @@ describe('HostBrowser dialogs', () => {
     expect(onDuplicateHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
   });
 
+  it('selects every visible host with Cmd/Ctrl+A', () => {
+    renderBrowser();
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.keyDown(window, { key: 'a', metaKey: true });
+
+    expect(appCard.dataset.hostCardState).toBe('selected');
+    expect(dbCard.dataset.hostCardState).toBe('selected');
+  });
+
+  it('limits Cmd/Ctrl+A selection to the current filtered host list', () => {
+    renderBrowser({ searchQuery: 'App' });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true });
+
+    expect(appCard.dataset.hostCardState).toBe('selected');
+    expect(screen.queryByText('DB')).not.toBeInTheDocument();
+  });
+
+  it('preserves native Cmd/Ctrl+A behavior in inputs and open dialogs', () => {
+    renderBrowser();
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const searchInput = screen.getByRole('textbox', { name: 'Search hosts' });
+    fireEvent.keyDown(searchInput, { key: 'a', ctrlKey: true });
+    expect(appCard.dataset.hostCardState).not.toBe('selected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Group' }));
+    fireEvent.keyDown(window, { key: 'a', metaKey: true });
+    expect(appCard.dataset.hostCardState).not.toBe('selected');
+  });
+
   it('opens one export flow for all selected hosts from the context menu', () => {
     const onExportHosts = vi.fn();
     renderBrowser({ onExportHosts });
@@ -1147,6 +1241,38 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: '내보내기... (2개)' }));
 
     expect(onExportHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
+  });
+
+  it('exports every host in a group subtree from the group context menu', () => {
+    const onExportHosts = vi.fn();
+    renderBrowser({ onExportHosts });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    fireEvent.contextMenu(groupTree.getByRole('button', { name: /Servers 3/ }));
+    fireEvent.click(screen.getByRole('button', { name: '내보내기... (3개 호스트)' }));
+
+    expect(onExportHosts).toHaveBeenCalledWith(['host-1', 'aws-1', 'host-2']);
+  });
+
+  it('disables group export when the group subtree has no hosts', () => {
+    renderBrowser({
+      groups: [
+        ...groups,
+        {
+          id: 'group-empty',
+          name: 'Empty',
+          path: 'Empty',
+          parentPath: null,
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const groupTree = within(screen.getByLabelText('Group tree'));
+    fireEvent.contextMenu(groupTree.getByRole('button', { name: /Empty 0/ }));
+
+    expect(screen.getByRole('button', { name: '내보내기... (0개 호스트)' })).toBeDisabled();
   });
 
   it('connects all selected hosts from the context menu in visible order', async () => {

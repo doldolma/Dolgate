@@ -160,6 +160,17 @@ export interface DolgateImportFileSelection {
   fileName: string;
 }
 
+export interface DolgateImportItemCounts {
+  hosts: number;
+  groups: number;
+  secrets: number;
+  awsProfiles: number;
+  snippets: number;
+  portForwards: number;
+  dnsOverrides: number;
+  knownHosts: number;
+}
+
 export interface DolgateImportPreview {
   snapshotId: string;
   hostCount: number;
@@ -171,6 +182,7 @@ export interface DolgateImportPreview {
   dnsOverrideCount: number;
   knownHostCount: number;
   skippedCount: number;
+  skippedCounts: DolgateImportItemCounts;
   warnings: string[];
 }
 
@@ -184,6 +196,7 @@ export interface DolgateImportResult {
   importedDnsOverrideCount: number;
   importedKnownHostCount: number;
   skippedCount: number;
+  skippedCounts: DolgateImportItemCounts;
   warnings: string[];
 }
 

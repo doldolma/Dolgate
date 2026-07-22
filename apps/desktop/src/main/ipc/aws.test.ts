@@ -28,12 +28,14 @@ describe("registerAwsIpcHandlers", () => {
       profileName: "default",
     });
     const deleteProfile = vi.fn().mockResolvedValue(undefined);
+    const listProfiles = vi.fn().mockResolvedValue([]);
+    const refreshAwsProfileNameCaches = vi.fn(() => []);
     const upsertDeletion = vi.fn();
     const queueSync = vi.fn();
 
     registerAwsIpcHandlers({
       awsService: {
-        listProfiles: vi.fn(),
+        listProfiles,
         listExternalProfiles: vi.fn(),
         createProfile: vi.fn(),
         prepareSsoProfile: vi.fn(),
@@ -61,7 +63,7 @@ describe("registerAwsIpcHandlers", () => {
       },
       queueSync,
       hosts: {
-        refreshAwsProfileNameCaches: vi.fn(() => []),
+        refreshAwsProfileNameCaches,
         getById: vi.fn(),
       },
       assertAwsEcsHost: vi.fn(),
@@ -80,6 +82,8 @@ describe("registerAwsIpcHandlers", () => {
 
     expect(getProfileDetails).toHaveBeenCalledWith("default");
     expect(deleteProfile).toHaveBeenCalledWith("default");
+    expect(listProfiles).toHaveBeenCalledTimes(1);
+    expect(refreshAwsProfileNameCaches).toHaveBeenCalledWith([]);
     expect(upsertDeletion).toHaveBeenCalledWith("awsProfiles", "profile-default");
     expect(queueSync).toHaveBeenCalledTimes(1);
   });
