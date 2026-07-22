@@ -3,7 +3,10 @@
 Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경을 이어 쓰는 SSH 워크스페이스입니다.
 호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
 
-![Dolgate 홈 화면](./docs/hosts-workspace.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/hosts-workspace-dark.png">
+  <img alt="Dolgate 홈 화면" src="./docs/hosts-workspace.png">
+</picture>
 
 ### 대표 기능
 
@@ -76,7 +79,10 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 - 자동 업데이트 · 셀프호스팅 sync-api
 
-![Dolgate 포트 포워딩 화면](./docs/port-forwarding.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/port-forwarding-dark.png">
+  <img alt="Dolgate 포트 포워딩 화면" src="./docs/port-forwarding.png">
+</picture>
 
 ## 빠른 시작
 
@@ -109,7 +115,11 @@ curl http://127.0.0.1:8080/healthz
 [sync-api 자체 호스팅 가이드](./docs/sync-api-self-hosting.md)를 참고해 주세요.
 
 데스크톱 앱에서는 로그인 화면의 톱니바퀴를 눌러 `Login Server`를 self-host 주소로 바꾸면 됩니다.
-![Login Server 설정 화면](docs/login.png)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/login-dark.png">
+  <img alt="Login Server 설정 화면" src="./docs/login.png">
+</picture>
 
 ## 중요한 사항
 
