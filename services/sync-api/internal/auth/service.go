@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -24,6 +25,18 @@ import (
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrExpiredRefreshToken = errors.New("expired refresh token")
 var ErrInvalidExchangeCode = errors.New("invalid exchange code")
+var ErrCurrentPasswordInvalid = errors.New("current password is invalid")
+var ErrPasswordChangeUnavailable = errors.New("password change is unavailable")
+var ErrPasswordReuse = errors.New("new password matches current password")
+var ErrInvalidPassword = errors.New("invalid password")
+
+type PasswordState string
+
+const (
+	PasswordStateUnset       PasswordState = "unset"
+	PasswordStateSet         PasswordState = "set"
+	PasswordStateUnavailable PasswordState = "unavailable"
+)
 
 // ErrVaultClientOutdated — E2EE(v2) 볼트 계정에 v2 를 모르는 구버전 클라이언트가 세션을
 // 요청했다. keyBase64 없는 세션을 내려주면 구버전이 정체불명 에러로 죽으므로, 라우터가
@@ -97,8 +110,9 @@ type OfflineLease struct {
 
 type SessionBootstrap struct {
 	User struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
+		ID            string        `json:"id"`
+		Email         string        `json:"email"`
+		PasswordState PasswordState `json:"passwordState"`
 	} `json:"user"`
 	Tokens         TokenPair      `json:"tokens"`
 	VaultBootstrap VaultBootstrap `json:"vaultBootstrap"`
@@ -114,6 +128,7 @@ type Service struct {
 	refreshTokenIdleTTL time.Duration
 	offlineLeaseTTL     time.Duration
 	refreshHandoffTTL   time.Duration
+	localAuthEnabled    bool
 }
 
 // Claims는 access token에 실어 보낼 사용자 식별 정보다.
@@ -143,6 +158,7 @@ func NewService(
 	refreshTokenIdleTTL time.Duration,
 	offlineLeaseTTL time.Duration,
 	refreshHandoffTTL time.Duration,
+	localAuthEnabled bool,
 ) (*Service, error) {
 	signingKey, signingPublicKeyPEM, err := resolveSigningKeypair(signingPrivateKeyPEM, signingPrivateKeyPath)
 	if err != nil {
@@ -157,6 +173,7 @@ func NewService(
 		refreshTokenIdleTTL: refreshTokenIdleTTL,
 		offlineLeaseTTL:     offlineLeaseTTL,
 		refreshHandoffTTL:   refreshHandoffTTL,
+		localAuthEnabled:    localAuthEnabled,
 	}, nil
 }
 
@@ -226,6 +243,55 @@ func (s *Service) Logout(ctx context.Context, refreshToken string) error {
 		return nil
 	}
 	return s.store.DeleteRefreshToken(ctx, hashToken(refreshToken))
+}
+
+// ChangePassword 는 로컬 비밀번호의 최초 설정(OIDC 전용 계정)과 기존 비밀번호 변경을
+// 함께 처리한다. 기존 비밀번호가 있으면 현재 값을 반드시 다시 확인하고, 없으면 같은
+// 이메일의 검증된 OIDC identity가 있어야 새 로그인 수단을 추가할 수 있다.
+func (s *Service) ChangePassword(ctx context.Context, userID string, currentPassword string, newPassword string, refreshToken string) error {
+	if !s.localAuthEnabled {
+		return ErrPasswordChangeUnavailable
+	}
+	if utf8.RuneCountInString(newPassword) < 8 || len([]byte(newPassword)) > 72 {
+		return ErrInvalidPassword
+	}
+
+	user, err := s.store.GetUserByID(ctx, userID)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+	expectedHash := user.PasswordHash
+	if expectedHash != "" {
+		if bcrypt.CompareHashAndPassword([]byte(expectedHash), []byte(currentPassword)) != nil {
+			return ErrCurrentPasswordInvalid
+		}
+		if bcrypt.CompareHashAndPassword([]byte(expectedHash), []byte(newPassword)) == nil {
+			return ErrPasswordReuse
+		}
+	} else {
+		verified, verifyErr := s.store.HasVerifiedAuthIdentity(ctx, user.ID, user.Email)
+		if verifyErr != nil {
+			return verifyErr
+		}
+		if !verified {
+			return ErrPasswordChangeUnavailable
+		}
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if err := s.store.UpdateUserPassword(ctx, user.ID, expectedHash, string(passwordHash), hashToken(refreshToken)); err != nil {
+		if errors.Is(err, store.ErrPasswordConflict) {
+			return ErrCurrentPasswordInvalid
+		}
+		if errors.Is(err, store.ErrRefreshTokenNotFound) {
+			return ErrInvalidCredentials
+		}
+		return err
+	}
+	return nil
 }
 
 // DeleteAccount 는 회원 탈퇴 — 사용자의 모든 서버측 데이터를 즉시 영구 삭제한다.
@@ -409,6 +475,10 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 	// 볼트 게이트(구클라 × v2 계정 → ErrVaultClientOutdated/426)를 토큰 발급보다 먼저
 	// 수행한다 — 뒤에 두면 거부될 세션의 refresh token 행이 시도마다 쌓인다(전달되지
 	// 않아 사용 불가지만 idle TTL 까지 잔존하는 쓰레기).
+	passwordState, err := s.resolvePasswordState(ctx, user)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
 	vaultBootstrap, err := s.resolveVaultBootstrap(ctx, user.ID, vaultResolution)
 	if err != nil {
 		return SessionBootstrap{}, err
@@ -425,6 +495,7 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 	var session SessionBootstrap
 	session.User.ID = user.ID
 	session.User.Email = user.Email
+	session.User.PasswordState = passwordState
 	session.Tokens = tokens
 	session.VaultBootstrap = vaultBootstrap
 	session.OfflineLease = offlineLease
@@ -439,6 +510,10 @@ func (s *Service) issueSession(ctx context.Context, user store.User, issuer stri
 // lost refresh responses. Response shape is identical to issueSession, so every
 // client version persists and reuses the returned token exactly as before.
 func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, issuer string, refreshToken string, refreshExpiresAt time.Time, vaultResolution VaultResolution) (SessionBootstrap, error) {
+	passwordState, err := s.resolvePasswordState(ctx, user)
+	if err != nil {
+		return SessionBootstrap{}, err
+	}
 	accessToken, err := s.signAccessToken(user)
 	if err != nil {
 		return SessionBootstrap{}, err
@@ -455,6 +530,7 @@ func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, 
 	var session SessionBootstrap
 	session.User.ID = user.ID
 	session.User.Email = user.Email
+	session.User.PasswordState = passwordState
 	session.Tokens = TokenPair{
 		AccessToken:      accessToken,
 		RefreshToken:     refreshToken,
@@ -464,6 +540,23 @@ func (s *Service) issueSessionWithRefresh(ctx context.Context, user store.User, 
 	session.OfflineLease = offlineLease
 	session.SyncServerTime = time.Now().UTC().Format(time.RFC3339)
 	return session, nil
+}
+
+func (s *Service) resolvePasswordState(ctx context.Context, user store.User) (PasswordState, error) {
+	if !s.localAuthEnabled {
+		return PasswordStateUnavailable, nil
+	}
+	if user.PasswordHash != "" {
+		return PasswordStateSet, nil
+	}
+	verified, err := s.store.HasVerifiedAuthIdentity(ctx, user.ID, user.Email)
+	if err != nil {
+		return PasswordStateUnavailable, err
+	}
+	if verified {
+		return PasswordStateUnset, nil
+	}
+	return PasswordStateUnavailable, nil
 }
 
 func (s *Service) signAccessToken(user store.User) (string, error) {

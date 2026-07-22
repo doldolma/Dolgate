@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { validateNewVaultPassphrase } from "@dolssh/shared-core";
+import {
+  validateAccountPassword,
+  validateNewVaultPassphrase,
+} from "@dolssh/shared-core";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
 import {
@@ -47,6 +50,9 @@ function SettingsContent({
   const secretMetadata = useMobileAppStore((state) => state.secretMetadata);
   const logout = useMobileAppStore((state) => state.logout);
   const deleteAccount = useMobileAppStore((state) => state.deleteAccount);
+  const changeAccountPassword = useMobileAppStore(
+    (state) => state.changeAccountPassword,
+  );
   const changeVaultPassphrase = useMobileAppStore(
     (state) => state.changeVaultPassphrase,
   );
@@ -55,6 +61,13 @@ function SettingsContent({
   const [serverUrlDraft, setServerUrlDraft] = useState(settings.serverUrl);
   const [savingServerUrl, setSavingServerUrl] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [accountPasswordOpen, setAccountPasswordOpen] = useState(false);
+  const [currentAccountPasswordDraft, setCurrentAccountPasswordDraft] =
+    useState("");
+  const [nextAccountPasswordDraft, setNextAccountPasswordDraft] = useState("");
+  const [confirmAccountPasswordDraft, setConfirmAccountPasswordDraft] =
+    useState("");
+  const [changingAccountPassword, setChangingAccountPassword] = useState(false);
   const [changePassphraseOpen, setChangePassphraseOpen] = useState(false);
   const [currentPassphraseDraft, setCurrentPassphraseDraft] = useState("");
   const [nextPassphraseDraft, setNextPassphraseDraft] = useState("");
@@ -64,6 +77,24 @@ function SettingsContent({
   useEffect(() => {
     setServerUrlDraft(settings.serverUrl);
   }, [settings.serverUrl]);
+
+  const accountPasswordState =
+    auth.status === "authenticated"
+      ? auth.session?.user.passwordState
+      : undefined;
+
+  useEffect(() => {
+    if (
+      accountPasswordState === "set" ||
+      accountPasswordState === "unset"
+    ) {
+      return;
+    }
+    setAccountPasswordOpen(false);
+    setCurrentAccountPasswordDraft("");
+    setNextAccountPasswordDraft("");
+    setConfirmAccountPasswordDraft("");
+  }, [accountPasswordState]);
 
   useEffect(() => {
     if (vault.status === "unlocked") {
@@ -121,6 +152,68 @@ function SettingsContent({
       );
     } finally {
       setDeletingAccount(false);
+    }
+  };
+
+  const nextAccountPasswordValidationMessage = nextAccountPasswordDraft
+    ? validateAccountPassword(nextAccountPasswordDraft)
+    : null;
+  const canChangeAccountPassword =
+    !changingAccountPassword &&
+    (accountPasswordState === "unset" || accountPasswordState === "set") &&
+    (accountPasswordState === "unset" ||
+      currentAccountPasswordDraft.length > 0) &&
+    validateAccountPassword(nextAccountPasswordDraft) === null &&
+    nextAccountPasswordDraft === confirmAccountPasswordDraft;
+
+  const resetAccountPasswordForm = (): void => {
+    setCurrentAccountPasswordDraft("");
+    setNextAccountPasswordDraft("");
+    setConfirmAccountPasswordDraft("");
+  };
+
+  const openAccountPassword = (): void => {
+    resetAccountPasswordForm();
+    setAccountPasswordOpen(true);
+  };
+
+  const closeAccountPassword = (): void => {
+    if (changingAccountPassword) {
+      return;
+    }
+    resetAccountPasswordForm();
+    setAccountPasswordOpen(false);
+  };
+
+  const handleChangeAccountPassword = async (): Promise<void> => {
+    if (!canChangeAccountPassword) {
+      return;
+    }
+    const isChanging = accountPasswordState === "set";
+    setChangingAccountPassword(true);
+    try {
+      await changeAccountPassword(
+        isChanging ? currentAccountPasswordDraft : "",
+        nextAccountPasswordDraft,
+      );
+      resetAccountPasswordForm();
+      setAccountPasswordOpen(false);
+      Alert.alert(
+        isChanging
+          ? "로그인 비밀번호 변경 완료"
+          : "로그인 비밀번호 설정 완료",
+      );
+    } catch (error) {
+      Alert.alert(
+        isChanging
+          ? "로그인 비밀번호 변경 실패"
+          : "로그인 비밀번호 설정 실패",
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "로그인 비밀번호를 저장하지 못했습니다.",
+      );
+    } finally {
+      setChangingAccountPassword(false);
     }
   };
 
@@ -263,6 +356,25 @@ function SettingsContent({
             </Text>
           ) : null}
           <View style={styles.row}>
+            {accountPasswordState === "set" ||
+            accountPasswordState === "unset" ? (
+              <Pressable
+                onPress={openAccountPassword}
+                style={[
+                  styles.secondaryButton,
+                  {
+                    backgroundColor: palette.surfaceAlt,
+                    borderColor: palette.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.secondaryText, { color: palette.text }]}>
+                  {accountPasswordState === "set"
+                    ? "비밀번호 변경"
+                    : "비밀번호 설정"}
+                </Text>
+              </Pressable>
+            ) : null}
             <Pressable
               onPress={() => void logout()}
               style={[
@@ -535,6 +647,147 @@ function SettingsContent({
           Version {APP_VERSION}
         </Text>
       </View>
+      {accountPasswordOpen &&
+      showFullSettings &&
+      (accountPasswordState === "set" || accountPasswordState === "unset") ? (
+        <Modal
+          animationType="fade"
+          transparent
+          visible
+          onRequestClose={closeAccountPassword}
+        >
+          <KeyboardAvoidingView
+            style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <ScrollView
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View
+                style={[
+                  styles.modalCard,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.border,
+                  },
+                ]}
+              >
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: palette.text }]}>
+                    로그인 비밀번호 {accountPasswordState === "set" ? "변경" : "설정"}
+                  </Text>
+                  <Text style={[styles.body, { color: palette.mutedText }]}>
+                    이메일 로그인에 사용하는 비밀번호입니다. 동기화 암호와는 별개입니다.
+                  </Text>
+                </View>
+                {accountPasswordState === "set" ? (
+                  <TextInput
+                    value={currentAccountPasswordDraft}
+                    onChangeText={setCurrentAccountPasswordDraft}
+                    placeholder="현재 로그인 비밀번호"
+                    placeholderTextColor={palette.mutedText}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="password"
+                    autoComplete="current-password"
+                    style={[
+                      styles.input,
+                      {
+                        color: palette.text,
+                        borderColor: palette.border,
+                        backgroundColor: palette.input,
+                      },
+                    ]}
+                  />
+                ) : null}
+                <TextInput
+                  value={nextAccountPasswordDraft}
+                  onChangeText={setNextAccountPasswordDraft}
+                  placeholder="새 로그인 비밀번호"
+                  placeholderTextColor={palette.mutedText}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="newPassword"
+                  autoComplete="new-password"
+                  style={[
+                    styles.input,
+                    {
+                      color: palette.text,
+                      borderColor: palette.border,
+                      backgroundColor: palette.input,
+                    },
+                  ]}
+                />
+                <TextInput
+                  value={confirmAccountPasswordDraft}
+                  onChangeText={setConfirmAccountPasswordDraft}
+                  placeholder="새 로그인 비밀번호 확인"
+                  placeholderTextColor={palette.mutedText}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="newPassword"
+                  autoComplete="new-password"
+                  style={[
+                    styles.input,
+                    {
+                      color: palette.text,
+                      borderColor: palette.border,
+                      backgroundColor: palette.input,
+                    },
+                  ]}
+                />
+                {nextAccountPasswordValidationMessage ? (
+                  <Text style={[styles.errorText, { color: palette.warning }]}>
+                    {nextAccountPasswordValidationMessage}
+                  </Text>
+                ) : null}
+                <View style={styles.modalActions}>
+                  <Pressable
+                    disabled={changingAccountPassword}
+                    onPress={closeAccountPassword}
+                    style={[
+                      styles.secondaryButton,
+                      {
+                        backgroundColor: palette.surfaceAlt,
+                        borderColor: palette.border,
+                        opacity: changingAccountPassword ? 0.55 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.secondaryText, { color: palette.text }]}>
+                      취소
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={!canChangeAccountPassword}
+                    onPress={() => void handleChangeAccountPassword()}
+                    style={[
+                      styles.secondaryButton,
+                      {
+                        backgroundColor: palette.accent,
+                        borderColor: palette.accent,
+                        opacity: canChangeAccountPassword ? 1 : 0.55,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.secondaryText, styles.primaryButtonText]}>
+                      {changingAccountPassword
+                        ? "저장 중..."
+                        : accountPasswordState === "set"
+                          ? "비밀번호 변경"
+                          : "비밀번호 설정"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </Modal>
+      ) : null}
       {changePassphraseOpen &&
       showFullSettings &&
       vault.status === "unlocked" ? (

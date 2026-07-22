@@ -130,6 +130,12 @@ type logoutRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`
 }
 
+type passwordChangeRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword" binding:"required"`
+	RefreshToken    string `json:"refreshToken" binding:"required"`
+}
+
 type exchangeRequest struct {
 	Code string `json:"code" binding:"required"`
 }
@@ -862,6 +868,45 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		ctx.Status(http.StatusNoContent)
+	})
+
+	// 로컬 로그인 비밀번호 관리. OIDC 전용 계정은 검증된 이메일 identity가 있을 때
+	// 최초 비밀번호를 설정할 수 있고, 이미 비밀번호가 있으면 현재 값을 다시 확인한다.
+	router.PUT("/auth/account/password", authMiddleware(authService), func(ctx *gin.Context) {
+		userID := ctx.GetString("userId")
+		var request passwordChangeRequest
+		if err := ctx.ShouldBindJSON(&request); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"code": "invalid_password", "error": "새 비밀번호를 확인해 주세요."})
+			return
+		}
+		if !authLimiters.password.Allow(accountAuthAttemptKeys(ctx.ClientIP(), userID)...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"code": "too_many_attempts", "error": tooManyAuthAttemptsMessage})
+			return
+		}
+
+		err := authService.ChangePassword(
+			ctx.Request.Context(),
+			userID,
+			request.CurrentPassword,
+			request.NewPassword,
+			request.RefreshToken,
+		)
+		switch {
+		case err == nil:
+			ctx.JSON(http.StatusOK, gin.H{"passwordState": auth.PasswordStateSet})
+		case errors.Is(err, auth.ErrCurrentPasswordInvalid):
+			ctx.JSON(http.StatusBadRequest, gin.H{"code": "current_password_invalid", "error": "현재 비밀번호가 올바르지 않습니다."})
+		case errors.Is(err, auth.ErrPasswordChangeUnavailable):
+			ctx.JSON(http.StatusConflict, gin.H{"code": "password_change_unavailable", "error": "이 계정에서는 로그인 비밀번호를 설정할 수 없습니다."})
+		case errors.Is(err, auth.ErrPasswordReuse):
+			ctx.JSON(http.StatusBadRequest, gin.H{"code": "password_reused", "error": "현재 비밀번호와 다른 비밀번호를 입력해 주세요."})
+		case errors.Is(err, auth.ErrInvalidPassword):
+			ctx.JSON(http.StatusBadRequest, gin.H{"code": "invalid_password", "error": "비밀번호는 8자 이상 72바이트 이하여야 합니다."})
+		case errors.Is(err, auth.ErrInvalidCredentials):
+			ctx.JSON(http.StatusUnauthorized, gin.H{"code": "session_invalid", "error": "세션이 만료되었습니다. 다시 로그인해 주세요."})
+		default:
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+		}
 	})
 
 	// 회원 탈퇴 — Bearer 인증 사용자의 모든 서버측 데이터(계정·인증·vault 키·기기 관찰·

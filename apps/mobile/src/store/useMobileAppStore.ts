@@ -65,6 +65,7 @@ import {
   buildLocalStateSyncPayload,
   clearStoredAuthSession,
   clearStoredSecrets,
+  changeRemoteAccountPassword,
   createDefaultMobileSettings,
   createDefaultSyncStatus,
   createLocalId,
@@ -487,6 +488,10 @@ interface MobileAppState {
   reopenAwsSsoLogin: () => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
+  changeAccountPassword: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
   setupVault: (passphrase: string) => Promise<void>;
   unlockVault: (passphrase: string) => Promise<void>;
   resetVault: () => Promise<void>;
@@ -4489,6 +4494,55 @@ export const useMobileAppStore = create<MobileAppState>()(
           await disconnectAllRuntimeSessions();
 
           await resetToSignedOutState();
+        },
+        changeAccountPassword: async (
+          currentPassword: string,
+          newPassword: string,
+        ) => {
+          const auth = get().auth;
+          const session = auth.session;
+          if (auth.status !== 'authenticated' || !session) {
+            throw new Error(
+              '온라인 로그인 상태에서만 비밀번호를 설정할 수 있습니다.',
+            );
+          }
+          const userID = session.user.id;
+          const serverUrl = normalizeServerUrl(get().settings.serverUrl);
+
+          await callWithFreshAccessToken(accessToken => {
+            const currentSession = get().auth.session;
+            if (!currentSession || currentSession.user.id !== userID) {
+              throw new Error('로그인 계정이 변경되어 작업을 취소했습니다.');
+            }
+            return changeRemoteAccountPassword(
+              serverUrl,
+              accessToken,
+              currentSession.tokens.refreshToken,
+              currentPassword,
+              newPassword,
+            );
+          });
+
+          const currentAuth = get().auth;
+          const currentSession = currentAuth.session;
+          if (
+            currentAuth.status !== 'authenticated' ||
+            !currentSession ||
+            currentSession.user.id !== userID ||
+            normalizeServerUrl(get().settings.serverUrl) !== serverUrl
+          ) {
+            throw new Error(
+              '로그인 계정 또는 서버가 변경되어 작업을 취소했습니다.',
+            );
+          }
+          const updatedSession: AuthSession = {
+            ...currentSession,
+            user: { ...currentSession.user, passwordState: 'set' },
+          };
+          await saveStoredAuthSession(updatedSession);
+          set({
+            auth: { ...currentAuth, session: updatedSession },
+          });
         },
         // 동기화 암호 최초 설정(신규 유저) — DEK 를 이 기기에서 만들고 암호로 감싸
         // 서버에 올린다. 서버는 감싼 DEK 만 보관하므로 이후 어떤 시점에도 복호화할 수 없다.

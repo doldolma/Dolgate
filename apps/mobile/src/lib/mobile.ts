@@ -5,6 +5,7 @@ import { Buffer } from 'buffer';
 import * as Keychain from 'react-native-keychain';
 import { Platform } from 'react-native';
 import type {
+  AccountPasswordState,
   AuthSession,
   AuthState,
   AwsSsoMobileLoginHandoffRequest,
@@ -820,6 +821,26 @@ export async function deleteRemoteAccount(
       headers: {
         authorization: `Bearer ${accessToken}`,
       },
+    },
+  );
+}
+
+export async function changeRemoteAccountPassword(
+  serverUrl: string,
+  accessToken: string,
+  refreshToken: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ passwordState: AccountPasswordState }> {
+  return fetchJson<{ passwordState: AccountPasswordState }>(
+    new URL('/auth/account/password', normalizeServerUrl(serverUrl)).toString(),
+    {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ currentPassword, newPassword, refreshToken }),
     },
   );
 }

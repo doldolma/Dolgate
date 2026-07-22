@@ -100,6 +100,7 @@ func createObservedTestRouterWithConfig(
 		time.Hour,
 		72*time.Hour,
 		2*time.Minute,
+		config.LocalAuthEnabled,
 	)
 	if err != nil {
 		t.Fatalf("new auth service: %v", err)
@@ -276,6 +277,71 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	router.ServeHTTP(reuseRefreshRecorder, reuseRefreshRequest)
 	if reuseRefreshRecorder.Code != http.StatusOK {
 		t.Fatalf("expected the same refresh token to keep working, got %d", reuseRefreshRecorder.Code)
+	}
+}
+
+func TestChangeAccountPasswordEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewBufferString(`{"email":"password@example.com","password":"old-password"}`))
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("signup status = %d: %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+
+	var session struct {
+		User struct {
+			PasswordState string `json:"passwordState"`
+		} `json:"user"`
+		Tokens struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+	if session.User.PasswordState != "set" {
+		t.Fatalf("passwordState = %q, want set", session.User.PasswordState)
+	}
+
+	changePassword := func(currentPassword string, newPassword string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(map[string]string{
+			"currentPassword": currentPassword,
+			"newPassword":     newPassword,
+			"refreshToken":    session.Tokens.RefreshToken,
+		})
+		if err != nil {
+			t.Fatalf("encode password request: %v", err)
+		}
+		request := httptest.NewRequest(http.MethodPut, "/auth/account/password", bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+session.Tokens.AccessToken)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	wrongCurrent := changePassword("wrong-password", "new-password")
+	if wrongCurrent.Code != http.StatusBadRequest || !strings.Contains(wrongCurrent.Body.String(), `"code":"current_password_invalid"`) {
+		t.Fatalf("wrong current response = %d: %s", wrongCurrent.Code, wrongCurrent.Body.String())
+	}
+
+	changed := changePassword("old-password", "new-password")
+	if changed.Code != http.StatusOK || !strings.Contains(changed.Body.String(), `"passwordState":"set"`) {
+		t.Fatalf("change response = %d: %s", changed.Code, changed.Body.String())
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"password@example.com","password":"new-password"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginRecorder := httptest.NewRecorder()
+	router.ServeHTTP(loginRecorder, loginRequest)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("login with new password status = %d: %s", loginRecorder.Code, loginRecorder.Body.String())
 	}
 }
 

@@ -24,6 +24,11 @@ var (
 	// ErrVaultE2EERequired 는 한 번 v2가 된 계정에서 v1 볼트를 다시 lazy 생성하려는
 	// downgrade 시도다. reset으로 볼트 행이 사라져도 users.vault_version_floor가 남는다.
 	ErrVaultE2EERequired = errors.New("e2ee vault required")
+	// ErrPasswordConflict 는 비밀번호 검증 뒤 저장하기 전에 다른 요청이 먼저 해시를
+	// 바꾼 경우다. 현재 비밀번호 오류와 같은 사용자 응답으로 처리한다.
+	ErrPasswordConflict = errors.New("password changed concurrently")
+	// ErrRefreshTokenNotFound 는 비밀번호 변경에서 유지할 현재 세션이 이미 사라진 경우다.
+	ErrRefreshTokenNotFound = errors.New("refresh token not found")
 )
 
 type User struct {
@@ -123,6 +128,8 @@ type Store interface {
 	CreateUser(ctx context.Context, email string, passwordHash string) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
+	HasVerifiedAuthIdentity(ctx context.Context, userID string, email string) (bool, error)
+	UpdateUserPassword(ctx context.Context, userID string, expectedPasswordHash string, passwordHash string, keepRefreshTokenHash string) error
 
 	GetAuthIdentity(ctx context.Context, provider string, subject string) (AuthIdentity, error)
 	SaveAuthIdentity(ctx context.Context, identity AuthIdentity) error

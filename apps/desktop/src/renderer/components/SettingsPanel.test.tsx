@@ -530,6 +530,54 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
+  it('changes an existing account password after confirming the current password', async () => {
+    const onChangeAccountPassword = vi.fn().mockResolvedValue(undefined);
+    renderSettingsPanel({ passwordState: 'set', onChangeAccountPassword });
+
+    fireEvent.click(screen.getByRole('button', { name: '비밀번호 변경' }));
+    const dialog = screen.getByRole('dialog', { name: '계정 비밀번호 변경' });
+    fireEvent.change(within(dialog).getByLabelText('현재 계정 비밀번호'), {
+      target: { value: 'old-password' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('새 계정 비밀번호'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('새 계정 비밀번호 확인'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '비밀번호 변경' }));
+
+    await waitFor(() =>
+      expect(onChangeAccountPassword).toHaveBeenCalledWith(
+        'old-password',
+        'new-password',
+      ),
+    );
+    expect(await screen.findByText('로그인 비밀번호를 변경했습니다.')).toBeInTheDocument();
+  });
+
+  it('sets an OIDC-only account password without asking for a current password', async () => {
+    const onChangeAccountPassword = vi.fn().mockResolvedValue(undefined);
+    renderSettingsPanel({ passwordState: 'unset', onChangeAccountPassword });
+
+    fireEvent.click(screen.getByRole('button', { name: '비밀번호 설정' }));
+    const dialog = screen.getByRole('dialog', { name: '계정 비밀번호 설정' });
+    expect(
+      within(dialog).queryByLabelText('현재 계정 비밀번호'),
+    ).not.toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('새 계정 비밀번호'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('새 계정 비밀번호 확인'), {
+      target: { value: 'new-password' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '비밀번호 설정' }));
+
+    await waitFor(() =>
+      expect(onChangeAccountPassword).toHaveBeenCalledWith('', 'new-password'),
+    );
+  });
+
   it('resets the sync vault only after the confirm dialog is accepted', async () => {
     const onResetVault = vi.fn().mockResolvedValue(undefined);
     renderSettingsPanel({

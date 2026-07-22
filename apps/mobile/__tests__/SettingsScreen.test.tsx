@@ -368,6 +368,110 @@ describe("SettingsScreen server save navigation", () => {
     });
   });
 
+  it("sets an OIDC-only account password without a current password", async () => {
+    const originalChangeAccountPassword =
+      useMobileAppStore.getState().changeAccountPassword;
+    const changeAccountPasswordMock = jest.fn(async () => undefined);
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    const authenticated = createAuthenticatedState();
+    if (!authenticated.session) {
+      throw new Error("authenticated test session is missing");
+    }
+    authenticated.session.user.passwordState = "unset";
+    useMobileAppStore.setState({
+      auth: authenticated,
+      vault: { status: "none" },
+      changeAccountPassword: changeAccountPasswordMock,
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "비밀번호 설정").props.onPress();
+    });
+    let modal = tree!.root.findByType(Modal);
+    expect(
+      modal.findAllByProps({ placeholder: "현재 로그인 비밀번호" }),
+    ).toHaveLength(0);
+    await act(async () => {
+      modal
+        .findByProps({ placeholder: "새 로그인 비밀번호" })
+        .props.onChangeText("new-password");
+      modal
+        .findByProps({ placeholder: "새 로그인 비밀번호 확인" })
+        .props.onChangeText("new-password");
+    });
+    modal = tree!.root.findByType(Modal);
+    await act(async () => {
+      await findPressableByText(modal, "비밀번호 설정").props.onPress();
+    });
+
+    expect(changeAccountPasswordMock).toHaveBeenCalledWith("", "new-password");
+    expect(alertSpy).toHaveBeenCalledWith("로그인 비밀번호 설정 완료");
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      useMobileAppStore.setState({
+        changeAccountPassword: originalChangeAccountPassword,
+      });
+      tree!.unmount();
+    });
+  });
+
+  it("changes a local account password after confirming the current password", async () => {
+    const originalChangeAccountPassword =
+      useMobileAppStore.getState().changeAccountPassword;
+    const changeAccountPasswordMock = jest.fn(async () => undefined);
+    const authenticated = createAuthenticatedState();
+    if (!authenticated.session) {
+      throw new Error("authenticated test session is missing");
+    }
+    authenticated.session.user.passwordState = "set";
+    useMobileAppStore.setState({
+      auth: authenticated,
+      vault: { status: "none" },
+      changeAccountPassword: changeAccountPasswordMock,
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+    await act(async () => {
+      findPressableByText(tree!.root, "비밀번호 변경").props.onPress();
+    });
+    let modal = tree!.root.findByType(Modal);
+    await act(async () => {
+      modal
+        .findByProps({ placeholder: "현재 로그인 비밀번호" })
+        .props.onChangeText("old-password");
+      modal
+        .findByProps({ placeholder: "새 로그인 비밀번호" })
+        .props.onChangeText("new-password");
+      modal
+        .findByProps({ placeholder: "새 로그인 비밀번호 확인" })
+        .props.onChangeText("new-password");
+    });
+    modal = tree!.root.findByType(Modal);
+    await act(async () => {
+      await findPressableByText(modal, "비밀번호 변경").props.onPress();
+    });
+
+    expect(changeAccountPasswordMock).toHaveBeenCalledWith(
+      "old-password",
+      "new-password",
+    );
+
+    await act(async () => {
+      useMobileAppStore.setState({
+        changeAccountPassword: originalChangeAccountPassword,
+      });
+      tree!.unmount();
+    });
+  });
+
   it("opens sync passphrase changes explicitly and clears drafts when cancelled", async () => {
     const originalChangeVaultPassphrase =
       useMobileAppStore.getState().changeVaultPassphrase;

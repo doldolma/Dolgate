@@ -676,6 +676,41 @@ describe("AuthService browser login recovery", () => {
   });
 });
 
+describe("AuthService account password", () => {
+  it("sends the current session token and updates the password state", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service } = await createService(serverUrl);
+    const session = createSession(serverUrl);
+    session.user.passwordState = "unset";
+    await (
+      service as unknown as {
+        persistSession: (value: AuthSession) => Promise<void>;
+      }
+    ).persistSession(session);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ passwordState: "set" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await service.changeAccountPassword("", "new-password");
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/auth/account/password");
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      currentPassword: "",
+      newPassword: "new-password",
+      refreshToken: session.tokens.refreshToken,
+    });
+    expect(service.getState().session?.user.passwordState).toBe("set");
+  });
+});
+
 describe("AuthService E2EE vault", () => {
   const VAULT_TEST_KDF = {
     algorithm: "argon2id",
