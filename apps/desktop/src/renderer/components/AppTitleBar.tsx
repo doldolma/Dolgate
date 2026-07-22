@@ -15,8 +15,8 @@ import {
   getSessionLastCommandAt,
 } from '../lib/terminal-cwd-registry';
 import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
-import { Badge, Button, IconButton, TabButton, Tabs } from '../ui';
-import { ArrowUpRight, Bell, Columns2, Container, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
+import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
+import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -727,6 +727,9 @@ export function AppTitleBar({
     : isAutoDownloading
       ? '업데이트를 다운로드하고 있습니다'
       : '앱 업데이트';
+  const installTooltip = updateState.release?.version
+    ? `${updateState.release.version.startsWith('v') ? '' : 'v'}${updateState.release.version} 업데이트 준비됨`
+    : '업데이트 준비됨';
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
   const isTitlebarInternalDragActive = isTabDragging || canDetachToTabs;
@@ -1559,18 +1562,33 @@ export function AppTitleBar({
       />
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
-          <IconButton
-            tone="default"
-            active={isUpdateOpen}
-            className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.15rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
-            aria-label="업데이트 상태 보기"
-            onClick={() => setIsUpdateOpen((current) => !current)}
-          >
-            <Bell className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
-            {showBadge ? <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" /> : null}
-          </IconButton>
+          {showInstallAction ? (
+            <Tooltip label={installTooltip}>
+              <Button
+                variant="primary"
+                size="sm"
+                className="h-9 min-h-9 whitespace-nowrap rounded-[9px] px-3"
+                aria-label="업데이트"
+                onClick={onInstallUpdate}
+              >
+                <Download className="h-4 w-4" aria-hidden="true" />
+                업데이트
+              </Button>
+            </Tooltip>
+          ) : (
+            <IconButton
+              tone="default"
+              active={isUpdateOpen}
+              className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.15rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
+              aria-label="업데이트 상태 보기"
+              onClick={() => setIsUpdateOpen((current) => !current)}
+            >
+              <Bell className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+              {showBadge ? <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)] ring-2 ring-[var(--chrome-bg)]" /> : null}
+            </IconButton>
+          )}
 
-          {isUpdateOpen ? (
+          {!showInstallAction && isUpdateOpen ? (
             <div
               data-testid="update-popover"
               className="absolute right-0 top-[calc(100%+0.8rem)] z-20 w-[min(24rem,calc(100vw-2rem))] rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface)] p-5 shadow-[var(--shadow-floating)]"
@@ -1630,11 +1648,6 @@ export function AppTitleBar({
                 {showDevDisabledAction ? (
                   <Button variant="secondary" disabled>
                     개발 실행에서는 비활성
-                  </Button>
-                ) : null}
-                {showInstallAction ? (
-                  <Button variant="primary" onClick={onInstallUpdate}>
-                    재시작하여 업데이트
                   </Button>
                 ) : null}
               </div>
