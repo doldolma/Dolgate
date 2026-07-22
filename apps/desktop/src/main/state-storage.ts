@@ -341,7 +341,7 @@ function normalizeSessionReplayRetentionCount(value: unknown): number {
   );
 }
 
-function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null {
+export function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null {
   if (
     !isObject(value) ||
     typeof value.id !== 'string' ||
@@ -447,7 +447,7 @@ function normalizePortForwardRule(value: unknown): PortForwardRuleRecord | null 
   return record;
 }
 
-function normalizeDnsOverrideRecord(value: unknown): DnsOverrideRecord | null {
+export function normalizeDnsOverrideRecord(value: unknown): DnsOverrideRecord | null {
   if (
     !isObject(value) ||
     typeof value.id !== 'string' ||
@@ -609,7 +609,7 @@ function normalizeStoredHostStartupCommand(value: unknown): HostStartupCommand |
   return null;
 }
 
-function normalizeHostRecord(value: unknown): HostRecord | null {
+export function normalizeHostRecord(value: unknown): HostRecord | null {
   if (!isObject(value) || typeof value.id !== 'string' || typeof value.label !== 'string') {
     return null;
   }

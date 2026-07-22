@@ -15,6 +15,7 @@ import {
 import { AwsImportDialog } from '../components/AwsImportDialog';
 import { HostBrowser } from '../components/HostBrowser';
 import { HostDrawer } from '../components/HostDrawer';
+import { DolgateImportDialog, HostExportDialog } from '../components/HostTransferDialogs';
 import { changeVaultPassphrase, resetVault } from '../services/desktop/auth-window-updater';
 import { getJumpHostCandidates } from '../components/HostForm';
 import { LogsPanel } from '../components/LogsPanel';
@@ -75,6 +76,8 @@ export function HomeShell({
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'overview' | 'connection'>('overview');
   const [isAwsImportOpen, setIsAwsImportOpen] = useState(false);
+  const [isDolgateImportOpen, setIsDolgateImportOpen] = useState(false);
+  const [exportHostIds, setExportHostIds] = useState<string[] | null>(null);
   const [isOpenSshImportOpen, setIsOpenSshImportOpen] = useState(false);
   const [isXshellImportOpen, setIsXshellImportOpen] = useState(false);
   const [isTermiusImportOpen, setIsTermiusImportOpen] = useState(false);
@@ -426,6 +429,10 @@ export function HomeShell({
               setSelectedHostId(null);
               homeViewModel.openCreateHostDrawer();
             }}
+            onOpenDolgateImport={() => {
+              resetHostBrowserMessages();
+              setIsDolgateImportOpen(true);
+            }}
             onOpenSerialImport={() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
@@ -455,6 +462,10 @@ export function HomeShell({
               resetHostBrowserMessages();
               setSelectedHostId(null);
               setIsWarpgateImportOpen(true);
+            }}
+            onExportHosts={(hostIds) => {
+              resetHostBrowserMessages();
+              setExportHostIds(hostIds);
             }}
             onCreateGroup={homeViewModel.createGroup}
             onRemoveGroup={homeViewModel.removeGroup}
@@ -707,6 +718,30 @@ export function HomeShell({
         onClose={() => setIsAwsImportOpen(false)}
         onImport={async (draft) => {
           await homeViewModel.saveHost(null, draft);
+        }}
+      />
+
+      <HostExportDialog
+        open={Boolean(exportHostIds)}
+        hostIds={exportHostIds ?? []}
+        onClose={() => setExportHostIds(null)}
+        onExported={(result) => {
+          setHostBrowserStatus(
+            `${result.exportedHostCount}개 호스트를 내보냈습니다.${result.skippedHostCount > 0 ? ` ${result.skippedHostCount}개는 제외했습니다.` : ''}`,
+          );
+          setHostBrowserError(result.warnings[0] ?? null);
+        }}
+      />
+
+      <DolgateImportDialog
+        open={isDolgateImportOpen}
+        onClose={() => setIsDolgateImportOpen(false)}
+        onImported={async (result) => {
+          await homeViewModel.refreshSyncedWorkspaceData();
+          setHostBrowserStatus(
+            `Dolgate 파일에서 호스트 ${result.importedHostCount}개를 가져왔습니다.${result.skippedCount > 0 ? ` 이미 있는 항목 ${result.skippedCount}개는 건너뛰었습니다.` : ''}`,
+          );
+          setHostBrowserError(result.warnings[0] ?? null);
         }}
       />
 

@@ -543,6 +543,27 @@ export function createMockApi(): DesktopApi {
       cancelBrowserImport: vi.fn().mockResolvedValue(undefined),
       onImportEvent: vi.fn(() => () => undefined),
     },
+    hostTransfer: {
+      previewExport: vi.fn().mockResolvedValue({
+        selectedHostCount: 1,
+        dolgateHostCount: 1,
+        opensshHostCount: 1,
+        opensshDependencyCount: 0,
+        opensshSkippedCount: 0,
+        opensshWarnings: [],
+      }),
+      exportSelection: vi.fn().mockResolvedValue({
+        canceled: false,
+        savedPath: "/tmp/hosts.dolgate",
+        exportedHostCount: 1,
+        skippedHostCount: 0,
+        warnings: [],
+      }),
+      pickImportFile: vi.fn().mockResolvedValue(null),
+      probeImport: vi.fn(),
+      commitImport: vi.fn(),
+      discardImport: vi.fn().mockResolvedValue(undefined),
+    },
     groups: {
       list: vi.fn().mockResolvedValue([
         {

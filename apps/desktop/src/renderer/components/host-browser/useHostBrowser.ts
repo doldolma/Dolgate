@@ -38,6 +38,7 @@ export const HOSTS_DRAG_MIME_TYPE = 'application/x-dolssh-host-ids';
 export const GROUP_DRAG_MIME_TYPE = 'application/x-dolssh-group-path';
 
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
+  'Import Dolgate',
   'Import OpenSSH',
   'Import Serial',
   'Import from Termius',
@@ -318,6 +319,7 @@ export interface UseHostBrowserParams {
   onHostViewModeChange?: (mode: HostViewMode) => void | Promise<void>;
   onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
+  onOpenDolgateImport: () => void;
   onOpenSerialImport: () => void;
   onOpenAwsImport: () => void;
   onOpenOpenSshImport: () => void;
@@ -333,6 +335,7 @@ export interface UseHostBrowserParams {
   onSelectHost: (hostId: string) => void;
   onEditHost: (hostId: string) => void;
   onDuplicateHosts: (hostIds: string[]) => Promise<void>;
+  onExportHosts: (hostIds: string[]) => void;
   onMoveHostToGroup: (hostId: string, groupPath: string | null) => Promise<void>;
   onRemoveHost: (hostId: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;

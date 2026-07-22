@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   beginBrowserLogin: vi.fn(),
   reopenBrowserLogin: vi.fn(),
   cancelBrowserLogin: vi.fn(),
+  changeAccountPassword: vi.fn(),
   checkForUpdates: vi.fn(),
   closeWindow: vi.fn(),
   deleteAccount: vi.fn(),

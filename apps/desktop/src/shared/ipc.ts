@@ -130,6 +130,63 @@ export type DesktopWindowLaunchIntent = {
   hostId: string;
 };
 
+export type HostExportFormat = "dolgate" | "openssh";
+
+export interface HostExportPreview {
+  selectedHostCount: number;
+  dolgateHostCount: number;
+  opensshHostCount: number;
+  opensshDependencyCount: number;
+  opensshSkippedCount: number;
+  opensshWarnings: string[];
+}
+
+export interface HostExportSelectionInput {
+  hostIds: string[];
+  format: HostExportFormat;
+  password?: string;
+}
+
+export interface HostExportResult {
+  canceled: boolean;
+  savedPath: string | null;
+  exportedHostCount: number;
+  skippedHostCount: number;
+  warnings: string[];
+}
+
+export interface DolgateImportFileSelection {
+  filePath: string;
+  fileName: string;
+}
+
+export interface DolgateImportPreview {
+  snapshotId: string;
+  hostCount: number;
+  groupCount: number;
+  secretCount: number;
+  awsProfileCount: number;
+  snippetCount: number;
+  portForwardCount: number;
+  dnsOverrideCount: number;
+  knownHostCount: number;
+  skippedCount: number;
+  warnings: string[];
+}
+
+export interface DolgateImportResult {
+  importedHostCount: number;
+  importedGroupCount: number;
+  importedSecretCount: number;
+  importedAwsProfileCount: number;
+  importedSnippetCount: number;
+  importedPortForwardCount: number;
+  importedDnsOverrideCount: number;
+  importedKnownHostCount: number;
+  skippedCount: number;
+  warnings: string[];
+}
+
 // Electron main과 Go SSH 코어가 주고받는 명령/이벤트의 집합이다.
 export type CoreCommandType =
   | "health"
@@ -1022,6 +1079,19 @@ export interface DesktopApi {
       input: OpenSshImportSelectionInput,
     ) => Promise<OpenSshImportResult>;
     discardSnapshot: (snapshotId: string) => Promise<void>;
+  };
+  hostTransfer: {
+    previewExport: (hostIds: string[]) => Promise<HostExportPreview>;
+    exportSelection: (
+      input: HostExportSelectionInput,
+    ) => Promise<HostExportResult>;
+    pickImportFile: () => Promise<DolgateImportFileSelection | null>;
+    probeImport: (
+      filePath: string,
+      password: string,
+    ) => Promise<DolgateImportPreview>;
+    commitImport: (snapshotId: string) => Promise<DolgateImportResult>;
+    discardImport: (snapshotId: string) => Promise<void>;
   };
   xshell: {
     probeDefault: () => Promise<XshellProbeResult>;

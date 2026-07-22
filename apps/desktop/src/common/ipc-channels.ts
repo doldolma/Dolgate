@@ -91,6 +91,14 @@ export const ipcChannels = {
     importSelection: 'openssh:import-selection',
     discardSnapshot: 'openssh:discard-snapshot'
   },
+  hostTransfer: {
+    previewExport: 'host-transfer:preview-export',
+    exportSelection: 'host-transfer:export-selection',
+    pickImportFile: 'host-transfer:pick-import-file',
+    probeImport: 'host-transfer:probe-import',
+    commitImport: 'host-transfer:commit-import',
+    discardImport: 'host-transfer:discard-import'
+  },
   xshell: {
     probeDefault: 'xshell:probe-default',
     addFolderToSnapshot: 'xshell:add-folder-to-snapshot',

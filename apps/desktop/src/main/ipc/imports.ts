@@ -11,8 +11,15 @@ import {
   type XshellSnapshotFolderInput,
 } from "@shared";
 import { randomUUID } from "node:crypto";
-import { ipcMain } from "electron";
+import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { app, dialog, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
+import {
+  type HostExportSelectionInput,
+} from "../../shared/ipc";
+import { MAX_DOLGATE_FILE_BYTES } from "../host-transfer-format";
+import { HostTransferService } from "../host-transfer-service";
 import { resolveOpenSshIdentityImport } from "../openssh-import-service";
 import { importTermiusSelection } from "../termius-import-executor";
 import { buildTermiusGroupAncestorPaths } from "../termius-import-service";
@@ -26,7 +33,195 @@ import {
 } from "../xshell-password-decryptor";
 import type { MainIpcContext } from "./context";
 
+const hostTransferService = new HostTransferService();
+
+function ensureExtension(filePath: string, extension: string): string {
+  return filePath.toLocaleLowerCase().endsWith(extension)
+    ? filePath
+    : `${filePath}${extension}`;
+}
+
+async function writeFileAtomically(filePath: string, content: Buffer | string): Promise<void> {
+  const tempPath = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tempPath, content, { mode: 0o600, flag: "wx" });
+    await rename(tempPath, filePath);
+  } finally {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+  }
+}
+
 export function registerImportIpcHandlers(ctx: MainIpcContext): void {
+  ipcMain.handle(
+    ipcChannels.hostTransfer.previewExport,
+    async (_event, hostIds: string[]) => hostTransferService.previewExport(hostIds),
+  );
+
+  ipcMain.handle(
+    ipcChannels.hostTransfer.exportSelection,
+    async (event, input: HostExportSelectionInput) => {
+      if (
+        !input ||
+        !Array.isArray(input.hostIds) ||
+        (input.format !== "dolgate" && input.format !== "openssh")
+      ) {
+        throw new Error("내보내기 요청이 올바르지 않습니다.");
+      }
+      const window = ctx.resolveWindowFromSender(event.sender);
+      if (input.format === "dolgate") {
+        const exported = await hostTransferService.createDolgateExport(
+          input.hostIds,
+          input.password ?? "",
+          app.getVersion(),
+        );
+        const result = await dialog.showSaveDialog(window, {
+          title: "Dolgate 호스트 내보내기",
+          defaultPath: path.join(
+            app.getPath("documents"),
+            `dolgate-hosts-${new Date().toISOString().slice(0, 10)}.dolgate`,
+          ),
+          filters: [{ name: "Dolgate encrypted host bundle", extensions: ["dolgate"] }],
+        });
+        if (result.canceled || !result.filePath) {
+          return {
+            canceled: true,
+            savedPath: null,
+            exportedHostCount: 0,
+            skippedHostCount: 0,
+            warnings: [],
+          };
+        }
+        const savedPath = ensureExtension(result.filePath, ".dolgate");
+        await writeFileAtomically(savedPath, exported.bytes);
+        ctx.activityLogs.append("info", "audit", "선택한 호스트를 Dolgate 파일로 내보냈습니다.", {
+          exportedHostCount: exported.hostCount,
+        });
+        return {
+          canceled: false,
+          savedPath,
+          exportedHostCount: exported.hostCount,
+          skippedHostCount: 0,
+          warnings: [],
+        };
+      }
+
+      const exported = hostTransferService.createOpenSshExport(input.hostIds);
+      if (!exported.content) {
+        throw new Error("선택한 호스트 중 OpenSSH 형식으로 내보낼 수 있는 항목이 없습니다.");
+      }
+      const result = await dialog.showSaveDialog(window, {
+        title: "OpenSSH config 내보내기",
+        defaultPath: path.join(
+          app.getPath("documents"),
+          `dolgate-hosts-${new Date().toISOString().slice(0, 10)}.ssh-config`,
+        ),
+        filters: [{ name: "OpenSSH config", extensions: ["ssh-config", "conf"] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return {
+          canceled: true,
+          savedPath: null,
+          exportedHostCount: 0,
+          skippedHostCount: exported.skippedCount,
+          warnings: exported.warnings,
+        };
+      }
+      const savedPath = ensureExtension(result.filePath, ".ssh-config");
+      await writeFileAtomically(savedPath, exported.content);
+      ctx.activityLogs.append("info", "audit", "선택한 호스트를 OpenSSH config로 내보냈습니다.", {
+        exportedHostCount: exported.exportedRootCount,
+        dependencyCount: exported.dependencyCount,
+        skippedHostCount: exported.skippedCount,
+      });
+      return {
+        canceled: false,
+        savedPath,
+        exportedHostCount: exported.exportedRootCount + exported.dependencyCount,
+        skippedHostCount: exported.skippedCount,
+        warnings: exported.warnings,
+      };
+    },
+  );
+
+  ipcMain.handle(ipcChannels.hostTransfer.pickImportFile, async (event) => {
+    const result = await dialog.showOpenDialog(ctx.resolveWindowFromSender(event.sender), {
+      title: "Dolgate 호스트 파일 가져오기",
+      properties: ["openFile"],
+      filters: [{ name: "Dolgate encrypted host bundle", extensions: ["dolgate"] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    const filePath = result.filePaths[0];
+    return { filePath, fileName: path.basename(filePath) };
+  });
+
+  ipcMain.handle(
+    ipcChannels.hostTransfer.probeImport,
+    async (_event, filePath: string, password: string) => {
+      if (typeof filePath !== "string" || typeof password !== "string") {
+        throw new Error("가져오기 요청이 올바르지 않습니다.");
+      }
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile() || fileStat.size > MAX_DOLGATE_FILE_BYTES) {
+        throw new Error("Dolgate 파일이 너무 크거나 올바른 파일이 아닙니다.");
+      }
+      return hostTransferService.probeImport(await readFile(filePath), password);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.hostTransfer.commitImport,
+    async (event, snapshotId: string) => {
+      if (typeof snapshotId !== "string" || !snapshotId) {
+        throw new Error("가져오기 상태가 올바르지 않습니다.");
+      }
+      const result = hostTransferService.commitImport(snapshotId);
+      const importedCount =
+        result.importedHostCount +
+        result.importedGroupCount +
+        result.importedSecretCount +
+        result.importedAwsProfileCount +
+        result.importedSnippetCount +
+        result.importedPortForwardCount +
+        result.importedDnsOverrideCount +
+        result.importedKnownHostCount;
+      if (importedCount > 0) {
+        ctx.queueSync();
+        await ctx.awsService.materializeManagedProfiles().catch((error: unknown) => {
+          result.warnings.push(
+            error instanceof Error
+              ? `AWS 프로필 파일 반영 실패: ${error.message}`
+              : "AWS 프로필 파일을 반영하지 못했습니다.",
+          );
+        });
+        await ctx.rewriteActiveDnsOverrides().catch((error: unknown) => {
+          result.warnings.push(
+            error instanceof Error
+              ? `DNS override 반영 실패: ${error.message}`
+              : "DNS override를 반영하지 못했습니다.",
+          );
+        });
+        ctx.emitWorkspaceChanged(event.sender);
+      }
+      ctx.activityLogs.append("info", "audit", "Dolgate 파일에서 호스트 데이터를 가져왔습니다.", {
+        importedHostCount: result.importedHostCount,
+        skippedCount: result.skippedCount,
+        warningCount: result.warnings.length,
+      });
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.hostTransfer.discardImport,
+    async (_event, snapshotId: string) => {
+      if (typeof snapshotId === "string") {
+        hostTransferService.discardImport(snapshotId);
+      }
+    },
+  );
+
   ipcMain.handle(ipcChannels.termius.probeLocal, async () => {
     return ctx.termiusImportService.probeLocal();
   });

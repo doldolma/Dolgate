@@ -232,12 +232,14 @@ interface RenderBrowserOptions {
   onHostViewModeChange?: ReturnType<typeof vi.fn>;
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
   onCreateHost?: ReturnType<typeof vi.fn>;
+  onOpenDolgateImport?: ReturnType<typeof vi.fn>;
   onOpenSerialImport?: ReturnType<typeof vi.fn>;
   onOpenAwsImport?: ReturnType<typeof vi.fn>;
   onOpenOpenSshImport?: ReturnType<typeof vi.fn>;
   onOpenXshellImport?: ReturnType<typeof vi.fn>;
   onOpenTermiusImport?: ReturnType<typeof vi.fn>;
   onOpenWarpgateImport?: ReturnType<typeof vi.fn>;
+  onExportHosts?: ReturnType<typeof vi.fn>;
 }
 
 function renderBrowser({
@@ -272,12 +274,14 @@ function renderBrowser({
   onHostViewModeChange = vi.fn(),
   onOpenLocalTerminal = vi.fn(),
   onCreateHost = vi.fn(),
+  onOpenDolgateImport = vi.fn(),
   onOpenSerialImport = vi.fn(),
   onOpenAwsImport = vi.fn(),
   onOpenOpenSshImport = vi.fn(),
   onOpenXshellImport = vi.fn(),
   onOpenTermiusImport = vi.fn(),
   onOpenWarpgateImport = vi.fn(),
+  onExportHosts = vi.fn(),
 }: RenderBrowserOptions = {}) {
   return render(
     <HostBrowser
@@ -294,6 +298,7 @@ function renderBrowser({
       onHostViewModeChange={onHostViewModeChange}
       onOpenLocalTerminal={onOpenLocalTerminal}
       onCreateHost={onCreateHost}
+      onOpenDolgateImport={onOpenDolgateImport}
       onOpenSerialImport={onOpenSerialImport}
       onOpenAwsImport={onOpenAwsImport}
       onOpenOpenSshImport={onOpenOpenSshImport}
@@ -309,6 +314,7 @@ function renderBrowser({
       onSelectHost={onSelectHost}
       onEditHost={vi.fn()}
       onDuplicateHosts={onDuplicateHosts}
+      onExportHosts={onExportHosts}
       onMoveHostToGroup={onMoveHostToGroup}
       onSetHostFavorite={vi.fn()}
       onRemoveHost={onRemoveHost}
@@ -580,6 +586,7 @@ describe('HostBrowser helpers', () => {
 
   it('defines import actions for the split-button menu in the expected order', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
+      'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
       'Import from Termius',
@@ -591,6 +598,7 @@ describe('HostBrowser helpers', () => {
 
   it('hides the Xshell import action outside Windows', () => {
     expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
+      'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
       'Import from Termius',
@@ -599,6 +607,7 @@ describe('HostBrowser helpers', () => {
       'Import via AWS SSM'
     ]);
     expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
+      'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
       'Import from Termius',
@@ -1124,6 +1133,20 @@ describe('HostBrowser dialogs', () => {
     fireEvent.click(screen.getByRole('button', { name: '복사 (2개)' }));
 
     expect(onDuplicateHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
+  });
+
+  it('opens one export flow for all selected hosts from the context menu', () => {
+    const onExportHosts = vi.fn();
+    renderBrowser({ onExportHosts });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.contextMenu(dbCard, { clientX: 20, clientY: 20 });
+    fireEvent.click(screen.getByRole('button', { name: '내보내기... (2개)' }));
+
+    expect(onExportHosts).toHaveBeenCalledWith(['host-1', 'host-2']);
   });
 
   it('connects all selected hosts from the context menu in visible order', async () => {

@@ -16,6 +16,7 @@ import { VaultGateShell } from './shells/VaultGateShell';
 import { AppShell } from './shells/AppShell';
 import {
   bootstrapSync,
+  consumeWindowLaunchIntent,
   getAuthState,
 } from './services/desktop/auth-window-updater';
 import {
@@ -27,7 +28,6 @@ import {
   useSessionWorkspaceViewModel,
   useSftpViewModel,
 } from './view-models/appViewModels';
-import { desktopApi } from './store/appStore';
 
 function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   if (theme === 'light' || theme === 'dark') {
@@ -340,11 +340,7 @@ export function App() {
       return;
     }
     launchIntentConsumedRef.current = true;
-    if (typeof desktopApi.window.consumeLaunchIntent !== 'function') {
-      return;
-    }
-    void desktopApi.window
-      .consumeLaunchIntent()
+    void consumeWindowLaunchIntent()
       .then((intent) => {
         if (intent?.type === 'connect-host') {
           return homeViewModel.connectHost(intent.hostId, 120, 32);
