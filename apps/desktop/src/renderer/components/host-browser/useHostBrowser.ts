@@ -184,6 +184,15 @@ export function isAdditiveSelectionEvent(
   return event.ctrlKey || event.metaKey;
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 export function getSelectionRange<T extends string>(items: T[], anchor: T | null, target: T): T[] {
   const targetIndex = items.indexOf(target);
   if (targetIndex < 0) {
@@ -673,6 +682,31 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   }, [visibleHostIds]);
 
   useEffect(() => {
+    const handleSelectAllHosts = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        (!event.metaKey && !event.ctrlKey) ||
+        event.key.toLocaleLowerCase() !== 'a' ||
+        isEditableKeyboardTarget(event.target) ||
+        document.querySelector('[role="dialog"][aria-modal="true"]')
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setSelectedHostIds(visibleHostIds);
+      setSelectedGroupPaths([]);
+      setHostSelectionAnchor(visibleHostIds[0] ?? null);
+      setGroupSelectionAnchor(null);
+      setContextMenu(null);
+    };
+
+    window.addEventListener('keydown', handleSelectAllHosts);
+    return () => window.removeEventListener('keydown', handleSelectAllHosts);
+  }, [visibleHostIds]);
+
+  useEffect(() => {
     setSelectedGroupPaths((current) =>
       current.filter((groupPath) => visibleGroupPaths.includes(groupPath)),
     );
@@ -767,6 +801,17 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       hostCount,
       childGroupCount,
     };
+  }
+
+  function getHostIdsInGroupTrees(groupPaths: string[]): string[] {
+    const normalizedPaths = normalizeGroupSelectionForDelete(groupPaths);
+    return hosts
+      .filter((host) =>
+        normalizedPaths.some((path) =>
+          isGroupWithinPath(normalizeGroupPath(host.groupName), path),
+        ),
+      )
+      .map((host) => host.id);
   }
 
   function buildHostDeleteTarget(hostIds: string[]): HostDeleteTarget {
@@ -1067,6 +1112,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     handleToggleGroupBranch,
     getOrderedSelectedHostIds,
     runForOrderedHosts,
+    getHostIdsInGroupTrees,
     clearSelections,
     // drag state + helpers
     draggedGroupPath,

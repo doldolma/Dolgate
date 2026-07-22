@@ -114,6 +114,11 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     async (_event, profileName: string) => {
       const details = await ctx.awsService.getProfileDetails(profileName);
       await ctx.awsService.deleteProfile(profileName);
+      ctx.hosts.refreshAwsProfileNameCaches(
+        (await ctx.awsService.listProfiles())
+          .filter((profile) => profile.id)
+          .map((profile) => ({ id: profile.id!, name: profile.name })),
+      );
       if (details.id) {
         ctx.syncOutbox.upsertDeletion("awsProfiles", details.id);
       }

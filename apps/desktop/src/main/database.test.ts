@@ -348,7 +348,7 @@ describe('HostRepository', () => {
     });
   });
 
-  it('refreshes AWS profile names only for an exact profile ID match', async () => {
+  it('refreshes exact AWS profile names and clears invalid profile references', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();
     const createAwsHost = (
@@ -367,25 +367,37 @@ describe('HostRepository', () => {
 
     createAwsHost('valid-profile', 'profile-current', 'old-name');
     createAwsHost('deleted-profile', 'profile-deleted', 'shared-name');
-    createAwsHost('missing-profile-id', null, 'shared-name');
+    hosts.create('missing-profile-id', {
+      kind: 'aws-ecs',
+      label: 'missing-profile-id',
+      awsProfileId: null,
+      awsProfileName: 'shared-name',
+      awsRegion: 'ap-northeast-2',
+      awsEcsClusterArn: 'arn:aws:ecs:ap-northeast-2:123456789012:cluster/test',
+      awsEcsClusterName: 'test',
+    });
 
     const updated = hosts.refreshAwsProfileNameCaches([
       { id: 'profile-current', name: 'renamed-profile' },
       { id: 'profile-replacement', name: 'shared-name' },
     ]);
 
-    expect(updated.map((host) => host.id)).toEqual(['valid-profile']);
+    expect(updated.map((host) => host.id)).toEqual([
+      'valid-profile',
+      'deleted-profile',
+      'missing-profile-id',
+    ]);
     expect(hosts.getById('valid-profile')).toMatchObject({
       awsProfileId: 'profile-current',
       awsProfileName: 'renamed-profile',
     });
     expect(hosts.getById('deleted-profile')).toMatchObject({
-      awsProfileId: 'profile-deleted',
-      awsProfileName: 'shared-name',
+      awsProfileId: null,
+      awsProfileName: '',
     });
     expect(hosts.getById('missing-profile-id')).toMatchObject({
       awsProfileId: null,
-      awsProfileName: 'shared-name',
+      awsProfileName: '',
     });
   });
 

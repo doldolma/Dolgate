@@ -357,7 +357,7 @@ function buildConnectionRows(
       rows.push({ label: 'Agent Forwarding', value: '사용' });
     }
   } else if (host.kind === 'aws-ec2') {
-    rows.push({ label: 'Profile', value: host.awsProfileName });
+    rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
     rows.push({ label: 'Instance', value: host.awsInstanceId });
     if (host.awsInstanceName) {
       rows.push({ label: 'Instance Name', value: host.awsInstanceName });
@@ -378,7 +378,7 @@ function buildConnectionRows(
       rows.push({ label: '서버 프록시', value: '사용' });
     }
   } else if (host.kind === 'aws-ecs') {
-    rows.push({ label: 'Profile', value: host.awsProfileName });
+    rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
     rows.push({ label: 'Cluster', value: host.awsEcsClusterName });
   } else if (host.kind === 'warpgate-ssh') {
     rows.push({ label: 'Base URL', value: host.warpgateBaseUrl });
@@ -803,6 +803,12 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
               <div>
                 <InfoRow label="Name" value={host.label} />
                 <InfoRow label="Type" value={getHostTypeLabel(host)} />
+                {isAwsEc2HostRecord(host) || isAwsEcsHostRecord(host) ? (
+                  <InfoRow
+                    label="Profile"
+                    value={host.awsProfileName || 'Not configured'}
+                  />
+                ) : null}
                 {address ? <InfoRow label="IP / Host" value={address} /> : null}
                 {region ? <InfoRow label="Region" value={region} /> : null}
                 <InfoRow label="Group" value={group ?? 'Ungrouped'} />

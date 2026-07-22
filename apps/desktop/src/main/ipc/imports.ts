@@ -18,6 +18,7 @@ import { ipcChannels } from "../../common/ipc-channels";
 import {
   type HostExportSelectionInput,
 } from "../../shared/ipc";
+import { createHostExportFileName } from "../host-export-filename";
 import { MAX_DOLGATE_FILE_BYTES } from "../host-transfer-format";
 import { HostTransferService } from "../host-transfer-service";
 import { resolveOpenSshIdentityImport } from "../openssh-import-service";
@@ -78,7 +79,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           title: "Dolgate 호스트 내보내기",
           defaultPath: path.join(
             app.getPath("documents"),
-            `dolgate-hosts-${new Date().toISOString().slice(0, 10)}.dolgate`,
+            createHostExportFileName("dolgate"),
           ),
           filters: [{ name: "Dolgate encrypted host bundle", extensions: ["dolgate"] }],
         });
@@ -113,7 +114,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         title: "OpenSSH config 내보내기",
         defaultPath: path.join(
           app.getPath("documents"),
-          `dolgate-hosts-${new Date().toISOString().slice(0, 10)}.ssh-config`,
+          createHostExportFileName("ssh-config"),
         ),
         filters: [{ name: "OpenSSH config", extensions: ["ssh-config", "conf"] }],
       });

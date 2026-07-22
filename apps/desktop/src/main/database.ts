@@ -947,7 +947,20 @@ export class HostRepository {
 
         const profileId = entry.awsProfileId ?? null;
         const nextProfileName = profileId ? byId.get(profileId) : null;
-        if (!nextProfileName || nextProfileName === entry.awsProfileName) {
+        if (!nextProfileName) {
+          if (profileId === null && entry.awsProfileName === '') {
+            return entry;
+          }
+          const nextRecord = {
+            ...entry,
+            awsProfileId: null,
+            awsProfileName: '',
+            updatedAt: timestamp
+          };
+          updatedHosts.push(nextRecord);
+          return nextRecord;
+        }
+        if (nextProfileName === entry.awsProfileName) {
           return entry;
         }
 

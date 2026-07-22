@@ -65,6 +65,9 @@ const VAULT_EPOCH_USERNAME_PREFIX = 'epoch:';
 export const VAULT_MUTATION_TIMEOUT_MS = 30_000;
 export const VAULT_MUTATION_TIMEOUT_MESSAGE =
   '동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+export const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS = 10_000;
+export const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE =
+  '비밀번호 변경 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
 
 const CLIENT_HEADER_NAME = 'X-Dolgate-Client';
 const CLIENT_VERSION_HEADER_NAME = 'X-Dolgate-Client-Version';
@@ -841,6 +844,10 @@ export async function changeRemoteAccountPassword(
         'content-type': 'application/json',
       },
       body: JSON.stringify({ currentPassword, newPassword, refreshToken }),
+    },
+    {
+      timeoutMs: ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS,
+      timeoutMessage: ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE,
     },
   );
 }

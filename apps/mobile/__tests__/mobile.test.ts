@@ -3,6 +3,7 @@ import { createVaultKdfDescriptor, type AuthSession } from '@dolssh/shared-core'
 import { APP_VERSION } from '../src/lib/app-metadata';
 import {
   buildBrowserLoginUrl,
+  changeRemoteAccountPassword,
   fetchExchangeSession,
   getOrCreateClientInstallationId,
   refreshAuthSession,
@@ -190,6 +191,37 @@ describe('buildBrowserLoginUrl', () => {
       expect(url.searchParams.get('platform')).toBe(os);
     },
   );
+});
+
+describe('mobile account password mutation', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('times out when the password change request never settles', async () => {
+    jest.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = jest.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>(() => undefined);
+    }) as typeof fetch;
+
+    const request = changeRemoteAccountPassword(
+      'https://ssh.doldolma.com',
+      'access-token',
+      'refresh-token',
+      'old-password',
+      'new-password',
+    );
+    const rejection = expect(request).rejects.toThrow(
+      '비밀번호 변경 요청 시간이 초과되었습니다.',
+    );
+
+    await jest.advanceTimersByTimeAsync(10_000);
+
+    await rejection;
+    expect(requestSignal?.aborted).toBe(true);
+  });
 });
 
 describe('mobile vault mutations', () => {

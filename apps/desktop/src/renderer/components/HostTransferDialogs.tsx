@@ -29,12 +29,46 @@ import {
   NoticeCard,
   SectionLabel,
 } from '../ui';
+import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
 
 interface HostExportDialogProps {
   open: boolean;
   hostIds: string[];
   onClose: () => void;
   onExported: (result: HostExportResult) => void | Promise<void>;
+}
+
+const importCountLabels = {
+  hosts: '호스트',
+  groups: '그룹',
+  secrets: '자격증명',
+  awsProfiles: 'AWS 프로필',
+  snippets: 'snippet',
+  portForwards: '포트 포워딩',
+  dnsOverrides: 'DNS override',
+  knownHosts: 'known host',
+} as const;
+
+function formatImportCounts(
+  counts: Record<keyof typeof importCountLabels, number>,
+): string {
+  return (Object.keys(importCountLabels) as Array<keyof typeof importCountLabels>)
+    .filter((kind) => counts[kind] > 0)
+    .map((kind) => `${importCountLabels[kind]} ${counts[kind]}개`)
+    .join(', ');
+}
+
+function getReadyImportCounts(preview: DolgateImportPreview) {
+  return {
+    hosts: preview.hostCount,
+    groups: preview.groupCount,
+    secrets: preview.secretCount,
+    awsProfiles: preview.awsProfileCount,
+    snippets: preview.snippetCount,
+    portForwards: preview.portForwardCount,
+    dnsOverrides: preview.dnsOverrideCount,
+    knownHosts: preview.knownHostCount,
+  };
 }
 
 export function HostExportDialog({
@@ -72,11 +106,7 @@ export function HostExportDialog({
       })
       .catch((loadError) => {
         if (!cancelled) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : '내보내기 항목을 확인하지 못했습니다.',
-          );
+          setError(normalizeErrorMessage(loadError, '내보내기 항목을 확인하지 못했습니다.'));
         }
       })
       .finally(() => {
@@ -93,12 +123,28 @@ export function HostExportDialog({
     return null;
   }
 
+  const normalizedPasswordLength = Array.from(password.normalize('NFC')).length;
+  const passwordValidationMessage = (() => {
+    if (password.length === 0 && passwordConfirm.length === 0) {
+      return { message: '4자 이상 입력해 주세요.', invalid: false };
+    }
+    if (normalizedPasswordLength < 4) {
+      return { message: '암호는 4자 이상이어야 합니다.', invalid: true };
+    }
+    if (passwordConfirm.length === 0) {
+      return { message: '암호 확인을 입력해 주세요.', invalid: true };
+    }
+    if (password !== passwordConfirm) {
+      return { message: '암호와 암호 확인이 일치하지 않습니다.', invalid: true };
+    }
+    return { message: '암호가 일치합니다.', invalid: false };
+  })();
   const canExport =
     !isLoading &&
     !isExporting &&
     Boolean(preview) &&
     (format === 'openssh' ||
-      (Array.from(password.normalize('NFC')).length >= 4 && password === passwordConfirm)) &&
+      (normalizedPasswordLength >= 4 && password === passwordConfirm)) &&
     (format !== 'openssh' || (preview?.opensshHostCount ?? 0) > 0);
 
   return (
@@ -182,9 +228,19 @@ export function HostExportDialog({
                   autoComplete="new-password"
                 />
               </FieldGroup>
-              <p className="text-[0.8rem] text-[var(--text-soft)] sm:col-span-2">
-                4자 이상 입력해 주세요. 이 암호는 복구할 수 없으며 가져올 때 동일한 암호가 필요합니다.
-              </p>
+              <div className="grid gap-1 text-[0.8rem] sm:col-span-2">
+                <p
+                  aria-live="polite"
+                  className={passwordValidationMessage.invalid
+                    ? 'text-[var(--danger-text)]'
+                    : 'text-[var(--text-soft)]'}
+                >
+                  {passwordValidationMessage.message}
+                </p>
+                <p className="text-[var(--text-soft)]">
+                  이 암호는 복구할 수 없으며 가져올 때 동일한 암호가 필요합니다.
+                </p>
+              </div>
             </div>
           ) : null}
 
@@ -219,11 +275,7 @@ export function HostExportDialog({
                   onClose();
                 }
               } catch (exportError) {
-                setError(
-                  exportError instanceof Error
-                    ? exportError.message
-                    : '호스트를 내보내지 못했습니다.',
-                );
+                setError(normalizeErrorMessage(exportError, '호스트를 내보내지 못했습니다.'));
               } finally {
                 setIsExporting(false);
               }
@@ -338,8 +390,18 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
           {preview ? (
             <>
               <NoticeCard tone="info">
-                호스트 {preview.hostCount}개, 그룹 {preview.groupCount}개, 자격증명 {preview.secretCount}개를 가져올 준비가 됐습니다.
-                {preview.skippedCount > 0 ? ` 이미 있는 항목 ${preview.skippedCount}개는 건너뜁니다.` : ''}
+                <div className="grid gap-1">
+                  <p>
+                    {formatImportCounts(getReadyImportCounts(preview))
+                      ? `${formatImportCounts(getReadyImportCounts(preview))}를 가져올 준비가 됐습니다.`
+                      : '가져올 새 항목이 없습니다.'}
+                  </p>
+                  {preview.skippedCount > 0 ? (
+                    <p>
+                      이미 존재하여 제외: {formatImportCounts(preview.skippedCounts)}.
+                    </p>
+                  ) : null}
+                </div>
               </NoticeCard>
               {preview.warnings.length > 0 ? (
                 <div className="grid gap-1 text-[0.82rem] leading-5 text-[var(--text-soft)]">
@@ -365,11 +427,7 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                 try {
                   setPreview(await probeDolgateImport(file.filePath, password));
                 } catch (probeError) {
-                  setError(
-                    probeError instanceof Error
-                      ? probeError.message
-                      : 'Dolgate 파일을 열지 못했습니다.',
-                  );
+                  setError(normalizeErrorMessage(probeError, 'Dolgate 파일을 열지 못했습니다.'));
                 } finally {
                   setIsWorking(false);
                 }
@@ -389,11 +447,7 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                   await onImported(result);
                   onClose();
                 } catch (importError) {
-                  setError(
-                    importError instanceof Error
-                      ? importError.message
-                      : 'Dolgate 파일을 가져오지 못했습니다.',
-                  );
+                  setError(normalizeErrorMessage(importError, 'Dolgate 파일을 가져오지 못했습니다.'));
                 } finally {
                   setIsWorking(false);
                 }
