@@ -42,6 +42,13 @@ export function deleteAccount() {
   return desktopApi.auth.deleteAccount();
 }
 
+export function changeAccountPassword(
+  currentPassword: string,
+  newPassword: string,
+) {
+  return desktopApi.auth.changeAccountPassword(currentPassword, newPassword);
+}
+
 // E2EE 볼트 — 동기화 암호 설정/잠금해제/초기화/변경.
 export function setupVault(passphrase: string) {
   return desktopApi.auth.setupVault(passphrase);

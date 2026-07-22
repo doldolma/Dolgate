@@ -35,6 +35,7 @@ func newTestService(t *testing.T) (*Service, store.Store) {
 		14*24*time.Hour,
 		72*time.Hour,
 		2*time.Minute,
+		true,
 	)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
@@ -87,6 +88,94 @@ func TestSignupLoginRefreshAndLogoutLifecycle(t *testing.T) {
 	}
 	if _, err := service.Refresh(ctx, refreshed.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Refresh(logged out token) error = %v, want %v", err, ErrInvalidCredentials)
+	}
+}
+
+func TestChangePasswordVerifiesCurrentPasswordAndRevokesOtherSessions(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	_, currentSession, err := service.Signup(ctx, "password@example.com", "old-password", "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("Signup() error = %v", err)
+	}
+	if currentSession.User.PasswordState != PasswordStateSet {
+		t.Fatalf("PasswordState = %q, want %q", currentSession.User.PasswordState, PasswordStateSet)
+	}
+	_, otherSession, err := service.Login(ctx, "password@example.com", "old-password", "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	if err := service.ChangePassword(ctx, currentSession.User.ID, "wrong-password", "new-password", currentSession.Tokens.RefreshToken); !errors.Is(err, ErrCurrentPasswordInvalid) {
+		t.Fatalf("ChangePassword(wrong current) error = %v, want %v", err, ErrCurrentPasswordInvalid)
+	}
+	if err := service.ChangePassword(ctx, currentSession.User.ID, "old-password", "old-password", currentSession.Tokens.RefreshToken); !errors.Is(err, ErrPasswordReuse) {
+		t.Fatalf("ChangePassword(reused) error = %v, want %v", err, ErrPasswordReuse)
+	}
+	if err := service.ChangePassword(ctx, currentSession.User.ID, "old-password", "new-password", currentSession.Tokens.RefreshToken); err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+
+	if _, _, err := service.Login(ctx, "password@example.com", "old-password", "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Login(old password) error = %v, want %v", err, ErrInvalidCredentials)
+	}
+	if _, _, err := service.Login(ctx, "password@example.com", "new-password", "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
+		t.Fatalf("Login(new password) error = %v", err)
+	}
+	if _, err := service.Refresh(ctx, currentSession.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); err != nil {
+		t.Fatalf("Refresh(current session) error = %v", err)
+	}
+	if _, err := service.Refresh(ctx, otherSession.Tokens.RefreshToken, "https://ssh.doldolma.com", VaultResolutionLegacy); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Refresh(other session) error = %v, want %v", err, ErrInvalidCredentials)
+	}
+}
+
+func TestOIDCOnlyUserCanSetPassword(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	user, err := service.ResolveOIDCUser(ctx, "oidc", "subject-1", "oidc@example.com", true)
+	if err != nil {
+		t.Fatalf("ResolveOIDCUser() error = %v", err)
+	}
+	session, err := service.issueSession(ctx, user, "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("issueSession() error = %v", err)
+	}
+	if session.User.PasswordState != PasswordStateUnset {
+		t.Fatalf("PasswordState = %q, want %q", session.User.PasswordState, PasswordStateUnset)
+	}
+
+	if err := service.ChangePassword(ctx, user.ID, "", "new-password", session.Tokens.RefreshToken); err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+	_, loginSession, err := service.Login(ctx, user.Email, "new-password", "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	if loginSession.User.PasswordState != PasswordStateSet {
+		t.Fatalf("PasswordState after setup = %q, want %q", loginSession.User.PasswordState, PasswordStateSet)
+	}
+}
+
+func TestUnverifiedOIDCUserCannotSetPassword(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	user, err := service.ResolveOIDCUser(ctx, "oidc", "subject-unverified", "unverified@example.com", false)
+	if err != nil {
+		t.Fatalf("ResolveOIDCUser() error = %v", err)
+	}
+	session, err := service.issueSession(ctx, user, "https://ssh.doldolma.com", VaultResolutionLegacy)
+	if err != nil {
+		t.Fatalf("issueSession() error = %v", err)
+	}
+	if session.User.PasswordState != PasswordStateUnavailable {
+		t.Fatalf("PasswordState = %q, want %q", session.User.PasswordState, PasswordStateUnavailable)
+	}
+	if err := service.ChangePassword(ctx, user.ID, "", "new-password", session.Tokens.RefreshToken); !errors.Is(err, ErrPasswordChangeUnavailable) {
+		t.Fatalf("ChangePassword() error = %v, want %v", err, ErrPasswordChangeUnavailable)
 	}
 }
 
@@ -259,7 +348,7 @@ func TestNewServiceGeneratesAndReusesSigningKeyFile(t *testing.T) {
 	})
 
 	keyPath := filepath.Join(tempDir, "auth-signing-private.pem")
-	firstService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute)
+	firstService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute, true)
 	if err != nil {
 		t.Fatalf("first NewService() error = %v", err)
 	}
@@ -271,7 +360,7 @@ func TestNewServiceGeneratesAndReusesSigningKeyFile(t *testing.T) {
 		t.Fatal("expected generated key file to be non-empty")
 	}
 
-	secondService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute)
+	secondService, err := NewService(backingStore, "", keyPath, 15*time.Minute, 14*24*time.Hour, 72*time.Hour, 2*time.Minute, true)
 	if err != nil {
 		t.Fatalf("second NewService() error = %v", err)
 	}

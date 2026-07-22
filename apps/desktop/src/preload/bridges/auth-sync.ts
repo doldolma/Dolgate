@@ -18,6 +18,12 @@ export function buildAuthBridge(
       ipcRenderer.invoke(ipcChannels.auth.cancelBrowserLogin),
     logout: () => ipcRenderer.invoke(ipcChannels.auth.logout),
     deleteAccount: () => ipcRenderer.invoke(ipcChannels.auth.deleteAccount),
+    changeAccountPassword: (currentPassword, newPassword) =>
+      ipcRenderer.invoke(
+        ipcChannels.auth.changeAccountPassword,
+        currentPassword,
+        newPassword,
+      ),
     setupVault: (passphrase) =>
       ipcRenderer.invoke(ipcChannels.auth.setupVault, passphrase),
     unlockVault: (passphrase) =>

@@ -9,6 +9,8 @@ export interface AuthTokenPair {
 export interface SessionUser {
   id: string;
   email: string;
+  // 구버전 서버에서는 필드가 없으며 클라이언트가 관련 UI를 숨긴다.
+  passwordState?: import('./account-password').AccountPasswordState;
 }
 
 // 동기화 암호 → KEK 유도 파라미터. 서버는 보관·배포만 하고 해석하지 않는다.

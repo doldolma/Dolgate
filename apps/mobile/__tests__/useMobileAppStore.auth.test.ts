@@ -497,6 +497,49 @@ describe("useMobileAppStore auth and sync flows", () => {
       .toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
   });
 
+  it("changes the account password and persists the updated password state", async () => {
+    const session = createAuthSession({
+      user: {
+        id: "user-1",
+        email: "mobile@example.com",
+        passwordState: "unset",
+      },
+    });
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/auth/account/password" && init?.method === "PUT") {
+        expect(init.headers).toMatchObject({
+          authorization: "Bearer access-token",
+        });
+        expect(JSON.parse(String(init.body))).toEqual({
+          currentPassword: "",
+          newPassword: "new-password",
+          refreshToken: "refresh-token",
+        });
+        return createJsonResponse({ passwordState: "set" });
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+    });
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .changeAccountPassword("", "new-password");
+    });
+
+    expect(useMobileAppStore.getState().auth.session?.user.passwordState).toBe(
+      "set",
+    );
+    expect(keychainMock.setGenericPassword).toHaveBeenCalledWith(
+      "dolgate",
+      expect.stringContaining('\"passwordState\":\"set\"'),
+      expect.objectContaining({ service: "dolgate.mobile.auth-session" }),
+    );
+  });
+
   it("deletes the account remotely and clears local state without a logout call", async () => {
     const session = createAuthSession();
     const host: SshHostRecord = {

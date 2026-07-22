@@ -289,6 +289,64 @@ func (s *GormStore) GetUserByID(ctx context.Context, id string) (User, error) {
 	}, nil
 }
 
+func (s *GormStore) HasVerifiedAuthIdentity(ctx context.Context, userID string, email string) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).
+		Model(&authIdentityRow{}).
+		Where("user_id = ? AND email_verified = ? AND LOWER(email) = LOWER(?)", userID, true, strings.TrimSpace(email)).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// UpdateUserPassword 는 비밀번호 해시 변경과 세션 폐기를 한 트랜잭션으로 묶는다.
+// users 행을 먼저 잠가 다른 비밀번호 변경과 직렬화하고, 현재 기기의 refresh token만
+// 남긴다. 변경 전에 발급된 exchange code도 지워 이전 로그인 흐름의 재사용을 막는다.
+func (s *GormStore) UpdateUserPassword(
+	ctx context.Context,
+	userID string,
+	expectedPasswordHash string,
+	passwordHash string,
+	keepRefreshTokenHash string,
+) error {
+	if userID == "" || passwordHash == "" || keepRefreshTokenHash == "" {
+		return errors.New("userID, passwordHash and keepRefreshTokenHash are required")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := s.lockUserRowTx(tx, userID); err != nil {
+			return err
+		}
+
+		var user userRow
+		if err := tx.Where("id = ?", userID).Take(&user).Error; err != nil {
+			return err
+		}
+		if user.PasswordHash != expectedPasswordHash {
+			return ErrPasswordConflict
+		}
+
+		var refreshCount int64
+		if err := tx.Model(&refreshTokenRow{}).
+			Where("user_id = ? AND token_hash = ? AND expires_at > ?", userID, keepRefreshTokenHash, time.Now().UTC()).
+			Count(&refreshCount).Error; err != nil {
+			return err
+		}
+		if refreshCount == 0 {
+			return ErrRefreshTokenNotFound
+		}
+
+		if err := tx.Model(&userRow{}).
+			Where("id = ?", userID).
+			UpdateColumn("password_hash", passwordHash).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ? AND token_hash <> ?", userID, keepRefreshTokenHash).
+			Delete(&refreshTokenRow{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id = ?", userID).Delete(&exchangeCodeRow{}).Error
+	})
+}
+
 func (s *GormStore) GetAuthIdentity(ctx context.Context, provider string, subject string) (AuthIdentity, error) {
 	var row authIdentityRow
 	if err := s.db.WithContext(ctx).Where("provider = ? AND subject = ?", provider, subject).Take(&row).Error; err != nil {

@@ -667,6 +667,11 @@ export function HomeShell({
             keychainEntries={settingsViewModel.keychainEntries}
             savedCredentialsSearchQuery={settingsViewModel.savedCredentialsSearchQuery}
             currentUserEmail={authState.session?.user.email ?? null}
+            passwordState={
+              authState.status === 'authenticated'
+                ? (authState.session?.user.passwordState ?? null)
+                : null
+            }
             desktopPlatform={desktopPlatform}
             onSelectSection={settingsViewModel.openSettingsSection}
             onSavedCredentialsSearchQueryChange={
@@ -684,6 +689,7 @@ export function HomeShell({
             }
             onLogout={loginController.logout}
             onDeleteAccount={loginController.deleteAccount}
+            onChangeAccountPassword={loginController.changeAccountPassword}
             vaultStatus={authState.vault?.status ?? null}
             onChangeVaultPassphrase={changeVaultPassphrase}
             onResetVault={resetVault}

@@ -16,6 +16,7 @@ type AuthRateLimitConfig struct {
 	Signup   RateLimitRuleConfig
 	Refresh  RateLimitRuleConfig
 	Exchange RateLimitRuleConfig
+	Password RateLimitRuleConfig
 }
 
 type authRateLimiter struct {
@@ -36,6 +37,7 @@ type authRouteLimiters struct {
 	signup   *authRateLimiter
 	refresh  *authRateLimiter
 	exchange *authRateLimiter
+	password *authRateLimiter
 }
 
 func newAuthRouteLimiters(config AuthRateLimitConfig) authRouteLimiters {
@@ -44,7 +46,16 @@ func newAuthRouteLimiters(config AuthRateLimitConfig) authRouteLimiters {
 		signup:   newAuthRateLimiter(resolveRateLimitRule(config.Signup, 5, 900)),
 		refresh:  newAuthRateLimiter(resolveRateLimitRule(config.Refresh, 30, 300)),
 		exchange: newAuthRateLimiter(resolveRateLimitRule(config.Exchange, 30, 300)),
+		password: newAuthRateLimiter(resolveRateLimitRule(config.Password, 5, 900)),
 	}
+}
+
+func accountAuthAttemptKeys(clientIP string, userID string) []string {
+	keys := authAttemptKeys(clientIP, "")
+	if normalizedUserID := strings.TrimSpace(userID); normalizedUserID != "" {
+		keys = append(keys, "user:"+normalizedUserID)
+	}
+	return keys
 }
 
 func newAuthRateLimiter(config RateLimitRuleConfig) *authRateLimiter {

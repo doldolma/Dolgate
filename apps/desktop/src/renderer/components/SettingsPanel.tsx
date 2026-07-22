@@ -1,6 +1,7 @@
 import type {
   AppSettings,
   AppTheme,
+  AccountPasswordState,
   AuthVaultStatus,
   GlobalTerminalThemeId,
   HostRecord,
@@ -17,6 +18,7 @@ import type {
 import {
   MAX_SESSION_REPLAY_RETENTION_COUNT,
   MIN_SESSION_REPLAY_RETENTION_COUNT,
+  validateAccountPassword,
   validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
@@ -60,6 +62,7 @@ interface SettingsPanelProps {
   keychainEntries: SecretMetadataRecord[];
   savedCredentialsSearchQuery: string;
   currentUserEmail?: string | null;
+  passwordState?: AccountPasswordState | null;
   desktopPlatform: 'darwin' | 'win32' | 'linux' | 'unknown';
   onSelectSection: (section: SettingsSection) => void;
   onSavedCredentialsSearchQueryChange: (query: string) => void;
@@ -74,6 +77,10 @@ interface SettingsPanelProps {
   onLogout: () => Promise<void>;
   // 회원 탈퇴 — 서버의 모든 사용자 데이터를 즉시 영구 삭제한다(로컬 데이터는 유지).
   onDeleteAccount?: () => Promise<void>;
+  onChangeAccountPassword?: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
   // E2EE 볼트(v2) 사용자의 동기화 암호 변경. v1(레거시) 사용자에게는 섹션이 숨겨진다.
   vaultStatus?: AuthVaultStatus | null;
   onChangeVaultPassphrase?: (
@@ -220,6 +227,7 @@ export function SettingsPanel({
   keychainEntries,
   savedCredentialsSearchQuery,
   currentUserEmail = null,
+  passwordState = null,
   vaultStatus = null,
   onChangeVaultPassphrase,
   onResetVault,
@@ -235,12 +243,23 @@ export function SettingsPanel({
   onInstallSshPublicKey,
   onLoadSessionReplayStorageUsage,
   onLogout,
-  onDeleteAccount
+  onDeleteAccount,
+  onChangeAccountPassword
 }: SettingsPanelProps) {
   // 회원 탈퇴 확인 다이얼로그 상태.
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [accountPasswordOpen, setAccountPasswordOpen] = useState(false);
+  const [currentAccountPassword, setCurrentAccountPassword] = useState('');
+  const [nextAccountPassword, setNextAccountPassword] = useState('');
+  const [confirmAccountPassword, setConfirmAccountPassword] = useState('');
+  const [accountPasswordBusy, setAccountPasswordBusy] = useState(false);
+  const [accountPasswordError, setAccountPasswordError] = useState<string | null>(null);
+  const [accountPasswordNotice, setAccountPasswordNotice] = useState<string | null>(null);
+  const accountPasswordValidationMessage = nextAccountPassword
+    ? validateAccountPassword(nextAccountPassword)
+    : null;
   // 동기화 암호 변경 다이얼로그 상태.
   const [vaultPassphraseOpen, setVaultPassphraseOpen] = useState(false);
   const [currentVaultPassphrase, setCurrentVaultPassphrase] = useState('');
@@ -284,6 +303,16 @@ export function SettingsPanel({
     activeSection,
     settings.sessionReplayRetentionCount,
   ]);
+  useEffect(() => {
+    if (passwordState === 'set' || passwordState === 'unset') {
+      return;
+    }
+    setAccountPasswordOpen(false);
+    setCurrentAccountPassword('');
+    setNextAccountPassword('');
+    setConfirmAccountPassword('');
+    setAccountPasswordError(null);
+  }, [passwordState]);
   useEffect(() => {
     if (vaultStatus === 'unlocked') {
       return;
@@ -358,6 +387,58 @@ export function SettingsPanel({
     sftpConflictPolicy: SftpConflictPolicy,
   ) {
     await onUpdateSettings({ sftpConflictPolicy });
+  }
+
+  function resetAccountPasswordForm() {
+    setCurrentAccountPassword('');
+    setNextAccountPassword('');
+    setConfirmAccountPassword('');
+    setAccountPasswordError(null);
+  }
+
+  function openAccountPasswordDialog() {
+    resetAccountPasswordForm();
+    setAccountPasswordNotice(null);
+    setAccountPasswordOpen(true);
+  }
+
+  function closeAccountPasswordDialog() {
+    if (accountPasswordBusy) {
+      return;
+    }
+    resetAccountPasswordForm();
+    setAccountPasswordOpen(false);
+  }
+
+  async function handleChangeAccountPassword() {
+    if (
+      !onChangeAccountPassword ||
+      (passwordState !== 'unset' && passwordState !== 'set')
+    ) {
+      return;
+    }
+    setAccountPasswordBusy(true);
+    setAccountPasswordError(null);
+    try {
+      await onChangeAccountPassword(
+        passwordState === 'set' ? currentAccountPassword : '',
+        nextAccountPassword,
+      );
+      resetAccountPasswordForm();
+      setAccountPasswordOpen(false);
+      setAccountPasswordNotice(
+        passwordState === 'set'
+          ? '로그인 비밀번호를 변경했습니다.'
+          : '로그인 비밀번호를 설정했습니다.',
+      );
+    } catch (error) {
+      const fallback = '로그인 비밀번호를 저장하지 못했습니다.';
+      setAccountPasswordError(
+        normalizeErrorMessage(error, fallback) || fallback,
+      );
+    } finally {
+      setAccountPasswordBusy(false);
+    }
   }
 
   function resetVaultPassphraseForm() {
@@ -836,7 +917,18 @@ export function SettingsPanel({
                 <dd className="m-0 break-all text-[var(--text)]">{settings.serverUrl || '—'}</dd>
               </div>
             </dl>
+            {accountPasswordNotice ? (
+              <p className="m-0 mb-3 text-sm text-[var(--text-soft)]">
+                {accountPasswordNotice}
+              </p>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
+              {onChangeAccountPassword &&
+              (passwordState === 'unset' || passwordState === 'set') ? (
+                <Button variant="secondary" onClick={openAccountPasswordDialog}>
+                  {passwordState === 'set' ? '비밀번호 변경' : '비밀번호 설정'}
+                </Button>
+              ) : null}
               <Button variant="danger" onClick={async () => onLogout()}>
                 로그아웃
               </Button>
@@ -960,6 +1052,100 @@ export function SettingsPanel({
                     onClick={() => void handleChangeVaultPassphrase()}
                   >
                     {vaultPassphraseBusy ? '변경 중...' : '암호 변경'}
+                  </Button>
+                </ModalFooter>
+              </ModalShell>
+            </DialogBackdrop>
+          ) : null}
+
+          {accountPasswordOpen &&
+          onChangeAccountPassword &&
+          (passwordState === 'unset' || passwordState === 'set') ? (
+            <DialogBackdrop
+              dismissDisabled={accountPasswordBusy}
+              onDismiss={closeAccountPasswordDialog}
+            >
+              <ModalShell
+                size="sm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="change-account-password-title"
+              >
+                <ModalHeader className="block">
+                  <SectionLabel>Account</SectionLabel>
+                  <h3 id="change-account-password-title">
+                    {passwordState === 'set'
+                      ? '계정 비밀번호 변경'
+                      : '계정 비밀번호 설정'}
+                  </h3>
+                </ModalHeader>
+                <ModalBody className="grid gap-3">
+                  <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
+                    {passwordState === 'set'
+                      ? '현재 비밀번호를 확인한 후 새 비밀번호로 변경합니다.'
+                      : '설정하면 현재 이메일로 비밀번호 로그인을 사용할 수 있습니다.'}{' '}
+                    동기화 암호와는 별개입니다.
+                  </p>
+                  {passwordState === 'set' ? (
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      value={currentAccountPassword}
+                      placeholder="현재 비밀번호"
+                      aria-label="현재 계정 비밀번호"
+                      onChange={(event) => setCurrentAccountPassword(event.target.value)}
+                    />
+                  ) : null}
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={nextAccountPassword}
+                    placeholder="새 비밀번호"
+                    aria-label="새 계정 비밀번호"
+                    onChange={(event) => setNextAccountPassword(event.target.value)}
+                  />
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmAccountPassword}
+                    placeholder="새 비밀번호 확인"
+                    aria-label="새 계정 비밀번호 확인"
+                    onChange={(event) => setConfirmAccountPassword(event.target.value)}
+                  />
+                  {accountPasswordValidationMessage ? (
+                    <p className="m-0 text-sm text-[var(--warning-text,var(--text-soft))]">
+                      {accountPasswordValidationMessage}
+                    </p>
+                  ) : null}
+                  {accountPasswordError ? (
+                    <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
+                      {accountPasswordError}
+                    </p>
+                  ) : null}
+                </ModalBody>
+                <ModalFooter>
+                  <Button
+                    variant="secondary"
+                    disabled={accountPasswordBusy}
+                    onClick={closeAccountPasswordDialog}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    variant="primary"
+                    disabled={
+                      accountPasswordBusy ||
+                      (passwordState === 'set' && !currentAccountPassword) ||
+                      validateAccountPassword(nextAccountPassword) !== null ||
+                      nextAccountPassword !== confirmAccountPassword
+                    }
+                    onClick={() => void handleChangeAccountPassword()}
+                  >
+                    {accountPasswordBusy
+                      ? '저장 중...'
+                      : passwordState === 'set'
+                        ? '비밀번호 변경'
+                        : '비밀번호 설정'}
                   </Button>
                 </ModalFooter>
               </ModalShell>

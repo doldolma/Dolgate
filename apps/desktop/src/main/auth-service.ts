@@ -405,6 +405,11 @@ function normalizeAuthSession(value: unknown): AuthSession | null {
     user: {
       id: user.id,
       email: user.email,
+      ...(user.passwordState === "unset" ||
+      user.passwordState === "set" ||
+      user.passwordState === "unavailable"
+        ? { passwordState: user.passwordState }
+        : {}),
     },
     tokens: {
       accessToken: tokens.accessToken,
@@ -916,6 +921,67 @@ export class AuthService {
         purgeLocalData: true,
       },
     );
+  }
+
+  async changeAccountPassword(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    if (this.state.status !== "authenticated" || !this.state.session) {
+      throw new Error(
+        "온라인 로그인 상태에서만 비밀번호를 설정할 수 있습니다.",
+      );
+    }
+
+    const requestChange = async (): Promise<Response> => {
+      const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
+      if (!refreshToken) {
+        throw new Error("세션이 만료되었습니다. 다시 로그인해 주세요.");
+      }
+      return fetch(new URL("/auth/account/password", this.getServerUrl()), {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${this.getAccessToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ currentPassword, newPassword, refreshToken }),
+      });
+    };
+
+    let response = await requestChange();
+    if (response.status === 401 || response.status === 403) {
+      const refreshed = await this.refreshSession();
+      if (refreshed.status !== "authenticated") {
+        throw new Error(
+          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+        );
+      }
+      response = await requestChange();
+    }
+    if (!response.ok) {
+      throw new Error(
+        await toApiErrorMessage(
+          response,
+          "로그인 비밀번호를 변경하지 못했습니다.",
+        ),
+      );
+    }
+
+    const session =
+      this.state.status === "authenticated" ? this.state.session : null;
+    if (!session) {
+      throw new Error("세션이 만료되었습니다. 다시 로그인해 주세요.");
+    }
+    await this.persistSession({
+      ...session,
+      user: { ...session.user, passwordState: "set" },
+    });
+    this.log({
+      level: "info",
+      category: "audit",
+      message: "로그인 비밀번호가 설정되었습니다.",
+      metadata: { userId: session.user.id, email: session.user.email },
+    });
   }
 
   async forceUnauthenticated(errorMessage?: string): Promise<void> {

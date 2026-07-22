@@ -49,6 +49,12 @@ export function registerAuthIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.auth.deleteAccount, async () => {
     await ctx.authService.deleteAccount();
   });
+  ipcMain.handle(
+    ipcChannels.auth.changeAccountPassword,
+    async (_event, currentPassword: string, newPassword: string) => {
+      await ctx.authService.changeAccountPassword(currentPassword, newPassword);
+    },
+  );
   // E2EE 볼트 — 설정/잠금해제가 끝나면 곧바로 동기화를 시작한다(볼트 게이트로 멈춰 있던 sync).
   // 볼트 이벤트는 DEK 시대의 경계이므로 sync 의 복구 상태(ETag·디코드 가드)를 함께 리셋한다:
   // 이전 시대의 ETag 로 304 를 받아 새 스냅샷을 놓치거나, 이전 시대의 디코드 실패 이력이

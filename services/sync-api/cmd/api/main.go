@@ -58,6 +58,7 @@ func main() {
 		time.Duration(cfg.Auth.RefreshTokenIdleDays)*24*time.Hour,
 		time.Duration(cfg.Auth.OfflineLeaseTTLHours)*time.Hour,
 		time.Duration(cfg.Auth.RefreshRotationHandoffSeconds)*time.Second,
+		cfg.Auth.Local.Enabled,
 	)
 	if err != nil {
 		log.Fatalf("create auth service: %v", err)
@@ -98,6 +99,10 @@ func main() {
 			Exchange: httpserver.RateLimitRuleConfig{
 				Limit:         cfg.Auth.RateLimit.Exchange.Limit,
 				WindowSeconds: cfg.Auth.RateLimit.Exchange.WindowSeconds,
+			},
+			Password: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Password.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Password.WindowSeconds,
 			},
 		},
 		OIDC: httpserver.OIDCConfig{

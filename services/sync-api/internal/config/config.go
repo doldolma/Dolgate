@@ -45,6 +45,7 @@ type AuthRateLimitConfig struct {
 	Signup   AuthRateLimitRuleConfig `json:"signup"`
 	Refresh  AuthRateLimitRuleConfig `json:"refresh"`
 	Exchange AuthRateLimitRuleConfig `json:"exchange"`
+	Password AuthRateLimitRuleConfig `json:"password"`
 }
 
 type AuthRateLimitRuleConfig struct {
@@ -92,6 +93,7 @@ func defaultConfig() AppConfig {
 				Signup:   AuthRateLimitRuleConfig{Limit: 5, WindowSeconds: 900},
 				Refresh:  AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
 				Exchange: AuthRateLimitRuleConfig{Limit: 30, WindowSeconds: 300},
+				Password: AuthRateLimitRuleConfig{Limit: 5, WindowSeconds: 900},
 			},
 			Local: LocalAuthConfig{
 				Enabled:       true,

@@ -3,6 +3,7 @@ import type { AuthState, UpdateState } from '@shared';
 import {
   beginBrowserLogin,
   cancelBrowserLogin,
+  changeAccountPassword,
   checkForUpdates,
   closeWindow,
   deleteAccount,
@@ -74,6 +75,7 @@ export function useLoginController({
     cancelBrowserLogin,
     logout,
     deleteAccount,
+    changeAccountPassword,
     minimizeWindow,
     maximizeWindow,
     restoreWindow,

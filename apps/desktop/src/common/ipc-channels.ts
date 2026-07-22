@@ -8,6 +8,7 @@ export const ipcChannels = {
     cancelBrowserLogin: 'auth:cancel-browser-login',
     logout: 'auth:logout',
     deleteAccount: 'auth:delete-account',
+    changeAccountPassword: 'auth:change-account-password',
     setupVault: 'auth:setup-vault',
     unlockVault: 'auth:unlock-vault',
     resetVault: 'auth:reset-vault',
