@@ -262,7 +262,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			// 서브쉘 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰).
+			// 서브셸 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰).
 			handle.reinjectGate.Observe(chunk)
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
