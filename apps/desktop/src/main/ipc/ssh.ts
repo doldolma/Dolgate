@@ -13,6 +13,7 @@ import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context";
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
+import { runWithIpcSessionOwner } from "./session-owner";
 
 // 로컬 agent 엔드포인트 해석은 agent-endpoint 모듈로 이전(포워딩+인증 공용 + 셸 환경 해석).
 // 기존 import 경로(테스트 포함) 호환을 위해 재노출한다.
@@ -149,7 +150,8 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.ssh.connect,
-    async (_event, input: DesktopConnectInput) => {
+    async (event, input: DesktopConnectInput) =>
+      runWithIpcSessionOwner(ctx, event, async () => {
       const host = ctx.hosts.getById(input.hostId);
       if (!host) {
         throw new Error("Host not found");
@@ -384,12 +386,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       }
 
       return connection;
-    },
+      }),
   );
 
   ipcMain.handle(
     ipcChannels.ssh.connectLocal,
-    async (_event, input: DesktopLocalConnectInput) => {
+    async (event, input: DesktopLocalConnectInput) =>
+      runWithIpcSessionOwner(ctx, event, async () => {
       const title = input.title?.trim() || "Terminal";
       const connection = await ctx.coreManager.connectLocalSession({
         cols: input.cols,
@@ -412,7 +415,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         input.rows,
       );
       return connection;
-    },
+      }),
   );
 
   ipcMain.handle(

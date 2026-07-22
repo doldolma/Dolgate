@@ -15,7 +15,9 @@ import type { CoreManager } from "../../core-manager";
 import type { DnsPortForwardCoordinator } from "./dns-port-forward-coordinator";
 
 export interface SnapshotCoordinator {
-  getInitialBootstrapSnapshot: () => Promise<DesktopBootstrapSnapshot>;
+  getInitialBootstrapSnapshot: (
+    ownerWebContentsId?: number,
+  ) => Promise<DesktopBootstrapSnapshot>;
   getSyncedWorkspaceSnapshot: () => Promise<DesktopSyncedWorkspaceSnapshot>;
 }
 
@@ -43,7 +45,7 @@ export function createSnapshotCoordinator(deps: {
   } = deps;
 
   const getInitialBootstrapSnapshot =
-    async (): Promise<DesktopBootstrapSnapshot> => {
+    async (ownerWebContentsId?: number): Promise<DesktopBootstrapSnapshot> => {
       const [
         nextHosts,
         nextGroups,
@@ -58,7 +60,7 @@ export function createSnapshotCoordinator(deps: {
       ] = await Promise.all([
         hosts.list(),
         groups.list(),
-        coreManager.listTabs(),
+        coreManager.listTabs(ownerWebContentsId),
         settings.get(),
         localFiles.getHomeDirectory(),
         Promise.resolve(dnsPortForwardCoordinator.listPortForwardSnapshot()),

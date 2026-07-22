@@ -46,6 +46,88 @@ describe("registerContainersIpcHandlers", () => {
     vi.useRealTimers();
   });
 
+  it("registers each window as a subscriber when opening a Container tab", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const registerContainerSubscriber = vi.fn();
+    const beginContainerLifecycle = vi.fn().mockReturnValue({
+      lifecycleId: "lifecycle-1",
+    });
+
+    registerContainersIpcHandlers({
+      hosts: {
+        getById: vi.fn().mockReturnValue({
+          id: "host-1",
+          label: "Prod",
+          kind: "ssh",
+        }),
+      },
+      buildContainersEndpointId: vi.fn(() => "containers:host-1"),
+      coreManager: {
+        registerContainerSubscriber,
+        beginContainerLifecycle,
+      },
+    } as any);
+
+    await handlers
+      .get(ipcChannels.containers.beginLifecycle)?.(
+        { sender: { id: 91 } },
+        "host-1",
+      );
+
+    expect(registerContainerSubscriber).toHaveBeenCalledWith(
+      "containers:host-1",
+      91,
+    );
+    expect(beginContainerLifecycle).toHaveBeenCalledTimes(1);
+  });
+
+  it("disconnects a shared Container endpoint only after the last window releases it", async () => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+    const releaseContainerSubscriber = vi
+      .fn()
+      .mockReturnValueOnce({ released: true, remainingSubscribers: 1 })
+      .mockReturnValueOnce({ released: true, remainingSubscribers: 0 });
+    const containersDisconnect = vi.fn().mockResolvedValue(undefined);
+    const stopAwsContainersTunnelForEndpoint = vi
+      .fn()
+      .mockResolvedValue(undefined);
+    const finalizeContainerLifecycleForScope = vi.fn();
+
+    registerContainersIpcHandlers({
+      hosts: {
+        getById: vi.fn().mockReturnValue({ id: "host-1", kind: "ssh" }),
+      },
+      buildContainersEndpointId: vi.fn(() => "containers:host-1"),
+      coreManager: {
+        releaseContainerSubscriber,
+        containersDisconnect,
+        finalizeContainerLifecycleForScope,
+      },
+      stopAwsContainersTunnelForEndpoint,
+    } as any);
+
+    const release = handlers.get(ipcChannels.containers.release);
+    await release?.({ sender: { id: 91 } }, "host-1", "lifecycle-1");
+    expect(containersDisconnect).not.toHaveBeenCalled();
+    expect(stopAwsContainersTunnelForEndpoint).not.toHaveBeenCalled();
+
+    await release?.({ sender: { id: 92 } }, "host-1", "lifecycle-1");
+    expect(containersDisconnect).toHaveBeenCalledWith("containers:host-1");
+    expect(stopAwsContainersTunnelForEndpoint).toHaveBeenCalledWith(
+      "containers:host-1",
+    );
+    expect(finalizeContainerLifecycleForScope).toHaveBeenCalledWith(
+      "containers:host-1",
+      "lifecycle-1",
+    );
+  });
+
   it("reuses hydrated AWS host metadata returned by ensureContainersEndpoint when opening a container shell", async () => {
     const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
     electronSpies.ipcMainHandle.mockImplementation((channel, handler) => {
@@ -70,12 +152,18 @@ describe("registerContainersIpcHandlers", () => {
     });
     const connect = vi.fn().mockResolvedValue({ sessionId: "session-1" });
     const trackAwsContainerShellTunnelRuntime = vi.fn();
+    const runWithSessionOwner = vi.fn(
+      (_ownerWebContentsId: number, action: () => Promise<unknown>) => action(),
+    );
 
     registerContainersIpcHandlers({
       hosts: {
         getById: vi.fn().mockReturnValue(host),
       },
       assertSftpCompatibleHost: vi.fn(),
+      buildContainersEndpointId: vi.fn(
+        (hostId: string) => `containers:${hostId}`,
+      ),
       ensureContainersEndpoint,
       buildContainerShellCommand: vi
         .fn()
@@ -99,6 +187,8 @@ describe("registerContainersIpcHandlers", () => {
       },
       coreManager: {
         connect,
+        runWithSessionOwner,
+        assertContainerSubscriber: vi.fn(),
       },
       trackAwsContainerShellTunnelRuntime,
     } as any);
@@ -109,10 +199,11 @@ describe("registerContainersIpcHandlers", () => {
       throw new Error("expected containers.openShell handler to be registered");
     }
 
-    await expect(handler({}, "aws-host-1", "container-1")).resolves.toEqual({
-      sessionId: "session-1",
-    });
+    await expect(
+      handler({ sender: { id: 91 } }, "aws-host-1", "container-1"),
+    ).resolves.toEqual({ sessionId: "session-1" });
 
+    expect(runWithSessionOwner).toHaveBeenCalledWith(91, expect.any(Function));
     expect(ensureContainersEndpoint).toHaveBeenCalledWith(host);
     expect(consumeAwsSftpPreflight).not.toHaveBeenCalled();
     expect(resolveAwsSftpPreflight).not.toHaveBeenCalled();

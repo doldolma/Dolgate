@@ -10,7 +10,7 @@ import {
   type HostContainersStatsInput,
 } from "@shared";
 import { randomUUID } from "node:crypto";
-import { ipcMain } from "electron";
+import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type {
   AwsEc2HostRecord,
@@ -25,6 +25,41 @@ import {
   buildAwsWsProxyTarget,
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
+import { runWithIpcSessionOwner } from "./session-owner";
+
+function resolveOwnerWebContentsId(
+  event: IpcMainInvokeEvent | null,
+): number | undefined {
+  return event?.sender?.id;
+}
+
+function registerContainerSubscriber(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  hostId: string,
+): void {
+  const ownerWebContentsId = resolveOwnerWebContentsId(event);
+  if (ownerWebContentsId !== undefined) {
+    ctx.coreManager.registerContainerSubscriber(
+      ctx.buildContainersEndpointId(hostId),
+      ownerWebContentsId,
+    );
+  }
+}
+
+function assertContainerSubscriber(
+  ctx: MainIpcContext,
+  event: IpcMainInvokeEvent | null,
+  hostId: string,
+): void {
+  const ownerWebContentsId = resolveOwnerWebContentsId(event);
+  if (ownerWebContentsId !== undefined) {
+    ctx.coreManager.assertContainerSubscriber(
+      ctx.buildContainersEndpointId(hostId),
+      ownerWebContentsId,
+    );
+  }
+}
 
 function beginContainersLifecycle(
   ctx: MainIpcContext,
@@ -48,11 +83,12 @@ function beginContainersLifecycle(
 export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.containers.beginLifecycle,
-    async (_event, hostId: string) => {
+    async (event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       if (!host) {
         throw new Error("Containers host를 찾지 못했습니다.");
       }
+      registerContainerSubscriber(ctx, event, hostId);
       return beginContainersLifecycle(ctx, host);
     },
   );
@@ -78,9 +114,10 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.list,
-    async (_event, hostId: string) => {
+    async (event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
+      registerContainerSubscriber(ctx, event, hostId);
       const typedHost = host as SftpCompatibleHostRecord;
       const scopeId = ctx.buildContainersEndpointId(hostId);
       const { lifecycleId } = beginContainersLifecycle(ctx, typedHost);
@@ -128,7 +165,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.inspect,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -145,7 +183,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.logs,
-    async (_event, input: HostContainersLogsInput) => {
+    async (event, input: HostContainersLogsInput) => {
+      assertContainerSubscriber(ctx, event, input.hostId);
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -169,7 +208,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.startTunnel,
-    async (_event, input: HostContainersEphemeralTunnelInput) => {
+    async (event, input: HostContainersEphemeralTunnelInput) => {
+      assertContainerSubscriber(ctx, event, input.hostId);
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       return ctx.startContainerTunnelRuntime({
@@ -193,7 +233,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.start,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -210,7 +251,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.stop,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -227,7 +269,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.restart,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -244,7 +287,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.remove,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -261,7 +305,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.stats,
-    async (_event, input: HostContainersStatsInput) => {
+    async (event, input: HostContainersStatsInput) => {
+      assertContainerSubscriber(ctx, event, input.hostId);
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -278,7 +323,8 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.searchLogs,
-    async (_event, input: HostContainersSearchLogsInput) => {
+    async (event, input: HostContainersSearchLogsInput) => {
+      assertContainerSubscriber(ctx, event, input.hostId);
       const host = ctx.hosts.getById(input.hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -302,9 +348,19 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.release,
-    async (_event, hostId: string, lifecycleId?: string) => {
+    async (event, hostId: string, lifecycleId?: string) => {
       const host = ctx.hosts.getById(hostId);
       const endpointId = ctx.buildContainersEndpointId(hostId);
+      const ownerWebContentsId = resolveOwnerWebContentsId(event);
+      if (ownerWebContentsId !== undefined) {
+        const subscription = ctx.coreManager.releaseContainerSubscriber(
+          endpointId,
+          ownerWebContentsId,
+        );
+        if (!subscription.released || subscription.remainingSubscribers > 0) {
+          return;
+        }
+      }
       try {
         if (!host || !isAwsEcsHostRecord(host)) {
           await ctx.coreManager.containersDisconnect(endpointId);
@@ -321,7 +377,9 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.containers.openShell,
-    async (_event, hostId: string, containerId: string) => {
+    async (event, hostId: string, containerId: string) =>
+      runWithIpcSessionOwner(ctx, event, async () => {
+      assertContainerSubscriber(ctx, event, hostId);
       const host = ctx.hosts.getById(hostId);
       ctx.assertSftpCompatibleHost(host);
       const typedHost = host as SftpCompatibleHostRecord;
@@ -524,6 +582,6 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         });
       }
       return connection;
-    },
+      }),
   );
 }

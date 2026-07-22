@@ -37,6 +37,9 @@ function createContext() {
     coreManager: {
       listTabs: vi.fn(),
     },
+    hosts: {
+      getById: vi.fn(),
+    },
     updater: {
       getState: vi.fn(),
       check: vi.fn(),
@@ -164,5 +167,36 @@ describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
     await handler({}, { theme: "dark" });
 
     expect(ctx.authService.resetServerVaultSupport).not.toHaveBeenCalled();
+  });
+
+  it("opens a validated host in a new window and consumes its launch intent once", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({ id: "host-1" });
+    const runtime = {
+      openWindow: vi.fn().mockResolvedValue(undefined),
+      consumeLaunchIntent: vi
+        .fn()
+        .mockReturnValueOnce({ type: "connect-host", hostId: "host-1" })
+        .mockReturnValueOnce(null),
+    };
+    ctx.resolveWindowFromSender.mockReturnValue({ id: 77 });
+
+    registerWindowUpdaterSettingsFilesIpcHandlers(ctx, runtime);
+    const openHost = getRegisteredHandler(ipcChannels.window.openHost);
+    const consumeIntent = getRegisteredHandler(
+      ipcChannels.window.consumeLaunchIntent,
+    );
+
+    await openHost({}, "host-1");
+    await expect(consumeIntent({ sender: {} })).resolves.toEqual({
+      type: "connect-host",
+      hostId: "host-1",
+    });
+    await expect(consumeIntent({ sender: {} })).resolves.toBeNull();
+
+    expect(runtime.openWindow).toHaveBeenCalledWith({
+      type: "connect-host",
+      hostId: "host-1",
+    });
   });
 });

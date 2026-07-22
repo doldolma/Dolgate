@@ -6,11 +6,13 @@ import {
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
+import { runWithIpcSessionOwner } from "./session-owner";
 
 export function registerSerialIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
     ipcChannels.serial.connect,
-    async (_event, input: DesktopSerialConnectInput) => {
+    async (event, input: DesktopSerialConnectInput) =>
+      runWithIpcSessionOwner(ctx, event, async () => {
       const host = ctx.hosts.getById(input.hostId);
       if (!host) {
         throw new Error("Host not found");
@@ -44,7 +46,7 @@ export function registerSerialIpcHandlers(ctx: MainIpcContext): void {
         input.rows,
       );
       return connection;
-    },
+      }),
   );
 
   ipcMain.handle(

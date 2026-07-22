@@ -23,7 +23,8 @@ export const ipcChannels = {
   },
   bootstrap: {
     getInitialSnapshot: 'bootstrap:get-initial-snapshot',
-    getSyncedWorkspaceSnapshot: 'bootstrap:get-synced-workspace-snapshot'
+    getSyncedWorkspaceSnapshot: 'bootstrap:get-synced-workspace-snapshot',
+    workspaceChanged: 'bootstrap:workspace-changed'
   },
   hosts: {
     list: 'hosts:list',
@@ -147,6 +148,9 @@ export const ipcChannels = {
   },
   window: {
     getState: 'window:get-state',
+    openNew: 'window:open-new',
+    openHost: 'window:open-host',
+    consumeLaunchIntent: 'window:consume-launch-intent',
     minimize: 'window:minimize',
     maximize: 'window:maximize',
     restore: 'window:restore',

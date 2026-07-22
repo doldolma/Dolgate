@@ -32,6 +32,14 @@ import type {
   SftpCompatibleHostRecord,
 } from "../context";
 
+interface ResolvedContainersEndpoint {
+  endpointId: string;
+  runtime: HostContainerRuntime | null;
+  runtimeCommand: string | null;
+  unsupportedReason: string | null;
+  hydratedHost?: AwsEc2HostRecord | null;
+}
+
 export interface ContainerRuntimeCoordinator {
   buildContainersEndpointId: (hostId: string) => string;
   buildContainerPortForwardEndpointId: (
@@ -41,13 +49,7 @@ export interface ContainerRuntimeCoordinator {
   ensureContainersEndpoint: (
     host: SftpCompatibleHostRecord,
     endpointId?: string,
-  ) => Promise<{
-    endpointId: string;
-    runtime: HostContainerRuntime | null;
-    runtimeCommand: string | null;
-    unsupportedReason: string | null;
-    hydratedHost?: AwsEc2HostRecord | null;
-  }>;
+  ) => Promise<ResolvedContainersEndpoint>;
   startContainerTunnelRuntime: (input: {
     ruleId: string;
     host: SftpCompatibleHostRecord;
@@ -108,17 +110,15 @@ export function createContainerRuntimeCoordinator(deps: {
   const buildContainersEndpointId = (hostId: string) => `containers:${hostId}`;
   const buildContainerPortForwardEndpointId = (hostId: string, ruleId: string) =>
     `containers:${hostId}:forward:${ruleId}`;
+  const pendingEndpointConnections = new Map<
+    string,
+    Promise<ResolvedContainersEndpoint>
+  >();
 
-  const ensureContainersEndpoint = async (
+  const connectContainersEndpoint = async (
     host: SftpCompatibleHostRecord,
     endpointId = buildContainersEndpointId(host.id),
-  ): Promise<{
-    endpointId: string;
-    runtime: HostContainerRuntime | null;
-    runtimeCommand: string | null;
-    unsupportedReason: string | null;
-    hydratedHost?: AwsEc2HostRecord | null;
-  }> => {
+  ): Promise<ResolvedContainersEndpoint> => {
     const existingRuntime =
       coreManager.getContainersEndpointRuntime(endpointId);
     if (existingRuntime) {
@@ -367,6 +367,29 @@ export function createContainerRuntimeCoordinator(deps: {
       unsupportedReason: result.unsupportedReason,
       hydratedHost: null,
     };
+  };
+
+  const ensureContainersEndpoint = async (
+    host: SftpCompatibleHostRecord,
+    endpointId = buildContainersEndpointId(host.id),
+  ): Promise<ResolvedContainersEndpoint> => {
+    const existingRuntime = coreManager.getContainersEndpointRuntime(endpointId);
+    if (existingRuntime) {
+      return connectContainersEndpoint(host, endpointId);
+    }
+    const pendingConnection = pendingEndpointConnections.get(endpointId);
+    if (pendingConnection) {
+      return pendingConnection;
+    }
+    const connection = connectContainersEndpoint(host, endpointId);
+    pendingEndpointConnections.set(endpointId, connection);
+    try {
+      return await connection;
+    } finally {
+      if (pendingEndpointConnections.get(endpointId) === connection) {
+        pendingEndpointConnections.delete(endpointId);
+      }
+    }
   };
 
   const startContainerTunnelRuntime = async (input: {

@@ -187,6 +187,9 @@ describe("registerAwsIpcHandlers", () => {
       tokenValue: "token-ecs-1",
     });
     const noteSessionConfigured = vi.fn();
+    const runWithSessionOwner = vi.fn(
+      (_ownerWebContentsId: number, action: () => Promise<unknown>) => action(),
+    );
 
     registerAwsIpcHandlers({
       awsService: {
@@ -207,6 +210,7 @@ describe("registerAwsIpcHandlers", () => {
       assertAwsEcsHost: vi.fn(),
       coreManager: {
         connectAwsSession,
+        runWithSessionOwner,
       },
       sessionReplayService: {
         noteSessionConfigured,
@@ -221,7 +225,7 @@ describe("registerAwsIpcHandlers", () => {
     }
 
     await expect(
-      handler({}, {
+      handler({ sender: { id: 73 } }, {
         hostId: "host-1",
         serviceName: "api",
         taskArn: "arn:aws:ecs:ap-northeast-2:123456789012:task/prod/task-1",
@@ -231,6 +235,7 @@ describe("registerAwsIpcHandlers", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1" });
 
+    expect(runWithSessionOwner).toHaveBeenCalledWith(73, expect.any(Function));
     expect(invalidateEcsServiceActionContext).toHaveBeenCalledWith(
       "default",
       "ap-northeast-2",

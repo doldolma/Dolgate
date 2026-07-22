@@ -25,6 +25,7 @@ export interface CoreEventBridge {
   buildWindowState: (window: BrowserWindow) => {
     isMaximized: boolean;
   };
+  emitWorkspaceChanged: (sender?: Electron.WebContents) => void;
 }
 
 export function createCoreEventBridge(deps: {
@@ -64,10 +65,26 @@ export function createCoreEventBridge(deps: {
   };
 
   const emitSftpConnectionProgress: AwsConnectionProgressEmitter = (event) => {
+    if (
+      typeof coreManager.sendSftpConnectionProgressToOwner === "function" &&
+      coreManager.sendSftpConnectionProgressToOwner(event.endpointId, event)
+    ) {
+      return;
+    }
     sendToAllWindows(ipcChannels.sftp.connectionProgress, event);
   };
 
   const emitContainersConnectionProgress: AwsConnectionProgressEmitter = (event) => {
+    if (
+      typeof coreManager.sendContainersConnectionProgressToSubscribers ===
+        "function" &&
+      coreManager.sendContainersConnectionProgressToSubscribers(
+        event.endpointId,
+        event,
+      )
+    ) {
+      return;
+    }
     sendToAllWindows(ipcChannels.containers.connectionProgress, event);
   };
 
@@ -84,6 +101,14 @@ export function createCoreEventBridge(deps: {
   const buildWindowState = (window: BrowserWindow) => ({
     isMaximized: window.isMaximized(),
   });
+
+  const emitWorkspaceChanged = (sender?: Electron.WebContents) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed() && window.webContents !== sender) {
+        window.webContents.send(ipcChannels.bootstrap.workspaceChanged);
+      }
+    }
+  };
 
   coreManager.setTerminalEventHandler(async (event) => {
     sessionShareService.handleTerminalEvent(event);
@@ -160,5 +185,6 @@ export function createCoreEventBridge(deps: {
     emitContainersConnectionProgress,
     resolveWindowFromSender,
     buildWindowState,
+    emitWorkspaceChanged,
   };
 }

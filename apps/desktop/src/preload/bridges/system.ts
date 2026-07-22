@@ -32,6 +32,11 @@ export function buildWindowBridge(
 ): DesktopApi["window"] {
   return {
     getState: () => ipcRenderer.invoke(ipcChannels.window.getState),
+    openNew: () => ipcRenderer.invoke(ipcChannels.window.openNew),
+    openHost: (hostId: string) =>
+      ipcRenderer.invoke(ipcChannels.window.openHost, hostId),
+    consumeLaunchIntent: () =>
+      ipcRenderer.invoke(ipcChannels.window.consumeLaunchIntent),
     minimize: () => ipcRenderer.invoke(ipcChannels.window.minimize),
     maximize: () => ipcRenderer.invoke(ipcChannels.window.maximize),
     restore: () => ipcRenderer.invoke(ipcChannels.window.restore),

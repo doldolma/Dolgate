@@ -220,6 +220,7 @@ interface RenderBrowserOptions {
   onRemoveHost?: ReturnType<typeof vi.fn>;
   onRemoveSecret?: ReturnType<typeof vi.fn>;
   onConnectHost?: ReturnType<typeof vi.fn>;
+  onOpenHostInNewWindow?: ReturnType<typeof vi.fn>;
   onConnectHostTmux?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
   onActivateSftp?: ReturnType<typeof vi.fn>;
@@ -259,6 +260,7 @@ function renderBrowser({
   onRemoveHost = vi.fn().mockResolvedValue(undefined),
   onRemoveSecret = vi.fn().mockResolvedValue(undefined),
   onConnectHost = vi.fn().mockResolvedValue(undefined),
+  onOpenHostInNewWindow,
   onConnectHostTmux,
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
   onActivateSftp = vi.fn(),
@@ -312,6 +314,7 @@ function renderBrowser({
       onRemoveHost={onRemoveHost}
       onRemoveSecret={onRemoveSecret}
       onConnectHost={onConnectHost}
+      onOpenHostInNewWindow={onOpenHostInNewWindow}
       onConnectHostTmux={onConnectHostTmux}
       onOpenHostContainers={onOpenHostContainers}
       onActivateSftp={onActivateSftp}
@@ -668,6 +671,19 @@ describe('HostBrowser helpers', () => {
 
     await waitFor(() => {
       expect(onConnectHost).toHaveBeenCalledWith('host-1');
+    });
+  });
+
+  it('opens a single host in a new window from the context menu', async () => {
+    const onOpenHostInNewWindow = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ onOpenHostInNewWindow });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: '새 창에서 연결' }));
+
+    await waitFor(() => {
+      expect(onOpenHostInNewWindow).toHaveBeenCalledWith('host-1');
     });
   });
 

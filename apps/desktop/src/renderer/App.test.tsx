@@ -389,6 +389,7 @@ function createDolsshApi(options: {
     window: {
       getState: vi.fn().mockResolvedValue({ isMaximized: false }),
       onStateChanged: vi.fn(() => off.windowState),
+      consumeLaunchIntent: vi.fn().mockResolvedValue(null),
       minimize: vi.fn().mockResolvedValue(undefined),
       maximize: vi.fn().mockResolvedValue(undefined),
       restore: vi.fn().mockResolvedValue(undefined),
@@ -461,6 +462,33 @@ describe('App integration', () => {
       expect(api.sync.bootstrap).toHaveBeenCalledTimes(1);
       expect(mocks.storeState.refreshSyncedWorkspaceData).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('terminal-workspace')).toBeInTheDocument();
+    });
+  });
+
+  it('connects the requested host after a new window finishes authentication', async () => {
+    const api = createDolsshApi({
+      authBootstrapState: {
+        status: 'authenticated',
+        session: { user: { id: 'user-1', email: 'user@example.com' } },
+        offline: null,
+        errorMessage: null,
+      },
+    });
+    api.window.consumeLaunchIntent.mockResolvedValue({
+      type: 'connect-host',
+      hostId: 'host-new-window',
+    });
+    mocks.desktopApi = api;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(api.window.consumeLaunchIntent).toHaveBeenCalledTimes(1);
+      expect(mocks.storeState.connectHost).toHaveBeenCalledWith(
+        'host-new-window',
+        120,
+        32,
+      );
     });
   });
 

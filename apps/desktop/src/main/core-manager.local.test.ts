@@ -8,7 +8,8 @@ import type {
   CoreRequest,
   SessionLifecycleLogMetadata,
 } from "@shared";
-import { encodeControlFrame } from "./core-framing";
+import { encodeControlFrame, encodeStreamFrame } from "./core-framing";
+import { ipcChannels } from "../common/ipc-channels";
 
 const { spawnMock } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
@@ -91,6 +92,16 @@ function createFakeChildProcess() {
   };
 }
 
+function createFakeWindow(webContentsId: number) {
+  const window = new EventEmitter() as EventEmitter & {
+    webContents: { id: number; send: ReturnType<typeof vi.fn> };
+    isDestroyed: () => boolean;
+  };
+  window.webContents = { id: webContentsId, send: vi.fn() };
+  window.isDestroyed = () => false;
+  return window;
+}
+
 async function waitForWriteCount(
   writes: Buffer[],
   expectedCount: number,
@@ -112,6 +123,231 @@ describe("CoreManager.isTmuxSession", () => {
     expect(manager.isTmuxSession("3f1c-regular-session")).toBe(false);
     expect(manager.isTmuxSession(undefined)).toBe(false);
     expect(manager.isTmuxSession(null)).toBe(false);
+  });
+});
+
+describe("CoreManager window session ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("routes terminal events and output only to the owning window", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const firstWindow = createFakeWindow(101);
+    const secondWindow = createFakeWindow(202);
+    manager.registerWindow(firstWindow as never);
+    manager.registerWindow(secondWindow as never);
+
+    const { sessionId } = await manager.runWithSessionOwner(101, () =>
+      manager.connectLocalSession({ cols: 120, rows: 32, title: "Terminal" }),
+    );
+
+    expect(manager.listTabs(101)).toHaveLength(1);
+    expect(manager.listTabs(202)).toHaveLength(0);
+
+    fakeProcess.emitControl({
+      type: "connected",
+      sessionId,
+      payload: { status: "connected" },
+    });
+    fakeProcess.child.stdout.emit(
+      "data",
+      encodeStreamFrame(
+        { type: "data", sessionId },
+        Buffer.from("owner-only", "utf8"),
+      ),
+    );
+
+    expect(firstWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.ssh.event,
+      expect.objectContaining({ type: "connected", sessionId }),
+    );
+    expect(firstWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.ssh.data,
+      expect.objectContaining({ sessionId }),
+    );
+    expect(secondWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("disconnects only sessions owned by a closed window", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const firstWindow = createFakeWindow(101);
+    const secondWindow = createFakeWindow(202);
+    manager.registerWindow(firstWindow as never);
+    manager.registerWindow(secondWindow as never);
+
+    const first = await manager.runWithSessionOwner(101, () =>
+      manager.connectLocalSession({ cols: 120, rows: 32, title: "First" }),
+    );
+    const second = await manager.runWithSessionOwner(202, () =>
+      manager.connectLocalSession({ cols: 120, rows: 32, title: "Second" }),
+    );
+    fakeProcess.emitControl({ type: "connected", sessionId: first.sessionId, payload: {} });
+    fakeProcess.emitControl({ type: "connected", sessionId: second.sessionId, payload: {} });
+
+    firstWindow.emit("closed");
+
+    const lastRequest = decodeControlFrame(fakeProcess.writes.at(-1)!);
+    expect(lastRequest).toMatchObject({
+      type: "disconnect",
+      sessionId: first.sessionId,
+    });
+    expect(manager.listTabs(202).map((tab) => tab.sessionId)).toEqual([
+      second.sessionId,
+    ]);
+  });
+});
+
+describe("CoreManager Container window subscriptions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shares endpoint events with subscribers and hands interactive auth to one window", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const firstWindow = createFakeWindow(101);
+    const secondWindow = createFakeWindow(202);
+    manager.registerWindow(firstWindow as never);
+    manager.registerWindow(secondWindow as never);
+    manager.registerContainerSubscriber("containers:host-1", 101);
+    manager.registerContainerSubscriber("containers:host-1", 202);
+    await manager.start();
+
+    manager.sendContainersConnectionProgressToSubscribers(
+      "containers:host-1",
+      {
+        endpointId: "containers:host-1",
+        hostId: "host-1",
+        stage: "connecting-containers",
+        message: "connecting",
+      },
+    );
+    expect(firstWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.containers.connectionProgress,
+      expect.objectContaining({ endpointId: "containers:host-1" }),
+    );
+    expect(secondWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.containers.connectionProgress,
+      expect.objectContaining({ endpointId: "containers:host-1" }),
+    );
+
+    firstWindow.webContents.send.mockClear();
+    secondWindow.webContents.send.mockClear();
+    fakeProcess.emitControl({
+      type: "keyboardInteractiveChallenge",
+      endpointId: "containers:host-1",
+      payload: {
+        challengeId: "challenge-1",
+        attempt: 1,
+        instruction: "approve",
+        prompts: [],
+      },
+    });
+    expect(firstWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.ssh.event,
+      expect.objectContaining({ type: "keyboardInteractiveChallenge" }),
+    );
+    expect(secondWindow.webContents.send).not.toHaveBeenCalled();
+
+    firstWindow.webContents.send.mockClear();
+    const released = manager.releaseContainerSubscriber(
+      "containers:host-1",
+      101,
+    );
+    expect(released).toEqual({ released: true, remainingSubscribers: 1 });
+    expect(secondWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.ssh.event,
+      expect.objectContaining({ type: "keyboardInteractiveChallenge" }),
+    );
+    expect(() =>
+      manager.assertContainerSubscriber("containers:host-1", 202),
+    ).not.toThrow();
+
+    firstWindow.webContents.send.mockClear();
+    secondWindow.webContents.send.mockClear();
+    fakeProcess.emitControl({
+      type: "containersConnected",
+      endpointId: "containers:host-1",
+      payload: { runtime: "docker" },
+    });
+    expect(firstWindow.webContents.send).not.toHaveBeenCalled();
+    expect(secondWindow.webContents.send).toHaveBeenCalledWith(
+      ipcChannels.ssh.event,
+      expect.objectContaining({ type: "containersConnected" }),
+    );
+
+    manager.releaseContainerSubscriber("containers:host-1", 202);
+    firstWindow.webContents.send.mockClear();
+    secondWindow.webContents.send.mockClear();
+    fakeProcess.emitControl({
+      type: "containersError",
+      endpointId: "containers:host-1",
+      payload: { message: "closed" },
+    });
+    expect(firstWindow.webContents.send).not.toHaveBeenCalled();
+    expect(secondWindow.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("disconnects a shared endpoint only when its last window closes", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+    const manager = new CoreManager();
+    const firstWindow = createFakeWindow(101);
+    const secondWindow = createFakeWindow(202);
+    manager.registerWindow(firstWindow as never);
+    manager.registerWindow(secondWindow as never);
+    manager.registerContainerSubscriber("containers:host-1", 101);
+    manager.registerContainerSubscriber("containers:host-1", 202);
+
+    const connect = manager.containersConnect({
+      endpointId: "containers:host-1",
+      hostId: "host-1",
+      host: "host.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      password: "secret",
+      trustedHostKeyBase64: "AAAATEST",
+    });
+    await waitForWriteCount(fakeProcess.writes, 1);
+    const connectRequest = decodeControlFrame(fakeProcess.writes[0]);
+    fakeProcess.emitControl({
+      type: "containersConnected",
+      requestId: connectRequest.id,
+      endpointId: "containers:host-1",
+      payload: {
+        runtime: "docker",
+        runtimeCommand: "/usr/bin/docker",
+      },
+    });
+    await connect;
+
+    firstWindow.emit("closed");
+    await Promise.resolve();
+    expect(fakeProcess.writes).toHaveLength(1);
+    expect(() =>
+      manager.assertContainerSubscriber("containers:host-1", 202),
+    ).not.toThrow();
+
+    secondWindow.emit("closed");
+    await waitForWriteCount(fakeProcess.writes, 2);
+    const disconnectRequest = decodeControlFrame(fakeProcess.writes[1]);
+    expect(disconnectRequest).toMatchObject({
+      type: "containersDisconnect",
+      endpointId: "containers:host-1",
+    });
+    fakeProcess.emitControl({
+      type: "containersDisconnected",
+      requestId: disconnectRequest.id,
+      endpointId: "containers:host-1",
+      payload: {},
+    });
   });
 });
 

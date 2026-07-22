@@ -40,7 +40,10 @@ import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshKeyIpcHandlers } from "./ipc/ssh-keys";
 import { registerSshIpcHandlers } from "./ipc/ssh";
 import { registerSyncIpcHandlers } from "./ipc/sync";
-import { registerWindowUpdaterSettingsFilesIpcHandlers } from "./ipc/window-updater-settings-files";
+import {
+  registerWindowUpdaterSettingsFilesIpcHandlers,
+  type DesktopWindowIpcRuntime,
+} from "./ipc/window-updater-settings-files";
 
 export function registerIpcHandlers(
   hosts: HostRepository,
@@ -67,6 +70,7 @@ export function registerIpcHandlers(
   xshellImportService: XshellImportService,
   sessionShareService: SessionShareService,
   sessionReplayService: SessionReplayService,
+  windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   const ctx = createMainIpcContext({
     hosts,
@@ -110,5 +114,5 @@ export function registerIpcHandlers(
   registerSnippetsIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
   registerSshKeyIpcHandlers(ctx);
-  registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
+  registerWindowUpdaterSettingsFilesIpcHandlers(ctx, windowRuntime);
 }

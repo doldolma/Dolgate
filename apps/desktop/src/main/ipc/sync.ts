@@ -42,11 +42,10 @@ export function registerSyncIpcHandlers(ctx: MainIpcContext): void {
   );
   ipcMain.handle(
     ipcChannels.bootstrap.getInitialSnapshot,
-    async () => ctx.getInitialBootstrapSnapshot(),
+    async (event) => ctx.getInitialBootstrapSnapshot(event.sender.id),
   );
   ipcMain.handle(
     ipcChannels.bootstrap.getSyncedWorkspaceSnapshot,
     async () => ctx.getSyncedWorkspaceSnapshot(),
   );
 }
-

@@ -120,7 +120,9 @@ export interface MainIpcContext {
   localFiles: LocalFileService;
   portForwardLifecycleLogger: PortForwardLifecycleLogger;
   queueSync: () => void;
-  getInitialBootstrapSnapshot: () => Promise<DesktopBootstrapSnapshot>;
+  getInitialBootstrapSnapshot: (
+    ownerWebContentsId?: number,
+  ) => Promise<DesktopBootstrapSnapshot>;
   getSyncedWorkspaceSnapshot: () => Promise<DesktopSyncedWorkspaceSnapshot>;
   listPortForwardSnapshot: () => {
     rules: ReturnType<PortForwardRepository["list"]>;
@@ -208,6 +210,7 @@ export interface MainIpcContext {
   }) => Promise<unknown>;
   resolveWindowFromSender: (sender: WebContents) => BrowserWindow;
   buildWindowState: (window: BrowserWindow) => DesktopWindowState;
+  emitWorkspaceChanged: (sender?: WebContents) => void;
   persistSecret: (
     label: string,
     secrets?: HostSecretInput,

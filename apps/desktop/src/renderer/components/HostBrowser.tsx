@@ -14,7 +14,7 @@ import {
   NoticeCard,
   SectionLabel,
 } from '../ui';
-import { Columns2, Container, Copy, Folder, Pencil, SquareTerminal, Trash2 } from '../ui/icons';
+import { AppWindow, Columns2, Container, Copy, Folder, Pencil, SquareTerminal, Trash2 } from '../ui/icons';
 import { HomeSidebar } from './host-browser/HomeSidebar';
 import { HostListPanel } from './host-browser/HostListPanel';
 import { HostDetailPanel } from './host-browser/HostDetailPanel';
@@ -120,6 +120,22 @@ export function HostBrowser({ hostEditor, ...props }: HostBrowserProps) {
                       ? '연결'
                       : `연결 (${contextMenu.hostIds.length}개)`}
                   </button>
+                  {contextMenu.hostIds.length === 1 && hb.onOpenHostInNewWindow ? (
+                    <button
+                      type="button"
+                      className={CTX_ITEM}
+                      onClick={() => {
+                        const targetHostId = contextMenu.hostIds[0];
+                        hb.setContextMenu(null);
+                        if (targetHostId) {
+                          void hb.onOpenHostInNewWindow?.(targetHostId);
+                        }
+                      }}
+                    >
+                      <AppWindow className={CTX_ICON} aria-hidden />
+                      새 창에서 연결
+                    </button>
+                  ) : null}
                   {!contextMenuIsEcs && hb.onOpenSftp ? (
                     <button
                       type="button"

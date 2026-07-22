@@ -1,16 +1,41 @@
-import type { AppSettings } from "@shared";
+import type { AppSettings, DesktopWindowLaunchIntent } from "@shared";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { app, dialog, ipcMain, shell } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 
+export interface DesktopWindowIpcRuntime {
+  openWindow: (intent?: DesktopWindowLaunchIntent) => Promise<void>;
+  consumeLaunchIntent: (windowId: number) => DesktopWindowLaunchIntent | null;
+}
+
 export function registerWindowUpdaterSettingsFilesIpcHandlers(
   ctx: MainIpcContext,
+  windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   ipcMain.handle(ipcChannels.window.getState, async (event) =>
     ctx.buildWindowState(ctx.resolveWindowFromSender(event.sender)),
   );
+
+  ipcMain.handle(ipcChannels.window.openNew, async () => {
+    await windowRuntime?.openWindow();
+  });
+
+  ipcMain.handle(
+    ipcChannels.window.openHost,
+    async (_event, hostId: string) => {
+      if (typeof hostId !== "string" || !ctx.hosts.getById(hostId)) {
+        throw new Error("Host not found");
+      }
+      await windowRuntime?.openWindow({ type: "connect-host", hostId });
+    },
+  );
+
+  ipcMain.handle(ipcChannels.window.consumeLaunchIntent, async (event) => {
+    const window = ctx.resolveWindowFromSender(event.sender);
+    return windowRuntime?.consumeLaunchIntent(window.id) ?? null;
+  });
 
   ipcMain.handle(ipcChannels.window.minimize, async (event) => {
     ctx.resolveWindowFromSender(event.sender).minimize();
@@ -28,7 +53,9 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
     ctx.resolveWindowFromSender(event.sender).close();
   });
 
-  ipcMain.handle(ipcChannels.tabs.list, async () => ctx.coreManager.listTabs());
+  ipcMain.handle(ipcChannels.tabs.list, async (event) =>
+    ctx.coreManager.listTabs(event.sender.id),
+  );
 
   ipcMain.handle(ipcChannels.updater.getState, async () => ctx.updater.getState());
 
@@ -55,7 +82,7 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.settings.update,
-    async (_event, input: Partial<AppSettings>) => {
+    async (event, input: Partial<AppSettings>) => {
       const previousServerUrl = ctx.settings.get().serverUrl;
       const nextSettings = ctx.settings.update(input);
       if (nextSettings.serverUrl !== previousServerUrl) {
@@ -69,6 +96,7 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
       ) {
         ctx.sessionReplayService.prune();
       }
+      ctx.emitWorkspaceChanged?.(event?.sender);
       return nextSettings;
     },
   );

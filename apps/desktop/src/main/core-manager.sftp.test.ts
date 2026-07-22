@@ -50,19 +50,24 @@ function decodeControlFrame(
   ) as CoreRequest<Record<string, unknown>>;
 }
 
-function createFakeWindow() {
+function createFakeWindow(webContentsId = 1) {
   const sent: Array<{ channel: string; payload: unknown }> = [];
+  const listeners = new Map<string, () => void>();
   return {
     sent,
     window: {
-      on: vi.fn(),
+      on: vi.fn((event: string, listener: () => void) => {
+        listeners.set(event, listener);
+      }),
       isDestroyed: vi.fn(() => false),
       webContents: {
+        id: webContentsId,
         send: vi.fn((channel: string, payload: unknown) => {
           sent.push({ channel, payload });
         }),
       },
     },
+    close: () => listeners.get("closed")?.(),
   };
 }
 
@@ -527,6 +532,149 @@ describe("CoreManager SFTP sessions", () => {
       challengeId: "challenge-1",
       responses: ["ABCD-1234"],
     });
+  });
+
+  it("routes owned SFTP lifecycle and transfer events only to their window", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const windowA = createFakeWindow(11);
+    const windowB = createFakeWindow(22);
+    manager.registerWindow(windowA.window as never);
+    manager.registerWindow(windowB.window as never);
+    manager.registerSftpEndpointOwner("endpoint-a", 11);
+
+    const job = await manager.runWithSessionOwner(11, () =>
+      manager.startSftpTransfer({
+        source: { kind: "local", path: "/tmp/local" },
+        target: {
+          kind: "remote",
+          endpointId: "endpoint-a",
+          path: "/tmp/remote",
+        },
+        items: [
+          {
+            name: "owned.bin",
+            path: "/tmp/local/owned.bin",
+            isDirectory: false,
+            size: 1024,
+          },
+        ],
+        conflictResolution: "overwrite",
+      }),
+    );
+
+    expect(getTransferEventPayloads(windowA.sent)).toHaveLength(1);
+    expect(getTransferEventPayloads(windowB.sent)).toHaveLength(0);
+
+    windowA.sent.length = 0;
+    windowB.sent.length = 0;
+    fakeProcess.emitControl({
+      type: "sftpTransferProgress",
+      jobId: job.id,
+      payload: {
+        bytesTotal: 1024,
+        bytesCompleted: 256,
+      },
+    });
+    fakeProcess.emitControl({
+      type: "keyboardInteractiveChallenge",
+      endpointId: "endpoint-a",
+      payload: {
+        challengeId: "challenge-a",
+        attempt: 1,
+        instruction: "approve",
+        prompts: [],
+      },
+    });
+    manager.sendSftpConnectionProgressToOwner("endpoint-a", {
+      endpointId: "endpoint-a",
+      hostId: "host-a",
+      stage: "connecting-sftp",
+      message: "connecting",
+    });
+
+    expect(getTransferEventPayloads(windowA.sent)).toHaveLength(1);
+    expect(getTransferEventPayloads(windowB.sent)).toHaveLength(0);
+    expect(windowA.sent).toContainEqual(
+      expect.objectContaining({
+        channel: ipcChannels.ssh.event,
+        payload: expect.objectContaining({ endpointId: "endpoint-a" }),
+      }),
+    );
+    expect(windowB.sent).not.toContainEqual(
+      expect.objectContaining({ channel: ipcChannels.ssh.event }),
+    );
+    expect(windowA.sent).toContainEqual(
+      expect.objectContaining({
+        channel: ipcChannels.sftp.connectionProgress,
+      }),
+    );
+    expect(windowB.sent).not.toContainEqual(
+      expect.objectContaining({
+        channel: ipcChannels.sftp.connectionProgress,
+      }),
+    );
+    expect(() => manager.assertSftpEndpointOwner("endpoint-a", 22)).toThrow(
+      "이 창에 속한 SFTP 연결이 아닙니다.",
+    );
+    expect(() => manager.assertSftpTransferOwner(job.id, 22)).toThrow(
+      "이 창에 속한 파일 전송이 아닙니다.",
+    );
+  });
+
+  it("cancels only the SFTP transfers owned by a closing window", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    const windowA = createFakeWindow(11);
+    const windowB = createFakeWindow(22);
+    manager.registerWindow(windowA.window as never);
+    manager.registerWindow(windowB.window as never);
+    manager.registerSftpEndpointOwner("endpoint-a", 11);
+
+    const createTransfer = (name: string) => ({
+      source: { kind: "local" as const, path: "/tmp/local" },
+      target: { kind: "local" as const, path: "/tmp/target" },
+      items: [
+        {
+          name,
+          path: `/tmp/local/${name}`,
+          isDirectory: false,
+          size: 1024,
+        },
+      ],
+      conflictResolution: "overwrite" as const,
+    });
+    const jobA = await manager.runWithSessionOwner(11, () =>
+      manager.startSftpTransfer(createTransfer("window-a.bin")),
+    );
+    const jobB = await manager.runWithSessionOwner(22, () =>
+      manager.startSftpTransfer(createTransfer("window-b.bin")),
+    );
+    windowB.sent.length = 0;
+
+    windowA.close();
+    await waitForWriteCount(fakeProcess.writes, 3);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        manager.assertSftpEndpointOwner("endpoint-a", 11);
+      } catch {
+        break;
+      }
+      await Promise.resolve();
+    }
+
+    const cancelRequest = decodeControlFrame(fakeProcess.writes[2]);
+    expect(cancelRequest.type).toBe("sftpTransferCancel");
+    expect(cancelRequest.jobId).toBe(jobA.id);
+    expect(windowB.sent).toHaveLength(0);
+    expect(() => manager.assertSftpTransferOwner(jobB.id, 22)).not.toThrow();
+    expect(() => manager.assertSftpEndpointOwner("endpoint-a", 11)).toThrow(
+      "이 창에 속한 SFTP 연결이 아닙니다.",
+    );
   });
 
   it("broadcasts cancelling immediately and preserves it across progress updates", async () => {

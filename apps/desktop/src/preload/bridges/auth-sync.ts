@@ -1,7 +1,7 @@
 import type { IpcRenderer } from "electron";
 import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
-import { subscribeAuthEvent } from "../events/state";
+import { subscribeAuthEvent, subscribeWorkspaceChanged } from "../events/state";
 
 export function buildAuthBridge(
   ipcRenderer: IpcRenderer,
@@ -55,5 +55,6 @@ export function buildBootstrapBridge(
       ipcRenderer.invoke(ipcChannels.bootstrap.getInitialSnapshot),
     getSyncedWorkspaceSnapshot: () =>
       ipcRenderer.invoke(ipcChannels.bootstrap.getSyncedWorkspaceSnapshot),
+    onWorkspaceChanged: (listener) => subscribeWorkspaceChanged(listener),
   };
 }

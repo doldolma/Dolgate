@@ -110,6 +110,52 @@ describe("container runtime coordinator", () => {
     expect(deps.tunnelRegistry.trackContainersTunnelRuntime).not.toHaveBeenCalled();
   });
 
+  it("shares one in-flight endpoint connection across windows", async () => {
+    let resolveConnection:
+      | ((value: {
+          runtime: "docker";
+          runtimeCommand: string;
+          unsupportedReason: null;
+        }) => void)
+      | undefined;
+    const containersConnect = vi.fn(
+      () =>
+        new Promise<{
+          runtime: "docker";
+          runtimeCommand: string;
+          unsupportedReason: null;
+        }>((resolve) => {
+          resolveConnection = resolve;
+        }),
+    );
+    const { deps, coordinator, host } = createCoordinator({
+      coreManager: {
+        getContainersEndpointRuntime: vi.fn(() => null),
+        containersConnect,
+        setPortForwardRuntime: vi.fn(),
+        listPortForwardRuntimes: vi.fn(() => []),
+        containersDisconnect: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    const first = coordinator.ensureContainersEndpoint(host, "endpoint-shared");
+    const second = coordinator.ensureContainersEndpoint(host, "endpoint-shared");
+    await vi.waitFor(() => {
+      expect(containersConnect).toHaveBeenCalledTimes(1);
+    });
+    resolveConnection?.({
+      runtime: "docker",
+      runtimeCommand: "/usr/bin/docker",
+      unsupportedReason: null,
+    });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ endpointId: "endpoint-shared" }),
+      expect.objectContaining({ endpointId: "endpoint-shared" }),
+    ]);
+    expect(deps.awsSsmTunnelService.start).toHaveBeenCalledTimes(1);
+  });
+
   it("routes AWS container runtime through the server proxy when enabled", async () => {
     const serverProxyHost = {
       ...createAwsHost(),

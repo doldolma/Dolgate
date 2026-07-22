@@ -536,6 +536,7 @@ export function HomeShell({
                 );
               }
             }}
+            onOpenHostInNewWindow={homeViewModel.openHostInNewWindow}
             onConnectHostTmux={async (hostId) => {
               try {
                 setHostBrowserError(null);
