@@ -72,7 +72,7 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
 }
 
 describe('AppTitleBar update popover', () => {
-  it('downloads available updates automatically and only offers installation when ready', () => {
+  it('keeps update details while downloading and shows a direct install button when ready', () => {
     const onDownloadUpdate = vi.fn().mockResolvedValue(undefined);
     const onInstallUpdate = vi.fn().mockResolvedValue(undefined);
     const release = {
@@ -109,9 +109,14 @@ describe('AppTitleBar update popover', () => {
       onDownloadUpdate,
       onInstallUpdate,
     });
-    fireEvent.click(screen.getByRole('button', { name: '업데이트 상태 보기' }));
+    expect(screen.queryByRole('button', { name: '업데이트 상태 보기' })).not.toBeInTheDocument();
+    const installButton = screen.getByRole('button', { name: '업데이트' });
+    expect(installButton).toHaveTextContent('업데이트');
 
-    fireEvent.click(screen.getByRole('button', { name: '재시작하여 업데이트' }));
+    fireEvent.mouseEnter(installButton);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('v1.1.0 업데이트 준비됨');
+
+    fireEvent.click(installButton);
     expect(onInstallUpdate).toHaveBeenCalledTimes(1);
   });
 
