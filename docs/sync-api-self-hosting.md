@@ -75,7 +75,10 @@ volumes:
 - 로컬 테스트: `http://127.0.0.1:8080`
 - reverse proxy 뒤 운영: `https://ssh.example.com`
 
-![Login Server 설정 화면](./login.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./login-dark.png">
+  <img alt="Login Server 설정 화면" src="./login.png">
+</picture>
 
 ## 운영 기본값과 권장 설정
 

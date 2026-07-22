@@ -138,13 +138,7 @@
       background: var(--panel);
       box-shadow: var(--shadow);
     }
-    .shot-bar {
-      display: flex; align-items: center; gap: 6px; padding: 10px 14px;
-      border-bottom: 1px solid var(--line); background: var(--panel-2);
-    }
-    .shot-bar i { width: 11px; height: 11px; border-radius: 50%; background: #3a4160; }
-    .shot-bar i:nth-child(1) { background: #ff5f57; } .shot-bar i:nth-child(2) { background: #febc2e; } .shot-bar i:nth-child(3) { background: #28c840; }
-    .shot-bar em { margin-left: 10px; font-style: normal; font-family: var(--mono); font-size: .78rem; color: var(--text-soft); }
+    .theme-shot { display: block; }
 
     /* ── sections ── */
     section { padding: 84px 0; }
@@ -273,8 +267,10 @@
     </div>
 
     <figure class="shot-frame">
-      <div class="shot-bar"><i></i><i></i><i></i><em>dolgate — hosts &amp; workspace</em></div>
-      <img src="./assets/hosts-workspace.png" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
+      <picture class="theme-shot">
+        <source data-theme-image="dark" srcset="./assets/hosts-workspace-dark.png" media="(prefers-color-scheme: dark)" />
+        <img src="./assets/hosts-workspace.png" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
+      </picture>
     </figure>
   </div>
 </header>
@@ -327,8 +323,10 @@
       </p>
     </div>
     <figure class="shot-frame">
-      <div class="shot-bar"><i></i><i></i><i></i><em>dolgate — port forwarding</em></div>
-      <img src="./assets/port-forwarding.png" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
+      <picture class="theme-shot">
+        <source data-theme-image="dark" srcset="./assets/port-forwarding-dark.png" media="(prefers-color-scheme: dark)" />
+        <img src="./assets/port-forwarding.png" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
+      </picture>
     </figure>
   </div>
 </section>
@@ -423,6 +421,7 @@
     const root = document.documentElement;
     const btn = document.getElementById("theme-toggle");
     const metas = document.querySelectorAll('meta[name="theme-color"]');
+    const darkImages = document.querySelectorAll('source[data-theme-image="dark"]');
     const COLORS = { dark: "#0b0e18", light: "#f6f7fb" };
     const ICONS = { auto: "◐", light: "☀", dark: "☾" };
     const LABELS = { auto: "시스템 설정 따름", light: "라이트", dark: "다크" };
@@ -437,6 +436,11 @@
       metas.forEach((m) => {
         const scheme = (m.media || "").includes("dark") ? "dark" : "light";
         m.content = mode === "auto" ? COLORS[scheme] : COLORS[mode];
+      });
+      darkImages.forEach((source) => {
+        source.media = mode === "auto"
+          ? "(prefers-color-scheme: dark)"
+          : mode === "dark" ? "all" : "not all";
       });
       btn.textContent = ICONS[mode];
       btn.title = `테마: ${LABELS[mode]} (클릭해서 전환)`;
