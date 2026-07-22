@@ -1,6 +1,4 @@
 import {
-  buildAwsSsmKnownHostIdentity,
-  getAwsEc2HostSshPort,
   getParentGroupPath,
   normalizeGroupPath,
   normalizeJumpHostIds,
@@ -574,30 +572,12 @@ export function buildDolgateHostBundle(
     (record) => record.type === "linked" && portForwardIds.has(record.portForwardRuleId),
   );
 
-  const endpointKeys = new Set<string>();
-  for (const host of hosts) {
-    if (host.kind === "ssh") {
-      endpointKeys.add(`${host.hostname.toLocaleLowerCase()}\u0000${host.port}`);
-    } else if (host.kind === "warpgate-ssh") {
-      endpointKeys.add(
-        `${host.warpgateSshHost.toLocaleLowerCase()}\u0000${host.warpgateSshPort}`,
-      );
-    } else if (host.kind === "aws-ec2") {
-      const profileName =
-        awsProfiles.find((profile) => profile.id === host.awsProfileId)?.name ??
-        host.awsProfileName;
-      endpointKeys.add(
-        `${buildAwsSsmKnownHostIdentity({
-          profileName,
-          region: host.awsRegion,
-          instanceId: host.awsInstanceId,
-        }).toLocaleLowerCase()}\u0000${getAwsEc2HostSshPort(host)}`,
-      );
-    }
-  }
-  const knownHosts = state.data.knownHosts.filter((record) =>
-    endpointKeys.has(`${record.host.toLocaleLowerCase()}\u0000${record.port}`),
-  );
+  // known_hosts are intentionally NOT exported: they are machine-local TOFU trust
+  // records. Carried to another machine (or re-imported) a stale/mismatched
+  // fingerprint only blocks the connection (host key mismatch); a matching one is
+  // redundant since first-connect TOFU re-establishes it. Imported hosts re-trust
+  // on first connect.
+  const knownHosts: KnownHostRecord[] = [];
 
   return {
     schemaVersion: 1,
@@ -753,32 +733,10 @@ export function buildHostTransferImportPlan(
     "portForwards",
   ).map((record) => ({ ...record, updatedAt: now }));
 
-  const knownEndpointKeys = new Map(
-    state.data.knownHosts.map((record) => [
-      `${record.host.toLocaleLowerCase()}\u0000${record.port}`,
-      record,
-    ]),
-  );
-  const knownHosts = takeNew(
-    bundle.knownHosts,
-    new Set(state.data.knownHosts.map((record) => record.id)),
-    (record) => record.id,
-    "knownHosts",
-  )
-    .filter((record) => {
-      const key = `${record.host.toLocaleLowerCase()}\u0000${record.port}`;
-      const existing = knownEndpointKeys.get(key);
-      if (!existing) {
-        knownEndpointKeys.set(key, record);
-        return true;
-      }
-      recordSkip("knownHosts");
-      if (existing.fingerprintSha256 !== record.fingerprintSha256) {
-        warnings.push(`${record.host}:${record.port}의 host key가 달라 가져오지 않았습니다.`);
-      }
-      return false;
-    })
-    .map((record) => ({ ...record, updatedAt: now }));
+  // known_hosts are intentionally NOT imported (see export). An imported fingerprint
+  // that does not match the live server would block the connection (host key
+  // mismatch); a matching one is redundant. Imported hosts re-trust on first connect.
+  const knownHosts: KnownHostRecord[] = [];
 
   const dnsHostnames = new Set(
     state.data.dnsOverrides.map((record) => record.hostname.toLocaleLowerCase()),

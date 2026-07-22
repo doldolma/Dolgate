@@ -43,6 +43,7 @@ type coreRuntime interface {
 	RunCompletionQuery(sessionID, requestID, command string) error
 	RunCommand(sessionID, requestID, command string, timeoutMs int) error
 	InstallShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string) error
 	ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
 	GeneratePrivateKey(requestID string, payload protocol.PrivateKeyGeneratePayload) error
@@ -383,6 +384,15 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		// independent of autocomplete so cwd/markers work even with it disabled.
 		go func() {
 			_ = core.InstallShellIntegration(request.SessionID)
+		}()
+		return nil
+	case protocol.CommandShellIntegrationReinject:
+		// Best-effort, fire-and-forget: re-install shell integration into the
+		// current foreground shell after the renderer detects a subshell entry
+		// (nested ssh, sudo su, docker exec). Waits for the subshell prompt to
+		// settle internally, so returning immediately is fine.
+		go func() {
+			_ = core.ReinjectShellIntegration(request.SessionID)
 		}()
 		return nil
 	case protocol.CommandKeyboardInteractiveRespond:

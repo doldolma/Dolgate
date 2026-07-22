@@ -34,6 +34,7 @@ import {
 import { createZmodemController } from '../lib/zmodem/zmodem-controller';
 import {
   installTerminalShellIntegration,
+  reinjectTerminalShellIntegration,
   writeTerminalBinaryInput,
   tmuxSplitPane,
   tmuxNewWindow,
@@ -41,6 +42,11 @@ import {
   tmuxDetach,
   tmuxCommand,
 } from '../services/desktop/terminal';
+import {
+  applyTerminalInput,
+  createEmptyCommandBuffer,
+} from '../lib/terminal-autocomplete';
+import { detectsSubshellEntry } from '../lib/subshell-detect';
 import {
   mapPrefixKey,
   resolveSiblingWindowId,
@@ -445,6 +451,9 @@ export function useTerminalSessionViewController({
   const liveAutocompleteVisibleRef = useRef(false);
   const liveAutocompleteShellMarkerRef = useRef(autocomplete.handleShellMarker);
   const liveAutocompleteCwdRef = useRef(autocomplete.handleCwd);
+  // 서브쉘 진입 감지용 명령줄 버퍼. autocomplete 훅과 독립적으로(설정 off 여도) 실행돼
+  // 사용자가 방금 실행한 명령을 재구성한다. \r 마다 리셋되므로 세션 간 오염은 없다.
+  const subshellCommandBufferRef = useRef(createEmptyCommandBuffer());
 
   useEffect(() => {
     liveAutocompleteInputRef.current = terminalAlternateScreen
@@ -850,6 +859,27 @@ export function useTerminalSessionViewController({
             return;
           }
           liveAutocompleteInputRef.current(data);
+          // 서브쉘(중첩 ssh·sudo su·docker exec …) 진입을 감지해 셸 통합을 다시 주입한다.
+          // autocomplete 게이트와 무관하게 항상 추적하므로 자동완성을 꺼도 동작한다.
+          const trackedInput = applyTerminalInput(
+            subshellCommandBufferRef.current,
+            data,
+          );
+          subshellCommandBufferRef.current = trackedInput.state;
+          if (trackedInput.executed) {
+            const currentSettings = appStore.getState().settings;
+            if (
+              currentSettings?.subshellReinjectEnabled !== false &&
+              detectsSubshellEntry(
+                trackedInput.executed,
+                currentSettings?.subshellReinjectPatterns ?? [],
+              )
+            ) {
+              void reinjectTerminalShellIntegration(
+                liveSessionIdRef.current,
+              ).catch(() => undefined);
+            }
+          }
         },
         onBinary: (data) => {
           const currentSessionId = liveSessionIdRef.current;

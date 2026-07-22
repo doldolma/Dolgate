@@ -700,6 +700,17 @@ export function SettingsPanel({
                   tmux 제어 모드에서 prefix 다음 키를 네이티브 tmux 동작으로 매핑합니다.
                 </p>
               </FieldGroup>
+              <ToggleSwitch
+                checked={settings.subshellReinjectEnabled !== false}
+                label="서브쉘 셸 통합 자동 복구"
+                description="중첩 ssh·sudo su·docker exec 등 서브쉘에 들어가면 셸 통합(명령 상태·현재 경로)을 자동으로 다시 설정합니다."
+                onClick={() =>
+                  void onUpdateSettings({
+                    subshellReinjectEnabled:
+                      settings.subshellReinjectEnabled === false,
+                  })
+                }
+              />
             </div>
 
             {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}

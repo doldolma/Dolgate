@@ -41,6 +41,10 @@ export function installTerminalShellIntegration(sessionId: string) {
   return desktopApi.ssh.installShellIntegration(sessionId);
 }
 
+export function reinjectTerminalShellIntegration(sessionId: string) {
+  return desktopApi.ssh.reinjectShellIntegration(sessionId);
+}
+
 export function stopTerminalAutocomplete(sessionId: string) {
   return desktopApi.ssh.stopAutocomplete(sessionId);
 }

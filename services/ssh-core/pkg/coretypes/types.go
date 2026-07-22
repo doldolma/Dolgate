@@ -60,6 +60,7 @@ const (
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
 	CommandTerminalCompletionQuery     CommandType = "terminalCompletionQuery"
 	CommandShellIntegrationInstall     CommandType = "terminalShellIntegrationInstall"
+	CommandShellIntegrationReinject    CommandType = "terminalShellIntegrationReinject"
 	CommandRunCommand                  CommandType = "runCommand"
 	CommandTmuxConnect                 CommandType = "tmuxConnect"
 	CommandTmuxSendKeys                CommandType = "tmuxSendKeys"

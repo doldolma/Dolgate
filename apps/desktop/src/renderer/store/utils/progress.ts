@@ -14,6 +14,18 @@ export function resolveCredentialRetryKind(
     return null;
   }
 
+  // 호스트 키 문제(불일치/미신뢰/협상 실패)는 인증(비밀번호·키) 문제가 아니라 신뢰 문제다.
+  // 이런 에러 메시지엔 "ssh handshake failed"가 함께 붙는 경우가 많아, 아래 auth 패턴 검사
+  // 이전에 먼저 걸러야 한다. 안 그러면 host key mismatch가 계정/비밀번호 재입력 다이얼로그를
+  // 잘못 띄운다(그 입력으로는 절대 해결되지 않음 — 호스트 키 신뢰/교체 플로우가 처리할 몫).
+  if (
+    /host key mismatch|trusted host key|host key is not trusted|no matching host key|no common host key/i.test(
+      message,
+    )
+  ) {
+    return null;
+  }
+
   if (host.authType === "keyboardInteractive") {
     return null;
   }

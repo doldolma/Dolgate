@@ -7,10 +7,16 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 )
+
+// shellIntegrationHandshakeTimeout bounds how long the echo-suppression
+// handshake waits for the first OSC 133;A marker after a re-injection before
+// releasing buffered output (non-bash/zsh subshell).
+const shellIntegrationHandshakeTimeout = 8 * time.Second
 
 type EventEmitter func(protocol.Event)
 type StreamEmitter func(protocol.StreamFrame, []byte)
@@ -23,6 +29,10 @@ type sessionHandle struct {
 	disconnectRequested bool
 	errorNotified       bool
 	handshake           autocomplete.Handshake
+	// reinjectGate re-installs OSC 133/7 hooks after the user enters a subshell
+	// (sudo su, docker exec, ssh from a local shell). Created in Connect; a no-op
+	// until Armed by ReinjectShellIntegration.
+	reinjectGate *autocomplete.PromptSettleGate
 }
 
 type Manager struct {
@@ -56,7 +66,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.LocalCon
 		return err
 	}
 
-	handle := &sessionHandle{runner: runner}
+	handle := &sessionHandle{runner: runner, reinjectGate: autocomplete.NewPromptSettleGate(0, 0)}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
 	m.mu.Unlock()
@@ -144,6 +154,45 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	return session.runner.Write([]byte(command))
 }
 
+// ReinjectShellIntegration re-installs the OSC 133/7 hooks into the foreground
+// shell after the user enters a subshell (sudo su, docker exec, ssh from the
+// local shell), where the connect-time hooks are absent. It waits for the
+// subshell prompt to settle before writing so it never corrupts input, then
+// arms the echo-suppression handshake around the injected command. A non-bash/
+// zsh subshell emits no marker and the handshake flush restores its output.
+func (m *Manager) ReinjectShellIntegration(sessionID string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	// The init script is POSIX-shell shaped; a Windows local shell subshell can't
+	// use it, so skip there (mirrors RunCompletionCommand's platform guard).
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	session.reinjectGate.Arm(
+		func() { m.performShellIntegrationReinject(sessionID, session) },
+		func() {},
+	)
+	return nil
+}
+
+func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle) {
+	if !m.HasSession(sessionID) {
+		return
+	}
+	session.handshake.Arm(true)
+	if err := session.runner.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+		if flushed := session.handshake.Flush(); len(flushed) > 0 {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+		}
+		return
+	}
+	time.AfterFunc(shellIntegrationHandshakeTimeout, func() {
+		m.FlushShellIntegration(sessionID)
+	})
+}
+
 // FlushShellIntegration releases any output the handshake filter is holding,
 // used when the prompt marker never arrives within the handshake timeout so the
 // user still sees whatever the shell produced.
@@ -213,6 +262,8 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
+			// 서브쉘 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(필터 전 관찰).
+			handle.reinjectGate.Observe(chunk)
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
 				m.emitStream(protocol.StreamFrame{

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"time"
 
@@ -456,7 +455,7 @@ func (m *Manager) observeShellIntegrationOutput(sessionID string, session *sessi
 		session.shellIntegrationTail = session.shellIntegrationTail[len(session.shellIntegrationTail)-shellIntegrationTailLimit:]
 	}
 
-	if looksLikeShellPrompt(session.shellIntegrationTail) {
+	if autocomplete.LooksLikeShellPrompt(session.shellIntegrationTail) {
 		if session.shellIntegrationMaxTimer != nil {
 			session.shellIntegrationMaxTimer.Stop()
 			session.shellIntegrationMaxTimer = nil
@@ -524,63 +523,6 @@ func (m *Manager) scheduleShellIntegrationFlush(sessionID string, session *sessi
 			m.FlushShellIntegration(sessionID)
 		}
 	}()
-}
-
-func looksLikeShellPrompt(value string) bool {
-	trimmed := strings.TrimRight(stripTerminalControls(value), " \t\r\n")
-	if trimmed == "" {
-		return false
-	}
-	for _, suffix := range []string{"$", "#", "%", ">", "❯", "➜"} {
-		if strings.HasSuffix(trimmed, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
-func stripTerminalControls(value string) string {
-	var out strings.Builder
-	out.Grow(len(value))
-	for i := 0; i < len(value); i++ {
-		ch := value[i]
-		if ch == 0x1b {
-			i = skipEscapeSequence(value, i)
-			continue
-		}
-		if ch < 0x20 && ch != '\r' && ch != '\n' && ch != '\t' {
-			continue
-		}
-		out.WriteByte(ch)
-	}
-	return out.String()
-}
-
-func skipEscapeSequence(value string, esc int) int {
-	if esc+1 >= len(value) {
-		return esc
-	}
-	switch value[esc+1] {
-	case ']':
-		for i := esc + 2; i < len(value); i++ {
-			if value[i] == '\a' {
-				return i
-			}
-			if value[i] == 0x1b && i+1 < len(value) && value[i+1] == '\\' {
-				return i + 1
-			}
-		}
-		return len(value) - 1
-	case '[':
-		for i := esc + 2; i < len(value); i++ {
-			if value[i] >= 0x40 && value[i] <= 0x7e {
-				return i
-			}
-		}
-		return len(value) - 1
-	default:
-		return esc + 1
-	}
 }
 
 func (h *sessionHandle) markShellIntegrationReady() {

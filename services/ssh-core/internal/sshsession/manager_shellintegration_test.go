@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+	"time"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
@@ -103,6 +104,52 @@ func TestInstallShellIntegrationWriteFailureCanRetry(t *testing.T) {
 	}
 	if w.writes != 2 {
 		t.Fatalf("expected failed write plus retry, got %d writes", w.writes)
+	}
+}
+
+// ReinjectShellIntegration must wait for the subshell prompt to settle before
+// writing (so it never corrupts a still-authenticating shell), then inject
+// exactly once and arm the echo-suppression handshake. This is the core of the
+// subshell (nested ssh / sudo su / docker exec) recovery path.
+func TestReinjectShellIntegrationInjectsAfterPromptSettles(t *testing.T) {
+	w := &fakeWriteCloser{}
+	h := &sessionHandle{
+		stdin:        w,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(20*time.Millisecond, time.Second),
+	}
+	m := NewManager(func(_ protocol.Event) {}, func(_ protocol.StreamFrame, _ []byte) {})
+	m.mu.Lock()
+	m.sessions["s1"] = h
+	m.mu.Unlock()
+	defer close(h.closed)
+
+	if err := m.ReinjectShellIntegration("s1"); err != nil {
+		t.Fatalf("arm reinject failed: %v", err)
+	}
+
+	// Connection/auth output that is not a prompt must not trigger injection.
+	h.reinjectGate.Observe([]byte("Connecting to remote2...\r\n"))
+	time.Sleep(45 * time.Millisecond)
+	if w.writes != 0 {
+		t.Fatalf("must not inject before a prompt settles, got %d writes", w.writes)
+	}
+
+	// A settled subshell prompt then quiet triggers exactly one injection.
+	h.reinjectGate.Observe([]byte("user@remote2:~$ "))
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && w.writes == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if w.writes != 1 {
+		t.Fatalf("expected exactly one re-injection after prompt settle, got %d", w.writes)
+	}
+	if got := w.buf.String(); got != autocomplete.ShellIntegrationInitCommand() {
+		t.Fatalf("unexpected injected command: %q", got)
+	}
+	// The handshake must be armed so the injected command echo is suppressed.
+	if forwarded := h.handshake.Filter([]byte("noise before marker")); len(forwarded) != 0 {
+		t.Fatalf("handshake should be armed after reinject, got %q", forwarded)
 	}
 }
 

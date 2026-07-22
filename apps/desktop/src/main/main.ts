@@ -535,26 +535,38 @@ if (termiusHelperArgIndex >= 0) {
   installDevStdioWriteGuard();
 
   app.on('second-instance', (_event, argv) => {
+    const focusExistingWindow = () => {
+      const window =
+        BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      if (window) {
+        if (window.isMinimized()) {
+          window.restore();
+        }
+        window.focus();
+      }
+    };
+
     const protocolUrl = findProtocolUrl(argv);
     if (protocolUrl) {
+      // OS 가 dolgate:// 인증 콜백을 전달하려고 앱을 다시 띄운 경우다. 새 창을 열지
+      // 않고 콜백만 처리한 뒤 기존 창을 앞으로 가져온다.
       pendingAuthCallbackUrl = protocolUrl;
       if (app.isReady()) {
         void handleAuthCallbackUrl(protocolUrl);
       }
+      focusExistingWindow();
+      return;
     }
 
-    if (argv.includes('--new-window') && app.isReady()) {
+    // 크롬처럼 앱을 다시 실행하면(바로가기·시작 메뉴·작업 표시줄 점프리스트·exe 재실행)
+    // 새 창을 연다. 단일 인스턴스 구조는 그대로다 — 두 번째 프로세스는 이 이벤트만
+    // 넘기고 종료되고, 창 생성과 상태 공유는 이 메인 프로세스가 담당한다.
+    if (app.isReady()) {
       void createWindow();
       return;
     }
 
-    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    if (window) {
-      if (window.isMinimized()) {
-        window.restore();
-      }
-      window.focus();
-    }
+    focusExistingWindow();
   });
 
   app.on('open-url', (event, url) => {
@@ -660,6 +672,21 @@ if (termiusHelperArgIndex >= 0) {
       void createWindow();
     };
     installApplicationMenu(openNewWindow);
+    if (process.platform === 'win32') {
+      // 작업 표시줄 아이콘 우클릭(점프리스트)에서 새 창을 열 수 있게 한다. 실행 중이면
+      // --new-window 인자가 second-instance 로 전달돼 새 창이 열리고, 꺼져 있으면 앱이
+      // 새로 시작된다. (아이콘 좌클릭은 OS 가 기존 창을 활성화하므로 여기서 잡히지 않는다.)
+      app.setUserTasks([
+        {
+          program: process.execPath,
+          arguments: '--new-window',
+          title: '새 창',
+          description: '새 Dolgate 창 열기',
+          iconPath: process.execPath,
+          iconIndex: 0,
+        },
+      ]);
+    }
     if (process.platform === 'darwin') {
       app.dock?.setMenu(
         Menu.buildFromTemplate([
