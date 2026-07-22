@@ -35,7 +35,7 @@ type sessionHandle struct {
 	shellIntegrationState          shellIntegrationState
 	shellIntegrationFlushScheduled bool
 
-	// reinjectGate는 서브쉘(중첩 ssh·sudo su·docker exec 등) 진입 후 새 프롬프트가
+	// reinjectGate는 서브셸(중첩 ssh·sudo su·docker exec 등) 진입 후 새 프롬프트가
 	// 안착하면 OSC 133/7 통합 스크립트를 1회 다시 주입하기 위한 프롬프트 감지기다.
 	// Connect에서 생성되며 Arm 되기 전에는 Observe가 no-op이다.
 	reinjectGate *autocomplete.PromptSettleGate
@@ -824,7 +824,7 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
-			// 서브쉘 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(핸드셰이크
+			// 서브셸 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(핸드셰이크
 			// 필터 전에 관찰해야 원본 프롬프트를 본다). Arm 전에는 no-op이다.
 			handle.reinjectGate.Observe(chunk)
 			chunk = handle.handshake.Filter(chunk)

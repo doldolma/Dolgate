@@ -3745,7 +3745,7 @@ export class CoreManager {
     });
   }
 
-  // 서브쉘(중첩 ssh·sudo su·docker exec) 진입 후 렌더러가 감지하면 호출된다. 코어가
+  // 서브셸(중첩 ssh·sudo su·docker exec) 진입 후 렌더러가 감지하면 호출된다. 코어가
   // 현재 포그라운드 셸의 프롬프트 안착을 기다렸다 OSC 133/7 훅을 다시 주입한다.
   // ssh/local 세션에만 효과가 있고 그 외 타입은 코어에서 no-op이다.
   async reinjectShellIntegration(sessionId: string): Promise<void> {

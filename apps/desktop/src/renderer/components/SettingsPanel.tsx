@@ -702,8 +702,8 @@ export function SettingsPanel({
               </FieldGroup>
               <ToggleSwitch
                 checked={settings.subshellReinjectEnabled !== false}
-                label="서브쉘 셸 통합 자동 복구"
-                description="중첩 ssh·sudo su·docker exec 등 서브쉘에 들어가면 셸 통합(명령 상태·현재 경로)을 자동으로 다시 설정합니다."
+                label="서브셸 셸 통합 자동 복구"
+                description="중첩 ssh·sudo su·docker exec 등 서브셸에 들어가면 셸 통합(명령 상태·현재 경로)을 자동으로 다시 설정합니다."
                 onClick={() =>
                   void onUpdateSettings({
                     subshellReinjectEnabled:
