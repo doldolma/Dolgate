@@ -1,4 +1,5 @@
-import { desktopApi, useAppStore } from '../store/appStore';
+import { openHostInNewWindow } from '../services/desktop/auth-window-updater';
+import { useAppStore } from '../store/appStore';
 
 export function useHomeViewModel() {
   const hosts = useAppStore((state) => state.hosts);
@@ -60,8 +61,6 @@ export function useHomeViewModel() {
   const handleActivityLogsChanged = useAppStore(
     (state) => state.handleActivityLogsChanged,
   );
-  const openHostInNewWindow = (hostId: string) => desktopApi.window.openHost(hostId);
-
   return {
     hosts,
     groups,

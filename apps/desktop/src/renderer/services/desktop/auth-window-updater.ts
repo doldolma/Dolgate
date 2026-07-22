@@ -131,3 +131,12 @@ export function restoreWindow() {
 export function closeWindow() {
   return desktopApi.window.close();
 }
+
+export function openHostInNewWindow(hostId: string) {
+  return desktopApi.window.openHost(hostId);
+}
+
+export function consumeWindowLaunchIntent() {
+  const consume = desktopApi.window.consumeLaunchIntent;
+  return typeof consume === 'function' ? consume() : Promise.resolve(null);
+}

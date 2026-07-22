@@ -11,6 +11,32 @@ export function getSyncStatus() {
   return desktopApi.sync.status();
 }
 
+export function previewHostExport(hostIds: string[]) {
+  return desktopApi.hostTransfer.previewExport(hostIds);
+}
+
+export function exportHostSelection(
+  input: Parameters<DesktopApi['hostTransfer']['exportSelection']>[0],
+) {
+  return desktopApi.hostTransfer.exportSelection(input);
+}
+
+export function pickDolgateImportFile() {
+  return desktopApi.hostTransfer.pickImportFile();
+}
+
+export function probeDolgateImport(filePath: string, password: string) {
+  return desktopApi.hostTransfer.probeImport(filePath, password);
+}
+
+export function commitDolgateImport(snapshotId: string) {
+  return desktopApi.hostTransfer.commitImport(snapshotId);
+}
+
+export function discardDolgateImport(snapshotId: string) {
+  return desktopApi.hostTransfer.discardImport(snapshotId);
+}
+
 export function listExternalAwsProfiles() {
   return desktopApi.aws.listExternalProfiles();
 }

@@ -60,17 +60,19 @@ export function HostListPanel({ hb }: HostListPanelProps) {
   const importMenuItems = useMemo(
     () =>
       [
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: hb.onOpenOpenSshImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: hb.onOpenSerialImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: hb.onOpenTermiusImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: hb.onOpenDolgateImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: hb.onOpenOpenSshImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: hb.onOpenSerialImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: hb.onOpenTermiusImport },
         ...(desktopPlatform === 'win32'
-          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: hb.onOpenXshellImport }]
+          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: hb.onOpenXshellImport }]
           : []),
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: hb.onOpenWarpgateImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: hb.onOpenAwsImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: hb.onOpenWarpgateImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[6], onSelect: hb.onOpenAwsImport },
       ],
     [
       desktopPlatform,
+      hb.onOpenDolgateImport,
       hb.onOpenAwsImport,
       hb.onOpenOpenSshImport,
       hb.onOpenSerialImport,

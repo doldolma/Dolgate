@@ -8,6 +8,7 @@ import {
 import {
   buildAwsBridge,
   buildGroupsBridge,
+  buildHostTransferBridge,
   buildHostsBridge,
   buildOpenSshBridge,
   buildTermiusBridge,
@@ -52,6 +53,7 @@ export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
     warpgate: buildWarpgateBridge(ipcRenderer),
     termius: buildTermiusBridge(ipcRenderer),
     openssh: buildOpenSshBridge(ipcRenderer),
+    hostTransfer: buildHostTransferBridge(ipcRenderer),
     xshell: buildXshellBridge(ipcRenderer),
     ssh: buildSshBridge(ipcRenderer),
     serial: buildSerialBridge(ipcRenderer),

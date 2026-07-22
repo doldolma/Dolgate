@@ -152,6 +152,25 @@ export function buildOpenSshBridge(
   };
 }
 
+export function buildHostTransferBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["hostTransfer"] {
+  return {
+    previewExport: (hostIds) =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.previewExport, hostIds),
+    exportSelection: (input) =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.exportSelection, input),
+    pickImportFile: () =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.pickImportFile),
+    probeImport: (filePath, password) =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.probeImport, filePath, password),
+    commitImport: (snapshotId) =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.commitImport, snapshotId),
+    discardImport: (snapshotId) =>
+      ipcRenderer.invoke(ipcChannels.hostTransfer.discardImport, snapshotId),
+  };
+}
+
 export function buildXshellBridge(
   ipcRenderer: IpcRenderer,
 ): DesktopApi["xshell"] {

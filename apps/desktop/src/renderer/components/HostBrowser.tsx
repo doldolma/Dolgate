@@ -14,7 +14,7 @@ import {
   NoticeCard,
   SectionLabel,
 } from '../ui';
-import { AppWindow, Columns2, Container, Copy, Folder, Pencil, SquareTerminal, Trash2 } from '../ui/icons';
+import { AppWindow, Columns2, Container, Copy, Download, Folder, Pencil, SquareTerminal, Trash2 } from '../ui/icons';
 import { HomeSidebar } from './host-browser/HomeSidebar';
 import { HostListPanel } from './host-browser/HostListPanel';
 import { HostDetailPanel } from './host-browser/HostDetailPanel';
@@ -214,6 +214,20 @@ export function HostBrowser({ hostEditor, ...props }: HostBrowserProps) {
                     {contextMenu.hostIds.length === 1
                       ? '복사'
                       : `복사 (${contextMenu.hostIds.length}개)`}
+                  </button>
+                  <button
+                    type="button"
+                    className={CTX_ITEM}
+                    onClick={() => {
+                      const orderedHostIds = hb.getOrderedSelectedHostIds(contextMenu.hostIds);
+                      hb.setContextMenu(null);
+                      hb.onExportHosts(orderedHostIds);
+                    }}
+                  >
+                    <Download className={CTX_ICON} aria-hidden />
+                    {contextMenu.hostIds.length === 1
+                      ? '내보내기...'
+                      : `내보내기... (${contextMenu.hostIds.length}개)`}
                   </button>
 
                   <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
