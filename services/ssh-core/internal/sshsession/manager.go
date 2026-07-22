@@ -35,6 +35,11 @@ type sessionHandle struct {
 	shellIntegrationState          shellIntegrationState
 	shellIntegrationFlushScheduled bool
 
+	// reinjectGate는 서브쉘(중첩 ssh·sudo su·docker exec 등) 진입 후 새 프롬프트가
+	// 안착하면 OSC 133/7 통합 스크립트를 1회 다시 주입하기 위한 프롬프트 감지기다.
+	// Connect에서 생성되며 Arm 되기 전에는 Observe가 no-op이다.
+	reinjectGate *autocomplete.PromptSettleGate
+
 	completionWorkerMu sync.Mutex
 	completionWorker   *sshcmd.CompletionWorker
 }
@@ -288,10 +293,11 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	}
 
 	handle := &sessionHandle{
-		client:  client,
-		session: session,
-		stdin:   stdin,
-		closed:  make(chan struct{}),
+		client:       client,
+		session:      session,
+		stdin:        stdin,
+		closed:       make(chan struct{}),
+		reinjectGate: autocomplete.NewPromptSettleGate(0, 0),
 	}
 
 	// 세션 등록 이후에야 write/resize가 정상적으로 동작할 수 있다.
@@ -587,6 +593,59 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	return err
 }
 
+// ReinjectShellIntegration re-installs the OSC 133/7 hooks into whatever shell
+// is currently in the foreground of an existing session. It is used after the
+// user enters a subshell (nested ssh, sudo su, docker exec, another bash/zsh),
+// where the connect-time hooks do not exist so command status and cwd go stale.
+// It does not inject immediately: writing into a shell that is still
+// connecting/authenticating would corrupt input, so it waits (via reinjectGate)
+// until the subshell shows a settled prompt, then arms the echo-suppression
+// handshake and writes the shell-agnostic init command over the existing PTY.
+// Because it targets the current foreground shell, nested ssh/su/docker are
+// covered without a new channel; a non-bash/zsh subshell emits no OSC 133;A
+// marker and the handshake flush restores its output.
+func (m *Manager) ReinjectShellIntegration(sessionID string) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.reinjectGate.Arm(
+		func() { m.performShellIntegrationReinject(sessionID, session) },
+		// No prompt settled within the window (unusual prompt, non-shell
+		// foreground, or still authenticating): leave the session untouched.
+		func() {},
+	)
+	return nil
+}
+
+func (m *Manager) performShellIntegrationReinject(sessionID string, session *sessionHandle) {
+	if !m.HasSession(sessionID) {
+		return
+	}
+	// Arm the handshake immediately before writing so only the injected command's
+	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
+	// prompt were already shown to the user while the gate was waiting.
+	session.handshake.Arm(true)
+	if _, err := session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+		if flushed := session.handshake.Flush(); len(flushed) > 0 {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+		}
+		return
+	}
+	// If the foreground shell is not bash/zsh the OSC 133;A marker never arrives,
+	// so release the buffered output after the handshake window instead of hiding
+	// it forever. Flush is a no-op once the marker already completed the handshake.
+	go func() {
+		timer := time.NewTimer(shellIntegrationHandshakeTimeout)
+		defer timer.Stop()
+		select {
+		case <-session.closed:
+		case <-timer.C:
+			m.FlushShellIntegration(sessionID)
+		}
+	}()
+}
+
 func (m *Manager) installShellIntegrationIfSupported(sessionID string, session *sessionHandle) (bool, error) {
 	switch session.shellIntegrationStatus() {
 	case shellIntegrationInstalled:
@@ -765,6 +824,9 @@ func (m *Manager) stream(sessionID string, handle *sessionHandle, reader io.Read
 		if n > 0 {
 			chunk := make([]byte, n)
 			copy(chunk, buffer[:n])
+			// 서브쉘 재주입 대기 중이면 raw 출력으로 프롬프트 안착을 감지한다(핸드셰이크
+			// 필터 전에 관찰해야 원본 프롬프트를 본다). Arm 전에는 no-op이다.
+			handle.reinjectGate.Observe(chunk)
 			chunk = handle.handshake.Filter(chunk)
 			if len(chunk) > 0 {
 				m.emitStream(protocol.StreamFrame{

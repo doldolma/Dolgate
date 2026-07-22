@@ -39,6 +39,7 @@ type sshSessionManager interface {
 	HasSession(sessionID string) bool
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	InstallShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
 	// RunHostCommand 은 보조 exec 채널에서 임의 명령을 실행하고 stdout/stderr/exit 를 돌려준다(AI run_command).
@@ -80,6 +81,7 @@ type localSessionManager interface {
 	Disconnect(sessionID string) error
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	InstallShellIntegration(sessionID string) error
+	ReinjectShellIntegration(sessionID string) error
 	FlushShellIntegration(sessionID string)
 	RunCompletionCommand(sessionID, command string) (string, bool, error)
 }
@@ -590,6 +592,24 @@ func (runtime *Runtime) installShellIntegration(sessionID string) error {
 // Idempotent per session (shares the same install-once flag as the probe path).
 func (runtime *Runtime) InstallShellIntegration(sessionID string) error {
 	return runtime.installShellIntegration(sessionID)
+}
+
+// ReinjectShellIntegration re-installs the OSC 7/133 hooks into the shell that
+// is currently in the foreground after the user enters a subshell (nested ssh,
+// sudo su, docker exec). Only SSH and local sessions support it; other session
+// types are a no-op. Unlike installShellIntegration it is not guarded by the
+// once-per-session flag — re-injection is expected to run repeatedly as the
+// user moves in and out of subshells. The manager waits for the subshell prompt
+// to settle before writing, so this returns immediately after arming.
+func (runtime *Runtime) ReinjectShellIntegration(sessionID string) error {
+	switch {
+	case runtime.ssh.HasSession(sessionID):
+		return runtime.ssh.ReinjectShellIntegration(sessionID)
+	case runtime.local.HasSession(sessionID):
+		return runtime.local.ReinjectShellIntegration(sessionID)
+	default:
+		return nil
+	}
 }
 
 func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {

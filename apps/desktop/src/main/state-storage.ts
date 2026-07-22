@@ -104,6 +104,8 @@ export interface DesktopStateFile {
     autoReconnectBaseDelayMs: number;
     autoReconnectMaxDelayMs: number;
     tmuxPrefixKey: string;
+    subshellReinjectEnabled: boolean;
+    subshellReinjectPatterns: string[];
     ai: AiSettings | null;
     serverUrlOverride: string | null;
     updatedAt: string;
@@ -524,6 +526,8 @@ function createDefaultStateFile(): DesktopStateFile {
       autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
       autoReconnectMaxDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxDelayMs,
       tmuxPrefixKey: 'C-b',
+      subshellReinjectEnabled: true,
+      subshellReinjectPatterns: [],
       ai: null,
       serverUrlOverride: null,
       updatedAt: timestamp
@@ -965,6 +969,17 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.tmuxPrefixKey === 'string' && settings.tmuxPrefixKey.trim()
           ? settings.tmuxPrefixKey.trim()
           : 'C-b',
+      // Absent in a stored state (upgrading users) → default ON, matching the
+      // fresh-install behavior of re-establishing shell integration in subshells.
+      subshellReinjectEnabled:
+        typeof settings.subshellReinjectEnabled === 'boolean'
+          ? settings.subshellReinjectEnabled
+          : true,
+      subshellReinjectPatterns: Array.isArray(settings.subshellReinjectPatterns)
+        ? settings.subshellReinjectPatterns.filter(
+            (pattern): pattern is string => typeof pattern === 'string',
+          )
+        : [],
       ai: normalizeAiSettings(settings.ai),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt

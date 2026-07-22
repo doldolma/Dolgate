@@ -24,6 +24,7 @@ type stubSSHManager struct {
 	completionTrun bool
 	completionErr  error
 	installCount   int
+	reinjectCount  int
 	installErr     error
 	runCommand     string
 	runTimeoutMs   int
@@ -65,6 +66,10 @@ func (stub *stubSSHManager) CollectAutocomplete(string, int) (autocomplete.Resul
 func (stub *stubSSHManager) InstallShellIntegration(string) error {
 	stub.installCount++
 	return stub.installErr
+}
+func (stub *stubSSHManager) ReinjectShellIntegration(string) error {
+	stub.reinjectCount++
+	return nil
 }
 func (stub *stubSSHManager) FlushShellIntegration(string) {}
 func (stub *stubSSHManager) RunCompletionCommand(string, string) (string, bool, error) {
@@ -188,6 +193,7 @@ func (stub *stubLocalManager) InstallShellIntegration(string) error {
 	stub.installShellCount++
 	return nil
 }
+func (stub *stubLocalManager) ReinjectShellIntegration(string) error { return nil }
 func (stub *stubLocalManager) FlushShellIntegration(string) {}
 func (stub *stubLocalManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return "", false, nil

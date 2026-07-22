@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../store/appStore', () => ({
   useAppStore: (selector: (state: any) => unknown) => selector(mocks.storeState),
+  appStore: { getState: () => mocks.storeState },
   get desktopApi() {
     return mocks.desktopApi;
   }

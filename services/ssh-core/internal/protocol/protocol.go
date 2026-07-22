@@ -65,6 +65,7 @@ const (
 	CommandTerminalAutocompleteStop    = coretypes.CommandTerminalAutocompleteStop
 	CommandTerminalCompletionQuery     = coretypes.CommandTerminalCompletionQuery
 	CommandShellIntegrationInstall     = coretypes.CommandShellIntegrationInstall
+	CommandShellIntegrationReinject    = coretypes.CommandShellIntegrationReinject
 	CommandRunCommand                  = coretypes.CommandRunCommand
 	CommandTmuxConnect                 = coretypes.CommandTmuxConnect
 	CommandTmuxSplitPane               = coretypes.CommandTmuxSplitPane

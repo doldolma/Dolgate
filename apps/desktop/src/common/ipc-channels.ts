@@ -114,6 +114,7 @@ export const ipcChannels = {
     disconnect: 'ssh:disconnect',
     prepareAutocomplete: 'ssh:autocomplete-prepare',
     installShellIntegration: 'ssh:install-shell-integration',
+    reinjectShellIntegration: 'ssh:reinject-shell-integration',
     refreshAutocomplete: 'ssh:autocomplete-refresh',
     stopAutocomplete: 'ssh:autocomplete-stop',
     completionQuery: 'ssh:completion-query',

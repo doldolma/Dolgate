@@ -308,8 +308,14 @@ const shellIntegrationScript = `__ds_o(){ printf '\033]133;%s\007' "$1"; }; __ds
 	// ${arr[(I)x]}: bash still parses this elif branch even though it never runs
 	// it, and the (( … )) arithmetic context rejects (I)… as a syntax error on
 	// bash 5.1.x (e.g. WSL/Ubuntu), which would break the whole script there.
-	`case " ${precmd_functions[*]} " in *" __ds_precmd "*) ;; *) precmd_functions+=(__ds_precmd);; esac; ` +
-	`case " ${preexec_functions[*]} " in *" __ds_preexec "*) ;; *) preexec_functions+=(__ds_preexec);; esac; ` +
+	// precmd_functions+=(…) is bash/zsh array-append syntax that a POSIX sh
+	// (dash) subshell cannot parse — and dash parses the whole line before
+	// running it, so a bare += here makes injecting into a dash/sh subshell abort
+	// with a visible "Syntax error". Wrapping the append in eval '…' keeps it an
+	// opaque string to dash's parser (this elif branch never executes there),
+	// while bash/zsh still eval the append normally.
+	`case " ${precmd_functions[*]} " in *" __ds_precmd "*) ;; *) eval 'precmd_functions+=(__ds_precmd)';; esac; ` +
+	`case " ${preexec_functions[*]} " in *" __ds_preexec "*) ;; *) eval 'preexec_functions+=(__ds_preexec)';; esac; ` +
 	`case "${PS1:-}" in *'133;B'*) ;; *) PS1="${PS1:-}"$'%{\033]133;B\007%}';; esac; ` +
 	`fi`
 

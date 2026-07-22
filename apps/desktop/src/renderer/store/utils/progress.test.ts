@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HostRecord } from "@shared";
 import {
+  resolveCredentialRetryKind,
   resolveCredentialRetryProgress,
   resolveErrorProgress,
   resolveHostKeyCheckProgress,
@@ -41,6 +42,44 @@ describe("progress utils", () => {
       stage: "connecting",
       retryable: true,
       message: "boom",
+    });
+  });
+
+  describe("resolveCredentialRetryKind", () => {
+    it("does NOT prompt credential retry for host-key problems", () => {
+      // A host key mismatch is a trust issue, not a credential issue. The Go error
+      // carries "ssh handshake failed" too, which must not trigger the password
+      // re-entry dialog (it can never fix a key mismatch).
+      for (const message of [
+        "ssh handshake failed: ssh: handshake failed: host key mismatch",
+        "host key is not trusted yet",
+        "trusted host key is required",
+        "ssh: no common host key type",
+      ]) {
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "password" }), message),
+          message,
+        ).toBeNull();
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "privateKey" }), message),
+          message,
+        ).toBeNull();
+      }
+    });
+
+    it("still prompts credential retry for genuine auth failures", () => {
+      expect(
+        resolveCredentialRetryKind(
+          sshHost({ authType: "password" }),
+          "ssh: handshake failed: permission denied (password)",
+        ),
+      ).toBe("auth");
+      expect(
+        resolveCredentialRetryKind(
+          sshHost({ authType: "password" }),
+          "unable to authenticate",
+        ),
+      ).toBe("auth");
     });
   });
 });

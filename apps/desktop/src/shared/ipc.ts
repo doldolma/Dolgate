@@ -253,6 +253,7 @@ export type CoreCommandType =
   | "terminalAutocompleteStop"
   | "terminalCompletionQuery"
   | "terminalShellIntegrationInstall"
+  | "terminalShellIntegrationReinject"
   | "runCommand"
   | "tmuxConnect"
   | "tmuxSplitPane"
@@ -1129,6 +1130,7 @@ export interface DesktopApi {
     refreshAutocomplete: (sessionId: string) => Promise<void>;
     stopAutocomplete: (sessionId: string) => Promise<void>;
     installShellIntegration: (sessionId: string) => Promise<void>;
+    reinjectShellIntegration: (sessionId: string) => Promise<void>;
     queryCompletion: (sessionId: string, command: string) => Promise<string>;
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,

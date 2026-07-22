@@ -1064,6 +1064,13 @@ export interface AppSettings extends TerminalAppearanceSettings {
   autoReconnectMaxDelayMs: number;
   /** tmux prefix 키 토큰("C-b"/"C-a"/"C-Space" …). 비우면 Ctrl-b. control mode pane 에서 항상 동작. */
   tmuxPrefixKey?: string;
+  /**
+   * 서브쉘(중첩 ssh·sudo su·docker exec 등) 진입을 감지하면 OSC 133/7 셸 통합을 자동으로
+   * 다시 주입할지 여부. 생략/undefined 는 활성으로 취급하며, 끄려면 명시적으로 false.
+   */
+  subshellReinjectEnabled?: boolean;
+  /** 서브쉘 감지에 추가할 사용자 정의 정규식(명령어 prefix). 기본 목록에 더해진다. */
+  subshellReinjectPatterns?: string[];
   ai?: AiSettings;
   serverUrl: string;
   serverUrlOverride?: string | null;
