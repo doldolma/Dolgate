@@ -9,7 +9,6 @@ const {
   resolveNdkDir,
   resolveSdkDir,
 } = require("./android-env.cjs");
-const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
 const {
   delay,
   runDevSession,
@@ -21,6 +20,11 @@ const nodeCommand = process.execPath;
 const reactNativeCli = require.resolve("react-native/cli.js", { paths: [appRoot] });
 const androidScript = path.join(__dirname, "run-android.cjs");
 const deviceReadyTimeoutMs = 180_000;
+const russhAndroidLibRoot = path.resolve(
+  appRoot,
+  "../../packages/fressh-react-native-uniffi-russh/android/src/main/jniLibs",
+);
+const russhAndroidAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"];
 const defaultAndroidArgs =
   process.env.DOLGATE_ANDROID_ALL_ARCHES === "1" ? [] : ["--active-arch-only"];
 
@@ -171,9 +175,26 @@ function ensureAndroidNdkAvailable(env) {
   const sdkMessage = sdkDir ? `SDK: ${sdkDir}` : "Android SDK was not found.";
   throw new Error(
     [
-      `Android NDK ${requiredNdkVersion} is required to build russh native artifacts.`,
+      `Android NDK ${requiredNdkVersion} is required to build the Android app.`,
       sdkMessage,
       "Install it from Android Studio > Settings > Languages & Frameworks > Android SDK > SDK Tools > NDK (Side by side), then try again.",
+    ].join("\n"),
+  );
+}
+
+function ensureRusshAndroidArtifactsAvailable() {
+  const missingAbis = russhAndroidAbis.filter(
+    (abi) =>
+      !fs.existsSync(path.join(russhAndroidLibRoot, abi, "libuniffi_russh.a")),
+  );
+  if (missingAbis.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    [
+      `Missing committed russh Android artifacts for: ${missingAbis.join(", ")}.`,
+      "Run `npm run mobile:russh:regenerate -- --platform android` explicitly, then try again.",
     ].join("\n"),
   );
 }
@@ -187,7 +208,7 @@ async function main() {
   const extraArgs = process.argv.slice(2);
   const androidEnv = buildEnvForAndroid(process.env);
   ensureAndroidNdkAvailable(androidEnv);
-  ensureRusshNative({ platform: "android", env: androidEnv });
+  ensureRusshAndroidArtifactsAvailable();
 
   await runDevSession({
     appRoot,
@@ -195,7 +216,6 @@ async function main() {
     nodeCommand,
     reactNativeCli,
     platformLabel: "Android",
-    prepareRuntimeOptions: { skipRussh: true },
     launchPlatform: async () => {
       const deviceState = await ensureDeviceReady(androidEnv);
       adbReverse(deviceState.deviceSerial, androidEnv);
