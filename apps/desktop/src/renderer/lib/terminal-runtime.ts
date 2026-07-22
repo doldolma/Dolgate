@@ -146,7 +146,8 @@ function buildTerminalOptions(appearance: TerminalRuntimeAppearance): ITerminalO
     lineHeight: appearance.lineHeight,
     letterSpacing: appearance.letterSpacing,
     minimumContrastRatio: appearance.minimumContrastRatio,
-    macOptionIsMeta: appearance.macOptionIsMeta
+    macOptionIsMeta: appearance.macOptionIsMeta,
+    macOptionClickForcesSelection: true
   };
 }
 
