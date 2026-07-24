@@ -826,6 +826,22 @@ describe('HostBrowser dialogs', () => {
     expect(onNavigateGroup).toHaveBeenCalledWith('Servers/Nested');
   });
 
+  it('deselects the group and returns to root when the selected group is clicked again', () => {
+    const onNavigateGroup = vi.fn();
+    renderBrowser({ onNavigateGroup });
+
+    const getNested = () =>
+      within(screen.getByLabelText('Group tree')).getByRole('button', { name: /Nested/ });
+
+    // 1st click: navigate into the group.
+    fireEvent.click(getNested());
+    expect(onNavigateGroup).toHaveBeenLastCalledWith('Servers/Nested');
+
+    // 2nd click on the now-selected group: deselect and return to root (host 재클릭 해제와 동일).
+    fireEvent.click(getNested());
+    expect(onNavigateGroup).toHaveBeenLastCalledWith(null);
+  });
+
   it('keeps the root group selection tint-based without drag shadows', () => {
     renderBrowser();
 

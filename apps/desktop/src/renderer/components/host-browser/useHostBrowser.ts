@@ -912,6 +912,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       toggleGroupSelection(groupPath);
       return;
     }
+    // 이미 단독 선택된 그룹을 다시 누르면 선택을 해제하고 루트로 복귀한다(호스트 재클릭 해제와 동일한 UX).
+    if (selectedGroupPaths.length === 1 && selectedGroupPaths[0] === groupPath) {
+      handleNavigateRoot();
+      return;
+    }
     selectSingleGroup(groupPath);
     // 그룹을 고르면 즐겨찾기 스코프는 해제(즐겨찾기/그룹/All Hosts는 상호배타 스코프).
     setFavoritesFilterActive(false);

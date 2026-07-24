@@ -168,7 +168,7 @@ const ecsTunnelRuntimeGridClass =
 const ecsDetailTabsClass =
   "gap-[0.55rem] rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_86%,transparent_14%)] p-[0.4rem] shadow-none";
 const ecsDetailTabButtonBaseClass =
-  "min-w-[5.75rem] border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
+  "min-w-[5.75rem] justify-center border border-transparent bg-[color-mix(in_srgb,var(--surface)_18%,transparent_82%)] text-[color-mix(in_srgb,var(--text-soft)_90%,black_10%)] shadow-none";
 const ecsDetailTabButtonActiveClass =
   "border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)] shadow-none";
 const ecsDetailTabButtonInactiveClass =
