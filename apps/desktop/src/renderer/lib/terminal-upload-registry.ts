@@ -10,3 +10,15 @@ export function markTerminalUploadJob(jobId: string): void {
 export function isTerminalUploadJob(jobId: string): boolean {
   return terminalUploadJobIds.has(jobId);
 }
+
+// connection_lost 자동 복구로 "재수립 후 재업로드"된 잡 id. 그 재시도가 또 connection_lost
+// 로 죽어도 다시 복구를 트리거하지 않게(무한 루프 방지) 표식해 둔다 — 한 번만 자동 재시도.
+const autoRecoveredTransferJobIds = new Set<string>();
+
+export function markAutoRecoveredTransferJob(jobId: string): void {
+  autoRecoveredTransferJobIds.add(jobId);
+}
+
+export function isAutoRecoveredTransferJob(jobId: string): boolean {
+  return autoRecoveredTransferJobIds.has(jobId);
+}

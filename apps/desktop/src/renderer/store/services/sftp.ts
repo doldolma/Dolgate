@@ -13,7 +13,10 @@ import type {
   TerminalUploadResult,
 } from "../types";
 import type { SliceDeps } from "./context";
-import { markTerminalUploadJob } from "../../lib/terminal-upload-registry";
+import {
+  markAutoRecoveredTransferJob,
+  markTerminalUploadJob,
+} from "../../lib/terminal-upload-registry";
 import { createBootstrapSyncServices } from "./bootstrap-sync";
 import { createSessionServices } from "./session";
 import { createTrustAuthServices } from "./trust-auth";
@@ -54,6 +57,9 @@ type TerminalUploadInput = {
   localPaths: string[];
   endpointId?: string;
   skipHostTrustPrompt?: boolean;
+  // connection_lost 자동 복구 시 true — 캐시/열린 pane 엔드포인트를 재사용하지 않고
+  // 반드시 새 엔드포인트(새 SSM 세션)를 맺는다.
+  forceReconnect?: boolean;
 };
 
 export { upsertTransferJob } from "../utils";
@@ -526,32 +532,37 @@ export function createSftpServices(deps: SliceDeps) {
       endpointId?: string;
       trustAction?: PendingHostKeyPrompt["action"];
       skipHostTrustPrompt?: boolean;
+      forceReconnect?: boolean;
     } = {},
   ): Promise<SftpEndpointSummary> => {
     const state = get();
-    for (const pane of [state.sftp.leftPane, state.sftp.rightPane]) {
-      if (
-        pane.sourceKind === "host" &&
-        pane.endpoint &&
-        pane.endpoint.hostId === hostId
-      ) {
-        return pane.endpoint;
+    // forceReconnect(연결 끊김 자동 복구)면 재사용을 건너뛰고 무조건 새로 맺는다 — 열린
+    // pane 엔드포인트나 캐시가 죽은 상태일 수 있기 때문.
+    if (!options.forceReconnect) {
+      for (const pane of [state.sftp.leftPane, state.sftp.rightPane]) {
+        if (
+          pane.sourceKind === "host" &&
+          pane.endpoint &&
+          pane.endpoint.hostId === hostId
+        ) {
+          return pane.endpoint;
+        }
       }
-    }
 
-    const cached = state.sftp.terminalUploadEndpoints[hostId];
-    if (cached) {
-      try {
-        await api.sftp.list({ endpointId: cached.id, path: cached.path });
-        scheduleTerminalUploadIdleDisconnect(set, hostId);
-        return cached;
-      } catch {
-        clearTerminalUploadIdleTracking(hostId);
-        set((current) => {
-          const next = { ...current.sftp.terminalUploadEndpoints };
-          delete next[hostId];
-          return { sftp: { ...current.sftp, terminalUploadEndpoints: next } };
-        });
+      const cached = state.sftp.terminalUploadEndpoints[hostId];
+      if (cached) {
+        try {
+          await api.sftp.list({ endpointId: cached.id, path: cached.path });
+          scheduleTerminalUploadIdleDisconnect(set, hostId);
+          return cached;
+        } catch {
+          clearTerminalUploadIdleTracking(hostId);
+          set((current) => {
+            const next = { ...current.sftp.terminalUploadEndpoints };
+            delete next[hostId];
+            return { sftp: { ...current.sftp, terminalUploadEndpoints: next } };
+          });
+        }
       }
     }
 
@@ -673,6 +684,7 @@ export function createSftpServices(deps: SliceDeps) {
         {
           endpointId,
           skipHostTrustPrompt: input.skipHostTrustPrompt,
+          forceReconnect: input.forceReconnect,
           trustAction: input.skipHostTrustPrompt
             ? undefined
             : {
@@ -758,6 +770,64 @@ export function createSftpServices(deps: SliceDeps) {
     };
   };
 
+  const getHostIdForTerminalUploadJob = (jobId: string): string | null => {
+    for (const [hostId, jobIds] of terminalUploadJobIdsByHost) {
+      if (jobIds.has(jobId)) {
+        return hostId;
+      }
+    }
+    return null;
+  };
+
+  // connection_lost로 죽은 터미널 업로드를 자동 복구한다: 죽은 엔드포인트를 무효화하고
+  // 실패 항목을 새 엔드포인트(새 SSM 세션)로 재업로드한다. 재수립된 재시도는
+  // markAutoRecoveredTransferJob으로 표식해 한 번만 재시도(무한 루프 방지).
+  const recoverTerminalUploadTransfer = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    job: TransferJob,
+  ): Promise<void> => {
+    const hostId = getHostIdForTerminalUploadJob(job.id);
+    if (!hostId) {
+      return;
+    }
+    const request = job.request;
+    const deadEndpointId =
+      request?.target.kind === "remote" ? request.target.endpointId : null;
+    const targetPath =
+      request?.target.kind === "remote" ? request.target.path : null;
+    const failedLocalPaths = (job.failedItems ?? [])
+      .map((failed) => failed.item.path)
+      .filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      );
+    if (failedLocalPaths.length === 0) {
+      return;
+    }
+
+    // 죽은 캐시 엔드포인트를 무효화하고 실제로 닫는다(참조만 버리면 서버 타임아웃까지 잔존).
+    clearTerminalUploadIdleTracking(hostId);
+    set((current) => {
+      const next = { ...current.sftp.terminalUploadEndpoints };
+      delete next[hostId];
+      return { sftp: { ...current.sftp, terminalUploadEndpoints: next } };
+    });
+    if (deadEndpointId) {
+      void api.sftp.disconnect(deadEndpointId).catch(() => undefined);
+    }
+
+    const result = await uploadFilesToHostPath(set, get, {
+      hostId,
+      targetPath,
+      localPaths: failedLocalPaths,
+      skipHostTrustPrompt: true,
+      forceReconnect: true,
+    });
+    if (result.ok) {
+      markAutoRecoveredTransferJob(result.job.id);
+    }
+  };
+
   return {
     loadPaneListing,
     setSftpPaneWarnings,
@@ -767,6 +837,7 @@ export function createSftpServices(deps: SliceDeps) {
     connectTrustedHostPane,
     ensureSftpEndpointForHost,
     uploadFilesToHostPath,
+    recoverTerminalUploadTransfer,
     refreshHostAndKeychainState,
     promptForMissingUsername,
     ensureTrustedHost,

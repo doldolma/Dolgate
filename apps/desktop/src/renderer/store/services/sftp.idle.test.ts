@@ -203,3 +203,89 @@ describe("terminal upload endpoint idle lifecycle", () => {
     expect(harness.api.sftp.disconnect).toHaveBeenCalledTimes(1);
   });
 });
+
+// connection_lost 자동 복구의 핵심: forceReconnect면 죽었을 수 있는 캐시/pane 엔드포인트를
+// 재사용하지 않고 반드시 새 엔드포인트(새 SSM 세션)를 맺는다.
+describe("ensureSftpEndpointForHost forceReconnect", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("reuses the cached endpoint without forceReconnect (probe passes)", async () => {
+    const harness = createHarness();
+    const hostId = "host-reuse";
+    const cached = createEndpoint(hostId);
+    harness.set(((current: { sftp: Record<string, unknown> }) => ({
+      sftp: { ...current.sftp, terminalUploadEndpoints: { [hostId]: cached } },
+    })) as unknown as Parameters<typeof harness.set>[0]);
+
+    const result = await harness.services.ensureSftpEndpointForHost(
+      harness.set,
+      harness.get,
+      hostId,
+    );
+
+    expect(result).toEqual(cached);
+    expect(harness.api.sftp.connect).not.toHaveBeenCalled();
+  });
+
+  it("forceReconnect bypasses the cached endpoint and connects a fresh one", async () => {
+    const harness = createHarness();
+    const hostId = "host-force-cache";
+    const stale = createEndpoint(hostId);
+    const fresh = { ...createEndpoint(hostId), id: "endpoint-fresh" };
+    harness.set(((current: { sftp: Record<string, unknown> }) => ({
+      sftp: { ...current.sftp, terminalUploadEndpoints: { [hostId]: stale } },
+    })) as unknown as Parameters<typeof harness.set>[0]);
+    (harness.api.sftp.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fresh,
+    );
+
+    const result = await harness.services.ensureSftpEndpointForHost(
+      harness.set,
+      harness.get,
+      hostId,
+      undefined,
+      { forceReconnect: true },
+    );
+
+    expect(result).toEqual(fresh);
+    expect(harness.api.sftp.connect).toHaveBeenCalledTimes(1);
+    expect(harness.api.sftp.list).not.toHaveBeenCalled(); // 캐시 probe 안 함
+    expect(harness.getState().sftp.terminalUploadEndpoints[hostId]).toEqual(
+      fresh,
+    );
+  });
+
+  it("forceReconnect bypasses an open pane endpoint for the host", async () => {
+    const harness = createHarness();
+    const hostId = "host-force-pane";
+    const paneEndpoint = createEndpoint(hostId);
+    const fresh = { ...createEndpoint(hostId), id: "endpoint-fresh-pane" };
+    harness.set(((current: { sftp: Record<string, unknown> }) => ({
+      sftp: {
+        ...current.sftp,
+        leftPane: { sourceKind: "host", endpoint: paneEndpoint },
+      },
+    })) as unknown as Parameters<typeof harness.set>[0]);
+    (harness.api.sftp.connect as ReturnType<typeof vi.fn>).mockResolvedValue(
+      fresh,
+    );
+
+    const result = await harness.services.ensureSftpEndpointForHost(
+      harness.set,
+      harness.get,
+      hostId,
+      undefined,
+      { forceReconnect: true },
+    );
+
+    expect(result).toEqual(fresh);
+    expect(harness.api.sftp.connect).toHaveBeenCalledTimes(1);
+  });
+});
