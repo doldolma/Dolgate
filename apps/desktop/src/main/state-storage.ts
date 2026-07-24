@@ -533,7 +533,7 @@ function createDefaultStateFile(): DesktopStateFile {
       updatedAt: timestamp
     },
     terminal: {
-      globalThemeId: 'dolssh-dark',
+      globalThemeId: 'system',
       globalThemeUpdatedAt: timestamp,
       fontFamily: defaultTerminalFontFamily,
       fontSize: 13,

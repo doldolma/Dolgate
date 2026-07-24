@@ -62,35 +62,6 @@ export const terminalFontOptions: TerminalFontOption[] = [
 
 export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
-    id: 'dolssh-dark',
-    title: 'Dolgate Dark',
-    description: '기본 다크',
-    preview: { background: '#0b1220', foreground: '#d9e4ee', accent: '#8ed1c2' },
-    theme: {
-      background: '#0b1220',
-      foreground: '#d9e4ee',
-      cursor: '#8ed1c2',
-      cursorAccent: '#0b1220',
-      selectionBackground: 'rgba(142, 209, 194, 0.2)',
-      black: '#101826',
-      red: '#ef6f6c',
-      green: '#8ad7a5',
-      yellow: '#e6c384',
-      blue: '#7fb4ca',
-      magenta: '#c4a7e7',
-      cyan: '#7ad5d6',
-      white: '#c8d3f5',
-      brightBlack: '#556079',
-      brightRed: '#ff8f88',
-      brightGreen: '#b7f59b',
-      brightYellow: '#ffd98c',
-      brightBlue: '#95c5ff',
-      brightMagenta: '#d7b7ff',
-      brightCyan: '#7fe7f1',
-      brightWhite: '#f5f7ff'
-    }
-  },
-  {
     id: 'dolssh-light',
     title: 'Dolgate Light',
     description: '기본 라이트',
@@ -117,6 +88,35 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
       brightMagenta: '#9b78ea',
       brightCyan: '#3fa4b8',
       brightWhite: '#ffffff'
+    }
+  },
+  {
+    id: 'dolssh-dark',
+    title: 'Dolgate Dark',
+    description: '기본 다크',
+    preview: { background: '#0b1220', foreground: '#d9e4ee', accent: '#8ed1c2' },
+    theme: {
+      background: '#0b1220',
+      foreground: '#d9e4ee',
+      cursor: '#8ed1c2',
+      cursorAccent: '#0b1220',
+      selectionBackground: 'rgba(142, 209, 194, 0.2)',
+      black: '#101826',
+      red: '#ef6f6c',
+      green: '#8ad7a5',
+      yellow: '#e6c384',
+      blue: '#7fb4ca',
+      magenta: '#c4a7e7',
+      cyan: '#7ad5d6',
+      white: '#c8d3f5',
+      brightBlack: '#556079',
+      brightRed: '#ff8f88',
+      brightGreen: '#b7f59b',
+      brightYellow: '#ffd98c',
+      brightBlue: '#95c5ff',
+      brightMagenta: '#d7b7ff',
+      brightCyan: '#7fe7f1',
+      brightWhite: '#f5f7ff'
     }
   },
   {

@@ -312,7 +312,10 @@ describe('SettingsPanel', () => {
     fireEvent.change(screen.getByLabelText('Line Height'), { target: { value: '1.2' } });
     fireEvent.change(screen.getByLabelText('Letter Spacing'), { target: { value: '1' } });
     fireEvent.change(screen.getByLabelText('Minimum Contrast'), { target: { value: '3' } });
-    fireEvent.change(screen.getByLabelText('Session Replay Retention'), { target: { value: '250' } });
+    // 보관 개수는 blur(포커스 아웃) 시에만 커밋된다(타이핑 도중 저장/prune 방지).
+    const replayInput = screen.getByLabelText('Session Replay Retention');
+    fireEvent.change(replayInput, { target: { value: '250' } });
+    fireEvent.blur(replayInput);
     fireEvent.click(screen.getByRole('switch', { name: 'Use Option/Alt as Meta' }));
 
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalScrollbackLines: 6400 });
@@ -321,6 +324,24 @@ describe('SettingsPanel', () => {
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalMinimumContrastRatio: 3 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ sessionReplayRetentionCount: 250 });
     expect(onUpdateSettings).toHaveBeenCalledWith({ terminalAltIsMeta: true });
+  });
+
+  it('does not persist session replay retention mid-typing, only the final value on blur', () => {
+    const { onUpdateSettings } = renderSettingsPanel();
+    const replayInput = screen.getByLabelText('Session Replay Retention');
+
+    // 타이핑 중간값("5")은 저장되면 안 된다. 저장되면 그 순간 replay가 5개로 prune되어
+    // 나머지가 삭제되는 데이터 손실이 발생하기 때문.
+    fireEvent.change(replayInput, { target: { value: '5' } });
+    expect(onUpdateSettings).not.toHaveBeenCalled();
+
+    // 계속 입력해 최종값에 도달한 뒤 blur → 최종값만 저장된다(중간 저장 없음).
+    fireEvent.change(replayInput, { target: { value: '5000' } });
+    expect(onUpdateSettings).not.toHaveBeenCalled();
+
+    fireEvent.blur(replayInput);
+    expect(onUpdateSettings).toHaveBeenCalledTimes(1);
+    expect(onUpdateSettings).toHaveBeenCalledWith({ sessionReplayRetentionCount: 5000 });
   });
 
   it('hides mac-only terminal fonts on Windows', () => {
@@ -504,7 +525,7 @@ describe('SettingsPanel', () => {
 
   it('deletes the account only after the confirm dialog is accepted', async () => {
     const onDeleteAccount = vi.fn().mockResolvedValue(undefined);
-    renderSettingsPanel({ onDeleteAccount });
+    renderSettingsPanel({ onDeleteAccount, activeSection: 'account' });
 
     fireEvent.click(screen.getByRole('button', { name: '회원 탈퇴' }));
     expect(onDeleteAccount).not.toHaveBeenCalled();
@@ -519,7 +540,7 @@ describe('SettingsPanel', () => {
 
   it('keeps the delete-account dialog open with the error when deletion fails', async () => {
     const onDeleteAccount = vi.fn().mockRejectedValue(new Error('서버 오류가 발생했습니다.'));
-    renderSettingsPanel({ onDeleteAccount });
+    renderSettingsPanel({ onDeleteAccount, activeSection: 'account' });
 
     fireEvent.click(screen.getByRole('button', { name: '회원 탈퇴' }));
     fireEvent.click(screen.getByRole('button', { name: '탈퇴' }));
@@ -532,7 +553,7 @@ describe('SettingsPanel', () => {
 
   it('changes an existing account password after confirming the current password', async () => {
     const onChangeAccountPassword = vi.fn().mockResolvedValue(undefined);
-    renderSettingsPanel({ passwordState: 'set', onChangeAccountPassword });
+    renderSettingsPanel({ passwordState: 'set', onChangeAccountPassword, activeSection: 'account' });
 
     fireEvent.click(screen.getByRole('button', { name: '비밀번호 변경' }));
     const dialog = screen.getByRole('dialog', { name: '계정 비밀번호 변경' });
@@ -558,7 +579,7 @@ describe('SettingsPanel', () => {
 
   it('sets an OIDC-only account password without asking for a current password', async () => {
     const onChangeAccountPassword = vi.fn().mockResolvedValue(undefined);
-    renderSettingsPanel({ passwordState: 'unset', onChangeAccountPassword });
+    renderSettingsPanel({ passwordState: 'unset', onChangeAccountPassword, activeSection: 'account' });
 
     fireEvent.click(screen.getByRole('button', { name: '비밀번호 설정' }));
     const dialog = screen.getByRole('dialog', { name: '계정 비밀번호 설정' });
@@ -581,6 +602,7 @@ describe('SettingsPanel', () => {
   it('resets the sync vault only after the confirm dialog is accepted', async () => {
     const onResetVault = vi.fn().mockResolvedValue(undefined);
     renderSettingsPanel({
+      activeSection: 'account',
       vaultStatus: 'unlocked',
       onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
       onResetVault,
@@ -604,6 +626,7 @@ describe('SettingsPanel', () => {
   it('keeps the vault reset dialog open with the error when reset fails', async () => {
     const onResetVault = vi.fn().mockRejectedValue(new Error('서버에 연결할 수 없습니다.'));
     renderSettingsPanel({
+      activeSection: 'account',
       vaultStatus: 'unlocked',
       onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
       onResetVault,
@@ -624,6 +647,7 @@ describe('SettingsPanel', () => {
 
   it('hides the vault reset entry without onResetVault (legacy/v1 vaults)', () => {
     renderSettingsPanel({
+      activeSection: 'account',
       vaultStatus: 'unlocked',
       onChangeVaultPassphrase: vi.fn().mockResolvedValue(undefined),
     });
@@ -635,6 +659,7 @@ describe('SettingsPanel', () => {
   it('opens sync passphrase changes explicitly and clears drafts when cancelled', async () => {
     const onChangeVaultPassphrase = vi.fn().mockResolvedValue(undefined);
     renderSettingsPanel({
+      activeSection: 'account',
       vaultStatus: 'unlocked',
       onChangeVaultPassphrase,
     });
@@ -809,7 +834,7 @@ describe('SettingsPanel', () => {
   });
 
   it('shows the signed-in email and current server in the account section', () => {
-    renderSettingsPanel();
+    renderSettingsPanel({ activeSection: 'account' });
 
     expect(screen.getByText('user@example.com')).toBeInTheDocument();
     expect(screen.getByText('https://ssh.doldolma.com')).toBeInTheDocument();

@@ -88,7 +88,7 @@ export type HomeSection =
   | "snippets"
   | "logs"
   | "settings";
-export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles" | "ai";
+export type SettingsSection = "general" | "sftp" | "security" | "secrets" | "aws-profiles" | "ai" | "account";
 export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
