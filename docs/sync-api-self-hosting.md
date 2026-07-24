@@ -122,7 +122,7 @@ environment:
   TRUSTED_PROXIES: "172.17.0.1,10.0.0.0/8"
 ```
 
-현재 repo에는 nginx 예제 파일이 포함되어 있지 않으므로, 사용하는 프록시에 맞춰 `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 전달만 맞추면 됩니다.
+현재 repo에는 nginx 예제 파일이 포함되어 있지 않으므로, 사용하는 프록시에 맞춰 `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 전달을 맞추고 **WebSocket 업그레이드(`Upgrade`/`Connection` 헤더)를 허용**해야 합니다. 일부 기능이 WebSocket을 사용하므로 막히면 동작하지 않습니다.
 
 ## MySQL로 전환할 때
 
