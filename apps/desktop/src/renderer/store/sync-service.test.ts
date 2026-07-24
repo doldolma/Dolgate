@@ -175,6 +175,7 @@ function createSyncService() {
     }),
     handleVaultDekRejected: vi.fn().mockResolvedValue(undefined),
     noteServerVaultSupport: vi.fn(),
+    noteServerWebauthnSupport: vi.fn(),
     refreshSession: vi.fn().mockResolvedValue({
       status: 'authenticated'
     })

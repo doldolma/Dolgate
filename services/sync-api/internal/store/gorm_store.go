@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -55,6 +56,37 @@ type authIdentityRow struct {
 
 func (authIdentityRow) TableName() string {
 	return "auth_identities"
+}
+
+// webauthnCredentialRow — 등록된 패스키. PK 는 원본 credential id 의 sha256(hex, 64자)로,
+// credential id 가 authenticator 마다 길이가 달라(수백 바이트까지) MySQL 인덱스 한계를
+// 넘길 수 있어 고정 길이 해시를 키로 쓴다. CredentialID(base64url 원본)와 Data(마샬링된
+// 자격증명 JSON)는 참조·복원용 컬럼이다.
+type webauthnCredentialRow struct {
+	CredentialIDHash string    `gorm:"column:credential_id_hash;primaryKey;type:varchar(64)"`
+	CredentialID     string    `gorm:"column:credential_id;not null;type:varchar(512)"`
+	UserID           string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	Name             string    `gorm:"column:name;not null;default:'';type:varchar(128)"`
+	Data             string    `gorm:"column:data;not null;type:text"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null"`
+	LastUsedAt       time.Time `gorm:"column:last_used_at;not null"`
+}
+
+func (webauthnCredentialRow) TableName() string {
+	return "webauthn_credentials"
+}
+
+// webauthnCeremonyRow — begin/finish 사이 일회성 챌린지 상태. exchange code 처럼 소비 시 삭제.
+type webauthnCeremonyRow struct {
+	ID          string    `gorm:"column:id;primaryKey;type:varchar(191)"`
+	UserID      string    `gorm:"column:user_id;not null;default:'';type:varchar(191)"`
+	Purpose     string    `gorm:"column:purpose;not null;type:varchar(32)"`
+	SessionData string    `gorm:"column:session_data;not null;type:text"`
+	ExpiresAt   time.Time `gorm:"column:expires_at;not null"`
+}
+
+func (webauthnCeremonyRow) TableName() string {
+	return "webauthn_ceremonies"
 }
 
 type refreshTokenRow struct {
@@ -238,6 +270,8 @@ func (s *GormStore) migrate() error {
 		&userVaultKeyRow{},
 		&userClientObservationRow{},
 		&syncRecordRow{},
+		&webauthnCredentialRow{},
+		&webauthnCeremonyRow{},
 	); err != nil {
 		return err
 	}
@@ -382,6 +416,131 @@ func (s *GormStore) SaveAuthIdentity(ctx context.Context, identity AuthIdentity)
 			}),
 		}).
 		Create(&row).Error
+}
+
+func webauthnCredentialIDHash(credentialID string) string {
+	sum := sha256.Sum256([]byte(credentialID))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *GormStore) SaveWebAuthnCredential(ctx context.Context, credential WebAuthnCredential) error {
+	now := time.Now().UTC()
+	createdAt := credential.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	lastUsedAt := credential.LastUsedAt
+	if lastUsedAt.IsZero() {
+		lastUsedAt = createdAt
+	}
+	row := webauthnCredentialRow{
+		CredentialIDHash: webauthnCredentialIDHash(credential.CredentialID),
+		CredentialID:     credential.CredentialID,
+		UserID:           credential.UserID,
+		Name:             credential.Name,
+		Data:             string(credential.Data),
+		CreatedAt:        createdAt.UTC(),
+		LastUsedAt:       lastUsedAt.UTC(),
+	}
+	return s.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "credential_id_hash"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"credential_id": row.CredentialID,
+				"user_id":       row.UserID,
+				"name":          row.Name,
+				"data":          row.Data,
+				"last_used_at":  row.LastUsedAt,
+			}),
+		}).
+		Create(&row).Error
+}
+
+func (s *GormStore) ListWebAuthnCredentialsByUser(ctx context.Context, userID string) ([]WebAuthnCredential, error) {
+	var rows []webauthnCredentialRow
+	if err := s.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	credentials := make([]WebAuthnCredential, 0, len(rows))
+	for _, row := range rows {
+		credentials = append(credentials, WebAuthnCredential{
+			CredentialID: row.CredentialID,
+			UserID:       row.UserID,
+			Name:         row.Name,
+			Data:         []byte(row.Data),
+			CreatedAt:    row.CreatedAt,
+			LastUsedAt:   row.LastUsedAt,
+		})
+	}
+	return credentials, nil
+}
+
+func (s *GormStore) UpdateWebAuthnCredentialData(ctx context.Context, credentialID string, data []byte, lastUsedAt time.Time) error {
+	result := s.db.WithContext(ctx).
+		Model(&webauthnCredentialRow{}).
+		Where("credential_id_hash = ?", webauthnCredentialIDHash(credentialID)).
+		Updates(map[string]any{
+			"data":         string(data),
+			"last_used_at": lastUsedAt.UTC(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *GormStore) DeleteWebAuthnCredential(ctx context.Context, userID string, credentialID string) error {
+	return s.db.WithContext(ctx).
+		Where("user_id = ? AND credential_id_hash = ?", userID, webauthnCredentialIDHash(credentialID)).
+		Delete(&webauthnCredentialRow{}).Error
+}
+
+func (s *GormStore) CountWebAuthnCredentialsByUser(ctx context.Context, userID string) (int64, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).
+		Model(&webauthnCredentialRow{}).
+		Where("user_id = ?", userID).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *GormStore) SaveWebAuthnCeremony(ctx context.Context, ceremony WebAuthnCeremony) error {
+	row := webauthnCeremonyRow{
+		ID:          ceremony.ID,
+		UserID:      ceremony.UserID,
+		Purpose:     ceremony.Purpose,
+		SessionData: string(ceremony.SessionData),
+		ExpiresAt:   ceremony.ExpiresAt.UTC(),
+	}
+	return s.db.WithContext(ctx).Create(&row).Error
+}
+
+func (s *GormStore) ConsumeWebAuthnCeremony(ctx context.Context, id string) (WebAuthnCeremony, error) {
+	var row webauthnCeremonyRow
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ?", id).Take(&row).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&webauthnCeremonyRow{}).Error
+	})
+	if err != nil {
+		return WebAuthnCeremony{}, err
+	}
+	return WebAuthnCeremony{
+		ID:          row.ID,
+		UserID:      row.UserID,
+		Purpose:     row.Purpose,
+		SessionData: []byte(row.SessionData),
+		ExpiresAt:   row.ExpiresAt,
+	}, nil
 }
 
 func (s *GormStore) SaveRefreshToken(ctx context.Context, token RefreshToken) error {
@@ -1305,6 +1464,8 @@ func (s *GormStore) DeleteUserData(ctx context.Context, userID string) error {
 			{&userClientObservationRow{}, "user_id"},
 			{&refreshTokenRow{}, "user_id"},
 			{&exchangeCodeRow{}, "user_id"},
+			{&webauthnCredentialRow{}, "user_id"},
+			{&webauthnCeremonyRow{}, "user_id"},
 			{&authIdentityRow{}, "user_id"},
 			{&userRow{}, "id"},
 		}

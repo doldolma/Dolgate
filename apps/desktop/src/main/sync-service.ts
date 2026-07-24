@@ -1238,6 +1238,7 @@ export class SyncService {
         // 5xx(501 제외)와 인증/프록시 오류는 구서버로 오인하지 않고 마지막 판정을 유지한다.
         if ([404, 405, 501].includes(response.status)) {
           this.authService.noteServerVaultSupport(false);
+          this.authService.noteServerWebauthnSupport(false);
           return 'unsupported';
         }
         return this.state.awsProfilesServerSupport ?? 'unknown';
@@ -1247,6 +1248,9 @@ export class SyncService {
       // 셀프호스팅 구버전 서버(vault capability 없음)에서는 E2EE 전환 프롬프트를 숨긴다.
       this.authService.noteServerVaultSupport(
         serverInfo.capabilities?.vault?.e2ee === true
+      );
+      this.authService.noteServerWebauthnSupport(
+        serverInfo.capabilities?.auth?.webauthn === true
       );
       return resolveAwsProfilesServerSupport(serverInfo);
     } catch (error) {

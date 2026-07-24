@@ -406,7 +406,49 @@ func (s *Service) ParseAccessToken(token string) (*Claims, error) {
 	if !ok || !parsed.Valid {
 		return nil, ErrInvalidCredentials
 	}
+	// 같은 키로 서명된 다른 용도의 토큰(WebAuthn 등록 티켓 등)이 access token 으로 재사용되는
+	// 것을 막는다 — 등록 티켓은 이 audience 를 갖는다.
+	for _, audience := range claims.Audience {
+		if audience == webauthnRegisterTicketAudience {
+			return nil, ErrInvalidCredentials
+		}
+	}
 	return claims, nil
+}
+
+// webauthnRegisterTicketAudience 는 등록 티켓 JWT 의 audience 다. access token 과 서명 키를
+// 공유하므로, 양쪽 파서가 audience 로 서로를 구분해 혼용을 차단한다.
+const webauthnRegisterTicketAudience = "webauthn-register"
+
+// NewWebAuthnRegisterTicket 은 로그인된 앱이 브라우저 등록 페이지를 열 때 신원을 전달하는
+// 단명 티켓이다. 브라우저는 자체 세션이 없으므로 이 티켓으로 begin/finish 를 인가한다.
+func (s *Service) NewWebAuthnRegisterTicket(userID string) (string, error) {
+	claims := jwt.RegisteredClaims{
+		Subject:   userID,
+		Audience:  jwt.ClaimStrings{webauthnRegisterTicketAudience},
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
+}
+
+// ParseWebAuthnRegisterTicket 은 티켓을 검증하고 userID(Subject)를 돌려준다. audience 를
+// 필수 검증해 access token 이 티켓으로 오용되는 것을 막는다.
+func (s *Service) ParseWebAuthnRegisterTicket(token string) (string, error) {
+	parsed, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(token *jwt.Token) (any, error) {
+		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
+			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
+		}
+		return &s.signingKey.PublicKey, nil
+	}, jwt.WithAudience(webauthnRegisterTicketAudience))
+	if err != nil {
+		return "", err
+	}
+	claims, ok := parsed.Claims.(*jwt.RegisteredClaims)
+	if !ok || !parsed.Valid || strings.TrimSpace(claims.Subject) == "" {
+		return "", ErrInvalidCredentials
+	}
+	return claims.Subject, nil
 }
 
 // resolveVaultBootstrap 은 클라이언트 부류(resolution)에 맞는 볼트 descriptor 를 만든다.

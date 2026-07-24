@@ -6,6 +6,7 @@ import type {
   GlobalTerminalThemeId,
   HostRecord,
   KnownHostRecord,
+  PasskeyCredential,
   SecretMetadataRecord,
   SessionReplayStorageUsage,
   SshKeyGenerateInput,
@@ -22,7 +23,7 @@ import {
   validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
@@ -81,6 +82,12 @@ interface SettingsPanelProps {
     currentPassword: string,
     newPassword: string,
   ) => Promise<void>;
+  // 패스키(WebAuthn) — 서버가 지원(webauthnSupported)할 때만 섹션을 노출한다. 추가는 실제
+  // 등록(Touch ID 등)을 위해 시스템 브라우저로 서버의 등록 페이지를 연다.
+  webauthnSupported?: boolean;
+  onAddPasskey?: () => Promise<void>;
+  onListPasskeys?: () => Promise<PasskeyCredential[]>;
+  onDeletePasskey?: (credentialId: string) => Promise<void>;
   // E2EE 볼트(v2) 사용자의 동기화 암호 변경. v1(레거시) 사용자에게는 섹션이 숨겨진다.
   vaultStatus?: AuthVaultStatus | null;
   onChangeVaultPassphrase?: (
@@ -244,7 +251,11 @@ export function SettingsPanel({
   onLoadSessionReplayStorageUsage,
   onLogout,
   onDeleteAccount,
-  onChangeAccountPassword
+  onChangeAccountPassword,
+  webauthnSupported = false,
+  onAddPasskey,
+  onListPasskeys,
+  onDeletePasskey
 }: SettingsPanelProps) {
   // 회원 탈퇴 확인 다이얼로그 상태.
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
@@ -257,6 +268,77 @@ export function SettingsPanel({
   const [accountPasswordBusy, setAccountPasswordBusy] = useState(false);
   const [accountPasswordError, setAccountPasswordError] = useState<string | null>(null);
   const [accountPasswordNotice, setAccountPasswordNotice] = useState<string | null>(null);
+  // 패스키(WebAuthn) 상태.
+  const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+
+  const loadPasskeys = useCallback(async () => {
+    if (!onListPasskeys) {
+      return;
+    }
+    setPasskeysLoading(true);
+    setPasskeyError(null);
+    try {
+      setPasskeys(await onListPasskeys());
+    } catch (error) {
+      setPasskeyError(
+        error instanceof Error ? error.message : '패스키 목록을 불러오지 못했습니다.',
+      );
+    } finally {
+      setPasskeysLoading(false);
+    }
+  }, [onListPasskeys]);
+
+  // 서버가 패스키를 지원하면 목록을 불러오고, 창이 다시 포커스될 때(브라우저 등록을 마치고
+  // 돌아왔을 때) 자동으로 새로고침한다 — 등록은 외부 브라우저에서 일어나기 때문.
+  useEffect(() => {
+    if (!webauthnSupported || !onListPasskeys) {
+      return;
+    }
+    void loadPasskeys();
+    const handleFocus = () => {
+      void loadPasskeys();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [webauthnSupported, onListPasskeys, loadPasskeys]);
+
+  async function handleAddPasskey() {
+    if (!onAddPasskey) {
+      return;
+    }
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      await onAddPasskey();
+    } catch (error) {
+      setPasskeyError(
+        error instanceof Error ? error.message : '패스키 추가를 시작하지 못했습니다.',
+      );
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function handleDeletePasskey(credentialId: string) {
+    if (!onDeletePasskey) {
+      return;
+    }
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      await onDeletePasskey(credentialId);
+      await loadPasskeys();
+    } catch (error) {
+      setPasskeyError(
+        error instanceof Error ? error.message : '패스키 삭제에 실패했습니다.',
+      );
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
   const accountPasswordValidationMessage = nextAccountPassword
     ? validateAccountPassword(nextAccountPassword)
     : null;
@@ -956,6 +1038,66 @@ export function SettingsPanel({
               ) : null}
             </div>
           </section>
+
+          {webauthnSupported && onAddPasskey ? (
+            <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
+              <div className="mb-4">
+                <SectionLabel>Session</SectionLabel>
+                <h3>패스키</h3>
+              </div>
+              <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
+                생체 인증이나 보안 키로 비밀번호 없이 로그인합니다. “패스키 추가”를 누르면 브라우저에서
+                등록을 마친 뒤 이 목록에 표시됩니다.
+              </p>
+              {passkeyError ? (
+                <p role="alert" className="m-0 mb-3 text-sm text-[var(--danger-text)]">
+                  {passkeyError}
+                </p>
+              ) : null}
+              {passkeys.length > 0 ? (
+                <ul className="m-0 mb-4 grid list-none gap-[0.6rem] p-0">
+                  {passkeys.map((passkey) => (
+                    <li
+                      key={passkey.id}
+                      className="flex items-center justify-between gap-3 rounded-[12px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_90%,transparent_10%)] px-4 py-[0.7rem]"
+                    >
+                      <div className="grid gap-[0.15rem]">
+                        <span className="break-all text-[var(--text)]">
+                          {passkey.name || '패스키'}
+                        </span>
+                        <span className="text-[0.78rem] text-[var(--text-soft)]">
+                          등록 {passkey.createdAt.slice(0, 10)}
+                        </span>
+                      </div>
+                      <Button
+                        variant="danger"
+                        disabled={passkeyBusy}
+                        onClick={() => handleDeletePasskey(passkey.id)}
+                      >
+                        삭제
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="m-0 mb-4 text-[0.88rem] text-[var(--text-soft)]">
+                  {passkeysLoading ? '불러오는 중…' : '등록된 패스키가 없습니다.'}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" disabled={passkeyBusy} onClick={handleAddPasskey}>
+                  패스키 추가
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={passkeysLoading}
+                  onClick={() => void loadPasskeys()}
+                >
+                  새로고침
+                </Button>
+              </div>
+            </section>
+          ) : null}
 
           {vaultStatus === 'unlocked' && onChangeVaultPassphrase ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">

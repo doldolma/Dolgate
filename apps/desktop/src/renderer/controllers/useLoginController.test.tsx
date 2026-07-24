@@ -4,10 +4,13 @@ import type { AuthState } from '@shared';
 import { useLoginController } from './useLoginController';
 
 const mocks = vi.hoisted(() => ({
+  addPasskey: vi.fn(),
   beginBrowserLogin: vi.fn(),
   reopenBrowserLogin: vi.fn(),
   cancelBrowserLogin: vi.fn(),
   changeAccountPassword: vi.fn(),
+  deletePasskey: vi.fn(),
+  listPasskeys: vi.fn(),
   checkForUpdates: vi.fn(),
   closeWindow: vi.fn(),
   deleteAccount: vi.fn(),

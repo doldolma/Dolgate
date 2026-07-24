@@ -701,6 +701,10 @@ export function HomeShell({
             onLogout={loginController.logout}
             onDeleteAccount={loginController.deleteAccount}
             onChangeAccountPassword={loginController.changeAccountPassword}
+            webauthnSupported={authState.capabilities?.webauthn ?? false}
+            onAddPasskey={loginController.addPasskey}
+            onListPasskeys={loginController.listPasskeys}
+            onDeletePasskey={loginController.deletePasskey}
             vaultStatus={authState.vault?.status ?? null}
             onChangeVaultPassphrase={changeVaultPassphrase}
             onResetVault={resetVault}

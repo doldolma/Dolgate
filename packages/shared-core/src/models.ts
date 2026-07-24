@@ -1327,6 +1327,19 @@ export interface AuthState {
     migrationRequired?: boolean;
     errorMessage?: string;
   } | null;
+  // 현재 붙어 있는 서버가 지원하는 로그인 기능. 설정의 패스키 섹션 노출 게이트로 쓴다.
+  // 서버 URL이 바뀌면 /api/info 재조회 전까지 false로 취급한다(서버별 지원이 다르므로).
+  capabilities?: {
+    webauthn: boolean;
+  } | null;
+}
+
+// PasskeyCredential 은 설정 화면이 보여줄 등록된 패스키 하나의 최소 정보다(민감 재료 없음).
+export interface PasskeyCredential {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string;
 }
 
 // SyncStatus는 초기 hydrate와 이후 push 재시도를 UI/서비스가 추적하기 위한 상태다.

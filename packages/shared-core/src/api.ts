@@ -121,6 +121,10 @@ export interface ServerInfoResponse {
     vault?: {
       e2ee: boolean;
     };
+    // 패스키(WebAuthn) 로그인 지원 여부. 도입 이전/미지원 서버 응답에는 없다.
+    auth?: {
+      webauthn: boolean;
+    };
   };
 }
 
