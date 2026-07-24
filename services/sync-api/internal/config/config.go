@@ -38,6 +38,7 @@ type AuthConfig struct {
 	RateLimit                     AuthRateLimitConfig `json:"rateLimit"`
 	Local                         LocalAuthConfig     `json:"local"`
 	OIDC                          OIDCConfig          `json:"oidc"`
+	WebAuthn                      WebAuthnConfig      `json:"webauthn"`
 }
 
 type AuthRateLimitConfig struct {
@@ -69,6 +70,22 @@ type OIDCConfig struct {
 	// HideOnIOS 는 iOS 앱에서 연 브라우저 로그인(platform=ios)에서만 OIDC 버튼을 숨기는
 	// opt-in 플래그다. 기본값(false)에서는 동작 변화가 없다.
 	HideOnIOS bool `json:"hideOnIos"`
+}
+
+// WebAuthnConfig 는 브라우저 로그인의 패스키(WebAuthn) 로그인 설정이다. Enabled 가 켜져도
+// RP(Relying Party) 유도에 실패하면(=HTTPS 도메인 origin 이 아니면) 런타임에서 자동 비활성된다
+// — WebAuthn 규격상 평문 HTTP 원격/ IP 리터럴 origin 에서는 동작할 수 없기 때문이다.
+// RPID·Origins 를 비워 두면 서버의 PublicBaseURL 에서 자동 유도한다.
+type WebAuthnConfig struct {
+	Enabled bool `json:"enabled"`
+	// RPID 는 Relying Party ID(스킴·포트 없는 등록 가능 도메인, 예: ssh.doldolma.com)다.
+	// 비우면 PublicBaseURL 의 호스트에서 유도한다.
+	RPID string `json:"rpId"`
+	// RPDisplayName 은 인증기 UI 에 노출되는 사람이 읽는 이름이다.
+	RPDisplayName string `json:"rpDisplayName"`
+	// Origins 는 허용할 Relying Party origin 목록(스킴+호스트+포트)이다. 비우면
+	// PublicBaseURL 에서 유도한다. 여러 origin(앱 도메인 등)을 허용하려면 명시한다.
+	Origins []string `json:"origins"`
 }
 
 func defaultConfig() AppConfig {
@@ -103,6 +120,10 @@ func defaultConfig() AppConfig {
 				Enabled:     false,
 				DisplayName: "SSO",
 				RedirectURL: "https://ssh.doldolma.com/auth/oidc/callback",
+			},
+			WebAuthn: WebAuthnConfig{
+				Enabled:       false,
+				RPDisplayName: "Dolgate",
 			},
 		},
 	}
@@ -155,6 +176,10 @@ func applyEnvOverrides(cfg *AppConfig) {
 	cfg.Auth.OIDC.RedirectURL = getenv("OIDC_REDIRECT_URL", cfg.Auth.OIDC.RedirectURL)
 	cfg.Auth.OIDC.Scopes = getenvCSV("OIDC_SCOPES", cfg.Auth.OIDC.Scopes)
 	cfg.Auth.OIDC.HideOnIOS = getenv("OIDC_HIDE_ON_IOS", boolToString(cfg.Auth.OIDC.HideOnIOS)) == "true"
+	cfg.Auth.WebAuthn.Enabled = getenv("WEBAUTHN_ENABLED", boolToString(cfg.Auth.WebAuthn.Enabled)) == "true"
+	cfg.Auth.WebAuthn.RPID = getenv("WEBAUTHN_RP_ID", cfg.Auth.WebAuthn.RPID)
+	cfg.Auth.WebAuthn.RPDisplayName = getenv("WEBAUTHN_RP_DISPLAY_NAME", cfg.Auth.WebAuthn.RPDisplayName)
+	cfg.Auth.WebAuthn.Origins = getenvCSV("WEBAUTHN_ORIGINS", cfg.Auth.WebAuthn.Origins)
 }
 
 func validateConfig(cfg AppConfig) error {

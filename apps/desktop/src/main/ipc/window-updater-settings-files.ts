@@ -87,6 +87,7 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
       const nextSettings = ctx.settings.update(input);
       if (nextSettings.serverUrl !== previousServerUrl) {
         ctx.authService.resetServerVaultSupport();
+        ctx.authService.resetServerWebauthnSupport();
       }
       if (
         Object.prototype.hasOwnProperty.call(

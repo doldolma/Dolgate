@@ -17,6 +17,7 @@ type AuthRateLimitConfig struct {
 	Refresh  RateLimitRuleConfig
 	Exchange RateLimitRuleConfig
 	Password RateLimitRuleConfig
+	Webauthn RateLimitRuleConfig
 }
 
 type authRateLimiter struct {
@@ -38,6 +39,7 @@ type authRouteLimiters struct {
 	refresh  *authRateLimiter
 	exchange *authRateLimiter
 	password *authRateLimiter
+	webauthn *authRateLimiter
 }
 
 func newAuthRouteLimiters(config AuthRateLimitConfig) authRouteLimiters {
@@ -47,6 +49,7 @@ func newAuthRouteLimiters(config AuthRateLimitConfig) authRouteLimiters {
 		refresh:  newAuthRateLimiter(resolveRateLimitRule(config.Refresh, 30, 300)),
 		exchange: newAuthRateLimiter(resolveRateLimitRule(config.Exchange, 30, 300)),
 		password: newAuthRateLimiter(resolveRateLimitRule(config.Password, 5, 900)),
+		webauthn: newAuthRateLimiter(resolveRateLimitRule(config.Webauthn, 30, 300)),
 	}
 }
 

@@ -4,6 +4,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AuthSession } from "@shared";
 import type { AuthState } from "@shared";
+import type { PasskeyCredential } from "@shared";
 import type { VaultMutationResponse } from "@shared";
 import {
   assertValidNewVaultPassphrase,
@@ -503,6 +504,10 @@ export class AuthService {
   // 알려준다. null 은 아직 미확인(전환 프롬프트를 띄우지 않는다).
   private serverVaultE2eeSupported: boolean | null = null;
   private serverVaultE2eeSupportServerUrl: string | null = null;
+  // 서버(/api/info)가 패스키(WebAuthn) 로그인을 지원하는지 — sync-service 가 알려준다.
+  // 서버 URL과 함께 보관해 서버가 바뀌면 이전 판정을 그대로 쓰지 않는다.
+  private serverWebauthnSupported: boolean | null = null;
+  private serverWebauthnSupportServerUrl: string | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private offlineRetryTimer: NodeJS.Timeout | null = null;
   private offlineLeaseExpiryTimer: NodeJS.Timeout | null = null;
@@ -2435,7 +2440,117 @@ export class AuthService {
     this.patchState({});
   }
 
+  // sync-service 가 /api/info 를 읽을 때 서버의 패스키(WebAuthn) 지원 여부를 알려준다.
+  // 설정 화면의 패스키 섹션 노출 게이트로만 쓰인다.
+  noteServerWebauthnSupport(supported: boolean): void {
+    const serverUrl = normalizeServerUrl(this.getServerUrl());
+    if (
+      this.serverWebauthnSupported === supported &&
+      this.serverWebauthnSupportServerUrl === serverUrl
+    ) {
+      return;
+    }
+    this.serverWebauthnSupported = supported;
+    this.serverWebauthnSupportServerUrl = serverUrl;
+    this.patchState({});
+  }
+
+  resetServerWebauthnSupport(): void {
+    if (
+      this.serverWebauthnSupported === null &&
+      this.serverWebauthnSupportServerUrl === null
+    ) {
+      return;
+    }
+    this.serverWebauthnSupported = null;
+    this.serverWebauthnSupportServerUrl = null;
+    this.patchState({});
+  }
+
+  // 패스키(WebAuthn) 등록/관리 요청 — Bearer 인증 + access 토큰 만료(401/403) 시 refresh 후
+  // 1회 재시도. 회원탈퇴/비밀번호 변경과 동일한 인증 패턴이다.
+  private async requestWebauthnApi(
+    method: string,
+    pathname: string,
+  ): Promise<unknown> {
+    const requestOnce = (): Promise<Response> =>
+      fetch(new URL(pathname, this.getServerUrl()), {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.getAccessToken()}`,
+        },
+      });
+
+    let response = await requestOnce();
+    if (response.status === 401 || response.status === 403) {
+      const refreshed = await this.refreshSession();
+      if (refreshed.status !== "authenticated") {
+        throw new Error(
+          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+        );
+      }
+      response = await requestOnce();
+    }
+    if (!response.ok) {
+      const fallback = `요청이 실패했습니다. (${response.status})`;
+      const message = await response
+        .json()
+        .then((body: { error?: unknown }) =>
+          typeof body.error === "string" && body.error.trim()
+            ? body.error
+            : fallback,
+        )
+        .catch(() => fallback);
+      throw new Error(message);
+    }
+    if (response.status === 204) {
+      return null;
+    }
+    return response.json().catch(() => null);
+  }
+
+  // 설정의 "패스키 추가" — 등록 티켓을 받아 시스템 브라우저로 등록 페이지를 연다.
+  // 실제 등록(Touch ID 등 ceremony)은 서버 도메인 origin 의 브라우저에서만 가능하다.
+  async beginPasskeyRegistration(): Promise<void> {
+    const result = (await this.requestWebauthnApi(
+      "POST",
+      "/api/webauthn/registration-ticket",
+    )) as { ticket?: unknown } | null;
+    const ticket = result?.ticket;
+    if (typeof ticket !== "string" || !ticket) {
+      throw new Error("패스키 등록을 시작할 수 없습니다.");
+    }
+    // 서버가 준 URL 을 그대로 열지 않고 설정된 serverUrl 로 직접 조립한다 — 침해/오설정 서버가
+    // file:// 같은 임의 URL 을 shell.openExternal 로 열게 하는 것을 차단한다. 티켓은 fragment 로
+    // 실어 서버 로그·브라우저 히스토리에 남지 않게 한다.
+    const registerUrl = new URL("/auth/webauthn/register", this.getServerUrl());
+    registerUrl.hash = "ticket=" + encodeURIComponent(ticket);
+    if (registerUrl.protocol !== "https:" && registerUrl.protocol !== "http:") {
+      throw new Error("등록 링크가 올바르지 않습니다.");
+    }
+    await shell.openExternal(registerUrl.toString());
+  }
+
+  async listPasskeys(): Promise<PasskeyCredential[]> {
+    const result = (await this.requestWebauthnApi(
+      "GET",
+      "/api/webauthn/credentials",
+    )) as { credentials?: unknown } | null;
+    return Array.isArray(result?.credentials)
+      ? (result.credentials as PasskeyCredential[])
+      : [];
+  }
+
+  async deletePasskey(credentialId: string): Promise<void> {
+    await this.requestWebauthnApi(
+      "DELETE",
+      `/api/webauthn/credentials/${encodeURIComponent(credentialId)}`,
+    );
+  }
+
   private patchState(patch: Partial<AuthState>): void {
+    // 패치 적용 후의 status 를 미리 계산한다(capabilities 게이트가 최신 status 를 봐야 하므로).
+    const nextStatus = patch.status ?? this.state.status;
     this.state = {
       ...this.state,
       ...patch,
@@ -2457,6 +2572,16 @@ export class AuthService {
                 this.vaultState.status === "legacy" &&
                 this.vaultState.migrationRequired,
             },
+      // 온라인 인증 상태 + 현재 서버 URL 일치일 때만 지원으로 노출한다 — 서버가 바뀌면 재조회
+      // 전까지 false, 오프라인이면 등록/조회 자체가 불가하므로 숨긴다(섹션이 떠서 버튼마다
+      // 오프라인 에러가 나는 것을 막는다).
+      capabilities: {
+        webauthn:
+          nextStatus === "authenticated" &&
+          this.serverWebauthnSupported === true &&
+          this.serverWebauthnSupportServerUrl ===
+            normalizeServerUrl(this.getServerUrl()),
+      },
     };
     this.broadcast(this.state);
   }

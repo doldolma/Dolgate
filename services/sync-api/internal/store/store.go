@@ -112,6 +112,29 @@ type VaultPushFence struct {
 	Version int
 }
 
+// WebAuthnCredential 은 사용자가 등록한 패스키 하나다. Data 는 인증(auth) 계층이 소유하는
+// 불투명한 직렬화 바이트(마샬링된 자격증명)로, 스토어는 WebAuthn 라이브러리에 의존하지 않고
+// 그대로 보관·반환만 한다. CredentialID 는 base64url 로 인코딩된 원본 credential id 다.
+type WebAuthnCredential struct {
+	CredentialID string
+	UserID       string
+	Name         string
+	Data         []byte
+	CreatedAt    time.Time
+	LastUsedAt   time.Time
+}
+
+// WebAuthnCeremony 는 begin/finish 사이에 보존해야 하는 일회성 챌린지 상태다. SessionData 는
+// auth 계층이 마샬링한 불투명 바이트다. exchange code 와 동일하게 소비 시 삭제한다.
+// UserID 는 등록 ceremony 에서만 채워지고, discoverable 로그인 ceremony 에서는 비어 있다.
+type WebAuthnCeremony struct {
+	ID          string
+	UserID      string
+	Purpose     string
+	SessionData []byte
+	ExpiresAt   time.Time
+}
+
 type UserClientObservation struct {
 	UserID               string
 	ClientName           string
@@ -133,6 +156,19 @@ type Store interface {
 
 	GetAuthIdentity(ctx context.Context, provider string, subject string) (AuthIdentity, error)
 	SaveAuthIdentity(ctx context.Context, identity AuthIdentity) error
+
+	// WebAuthn 패스키 자격증명. Save 는 credential id 기준 upsert 다.
+	SaveWebAuthnCredential(ctx context.Context, credential WebAuthnCredential) error
+	ListWebAuthnCredentialsByUser(ctx context.Context, userID string) ([]WebAuthnCredential, error)
+	// UpdateWebAuthnCredentialData 는 로그인 성공 후 sign count 등 갱신된 자격증명 바이트와
+	// 마지막 사용 시각을 저장한다. 대상 행이 없으면 gorm.ErrRecordNotFound.
+	UpdateWebAuthnCredentialData(ctx context.Context, credentialID string, data []byte, lastUsedAt time.Time) error
+	DeleteWebAuthnCredential(ctx context.Context, userID string, credentialID string) error
+	CountWebAuthnCredentialsByUser(ctx context.Context, userID string) (int64, error)
+
+	// WebAuthn ceremony(챌린지) 일회성 저장/소비. Consume 는 트랜잭션 내 조회 후 삭제한다.
+	SaveWebAuthnCeremony(ctx context.Context, ceremony WebAuthnCeremony) error
+	ConsumeWebAuthnCeremony(ctx context.Context, id string) (WebAuthnCeremony, error)
 
 	SaveRefreshToken(ctx context.Context, token RefreshToken) error
 	GetRefreshToken(ctx context.Context, tokenHash string) (RefreshToken, error)

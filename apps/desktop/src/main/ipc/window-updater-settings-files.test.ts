@@ -53,6 +53,7 @@ function createContext() {
     },
     authService: {
       resetServerVaultSupport: vi.fn(),
+      resetServerWebauthnSupport: vi.fn(),
     },
     sessionReplayService: {
       prune: vi.fn(),

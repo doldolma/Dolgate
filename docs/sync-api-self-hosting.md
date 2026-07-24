@@ -193,6 +193,14 @@ OIDC 입력값
 
 `OIDC_REDIRECT_URL`은 실제 외부에서 접근하는 주소와 정확히 일치해야 합니다.
 
+## 패스키(WebAuthn) 로그인
+
+브라우저 로그인에 패스키를 추가로 켤 수 있습니다(비밀번호·OIDC와 공존).
+
+- `WEBAUTHN_ENABLED: "true"`로 켭니다. 단 `PUBLIC_BASE_URL`이 **HTTPS 도메인**이어야 합니다(IP·평문 HTTP 불가, `localhost`만 개발용 예외). 조건이 안 맞으면 부팅 시 자동 비활성화됩니다.
+- RP 값은 `PUBLIC_BASE_URL`에서 자동 유도되며, 필요하면 `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_DISPLAY_NAME` / `WEBAUTHN_ORIGINS`로 직접 지정합니다.
+- 패스키는 등록한 도메인에 묶이므로 도메인이 바뀌면 재등록이 필요합니다.
+
 ## 자주 쓰는 환경 변수
 
 `sync-api`는 config file 없이 env-only로 운영할 수 있습니다.
@@ -204,6 +212,7 @@ PORT
 DB_DRIVER
 DATABASE_URL
 TRUSTED_PROXIES
+PUBLIC_BASE_URL
 AUTH_SIGNING_PRIVATE_KEY_PEM
 AUTH_SIGNING_PRIVATE_KEY_PATH
 ACCESS_TOKEN_TTL_MINUTES
@@ -219,6 +228,10 @@ OIDC_CLIENT_ID
 OIDC_CLIENT_SECRET
 OIDC_REDIRECT_URL
 OIDC_SCOPES
+WEBAUTHN_ENABLED
+WEBAUTHN_RP_ID
+WEBAUTHN_RP_DISPLAY_NAME
+WEBAUTHN_ORIGINS
 ```
 
 기본값 메모:
@@ -230,6 +243,7 @@ OIDC_SCOPES
 - `LOCAL_AUTH_ENABLED`: `true`
 - `LOCAL_SIGNUP_ENABLED`: `true`
 - `OIDC_ENABLED`: `false`
+- `WEBAUTHN_ENABLED`: `false` (활성화하려면 `PUBLIC_BASE_URL`이 HTTPS 도메인이어야 함 — 위 패스키 섹션 참고)
 
 PostgreSQL을 사용할 때는 `DB_DRIVER=postgres`와 PostgreSQL DSN을 지정합니다.
 

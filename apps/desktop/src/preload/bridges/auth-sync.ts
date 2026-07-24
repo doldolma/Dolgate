@@ -24,6 +24,10 @@ export function buildAuthBridge(
         currentPassword,
         newPassword,
       ),
+    addPasskey: () => ipcRenderer.invoke(ipcChannels.auth.addPasskey),
+    listPasskeys: () => ipcRenderer.invoke(ipcChannels.auth.listPasskeys),
+    deletePasskey: (credentialId) =>
+      ipcRenderer.invoke(ipcChannels.auth.deletePasskey, credentialId),
     setupVault: (passphrase) =>
       ipcRenderer.invoke(ipcChannels.auth.setupVault, passphrase),
     unlockVault: (passphrase) =>

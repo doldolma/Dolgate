@@ -115,6 +115,12 @@ func main() {
 			Scopes:       cfg.Auth.OIDC.Scopes,
 			HideOnIOS:    cfg.Auth.OIDC.HideOnIOS,
 		},
+		WebAuthn: httpserver.WebAuthnRouterConfig{
+			Enabled:       cfg.Auth.WebAuthn.Enabled,
+			RPID:          cfg.Auth.WebAuthn.RPID,
+			RPDisplayName: cfg.Auth.WebAuthn.RPDisplayName,
+			Origins:       cfg.Auth.WebAuthn.Origins,
+		},
 		AwsSsoMobile:      awsSsoMobileManager,
 		AwsSessionBridge:  awsSessionBridge,
 		AwsSftpBridge:     awsSftpBridge,

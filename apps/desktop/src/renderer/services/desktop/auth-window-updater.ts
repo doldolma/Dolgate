@@ -49,6 +49,19 @@ export function changeAccountPassword(
   return desktopApi.auth.changeAccountPassword(currentPassword, newPassword);
 }
 
+// 패스키(WebAuthn) — 설정에서 추가(시스템 브라우저로 등록 페이지 오픈)/목록/삭제.
+export function addPasskey() {
+  return desktopApi.auth.addPasskey();
+}
+
+export function listPasskeys() {
+  return desktopApi.auth.listPasskeys();
+}
+
+export function deletePasskey(credentialId: string) {
+  return desktopApi.auth.deletePasskey(credentialId);
+}
+
 // E2EE 볼트 — 동기화 암호 설정/잠금해제/초기화/변경.
 export function setupVault(passphrase: string) {
   return desktopApi.auth.setupVault(passphrase);

@@ -1,15 +1,18 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import type { AuthState, UpdateState } from '@shared';
 import {
+  addPasskey,
   beginBrowserLogin,
   cancelBrowserLogin,
   changeAccountPassword,
   checkForUpdates,
   closeWindow,
   deleteAccount,
+  deletePasskey,
   dismissAvailableUpdate,
   downloadUpdate,
   installUpdateAndRestart,
+  listPasskeys,
   logout,
   maximizeWindow,
   minimizeWindow,
@@ -76,6 +79,9 @@ export function useLoginController({
     logout,
     deleteAccount,
     changeAccountPassword,
+    addPasskey,
+    listPasskeys,
+    deletePasskey,
     minimizeWindow,
     maximizeWindow,
     restoreWindow,

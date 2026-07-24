@@ -38,6 +38,7 @@ import type {
   ManagedSecretPayload,
   OpenSshSnapshotFileInput,
   OpenSshImportResult,
+  PasskeyCredential,
   OpenSshImportSelectionInput,
   OpenSshProbeResult,
   XshellSnapshotFolderInput,
@@ -954,6 +955,10 @@ export interface DesktopApi {
       currentPassword: string,
       newPassword: string,
     ) => Promise<void>;
+    // 패스키(WebAuthn) — 설정에서 추가(시스템 브라우저로 등록 페이지 오픈)/목록/삭제.
+    addPasskey: () => Promise<void>;
+    listPasskeys: () => Promise<PasskeyCredential[]>;
+    deletePasskey: (credentialId: string) => Promise<void>;
     // E2EE 볼트 — 동기화 암호 설정/잠금해제/초기화/변경.
     setupVault: (passphrase: string) => Promise<void>;
     unlockVault: (passphrase: string) => Promise<void>;
