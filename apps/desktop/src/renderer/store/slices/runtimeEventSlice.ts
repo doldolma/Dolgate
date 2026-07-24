@@ -157,6 +157,11 @@ import {
   scheduleReconnect,
 } from "../services/reconnect-orchestrator";
 import { classifyReconnect } from "../utils/reconnect-classify";
+import {
+  isAutoRecoveredTransferJob,
+  isTerminalUploadJob,
+  markAutoRecoveredTransferJob,
+} from "../../lib/terminal-upload-registry";
 import { resolveHopHostNames } from "../../lib/connection-hops";
 import type { CoreEvent, HostRecord } from "@shared";
 
@@ -1816,9 +1821,25 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 transfers: upsertTransferJob(state.sftp.transfers, event.job),
               },
             }));
-    
+
             scheduleActivityLogsRefresh();
-    
+
+            // 전송이 connection_lost로 죽으면(SSM idle 타임아웃 등) 죽은 SFTP 엔드포인트를
+            // 자동 재수립하고 실패 항목을 재업로드한다. 터미널 업로드 잡만, 자동 재시도로
+            // 만든 잡은 제외(한 번만), autoReconnect 켜졌을 때만.
+            if (
+              event.job.status === "failed" &&
+              event.job.errorCode === "connection_lost" &&
+              get().settings.autoReconnectEnabled &&
+              isTerminalUploadJob(event.job.id) &&
+              !isAutoRecoveredTransferJob(event.job.id)
+            ) {
+              // 이 실패 잡을 표식해 같은 잡의 중복 이벤트로 복구가 두 번 트리거되지 않게 한다.
+              // recover 쪽은 재수립된 새 잡을 표식해, 그 재시도가 또 죽어도 재복구 안 하게 한다.
+              markAutoRecoveredTransferJob(event.job.id);
+              void get().recoverTransferConnectionLoss(event.job);
+            }
+
             if (event.job.status === "completed" && event.job.request) {
               const request = event.job.request;
               const state = get();

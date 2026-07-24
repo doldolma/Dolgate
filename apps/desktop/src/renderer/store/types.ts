@@ -1044,6 +1044,8 @@ interface AppStateParts {
     },
     onProgress?: (message: string) => void,
   ) => Promise<TerminalUploadResult>;
+  // connection_lost로 죽은 터미널 업로드 전송을 자동 복구한다(엔드포인트 재수립 + 실패 항목 재업로드).
+  recoverTransferConnectionLoss: (job: TransferJob) => Promise<void>;
   transferSftpSelectionToPane: (
     sourcePaneId: SftpPaneId,
     targetPaneId: SftpPaneId,
@@ -1230,6 +1232,7 @@ export type SftpSlice = Pick<
   | "prepareSftpTransfer"
   | "prepareSftpExternalTransfer"
   | "uploadLocalFilesToHost"
+  | "recoverTransferConnectionLoss"
   | "transferSftpSelectionToPane"
   | "resolveSftpConflict"
   | "dismissSftpConflict"
