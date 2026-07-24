@@ -85,7 +85,10 @@ import {
   SESSION_SHARE_CHAT_HISTORY_LIMIT,
   type SessionShareChatMessage,
 } from "@shared";
-import { SessionShareService } from "./session-share-service";
+import {
+  SessionShareService,
+  toApiErrorMessage,
+} from "./session-share-service";
 
 const terminalAppearance = {
   fontFamily: "sf-mono",
@@ -616,5 +619,42 @@ describe("SessionShareService start transport resolution", () => {
     await service.start(buildStartInput());
 
     expect((service as any).shares.get("session-start-1").transport).toBe("ssh");
+  });
+});
+
+describe("toApiErrorMessage", () => {
+  it("returns a friendly message for an HTML error body instead of dumping raw HTML", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const html =
+      "<!DOCTYPE html><html><head><title>404</title></head><body>not found</body></html>";
+    const response = new Response(html, {
+      status: 404,
+      headers: { "content-type": "text/html" },
+    });
+
+    const message = await toApiErrorMessage(
+      response,
+      "세션 공유 링크를 만들지 못했습니다.",
+    );
+
+    expect(message).not.toContain("<"); // 원시 HTML을 UI로 흘리지 않는다
+    expect(message).toContain("404"); // 상태 코드로 진단 가능
+    errorSpy.mockRestore();
+  });
+
+  it("passes through a JSON error field", async () => {
+    const response = new Response(JSON.stringify({ error: "권한이 없습니다." }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+
+    const message = await toApiErrorMessage(response, "실패");
+    expect(message).toBe("권한이 없습니다.");
+  });
+
+  it("keeps a short plain-text error as-is", async () => {
+    const response = new Response("rate limited", { status: 429 });
+    const message = await toApiErrorMessage(response, "실패");
+    expect(message).toBe("rate limited");
   });
 });

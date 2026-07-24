@@ -68,6 +68,43 @@ describe('TerminalSharePopover', () => {
     expect(onStopShare).toHaveBeenCalledTimes(1);
   });
 
+  it('renders the error state without a false "ready" header or "generating" note', () => {
+    render(
+      <TerminalSharePopover
+        anchorRef={{ current: null }}
+        showHeader
+        open
+        canStartShare
+        shareCopyStatus={null}
+        shareState={{
+          status: 'error',
+          shareUrl: null,
+          viewerCount: 0,
+          inputEnabled: false,
+          errorMessage:
+            '세션 공유 링크를 만들지 못했습니다. (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 404)',
+        }}
+        onToggle={vi.fn()}
+        onStartShare={vi.fn()}
+        onCopyShareUrl={vi.fn()}
+        onSetInputEnabled={vi.fn()}
+        onOpenChatWindow={vi.fn()}
+        onStopShare={vi.fn()}
+        canOpenChatWindow={false}
+      />,
+    );
+
+    // 에러 상태에서 "준비됐다"/"생성 중" 오표시가 없어야 하고, 에러 메시지가 보여야 한다.
+    expect(screen.getByText('세션 공유에 실패했습니다.')).toBeInTheDocument();
+    expect(screen.getByText(/상태 코드 404/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('공유 링크가 준비되었습니다.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('공유 링크를 생성하는 중입니다.'),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders extra session actions next to the share control', () => {
     render(
       <TerminalSharePopover

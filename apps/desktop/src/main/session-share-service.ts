@@ -100,7 +100,13 @@ function isE2EFakeSessionShareEnabled(): boolean {
   return process.env.DOLSSH_E2E_FAKE_SESSION_SHARE === "1";
 }
 
-function toApiErrorMessage(response: Response, fallback: string): Promise<string> {
+// 세션 공유 REST 요청 타임아웃 — 서버 다운/역방향 프록시 지연 시 무한 대기하지 않도록.
+const SESSION_SHARE_REQUEST_TIMEOUT_MS = 15_000;
+
+export function toApiErrorMessage(
+  response: Response,
+  fallback: string,
+): Promise<string> {
   return response
     .text()
     .then((text) => {
@@ -118,9 +124,19 @@ function toApiErrorMessage(response: Response, fallback: string): Promise<string
           return parsed.message;
         }
       } catch {
-        // ignore JSON parse failure
+        // JSON이 아님 — 아래에서 원문 대신 안내로 대체한다.
       }
 
+      // 비-JSON 응답(리버스 프록시/서버의 HTML 에러 페이지 등)은 원문(HTML)을 UI에 그대로
+      // 노출하지 않는다 — 패널에 원시 HTML이 덤프되던 문제. 단 디버깅을 위해 원문은 잘라서
+      // 로그에 남기고, UI에는 상태 코드만 담은 안내를 준다(정상 시엔 뜨지 않음).
+      if (trimmed.startsWith("<") || trimmed.length > 200) {
+        console.error(
+          `[session-share] non-JSON error response (status ${response.status}):`,
+          trimmed.slice(0, 1000),
+        );
+        return `${fallback} (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 ${response.status})`;
+      }
       return trimmed;
     })
     .catch(() => `${fallback} (${response.status})`);
@@ -603,6 +619,19 @@ export class SessionShareService {
       "세션 공유 링크를 만들지 못했습니다.",
     );
 
+    // 2xx 라도 JSON이 아니면(프록시가 200 + HTML 에러 페이지를 주는 경우 등) 실패로 처리한다.
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.includes("application/json")) {
+      const body = await response.text().catch(() => "");
+      console.error(
+        `[session-share] createShare non-JSON 2xx response (status ${response.status}):`,
+        body.slice(0, 1000),
+      );
+      throw new Error(
+        `세션 공유 링크를 만들지 못했습니다. (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 ${response.status})`,
+      );
+    }
+
     return (await response.json()) as CreateShareResponse;
   }
 
@@ -611,7 +640,7 @@ export class SessionShareService {
     init: RequestInit,
     fallback: string,
   ): Promise<Response> {
-    let response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+    let response = await this.fetchWithTimeout(url, this.withAccessToken(init, this.authService.getAccessToken()));
     if (response.ok) {
       return response;
     }
@@ -626,11 +655,32 @@ export class SessionShareService {
       throw new Error(firstFailureMessage || "로그인이 필요합니다.");
     }
 
-    response = await fetch(url, this.withAccessToken(init, this.authService.getAccessToken()));
+    response = await this.fetchWithTimeout(url, this.withAccessToken(init, this.authService.getAccessToken()));
     if (!response.ok) {
       throw new Error(await toApiErrorMessage(response, fallback));
     }
     return response;
+  }
+
+  // 타임아웃 있는 fetch — 서버 다운/프록시 지연에도 무한 대기하지 않게 AbortController로 끊는다.
+  private async fetchWithTimeout(url: URL, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      SESSION_SHARE_REQUEST_TIMEOUT_MS,
+    );
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(
+          "세션 공유 서버 응답이 지연되어 요청을 취소했습니다. 잠시 후 다시 시도해 주세요.",
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private withAccessToken(init: RequestInit | undefined, accessToken: string): RequestInit {
