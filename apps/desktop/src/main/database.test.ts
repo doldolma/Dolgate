@@ -930,11 +930,18 @@ describe('SettingsRepository', () => {
     expect(reset.terminalAltIsMeta).toBe(false);
     expect(reset.terminalWebglEnabled).toBe(true);
 
-    const clampedLow = settings.update({
+    // 인위적 하한을 없앴으므로 작은 값도 그대로 저장된다(0/음수만 자연 하한 1로).
+    const smallValue = settings.update({
       sessionReplayRetentionCount: 2,
     });
-    expect(clampedLow.sessionReplayRetentionCount).toBe(10);
+    expect(smallValue.sessionReplayRetentionCount).toBe(2);
 
+    const clampedFloor = settings.update({
+      sessionReplayRetentionCount: 0,
+    });
+    expect(clampedFloor.sessionReplayRetentionCount).toBe(1);
+
+    // 상한은 안전상 유지된다.
     const clampedHigh = settings.update({
       sessionReplayRetentionCount: 50000,
     });

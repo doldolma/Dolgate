@@ -123,8 +123,9 @@ export type ConnectionProgressStage =
   | 'loading-ecs-metrics';
 
 export const AWS_SFTP_DEFAULT_PORT = 22;
-export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 100;
-export const MIN_SESSION_REPLAY_RETENTION_COUNT = 10;
+export const DEFAULT_SESSION_REPLAY_RETENTION_COUNT = 1000;
+// 사용자가 임의 개수를 지정할 수 있도록 인위적인 하한은 두지 않는다(0/음수만 막는 자연 하한 1).
+export const MIN_SESSION_REPLAY_RETENTION_COUNT = 1;
 export const MAX_SESSION_REPLAY_RETENTION_COUNT = 10000;
 export const MAX_HOST_STARTUP_COMMAND_LENGTH = 32 * 1024;
 

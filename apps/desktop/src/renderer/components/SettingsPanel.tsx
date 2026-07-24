@@ -17,8 +17,6 @@ import type {
   TerminalFontFamilyId,
 } from '@shared';
 import {
-  MAX_SESSION_REPLAY_RETENTION_COUNT,
-  MIN_SESSION_REPLAY_RETENTION_COUNT,
   validateAccountPassword,
   validateNewVaultPassphrase,
 } from '@shared';
@@ -141,7 +139,8 @@ const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'security', title: 'Security' },
   { id: 'secrets', title: 'Saved Credentials' },
   { id: 'aws-profiles', title: 'AWS Profiles' },
-  { id: 'ai', title: 'AI' }
+  { id: 'ai', title: 'AI' },
+  { id: 'account', title: 'Account' }
 ];
 
 function renderTerminalThemePreview(
@@ -459,6 +458,29 @@ export function SettingsPanel({
     await onUpdateSettings({ tmuxPrefixKey });
   }
 
+  // 세션 replay 보관 개수 입력은 로컬 상태로 타이핑을 받고, blur(포커스 아웃) 때에만 저장한다.
+  // 매 키 입력마다 저장하면 "5000"을 치는 중 "5"가 곧바로 저장되고, 그 순간 replay가 그
+  // 작은 개수까지 prune(삭제)되어 데이터가 날아가던 버그를 막는다. clamp는 하지 않고 입력한
+  // 값을 그대로 저장한다(빈 값/이상치만 이전 값으로 되돌림).
+  const [replayRetentionInput, setReplayRetentionInput] = useState(
+    String(settings.sessionReplayRetentionCount),
+  );
+  useEffect(() => {
+    setReplayRetentionInput(String(settings.sessionReplayRetentionCount));
+  }, [settings.sessionReplayRetentionCount]);
+
+  function commitSessionReplayRetentionCount() {
+    const parsed = Math.round(Number(replayRetentionInput));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setReplayRetentionInput(String(settings.sessionReplayRetentionCount));
+      return;
+    }
+    setReplayRetentionInput(String(parsed));
+    if (parsed !== settings.sessionReplayRetentionCount) {
+      void handleChangeSessionReplayRetentionCount(parsed);
+    }
+  }
+
   async function handleChangeSessionReplayRetentionCount(
     sessionReplayRetentionCount: number,
   ) {
@@ -714,13 +736,15 @@ export function SettingsPanel({
                 <Input
                   aria-label="Session Replay Retention"
                   type="number"
-                  min={MIN_SESSION_REPLAY_RETENTION_COUNT}
-                  max={MAX_SESSION_REPLAY_RETENTION_COUNT}
-                  step={10}
-                  value={settings.sessionReplayRetentionCount}
-                  onChange={async (event) =>
-                    handleChangeSessionReplayRetentionCount(Number(event.target.value))
-                  }
+                  inputMode="numeric"
+                  value={replayRetentionInput}
+                  onChange={(event) => setReplayRetentionInput(event.target.value)}
+                  onBlur={commitSessionReplayRetentionCount}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
                   로컬에 보관할 종료된 세션 replay 개수입니다.
@@ -992,11 +1016,14 @@ export function SettingsPanel({
               ))}
             </div>
           </section>
+        </>
+      ) : null}
 
+      {activeSection === 'account' ? (
+        <>
           <section className="rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
             <div className="mb-4">
               <div>
-                <SectionLabel>Session</SectionLabel>
                 <h3>Account</h3>
               </div>
             </div>
@@ -1042,7 +1069,6 @@ export function SettingsPanel({
           {webauthnSupported && onAddPasskey ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
               <div className="mb-4">
-                <SectionLabel>Session</SectionLabel>
                 <h3>패스키</h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
@@ -1102,7 +1128,6 @@ export function SettingsPanel({
           {vaultStatus === 'unlocked' && onChangeVaultPassphrase ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
               <div className="mb-4">
-                <SectionLabel>Session</SectionLabel>
                 <h3>동기화 암호</h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">

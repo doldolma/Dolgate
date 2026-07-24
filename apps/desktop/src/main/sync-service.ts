@@ -1131,7 +1131,7 @@ export class SyncService {
         }));
       }
       state.terminal.globalThemeId =
-        preferences[0]?.globalTerminalThemeId ?? 'dolssh-dark';
+        preferences[0]?.globalTerminalThemeId ?? 'system';
       state.terminal.globalThemeUpdatedAt =
         preferences[0]?.updatedAt ?? nowIso();
       state.data.secretMetadata = nextSecretMetadata;
