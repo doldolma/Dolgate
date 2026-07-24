@@ -77,9 +77,11 @@ export function TerminalSharePopover({
             <>
               <SectionLabel className="mb-2">Session Share</SectionLabel>
               <strong>
-                {shareState.status === 'starting'
-                  ? '공유를 준비하는 중입니다.'
-                  : '공유 링크가 준비되었습니다.'}
+                {shareState.status === 'error'
+                  ? '세션 공유에 실패했습니다.'
+                  : shareState.status === 'starting'
+                    ? '공유를 준비하는 중입니다.'
+                    : '공유 링크가 준비되었습니다.'}
               </strong>
               {shareState.errorMessage ? (
                 <p className="mt-2 text-sm text-[var(--danger-text)]">
@@ -109,9 +111,9 @@ export function TerminalSharePopover({
                     </svg>
                   </span>
                 </button>
-              ) : (
+              ) : shareState.status !== 'error' ? (
                 <p className="mt-3 text-sm text-[var(--text-soft)]">공유 링크를 생성하는 중입니다.</p>
-              )}
+              ) : null}
               <div className="mt-3 space-y-3">
                 <span className="block text-sm text-[var(--text-soft)]">시청자 {shareState.viewerCount}명</span>
                 <div
