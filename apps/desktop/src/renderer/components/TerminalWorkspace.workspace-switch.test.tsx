@@ -26,7 +26,15 @@ vi.mock('../lib/terminal-runtime', () => ({
       rows: 24,
       cols: 80,
       refresh: vi.fn(),
-      focus: vi.fn()
+      focus: vi.fn(),
+      // 명령 블록 점프(Cmd/Ctrl+↑↓)용 키 핸들러를 컨트롤러가 등록한다.
+      attachCustomKeyEventHandler: vi.fn(),
+      // 블록 오버레이가 스크롤/렌더에 맞춰 위치를 다시 계산하려고 구독한다.
+      onRender: vi.fn(() => ({ dispose: vi.fn() })),
+      onScroll: vi.fn(() => ({ dispose: vi.fn() })),
+      buffer: {
+        active: { type: 'normal', viewportY: 0, baseY: 0, cursorX: 0, cursorY: 0 }
+      }
     };
     const runtime = {
       terminal,

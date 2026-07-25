@@ -23,10 +23,21 @@ import {
 } from '../lib/terminal-write-registry';
 import {
   clearSessionCwd,
+  getSessionCwd,
   markSessionConnected,
   setSessionCwd,
   setSessionLastCommandAt,
 } from '../lib/terminal-cwd-registry';
+import {
+  beginCommandBlock,
+  clearCommandBlocks,
+  finishCommandBlock,
+  getCommandBlocks,
+  jumpToAdjacentCommandBlock,
+  notePromptCommandStart,
+  readBlockOutput,
+} from '../lib/terminal-command-blocks';
+import { useTerminalBlockOverlay } from './useTerminalBlockOverlay';
 import {
   registerTerminalFocus,
   unregisterTerminalFocus,
@@ -897,20 +908,42 @@ export function useTerminalSessionViewController({
         },
         onShellIntegration: (marker) => {
           liveAutocompleteShellMarkerRef.current(marker);
+          // 명령 블록 오버레이용 마커 기록. 터미널 인스턴스는 런타임 생성 직후 채워지고
+          // OSC 는 그 이후에 도착하므로 여기서는 항상 준비돼 있다(안전하게 null 가드).
+          const blockTerminal = terminalRef.current;
           // 탭 상태 점(하이브리드)용 명령 상태: C=명령 실행 시작, D;<exit>=완료(성공/실패).
           // A/B(프롬프트/입력)는 직전 결과를 유지한다.
-          if (marker === 'C') {
+          if (marker === 'B') {
+            if (blockTerminal) {
+              notePromptCommandStart(liveSessionIdRef.current, blockTerminal);
+            }
+          } else if (marker === 'C') {
+            if (blockTerminal) {
+              beginCommandBlock(
+                liveSessionIdRef.current,
+                blockTerminal,
+                getSessionCwd(liveSessionIdRef.current),
+              );
+            }
             appStore
               .getState()
               .applyTabCommandState(liveSessionIdRef.current, 'running');
           } else if (marker === 'D' || marker.startsWith('D;')) {
             const code =
               marker === 'D' ? 0 : Number(marker.slice(2).split(';')[0]);
+            const exitCode = Number.isFinite(code) ? code : null;
+            if (blockTerminal) {
+              finishCommandBlock(
+                liveSessionIdRef.current,
+                blockTerminal,
+                exitCode,
+              );
+            }
             appStore
               .getState()
               .applyTabCommandState(
                 liveSessionIdRef.current,
-                Number.isFinite(code) && code === 0 ? 'ok' : 'failed',
+                exitCode === 0 ? 'ok' : 'failed',
               );
             setSessionLastCommandAt(liveSessionIdRef.current);
           }
@@ -932,6 +965,27 @@ export function useTerminalSessionViewController({
     }
 
     terminalRef.current = runtime.terminal;
+    // Cmd/Ctrl + ↑/↓ = 이전/다음 명령, Shift 를 더하면 실패한 명령만 건너뛴다.
+    // 점프할 대상이 없거나 대체화면(vim 등)이면 true 를 돌려 키를 그대로 셸로 흘려보낸다
+    // — TUI 에서 방향키가 죽지 않도록 하기 위함이다.
+    runtime.terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown') {
+        return true;
+      }
+      if (event.altKey || !(event.metaKey || event.ctrlKey)) {
+        return true;
+      }
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+        return true;
+      }
+      const jumped = jumpToAdjacentCommandBlock(
+        liveSessionIdRef.current,
+        runtime.terminal,
+        event.key === 'ArrowUp' ? 'previous' : 'next',
+        { failedOnly: event.shiftKey },
+      );
+      return !jumped;
+    });
     runtimeRef.current = runtime;
     // 자동 재연결 안내선 출력(write) + 절전 복귀 시 강제 재렌더(refresh)를 위해
     // stableId 기준으로 훅을 등록한다.
@@ -1038,6 +1092,7 @@ export function useTerminalSessionViewController({
       resizeSchedulerRef.current = null;
       unregisterTerminalHooks(stableId, terminalHooks);
       clearSessionCwd(liveSessionIdRef.current);
+      clearCommandBlocks(liveSessionIdRef.current);
       // 안전망: 파괴 직전 스크롤백을 저장해, 같은 stableId로 재생성되면 복원한다.
       // 단 tmux pane 은 제외한다 — 내용이 서버(tmux) 권위라 재attach 시 %output 으로
       // 전체 화면을 다시 replay 한다. 스냅샷까지 복원하면 그 위에 replay 가 덧그려져
@@ -1108,6 +1163,89 @@ export function useTerminalSessionViewController({
     autocomplete.suggestions.length,
     refreshAutocompleteAnchor,
   ]);
+
+  // 명령 블록 오버레이(hover 하이라이트 + 액션 툴바). 대체화면에서는 블록 개념이 없어 끈다.
+  const {
+    overlay: blockOverlay,
+    sticky: blockSticky,
+    handlePointerMove: handleBlockPointerMove,
+    clearHover: clearBlockHover,
+    scrollToStickyBlock,
+  } = useTerminalBlockOverlay({
+    terminalRef,
+    containerRef,
+    sessionIdRef: liveSessionIdRef,
+    enabled: !terminalAlternateScreen,
+  });
+
+  const findHoveredBlock = useCallback(() => {
+    if (!blockOverlay) {
+      return null;
+    }
+    return (
+      getCommandBlocks(liveSessionIdRef.current).find(
+        (candidate) => candidate.id === blockOverlay.blockId,
+      ) ?? null
+    );
+  }, [blockOverlay]);
+
+  const handleBlockCopyOutput = useCallback(() => {
+    const terminal = terminalRef.current;
+    const block = findHoveredBlock();
+    if (!terminal || !block) {
+      return;
+    }
+    void navigator.clipboard.writeText(readBlockOutput(terminal, block));
+  }, [findHoveredBlock]);
+
+  const handleBlockCopyCommand = useCallback(() => {
+    const command = findHoveredBlock()?.command;
+    if (command) {
+      void navigator.clipboard.writeText(command);
+    }
+  }, [findHoveredBlock]);
+
+  const handleBlockRerun = useCallback(() => {
+    const block = findHoveredBlock();
+    // 실행 중이면 보내지 않는다 — 실행 중인 프로그램의 stdin 으로 들어가 버린다.
+    if (!block || block.state === 'running' || !block.command) {
+      return;
+    }
+    liveOnSendInputRef.current?.(liveSessionIdRef.current, `${block.command}\r`);
+  }, [findHoveredBlock]);
+
+  const handleBlockAskAi = useCallback(() => {
+    const terminal = terminalRef.current;
+    const block = findHoveredBlock();
+    if (!terminal || !block) {
+      return;
+    }
+    const output = readBlockOutput(terminal, block);
+    // 요청이 비대해지지 않도록 출력은 뒤쪽만 싣는다(에러는 대개 끝에 나온다).
+    const trimmedOutput =
+      output.length > 4000 ? `…(생략)\n${output.slice(-4000)}` : output;
+    const contextLines = [
+      `명령: ${block.command ?? '(알 수 없음)'}`,
+      block.cwd ? `작업 디렉터리: ${block.cwd}` : null,
+      block.exitCode !== null ? `종료 코드: ${block.exitCode}` : null,
+      '',
+      '출력:',
+      trimmedOutput,
+    ].filter((line) => line !== null);
+    const question =
+      block.state === 'failed'
+        ? '이 명령이 왜 실패했는지 설명하고 해결 방법을 알려줘.'
+        : '이 명령의 출력을 설명해줘.';
+    const store = appStore.getState();
+    if (!store.aiConversations?.[liveSessionIdRef.current]?.open) {
+      store.toggleAiPanel(liveSessionIdRef.current);
+    }
+    void store.sendAiMessage(
+      liveSessionIdRef.current,
+      question,
+      contextLines.join('\n'),
+    );
+  }, [findHoveredBlock]);
 
   useEffect(() => {
     const nextWebglEnabled = resolveTerminalRuntimeWebglEnabled({
@@ -1200,6 +1338,7 @@ export function useTerminalSessionViewController({
       unsubscribe();
       zmodem.dispose();
       clearSessionCwd(sessionId);
+      clearCommandBlocks(sessionId);
     };
   }, [
     host?.kind,
@@ -1479,6 +1618,15 @@ export function useTerminalSessionViewController({
     autocompleteCommand: autocomplete.command.value,
     autocompleteSelectedIndex: autocomplete.selectedIndex,
     autocompleteAnchor,
+    blockOverlay,
+    blockSticky,
+    scrollToStickyBlock,
+    handleBlockPointerMove,
+    clearBlockHover,
+    handleBlockCopyOutput,
+    handleBlockCopyCommand,
+    handleBlockRerun,
+    handleBlockAskAi,
     acceptAutocompleteSuggestion: autocomplete.acceptSuggestion,
     autocompletePendingSnippet: autocomplete.pendingSnippet,
     confirmAutocompleteSnippet: autocomplete.confirmSnippet,

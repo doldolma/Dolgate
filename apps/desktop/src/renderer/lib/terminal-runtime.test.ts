@@ -115,6 +115,9 @@ describe('terminal-runtime', () => {
     });
 
     expect(createTerminal).toHaveBeenCalledWith({
+      // 명령 블록 오버레이의 marker/decoration 은 proposed API 라 이 옵션이 꺼지면
+      // registerDecoration 이 OSC 핸들러 안에서 던져 터미널이 멈춘다.
+      allowProposedApi: true,
       cursorBlink: true,
       fontFamily: 'JetBrains Mono',
       fontSize: 14,

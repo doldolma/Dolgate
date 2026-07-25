@@ -138,6 +138,10 @@ function defaultOpenExternal(url: string): void | Promise<void> {
 
 function buildTerminalOptions(appearance: TerminalRuntimeAppearance): ITerminalOptions {
   return {
+    // 명령 블록 오버레이가 쓰는 marker/decoration 은 xterm 5.x 에서 proposed API 라
+    // 이 옵션이 없으면 registerDecoration 이 예외를 던진다(OSC 핸들러 안이라 파싱 루프가
+    // 끊겨 터미널이 그 자리에서 멈춘다). unicode11 addon 등록에도 필요하다.
+    allowProposedApi: true,
     cursorBlink: true,
     fontFamily: appearance.fontFamily,
     fontSize: appearance.fontSize,

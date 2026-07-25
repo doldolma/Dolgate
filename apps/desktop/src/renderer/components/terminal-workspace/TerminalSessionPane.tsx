@@ -28,6 +28,8 @@ import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
+import { TerminalBlockOverlay } from './TerminalBlockOverlay';
+import { TerminalBlockStickyHeader } from './TerminalBlockStickyHeader';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
 import { supportsTmuxControlMode } from '../../lib/tmux-version';
@@ -178,6 +180,22 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     (state) => state.aiConversations?.[sessionId]?.open ?? false,
   );
   const aiPanelWidth = useAppStore((state) => state.aiPanelWidth);
+  // 블록 툴바의 AI 버튼은 AI 기능이 켜져 있을 때만 노출한다.
+  const aiAssistantEnabled = useAppStore(
+    (state) => state.settings?.ai?.enabled ?? false,
+  );
+  // 스티키 헤더가 떠 있고 hover 한 블록이 그 아래로 파고들면(=블록 상단이 화면 위로 잘린
+  // 상태) 툴바가 헤더에 가린다. 그 겹치는 만큼만 툴바를 내린다.
+  const blockToolbarTopOffset = (() => {
+    const { blockOverlay, blockSticky } = controller;
+    if (!blockOverlay || !blockSticky) {
+      return 0;
+    }
+    const stickyBottom = blockSticky.top + blockSticky.height;
+    return blockOverlay.top < stickyBottom
+      ? stickyBottom - blockOverlay.top + 2
+      : 0;
+  })();
   const toggleAiPanel = useAppStore((state) => state.toggleAiPanel);
   // 선택/출력 캡처는 stableId 로 살아있는 런타임에서 읽는다(재연결로 sessionId가 바뀌어도 안정).
   const stableId = tab?.stableId ?? sessionId;
@@ -523,9 +541,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           <div
             ref={controller.containerRef}
             className={cn(
-              'relative m-[0.55rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
+              'relative m-[0.35rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
               showHeader &&
-                'mx-[0.55rem] mb-[0.55rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+                'mx-[0.35rem] mb-[0.35rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
+              // 명령 블록 점 마커가 들어갈 왼쪽 거터. 이 여백이 없으면 마커가 열 0 위에 그려져
+              // 글자와 겹친다(GUTTER_WIDTH_PX 와 맞춰야 함). FitAddon 은 부모의 content width 로
+              // cols 를 계산하므로 패딩만큼 자동 반영된다. tmux pane 은 컨테이너 px = tmux 셀
+              // 그리드라 제외한다.
+              !isTmuxPane && 'pl-[10px]',
               // tmux pane: 여백/라운드 제거 → 슬롯을 꽉 채워 컨테이너 px = tmux 셀 그리드.
               isTmuxPane && 'm-0 rounded-none border-0',
               // tmux control mode dead-zone 완화(최소·안전): 공유 크기 탓에 pane 렌더 영역보다
@@ -537,7 +560,26 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             )}
             data-terminal-canvas="true"
             data-tmux-pane={tab?.tmux ? 'true' : undefined}
+            onMouseMove={controller.handleBlockPointerMove}
+            onMouseLeave={controller.clearBlockHover}
           >
+            {controller.blockSticky ? (
+              <TerminalBlockStickyHeader
+                sticky={controller.blockSticky}
+                onJumpToCommand={controller.scrollToStickyBlock}
+              />
+            ) : null}
+            {controller.blockOverlay ? (
+              <TerminalBlockOverlay
+                overlay={controller.blockOverlay}
+                onCopyOutput={controller.handleBlockCopyOutput}
+                onCopyCommand={controller.handleBlockCopyCommand}
+                onRerun={controller.handleBlockRerun}
+                onAskAi={controller.handleBlockAskAi}
+                aiEnabled={aiAssistantEnabled}
+                toolbarTopOffset={blockToolbarTopOffset}
+              />
+            ) : null}
             {isFileDropActive ? (
               <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center rounded-[6px] border-2 border-dashed border-[color-mix(in_srgb,var(--accent-strong)_60%,transparent)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]">
                 <span className="rounded-[6px] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] shadow-[var(--shadow)]">
