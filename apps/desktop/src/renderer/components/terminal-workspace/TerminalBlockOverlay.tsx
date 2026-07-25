@@ -15,6 +15,8 @@ interface TerminalBlockOverlayProps {
   onCopyOutput: () => void;
   onCopyCommand: () => void;
   onRerun: () => void;
+  /** 세션이 연결돼 있지 않으면 재실행이 아무 일도 못 한다 — 버튼을 눌리지 않게 한다. */
+  rerunEnabled: boolean;
   onAskAi: () => void;
   aiEnabled: boolean;
   /**
@@ -29,6 +31,7 @@ export function TerminalBlockOverlay({
   onCopyOutput,
   onCopyCommand,
   onRerun,
+  rerunEnabled,
   onAskAi,
   aiEnabled,
   toolbarTopOffset,
@@ -94,13 +97,17 @@ export function TerminalBlockOverlay({
         <BlockAction
           label="재실행"
           onClick={onRerun}
-          disabled={running || !overlay.command || overlay.commandUnreliable}
+          disabled={
+            running || !rerunEnabled || !overlay.command || overlay.commandUnreliable
+          }
           title={
             running
               ? '명령이 실행 중입니다'
-              : overlay.commandUnreliable
-                ? '화면에서 읽은 명령이 실제 입력과 다를 수 있어 재실행할 수 없습니다(너무 길거나 여러 줄).'
-                : undefined
+              : !rerunEnabled
+                ? '세션이 연결되어 있지 않습니다'
+                : overlay.commandUnreliable
+                  ? '화면에서 읽은 명령이 실제 입력과 다를 수 있어 재실행할 수 없습니다(너무 길거나 여러 줄).'
+                  : undefined
           }
         />
         {aiEnabled ? <BlockAction label="AI" onClick={onAskAi} /> : null}

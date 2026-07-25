@@ -201,12 +201,6 @@ func registerWebAuthnRoutes(
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
 			return
 		}
-		// 티켓 소비는 등록 직전에. 생체인증을 취소해 여기까지 못 온 경우엔 태우지 않아
-		// 같은 티켓으로 다시 시도할 수 있다.
-		if err := authService.ConsumeWebAuthnRegisterTicket(ctx.Request.Context(), userID, ticketID); err != nil {
-			logAndJSONError(ctx, http.StatusUnauthorized, "등록 링크가 만료되었거나 이미 사용되었습니다.", err)
-			return
-		}
 		err = runtime.service.FinishRegistration(ctx.Request.Context(), userID, request.CeremonyID, request.Name, request.Credential)
 		if errors.Is(err, auth.ErrTooManyWebAuthnCredentials) {
 			logAndJSONError(ctx, http.StatusConflict, tooManyPasskeysMessage, err)
@@ -214,6 +208,13 @@ func registerWebAuthnRoutes(
 		}
 		if err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "패스키 등록에 실패했습니다.", err)
+			return
+		}
+		// 티켓은 등록이 실제로 성사된 뒤에 태운다. 앞에서 태우면 이후 어떤 실패(개수 상한,
+		// DB 오류)든 티켓과 ceremony 를 함께 날려, 인증기에는 패스키가 이미 만들어졌는데
+		// 재시도는 막히는 상태가 된다. 티켓당 성공 등록은 한 번뿐이라는 성질은 그대로다.
+		if err := authService.ConsumeWebAuthnRegisterTicket(ctx.Request.Context(), userID, ticketID); err != nil {
+			logAndJSONError(ctx, http.StatusUnauthorized, "등록 링크가 만료되었거나 이미 사용되었습니다.", err)
 			return
 		}
 		ctx.JSON(http.StatusOK, gin.H{"ok": true})
@@ -224,6 +225,12 @@ func registerWebAuthnRoutes(
 	group.Use(authMiddleware(authService))
 	group.POST("/registration-ticket", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
+		// 발급이 ceremony 행을 하나씩 남기게 됐다 — 인증된 클라이언트라도 무제한으로
+		// 부르면 정리가 쫓아가야 할 양이 계속 늘어난다.
+		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), userID)...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+			return
+		}
 		ticket, err := authService.NewWebAuthnRegisterTicket(ctx.Request.Context(), userID)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)

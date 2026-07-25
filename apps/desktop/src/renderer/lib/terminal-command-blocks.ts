@@ -72,9 +72,6 @@ const sessions = new Map<string, SessionBlocks>();
  */
 const disabledSessions = new Map<string, unknown>();
 
-/** 세션을 특정할 수 없는 진입점(블록 객체만 받는 경우)이 쓰는 키. */
-const UNSCOPED_SESSION = '\u0000unscoped';
-
 function safely<T>(sessionId: string, fallback: T, run: () => T): T {
   if (disabledSessions.has(sessionId)) {
     return fallback;
@@ -180,8 +177,37 @@ function removeBlock(session: SessionBlocks, block: TerminalCommandBlock): void 
  */
 export interface CommandTextBuffer {
   getLine(line: number):
-    | { translateToString(trimRight: boolean): string; isWrapped: boolean }
+    | {
+        translateToString(
+          trimRight: boolean,
+          startColumn?: number,
+          endColumn?: number,
+        ): string;
+        isWrapped: boolean;
+        length: number;
+        getCell(x: number): { getCode(): number } | undefined;
+      }
     | undefined;
+}
+
+type CommandTextLine = NonNullable<ReturnType<CommandTextBuffer['getLine']>>;
+
+/**
+ * 한 행에서 "실제로 쓰인 칸"까지만 읽는다.
+ *
+ * translateToString(true) 는 명령에 속한 후행 공백까지 지워 접합부에서 단어를 붙여 버리고,
+ * (false) 는 반대로 한 번도 쓰이지 않은 칸까지 공백으로 내보낸다. 후자가 특히 문제인 게,
+ * 넓은 글자(한글·CJK·이모지)가 행 끝에 못 들어가면 xterm 이 남은 칸을 코드 0 으로 채우고
+ * 다음 행으로 접는데, 그 채움 칸이 공백이 되어 "안녕하세요반 갑습니다" 처럼 없던 공백이
+ * 명령 한가운데 생긴다. 사용자가 친 공백(코드 32)과 쓰인 적 없는 칸(코드 0)은 다르므로
+ * 후자만 잘라낸다.
+ */
+function readLineText(line: CommandTextLine): string {
+  let end = line.length;
+  while (end > 0 && (line.getCell(end - 1)?.getCode() ?? 0) === 0) {
+    end -= 1;
+  }
+  return line.translateToString(false, 0, end);
 }
 
 export interface CommandText {
@@ -222,16 +248,18 @@ export function readCommandTextFromBuffer(
     if (!bufferLine) {
       break;
     }
-    // 다음 행이 접힘이면 이 행은 폭을 가득 채운 상태다 — trimRight 를 하면 명령에 속한
-    // 공백까지 잘려 접합부에서 단어가 붙어 버린다.
-    const wrapsToNext = buffer.getLine(line + 1)?.isWrapped === true;
-    const raw = bufferLine.translateToString(!wrapsToNext);
+    const raw = readLineText(bufferLine);
     if (line === promptLine) {
       text = raw.slice(promptEndX);
       continue;
     }
     if (bufferLine.isWrapped) {
       text += raw;
+      continue;
+    }
+    // 접힘이 아닌 새 줄. 빈 줄이면 셸 훅(preexec·PS0)이 명령과 133;C 사이에 무언가를
+    // 출력했다 사라진 것뿐이라 명령 자체는 온전하다 — 그걸로 재실행을 막지 않는다.
+    if (raw.trim().length === 0) {
       continue;
     }
     text += `\n${raw}`;
@@ -429,10 +457,11 @@ export function getCommandBlockAtLine(
  * 개행을 넣으면 안 된다(넣으면 복사한 로그가 원본과 달라진다).
  */
 export function readBlockOutput(
+  sessionId: string,
   terminal: Terminal,
   block: TerminalCommandBlock,
 ): string {
-  return safely(UNSCOPED_SESSION, '', () => {
+  return safely(sessionId, '', () => {
     const start = block.marker.line;
     if (start < 0) {
       return '';

@@ -578,9 +578,13 @@ function EmptyDetail({
   tmuxPrefixKey?: string;
 }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // 시간순 최근 로그. 예전에는 hostId 로 중복을 걸러 "호스트당 한 줄"만 보여 줬는데,
+  // 그러면 같은 호스트의 리플레이가 있는 세션 로그가 그보다 최근의 다른 로그(전송·감사)에
+  // 가려 사라졌고, 활동이 있는 호스트가 6개를 넘으면 아예 목록에서 빠졌다. 섹션 이름과
+  // "View all"(로그 화면)이 가리키는 대로 로그 목록으로 맞춘다.
   const recentLogs = useMemo(() => {
-    const seen = new Set<string>();
     const items: Array<{
+      id: string;
       hostId: string;
       name: string;
       detail: string;
@@ -590,10 +594,9 @@ function EmptyDetail({
     }> = [];
     for (const log of hb.activityLogs ?? []) {
       const hostId = getLogHostId(log);
-      if (!hostId || seen.has(hostId)) {
+      if (!hostId) {
         continue;
       }
-      seen.add(hostId);
       const metadata = log.metadata as {
         hostLabel?: string;
         label?: string;
@@ -613,6 +616,7 @@ function EmptyDetail({
         ? getConnectionKindLabel(metadata.connectionKind)
         : log.message;
       items.push({
+        id: log.id,
         hostId,
         name,
         detail,
@@ -686,7 +690,7 @@ function EmptyDetail({
           <div className="flex flex-col">
             {recentLogs.map((item) => (
               <ActivityRow
-                key={item.hostId}
+                key={item.id}
                 primary={item.name}
                 secondary={item.detail}
                 level={item.level}

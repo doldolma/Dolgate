@@ -144,6 +144,11 @@ func (s *WebAuthnService) loadCredentials(ctx context.Context, userID string) ([
 		if err := json.Unmarshal(row.Data, &credential); err != nil {
 			return nil, fmt.Errorf("decode stored webauthn credential: %w", err)
 		}
+		// CloneWarning 은 저장된 값이 아니라 이번 어써션의 판정이어야 한다. 라이브러리의
+		// UpdateCounter 는 이 플래그를 true 로만 만들고 되돌리지 않는데, 예전 코드가 로그인마다
+		// 자격증명을 통째로 되저장해서 true 가 blob 에 박힌 계정이 있을 수 있다. 그대로 두면
+		// 카운터와 무관하게 매번 복제로 판정돼 그 패스키가 영구히 막힌다.
+		credential.Authenticator.CloneWarning = false
 		credentials = append(credentials, credential)
 	}
 	return credentials, nil

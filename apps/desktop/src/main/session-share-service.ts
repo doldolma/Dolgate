@@ -150,7 +150,14 @@ export function toApiErrorMessage(
       }
       return trimmed;
     })
-    .catch(() => `${fallback} (${response.status})`);
+    .catch((error) => {
+      // 헤더는 왔는데 본문에서 멈춘 경우도 여기로 온다 — 타임아웃이면 원시 AbortError 대신
+      // 사람이 읽는 문구를 준다(fetch 만 감싸면 이 경로가 빠진다).
+      const mapped = toSessionShareTimeoutError(error);
+      return mapped instanceof Error && mapped !== error
+        ? mapped.message
+        : `${fallback} (${response.status})`;
+    });
 }
 
 function isLikelyAuthError(response: Response, message: string): boolean {
@@ -643,7 +650,13 @@ export class SessionShareService {
       );
     }
 
-    return (await response.json()) as CreateShareResponse;
+    // 본문 읽기도 타임아웃 대상이다 — fetch 만 감싸면 헤더만 보내고 멈추는 프록시에서
+    // 원시 AbortError 가 그대로 UI 로 나간다.
+    try {
+      return (await response.json()) as CreateShareResponse;
+    } catch (error) {
+      throw toSessionShareTimeoutError(error);
+    }
   }
 
   private async fetchWithAuthRetry(
