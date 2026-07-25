@@ -44,6 +44,8 @@ import type { HostBrowserModel } from './useHostBrowser';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
+  /** 단축키 안내에 실제 설정된 tmux 프리픽스를 보여주기 위해 전달받는다. */
+  tmuxPrefixKey?: string;
 }
 
 type DetailTab = 'overview' | 'connection';
@@ -568,7 +570,13 @@ function HostStackArt({ className }: { className?: string }) {
   );
 }
 
-function EmptyDetail({ hb }: { hb: HostBrowserModel }) {
+function EmptyDetail({
+  hb,
+  tmuxPrefixKey,
+}: {
+  hb: HostBrowserModel;
+  tmuxPrefixKey?: string;
+}) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const recentLogs = useMemo(() => {
     const seen = new Set<string>();
@@ -691,12 +699,16 @@ function EmptyDetail({ hb }: { hb: HostBrowserModel }) {
           </div>
         </div>
       ) : null}
-      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <ShortcutsDialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        tmuxPrefixKey={tmuxPrefixKey}
+      />
     </div>
   );
 }
 
-export function HostDetailPanel({ hb }: HostDetailPanelProps) {
+export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
   const { selectedHostId, hosts, favoriteHostIdSet } = hb;
   const host = useMemo(
     () => hosts.find((entry) => entry.id === selectedHostId) ?? null,
@@ -717,7 +729,7 @@ export function HostDetailPanel({ hb }: HostDetailPanelProps) {
   }, [hb.activityLogs, host]);
 
   if (!host) {
-    return <EmptyDetail hb={hb} />;
+    return <EmptyDetail hb={hb} tmuxPrefixKey={tmuxPrefixKey} />;
   }
 
   const isFavorite = favoriteHostIdSet.has(host.id);

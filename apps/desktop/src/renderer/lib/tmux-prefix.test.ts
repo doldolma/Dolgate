@@ -4,6 +4,7 @@ import {
   mapPrefixKey,
   resolveSiblingWindowId,
   tmuxPrefixByteFromKey,
+  tmuxPrefixKeyLabels,
   type TmuxPrefixResolverContext,
 } from './tmux-prefix';
 
@@ -219,5 +220,14 @@ describe('tmuxPrefixByteFromKey', () => {
   it('falls back to Ctrl-b for unknown/empty tokens', () => {
     expect(tmuxPrefixByteFromKey(undefined)).toBe('\x02');
     expect(tmuxPrefixByteFromKey('nonsense')).toBe('\x02');
+  });
+
+  it('설정 토큰을 단축키 안내 표기로 바꾼다', () => {
+    expect(tmuxPrefixKeyLabels('C-b')).toEqual(['Ctrl', 'B']);
+    expect(tmuxPrefixKeyLabels('C-a')).toEqual(['Ctrl', 'A']);
+    expect(tmuxPrefixKeyLabels('C-Space')).toEqual(['Ctrl', 'Space']);
+    // 미인식·미설정은 기본 프리픽스로 안내한다(tmuxPrefixByteFromKey 와 같은 규칙).
+    expect(tmuxPrefixKeyLabels(undefined)).toEqual(['Ctrl', 'B']);
+    expect(tmuxPrefixKeyLabels('nonsense')).toEqual(['Ctrl', 'B']);
   });
 });

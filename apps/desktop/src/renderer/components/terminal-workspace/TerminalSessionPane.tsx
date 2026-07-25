@@ -30,6 +30,7 @@ import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { TerminalBlockOverlay } from './TerminalBlockOverlay';
 import { TerminalBlockStickyHeader } from './TerminalBlockStickyHeader';
+import { TerminalCommandPalette } from './TerminalCommandPalette';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
 import { supportsTmuxControlMode } from '../../lib/tmux-version';
@@ -209,6 +210,18 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       ) {
         event.preventDefault();
         toggleAiPanel(sessionId);
+        return;
+      }
+      // ⌘/Ctrl+Shift+P: 명령 팔레트. 팔레트 표준 단축키라 다른 도구와 감각이 같고,
+      // Ctrl+Shift+* 는 셸(readline)이 쓰지 않아 터미널 입력을 뺏지 않는다.
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        (event.key === 'p' || event.key === 'P')
+      ) {
+        event.preventDefault();
+        controller.openCommandPalette();
         return;
       }
       controller.handlePaneKeyDownCapture(event);
@@ -563,6 +576,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             onMouseMove={controller.handleBlockPointerMove}
             onMouseLeave={controller.clearBlockHover}
           >
+            {controller.commandPaletteOpen ? (
+              <TerminalCommandPalette
+                items={controller.commandPaletteItems}
+                onClose={controller.closeCommandPalette}
+                onJump={controller.handleCommandPaletteJump}
+                onRerun={controller.handleCommandPaletteRerun}
+              />
+            ) : null}
             {controller.blockSticky ? (
               <TerminalBlockStickyHeader
                 sticky={controller.blockSticky}

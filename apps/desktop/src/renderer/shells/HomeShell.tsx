@@ -401,6 +401,7 @@ export function HomeShell({
         {homeViewModel.homeSection === 'hosts' ? (
           <HostBrowser
             hostEditor={hostEditor}
+            tmuxPrefixKey={settingsViewModel.settings.tmuxPrefixKey}
             desktopPlatform={desktopPlatform}
             hosts={homeViewModel.hosts}
             groups={homeViewModel.groups}
