@@ -10,7 +10,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -63,13 +65,15 @@ func (authIdentityRow) TableName() string {
 // 넘길 수 있어 고정 길이 해시를 키로 쓴다. CredentialID(base64url 원본)와 Data(마샬링된
 // 자격증명 JSON)는 참조·복원용 컬럼이다.
 type webauthnCredentialRow struct {
-	CredentialIDHash string    `gorm:"column:credential_id_hash;primaryKey;type:varchar(64)"`
-	CredentialID     string    `gorm:"column:credential_id;not null;type:varchar(512)"`
-	UserID           string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
-	Name             string    `gorm:"column:name;not null;default:'';type:varchar(128)"`
-	Data             string    `gorm:"column:data;not null;type:text"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null"`
-	LastUsedAt       time.Time `gorm:"column:last_used_at;not null"`
+	CredentialIDHash string `gorm:"column:credential_id_hash;primaryKey;type:varchar(64)"`
+	// 스펙상 credential id 는 최대 1023 바이트이고 base64url(무패딩) 로 담으므로 1364 자가 필요하다.
+	// 인덱스가 걸린 컬럼이 아니라(PK 는 credential_id_hash) 길이를 늘려도 키 길이 제한과 무관하다.
+	CredentialID string    `gorm:"column:credential_id;not null;type:varchar(1364)"`
+	UserID       string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	Name         string    `gorm:"column:name;not null;default:'';type:varchar(128)"`
+	Data         string    `gorm:"column:data;not null;type:text"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null"`
+	LastUsedAt   time.Time `gorm:"column:last_used_at;not null"`
 }
 
 func (webauthnCredentialRow) TableName() string {
@@ -78,11 +82,12 @@ func (webauthnCredentialRow) TableName() string {
 
 // webauthnCeremonyRow — begin/finish 사이 일회성 챌린지 상태. exchange code 처럼 소비 시 삭제.
 type webauthnCeremonyRow struct {
-	ID          string    `gorm:"column:id;primaryKey;type:varchar(191)"`
-	UserID      string    `gorm:"column:user_id;not null;default:'';type:varchar(191)"`
-	Purpose     string    `gorm:"column:purpose;not null;type:varchar(32)"`
-	SessionData string    `gorm:"column:session_data;not null;type:text"`
-	ExpiresAt   time.Time `gorm:"column:expires_at;not null"`
+	ID          string `gorm:"column:id;primaryKey;type:varchar(191)"`
+	UserID      string `gorm:"column:user_id;not null;default:'';index;type:varchar(191)"`
+	Purpose     string `gorm:"column:purpose;not null;type:varchar(32)"`
+	SessionData string `gorm:"column:session_data;not null;type:text"`
+	// 청소가 이 컬럼으로 스캔하고, 계정 삭제가 user_id 로 스캔한다.
+	ExpiresAt time.Time `gorm:"column:expires_at;not null;index"`
 }
 
 func (webauthnCeremonyRow) TableName() string {
@@ -168,6 +173,25 @@ func (syncRecordRow) TableName() string {
 type GormStore struct {
 	db     *gorm.DB
 	driver string
+
+	// 만료 행 청소는 쓰기 경로에 얹혀 돈다(별도 스위퍼 고루틴 없이). begin 은 /login
+	// 페이지를 볼 때마다 불리므로 매번 지우면 쓰기가 배가 된다 — 간격을 두고 한 번씩만.
+	sweepMu     sync.Mutex
+	lastSweepAt time.Time
+}
+
+// 만료 행 청소 간격.
+const expiredRowSweepInterval = 5 * time.Minute
+
+// shouldSweepExpired 는 마지막 청소로부터 간격이 지났으면 true 를 돌려주고 시각을 갱신한다.
+func (s *GormStore) shouldSweepExpired(now time.Time) bool {
+	s.sweepMu.Lock()
+	defer s.sweepMu.Unlock()
+	if !s.lastSweepAt.IsZero() && now.Sub(s.lastSweepAt) < expiredRowSweepInterval {
+		return false
+	}
+	s.lastSweepAt = now
+	return true
 }
 
 func Open(driver string, dsn string) (*GormStore, error) {
@@ -290,6 +314,9 @@ func (s *GormStore) CreateUser(ctx context.Context, email string, passwordHash s
 	}
 
 	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		if isDuplicateKeyError(err) {
+			return User{}, ErrEmailAlreadyExists
+		}
 		return User{}, err
 	}
 	return User{
@@ -297,6 +324,17 @@ func (s *GormStore) CreateUser(ctx context.Context, email string, passwordHash s
 		Email:        row.Email,
 		PasswordHash: row.PasswordHash,
 	}, nil
+}
+
+// isDuplicateKeyError 는 unique 제약 위반을 방언에 상관없이 알아본다. gorm 의
+// TranslateError 는 전역 설정이라 다른 경로의 에러 형태까지 바꾸므로 여기서만 판별한다.
+func isDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate entry") || // MySQL 1062
+		strings.Contains(message, "unique constraint") // Postgres 23505 / SQLite
 }
 
 func (s *GormStore) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -442,18 +480,33 @@ func (s *GormStore) SaveWebAuthnCredential(ctx context.Context, credential WebAu
 		CreatedAt:        createdAt.UTC(),
 		LastUsedAt:       lastUsedAt.UTC(),
 	}
-	return s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "credential_id_hash"}},
-			DoUpdates: clause.Assignments(map[string]any{
-				"credential_id": row.CredentialID,
-				"user_id":       row.UserID,
-				"name":          row.Name,
-				"data":          row.Data,
-				"last_used_at":  row.LastUsedAt,
-			}),
-		}).
-		Create(&row).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// credential id 는 인증기가 정하는 값이라 남의 것을 그대로 흉내 낼 수 있다. 소유자가
+		// 다르면 거부한다 — 통과시키면 아래 upsert 가 행을 덮어써 피해자의 패스키가 사라지고,
+		// 그 뒤 로그인 실패가 unknown_credential 로 나가 클라이언트에서까지 지워진다.
+		// Take 이 아니라 Find — 신규 등록(대부분)에서 ErrRecordNotFound 가 나면 gorm 기본
+		// 로거가 등록마다 에러 줄을 찍는다.
+		var existing []webauthnCredentialRow
+		if err := tx.Where("credential_id_hash = ?", row.CredentialIDHash).Limit(1).Find(&existing).Error; err != nil {
+			return err
+		}
+		if len(existing) > 0 && existing[0].UserID != row.UserID {
+			return ErrWebAuthnCredentialOwned
+		}
+		return tx.
+			Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "credential_id_hash"}},
+				// user_id 는 갱신하지 않는다 — 위 검사와 이 쓰기 사이의 경쟁에서도
+				// 소유권이 넘어가지 않게 한다(같은 사용자의 재등록은 그대로 동작).
+				DoUpdates: clause.Assignments(map[string]any{
+					"credential_id": row.CredentialID,
+					"name":          row.Name,
+					"data":          row.Data,
+					"last_used_at":  row.LastUsedAt,
+				}),
+			}).
+			Create(&row).Error
+	})
 }
 
 func (s *GormStore) ListWebAuthnCredentialsByUser(ctx context.Context, userID string) ([]WebAuthnCredential, error) {
@@ -520,7 +573,25 @@ func (s *GormStore) SaveWebAuthnCeremony(ctx context.Context, ceremony WebAuthnC
 		SessionData: string(ceremony.SessionData),
 		ExpiresAt:   ceremony.ExpiresAt.UTC(),
 	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+	// begin 은 로그인 페이지를 볼 때마다 행을 하나 남기는데, 지우는 건 성공적으로 소비된
+	// 것뿐이다. 이탈·실패분을 여기서 정리하지 않으면 테이블이 끝없이 자란다.
+	s.sweepExpired(&webauthnCeremonyRow{})
+	return nil
+}
+
+// sweepExpired 는 만료된 행을 지운다. 실패해도 호출자의 작업은 이미 성공했으므로 삼킨다.
+func (s *GormStore) sweepExpired(model any) {
+	now := time.Now().UTC()
+	if !s.shouldSweepExpired(now) {
+		return
+	}
+	// 요청 컨텍스트가 끊겨도 청소는 마치도록 분리한다 — 다음 기회까지 밀리면 그만큼 쌓인다.
+	if err := s.db.Where("expires_at < ?", now).Delete(model).Error; err != nil {
+		log.Printf("store: 만료 행 정리 실패: %v", err)
+	}
 }
 
 func (s *GormStore) ConsumeWebAuthnCeremony(ctx context.Context, id string) (WebAuthnCeremony, error) {
@@ -529,7 +600,16 @@ func (s *GormStore) ConsumeWebAuthnCeremony(ctx context.Context, id string) (Web
 		if err := tx.Where("id = ?", id).Take(&row).Error; err != nil {
 			return err
 		}
-		return tx.Where("id = ?", id).Delete(&webauthnCeremonyRow{}).Error
+		// Take 은 잠그지 않는 스냅샷 읽기라, 동시에 같은 ceremony 를 소비하면 양쪽 다 행을
+		// 본다(어써션 재사용). 실제로 지운 쪽만 1행이므로 RowsAffected 로 승자를 가린다.
+		result := tx.Where("id = ?", id).Delete(&webauthnCeremonyRow{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 	if err != nil {
 		return WebAuthnCeremony{}, err
@@ -599,7 +679,12 @@ func (s *GormStore) SaveExchangeCode(ctx context.Context, code ExchangeCode) err
 		UserID:    code.UserID,
 		ExpiresAt: code.ExpiresAt.UTC(),
 	}
-	return s.db.WithContext(ctx).Create(&row).Error
+	if err := s.db.WithContext(ctx).Create(&row).Error; err != nil {
+		return err
+	}
+	// ceremony 와 같은 이유 — 앱으로 전달되지 못한 코드가 영구히 남는다.
+	s.sweepExpired(&exchangeCodeRow{})
+	return nil
 }
 
 func (s *GormStore) ConsumeExchangeCode(ctx context.Context, codeHash string) (ExchangeCode, error) {
@@ -608,7 +693,16 @@ func (s *GormStore) ConsumeExchangeCode(ctx context.Context, codeHash string) (E
 		if err := tx.Where("code_hash = ?", codeHash).Take(&row).Error; err != nil {
 			return err
 		}
-		return tx.Where("code_hash = ?", codeHash).Delete(&exchangeCodeRow{}).Error
+		// ceremony 소비와 같은 이유 — Take 은 잠그지 않아 동시에 같은 코드를 쓰면 양쪽 다
+		// 행을 보고, 하나의 코드에서 세션(리프레시 토큰)이 둘 발급된다.
+		result := tx.Where("code_hash = ?", codeHash).Delete(&exchangeCodeRow{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 	if err != nil {
 		return ExchangeCode{}, err

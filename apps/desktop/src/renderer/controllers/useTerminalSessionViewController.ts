@@ -59,6 +59,7 @@ import {
   createEmptyCommandBuffer,
 } from '../lib/terminal-autocomplete';
 import { detectsSubshellEntry } from '../lib/subshell-detect';
+import { redactAiContext } from '../lib/ai-context-redact';
 import {
   mapPrefixKey,
   resolveSiblingWindowId,
@@ -272,7 +273,11 @@ export function useTerminalSessionViewController({
   });
   const [terminalAlternateScreen, setTerminalAlternateScreen] = useState(false);
 
-  const sendAutocompleteInput = useCallback((data: string) => {
+  /**
+   * 연결이 살아 있을 때만 입력을 보낸다. 끊겼거나 재연결 중이면 조용히 버린다 —
+   * 죽은 세션 id 로 쓰면 IPC 가 거부만 하고 사용자에겐 아무 반응도 없다.
+   */
+  const sendInputIfConnected = useCallback((data: string) => {
     const currentSessionId = liveSessionIdRef.current;
     const currentStatus = liveSessionStatusRef.current;
     if (
@@ -285,6 +290,8 @@ export function useTerminalSessionViewController({
     }
     liveOnSendInputRef.current?.(currentSessionId, data);
   }, []);
+
+  const sendAutocompleteInput = sendInputIfConnected;
 
   // 같은 control 세션의 window id 목록을 tabStrip(워크스페이스 탭) 순서대로 모은다.
   // n/p(다음/이전 window) 전환의 순서 기준이다.
@@ -1209,11 +1216,17 @@ export function useTerminalSessionViewController({
   const handleBlockRerun = useCallback(() => {
     const block = findHoveredBlock();
     // 실행 중이면 보내지 않는다 — 실행 중인 프로그램의 stdin 으로 들어가 버린다.
-    if (!block || block.state === 'running' || !block.command) {
+    // 화면에서 읽은 값이 실제 입력과 다를 수 있으면(잘림·여러 줄) 아예 보내지 않는다.
+    if (
+      !block ||
+      block.state === 'running' ||
+      !block.command ||
+      block.commandUnreliable
+    ) {
       return;
     }
-    liveOnSendInputRef.current?.(liveSessionIdRef.current, `${block.command}\r`);
-  }, [findHoveredBlock]);
+    sendInputIfConnected(`${block.command}\r`);
+  }, [findHoveredBlock, sendInputIfConnected]);
 
   // 명령 팔레트(⌘/Ctrl+Shift+P). 목록은 열 때 스냅샷으로 떠서 렌더 중 블록이 바뀌어도 흔들리지 않는다.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -1226,6 +1239,7 @@ export function useTerminalSessionViewController({
       getCommandBlocks(liveSessionIdRef.current).map((block) => ({
         id: block.id,
         command: block.command,
+        commandUnreliable: block.commandUnreliable,
         state: block.state,
         exitCode: block.exitCode,
         durationMs: block.durationMs,
@@ -1265,15 +1279,17 @@ export function useTerminalSessionViewController({
     (id: number) => {
       const block = findBlockById(id);
       // 실행 중인 명령은 다시 보내지 않는다(실행 중인 프로그램의 stdin 으로 들어간다).
-      if (block && block.state !== 'running' && block.command) {
-        liveOnSendInputRef.current?.(
-          liveSessionIdRef.current,
-          `${block.command}\r`,
-        );
+      if (
+        block &&
+        block.state !== 'running' &&
+        block.command &&
+        !block.commandUnreliable
+      ) {
+        sendInputIfConnected(`${block.command}\r`);
       }
       closeCommandPalette();
     },
-    [closeCommandPalette, findBlockById],
+    [closeCommandPalette, findBlockById, sendInputIfConnected],
   );
 
   const handleBlockAskAi = useCallback(() => {
@@ -1305,7 +1321,9 @@ export function useTerminalSessionViewController({
     void store.sendAiMessage(
       liveSessionIdRef.current,
       question,
-      contextLines.join('\n'),
+      // 명령줄·출력 모두 시크릿이 그대로 찍혀 있을 수 있다(`aws sts …`, `env | grep TOKEN`,
+      // `AWS_SECRET_ACCESS_KEY=… terraform apply`). 다른 AI 유입 경로와 같게 egress 직전에 가린다.
+      redactAiContext(contextLines.join('\n')),
     );
   }, [findHoveredBlock]);
 

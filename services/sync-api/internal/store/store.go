@@ -29,6 +29,14 @@ var (
 	ErrPasswordConflict = errors.New("password changed concurrently")
 	// ErrRefreshTokenNotFound 는 비밀번호 변경에서 유지할 현재 세션이 이미 사라진 경우다.
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")
+	// ErrEmailAlreadyExists 는 이미 있는 이메일로 가입하려는 경우다. 드라이버 원문 에러
+	// (MySQL 의 "Duplicate entry '…' for key 'users.email'" 등)를 사용자에게 그대로
+	// 보여주지 않으려고 sentinel 로 바꿔 올린다.
+	ErrEmailAlreadyExists = errors.New("email already exists")
+	// ErrWebAuthnCredentialOwned 는 등록하려는 credential id 가 이미 다른 사용자의 것인 경우다.
+	// credential id 는 클라이언트(인증기)가 정하는 값이라 위조할 수 있는데, 그대로 upsert 하면
+	// 남의 패스키 소유권을 가져가 버린다(WebAuthn §7.1 step 27 은 RP 몫이고 라이브러리는 안 한다).
+	ErrWebAuthnCredentialOwned = errors.New("webauthn credential already registered to another user")
 )
 
 type User struct {

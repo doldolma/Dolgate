@@ -1837,7 +1837,11 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               // 이 실패 잡을 표식해 같은 잡의 중복 이벤트로 복구가 두 번 트리거되지 않게 한다.
               // recover 쪽은 재수립된 새 잡을 표식해, 그 재시도가 또 죽어도 재복구 안 하게 한다.
               markAutoRecoveredTransferJob(event.job.id);
-              void get().recoverTransferConnectionLoss(event.job);
+              // 복구 실패는 이미 실패한 전송을 그대로 두는 것뿐이라 삼킨다 — catch 가 없으면
+              // 재수립 도중의 예외가 unhandled rejection 으로 새어 나간다.
+              void get()
+                .recoverTransferConnectionLoss(event.job)
+                .catch(() => undefined);
             }
 
             if (event.job.status === "completed" && event.job.request) {

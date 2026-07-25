@@ -47,7 +47,10 @@ function createFakeTerminal(rows: string[] = [], wrappedLines: number[] = []) {
         return undefined;
       }
       return {
-        translateToString: () => text,
+        // xterm 과 같게 trimRight 를 실제로 반영한다 — 접힘 경계에서 명령에 속한 공백이
+        // 잘리는지 여부가 이 인자에 달려 있다.
+        translateToString: (trimRight: boolean) =>
+          trimRight ? text.replace(/\s+$/, '') : text,
         isWrapped: wrappedLines.includes(line),
       };
     },
@@ -137,6 +140,51 @@ describe('terminal-command-blocks', () => {
     expect(finished[0].state).toBe('ok');
     expect(finished[0].exitCode).toBe(0);
     expect(finished[0].durationMs).not.toBeNull();
+  });
+
+  // 아래 셋은 "화면에서 읽은 명령"이 실제 입력과 어긋나는 경우들이다. 그대로 재실행하면
+  // 사용자가 친 적 없는 명령이 실행되므로 commandUnreliable 로 표시해 막아야 한다.
+  it('행 예산을 넘겨 잘리면 재실행 불가로 표시한다', () => {
+    const rows = ['$ long-command'];
+    for (let index = 1; index < 30; index += 1) {
+      rows.push(`part-${index}`);
+    }
+    const fake = createFakeTerminal(rows, [...Array(29).keys()].map((n) => n + 1));
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    // 명령이 25 행에 걸쳐 있다 → MAX_COMMAND_ROWS(20) 를 넘는다.
+    fake.buffer.cursorY = 25;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toContain('long-command');
+    expect(block.commandUnreliable).toBe(true);
+  });
+
+  it('접힘이 아닌 새 줄(여러 줄 입력)은 줄바꿈으로 잇고 재실행 불가로 표시한다', () => {
+    // 이어 붙이면 "cat <<EOFline1EOF" 라는, 사용자가 친 적 없는 한 줄이 된다.
+    const fake = createFakeTerminal(['$ cat <<EOF', 'line1', 'EOF']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 3;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('cat <<EOF\nline1\nEOF');
+    expect(block.commandUnreliable).toBe(true);
+  });
+
+  it('접힘 경계에서 명령에 속한 공백을 잘라먹지 않는다', () => {
+    // 다음 행이 접힘이면 이 행은 폭을 가득 채운 것 — trimRight 를 하면 단어가 붙어 버린다.
+    const fake = createFakeTerminal(['$ echo a   ', 'b'], [1]);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(SESSION, fake.terminal);
+    fake.buffer.cursorY = 2;
+    beginCommandBlock(SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(SESSION);
+    expect(block.command).toBe('echo a   b');
+    expect(block.commandUnreliable).toBe(false);
   });
 
   it('0 이 아닌 종료코드는 failed 로 표시하고 액센트 색을 갱신한다', () => {
@@ -353,15 +401,32 @@ describe('terminal-command-blocks', () => {
     expect(fake.decorations[0].disposed).toBe(true);
     expect(fake.markers.every((marker) => marker.line === -1)).toBe(true);
   });
+
+  it('블록이 여러 개여도 하나도 남기지 않고 폐기한다', () => {
+    // marker.dispose() 는 onDispose 를 동기로 불러 blocks 에서 자신을 빼낸다. 순회 중에
+    // 배열이 줄어들면 한 칸씩 건너뛰어 절반이 살아남는다(터미널은 재연결 후에도 살아 있어
+    // 마커·데코레이션이 그대로 누적된다).
+    const fake = createFakeTerminal(['$ a', '$ b', '$ c', '$ d']);
+    for (let row = 0; row < 4; row += 1) {
+      fake.buffer.cursorY = row;
+      fake.buffer.cursorX = 2;
+      notePromptCommandStart(SESSION, fake.terminal);
+      beginCommandBlock(SESSION, fake.terminal, null);
+    }
+    expect(getCommandBlocks(SESSION)).toHaveLength(4);
+
+    clearCommandBlocks(SESSION);
+
+    expect(getCommandBlocks(SESSION)).toHaveLength(0);
+    expect(fake.markers.filter((marker) => marker.line !== -1)).toEqual([]);
+    expect(fake.decorations.filter((decoration) => !decoration.disposed)).toEqual([]);
+  });
 });
 
 /**
  * 위 테스트들은 가짜 터미널을 쓰기 때문에 "xterm 이 marker/decoration 을 실제로 허용하는가"
  * 같은 제약은 잡지 못한다(실제로 allowProposedApi 누락을 놓쳐 터미널이 멈춘 적이 있다).
  * 그래서 실제 xterm 인스턴스로도 한 번 확인한다.
- *
- * 주의: 두 번째 테스트는 모듈의 "오류 시 추적 비활성화" 플래그를 켜므로 반드시 파일 마지막에
- * 두어야 한다(이후 테스트는 모두 no-op 이 된다).
  */
 describe('terminal-command-blocks (실제 xterm)', () => {
   function openRealTerminal(allowProposedApi: boolean) {
@@ -416,5 +481,26 @@ describe('terminal-command-blocks (실제 xterm)', () => {
     clearCommandBlocks(session);
     terminal.dispose();
     container.remove();
+  });
+
+  it('한 세션에서 난 오류가 다른 세션의 추적까지 끄지 않는다', () => {
+    // 예전에는 비활성화가 전역이라, 탭 하나에서 예외가 한 번 나면 그 창의 모든 탭과 이후
+    // 모든 세션에서 앱을 다시 켤 때까지 기능이 죽었다(사용자에겐 아무 표시도 없이).
+    const broken = openRealTerminal(false);
+    notePromptCommandStart('poisoner', broken.terminal);
+    beginCommandBlock('poisoner', broken.terminal, null);
+    expect(getCommandBlocks('poisoner')).toHaveLength(0);
+
+    const healthy = openRealTerminal(true);
+    notePromptCommandStart('bystander', healthy.terminal);
+    beginCommandBlock('bystander', healthy.terminal, null);
+    expect(getCommandBlocks('bystander')).toHaveLength(1);
+
+    clearCommandBlocks('poisoner');
+    clearCommandBlocks('bystander');
+    broken.terminal.dispose();
+    broken.container.remove();
+    healthy.terminal.dispose();
+    healthy.container.remove();
   });
 });

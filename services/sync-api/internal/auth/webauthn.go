@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"strings"
@@ -30,6 +31,26 @@ const (
 
 var ErrWebAuthnCeremony = errors.New("invalid or expired webauthn ceremony")
 
+// MaxWebAuthnCredentialsPerUser 는 한 계정에 붙일 수 있는 패스키 수다. 상한이 없으면 티켓
+// 하나로 수천 개를 붙여 놓을 수 있고, 사용자가 목록에서 무엇을 지워야 할지도 알 수 없다.
+const MaxWebAuthnCredentialsPerUser = 20
+
+// ErrTooManyWebAuthnCredentials 는 위 상한에 도달한 경우다.
+var ErrTooManyWebAuthnCredentials = errors.New("too many webauthn credentials")
+
+// ensureCredentialCapacity 는 상한을 넘지 않았는지 본다. begin 에서 한 번(생체인증 전에
+// 거절하려고), finish 에서 한 번(그 사이 다른 요청이 채웠을 수 있어) 부른다.
+func (s *WebAuthnService) ensureCredentialCapacity(ctx context.Context, userID string) error {
+	count, err := s.store.CountWebAuthnCredentialsByUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if count >= MaxWebAuthnCredentialsPerUser {
+		return ErrTooManyWebAuthnCredentials
+	}
+	return nil
+}
+
 // ErrUnknownWebAuthnCredential 는 discoverable 로그인에서 어써션의 자격증명이 이 서버에
 // 기록이 없을 때 반환한다 — (1) user handle 로 사용자를 못 찾거나, (2) 사용자는 있으나 그
 // 자격증명이 목록에 없는 경우. 두 경우 모두 "서버에 없는(unknown) 자격증명"이라, 클라이언트가
@@ -37,6 +58,10 @@ var ErrWebAuthnCeremony = errors.New("invalid or expired webauthn ceremony")
 // 서명 검증 실패는 여기에 포함하지 않는다 — 기록은 있으나 검증만 실패한 것이라(서버측 공개키
 // 불일치·클론 감지 등) 정상 패스키를 지울 위험이 있어 별개로 다룬다.
 var ErrUnknownWebAuthnCredential = errors.New("webauthn credential is not registered")
+
+// ErrClonedWebAuthnCredential 는 sign count 역행으로 복제가 의심되는 경우다. unknown 과
+// 구분해야 한다 — 이건 서버에 기록이 멀쩡히 있는 상태라, 클라이언트가 패스키를 지우면 안 된다.
+var ErrClonedWebAuthnCredential = errors.New("webauthn credential may be cloned")
 
 // WebAuthnService 는 브라우저 로그인의 패스키 등록/인증 ceremony 를 처리한다. 자격증명은
 // go-webauthn 의 Credential 을 JSON 으로 마샬링해 store 에 불투명 바이트로 보관한다 — store 는
@@ -130,6 +155,9 @@ func webauthnCredentialID(raw []byte) string {
 
 // BeginRegistration 은 로그인된 사용자가 새 패스키를 등록하는 ceremony 를 시작한다.
 func (s *WebAuthnService) BeginRegistration(ctx context.Context, userID string) (*protocol.CredentialCreation, string, error) {
+	if err := s.ensureCredentialCapacity(ctx, userID); err != nil {
+		return nil, "", err
+	}
 	user, err := s.loadUser(ctx, userID)
 	if err != nil {
 		return nil, "", err
@@ -157,6 +185,9 @@ func (s *WebAuthnService) FinishRegistration(ctx context.Context, userID string,
 	}
 	parsed, err := protocol.ParseCredentialCreationResponseBody(bytes.NewReader(responseBody))
 	if err != nil {
+		return err
+	}
+	if err := s.ensureCredentialCapacity(ctx, userID); err != nil {
 		return err
 	}
 	user, err := s.loadUser(ctx, userID)
@@ -244,10 +275,27 @@ func (s *WebAuthnService) FinishLogin(ctx context.Context, ceremonyID string, re
 		return store.User{}, ErrInvalidCredentials
 	}
 
-	// sign count 등 갱신된 자격증명을 되저장한다(클론 감지의 근거). 실패해도 로그인 자체는
-	// 성공으로 처리하되 상위에서 로깅하도록 에러는 무시하지 않고 반환하지 않는다.
-	if data, marshalErr := json.Marshal(credential); marshalErr == nil {
-		_ = s.store.UpdateWebAuthnCredentialData(ctx, webauthnCredentialID(credential.ID), data, time.Now().UTC())
+	// sign count 가 뒤로 갔다 = 같은 자격증명이 복제돼 두 곳에서 쓰이고 있다는 신호다
+	// (WebAuthn 7.2). 라이브러리는 플래그만 세우므로 판단은 여기서 한다. 플랫폼 패스키는
+	// 카운터를 늘 0 으로 보고해 여기 걸리지 않는다 — 실제로는 하드웨어 키에서만 뜬다.
+	// 비밀번호·OIDC 로그인은 그대로 되므로 계정이 잠기지는 않는다.
+	if credential.Authenticator.CloneWarning {
+		log.Printf(
+			"webauthn: 자격증명 복제 의심으로 로그인 거부 user=%s credential=%s",
+			resolved.ID, webauthnCredentialID(credential.ID),
+		)
+		return store.User{}, ErrClonedWebAuthnCredential
+	}
+
+	// 갱신된 sign count 를 되저장한다 — 이게 실패하면 카운터가 멈춰 위 감지가 무력해지므로
+	// 조용히 넘기지 않고 남긴다(로그인 자체는 이미 성공했으니 실패로 바꾸지는 않는다).
+	data, marshalErr := json.Marshal(credential)
+	if marshalErr != nil {
+		log.Printf("webauthn: 자격증명 직렬화 실패 credential=%s: %v", webauthnCredentialID(credential.ID), marshalErr)
+		return resolved, nil
+	}
+	if err := s.store.UpdateWebAuthnCredentialData(ctx, webauthnCredentialID(credential.ID), data, time.Now().UTC()); err != nil {
+		log.Printf("webauthn: sign count 저장 실패 credential=%s: %v", webauthnCredentialID(credential.ID), err)
 	}
 	return resolved, nil
 }

@@ -17,6 +17,8 @@ export interface TerminalCommandBlock {
   state: TerminalCommandBlockState;
   /** 프롬프트 뒤에서 읽어낸 명령 텍스트. 읽지 못하면 null. */
   command: string | null;
+  /** 읽은 텍스트가 실제 입력과 다를 수 있음(행 예산 초과로 잘림, 여러 줄 입력) — 재실행 금지. */
+  commandUnreliable: boolean;
   exitCode: number | null;
   /** OSC 133;C 시각(epoch ms). */
   startedAt: number;
@@ -63,19 +65,28 @@ const sessions = new Map<string, SessionBlocks>();
 /**
  * 이 모듈의 진입점은 xterm 파서(OSC 핸들러)와 키 핸들러 안에서 호출된다. 거기서 예외가 나면
  * 파싱/입력 루프가 끊겨 터미널 자체가 멈춰 버리므로, 블록 추적 실패는 절대 밖으로 던지지
- * 않는다. 한 번 실패하면 이후 추적을 포기해 같은 예외가 매 명령마다 반복되지 않게 한다.
+ * 않는다. 한 번 실패하면 그 세션의 추적을 포기해 같은 예외가 매 명령마다 반복되지 않게 한다.
+ *
+ * 비활성화는 세션 단위다 — 전역으로 두면 탭 하나에서 난 예외가 그 창의 모든 탭과 이후
+ * 모든 세션에서 기능을 죽인다(앱을 다시 켤 때까지, 사용자에게는 아무 표시도 없이).
  */
-let disabledReason: unknown = null;
+const disabledSessions = new Map<string, unknown>();
 
-function safely<T>(fallback: T, run: () => T): T {
-  if (disabledReason !== null) {
+/** 세션을 특정할 수 없는 진입점(블록 객체만 받는 경우)이 쓰는 키. */
+const UNSCOPED_SESSION = '\u0000unscoped';
+
+function safely<T>(sessionId: string, fallback: T, run: () => T): T {
+  if (disabledSessions.has(sessionId)) {
     return fallback;
   }
   try {
     return run();
   } catch (error) {
-    disabledReason = error;
-    console.error('[command-blocks] 비활성화 — 명령 블록 추적 중 오류', error);
+    disabledSessions.set(sessionId, error);
+    console.error(
+      `[command-blocks] 세션 ${sessionId} 비활성화 — 명령 블록 추적 중 오류`,
+      error,
+    );
     return fallback;
   }
 }
@@ -168,31 +179,66 @@ function removeBlock(session: SessionBlocks, block: TerminalCommandBlock): void 
  * 서로 다른 Terminal 타입을 쓰지만 명령 텍스트를 읽는 방식은 같아야 하기 때문이다.
  */
 export interface CommandTextBuffer {
-  getLine(line: number): { translateToString(trimRight: boolean): string } | undefined;
+  getLine(line: number):
+    | { translateToString(trimRight: boolean): string; isWrapped: boolean }
+    | undefined;
+}
+
+export interface CommandText {
+  text: string;
+  /**
+   * 화면에서 읽은 값이 사용자가 실제로 친 것과 다를 수 있으면 true. 표시는 하되 재실행은
+   * 막는다 — 조용히 다른 명령을 실행하는 것보다 버튼이 비활성인 편이 낫다.
+   */
+  unreliable: boolean;
 }
 
 /**
  * 프롬프트 라인에서 명령 텍스트를 읽어낸다. 키 입력 재구성과 달리 히스토리 호출(↑)·붙여넣기
  * 에서도 화면에 실제로 보이는 값을 그대로 얻는다.
+ *
+ * 화면에서 읽는 방식의 한계 두 가지를 여기서 표시한다.
+ *  - 행 예산(MAX_COMMAND_ROWS)을 다 쓰면 뒤가 잘린다. 잘린 앞부분도 유효한 명령일 수 있어
+ *    ("rsync … --dry-run" 에서 --dry-run 이 날아가는 식) 그대로 재실행하면 위험하다.
+ *  - 접힘(isWrapped)이 아닌 새 줄은 여러 줄 입력(\ 연장·heredoc)이다. 이어 붙이면 사용자가
+ *    친 적 없는 한 줄이 된다.
+ *
+ * RPROMPT(zsh 오른쪽 프롬프트)가 같은 행에 그려지면 명령 뒤에 섞이는데, 화면만 보고
+ * 경계를 알 방법이 없어 걸러내지 못한다(VS Code 도 같은 한계).
  */
 export function readCommandTextFromBuffer(
   buffer: CommandTextBuffer,
   promptLine: number,
   promptEndX: number,
   endLineExclusive: number,
-): string | null {
-  const lastLine = Math.min(endLineExclusive, promptLine + MAX_COMMAND_ROWS);
+): CommandText | null {
+  const budgetLine = promptLine + MAX_COMMAND_ROWS;
+  const lastLine = Math.min(endLineExclusive, budgetLine);
+  // 예산 때문에 잘렸으면 읽은 값이 명령의 앞부분일 뿐이다.
+  let unreliable = endLineExclusive > budgetLine;
   let text = '';
   for (let line = promptLine; line < lastLine; line += 1) {
     const bufferLine = buffer.getLine(line);
     if (!bufferLine) {
       break;
     }
-    const raw = bufferLine.translateToString(true);
-    text += line === promptLine ? raw.slice(promptEndX) : raw;
+    // 다음 행이 접힘이면 이 행은 폭을 가득 채운 상태다 — trimRight 를 하면 명령에 속한
+    // 공백까지 잘려 접합부에서 단어가 붙어 버린다.
+    const wrapsToNext = buffer.getLine(line + 1)?.isWrapped === true;
+    const raw = bufferLine.translateToString(!wrapsToNext);
+    if (line === promptLine) {
+      text = raw.slice(promptEndX);
+      continue;
+    }
+    if (bufferLine.isWrapped) {
+      text += raw;
+      continue;
+    }
+    text += `\n${raw}`;
+    unreliable = true;
   }
   const trimmed = text.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return trimmed.length > 0 ? { text: trimmed, unreliable } : null;
 }
 
 /**
@@ -200,7 +246,7 @@ export function readCommandTextFromBuffer(
  * 모르므로 마커만 확보해 두고, C 가 와야 블록으로 승격한다(빈 Enter·프롬프트 재출력 무시).
  */
 export function notePromptCommandStart(sessionId: string, terminal: Terminal): void {
-  safely(undefined, () => {
+  safely(sessionId, undefined, () => {
     if (!sessionId || !isNormalBuffer(terminal)) {
       return;
     }
@@ -221,7 +267,7 @@ export function beginCommandBlock(
   terminal: Terminal,
   cwd: string | null,
 ): void {
-  safely(undefined, () => {
+  safely(sessionId, undefined, () => {
     beginCommandBlockUnsafe(sessionId, terminal, cwd);
   });
 }
@@ -246,18 +292,21 @@ function beginCommandBlockUnsafe(
 
   const buffer = terminal.buffer.active;
   const outputStartLine = buffer.baseY + buffer.cursorY;
+  const commandText = pending
+    ? readCommandTextFromBuffer(
+        buffer,
+        marker.line,
+        pending.promptEndX,
+        outputStartLine,
+      )
+    : null;
   session.seq += 1;
   const block: TerminalCommandBlock = {
     id: session.seq,
     state: 'running',
-    command: pending
-      ? readCommandTextFromBuffer(
-          buffer,
-          marker.line,
-          pending.promptEndX,
-          outputStartLine,
-        )
-      : null,
+    command: commandText?.text ?? null,
+    // 읽은 값이 실제 입력과 다를 수 있으면(잘림·여러 줄) 재실행을 막는다.
+    commandUnreliable: commandText?.unreliable ?? false,
     exitCode: null,
     startedAt: Date.now(),
     durationMs: null,
@@ -294,7 +343,7 @@ export function finishCommandBlock(
   terminal: Terminal,
   exitCode: number | null,
 ): void {
-  safely(undefined, () => {
+  safely(sessionId, undefined, () => {
     finishCommandBlockUnsafe(sessionId, terminal, exitCode);
   });
 }
@@ -354,7 +403,7 @@ export function getCommandBlockAtLine(
   sessionId: string,
   line: number,
 ): TerminalCommandBlock | null {
-  return safely(null, () => {
+  return safely(sessionId, null, () => {
     const blocks = sessions.get(sessionId)?.blocks;
     if (!blocks) {
       return null;
@@ -383,7 +432,7 @@ export function readBlockOutput(
   terminal: Terminal,
   block: TerminalCommandBlock,
 ): string {
-  return safely('', () => {
+  return safely(UNSCOPED_SESSION, '', () => {
     const start = block.marker.line;
     if (start < 0) {
       return '';
@@ -423,7 +472,7 @@ export function jumpToAdjacentCommandBlock(
   direction: 'previous' | 'next',
   options: { failedOnly?: boolean } = {},
 ): boolean {
-  return safely(false, () =>
+  return safely(sessionId, false, () =>
     jumpToAdjacentCommandBlockUnsafe(sessionId, terminal, direction, options),
   );
 }
@@ -464,12 +513,16 @@ function jumpToAdjacentCommandBlockUnsafe(
 
 /** 세션 종료·재연결 시 마커와 데코레이션을 모두 정리한다. */
 export function clearCommandBlocks(sessionId: string): void {
+  // 세션이 끝나면 비활성화 기록도 같이 버린다 — 안 그러면 맵에 영원히 남는다.
+  disabledSessions.delete(sessionId);
   const session = sessions.get(sessionId);
   if (!session) {
     return;
   }
   session.pendingPrompt?.marker.dispose();
-  for (const block of session.blocks) {
+  // 복사본을 돈다 — disposeBlock 이 marker.onDispose 를 동기로 발화시켜 원본 배열에서
+  // 자신을 splice 하므로, 원본을 그대로 순회하면 한 칸씩 건너뛰어 절반이 안 지워진다.
+  for (const block of [...session.blocks]) {
     disposeBlock(block);
   }
   sessions.delete(sessionId);

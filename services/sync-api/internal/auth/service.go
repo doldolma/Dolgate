@@ -422,19 +422,53 @@ const webauthnRegisterTicketAudience = "webauthn-register"
 
 // NewWebAuthnRegisterTicket 은 로그인된 앱이 브라우저 등록 페이지를 열 때 신원을 전달하는
 // 단명 티켓이다. 브라우저는 자체 세션이 없으므로 이 티켓으로 begin/finish 를 인가한다.
-func (s *Service) NewWebAuthnRegisterTicket(userID string) (string, error) {
+//
+// 티켓은 소지만으로 남의 계정에 패스키를 붙일 수 있는 값이라 한 번만 쓰이게 한다. JWT 자체는
+// 상태가 없으므로 발급 시 jti 로 ceremony 행을 하나 남기고, 등록이 실제로 끝날 때 소비한다
+// (그 행은 만료 정리 대상이라 따로 치울 필요가 없다).
+func (s *Service) NewWebAuthnRegisterTicket(ctx context.Context, userID string) (string, error) {
+	ticketID, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	expiresAt := time.Now().Add(webauthnRegisterTicketTTL)
 	claims := jwt.RegisteredClaims{
+		ID:        ticketID,
 		Subject:   userID,
 		Audience:  jwt.ClaimStrings{webauthnRegisterTicketAudience},
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
+	signed, signErr := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(s.signingKey)
+	if signErr != nil {
+		return "", signErr
+	}
+	if err := s.store.SaveWebAuthnCeremony(ctx, store.WebAuthnCeremony{
+		ID:          webauthnRegisterTicketCeremonyID(ticketID),
+		UserID:      userID,
+		Purpose:     WebAuthnPurposeRegisterTicket,
+		SessionData: []byte("{}"),
+		ExpiresAt:   expiresAt.UTC(),
+	}); err != nil {
+		return "", err
+	}
+	return signed, nil
 }
 
-// ParseWebAuthnRegisterTicket 은 티켓을 검증하고 userID(Subject)를 돌려준다. audience 를
+const webauthnRegisterTicketTTL = 5 * time.Minute
+
+// WebAuthnPurposeRegisterTicket 은 등록 티켓의 일회성 표식이 쓰는 ceremony purpose 다.
+const WebAuthnPurposeRegisterTicket = "register-ticket"
+
+// webauthnRegisterTicketCeremonyID 는 jti 로 티켓 표식 행의 id 를 만든다. 등록 ceremony id 와
+// 같은 테이블을 쓰므로 접두사로 구분한다.
+func webauthnRegisterTicketCeremonyID(ticketID string) string {
+	return "ticket:" + ticketID
+}
+
+// ParseWebAuthnRegisterTicket 은 티켓을 검증하고 userID(Subject)와 jti 를 돌려준다. audience 를
 // 필수 검증해 access token 이 티켓으로 오용되는 것을 막는다.
-func (s *Service) ParseWebAuthnRegisterTicket(token string) (string, error) {
+func (s *Service) ParseWebAuthnRegisterTicket(token string) (string, string, error) {
 	parsed, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(token *jwt.Token) (any, error) {
 		if token.Method.Alg() != jwt.SigningMethodRS256.Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %s", token.Method.Alg())
@@ -442,13 +476,34 @@ func (s *Service) ParseWebAuthnRegisterTicket(token string) (string, error) {
 		return &s.signingKey.PublicKey, nil
 	}, jwt.WithAudience(webauthnRegisterTicketAudience))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	claims, ok := parsed.Claims.(*jwt.RegisteredClaims)
 	if !ok || !parsed.Valid || strings.TrimSpace(claims.Subject) == "" {
-		return "", ErrInvalidCredentials
+		return "", "", ErrInvalidCredentials
 	}
-	return claims.Subject, nil
+	// jti 가 없는 티켓은 일회성 표식을 만들 수 없던 구버전이다 — 지금은 발급하지 않는다.
+	if strings.TrimSpace(claims.ID) == "" {
+		return "", "", ErrInvalidCredentials
+	}
+	return claims.Subject, claims.ID, nil
+}
+
+// ConsumeWebAuthnRegisterTicket 은 티켓의 일회성 표식을 소비한다. 이미 쓰였거나 만료됐으면
+// 실패한다. 등록이 실제로 성사되는 시점에만 부른다 — begin 에서 태우면 생체인증을 취소한
+// 사용자가 다시 시도할 수 없다.
+func (s *Service) ConsumeWebAuthnRegisterTicket(ctx context.Context, userID string, ticketID string) error {
+	record, err := s.store.ConsumeWebAuthnCeremony(ctx, webauthnRegisterTicketCeremonyID(ticketID))
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+	if record.Purpose != WebAuthnPurposeRegisterTicket || record.UserID != userID {
+		return ErrInvalidCredentials
+	}
+	if time.Now().After(record.ExpiresAt) {
+		return ErrInvalidCredentials
+	}
+	return nil
 }
 
 // resolveVaultBootstrap 은 클라이언트 부류(resolution)에 맞는 볼트 descriptor 를 만든다.

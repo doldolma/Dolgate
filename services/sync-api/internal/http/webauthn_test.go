@@ -53,6 +53,27 @@ func loginPageBody(t *testing.T, router *gin.Engine) string {
 	return recorder.Body.String()
 }
 
+// 로그인 폼의 fetch 핸들러는 "서버가 응답을 준" 경우 절대 폼을 다시 보내면 안 된다.
+// 재전송하면 서버가 이미 처리한 요청이 한 번 더 실행된다 — 회원가입이라면 첫 요청에서
+// 계정이 만들어진 뒤 두 번째가 중복으로 실패해, 계정은 있는데 "가입 실패"로 보인다.
+// 유일하게 허용되는 폴백은 fetch 자체가 실패한 경우(.catch)뿐이다.
+func TestLoginFormDoesNotResubmitWhenServerResponded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouterWithConfig(t, enabledWebAuthnConfig())
+	body := loginPageBody(t, router)
+
+	if calls := strings.Count(body, "nativeSubmit();"); calls != 1 {
+		t.Fatalf("nativeSubmit() 호출은 .catch 한 곳이어야 한다, got %d", calls)
+	}
+	if !strings.Contains(body, ".catch(function () { nativeSubmit(); });") {
+		t.Fatalf("fetch 실패 시 네이티브 전송 폴백이 사라졌다")
+	}
+	// 예상 밖 응답(평문 4xx/5xx, 프록시 오류 페이지)에서는 알리고 버튼을 되살린다.
+	if !strings.Contains(body, "서버가 로그인을 마치지 못했습니다") {
+		t.Fatalf("예상 밖 응답 안내 문구가 없다")
+	}
+}
+
 func TestWebAuthnEnabledExposesCapabilityAndLogin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouterWithConfig(t, enabledWebAuthnConfig())

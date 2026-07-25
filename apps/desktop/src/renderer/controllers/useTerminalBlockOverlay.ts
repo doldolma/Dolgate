@@ -11,6 +11,7 @@ import type { MutableRefObject } from 'react';
 import type { Terminal } from 'xterm';
 import {
   getCommandBlockAtLine,
+  getCommandBlocks,
   type TerminalCommandBlockState,
 } from '../lib/terminal-command-blocks';
 
@@ -26,6 +27,8 @@ export interface TerminalBlockOverlayState {
   exitCode: number | null;
   durationMs: number | null;
   command: string | null;
+  /** 읽은 명령이 실제 입력과 다를 수 있음 — 재실행 버튼을 막는 근거. */
+  commandUnreliable: boolean;
 }
 
 /**
@@ -141,6 +144,7 @@ export function useTerminalBlockOverlay({
       exitCode: block.exitCode,
       durationMs: block.durationMs,
       command: block.command,
+      commandUnreliable: block.commandUnreliable,
     };
     setOverlay((current) =>
       current &&
@@ -161,6 +165,12 @@ export function useTerminalBlockOverlay({
       return;
     }
     if (terminal.buffer.active.type !== 'normal') {
+      setSticky(null);
+      return;
+    }
+    // readGeometry 는 getBoundingClientRect 를 두 번 부른다(= 강제 레이아웃). 이 함수는
+    // 매 렌더 프레임마다 도니, 블록이 하나도 없으면(셸 통합 미설치 포함) 측정 전에 빠진다.
+    if (getCommandBlocks(sessionIdRef.current).length === 0) {
       setSticky(null);
       return;
     }

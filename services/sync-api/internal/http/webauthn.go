@@ -123,6 +123,14 @@ func registerWebAuthnRoutes(
 				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "등록되지 않은 패스키입니다.", "code": "unknown_credential"})
 				return
 			}
+			// 복제 의심은 unknown 과 반대다 — 서버 기록은 멀쩡하므로 code 를 주지 않는다
+			// (주면 클라이언트가 정상 패스키를 지운다). 대신 다음 행동을 알려 준다.
+			if errors.Is(err, auth.ErrClonedWebAuthnCredential) {
+				ctx.JSON(http.StatusUnauthorized, gin.H{
+					"error": "이 패스키는 사용할 수 없습니다. 다른 방법으로 로그인한 뒤 설정에서 삭제하고 다시 등록해 주세요.",
+				})
+				return
+			}
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
@@ -147,17 +155,26 @@ func registerWebAuthnRoutes(
 	})
 
 	router.POST("/auth/webauthn/register/begin", func(ctx *gin.Context) {
+		// 티켓 하나로 ceremony 를 무한정 만들 수 있고, 가짜 티켓도 매번 RSA 검증을 태운다.
+		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+			return
+		}
 		var request webauthnRegisterBeginRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		userID, err := authService.ParseWebAuthnRegisterTicket(request.Ticket)
+		userID, _, err := authService.ParseWebAuthnRegisterTicket(request.Ticket)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}
 		creation, ceremonyID, err := runtime.service.BeginRegistration(ctx.Request.Context(), userID)
+		if errors.Is(err, auth.ErrTooManyWebAuthnCredentials) {
+			logAndJSONError(ctx, http.StatusConflict, tooManyPasskeysMessage, err)
+			return
+		}
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return
@@ -166,12 +183,16 @@ func registerWebAuthnRoutes(
 	})
 
 	router.POST("/auth/webauthn/register/finish", func(ctx *gin.Context) {
+		if !limiters.webauthn.Allow(authAttemptKeys(ctx.ClientIP(), "")...) {
+			ctx.JSON(http.StatusTooManyRequests, gin.H{"error": tooManyAuthAttemptsMessage})
+			return
+		}
 		var request webauthnRegisterFinishRequest
 		if err := ctx.ShouldBindJSON(&request); err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
-		userID, err := authService.ParseWebAuthnRegisterTicket(request.Ticket)
+		userID, ticketID, err := authService.ParseWebAuthnRegisterTicket(request.Ticket)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
@@ -180,7 +201,18 @@ func registerWebAuthnRoutes(
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": "잘못된 요청입니다."})
 			return
 		}
-		if err := runtime.service.FinishRegistration(ctx.Request.Context(), userID, request.CeremonyID, request.Name, request.Credential); err != nil {
+		// 티켓 소비는 등록 직전에. 생체인증을 취소해 여기까지 못 온 경우엔 태우지 않아
+		// 같은 티켓으로 다시 시도할 수 있다.
+		if err := authService.ConsumeWebAuthnRegisterTicket(ctx.Request.Context(), userID, ticketID); err != nil {
+			logAndJSONError(ctx, http.StatusUnauthorized, "등록 링크가 만료되었거나 이미 사용되었습니다.", err)
+			return
+		}
+		err = runtime.service.FinishRegistration(ctx.Request.Context(), userID, request.CeremonyID, request.Name, request.Credential)
+		if errors.Is(err, auth.ErrTooManyWebAuthnCredentials) {
+			logAndJSONError(ctx, http.StatusConflict, tooManyPasskeysMessage, err)
+			return
+		}
+		if err != nil {
 			logAndJSONError(ctx, http.StatusBadRequest, "패스키 등록에 실패했습니다.", err)
 			return
 		}
@@ -192,7 +224,7 @@ func registerWebAuthnRoutes(
 	group.Use(authMiddleware(authService))
 	group.POST("/registration-ticket", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
-		ticket, err := authService.NewWebAuthnRegisterTicket(userID)
+		ticket, err := authService.NewWebAuthnRegisterTicket(ctx.Request.Context(), userID)
 		if err != nil {
 			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
 			return

@@ -103,6 +103,17 @@ function isE2EFakeSessionShareEnabled(): boolean {
 // 세션 공유 REST 요청 타임아웃 — 서버 다운/역방향 프록시 지연 시 무한 대기하지 않도록.
 const SESSION_SHARE_REQUEST_TIMEOUT_MS = 15_000;
 
+/** 타임아웃(헤더 대기·본문 스트리밍 모두)을 사용자용 문구로 바꾼다. 그 외 오류는 그대로 둔다. */
+function toSessionShareTimeoutError(error: unknown): unknown {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === "TimeoutError" || name === "AbortError") {
+    return new Error(
+      "세션 공유 서버 응답이 지연되어 요청을 취소했습니다. 잠시 후 다시 시도해 주세요.",
+    );
+  }
+  return error;
+}
+
 export function toApiErrorMessage(
   response: Response,
   fallback: string,
@@ -662,24 +673,20 @@ export class SessionShareService {
     return response;
   }
 
-  // 타임아웃 있는 fetch — 서버 다운/프록시 지연에도 무한 대기하지 않게 AbortController로 끊는다.
+  // 타임아웃 있는 fetch — 서버 다운/프록시 지연에도 무한 대기하지 않게 끊는다.
+  //
+  // AbortController + clearTimeout(finally) 조합을 쓰면 안 된다: fetch 는 "헤더가 도착하면"
+  // resolve 하므로 그 순간 타이머가 해제되고, 이후 response.json()/text() 본문 읽기는 무방비가
+  // 된다. 헤더만 보내고 본문에서 멈추는 리버스 프록시가 정확히 이 타임아웃이 막으려던 상황인데
+  // 그대로 무한 대기하게 된다. AbortSignal.timeout 은 본문 스트리밍까지 계속 살아 있다.
   private async fetchWithTimeout(url: URL, init: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      SESSION_SHARE_REQUEST_TIMEOUT_MS,
-    );
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      return await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(SESSION_SHARE_REQUEST_TIMEOUT_MS),
+      });
     } catch (error) {
-      if (controller.signal.aborted) {
-        throw new Error(
-          "세션 공유 서버 응답이 지연되어 요청을 취소했습니다. 잠시 후 다시 시도해 주세요.",
-        );
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
+      throw toSessionShareTimeoutError(error);
     }
   }
 
