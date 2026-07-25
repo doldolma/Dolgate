@@ -487,19 +487,9 @@ export function SettingsPanel({
     }
   }
 
-  // blur 로만 저장하면 타이핑 중 설정을 닫았을 때 값이 조용히 사라진다 — Chromium 은
-  // 포커스된 요소가 DOM 에서 제거될 때 blur 를 쏘지 않는다. 언마운트 시 한 번 더 저장한다.
-  // (디바운스로 바꾸면 "5000" 을 치는 도중 "5" 가 저장돼 replay 가 잘려 나가는 원래 버그가
-  //  되살아난다 — 그래서 중간 저장은 하지 않는다.)
-  const flushReplayRetentionRef = useRef<() => void>(() => undefined);
-  flushReplayRetentionRef.current = () => {
-    const parsed = parsedReplayRetentionInput();
-    if (parsed !== null && parsed !== settings.sessionReplayRetentionCount) {
-      void handleChangeSessionReplayRetentionCount(parsed);
-    }
-  };
-  useEffect(() => () => flushReplayRetentionRef.current(), []);
-
+  // 저장은 blur/Enter 에서만 한다. 타이핑 중 패널이 닫히면 입력값이 사라지지만, 언마운트
+  // 때 대신 저장해 주면 "5000" 을 치다 만 "5" 가 그대로 저장돼 replay 가 그 개수까지
+  // 삭제된다(prune 은 되돌릴 수 없다). 값이 날아가는 쪽이 낫다.
   async function handleChangeSessionReplayRetentionCount(
     sessionReplayRetentionCount: number,
   ) {

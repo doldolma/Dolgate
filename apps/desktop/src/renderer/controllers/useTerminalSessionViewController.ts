@@ -284,7 +284,8 @@ export function useTerminalSessionViewController({
       isPendingConnectionSessionId(currentSessionId) ||
       currentStatus === 'pending' ||
       currentStatus === 'error' ||
-      currentStatus === 'disconnecting'
+      currentStatus === 'disconnecting' ||
+      currentStatus === 'closed'
     ) {
       return;
     }
@@ -1203,7 +1204,9 @@ export function useTerminalSessionViewController({
     if (!terminal || !block) {
       return;
     }
-    void navigator.clipboard.writeText(readBlockOutput(terminal, block));
+    void navigator.clipboard.writeText(
+      readBlockOutput(liveSessionIdRef.current, terminal, block),
+    );
   }, [findHoveredBlock]);
 
   const handleBlockCopyCommand = useCallback(() => {
@@ -1298,7 +1301,7 @@ export function useTerminalSessionViewController({
     if (!terminal || !block) {
       return;
     }
-    const output = readBlockOutput(terminal, block);
+    const output = readBlockOutput(liveSessionIdRef.current, terminal, block);
     // 요청이 비대해지지 않도록 출력은 뒤쪽만 싣는다(에러는 대개 끝에 나온다).
     const trimmedOutput =
       output.length > 4000 ? `…(생략)\n${output.slice(-4000)}` : output;
@@ -1699,6 +1702,8 @@ export function useTerminalSessionViewController({
     autocompleteSelectedIndex: autocomplete.selectedIndex,
     autocompleteAnchor,
     blockOverlay,
+    // 끊긴 세션에서 재실행 버튼이 눌리기만 하고 아무 일도 안 하는 것을 막는다.
+    blockRerunEnabled: tab?.status === 'connected',
     blockSticky,
     commandPaletteOpen,
     commandPaletteItems,

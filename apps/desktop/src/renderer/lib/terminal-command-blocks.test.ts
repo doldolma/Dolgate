@@ -46,12 +46,17 @@ function createFakeTerminal(rows: string[] = [], wrappedLines: number[] = []) {
       if (text === undefined) {
         return undefined;
       }
+      // xterm 의 셀 모델을 최소한만 흉내 낸다. NUL 은 "쓰인 적 없는 칸"(넓은 글자가 행 끝에
+      // 못 들어갔을 때 xterm 이 채우는 것)으로, xterm 처럼 공백으로 렌더되지만 코드가 0 이라
+      // 사용자가 친 공백과 구분된다.
       return {
-        // xterm 과 같게 trimRight 를 실제로 반영한다 — 접힘 경계에서 명령에 속한 공백이
-        // 잘리는지 여부가 이 인자에 달려 있다.
-        translateToString: (trimRight: boolean) =>
-          trimRight ? text.replace(/\s+$/, '') : text,
+        translateToString: (trimRight: boolean, from = 0, to = text.length) => {
+          const slice = text.slice(from, to).replace(/\u0000/g, ' ');
+          return trimRight ? slice.replace(/\s+$/, '') : slice;
+        },
         isWrapped: wrappedLines.includes(line),
+        length: text.length,
+        getCell: (x: number) => ({ getCode: () => text.charCodeAt(x) || 0 }),
       };
     },
   };
@@ -383,7 +388,7 @@ describe('terminal-command-blocks', () => {
     finishCommandBlock(SESSION, fake.terminal, 0);
 
     const [block] = getCommandBlocks(SESSION);
-    expect(readBlockOutput(fake.terminal, block)).toBe(
+    expect(readBlockOutput(SESSION, fake.terminal, block)).toBe(
       'first line\nwrapped-startwrapped-end',
     );
   });
@@ -502,5 +507,24 @@ describe('terminal-command-blocks (실제 xterm)', () => {
     broken.container.remove();
     healthy.terminal.dispose();
     healthy.container.remove();
+  });
+});
+
+describe('terminal-command-blocks (셸 훅 잡음)', () => {
+  const HOOK_SESSION = 'session-hook-noise';
+
+  it('명령과 133;C 사이의 빈 줄은 재실행 불가로 만들지 않는다', () => {
+    // preexec·PS0 훅이 무언가를 출력했다 지운 자리다. 명령 자체는 온전한데 이걸로
+    // unreliable 을 세우면 그 사용자의 모든 명령에 "재실행 불가" 배지가 붙는다.
+    const fake = createFakeTerminal(['$ ls -la', '']);
+    fake.buffer.cursorX = 2;
+    notePromptCommandStart(HOOK_SESSION, fake.terminal);
+    fake.buffer.cursorY = 2;
+    beginCommandBlock(HOOK_SESSION, fake.terminal, null);
+
+    const [block] = getCommandBlocks(HOOK_SESSION);
+    expect(block.command).toBe('ls -la');
+    expect(block.commandUnreliable).toBe(false);
+    clearCommandBlocks(HOOK_SESSION);
   });
 });

@@ -1975,13 +1975,16 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
           event.preventDefault();
           busy = true;
           if (submitButton) { submitButton.disabled = true; }
+          // 응답 헤더가 오는 순간 서버는 이 요청을 이미 처리한 것이다. 그 뒤의 실패
+          // (본문이 잘림, 연결 끊김, 파싱 오류)는 재전송하면 안 된다.
+          var responded = false;
           fetch(form.action, {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams(new FormData(form)).toString()
           })
-            .then(function (response) { return response.text(); })
+            .then(function (response) { responded = true; return response.text(); })
             .then(function (html) {
               var doc = new DOMParser().parseFromString(html, 'text/html');
               var callbackLink = doc.getElementById('open-app');
@@ -2004,10 +2007,17 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
               showError(serverError ? serverError.textContent.trim() : '로그인에 실패했습니다.');
               unlock();
             })
-            // fetch 자체가 실패한 경우(네트워크 끊김, 확장/프록시가 fetch 만 차단)에만
-            // 네이티브 전송으로 폴백한다 — 요청이 서버에 닿지 않았을 가능성이 높고,
-            // 폴백이 없으면 fetch 가 막힌 환경에서 로그인이 아예 불가능해진다.
-            .catch(function () { nativeSubmit(); });
+            .catch(function () {
+              if (responded) {
+                showError('서버 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                unlock();
+                return;
+              }
+              // 요청이 서버에 닿지도 못한 경우(네트워크 끊김, 확장/프록시가 fetch 만 차단)
+              // 에만 네이티브 전송으로 폴백한다 — 폴백이 없으면 fetch 가 막힌 환경에서
+              // 로그인이 아예 불가능해진다.
+              nativeSubmit();
+            });
         });
       })();
     </script>
@@ -2258,19 +2268,29 @@ var webauthnRegisterPageTemplate = template.Must(template.New("webauthn-register
             clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
           };
         }
+        // 서버가 내려준 문구를 그대로 쓴다. 안 읽으면 "개수 초과라 먼저 지우라"거나
+        // "등록 링크가 이미 사용됐다" 같은, 다음에 뭘 할지 알려 주는 안내가 사라진다.
+        async function serverError(response, fallback) {
+          try {
+            var body = await response.json();
+            return (body && typeof body.error === 'string' && body.error) || fallback;
+          } catch (error) {
+            return fallback;
+          }
+        }
         async function register() {
           setStatus('진행 중…');
           var beginResponse = await fetch('/auth/webauthn/register/begin', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: TICKET })
           });
-          if (!beginResponse.ok) { throw new Error('등록을 시작할 수 없습니다.'); }
+          if (!beginResponse.ok) { throw new Error(await serverError(beginResponse, '등록을 시작할 수 없습니다.')); }
           var data = await beginResponse.json();
           var credential = await navigator.credentials.create({ publicKey: decodeCreationOptions(data.publicKey) });
           var finishResponse = await fetch('/auth/webauthn/register/finish', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ticket: TICKET, ceremonyId: data.ceremonyId, name: document.getElementById('passkey-name').value, credential: encodeAttestation(credential) })
           });
-          if (!finishResponse.ok) { throw new Error('패스키 등록에 실패했습니다.'); }
+          if (!finishResponse.ok) { throw new Error(await serverError(finishResponse, '패스키 등록에 실패했습니다.')); }
           markDone();
         }
         var registerButton = document.getElementById('register');

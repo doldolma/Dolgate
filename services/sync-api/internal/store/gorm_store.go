@@ -21,6 +21,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/schema"
 
 	syncmodel "dolssh/services/sync-api/internal/sync"
 )
@@ -108,9 +109,10 @@ func (refreshTokenRow) TableName() string {
 }
 
 type exchangeCodeRow struct {
-	CodeHash  string    `gorm:"column:code_hash;primaryKey;type:varchar(191)"`
-	UserID    string    `gorm:"column:user_id;not null;index;type:varchar(191)"`
-	ExpiresAt time.Time `gorm:"column:expires_at;not null"`
+	CodeHash string `gorm:"column:code_hash;primaryKey;type:varchar(191)"`
+	UserID   string `gorm:"column:user_id;not null;index;type:varchar(191)"`
+	// ceremony 쪽과 같은 이유 — 만료 정리가 이 컬럼으로 스캔한다.
+	ExpiresAt time.Time `gorm:"column:expires_at;not null;index"`
 }
 
 func (exchangeCodeRow) TableName() string {
@@ -176,21 +178,26 @@ type GormStore struct {
 
 	// 만료 행 청소는 쓰기 경로에 얹혀 돈다(별도 스위퍼 고루틴 없이). begin 은 /login
 	// 페이지를 볼 때마다 불리므로 매번 지우면 쓰기가 배가 된다 — 간격을 두고 한 번씩만.
+	// 간격은 테이블마다 따로 센다. 하나로 묶으면 쓰기가 잦은 쪽(ceremony)이 매 창을
+	// 차지해 exchange code 는 사실상 정리되지 않는다.
 	sweepMu     sync.Mutex
-	lastSweepAt time.Time
+	lastSweptAt map[string]time.Time
 }
 
 // 만료 행 청소 간격.
 const expiredRowSweepInterval = 5 * time.Minute
 
 // shouldSweepExpired 는 마지막 청소로부터 간격이 지났으면 true 를 돌려주고 시각을 갱신한다.
-func (s *GormStore) shouldSweepExpired(now time.Time) bool {
+func (s *GormStore) shouldSweepExpired(table string, now time.Time) bool {
 	s.sweepMu.Lock()
 	defer s.sweepMu.Unlock()
-	if !s.lastSweepAt.IsZero() && now.Sub(s.lastSweepAt) < expiredRowSweepInterval {
+	if s.lastSweptAt == nil {
+		s.lastSweptAt = make(map[string]time.Time)
+	}
+	if last, ok := s.lastSweptAt[table]; ok && now.Sub(last) < expiredRowSweepInterval {
 		return false
 	}
-	s.lastSweepAt = now
+	s.lastSweptAt[table] = now
 	return true
 }
 
@@ -480,32 +487,35 @@ func (s *GormStore) SaveWebAuthnCredential(ctx context.Context, credential WebAu
 		CreatedAt:        createdAt.UTC(),
 		LastUsedAt:       lastUsedAt.UTC(),
 	}
+	// credential id 는 인증기가 정하는 값이라 남의 것을 그대로 흉내 낼 수 있다. upsert 로
+	// 쓰면 충돌 시 data(공개키까지)를 덮어써, 공격자가 소유권을 못 가져가도 피해자의 패스키를
+	// 못 쓰게 만들 수 있다. "먼저 읽고 판단"은 잠그지 않으면 경쟁에 진다.
+	//
+	// 그래서 소유자를 조건에 넣은 UPDATE 를 먼저 하고, 0행이면 INSERT 를 시도한다. 남의
+	// 자격증명이면 UPDATE 가 0행이고 INSERT 가 중복키로 튕겨 나온다 — 방언에 상관없이
+	// (MySQL 의 ON DUPLICATE KEY UPDATE 는 WHERE 를 못 붙인다) 원자적이다.
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// credential id 는 인증기가 정하는 값이라 남의 것을 그대로 흉내 낼 수 있다. 소유자가
-		// 다르면 거부한다 — 통과시키면 아래 upsert 가 행을 덮어써 피해자의 패스키가 사라지고,
-		// 그 뒤 로그인 실패가 unknown_credential 로 나가 클라이언트에서까지 지워진다.
-		// Take 이 아니라 Find — 신규 등록(대부분)에서 ErrRecordNotFound 가 나면 gorm 기본
-		// 로거가 등록마다 에러 줄을 찍는다.
-		var existing []webauthnCredentialRow
-		if err := tx.Where("credential_id_hash = ?", row.CredentialIDHash).Limit(1).Find(&existing).Error; err != nil {
+		updated := tx.Model(&webauthnCredentialRow{}).
+			Where("credential_id_hash = ? AND user_id = ?", row.CredentialIDHash, row.UserID).
+			Updates(map[string]any{
+				"credential_id": row.CredentialID,
+				"name":          row.Name,
+				"data":          row.Data,
+				"last_used_at":  row.LastUsedAt,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected > 0 {
+			return nil
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return ErrWebAuthnCredentialOwned
+			}
 			return err
 		}
-		if len(existing) > 0 && existing[0].UserID != row.UserID {
-			return ErrWebAuthnCredentialOwned
-		}
-		return tx.
-			Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "credential_id_hash"}},
-				// user_id 는 갱신하지 않는다 — 위 검사와 이 쓰기 사이의 경쟁에서도
-				// 소유권이 넘어가지 않게 한다(같은 사용자의 재등록은 그대로 동작).
-				DoUpdates: clause.Assignments(map[string]any{
-					"credential_id": row.CredentialID,
-					"name":          row.Name,
-					"data":          row.Data,
-					"last_used_at":  row.LastUsedAt,
-				}),
-			}).
-			Create(&row).Error
+		return nil
 	})
 }
 
@@ -578,20 +588,49 @@ func (s *GormStore) SaveWebAuthnCeremony(ctx context.Context, ceremony WebAuthnC
 	}
 	// begin 은 로그인 페이지를 볼 때마다 행을 하나 남기는데, 지우는 건 성공적으로 소비된
 	// 것뿐이다. 이탈·실패분을 여기서 정리하지 않으면 테이블이 끝없이 자란다.
-	s.sweepExpired(&webauthnCeremonyRow{})
+	s.sweepExpired(&webauthnCeremonyRow{}, "id")
 	return nil
 }
 
-// sweepExpired 는 만료된 행을 지운다. 실패해도 호출자의 작업은 이미 성공했으므로 삼킨다.
-func (s *GormStore) sweepExpired(model any) {
+// 한 번의 정리에서 지우는 최대 행 수. 상한이 없으면 오래 방치된 배포의 첫 정리가 수백만
+// 행짜리 DELETE 가 되어, 그걸 유발한 요청(로그인)이 그동안 멈추고 테이블이 잠긴다.
+const expiredRowSweepBatch = 1000
+
+// sweepExpired 는 만료된 행을 배치만큼 지운다. 실패해도 호출자의 작업은 이미 성공했으므로
+// 삼킨다. 배치를 가득 채워 지웠으면 아직 밀린 것이므로 다음 쓰기에서 곧바로 이어서 지운다.
+func (s *GormStore) sweepExpired(model schema.Tabler, primaryKeyColumn string) {
 	now := time.Now().UTC()
-	if !s.shouldSweepExpired(now) {
+	table := model.TableName()
+	if !s.shouldSweepExpired(table, now) {
 		return
 	}
-	// 요청 컨텍스트가 끊겨도 청소는 마치도록 분리한다 — 다음 기회까지 밀리면 그만큼 쌓인다.
-	if err := s.db.Where("expires_at < ?", now).Delete(model).Error; err != nil {
-		log.Printf("store: 만료 행 정리 실패: %v", err)
+	// LIMIT 을 건 DELETE 는 방언마다 지원이 갈려서(Postgres 는 불가) 키를 먼저 뽑아 지운다.
+	// 요청 컨텍스트는 쓰지 않는다 — 클라이언트가 끊겨도 정리는 마쳐야 다음으로 밀리지 않는다.
+	var keys []string
+	if err := s.db.Model(model).
+		Where("expires_at < ?", now).
+		Limit(expiredRowSweepBatch).
+		Pluck(primaryKeyColumn, &keys).Error; err != nil {
+		log.Printf("store: 만료 행 조회 실패: %v", err)
+		return
 	}
+	if len(keys) == 0 {
+		return
+	}
+	if err := s.db.Where(primaryKeyColumn+" IN ?", keys).Delete(model).Error; err != nil {
+		log.Printf("store: 만료 행 정리 실패: %v", err)
+		return
+	}
+	if len(keys) >= expiredRowSweepBatch {
+		s.allowImmediateSweep(table)
+	}
+}
+
+// allowImmediateSweep 은 그 테이블의 다음 쓰기가 간격을 기다리지 않고 정리를 잇게 한다.
+func (s *GormStore) allowImmediateSweep(table string) {
+	s.sweepMu.Lock()
+	defer s.sweepMu.Unlock()
+	delete(s.lastSweptAt, table)
 }
 
 func (s *GormStore) ConsumeWebAuthnCeremony(ctx context.Context, id string) (WebAuthnCeremony, error) {
@@ -683,7 +722,7 @@ func (s *GormStore) SaveExchangeCode(ctx context.Context, code ExchangeCode) err
 		return err
 	}
 	// ceremony 와 같은 이유 — 앱으로 전달되지 못한 코드가 영구히 남는다.
-	s.sweepExpired(&exchangeCodeRow{})
+	s.sweepExpired(&exchangeCodeRow{}, "code_hash")
 	return nil
 }
 

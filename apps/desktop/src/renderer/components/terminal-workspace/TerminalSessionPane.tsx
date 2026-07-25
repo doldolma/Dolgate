@@ -600,6 +600,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                 onCopyOutput={controller.handleBlockCopyOutput}
                 onCopyCommand={controller.handleBlockCopyCommand}
                 onRerun={controller.handleBlockRerun}
+                rerunEnabled={controller.blockRerunEnabled}
                 onAskAi={controller.handleBlockAskAi}
                 aiEnabled={aiAssistantEnabled}
                 toolbarTopOffset={blockToolbarTopOffset}

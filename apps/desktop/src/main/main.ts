@@ -65,6 +65,11 @@ if (!app.isPackaged) {
   app.commandLine.appendSwitch('disable-http-cache');
 }
 
+// 탭을 가진 워크스페이스 창들. Cmd+W 가 "탭 닫기"인 건 여기서만이고, 리플레이처럼 탭이
+// 없는 보조 창에서는 창 자체를 닫아야 한다(안 그러면 아무 일도 일어나지 않는다 — 보조 창의
+// 렌더러는 closeActiveTab 을 처리하지 않는다).
+const workspaceWindowIds = new Set<number>();
+
 // Cmd+W 를 "창 닫기"가 아니라 "현재 탭 닫기"(크롬식)로 바꾸기 위해 커스텀 메뉴를 쓴다.
 // 기본 메뉴엔 Window>Close(Cmd+W, 창 닫기)가 있어 이를 대체해야 한다. 표준 역할
 // (앱/편집/보기 — 복사·붙여넣기·종료 등)은 그대로 유지한다. Cmd+Shift+W 가 창 닫기.
@@ -135,9 +140,15 @@ function installApplicationMenu(openNewWindow: () => void): void {
           label: '탭 닫기',
           accelerator: 'CmdOrCtrl+W',
           click: () => {
-            BrowserWindow.getFocusedWindow()?.webContents.send(
-              ipcChannels.window.closeActiveTab,
-            );
+            const focused = BrowserWindow.getFocusedWindow();
+            if (!focused) {
+              return;
+            }
+            if (!workspaceWindowIds.has(focused.id)) {
+              focused.close();
+              return;
+            }
+            focused.webContents.send(ipcChannels.window.closeActiveTab);
           },
         },
         { label: '창 닫기', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
@@ -458,10 +469,12 @@ if (termiusHelperArgIndex >= 0) {
       }
     });
 
+    workspaceWindowIds.add(window.id);
     if (launchIntent) {
       launchIntentsByWindowId.set(window.id, launchIntent);
     }
     window.on('closed', () => {
+      workspaceWindowIds.delete(window.id);
       launchIntentsByWindowId.delete(window.id);
     });
 

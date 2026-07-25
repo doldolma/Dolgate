@@ -21,6 +21,7 @@ import {
   SelectField,
   Toolbar,
 } from '../ui';
+import { Play } from '../ui/icons';
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -543,11 +544,6 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-[0.55rem]">
-                      {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
-                        <Button variant="secondary" size="sm" onClick={() => void onOpenReplay(replayRecordingId)}>
-                          Replay
-                        </Button>
-                      ) : null}
                       <Badge tone={getConnectionKindTone(sessionLifecycleMetadata.connectionKind)}>
                         {getConnectionKindLabel(sessionLifecycleMetadata.connectionKind)}
                       </Badge>
@@ -555,6 +551,19 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                         {getLifecycleStatusLabel(sessionLifecycleMetadata.status)}
                       </Badge>
                     </div>
+                    {/* 유일하게 누를 수 있는 요소라 배지 사이에 끼워 두지 않는다 — 오른쪽 끝
+                        액션 자리로 빼고 아이콘을 붙여야 배지와 구분된다(다크 테마에서 특히). */}
+                    {sessionLifecycleMetadata.status !== 'connected' && replayRecordingId ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="ml-auto"
+                        onClick={() => void onOpenReplay(replayRecordingId)}
+                      >
+                        <Play className="h-[0.8rem] w-[0.8rem]" aria-hidden />
+                        Replay
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">

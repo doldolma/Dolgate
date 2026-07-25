@@ -792,23 +792,15 @@ export function createSftpServices(deps: SliceDeps) {
       return;
     }
     const request = job.request;
-    if (request?.target.kind !== "remote") {
-      // 원래 업로드 대상을 모르면 재시도하지 않는다 — targetPath 가 null 이면
-      // uploadFilesToHostPath 가 홈 디렉터리로 폴백해 엉뚱한 곳에 올리고 성공으로 보고한다.
-      return;
-    }
-    const deadEndpointId = request.target.endpointId;
-    const targetPath = request.target.path;
+    const remoteTarget = request?.target.kind === "remote" ? request.target : null;
+    const deadEndpointId = remoteTarget?.endpointId ?? null;
     const failedLocalPaths = (job.failedItems ?? [])
       .map((failed) => failed.item.path)
       .filter(
         (path): path is string => typeof path === "string" && path.length > 0,
       );
-    if (failedLocalPaths.length === 0) {
-      return;
-    }
-
-    // 죽은 캐시 엔드포인트를 무효화하고 실제로 닫는다(참조만 버리면 서버 타임아웃까지 잔존).
+    // 재시도 여부와 무관하게 죽은 엔드포인트는 먼저 정리한다 — 남겨 두면 다음 드래그
+    // 업로드가 그 캐시를 한 번 찔러 보고 실패한 뒤에야 재수립한다.
     clearTerminalUploadIdleTracking(hostId);
     set((current) => {
       const next = { ...current.sftp.terminalUploadEndpoints };
@@ -818,6 +810,13 @@ export function createSftpServices(deps: SliceDeps) {
     if (deadEndpointId) {
       void api.sftp.disconnect(deadEndpointId).catch(() => undefined);
     }
+
+    // 원래 업로드 대상을 모르면 재시도하지 않는다 — targetPath 가 null 이면
+    // uploadFilesToHostPath 가 홈 디렉터리로 폴백해 엉뚱한 곳에 올리고 성공으로 보고한다.
+    if (!remoteTarget || failedLocalPaths.length === 0) {
+      return;
+    }
+    const targetPath = remoteTarget.path;
 
     const result = await uploadFilesToHostPath(set, get, {
       hostId,

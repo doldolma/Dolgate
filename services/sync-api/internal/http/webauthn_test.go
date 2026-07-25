@@ -63,10 +63,18 @@ func TestLoginFormDoesNotResubmitWhenServerResponded(t *testing.T) {
 	body := loginPageBody(t, router)
 
 	if calls := strings.Count(body, "nativeSubmit();"); calls != 1 {
-		t.Fatalf("nativeSubmit() 호출은 .catch 한 곳이어야 한다, got %d", calls)
+		t.Fatalf("nativeSubmit() 호출은 폴백 한 곳이어야 한다, got %d", calls)
 	}
-	if !strings.Contains(body, ".catch(function () { nativeSubmit(); });") {
-		t.Fatalf("fetch 실패 시 네이티브 전송 폴백이 사라졌다")
+	// 응답 헤더가 온 뒤의 실패(본문 잘림·연결 끊김·파싱 오류)는 .catch 로 떨어지지만
+	// 서버는 이미 요청을 처리했다. responded 게이트가 없으면 그 경우에도 재전송된다.
+	if !strings.Contains(body, "responded = true; return response.text();") {
+		t.Fatalf("응답 도착 표식이 없다 — .catch 가 본문 실패까지 재전송한다")
+	}
+	if !strings.Contains(body, "if (responded) {") {
+		t.Fatalf("폴백이 responded 로 걸러지지 않는다")
+	}
+	if !strings.Contains(body, "서버 응답을 받지 못했습니다") {
+		t.Fatalf("응답 후 실패 안내 문구가 없다")
 	}
 	// 예상 밖 응답(평문 4xx/5xx, 프록시 오류 페이지)에서는 알리고 버튼을 되살린다.
 	if !strings.Contains(body, "서버가 로그인을 마치지 못했습니다") {
