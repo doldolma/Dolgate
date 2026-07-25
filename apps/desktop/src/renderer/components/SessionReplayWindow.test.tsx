@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
     };
     write: ReturnType<typeof vi.fn>;
     setAppearance: ReturnType<typeof vi.fn>;
+    // 화면 전체 직렬화 — 재생 중 프레임마다 불리면 안 되므로 테스트에서 호출 여부를 본다.
+    captureSnapshot: ReturnType<typeof vi.fn>;
+    repaint: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
   }>,
   rafCallbacks: [] as FrameRequestCallback[],
@@ -34,6 +37,8 @@ vi.mock("../lib/terminal-runtime", () => ({
       write: vi.fn(),
       scheduleAfterWriteDrain: vi.fn(),
       captureSnapshot: vi.fn(() => ""),
+      // 패널 토글 등 레이아웃 변경 후 컨트롤러가 다시 그리게 한다.
+      repaint: vi.fn(),
       setAppearance: vi.fn(),
       setWebglEnabled: vi.fn().mockResolvedValue(undefined),
       syncDisplayMetrics: vi.fn(),
@@ -141,6 +146,74 @@ describe("SessionReplayWindow", () => {
         },
       },
     });
+  });
+
+  it("lists scanned commands and seeks to one when clicked", async () => {
+    window.dolssh.sessionReplays.get = vi.fn().mockResolvedValue({
+      recordingId: "recording-cmds",
+      sessionId: "session-cmds",
+      hostId: "host-1",
+      hostLabel: "nas",
+      title: "NAS",
+      connectionKind: "ssh",
+      connectedAt: "2026-03-29T00:00:00.000Z",
+      disconnectedAt: "2026-03-29T00:00:02.000Z",
+      durationMs: 2000,
+      initialCols: 80,
+      initialRows: 24,
+      entries: [
+        { type: "output", atMs: 0, dataBase64: btoa("$ \x1b]133;B\x07") },
+        { type: "output", atMs: 300, dataBase64: btoa("ls -la\r\n\x1b]133;C\x07") },
+        { type: "output", atMs: 800, dataBase64: btoa("out\r\n\x1b]133;D;0\x07") },
+        { type: "output", atMs: 900, dataBase64: btoa("$ \x1b]133;B\x07") },
+        { type: "output", atMs: 1000, dataBase64: btoa("boom\r\n\x1b]133;C\x07") },
+        { type: "output", atMs: 1500, dataBase64: btoa("\x1b]133;D;127\x07") },
+      ],
+    });
+
+    render(<SessionReplayWindow recordingId="recording-cmds" />);
+
+    // 사전 스캔이 끝나면 두 명령이 목록에 뜬다.
+    const failedRow = await screen.findByTitle("boom");
+    expect(await screen.findByTitle("ls -la")).toBeInTheDocument();
+    // 실패한 명령은 종료 코드를 함께 보여준다.
+    expect(within(failedRow).getByText("127")).toBeInTheDocument();
+
+    const runtime = mocks.runtimeRecords[0]!;
+    runtime.terminal.reset.mockClear();
+
+    // 두 번째 명령(1000ms)으로 이동 — 현재 위치보다 뒤이므로 되감기 없이 진행한다.
+    fireEvent.click(failedRow);
+
+    expect(
+      (screen.getByLabelText("Replay scrubber") as HTMLInputElement).value,
+    ).toBe("1000");
+  });
+
+  it("does not serialize the terminal when E2E state publishing is off", async () => {
+    // terminalText 는 captureSnapshot(화면 전체 직렬화)이라 비싸다. E2E 훅이 꺼진
+    // 프로덕션에서는 재생 중 프레임마다 이게 돌면 안 된다.
+    expect(
+      (window as Window & { __dolsshE2E?: unknown }).__dolsshE2E,
+    ).toBeUndefined();
+
+    render(<SessionReplayWindow recordingId="recording-1" />);
+    await waitFor(() => expect(mocks.runtimeRecords).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(mocks.rafCallbacks.length).toBeGreaterThan(0));
+
+    const runtime = mocks.runtimeRecords[0]!;
+    runtime.captureSnapshot.mockClear();
+
+    // 재생 프레임 한 번 = positionMs 변경 = E2E 상태 effect 재실행.
+    await act(async () => {
+      mocks.currentNow = 150;
+      mocks.rafCallbacks.shift()?.(150);
+    });
+
+    expect(runtime.captureSnapshot).not.toHaveBeenCalled();
   });
 
   it("renders replay summary and restores output when seeking with the scrubber", async () => {

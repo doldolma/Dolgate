@@ -164,16 +164,23 @@ function removeBlock(session: SessionBlocks, block: TerminalCommandBlock): void 
 }
 
 /**
+ * 버퍼의 최소 표면만 요구한다 — 라이브(xterm)와 리플레이 사전 스캔(xterm-headless)이
+ * 서로 다른 Terminal 타입을 쓰지만 명령 텍스트를 읽는 방식은 같아야 하기 때문이다.
+ */
+export interface CommandTextBuffer {
+  getLine(line: number): { translateToString(trimRight: boolean): string } | undefined;
+}
+
+/**
  * 프롬프트 라인에서 명령 텍스트를 읽어낸다. 키 입력 재구성과 달리 히스토리 호출(↑)·붙여넣기
  * 에서도 화면에 실제로 보이는 값을 그대로 얻는다.
  */
-function readCommandText(
-  terminal: Terminal,
+export function readCommandTextFromBuffer(
+  buffer: CommandTextBuffer,
   promptLine: number,
   promptEndX: number,
   endLineExclusive: number,
 ): string | null {
-  const buffer = terminal.buffer.active;
   const lastLine = Math.min(endLineExclusive, promptLine + MAX_COMMAND_ROWS);
   let text = '';
   for (let line = promptLine; line < lastLine; line += 1) {
@@ -244,7 +251,12 @@ function beginCommandBlockUnsafe(
     id: session.seq,
     state: 'running',
     command: pending
-      ? readCommandText(terminal, marker.line, pending.promptEndX, outputStartLine)
+      ? readCommandTextFromBuffer(
+          buffer,
+          marker.line,
+          pending.promptEndX,
+          outputStartLine,
+        )
       : null,
     exitCode: null,
     startedAt: Date.now(),
