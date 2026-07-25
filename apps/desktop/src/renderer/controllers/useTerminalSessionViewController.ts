@@ -38,6 +38,7 @@ import {
   readBlockOutput,
 } from '../lib/terminal-command-blocks';
 import { useTerminalBlockOverlay } from './useTerminalBlockOverlay';
+import type { TerminalCommandPaletteItem } from '../components/terminal-workspace/TerminalCommandPalette';
 import {
   registerTerminalFocus,
   unregisterTerminalFocus,
@@ -1214,6 +1215,67 @@ export function useTerminalSessionViewController({
     liveOnSendInputRef.current?.(liveSessionIdRef.current, `${block.command}\r`);
   }, [findHoveredBlock]);
 
+  // 명령 팔레트(⌘/Ctrl+Shift+P). 목록은 열 때 스냅샷으로 떠서 렌더 중 블록이 바뀌어도 흔들리지 않는다.
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteItems, setCommandPaletteItems] = useState<
+    TerminalCommandPaletteItem[]
+  >([]);
+
+  const openCommandPalette = useCallback(() => {
+    setCommandPaletteItems(
+      getCommandBlocks(liveSessionIdRef.current).map((block) => ({
+        id: block.id,
+        command: block.command,
+        state: block.state,
+        exitCode: block.exitCode,
+        durationMs: block.durationMs,
+        cwd: block.cwd,
+        startedAt: block.startedAt,
+      })),
+    );
+    setCommandPaletteOpen(true);
+  }, []);
+
+  const closeCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+    // 팔레트를 닫으면 터미널로 입력 포커스를 돌려준다.
+    runtimeRef.current?.focus();
+  }, []);
+
+  const findBlockById = useCallback(
+    (id: number) =>
+      getCommandBlocks(liveSessionIdRef.current).find(
+        (block) => block.id === id,
+      ) ?? null,
+    [],
+  );
+
+  const handleCommandPaletteJump = useCallback(
+    (id: number) => {
+      const block = findBlockById(id);
+      if (block && block.marker.line >= 0) {
+        terminalRef.current?.scrollToLine(block.marker.line);
+      }
+      closeCommandPalette();
+    },
+    [closeCommandPalette, findBlockById],
+  );
+
+  const handleCommandPaletteRerun = useCallback(
+    (id: number) => {
+      const block = findBlockById(id);
+      // 실행 중인 명령은 다시 보내지 않는다(실행 중인 프로그램의 stdin 으로 들어간다).
+      if (block && block.state !== 'running' && block.command) {
+        liveOnSendInputRef.current?.(
+          liveSessionIdRef.current,
+          `${block.command}\r`,
+        );
+      }
+      closeCommandPalette();
+    },
+    [closeCommandPalette, findBlockById],
+  );
+
   const handleBlockAskAi = useCallback(() => {
     const terminal = terminalRef.current;
     const block = findHoveredBlock();
@@ -1620,6 +1682,12 @@ export function useTerminalSessionViewController({
     autocompleteAnchor,
     blockOverlay,
     blockSticky,
+    commandPaletteOpen,
+    commandPaletteItems,
+    openCommandPalette,
+    closeCommandPalette,
+    handleCommandPaletteJump,
+    handleCommandPaletteRerun,
     scrollToStickyBlock,
     handleBlockPointerMove,
     clearBlockHover,

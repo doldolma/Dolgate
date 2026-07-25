@@ -39,6 +39,18 @@ export function tmuxPrefixByteFromKey(key: string | undefined): string {
   return TMUX_PREFIX_BYTE;
 }
 
+/**
+ * tmuxPrefixKeyLabels 는 설정 토큰("C-b"/"C-Space")을 단축키 안내에 찍을 키 조합으로 바꾼다.
+ * 파싱 규칙은 tmuxPrefixByteFromKey 와 같게 유지한다(미인식이면 기본 Ctrl-B).
+ */
+export function tmuxPrefixKeyLabels(key: string | undefined): string[] {
+  if (key === 'C-Space') {
+    return ['Ctrl', 'Space'];
+  }
+  const match = /^C-([a-z])$/.exec(key ?? '');
+  return match ? ['Ctrl', match[1].toUpperCase()] : ['Ctrl', 'B'];
+}
+
 export type TmuxPrefixAction =
   | { kind: 'newWindow' }
   | { kind: 'splitPane'; direction: 'h' | 'v' }

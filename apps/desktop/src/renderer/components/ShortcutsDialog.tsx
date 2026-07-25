@@ -1,9 +1,12 @@
 import { DialogBackdrop } from './DialogBackdrop';
 import { ModalBody, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { tmuxPrefixKeyLabels } from '../lib/tmux-prefix';
 
 interface ShortcutsDialogProps {
   open: boolean;
   onClose: () => void;
+  /** 설정된 tmux 프리픽스("C-b" 등). 없으면 기본 Ctrl-B 로 안내한다. */
+  tmuxPrefixKey?: string;
 }
 
 // 플랫폼은 앱이 documentElement.dataset.platform 에 심어두며(NetworkBridge 참고),
@@ -20,7 +23,11 @@ interface ShortcutSection {
   items: Array<{ label: string; keys: string[] }>;
 }
 
-export function ShortcutsDialog({ open, onClose }: ShortcutsDialogProps) {
+export function ShortcutsDialog({
+  open,
+  onClose,
+  tmuxPrefixKey,
+}: ShortcutsDialogProps) {
   if (!open) {
     return null;
   }
@@ -48,8 +55,19 @@ export function ShortcutsDialog({ open, onClose }: ShortcutsDialogProps) {
       ],
     },
     {
+      title: '터미널',
+      items: [
+        { label: '명령 팔레트', keys: [cmd, shift, 'P'] },
+        { label: 'AI 어시스턴트', keys: [cmd, 'I'] },
+        { label: '이전 / 다음 명령', keys: [cmd, '↑ / ↓'] },
+        { label: '이전 / 다음 실패한 명령', keys: [cmd, shift, '↑ / ↓'] },
+      ],
+    },
+    {
       title: 'tmux',
-      items: [{ label: 'tmux 프리픽스', keys: ['Ctrl', 'B'] }],
+      items: [
+        { label: 'tmux 프리픽스', keys: tmuxPrefixKeyLabels(tmuxPrefixKey) },
+      ],
     },
   ];
   return (
@@ -85,6 +103,9 @@ export function ShortcutsDialog({ open, onClose }: ShortcutsDialogProps) {
               ))}
             </div>
           ))}
+          <p className="m-0 text-[0.72rem] leading-[1.5] text-[var(--text-soft)]">
+            명령 팔레트와 명령 이동은 셸 통합(OSC 133)이 동작하는 세션에서만 쓸 수 있습니다.
+          </p>
         </ModalBody>
       </ModalShell>
     </DialogBackdrop>
