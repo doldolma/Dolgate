@@ -17,8 +17,10 @@ import { useTerminalSessionViewController } from '../../controllers/useTerminalS
 import { AiChatPanel } from './AiChatPanel';
 import { TerminalChatToastRegion } from './TerminalChatToastRegion';
 import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
+import { TerminalHostStatusBar } from './TerminalHostStatusBar';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
 import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
+import { useHostMetrics } from '../../controllers/useHostMetrics';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
@@ -185,6 +187,16 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const aiAssistantEnabled = useAppStore(
     (state) => state.settings?.ai?.enabled ?? false,
   );
+  const hostMetricsEnabled = useAppStore(
+    (state) => state.settings?.hostMetricsEnabled ?? false,
+  );
+  // 연결된 호스트 세션에서만. 로컬 터미널은 원격 부하라는 개념이 없다.
+  const hostMetrics = useHostMetrics({
+    sessionId,
+    enabled:
+      hostMetricsEnabled && tab?.source === 'host' && tab?.status === 'connected',
+    visible,
+  });
   // 스티키 헤더가 떠 있고 hover 한 블록이 그 아래로 파고들면(=블록 상단이 화면 위로 잘린
   // 상태) 툴바가 헤더에 가린다. 그 겹치는 만큼만 툴바를 내린다.
   const blockToolbarTopOffset = (() => {
@@ -558,7 +570,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           <div
             ref={controller.containerRef}
             className={cn(
-              'relative m-[0.35rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
+              'relative mx-[0.35rem] mt-[0.35rem] mb-[0.2rem] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_96%,transparent_4%)] p-0 [&_.xterm]:min-h-full [&_.xterm]:h-full [&_.xterm]:w-full [&_.xterm-viewport]:min-h-full [&_.xterm-viewport]:h-full [&_.xterm-viewport]:w-full [&_.xterm-viewport]:bg-transparent [&_.xterm-viewport]:rounded-none',
               showHeader &&
                 'mx-[0.35rem] mb-[0.35rem] mt-0 rounded-b-[6px] rounded-t-none border border-[var(--border)] border-t-0',
               // 명령 블록 점 마커가 들어갈 왼쪽 거터. 이 여백이 없으면 마커가 열 0 위에 그려져
@@ -655,22 +667,31 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
           <AiChatPanel sessionId={sessionId} stableId={stableId} width={aiPanelWidth} />
         ) : null}
       </div>
-      {tab?.moshState ? (
-        <TerminalMoshStatusBar
-          state={tab.moshState}
-          lastResponseAt={tab.lastMoshResponseAt ?? null}
+      {/* 하단 상태바들은 서로 바짝 붙이고, 아래 여백은 이 컨테이너에서 한 번만 준다.
+          각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다. */}
+      <div className="pb-[0.15rem]">
+        <TerminalHostStatusBar
+          status={hostMetrics.status}
+          metrics={hostMetrics.metrics}
+          onRetry={hostMetrics.retry}
         />
-      ) : null}
-      {tab?.tmuxAvailable && !tab.tmux ? (
-        <TerminalTmuxStatusBar
-          version={tab.tmuxAvailable.version}
-          sessions={tab.tmuxAvailable.sessions}
-          onOpen={handleOpenTmux}
-          onAttachSession={handleAttachTmuxSession}
-          onCreateSession={handleCreateTmuxSession}
-          onKillSession={handleKillTmuxSession}
-        />
-      ) : null}
+        {tab?.moshState ? (
+          <TerminalMoshStatusBar
+            state={tab.moshState}
+            lastResponseAt={tab.lastMoshResponseAt ?? null}
+          />
+        ) : null}
+        {tab?.tmuxAvailable && !tab.tmux ? (
+          <TerminalTmuxStatusBar
+            version={tab.tmuxAvailable.version}
+            sessions={tab.tmuxAvailable.sessions}
+            onOpen={handleOpenTmux}
+            onAttachSession={handleAttachTmuxSession}
+            onCreateSession={handleCreateTmuxSession}
+            onKillSession={handleKillTmuxSession}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

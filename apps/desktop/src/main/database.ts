@@ -4,6 +4,7 @@ import {
   DEFAULT_AI_SETTINGS,
   DEFAULT_AUTO_RECONNECT_SETTINGS,
   DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
+  DEFAULT_HOST_METRICS_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
@@ -1265,6 +1266,9 @@ export class SettingsRepository {
       commandNotificationSound:
         state.settings.commandNotificationSound ??
         DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      hostMetricsEnabled:
+        state.settings.hostMetricsEnabled ??
+        DEFAULT_HOST_METRICS_SETTINGS.hostMetricsEnabled,
       autoReconnectEnabled:
         state.settings.autoReconnectEnabled ??
         DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectEnabled,
@@ -1395,6 +1399,11 @@ export class SettingsRepository {
 
       if (typeof input.commandNotificationSound === 'boolean') {
         state.settings.commandNotificationSound = input.commandNotificationSound;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (typeof input.hostMetricsEnabled === 'boolean') {
+        state.settings.hostMetricsEnabled = input.hostMetricsEnabled;
         state.settings.updatedAt = nowIso();
       }
 

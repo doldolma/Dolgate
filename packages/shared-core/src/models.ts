@@ -1063,6 +1063,8 @@ export interface AppSettings extends TerminalAppearanceSettings {
   autoReconnectMaxAttempts: number;
   autoReconnectBaseDelayMs: number;
   autoReconnectMaxDelayMs: number;
+  /** 접속한 원격 호스트의 CPU·메모리·네트워크를 터미널 하단에 표시할지. 기본 꺼짐. */
+  hostMetricsEnabled: boolean;
   /** tmux prefix 키 토큰("C-b"/"C-a"/"C-Space" …). 비우면 Ctrl-b. control mode pane 에서 항상 동작. */
   tmuxPrefixKey?: string;
   /**
@@ -1093,6 +1095,22 @@ export const DEFAULT_COMMAND_NOTIFICATION_SETTINGS: CommandNotificationSettings 
   commandNotificationOnlyWhenUnfocused: true,
   commandNotificationOnFailure: false,
   commandNotificationSound: false
+};
+
+// HostMetricsSettings 는 원격 호스트 부하 표시를 제어한다.
+//
+// 기본 켜짐이다. 원격에 주기적으로 명령을 보내지만 (1) 자동완성 generator 가 쓰는 보조
+// 채널을 그대로 재사용해 폴링마다 SSH 채널을 새로 열지 않고, (2) 읽는 것이 /proc 몇 줄이며,
+// (3) 보고 있는 탭에서만 돈다. 자동완성이 이미 기본으로 원격 명령을 돌리는 것에 비하면 가볍다.
+// 끄고 싶으면 설정에서 끈다.
+//
+// 주기는 설정으로 열지 않고 고정한다(POLL_INTERVAL_MS) — 조절할 만한 값이 아니고 항목만 늘어난다.
+export interface HostMetricsSettings {
+  hostMetricsEnabled: boolean;
+}
+
+export const DEFAULT_HOST_METRICS_SETTINGS: HostMetricsSettings = {
+  hostMetricsEnabled: true
 };
 
 export const MIN_COMMAND_NOTIFICATION_THRESHOLD_SECONDS = 1;

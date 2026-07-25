@@ -67,7 +67,7 @@ export function TerminalMoshStatusBar({
 
   return (
     <div
-      className="mx-[0.55rem] mb-[0.55rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
+      className="mx-[0.35rem] mb-[0.2rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
       role="status"
       aria-live="polite"
     >
