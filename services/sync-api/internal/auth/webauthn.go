@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"gorm.io/gorm"
 
 	"dolssh/services/sync-api/internal/store"
 )
@@ -28,6 +29,14 @@ const (
 )
 
 var ErrWebAuthnCeremony = errors.New("invalid or expired webauthn ceremony")
+
+// ErrUnknownWebAuthnCredential 는 discoverable 로그인에서 어써션의 자격증명이 이 서버에
+// 기록이 없을 때 반환한다 — (1) user handle 로 사용자를 못 찾거나, (2) 사용자는 있으나 그
+// 자격증명이 목록에 없는 경우. 두 경우 모두 "서버에 없는(unknown) 자격증명"이라, 클라이언트가
+// signalUnknownCredential 로 비밀번호 관리자의 stale 패스키를 안전하게 정리할 수 있다.
+// 서명 검증 실패는 여기에 포함하지 않는다 — 기록은 있으나 검증만 실패한 것이라(서버측 공개키
+// 불일치·클론 감지 등) 정상 패스키를 지울 위험이 있어 별개로 다룬다.
+var ErrUnknownWebAuthnCredential = errors.New("webauthn credential is not registered")
 
 // WebAuthnService 는 브라우저 로그인의 패스키 등록/인증 ceremony 를 처리한다. 자격증명은
 // go-webauthn 의 Credential 을 JSON 으로 마샬링해 store 에 불투명 바이트로 보관한다 — store 는
@@ -196,17 +205,39 @@ func (s *WebAuthnService) FinishLogin(ctx context.Context, ceremonyID string, re
 	}
 
 	var resolved store.User
-	handler := func(_ []byte, userHandle []byte) (webauthn.User, error) {
+	unknownCredential := false
+	handler := func(rawID []byte, userHandle []byte) (webauthn.User, error) {
 		user, loadErr := s.loadUser(ctx, string(userHandle))
 		if loadErr != nil {
+			// (1) user handle 로 사용자를 못 찾음 = 이 서버에 없는 계정의 자격증명(예: DB 재생성).
+			if errors.Is(loadErr, gorm.ErrRecordNotFound) {
+				unknownCredential = true
+			}
 			return nil, loadErr
 		}
 		resolved = user.user
+		// (2) 사용자는 있으나 이 자격증명이 목록에 없음 = 서버에서 삭제됐는데 인증기에만 남은 것.
+		// 서명 검증(아래 ValidateDiscoverableLogin) 이전 단계라, 여기서 세운 플래그는 "기록 없음"만
+		// 뜻하고 서명 실패와 섞이지 않는다.
+		hasCredential := false
+		for i := range user.credentials {
+			if bytes.Equal(user.credentials[i].ID, rawID) {
+				hasCredential = true
+				break
+			}
+		}
+		if !hasCredential {
+			unknownCredential = true
+		}
 		return user, nil
 	}
 
 	credential, err := s.webauthn.ValidateDiscoverableLogin(handler, *session, parsed)
 	if err != nil {
+		// 서버에 기록이 없는 경우에만 미등록으로 확정한다(서명 검증 실패는 제외).
+		if unknownCredential {
+			return store.User{}, ErrUnknownWebAuthnCredential
+		}
 		return store.User{}, err
 	}
 	if resolved.ID == "" {
