@@ -30,7 +30,7 @@
     "version:bump:patch": "node ./scripts/version.cjs bump patch",
     "version:bump:minor": "node ./scripts/version.cjs bump minor",
     "version:bump:major": "node ./scripts/version.cjs bump major",
-    "dev:api": "cd services/sync-api && go run ./cmd/api",
+    "dev:api": "cd services/sync-api && cross-env WEBAUTHN_ENABLED=true WEBAUTHN_RP_ID=localhost WEBAUTHN_ORIGINS=http://localhost:8080 go run ./cmd/api",
     "generate:icons": "node ./apps/desktop/scripts/generate-icons.cjs",
     "build": "npm run build --workspace @dolssh/desktop",
     "release:dist:mac": "npm run release:dist:mac --workspace @dolssh/desktop",
