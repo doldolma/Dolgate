@@ -496,10 +496,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	router.POST("/login", func(ctx *gin.Context) {
 		var form browserLoginForm
 		if err := ctx.ShouldBind(&form); err != nil {
+			// 바인딩 실패 원문은 구조체 필드명이 드러나고 사용자가 할 수 있는 게 없다.
+			log.Printf("browser login form bind failed: %v", err)
 			renderLogin(ctx, loginPageData{
 				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
-				ErrorMessage:       err.Error(),
+				ErrorMessage:       "입력값을 확인해 주세요.",
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -617,10 +619,11 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		var form browserSignupForm
 		if err := ctx.ShouldBind(&form); err != nil {
+			log.Printf("browser signup form bind failed: %v", err)
 			renderLogin(ctx, loginPageData{
 				Title:              "Create your Dolgate account",
 				IsSignup:           true,
-				ErrorMessage:       err.Error(),
+				ErrorMessage:       "입력값을 확인해 주세요.",
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -659,10 +662,18 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		// 브라우저 폼 로그인과 동일 — 세션이 앱으로 가지 않으므로 볼트 생성을 건너뛴다.
 		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
 		if err != nil {
+			// 드라이버 원문("Duplicate entry '…' for key 'users.email'")을 화면에 그대로
+			// 흘리지 않는다. 아는 원인만 문구로 바꾸고 나머지는 서버 로그로만 남긴다.
+			message := "회원가입에 실패했습니다."
+			if errors.Is(err, storepkg.ErrEmailAlreadyExists) {
+				message = "이미 사용 중인 이메일입니다."
+			} else {
+				log.Printf("browser signup failed: %v", err)
+			}
 			renderLogin(ctx, loginPageData{
 				Title:              "Create your Dolgate account",
 				IsSignup:           true,
-				ErrorMessage:       err.Error(),
+				ErrorMessage:       message,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -800,6 +811,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		_, session, err := authService.Signup(ctx.Request.Context(), request.Email, request.Password, resolveRequestOrigin(ctx), resolveVaultResolution(ctx))
 		if err != nil {
+			// 중복 이메일은 "잘못된 요청"이 아니라 사용자가 고칠 수 있는 상태다 — 앱에서도
+			// 브라우저 폼과 같은 문구를 보여준다.
+			if errors.Is(err, storepkg.ErrEmailAlreadyExists) {
+				logAndJSONError(ctx, http.StatusConflict, "이미 사용 중인 이메일입니다.", err)
+				return
+			}
 			logAndJSONError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
 			return
 		}
@@ -1791,6 +1808,8 @@ func extractBearerToken(ctx *gin.Context, options authMiddlewareOptions) string 
 
 const tooManyAuthAttemptsMessage = "너무 많은 인증 시도가 감지되었습니다. 잠시 후 다시 시도해 주세요."
 
+const tooManyPasskeysMessage = "등록할 수 있는 패스키 개수를 초과했습니다. 사용하지 않는 패스키를 먼저 삭제해 주세요."
+
 // logAndJSONError/logAndStringError는 클라이언트에는 generic 메시지만 주고 원본 오류는 서버
 // 로그에만 남긴다 — DB/OIDC/JWT 등 내부 오류 문자열이 응답 body로 새어 나가는 것을 막는다.
 func logAndJSONError(ctx *gin.Context, status int, publicMsg string, err error) {
@@ -1923,7 +1942,9 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
       //
       // 서버 응답 형식은 그대로 사용한다(하위 호환) — 성공 시 돌아오는 브리지 페이지의
       // #open-app 링크에서 콜백 URL 을 읽고, 실패 시 다시 렌더된 로그인 페이지의 .error 문구를
-      // 그대로 표시한다. JS 미지원이거나 응답이 예상과 다르면 네이티브 폼 전송으로 폴백한다.
+      // 그대로 표시한다. JS 미지원이면 리스너가 안 붙어 네이티브 전송이 그대로 동작하고,
+      // fetch 가 실패하면(네트워크·확장 차단) 네이티브 전송으로 폴백한다. 반대로 서버가
+      // 응답을 준 경우엔 절대 재전송하지 않는다 — 그 요청은 이미 처리됐을 수 있다.
       (function () {
         var form = document.querySelector('form[method="post"]');
         if (!form || !window.fetch || !window.DOMParser || !window.FormData || !window.URLSearchParams) { return; }
@@ -1971,14 +1992,21 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
                 return;
               }
               if (!doc.querySelector('form[method="post"]')) {
-                // 로그인 페이지도 브리지 페이지도 아닌 예상 밖 응답 — 기존 방식에 맡긴다.
-                nativeSubmit();
+                // 서버가 응답은 했는데 로그인 페이지도 브리지 페이지도 아니다(평문 4xx/5xx,
+                // 프록시의 502 페이지 …). 여기서 네이티브로 재전송하면 서버가 이미 처리한
+                // 요청이 한 번 더 실행된다 — 회원가입이면 첫 요청에서 계정이 만들어진 뒤
+                // 두 번째가 중복으로 실패해 "가입 실패"로 보인다. 재전송하지 않고 알린다.
+                showError('서버가 로그인을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                unlock();
                 return;
               }
               var serverError = doc.querySelector('.error');
               showError(serverError ? serverError.textContent.trim() : '로그인에 실패했습니다.');
               unlock();
             })
+            // fetch 자체가 실패한 경우(네트워크 끊김, 확장/프록시가 fetch 만 차단)에만
+            // 네이티브 전송으로 폴백한다 — 요청이 서버에 닿지 않았을 가능성이 높고,
+            // 폴백이 없으면 fetch 가 막힌 환경에서 로그인이 아예 불가능해진다.
             .catch(function () { nativeSubmit(); });
         });
       })();

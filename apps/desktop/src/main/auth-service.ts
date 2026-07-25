@@ -725,6 +725,13 @@ export class AuthService {
     loginUrl.searchParams.set("redirect_uri", redirectUri);
     loginUrl.searchParams.set("state", browserState);
 
+    // openExternal 은 OS 핸들러를 부르므로 http(s) 만 허용한다. 설정 파일의 serverUrl 은
+    // "비어 있지 않은 문자열" 검사만 받아서, file:/smb: 같은 스킴이 들어오면 파인더가 열리거나
+    // 원격 공유가 마운트될 수 있다(패스키 등록 경로엔 이미 같은 가드가 있다).
+    if (loginUrl.protocol !== "https:" && loginUrl.protocol !== "http:") {
+      throw new Error("로그인 서버 주소가 올바르지 않습니다.");
+    }
+
     this.pendingBrowserLoginState = browserState;
     this.pendingBrowserLoginUrl = loginUrl.toString();
     this.patchState({

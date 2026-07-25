@@ -94,8 +94,14 @@ export function TerminalBlockOverlay({
         <BlockAction
           label="재실행"
           onClick={onRerun}
-          disabled={running || !overlay.command}
-          title={running ? '명령이 실행 중입니다' : undefined}
+          disabled={running || !overlay.command || overlay.commandUnreliable}
+          title={
+            running
+              ? '명령이 실행 중입니다'
+              : overlay.commandUnreliable
+                ? '화면에서 읽은 명령이 실제 입력과 다를 수 있어 재실행할 수 없습니다(너무 길거나 여러 줄).'
+                : undefined
+          }
         />
         {aiEnabled ? <BlockAction label="AI" onClick={onAskAi} /> : null}
       </div>

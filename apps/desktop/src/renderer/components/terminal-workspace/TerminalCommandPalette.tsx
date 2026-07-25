@@ -10,6 +10,8 @@ import { formatBlockDuration } from './blockFormat';
 export interface TerminalCommandPaletteItem {
   id: number;
   command: string | null;
+  /** 화면에서 읽은 명령이 실제 입력과 다를 수 있음 — 재실행 대신 이동만 한다. */
+  commandUnreliable: boolean;
   state: TerminalCommandBlockState;
   exitCode: number | null;
   durationMs: number | null;
@@ -109,7 +111,9 @@ export function TerminalCommandPalette({
       if (!item) {
         return;
       }
-      if (event.metaKey || event.ctrlKey) {
+      // 재실행할 수 없는 항목(잘림·여러 줄)은 이동으로 대신한다 — 아무 일도 안 하는
+      // 것보다 낫고, 어차피 컨트롤러가 전송을 막는다.
+      if ((event.metaKey || event.ctrlKey) && !item.commandUnreliable) {
         onRerun(item.id);
       } else {
         onJump(item.id);
@@ -181,7 +185,7 @@ export function TerminalCommandPalette({
                   )}
                   onMouseEnter={() => setSelectedIndex(index)}
                   onClick={(event) => {
-                    if (event.metaKey || event.ctrlKey) {
+                    if ((event.metaKey || event.ctrlKey) && !item.commandUnreliable) {
                       onRerun(item.id);
                     } else {
                       onJump(item.id);
@@ -214,6 +218,14 @@ export function TerminalCommandPalette({
                         .join(' · ')}
                     </span>
                   </span>
+                  {item.commandUnreliable ? (
+                    <span
+                      className="shrink-0 rounded-full bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 text-[0.68rem] text-[rgba(226,234,255,0.55)]"
+                      title="화면에서 읽은 명령이 실제 입력과 다를 수 있습니다(너무 길거나 여러 줄) — 재실행할 수 없습니다."
+                    >
+                      재실행 불가
+                    </span>
+                  ) : null}
                   {item.state === 'failed' && item.exitCode !== null ? (
                     <span className="shrink-0 rounded-full bg-[rgba(239,111,108,0.2)] px-1.5 py-0.5 text-[0.68rem] font-semibold text-[#ffb1b1]">
                       exit {item.exitCode}

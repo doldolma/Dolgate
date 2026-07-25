@@ -792,10 +792,13 @@ export function createSftpServices(deps: SliceDeps) {
       return;
     }
     const request = job.request;
-    const deadEndpointId =
-      request?.target.kind === "remote" ? request.target.endpointId : null;
-    const targetPath =
-      request?.target.kind === "remote" ? request.target.path : null;
+    if (request?.target.kind !== "remote") {
+      // 원래 업로드 대상을 모르면 재시도하지 않는다 — targetPath 가 null 이면
+      // uploadFilesToHostPath 가 홈 디렉터리로 폴백해 엉뚱한 곳에 올리고 성공으로 보고한다.
+      return;
+    }
+    const deadEndpointId = request.target.endpointId;
+    const targetPath = request.target.path;
     const failedLocalPaths = (job.failedItems ?? [])
       .map((failed) => failed.item.path)
       .filter(

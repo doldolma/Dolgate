@@ -21,7 +21,7 @@ import {
   validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
 import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
@@ -469,9 +469,15 @@ export function SettingsPanel({
     setReplayRetentionInput(String(settings.sessionReplayRetentionCount));
   }, [settings.sessionReplayRetentionCount]);
 
-  function commitSessionReplayRetentionCount() {
+  /** 입력값을 저장 가능한 개수로. 빈 값·이상치는 null(= 이전 값 유지). */
+  function parsedReplayRetentionInput(): number | null {
     const parsed = Math.round(Number(replayRetentionInput));
-    if (!Number.isFinite(parsed) || parsed <= 0) {
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function commitSessionReplayRetentionCount() {
+    const parsed = parsedReplayRetentionInput();
+    if (parsed === null) {
       setReplayRetentionInput(String(settings.sessionReplayRetentionCount));
       return;
     }
@@ -480,6 +486,19 @@ export function SettingsPanel({
       void handleChangeSessionReplayRetentionCount(parsed);
     }
   }
+
+  // blur 로만 저장하면 타이핑 중 설정을 닫았을 때 값이 조용히 사라진다 — Chromium 은
+  // 포커스된 요소가 DOM 에서 제거될 때 blur 를 쏘지 않는다. 언마운트 시 한 번 더 저장한다.
+  // (디바운스로 바꾸면 "5000" 을 치는 도중 "5" 가 저장돼 replay 가 잘려 나가는 원래 버그가
+  //  되살아난다 — 그래서 중간 저장은 하지 않는다.)
+  const flushReplayRetentionRef = useRef<() => void>(() => undefined);
+  flushReplayRetentionRef.current = () => {
+    const parsed = parsedReplayRetentionInput();
+    if (parsed !== null && parsed !== settings.sessionReplayRetentionCount) {
+      void handleChangeSessionReplayRetentionCount(parsed);
+    }
+  };
+  useEffect(() => () => flushReplayRetentionRef.current(), []);
 
   async function handleChangeSessionReplayRetentionCount(
     sessionReplayRetentionCount: number,

@@ -221,7 +221,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         (event.key === 'p' || event.key === 'P')
       ) {
         event.preventDefault();
-        controller.openCommandPalette();
+        // 이미 열려 있으면 다시 열지 않는다 — 컴포넌트가 리마운트되지 않아 검색어와
+        // 선택 위치는 그대로인 채 목록만 새로 떠서, 강조된 행의 의미가 조용히 바뀐다.
+        if (!controller.commandPaletteOpen) {
+          controller.openCommandPalette();
+        }
         return;
       }
       controller.handlePaneKeyDownCapture(event);

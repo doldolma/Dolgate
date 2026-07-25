@@ -104,6 +104,10 @@ func main() {
 				Limit:         cfg.Auth.RateLimit.Password.Limit,
 				WindowSeconds: cfg.Auth.RateLimit.Password.WindowSeconds,
 			},
+			Webauthn: httpserver.RateLimitRuleConfig{
+				Limit:         cfg.Auth.RateLimit.Webauthn.Limit,
+				WindowSeconds: cfg.Auth.RateLimit.Webauthn.WindowSeconds,
+			},
 		},
 		OIDC: httpserver.OIDCConfig{
 			Enabled:      cfg.Auth.OIDC.Enabled,

@@ -150,6 +150,56 @@ func createOIDCTestServer(t *testing.T) *httptest.Server {
 	return server
 }
 
+// 중복 이메일 가입은 드라이버 원문 에러를 사용자에게 보여선 안 된다. 예전에는 브라우저
+// 폼이 "Duplicate entry '…' for key 'users.email'"(MySQL) / "UNIQUE constraint failed"
+// (SQLite)를 그대로 렌더했다.
+func TestDuplicateSignupHidesDriverError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	signup := func(path string, body string, contentType string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", contentType)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	if code := signup("/auth/signup", `{"email":"dup@example.com","password":"supersecure"}`, "application/json").Code; code != http.StatusCreated {
+		t.Fatalf("first signup = %d, want 201", code)
+	}
+
+	// JSON API: 409 + 사람이 읽는 문구.
+	jsonRecorder := signup("/auth/signup", `{"email":"dup@example.com","password":"supersecure"}`, "application/json")
+	if jsonRecorder.Code != http.StatusConflict {
+		t.Fatalf("duplicate signup = %d, want 409: %s", jsonRecorder.Code, jsonRecorder.Body.String())
+	}
+	assertNoDriverError(t, "JSON", jsonRecorder.Body.String())
+	if !strings.Contains(jsonRecorder.Body.String(), "이미 사용 중인 이메일입니다") {
+		t.Fatalf("duplicate signup body = %s", jsonRecorder.Body.String())
+	}
+
+	// 브라우저 폼: 로그인 페이지가 다시 렌더되고 같은 문구가 뜬다.
+	form := url.Values{}
+	form.Set("email", "dup@example.com")
+	form.Set("password", "supersecure")
+	form.Set("redirect_uri", "http://127.0.0.1:53123/auth/callback")
+	formBody := signup("/signup", form.Encode(), "application/x-www-form-urlencoded").Body.String()
+	assertNoDriverError(t, "browser form", formBody)
+	if !strings.Contains(formBody, "이미 사용 중인 이메일입니다") {
+		t.Fatalf("browser signup page missing the duplicate message")
+	}
+}
+
+func assertNoDriverError(t *testing.T, label string, body string) {
+	t.Helper()
+	for _, leak := range []string{"UNIQUE constraint", "Duplicate entry", "users.email", "SQLSTATE", "gorm"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("%s response leaks driver error %q: %s", label, leak, body)
+		}
+	}
+}
+
 func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouter(t)

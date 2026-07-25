@@ -47,6 +47,7 @@ type AuthRateLimitConfig struct {
 	Refresh  AuthRateLimitRuleConfig `json:"refresh"`
 	Exchange AuthRateLimitRuleConfig `json:"exchange"`
 	Password AuthRateLimitRuleConfig `json:"password"`
+	Webauthn AuthRateLimitRuleConfig `json:"webauthn"`
 }
 
 type AuthRateLimitRuleConfig struct {

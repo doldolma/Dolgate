@@ -139,14 +139,15 @@ export async function scanReplayCommands(
           endAtMs: null,
           durationMs: null,
           command:
-            pendingPrompt && pendingPrompt.marker.line >= 0
+            (pendingPrompt && pendingPrompt.marker.line >= 0
               ? readCommandTextFromBuffer(
                   buffer,
                   pendingPrompt.marker.line,
                   pendingPrompt.promptEndX,
                   outputStartLine,
                 )
-              : null,
+              : null
+            )?.text ?? null,
           exitCode: null,
           cwd: currentCwd,
           state: 'running',
