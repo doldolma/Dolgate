@@ -173,8 +173,8 @@ export function SessionShell({
     <section
       className={
         active
-          ? 'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1.1rem] opacity-100 pointer-events-auto transition-[opacity,transform] duration-180 scale-100'
-          : 'absolute inset-0 flex min-h-0 flex-col gap-4 p-[1.1rem] opacity-0 pointer-events-none transition-[opacity,transform] duration-180 scale-[0.995]'
+          ? 'absolute inset-0 flex min-h-0 flex-col gap-4 opacity-100 pointer-events-auto transition-[opacity,transform] duration-180 scale-100'
+          : 'absolute inset-0 flex min-h-0 flex-col gap-4 opacity-0 pointer-events-none transition-[opacity,transform] duration-180 scale-[0.995]'
       }
     >
       {authState.status === 'offline-authenticated' && authState.offline ? (
