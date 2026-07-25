@@ -826,6 +826,16 @@ export function SettingsPanel({
                   })
                 }
               />
+              <ToggleSwitch
+                checked={settings.hostMetricsEnabled}
+                label="호스트 상태 표시"
+                description="접속한 서버의 CPU·메모리·디스크·네트워크를 터미널 하단에 표시합니다. (SSM 셸·mosh 미지원)"
+                onClick={() => {
+                  void onUpdateSettings({
+                    hostMetricsEnabled: !settings.hostMetricsEnabled,
+                  });
+                }}
+              />
             </div>
 
             {/* 명령 완료 알림 — 관련 설정을 한 그룹 카드로 묶는다 */}
@@ -912,6 +922,7 @@ export function SettingsPanel({
                 </div>
               ) : null}
             </div>
+
 
             {/* 자동 재연결 — 끊김 시 백오프 재연결 동작 제어 */}
             <div className="mb-[1.1rem] grid gap-[0.7rem] rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_55%,transparent_45%)] p-[1.1rem]">

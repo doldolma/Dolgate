@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+// waitFor/findBy 의 기본 대기 시간은 1초인데, 이 단언들은 "언젠가 이 상태가 된다"를 확인하는
+// 것이지 1초 안에 되는지를 재는 게 아니다. 전체 스위트는 파일을 여러 프로세스로 병렬 실행해
+// 무거운 jsdom+React 파일이 겹치면 워커가 잠깐 굶고, 그때 단독으로는 늘 통과하는 테스트가
+// 산발적으로 실패한다. CI 러너는 개발 머신보다 느려 더 자주 걸린다.
+configure({ asyncUtilTimeout: 3000 });
 
 if (typeof HTMLCanvasElement !== 'undefined') {
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {

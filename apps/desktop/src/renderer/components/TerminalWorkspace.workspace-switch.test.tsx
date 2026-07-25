@@ -98,6 +98,7 @@ const settings: AppSettings = {
   commandNotificationOnlyWhenUnfocused: true,
   commandNotificationOnFailure: true,
   commandNotificationSound: false,
+  hostMetricsEnabled: false,
   autoReconnectEnabled: true,
   autoReconnectMaxAttempts: 10,
   autoReconnectBaseDelayMs: 1000,

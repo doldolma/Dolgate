@@ -44,6 +44,7 @@ import type {
 import {
   DEFAULT_AUTO_RECONNECT_SETTINGS,
   DEFAULT_COMMAND_NOTIFICATION_SETTINGS,
+  DEFAULT_HOST_METRICS_SETTINGS,
   DEFAULT_SESSION_REPLAY_RETENTION_COUNT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
   MAX_SESSION_REPLAY_RETENTION_COUNT,
@@ -99,6 +100,7 @@ export interface DesktopStateFile {
     commandNotificationOnlyWhenUnfocused: boolean;
     commandNotificationOnFailure: boolean;
     commandNotificationSound: boolean;
+    hostMetricsEnabled: boolean;
     autoReconnectEnabled: boolean;
     autoReconnectMaxAttempts: number;
     autoReconnectBaseDelayMs: number;
@@ -521,6 +523,7 @@ function createDefaultStateFile(): DesktopStateFile {
         DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnlyWhenUnfocused,
       commandNotificationOnFailure: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationOnFailure,
       commandNotificationSound: DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      hostMetricsEnabled: DEFAULT_HOST_METRICS_SETTINGS.hostMetricsEnabled,
       autoReconnectEnabled: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectEnabled,
       autoReconnectMaxAttempts: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectMaxAttempts,
       autoReconnectBaseDelayMs: DEFAULT_AUTO_RECONNECT_SETTINGS.autoReconnectBaseDelayMs,
@@ -949,6 +952,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.commandNotificationSound === 'boolean'
           ? settings.commandNotificationSound
           : DEFAULT_COMMAND_NOTIFICATION_SETTINGS.commandNotificationSound,
+      hostMetricsEnabled:
+        typeof settings.hostMetricsEnabled === 'boolean'
+          ? settings.hostMetricsEnabled
+          : DEFAULT_HOST_METRICS_SETTINGS.hostMetricsEnabled,
       autoReconnectEnabled:
         typeof settings.autoReconnectEnabled === 'boolean'
           ? settings.autoReconnectEnabled

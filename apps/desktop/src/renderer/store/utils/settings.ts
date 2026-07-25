@@ -95,6 +95,7 @@ export const defaultSettings: AppSettings = {
   commandNotificationOnlyWhenUnfocused: true,
   commandNotificationOnFailure: false,
   commandNotificationSound: false,
+  hostMetricsEnabled: true,
   // @shared의 DEFAULT_AUTO_RECONNECT_SETTINGS를 인라인한다(위 command notification과
   // 동일한 이유 — vite dev의 비결정적 export* 누락 회피).
   autoReconnectEnabled: true,

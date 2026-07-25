@@ -875,6 +875,30 @@ describe('GroupRepository.rename', () => {
 });
 
 describe('SettingsRepository', () => {
+  // update() 는 필드별 명시 허용목록이라, 새 설정을 읽기 경로에만 추가하면 저장이 조용히
+  // 무시된다(설정 화면의 스위치가 눌러도 안 켜진다). 실제로 그렇게 새어 나간 적이 있다.
+  it('호스트 상태 표시 토글을 저장한다', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
+        }
+      })
+    } as never);
+
+    expect(settings.get().hostMetricsEnabled).toBe(true);
+
+    expect(settings.update({ hostMetricsEnabled: false }).hostMetricsEnabled).toBe(false);
+    // 다시 읽어도 유지돼야 한다(저장이 아니라 반환값만 바뀌는 경우를 배제).
+    expect(settings.get().hostMetricsEnabled).toBe(false);
+
+    expect(settings.update({ hostMetricsEnabled: true }).hostMetricsEnabled).toBe(true);
+    expect(settings.get().hostMetricsEnabled).toBe(true);
+  });
+
   it('persists a login server override and resolves the effective server URL', async () => {
     const { SettingsRepository } = await loadRepositories();
     const settings = new SettingsRepository({
