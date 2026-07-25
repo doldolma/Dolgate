@@ -7,6 +7,7 @@
  */
 export {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   Star,
