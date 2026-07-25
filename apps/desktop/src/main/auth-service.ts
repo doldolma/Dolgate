@@ -2661,6 +2661,7 @@ export class AuthService {
         renderLoopbackCallbackPage(
           "로그인이 완료되었습니다.",
           "Dolgate 앱으로 돌아갑니다. 이 탭은 닫아도 됩니다.",
+          true,
         ),
       );
     } catch (error) {
@@ -2708,7 +2709,18 @@ export class AuthService {
   }
 }
 
-function renderLoopbackCallbackPage(title: string, message: string): string {
+// autoClose: 성공 화면에서만 탭을 닫는다. 실패 화면을 닫으면 에러 메시지를 못 보게 된다.
+// 브라우저는 세션 히스토리 항목이 1개인 탭만 스크립트로 닫도록 허용하므로, 로그인 페이지가
+// location.replace 로 이 콜백에 도달한 경우(패스키 로그인)에만 실제로 닫힌다. 비밀번호/OIDC
+// 로그인은 항목이 여러 개라 닫기가 무시되고, 아래 안내문이 그대로 남는다.
+function renderLoopbackCallbackPage(
+  title: string,
+  message: string,
+  autoClose = false,
+): string {
+  const autoCloseScript = autoClose
+    ? `<script>setTimeout(function () { try { window.close(); } catch (error) {} }, 600);</script>`
+    : "";
   return `<!doctype html>
 <html lang="ko">
   <head>
@@ -2732,6 +2744,7 @@ function renderLoopbackCallbackPage(title: string, message: string): string {
         <p>${escapeHtml(message)}</p>
       </div>
     </div>
+    ${autoCloseScript}
   </body>
 </html>`;
 }

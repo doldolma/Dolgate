@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -115,6 +116,13 @@ func registerWebAuthnRoutes(
 
 		user, err := runtime.service.FinishLogin(ctx.Request.Context(), request.CeremonyID, request.Credential)
 		if err != nil {
+			// 서버에 기록이 없는(미등록) 자격증명이면 code 를 함께 내려, 클라이언트가
+			// signalUnknownCredential 로 비밀번호 관리자의 stale 패스키를 정리하도록 한다.
+			if errors.Is(err, auth.ErrUnknownWebAuthnCredential) {
+				log.Printf("webauthn login finish: unknown credential (client will be signaled): %v", err)
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "등록되지 않은 패스키입니다.", "code": "unknown_credential"})
+				return
+			}
 			logAndJSONError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
 			return
 		}

@@ -360,6 +360,7 @@ type loginPageData struct {
 	OIDCEnabled        bool
 	OIDCDisplayName    string
 	WebAuthnEnabled    bool
+	WebAuthnRPID       string
 	ShowSignupLink     bool
 }
 
@@ -419,11 +420,16 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		return nil, err
 	}
 	webAuthnEnabled := webauthnRuntime != nil
+	webAuthnRPID := ""
+	if webauthnRuntime != nil {
+		webAuthnRPID = webauthnRuntime.service.RPID()
+	}
 
 	// renderLogin 은 흩어진 loginPageData 리터럴마다 WebAuthnEnabled 를 반복 설정하지 않도록
 	// 렌더 직전에 런타임 활성 여부를 채워 넣는 래퍼다.
 	renderLogin := func(ctx *gin.Context, data loginPageData) {
 		data.WebAuthnEnabled = webAuthnEnabled
+		data.WebAuthnRPID = webAuthnRPID
 		renderLoginPage(ctx, data)
 	}
 
@@ -1882,7 +1888,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
             <input type="hidden" name="state" value="{{ .State }}" />
             <input type="hidden" name="platform" value="{{ .Platform }}" />
             <label>Email
-              <input type="email" name="email" value="{{ .Email }}" required autocomplete="username webauthn" />
+              <input type="email" name="email" value="{{ .Email }}" required autocomplete="username webauthn" autofocus />
             </label>
             <label>Password
               <input type="password" name="password" required minlength="8" />
@@ -1910,6 +1916,73 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
         {{ end }}
       </div>
     </div>
+    <script>
+      // 로그인/회원가입 폼을 fetch 로 보내 페이지 이동을 없앤다. 폼을 네이티브로 전송하면
+      // 히스토리 항목이 하나 늘어나고, 그러면 브라우저가 콜백 탭의 window.close() 를 막아
+      // "이 탭은 닫아도 됩니다" 화면이 남는다. 이동을 안 하면 항목이 1개로 유지되어 닫힌다.
+      //
+      // 서버 응답 형식은 그대로 사용한다(하위 호환) — 성공 시 돌아오는 브리지 페이지의
+      // #open-app 링크에서 콜백 URL 을 읽고, 실패 시 다시 렌더된 로그인 페이지의 .error 문구를
+      // 그대로 표시한다. JS 미지원이거나 응답이 예상과 다르면 네이티브 폼 전송으로 폴백한다.
+      (function () {
+        var form = document.querySelector('form[method="post"]');
+        if (!form || !window.fetch || !window.DOMParser || !window.FormData || !window.URLSearchParams) { return; }
+        var container = form.parentNode;
+        var submitButton = form.querySelector('button[type="submit"]');
+        var busy = false;
+
+        function showError(message) {
+          var box = container.querySelector('.error');
+          if (!box) {
+            box = document.createElement('div');
+            box.className = 'error';
+            container.insertBefore(box, form);
+          }
+          box.textContent = message;
+        }
+        function nativeSubmit() {
+          busy = true;
+          form.submit();
+        }
+        function unlock() {
+          busy = false;
+          if (submitButton) { submitButton.disabled = false; }
+        }
+
+        form.addEventListener('submit', function (event) {
+          if (busy) { return; }
+          event.preventDefault();
+          busy = true;
+          if (submitButton) { submitButton.disabled = true; }
+          fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(new FormData(form)).toString()
+          })
+            .then(function (response) { return response.text(); })
+            .then(function (html) {
+              var doc = new DOMParser().parseFromString(html, 'text/html');
+              var callbackLink = doc.getElementById('open-app');
+              var target = callbackLink && callbackLink.getAttribute('href');
+              if (target) {
+                // assign 이 아니라 replace — 히스토리 항목을 1개로 유지해야 탭이 스스로 닫힌다.
+                window.location.replace(target);
+                return;
+              }
+              if (!doc.querySelector('form[method="post"]')) {
+                // 로그인 페이지도 브리지 페이지도 아닌 예상 밖 응답 — 기존 방식에 맡긴다.
+                nativeSubmit();
+                return;
+              }
+              var serverError = doc.querySelector('.error');
+              showError(serverError ? serverError.textContent.trim() : '로그인에 실패했습니다.');
+              unlock();
+            })
+            .catch(function () { nativeSubmit(); });
+        });
+      })();
+    </script>
     {{ if .WebAuthnEnabled }}
     <script>
       (function () {
@@ -1917,6 +1990,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
         if (!window.PublicKeyCredential || !window.isSecureContext) { return; }
         if (section) { section.style.display = 'block'; }
         var CTX = { client: "{{ .Client }}", redirectUri: "{{ .RedirectURI }}", state: "{{ .State }}" };
+        var RP_ID = "{{ .WebAuthnRPID }}";
         function b64urlToBuf(value) {
           value = value.replace(/-/g, '+').replace(/_/g, '/');
           var pad = value.length % 4; if (pad) { value += '='.repeat(4 - pad); }
@@ -1962,7 +2036,13 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ceremonyId: ceremonyId, client: CTX.client, redirectUri: CTX.redirectUri, state: CTX.state, credential: assertion })
           });
-          if (!response.ok) { throw new Error('finish failed'); }
+          if (!response.ok) {
+            var body = {};
+            try { body = (await response.json()) || {}; } catch (e) {}
+            var loginError = new Error(body.error || ('로그인 검증 실패 (' + response.status + ')'));
+            loginError.code = body.code || '';
+            throw loginError;
+          }
           return response.json();
         }
         var statusEl = document.getElementById('passkey-status');
@@ -1972,6 +2052,25 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
         function errorMessage(error) {
           if (error && error.name === 'NotAllowedError') { return '등록된 패스키가 없거나 인증이 취소되었습니다. 먼저 패스키를 등록해 주세요.'; }
           return '패스키 로그인 실패: ' + ((error && (error.message || error.name)) || '알 수 없는 오류');
+        }
+        function signalUnknownCredential(credential) {
+          // WebAuthn Signal API — 지원 브라우저(Chrome 132+ 등)에서 비밀번호 관리자에게 이
+          // 자격증명이 이 서버에 없음을 알려 stale 패스키를 정리하게 한다. credential.id 는
+          // base64url 자격증명 ID. 미지원/실패는 조용히 무시한다.
+          if (!RP_ID || !credential) { return; }
+          if (!PublicKeyCredential.signalUnknownCredential) {
+            console.info('[passkey] signalUnknownCredential 미지원 브라우저 — stale 패스키는 수동 삭제 필요');
+            return;
+          }
+          try {
+            PublicKeyCredential.signalUnknownCredential({ rpId: RP_ID, credentialId: credential.id })
+              .then(function () {
+                // 신호를 보냈다고 항상 삭제되지는 않는다 — 반영 여부는 패스키 제공자가 결정한다.
+                // (Google 비밀번호 관리자는 반영, Apple Passwords/iCloud 키체인은 Chrome 경로에서 미반영)
+                console.info('[passkey] signalUnknownCredential 전송됨 (반영 여부는 패스키 제공자가 결정)');
+              })
+              .catch(function (error) { console.warn('[passkey] signalUnknownCredential 실패', error); });
+          } catch (e) { console.warn('[passkey] signalUnknownCredential 호출 실패', e); }
         }
         async function run(mediation) {
           var data = await beginLogin();
@@ -1984,11 +2083,31 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
           var credential = await navigator.credentials.get(getOptions);
           if (!credential) { return; }
           setStatus('로그인 확인 중…');
-          var result = await finishLogin(data.ceremonyId, encodeAssertion(credential));
+          // 자격증명을 고른 뒤의 서버 검증 실패는 conditional(autofill) 흐름이라도 반드시
+          // 표시한다 — 안 그러면 바깥 catch(function(){})가 삼켜 "로그인 확인 중…"에서 무한
+          // 정지한다. 실패 후엔 autofill 을 다시 쓸 수 있게 재무장한다.
+          var result;
+          try {
+            result = await finishLogin(data.ceremonyId, encodeAssertion(credential));
+          } catch (error) {
+            setStatus(errorMessage(error), 'err');
+            // 서버가 "미등록 자격증명"으로 확정하면, 비밀번호 관리자의 stale 패스키를 정리 신호.
+            if (error && error.code === 'unknown_credential') { signalUnknownCredential(credential); }
+            armConditional();
+            return;
+          }
           if (result && result.redirectUrl) {
             setStatus('로그인 성공 — 앱으로 돌아갑니다.', 'ok');
-            window.location.assign(result.redirectUrl);
+            // assign 이 아니라 replace 를 쓴다 — 히스토리 항목을 늘리지 않아야 콜백 탭의 세션
+            // 히스토리가 1개로 유지되고, 그래야 브라우저가 콜백 페이지의 window.close() 를 허용한다.
+            window.location.replace(result.redirectUrl);
           }
+        }
+        function armConditional() {
+          if (!PublicKeyCredential.isConditionalMediationAvailable) { return; }
+          PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
+            if (available) { run('conditional').catch(function () {}); }
+          });
         }
         var button = document.getElementById('passkey-login');
         if (button) {
@@ -1999,14 +2118,17 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`
             // 페이지 로드 시 시작한 conditional 요청이 대기 중이면 취소한다 — 안 그러면
             // 버튼의 modal get() 이 "이미 요청 진행 중" 에러로 조용히 실패한다.
             if (conditionalController) { conditionalController.abort(); conditionalController = null; }
-            run('optional').catch(function (error) { setStatus(errorMessage(error), 'err'); }).finally(function () { busy = false; });
+            run('optional')
+              .catch(function (error) {
+                setStatus(errorMessage(error), 'err');
+                // 모달을 취소/실패하면 conditional 요청도 abort된 상태이므로, 새로고침 없이
+                // email 필드 autofill 이 다시 뜨도록 conditional 을 재무장한다.
+                armConditional();
+              })
+              .finally(function () { busy = false; });
           });
         }
-        if (PublicKeyCredential.isConditionalMediationAvailable) {
-          PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
-            if (available) { run('conditional').catch(function () {}); }
-          });
-        }
+        armConditional();
       })();
     </script>
     {{ end }}
@@ -2244,7 +2366,9 @@ var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback
         if (!target) {
           return;
         }
-        window.location.assign(target);
+        // assign 이 아니라 replace — 이 브리지 페이지를 히스토리에 남기면 콜백에서 뒤로 가기를
+        // 눌렀을 때 이 페이지로 돌아왔다가 아래 load 핸들러가 다시 앞으로 보내는 루프가 된다.
+        window.location.replace(target);
       };
       if (openAppButton && target) {
         openAppButton.addEventListener('click', (event) => {
