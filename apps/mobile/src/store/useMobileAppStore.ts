@@ -118,8 +118,10 @@ import {
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import {
-  getCurrentWindowTerminalGridSize,
+  resolvePtyTerminalGridSize,
+  setReportedTerminalGrid,
   toRusshTerminalSize,
+  type TerminalGridSize,
 } from '../lib/terminal-size';
 import {
   deleteDownloadDestination,
@@ -455,6 +457,10 @@ export interface MobileHostDraftInput {
 
 interface MobileAppState {
   hydrated: boolean;
+  // WebView 안 xterm 이 실제로 fit 한 그리드. 원격 PTY 크기의 기준이며, 콜드스타트
+  // 첫 접속도 정확한 크기를 쓰도록 persist 한다(모듈 캐시는 재시작 시 사라진다).
+  terminalGrid: TerminalGridSize | null;
+  reportTerminalGrid: (size: TerminalGridSize) => void;
   bootstrapping: boolean;
   authGateResolved: boolean;
   secureStateReady: boolean;
@@ -3241,7 +3247,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               markSessionState(sessionRecord.id, 'closed');
             },
           });
-          const terminalSize = getCurrentWindowTerminalGridSize();
+          const terminalSize = await resolvePtyTerminalGridSize();
           const shell = await connection.startShell({
             term: 'Xterm',
             terminalSize: toRusshTerminalSize(terminalSize),
@@ -3390,7 +3396,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               throw error;
             }
           }
-          const terminalSize = getCurrentWindowTerminalGridSize();
+          const terminalSize = await resolvePtyTerminalGridSize();
           const wsUrl = new URL(
             '/api/aws-sessions/ws',
             get().settings.serverUrl,
@@ -4226,6 +4232,15 @@ export const useMobileAppStore = create<MobileAppState>()(
 
       return {
         hydrated: false,
+        terminalGrid: null,
+        reportTerminalGrid: (size: TerminalGridSize) => {
+          setReportedTerminalGrid(size);
+          const current = get().terminalGrid;
+          if (current?.cols === size.cols && current?.rows === size.rows) {
+            return;
+          }
+          set({ terminalGrid: size });
+        },
         bootstrapping: false,
         authGateResolved: false,
         secureStateReady: false,
@@ -6369,6 +6384,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: state => ({
         settings: state.settings,
+        terminalGrid: state.terminalGrid,
         syncStatus: state.syncStatus,
         groups: state.groups,
         hosts: state.hosts,
@@ -6384,6 +6400,12 @@ export const useMobileAppStore = create<MobileAppState>()(
           beginStartupTiming('persist hydrate');
         return () => {
           finishPersistHydrateTiming?.();
+          // 저장된 실제 그리드를 모듈 캐시로 되돌려, 첫 접속의 PTY 크기가 추정값으로
+          // 어긋나지 않게 한다(어긋나면 프롬프트 입력이 같은 줄에 겹쳐 그려진다).
+          const persistedGrid = useMobileAppStore.getState().terminalGrid;
+          if (persistedGrid) {
+            setReportedTerminalGrid(persistedGrid);
+          }
           const nextSessions = normalizePersistedSessionsForColdStart(
             useMobileAppStore.getState().sessions,
           );

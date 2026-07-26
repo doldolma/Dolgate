@@ -41,6 +41,10 @@ import {
   type NativeTerminalInputEvent,
 } from '../lib/terminal-input';
 import { getKeyboardDockInset } from '../lib/keyboard-layout';
+import {
+  TERMINAL_GRID_REPORT_SCRIPT,
+  parseReportedTerminalGrid,
+} from '../lib/terminal-size';
 import type { MainTabParamList } from '../navigation/RootNavigator';
 import { useMobileAppStore } from '../store/useMobileAppStore';
 import type { MobilePalette } from '../theme';
@@ -202,6 +206,9 @@ export function SessionScreen(): React.JSX.Element {
   const subscribeToSessionTerminal = useMobileAppStore(
     state => state.subscribeToSessionTerminal,
   );
+  const reportTerminalGrid = useMobileAppStore(
+    state => state.reportTerminalGrid,
+  );
 
   const goBackToPreviousMainTab = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -212,6 +219,18 @@ export function SessionScreen(): React.JSX.Element {
     navigation.navigate('Home');
   }, [navigation]);
 
+  // OS 가 백그라운드에서 프로세스를 회수하면 SSH 연결도 함께 끊기고, 콜드스타트에서
+  // 살아있던 세션은 closed 로 정규화된다. 탭은 live 세션만 보여주므로 사용자 눈에는
+  // 세션이 사라진 것처럼 보인다 — 다시 붙을 수 있게 재연결 목록으로 남겨준다.
+  const reconnectableSessions = useMemo(
+    () =>
+      sessions
+        .filter(
+          session => !isLiveSession(session.status) && session.isRestorable,
+        )
+        .slice(0, 5),
+    [sessions],
+  );
   const liveSessions = useMemo(
     () => sessions.filter(session => isLiveSession(session.status)),
     [sessions],
@@ -337,21 +356,40 @@ export function SessionScreen(): React.JSX.Element {
   const canOpenSftpFromMenu = Boolean(
     menuHost && (isSshHostRecord(menuHost) || isAwsEc2HostRecord(menuHost)),
   );
+  // logger 는 릴리스에서도 항상 넘긴다 — xterm 이 실제로 fit 한 그리드가 이 채널로
+  // 오고(TERMINAL_GRID_REPORT_SCRIPT), 그 값이 원격 PTY 크기의 기준이 된다.
   const terminalLogger = useMemo(
-    () =>
-      __DEV__
-        ? {
-            debug: (...args: unknown[]) =>
-              console.log('[xterm-webview]', ...args),
-            log: (...args: unknown[]) =>
-              console.log('[xterm-webview]', ...args),
-            warn: (...args: unknown[]) =>
-              console.warn('[xterm-webview]', ...args),
-            error: (...args: unknown[]) =>
-              console.error('[xterm-webview]', ...args),
+    () => ({
+      debug: (...args: unknown[]) => {
+        if (__DEV__) {
+          console.log('[xterm-webview]', ...args);
+        }
+      },
+      log: (...args: unknown[]) => {
+        const grid = parseReportedTerminalGrid(args);
+        if (grid) {
+          reportTerminalGrid(grid);
+          if (__DEV__) {
+            console.log('[xterm-grid]', `${grid.cols}x${grid.rows}`);
           }
-        : undefined,
-    [],
+          return;
+        }
+        if (__DEV__) {
+          console.log('[xterm-webview]', ...args);
+        }
+      },
+      warn: (...args: unknown[]) => {
+        if (__DEV__) {
+          console.warn('[xterm-webview]', ...args);
+        }
+      },
+      error: (...args: unknown[]) => {
+        if (__DEV__) {
+          console.error('[xterm-webview]', ...args);
+        }
+      },
+    }),
+    [reportTerminalGrid],
   );
   const keyboardToggleActive = isAndroid
     ? keyboardVisible || keyboardRequestedVisible
@@ -809,6 +847,44 @@ export function SessionScreen(): React.JSX.Element {
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
               Home에서 호스트를 열면 여기에 현재 연결 탭이 표시됩니다.
             </Text>
+            {reconnectableSessions.length > 0 ? (
+              <View style={styles.reconnectList}>
+                <Text
+                  style={[styles.reconnectHeading, { color: palette.mutedText }]}
+                >
+                  최근 세션
+                </Text>
+                {reconnectableSessions.map(session => (
+                  <Pressable
+                    key={session.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${session.title} 세션 재연결`}
+                    onPress={() => {
+                      void resumeSession(session.id);
+                    }}
+                    style={[
+                      styles.reconnectRow,
+                      {
+                        backgroundColor: palette.surfaceAlt,
+                        borderColor: palette.sessionSurfaceBorder,
+                      },
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.reconnectTitle, { color: palette.text }]}
+                    >
+                      {session.title}
+                    </Text>
+                    <Text
+                      style={[styles.reconnectAction, { color: palette.accent }]}
+                    >
+                      재연결
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </View>
         </View>
       </IosEdgeSwipeBack>
@@ -1112,6 +1188,9 @@ export function SessionScreen(): React.JSX.Element {
                   logger={terminalLogger}
                   webViewOptions={{
                     hideKeyboardAccessoryView: true,
+                    // 실제 fit 된 그리드를 보고받아 PTY 크기를 맞춘다. onMessage 는
+                    // 넘기면 안 된다 — 패키지 핸들러를 덮어써 입출력이 끊긴다.
+                    injectedJavaScript: TERMINAL_GRID_REPORT_SCRIPT,
                   }}
                   onInitialized={() => setTerminalReady(true)}
                   onData={data => {
@@ -1420,6 +1499,35 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '800',
+  },
+  reconnectList: {
+    marginTop: 18,
+    gap: 8,
+  },
+  reconnectHeading: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  reconnectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  reconnectTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  reconnectAction: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   emptyBody: {
     fontSize: 14,
