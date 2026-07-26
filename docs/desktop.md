@@ -24,7 +24,9 @@ Dolgate Desktop은 Windows, macOS, Linux를 위한 Electron 기반 SSH 워크스
 - Session Share, 브라우저 viewer, 실시간 채팅
 - AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
 - Docker / Podman 컨테이너 모니터링, 로그, 메트릭, 셸, 터널링
+- 호스트 내보내기(Dolgate 암호화 파일 · OpenSSH config), Dolgate 파일 가져오기
 - OpenSSH / Xshell / Termius import
+- 패스키(WebAuthn) 로그인 · 패스키 관리 (서버에서 켠 경우)
 - GitHub Releases 기반 업데이트 배포
 
 ## 명령어 자동완성
@@ -146,6 +148,22 @@ zsh에서 오른쪽 프롬프트(RPROMPT)를 쓰면 같은 행에 함께 그려�
 - **인증**: 베스천이 password / privateKey / certificate / keyboard-interactive 어느 방식이든 연결됩니다(두 홉을 순차 인증). 단, 베스천 경유 **키 probe**는 비대화형 인증(password/key/certificate)만 지원합니다.
 - **다단 체인**: 여러 jump host를 위에서부터 순서대로 지정할 수 있습니다. 첫 번째 홉은 클라이언트에서 직접 연결하는 베스천이고, 마지막 홉은 타깃 바로 앞 홉입니다.
 - **제약**: 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
+
+## 패스키(WebAuthn) 로그인
+
+생체 인증이나 보안 키로 비밀번호 없이 로그인합니다. **동기화 서버에서 켠 경우에만** 나타나며(자체 호스팅은 [설정 문서](./sync-api-self-hosting.md#패스키webauthn-로그인) 참고), 비밀번호·OIDC 로그인과 함께 쓸 수 있습니다.
+
+- **로그인**: 브라우저 로그인 화면의 **패스키로 로그인** 버튼, 또는 입력란에서 브라우저가 제안하는 패스키를 선택합니다.
+- **추가·관리**: 설정 > **패스키** 에서 추가(브라우저에서 등록을 마치면 목록에 반영)하고 삭제합니다. 등록 개수에 상한이 있습니다.
+- **주의**: 등록한 도메인에 묶이므로 서버 주소가 바뀌면 재등록이 필요하고, **동기화 암호를 대체하지 않습니다**(로그인 후 따로 입력).
+
+## 호스트 내보내기 · 가져오기
+
+호스트 목록에서 호스트나 그룹을 우클릭해 **내보내기...** 를 고르면 연결에 필요한 항목까지 함께 파일로 저장합니다. 데스크톱 전용입니다.
+
+- **형식**: **Dolgate 파일(`.dolgate`)** — 자격증명과 관련 설정을 담고 내보내기 암호(4자 이상)로 전체를 암호화합니다(Argon2id + AES-256-GCM). **암호는 복구할 수 없습니다.** / **OpenSSH config** — 평문이며 자격증명은 빠지고, 표현할 수 없는 호스트는 개수를 알려주고 제외합니다.
+- **Dolgate 파일 가져오기**: 파일과 암호를 넣으면 무엇이 들어올지 먼저 보여주고, 확정할 때만 반영합니다. 이미 있는 항목은 제외하고, 이름이 겹치면 이름을 바꿔 가져온 뒤 알려줍니다.
+- **다른 앱에서 가져오기**: 호스트 목록의 가져오기 메뉴에서 **OpenSSH · Termius · Xshell(Windows 전용) · Warpgate · AWS SSM · 시리얼**도 불러올 수 있습니다.
 
 ## 명령어 스니펫 (Snippets)
 

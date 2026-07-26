@@ -7,7 +7,7 @@ Dolgate는 현재 네 개의 주요 런타임 경계로 나뉩니다.
 3. SSH/SFTP/포트 포워딩 기능을 제공하는 Go `ssh-core`
 4. 인증, 동기화, session share viewer, AWS SSM 브로커를 담당하는 Go `sync-api`
 
-복잡한 사용자 흐름(인증/오프라인, Session Share, AWS Import, Warpgate)은 아래 [주요 흐름](#주요-흐름)에 정리돼 있습니다.
+복잡한 사용자 흐름(인증/오프라인, Session Share, AWS Import, 호스트 내보내기/가져오기, Warpgate)은 아래 [주요 흐름](#주요-흐름)에 정리돼 있습니다.
 
 ```mermaid
 flowchart LR
@@ -150,6 +150,11 @@ flowchart TD
   - ephemeral key 생성과 공개 키 전송
   - 실제 SFTP 연결
 - 자동 추천값이 맞지 않으면 username/port를 다시 입력해 재시도할 수 있습니다.
+
+### 호스트 내보내기 · 가져오기
+
+- 호스트 목록에서 호스트나 그룹을 골라 내보내면, 연결에 필요한 항목(자격증명·점프 호스트 등)을 함께 담습니다.
+- 형식은 암호로 암호화한 Dolgate 파일과 평문 OpenSSH config 중에 고릅니다. OpenSSH로 표현할 수 없는 호스트는 개수를 먼저 알려주고 제외합니다.
 
 ### Warpgate Import
 

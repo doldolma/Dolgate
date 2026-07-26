@@ -3,40 +3,9 @@
 Dolgate의 브라우저 로그인과 데이터 동기화를 직접 운영하려면 `sync-api`를 별도 서버에 띄우면 됩니다.
 이 문서는 가장 단순한 SQLite 단일 인스턴스 배포부터 MySQL, OIDC, 운영 시 주의사항까지 한 번에 정리한 가이드입니다.
 
-## 개요
-
-- 데스크톱 앱과 `sync-api`는 별도 프로세스입니다.
-- 데스크톱 앱은 로그인 화면의 `Login Server`에 설정된 주소로 브라우저 인증과 동기화를 요청합니다.
-- 가장 쉬운 시작점은 Docker Compose + SQLite 단일 인스턴스입니다.
-- 운영 환경에서는 `latest` 대신 명시 버전 태그를 고정하는 것을 권장합니다.
-
-```mermaid
-flowchart LR
-  Desktop["Dolgate Desktop<br/>Login Server 주소 설정"] -->|"브라우저 인증 / 동기화 요청"| Proxy["Reverse Proxy<br/>(optional)"]
-  Browser["External Browser<br/>/login"] -->|"사용자 로그인"| Proxy
-  Proxy --> Sync["sync-api<br/>auth / sync / session share"]
-  Sync --> Storage["SQLite or MySQL"]
-  Sync --> OIDC["OIDC Provider<br/>(optional)"]
-  Desktop -. "callback / token handoff" .-> Browser
-```
-
 ## 가장 빠른 시작: SQLite 단일 인스턴스
 
-기본 예제 파일:
-
-- [docker-compose.example.yml](../services/sync-api/deploy/docker-compose.example.yml)
-
-실행 순서:
-
-```bash
-cd services/sync-api/deploy
-cp docker-compose.example.yml docker-compose.yml
-docker compose up -d
-docker compose ps
-curl http://127.0.0.1:8080/healthz
-```
-
-예제 compose는 아래와 같습니다.
+`docker-compose.yml`을 아래 내용으로 만들고 띄웁니다.
 
 ```yaml
 services:
@@ -53,14 +22,14 @@ volumes:
   dolgate-sync-api-data:
 ```
 
-이 구성의 의미:
+```bash
+docker compose up -d
+docker compose ps
+curl http://127.0.0.1:8080/healthz
+```
 
-- 기본 포트는 `8080`입니다.
-- SQLite DB 파일은 `/app/data/dolgate_sync.db`에 저장됩니다.
-- 인증 서명 키는 기본적으로 `/app/data/auth-signing-private.pem`을 사용합니다.
-- 첫 부팅 시 해당 키 파일이 없으면 `sync-api`가 새 RSA private key를 생성해서 저장합니다.
-- 같은 volume을 유지하면 기존 refresh token, browser login state, offline lease 검증이 계속 유지됩니다.
-- volume을 잃으면 기존 세션과 토큰은 모두 무효화되며 재로그인이 필요합니다.
+- `/app/data`에 SQLite DB와 인증 서명 키(첫 부팅 시 자동 생성)가 저장됩니다.
+- 이 volume을 잃으면 토큰·세션이 모두 무효화되어 전원 재로그인이 필요합니다.
 
 ## 데스크톱 앱 연결
 
@@ -124,64 +93,42 @@ environment:
 
 현재 repo에는 nginx 예제 파일이 포함되어 있지 않으므로, 사용하는 프록시에 맞춰 `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 전달을 맞추고 **WebSocket 업그레이드(`Upgrade`/`Connection` 헤더)를 허용**해야 합니다. 일부 기능이 WebSocket을 사용하므로 막히면 동작하지 않습니다.
 
-## MySQL로 전환할 때
+## MySQL + Google OIDC
 
-기본 MySQL 예제 파일:
+SQLite 대신 MySQL을 쓰고, 로컬 로그인·회원가입을 끄고 Google OIDC만 허용하는 구성입니다. DB는 이미 운영 중인 MySQL을 가리킵니다.
 
-- [docker-compose.mysql.example.yml](../services/sync-api/deploy/docker-compose.mysql.example.yml)
+```yaml
+services:
+  sync-api:
+    image: ghcr.io/doldolma/dolgate-sync-api:latest
+    container_name: dolgate-sync-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DB_DRIVER: mysql
+      DATABASE_URL: dolgate_user:CHANGE_ME_PASSWORD@tcp(172.17.0.1:3309)/dolgate?charset=utf8mb4&parseTime=True&loc=UTC
+      LOCAL_AUTH_ENABLED: "false"
+      LOCAL_SIGNUP_ENABLED: "false"
+      OIDC_ENABLED: "true"
+      OIDC_DISPLAY_NAME: "Google"
+      OIDC_ISSUER_URL: "https://accounts.google.com"
+      OIDC_CLIENT_ID: "CHANGE_ME_CLIENT_ID"
+      OIDC_CLIENT_SECRET: "CHANGE_ME_CLIENT_SECRET"
+      OIDC_REDIRECT_URL: "https://ssh.example.com/auth/oidc/callback"
+      OIDC_SCOPES: "openid,profile,email"
+      TRUSTED_PROXIES: "172.17.0.1"
+    volumes:
+      - dolgate-sync-api-data:/app/data
 
-실행 순서:
-
-```bash
-cd services/sync-api/deploy
-cp docker-compose.mysql.example.yml docker-compose.yml
-docker compose up -d
-docker compose ps
-curl http://127.0.0.1:8080/healthz
+volumes:
+  dolgate-sync-api-data:
 ```
-
-이 예제는 다음을 추가합니다.
-
-- MySQL 8.4 컨테이너
-- `DB_DRIVER=mysql`
-- `DATABASE_URL=...@tcp(mysql:3306)/...`
 
 주의사항:
 
-- `mysql:3306`은 Docker Compose 내부 서비스명일 때만 동작합니다.
 - 비밀번호는 예제의 `CHANGE_ME_*` 값을 그대로 쓰면 안 됩니다.
-- `sync-api` 컨테이너에서도 `/app/data` volume은 유지하는 편이 안전합니다.
-  - DB를 MySQL로 옮겨도 signing key는 계속 필요합니다.
-
-## Google OIDC + MySQL
-
-예제 파일:
-
-- [docker-compose.oidc-mysql.example.yml](../services/sync-api/deploy/docker-compose.oidc-mysql.example.yml)
-
-이 예제는 다음 환경을 전제로 합니다.
-
-- MySQL 사용
-- 로컬 로그인 비활성화
-- 로컬 회원가입 비활성화
-- Google OIDC 사용
-
-
-```yaml
-environment:
-  DB_DRIVER: mysql
-  DATABASE_URL: dolgate_user:CHANGE_ME_PASSWORD@tcp(172.17.0.1:3309)/dolgate?charset=utf8mb4&parseTime=True&loc=UTC
-  LOCAL_AUTH_ENABLED: "false"
-  LOCAL_SIGNUP_ENABLED: "false"
-  OIDC_ENABLED: "true"
-  OIDC_DISPLAY_NAME: "Google"
-  OIDC_ISSUER_URL: "https://accounts.google.com"
-  OIDC_CLIENT_ID: "CHANGE_ME_CLIENT_ID"
-  OIDC_CLIENT_SECRET: "CHANGE_ME_CLIENT_SECRET"
-  OIDC_REDIRECT_URL: "https://ssh.example.com/auth/oidc/callback"
-  OIDC_SCOPES: "openid,profile,email"
-  TRUSTED_PROXIES: "172.17.0.1"
-```
+- DB를 MySQL로 옮겨도 signing key는 계속 필요하므로 `sync-api`의 `/app/data` volume은 유지하세요.
 
 OIDC 입력값
 
@@ -201,9 +148,83 @@ OIDC 입력값
 - RP 값은 `PUBLIC_BASE_URL`에서 자동 유도되며, 필요하면 `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_DISPLAY_NAME` / `WEBAUTHN_ORIGINS`로 직접 지정합니다.
 - 패스키는 등록한 도메인에 묶이므로 도메인이 바뀌면 재등록이 필요합니다.
 
+## 설정 파일로 운영하기
+
+환경 변수 대신 JSON 설정 파일로도 운영할 수 있습니다. 항목이 많아지는 OIDC·패스키 구성이나, 설정을 버전 관리하고 싶을 때 편합니다.
+
+`sync-api`는 다음 경로를 순서대로 찾아 **처음 발견한 설정 파일을 자동으로 읽습니다.**
+
+```text
+./config.json
+./config/config.json
+/etc/dolgate/config.json
+```
+
+- 상대 경로는 작업 디렉터리 기준입니다. 컨테이너 이미지의 작업 디렉터리가 `/app`이라 `/app/config.json` 또는 `/app/config/config.json`으로 마운트하면 그대로 잡힙니다.
+- 다른 위치를 쓰려면 `DOLSSH_API_CONFIG_PATH`로 경로를 직접 지정합니다(지정하면 자동 탐색은 건너뜁니다).
+- **환경 변수는 파일 값을 덮어씁니다**(파일 → env 순서로 적용). 비밀 값만 환경 변수로 빼서 섞어 쓸 수 있습니다.
+
+```json
+{
+  "server": {
+    "port": "8080",
+    "trustedProxies": ["172.17.0.1"],
+    "publicBaseUrl": "https://ssh.example.com"
+  },
+  "database": {
+    "driver": "mysql",
+    "url": "dolgate_user:CHANGE_ME_PASSWORD@tcp(mysql:3306)/dolgate?charset=utf8mb4&parseTime=True&loc=UTC"
+  },
+  "auth": {
+    "signingPrivateKeyPath": "./data/auth-signing-private.pem",
+    "accessTokenTtlMinutes": 15,
+    "refreshTokenIdleDays": 14,
+    "offlineLeaseTtlHours": 72,
+    "local": {
+      "enabled": false,
+      "signupEnabled": false
+    },
+    "oidc": {
+      "enabled": true,
+      "displayName": "Google",
+      "issuerUrl": "https://accounts.google.com",
+      "clientId": "CHANGE_ME_CLIENT_ID",
+      "clientSecret": "CHANGE_ME_CLIENT_SECRET",
+      "redirectUrl": "https://ssh.example.com/auth/oidc/callback",
+      "scopes": ["openid", "profile", "email"]
+    },
+    "webauthn": {
+      "enabled": true
+    }
+  }
+}
+```
+
+컨테이너에 마운트해서 쓰는 예입니다.
+
+```yaml
+services:
+  sync-api:
+    image: ghcr.io/doldolma/dolgate-sync-api:latest
+    container_name: dolgate-sync-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.json:/app/config/config.json:ro
+      - dolgate-sync-api-data:/app/data
+
+volumes:
+  dolgate-sync-api-data:
+```
+
+- 적지 않은 항목은 기본값을 씁니다(아래 [기본값 메모](#자주-쓰는-환경-변수) 참고).
+- 비밀 값(`clientSecret`, DB 비밀번호, `signingPrivateKeyPem`)이 파일에 들어가므로 권한을 좁히고 저장소에 커밋하지 마세요.
+- 부팅 로그에 어떤 설정을 읽었는지 찍히므로 적용 여부를 확인할 수 있습니다.
+
 ## 자주 쓰는 환경 변수
 
-`sync-api`는 config file 없이 env-only로 운영할 수 있습니다.
+`sync-api`는 설정 파일 없이 환경 변수만으로도 운영할 수 있습니다(설정 파일과 섞어 쓰면 환경 변수가 우선합니다 — 위 [설정 파일로 운영하기](#설정-파일로-운영하기) 참고).
 
 주요 변수:
 

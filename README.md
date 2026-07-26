@@ -64,13 +64,15 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 - AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
 - Docker / Podman 컨테이너 모니터링·로그·메트릭·셸·터널링
 
-**공유 & 가져오기**
+**공유 · 내보내기 & 가져오기**
 
 - Session Share, 브라우저 viewer, 실시간 채팅
-- OpenSSH / Xshell / Termius import
+- 호스트 내보내기 — 암호로 암호화한 Dolgate 파일(`.dolgate`) 또는 OpenSSH config
+- OpenSSH / Xshell / Termius import, Dolgate 파일 가져오기
 
 **동기화 & 보안**
 
+- 패스키(WebAuthn) 로그인 — 생체 인증·보안 키로 비밀번호 없이 로그인 (서버에서 켠 경우)
 - 종단간 암호화(E2EE) — 호스트·자격 증명·스니펫 등은 기기에서 암호화되어 서버에는 암호문만 저장됩니다
 - Zero-knowledge — E2EE 계정의 암호화 키(DEK)는 사용자의 동기화 암호(Argon2id)로 감싸 보관되며, 서버는 원문 키를 저장하지 않습니다. 동기화 암호를 잊으면 서버도 복구해 줄 수 없습니다
 

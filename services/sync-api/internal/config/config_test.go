@@ -128,3 +128,124 @@ func TestLoadRejectsLegacyJWTSecretEnvironmentVariable(t *testing.T) {
 		t.Fatalf("Load() error = %v, want JWT_SECRET rejection", err)
 	}
 }
+
+// 설정 파일은 DOLSSH_API_CONFIG_PATH 없이도 관례 경로에서 자동으로 잡혀야 한다.
+func TestLoadDiscoversConfigFileInWorkingDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+
+	if err := os.WriteFile("config.json", []byte(`{"server":{"port":"9310"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	cfg, source, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if source != "config.json" {
+		t.Fatalf("source = %q, want config.json", source)
+	}
+	if cfg.Server.Port != "9310" {
+		t.Fatalf("cfg.Server.Port = %q, want 9310", cfg.Server.Port)
+	}
+}
+
+func TestLoadDiscoversConfigFileInConfigDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+
+	if err := os.MkdirAll("config", 0o700); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+	configPath := filepath.Join("config", "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"server":{"port":"9311"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	cfg, source, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if source != configPath {
+		t.Fatalf("source = %q, want %q", source, configPath)
+	}
+	if cfg.Server.Port != "9311" {
+		t.Fatalf("cfg.Server.Port = %q, want 9311", cfg.Server.Port)
+	}
+}
+
+// 작업 디렉터리의 파일이 config/ 보다 먼저다.
+func TestLoadPrefersWorkingDirectoryOverConfigDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+
+	if err := os.WriteFile("config.json", []byte(`{"server":{"port":"9312"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll("config", 0o700); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join("config", "config.json"), []byte(`{"server":{"port":"9999"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	cfg, source, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if source != "config.json" || cfg.Server.Port != "9312" {
+		t.Fatalf("source = %q, port = %q; want config.json / 9312", source, cfg.Server.Port)
+	}
+}
+
+// 명시 경로가 있으면 자동 탐색 결과를 무시한다.
+func TestLoadExplicitConfigPathWinsOverDiscoveredFile(t *testing.T) {
+	tempDir := t.TempDir()
+	chdir(t, tempDir)
+
+	if err := os.WriteFile("config.json", []byte(`{"server":{"port":"9313"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	explicitPath := filepath.Join(tempDir, "explicit.json")
+	if err := os.WriteFile(explicitPath, []byte(`{"server":{"port":"9314"}}`), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+	t.Setenv("DOLSSH_API_CONFIG_PATH", explicitPath)
+
+	cfg, source, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if source != explicitPath || cfg.Server.Port != "9314" {
+		t.Fatalf("source = %q, port = %q; want %q / 9314", source, cfg.Server.Port, explicitPath)
+	}
+}
+
+// 설정 파일이 없으면 예전처럼 기본값+환경 변수로 동작한다.
+func TestLoadFallsBackWhenNoConfigFileExists(t *testing.T) {
+	chdir(t, t.TempDir())
+
+	_, source, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if source != "defaults+env" {
+		t.Fatalf("source = %q, want defaults+env", source)
+	}
+}
+
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("os.Chdir() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("os.Chdir(restore) error = %v", err)
+		}
+	})
+}

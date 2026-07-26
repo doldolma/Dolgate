@@ -130,22 +130,50 @@ func defaultConfig() AppConfig {
 	}
 }
 
+// configSearchPaths 는 DOLSSH_API_CONFIG_PATH 가 없을 때 순서대로 살펴보는 관례 경로다.
+// 상대 경로는 작업 디렉터리 기준이며, 컨테이너 이미지의 WORKDIR 이 /app 이므로
+// /app/config.json · /app/config/config.json 을 마운트하면 그대로 잡힌다.
+var configSearchPaths = []string{
+	"config.json",
+	"config/config.json",
+	"/etc/dolgate/config.json",
+}
+
+// findConfigFile 은 관례 경로에서 처음 발견한 설정 파일을 돌려준다. 없으면 빈 문자열.
+func findConfigFile() string {
+	for _, candidate := range configSearchPaths {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
 func Load() (AppConfig, string, error) {
 	cfg := defaultConfig()
-	requestedConfigPath := os.Getenv("DOLSSH_API_CONFIG_PATH")
 	configSource := "defaults+env"
-	if strings.TrimSpace(requestedConfigPath) != "" {
-		data, err := os.ReadFile(requestedConfigPath)
+
+	// 명시 경로가 있으면 그것만 쓴다(오타를 조용히 넘기지 않으려고 읽기 실패는 에러).
+	// 없으면 관례 경로를 탐색하고, 아무것도 없으면 기본값+환경 변수로만 동작한다.
+	configPath := strings.TrimSpace(os.Getenv("DOLSSH_API_CONFIG_PATH"))
+	if configPath == "" {
+		configPath = findConfigFile()
+	}
+
+	if configPath != "" {
+		data, err := os.ReadFile(configPath)
 		if err != nil {
-			return AppConfig{}, requestedConfigPath, err
+			return AppConfig{}, configPath, err
 		}
 		if err := rejectLegacyAuthConfig(data); err != nil {
-			return AppConfig{}, requestedConfigPath, err
+			return AppConfig{}, configPath, err
 		}
 		if err := json.Unmarshal(data, &cfg); err != nil {
-			return AppConfig{}, requestedConfigPath, err
+			return AppConfig{}, configPath, err
 		}
-		configSource = requestedConfigPath
+		configSource = configPath
 	}
 
 	applyEnvOverrides(&cfg)
