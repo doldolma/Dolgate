@@ -231,7 +231,22 @@ export class UpdateService {
     // 이미 새 버전을 들고 있거나 다운로드 중인 경우에는 중복 체크를 생략한다.
     this.periodicCheckTimer = setInterval(() => {
       void this.check();
-    }, 1000 * 60 * 60 * 4);
+    }, 1000 * 60 * 60);
+  }
+
+  // macOS 는 창을 닫아도 프로세스가 살아 있어(window-all-closed 에서 quit 하지 않는다)
+  // 부팅 때 1회 예약한 초기 확인이 다시 돌지 않는다. 그래서 창만 닫았다 다시 열면
+  // 1시간 주기가 오기 전까지 새 릴리즈를 못 본다 — 창을 다시 열 때 마지막 확인이
+  // 오래됐으면 한 번 더 확인한다. 중복 호출은 check() 의 가드가 막는다.
+  checkIfStale(maxAgeMs = 30 * 60 * 1000): void {
+    if (!this.state.enabled) {
+      return;
+    }
+    const checkedAt = this.state.checkedAt ? Date.parse(this.state.checkedAt) : Number.NaN;
+    if (Number.isFinite(checkedAt) && Date.now() - checkedAt < maxAgeMs) {
+      return;
+    }
+    void this.check();
   }
 
   async check(): Promise<void> {

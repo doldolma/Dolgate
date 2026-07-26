@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SettingsRepository } from './database';
 
 const updaterMocks = vi.hoisted(() => {
@@ -19,12 +19,16 @@ const updaterMocks = vi.hoisted(() => {
   return { autoUpdater, listeners };
 });
 
-vi.mock('electron', () => ({
+const electronMocks = vi.hoisted(() => ({
   app: {
     isPackaged: false,
     getVersion: () => '1.0.0',
     getPath: () => '/tmp/dolgate-test',
   },
+}));
+
+vi.mock('electron', () => ({
+  app: electronMocks.app,
   BrowserWindow: class BrowserWindow {},
 }));
 
@@ -79,5 +83,64 @@ describe('UpdateService automatic downloads', () => {
       release: { version: '1.1.0' },
     });
     expect(updaterMocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+});
+
+// macOS 는 창을 닫아도 프로세스가 살아 있어 부팅 시 1회 예약한 초기 확인이 다시 돌지
+// 않는다(Cmd+Q 로 완전히 종료해야 재실행됨). 창을 다시 열 때의 재확인 경로를 고정한다.
+describe('UpdateService.checkIfStale', () => {
+  const createService = () => {
+    const settings = {
+      get: vi.fn(() => ({ dismissedUpdateVersion: null })),
+      update: vi.fn(),
+    } as unknown as SettingsRepository;
+    return new UpdateService(settings);
+  };
+
+  beforeEach(() => {
+    updaterMocks.listeners.clear();
+    vi.clearAllMocks();
+    electronMocks.app.isPackaged = true;
+  });
+
+  afterEach(() => {
+    electronMocks.app.isPackaged = false;
+  });
+
+  it('checks when no check has run yet', () => {
+    const service = createService();
+
+    service.checkIfStale();
+
+    expect(updaterMocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips while the last check is still fresh', () => {
+    const service = createService();
+    updaterMocks.listeners.get('update-not-available')?.();
+    vi.clearAllMocks();
+
+    service.checkIfStale();
+
+    expect(updaterMocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it('checks again once the last check is older than the cooldown', () => {
+    const service = createService();
+    updaterMocks.listeners.get('update-not-available')?.();
+    vi.clearAllMocks();
+
+    service.checkIfStale(0);
+
+    expect(updaterMocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays disabled when the app is not packaged', () => {
+    electronMocks.app.isPackaged = false;
+    const service = createService();
+
+    service.checkIfStale();
+
+    expect(updaterMocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
   });
 });

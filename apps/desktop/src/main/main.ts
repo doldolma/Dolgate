@@ -726,6 +726,9 @@ if (termiusHelperArgIndex >= 0) {
       if (BrowserWindow.getAllWindows().length === 0) {
         await createWindow();
       }
+      // 창만 닫았다 여는 동안에는 부팅 시 예약한 초기 확인이 다시 돌지 않는다.
+      // 마지막 확인이 오래됐으면 이 시점에 업데이트를 다시 확인한다.
+      updateService.checkIfStale();
     });
 
     // 절전/화면잠금에서 복귀하면 navigator.onLine이 true여도 SSH 소켓이 죽어
