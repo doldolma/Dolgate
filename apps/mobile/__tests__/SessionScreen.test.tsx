@@ -516,6 +516,47 @@ describe('SessionScreen', () => {
     });
   });
 
+  // OS 가 백그라운드 프로세스를 회수하면 세션이 closed 로 정규화되고 탭에서 사라진다.
+  // 사용자가 다시 붙을 수 있도록 빈 상태에 재연결 목록을 남겨야 한다.
+  it('offers reconnect for sessions closed by a cold start', async () => {
+    const resumeSession = jest.fn(async () => 'session-1');
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          { ...session, status: 'closed', isRestorable: true },
+          { ...secondSession, status: 'closed', isRestorable: false },
+        ],
+        resumeSession,
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const reconnect = tree!.root.findByProps({
+      accessibilityLabel: 'Synology 세션 재연결',
+    });
+
+    // 복원 불가 세션은 노출하지 않는다.
+    expect(() =>
+      tree!.root.findByProps({
+        accessibilityLabel: 'Docker-ubuntu 세션 재연결',
+      }),
+    ).toThrow();
+
+    await act(async () => {
+      reconnect.props.onPress();
+    });
+
+    expect(resumeSession).toHaveBeenCalledWith('session-1');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('renders the native terminal input overlay on iOS', async () => {
     // iOS도 네이티브 입력 오버레이를 쓴다 — WebView(xterm) 직접 입력은 한글 IME 조합이
     // 깨져 자모가 분리되기 때문(SessionScreen.useTerminalInputOverlay 참고).

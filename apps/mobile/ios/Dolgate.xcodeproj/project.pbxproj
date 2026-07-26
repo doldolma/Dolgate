@@ -276,12 +276,14 @@
 				DEVELOPMENT_TEAM = L8QAH35DSW;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = Dolgate/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Dolgate;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.8.4;
+				MARKETING_VERSION = 1.8.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -309,12 +311,14 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = L8QAH35DSW;
 				INFOPLIST_FILE = Dolgate/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Dolgate;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.8.4;
+				MARKETING_VERSION = 1.8.5;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",

@@ -25,13 +25,16 @@ import {
   createUnauthenticatedState,
 } from "../src/lib/mobile";
 import {
-  getCurrentWindowTerminalGridSize,
+  resetReportedTerminalGridForTests,
+  setReportedTerminalGrid,
   toRusshTerminalSize,
 } from "../src/lib/terminal-size";
 import {
   resetMobileStoreRuntimeForTests,
   useMobileAppStore,
 } from "../src/store/useMobileAppStore";
+
+const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
 
 jest.mock("@fressh/react-native-uniffi-russh", () => ({
   RnRussh: {
@@ -282,6 +285,10 @@ describe("useMobileAppStore auth and sync flows", () => {
 
   beforeEach(async () => {
     resetMobileStoreRuntimeForTests();
+    // 접속은 xterm 이 보고한 실제 그리드를 기다린다(없으면 추정값으로 폴백하며 대기).
+    // 테스트는 보고된 상태를 전제로 PTY 크기 전달을 검증한다.
+    resetReportedTerminalGridForTests();
+    setReportedTerminalGrid(REPORTED_TEST_GRID);
     fetchMock.mockReset();
     jest.clearAllMocks();
     asyncStorageMock.setItem.mockClear();
@@ -2186,7 +2193,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(connection.startShell).toHaveBeenCalledWith(
       expect.objectContaining({
         term: "Xterm",
-        terminalSize: toRusshTerminalSize(getCurrentWindowTerminalGridSize()),
+        terminalSize: toRusshTerminalSize(REPORTED_TEST_GRID),
       }),
     );
 
@@ -2279,7 +2286,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(connection.startShell).toHaveBeenCalledWith(
       expect.objectContaining({
         term: "Xterm",
-        terminalSize: toRusshTerminalSize(getCurrentWindowTerminalGridSize()),
+        terminalSize: toRusshTerminalSize(REPORTED_TEST_GRID),
       }),
     );
     expect(useMobileAppStore.getState().sessions[0]?.status).toBe("connected");
