@@ -277,7 +277,7 @@ describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
     expect(ctx.activityLogs.append).toHaveBeenCalledWith(
       'error',
       'session',
-      '호스트 연결에 실패했습니다.',
+      expect.objectContaining({ messageKey: 'knownHostsIpc.connectFailed' }),
       expect.objectContaining({ hostId: 'host-1', hostLabel: 'Unreachable' }),
     );
   });

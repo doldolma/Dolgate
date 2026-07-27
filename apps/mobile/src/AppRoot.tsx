@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Linking,
@@ -18,9 +19,16 @@ import { recordAwsSsoCallbackUrl } from "./lib/aws-session";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { useMobileAppStore } from "./store/useMobileAppStore";
 import { createNavigationTheme, getPalette, resolveAppTheme } from "./theme";
+import { applyMobileLanguage, initMobileI18n } from "./i18n";
+
+// 첫 렌더보다 먼저 언어를 정해 문구가 나중에 바뀌며 깜빡이지 않게 한다. 저장된 설정은
+// persist 하이드레이트 뒤에 오므로 아래 useEffect 에서 맞춘다.
+initMobileI18n();
 
 export function AppRoot(): React.JSX.Element {
   const systemScheme = useColorScheme();
+  const { t: translate } = useTranslation();
+  const language = useMobileAppStore((state) => state.settings.language);
   const hydrated = useMobileAppStore((state) => state.hydrated);
   const authGateResolved = useMobileAppStore(
     (state) => state.authGateResolved,
@@ -65,6 +73,11 @@ export function AppRoot(): React.JSX.Element {
     }
     void initializeApp();
   }, [hydrated, initializeApp]);
+
+  // 저장된 언어 설정을 반영한다(하이드레이트 전에는 기기 언어로 그려져 있다).
+  useEffect(() => {
+    applyMobileLanguage(language);
+  }, [language]);
 
   useEffect(() => {
     if (!hydrated) {
@@ -128,7 +141,7 @@ export function AppRoot(): React.JSX.Element {
                   },
                 ]}
               >
-                앱을 준비하고 있습니다.
+                {translate("appRoot.preparing")}
               </Text>
             </View>
           ) : (

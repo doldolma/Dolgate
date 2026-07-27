@@ -44,7 +44,14 @@ func infoWebAuthnCapability(t *testing.T, router *gin.Engine) bool {
 
 func loginPageBody(t *testing.T, router *gin.Engine) string {
 	t.Helper()
-	request := httptest.NewRequest(http.MethodGet, "/login", nil)
+	return loginPageBodyInLocale(t, router, "ko")
+}
+
+// 문구를 단정하는 테스트는 언어를 명시한다 — 기본 언어(en)에 기대면 카탈로그를 손댈 때마다
+// 무관한 테스트가 깨진다.
+func loginPageBodyInLocale(t *testing.T, router *gin.Engine, locale string) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/login?lang="+locale, nil)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {

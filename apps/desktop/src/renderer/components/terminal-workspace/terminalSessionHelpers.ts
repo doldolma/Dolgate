@@ -4,7 +4,7 @@ import type {
   TerminalTab,
 } from '@shared';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
-import { t } from '../../i18n';
+import { getFormatLocale, t } from '../../i18n';
 
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
 export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;
@@ -163,7 +163,7 @@ export function formatSessionShareChatTimestamp(sentAt: string): string {
     return '';
   }
 
-  return timestamp.toLocaleTimeString('ko-KR', {
+  return timestamp.toLocaleTimeString(getFormatLocale(), {
     hour: '2-digit',
     minute: '2-digit',
   });

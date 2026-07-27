@@ -32,6 +32,7 @@ import type {
   SftpCompatibleHostRecord,
 } from "../context";
 import { t } from '../../i18n';
+import { logMessage } from "../../activity-log-message";
 
 interface ResolvedContainersEndpoint {
   endpointId: string;

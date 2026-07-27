@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import {
   FlatList,
   Pressable,
@@ -43,6 +44,7 @@ function canRemoveSession(status: string) {
 
 export function ConnectionsScreen(): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
   const screenPadding = useScreenPadding();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const storedSessions = useMobileAppStore((state) => state.sessions);
@@ -76,7 +78,7 @@ export function ConnectionsScreen(): React.JSX.Element {
     >
       <Text style={[styles.title, { color: palette.text }]}>Connections</Text>
       <Text style={[styles.subtitle, { color: palette.mutedText }]}>
-        현재 세션과 최근 세션
+        {translate("connections.title")}
       </Text>
 
       <FlatList
@@ -102,10 +104,10 @@ export function ConnectionsScreen(): React.JSX.Element {
             ]}
           >
             <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              아직 세션이 없습니다.
+              {translate("connections.emptyTitle")}
             </Text>
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              Home에서 호스트를 열면 여기에 표시됩니다.
+              {translate("connections.emptyBody")}
             </Text>
           </View>
         }
@@ -132,7 +134,7 @@ export function ConnectionsScreen(): React.JSX.Element {
               <View style={styles.row}>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.title} 세션 열기`}
+                  accessibilityLabel={translate("connections.openAria", { title: item.title })}
                   onPress={openSession}
                   style={styles.rowOpenArea}
                 >
@@ -156,7 +158,7 @@ export function ConnectionsScreen(): React.JSX.Element {
                   {removable ? (
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`${item.title} 세션 삭제`}
+                      accessibilityLabel={translate("connections.deleteAria", { title: item.title })}
                       hitSlop={10}
                       onPress={() => {
                         void removeSession(item.id);
@@ -180,21 +182,21 @@ export function ConnectionsScreen(): React.JSX.Element {
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${item.title} 세션 본문 열기`}
+                accessibilityLabel={translate("connections.openBodyAria", { title: item.title })}
                 onPress={async () => {
                   await openSession();
                 }}
                 style={styles.cardBody}
               >
                 <Text style={[styles.meta, { color: palette.mutedText }]}>
-                  {hostLabelById.get(item.hostId) ?? "삭제된 호스트"} •{" "}
+                  {hostLabelById.get(item.hostId) ?? translate("connections.deletedHost")} •{" "}
                   {formatRelativeTime(item.lastEventAt)}
                 </Text>
                 <Text style={[styles.meta, { color: palette.mutedText }]}>
                   {item.hasReceivedOutput
-                    ? "출력 스냅샷 있음"
-                    : "출력 스냅샷 없음"}
-                  {item.isRestorable ? " • 이어서 사용 가능" : ""}
+                    ? translate("connections.hasSnapshot")
+                    : translate("connections.noSnapshot")}
+                  {item.isRestorable ? translate("connections.restorable") : ""}
                 </Text>
                 {item.errorMessage ? (
                   <Text style={[styles.errorText, { color: palette.danger }]}>

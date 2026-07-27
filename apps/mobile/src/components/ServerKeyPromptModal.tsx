@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
   Modal,
   Pressable,
@@ -21,6 +22,7 @@ export function ServerKeyPromptModal({
   onReject,
 }: ServerKeyPromptModalProps): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
 
   return (
     <Modal
@@ -48,11 +50,11 @@ export function ServerKeyPromptModal({
         >
           <Text style={[styles.title, { color: palette.text }]}>
             {prompt?.status === "mismatch"
-              ? "호스트 키가 변경되었습니다"
-              : "새 호스트 키를 확인해 주세요"}
+              ? translate("serverKey.titleMismatch")
+              : translate("serverKey.titleNew")}
           </Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            {prompt?.hostLabel} 연결 전에 서버 공개키를 신뢰할지 결정해야 합니다.
+            {translate("serverKey.body", { label: prompt?.hostLabel ?? "" })}
           </Text>
 
           <View
@@ -65,14 +67,14 @@ export function ServerKeyPromptModal({
             ]}
           >
             <Text style={[styles.label, { color: palette.mutedText }]}>
-              대상
+              {translate("serverKey.targetLabel")}
             </Text>
             <Text style={[styles.value, { color: palette.text }]}>
               {prompt ? `${prompt.info.host}:${prompt.info.port}` : ""}
             </Text>
 
             <Text style={[styles.label, { color: palette.mutedText }]}>
-              알고리즘
+              {translate("serverKey.algorithmLabel")}
             </Text>
             <Text style={[styles.value, { color: palette.text }]}>
               {prompt?.info.algorithm}
@@ -88,7 +90,7 @@ export function ServerKeyPromptModal({
             {prompt?.existing ? (
               <>
                 <Text style={[styles.label, { color: palette.mutedText }]}>
-                  기존 fingerprint
+                  {translate("serverKey.existingFingerprintLabel")}
                 </Text>
                 <Text style={[styles.monoValue, { color: palette.warning }]}>
                   {prompt.existing.fingerprintSha256}
@@ -109,7 +111,7 @@ export function ServerKeyPromptModal({
               ]}
             >
               <Text style={[styles.buttonText, { color: palette.text }]}>
-                취소
+                {translate("common.cancel")}
               </Text>
             </Pressable>
             <Pressable
@@ -122,7 +124,7 @@ export function ServerKeyPromptModal({
               ]}
             >
               <Text style={[styles.buttonText, styles.primaryButtonText]}>
-                신뢰하고 계속
+                {translate("serverKey.trustAndContinue")}
               </Text>
             </Pressable>
           </View>

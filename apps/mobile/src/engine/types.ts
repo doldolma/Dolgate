@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 // The engine-neutral SSH surface the session flow talks to.
 //
 // One implementation backs it: the Go engine (gomobile bindings over
@@ -226,7 +227,7 @@ export interface MobileSshEngine {
 /** Raised when a host key is presented and the caller declines it. */
 export class HostKeyRejectedError extends Error {
   constructor() {
-    super('호스트 키를 신뢰하지 않아 연결을 중단했습니다.');
+    super(t('engine.hostKeyRejected'));
     this.name = 'HostKeyRejectedError';
   }
 }

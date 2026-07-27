@@ -8,7 +8,7 @@ import type {
 import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
-  getAwsEc2HostSftpDisabledReason,
+  getAwsEc2SftpDisabledMessage,
   getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,

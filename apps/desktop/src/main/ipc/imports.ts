@@ -34,6 +34,7 @@ import {
 } from "../xshell-password-decryptor";
 import type { MainIpcContext } from "./context";
 import { t } from "../i18n";
+import { logMessage } from "../activity-log-message";
 
 const hostTransferService = new HostTransferService();
 
@@ -95,7 +96,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         }
         const savedPath = ensureExtension(result.filePath, ".dolgate");
         await writeFileAtomically(savedPath, exported.bytes);
-        ctx.activityLogs.append("info", "audit", t("imports.dolgateExported"), {
+        ctx.activityLogs.append("info", "audit", logMessage("imports.dolgateExported"), {
           exportedHostCount: exported.hostCount,
         });
         return {
@@ -130,7 +131,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       }
       const savedPath = ensureExtension(result.filePath, ".ssh-config");
       await writeFileAtomically(savedPath, exported.content);
-      ctx.activityLogs.append("info", "audit", t("imports.opensshExported"), {
+      ctx.activityLogs.append("info", "audit", logMessage("imports.opensshExported"), {
         exportedHostCount: exported.exportedRootCount,
         dependencyCount: exported.dependencyCount,
         skippedHostCount: exported.skippedCount,
@@ -206,7 +207,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         });
         ctx.emitWorkspaceChanged(event.sender);
       }
-      ctx.activityLogs.append("info", "audit", t("imports.dolgateImported"), {
+      ctx.activityLogs.append("info", "audit", logMessage("imports.dolgateImported"), {
         importedHostCount: result.importedHostCount,
         skippedCount: result.skippedCount,
         warningCount: result.warnings.length,
@@ -301,7 +302,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         ctx.activityLogs.append(
           "warn",
           "audit",
-          t("imports.termiusPartial"),
+          logMessage("imports.termiusPartial"),
           {
             warningCount: result.warnings.length,
           },
@@ -406,7 +407,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "info",
             "audit",
-            t("imports.opensshImported"),
+            logMessage("imports.opensshImported"),
             {
               sourceCount: snapshot.sources.length,
               targetGroupPath,
@@ -423,7 +424,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "warn",
             "audit",
-            t("imports.opensshImportedWithWarnings"),
+            logMessage("imports.opensshImportedWithWarnings"),
             {
               sourceCount: snapshot.sources.length,
               warningCount: warnings.length,
@@ -601,7 +602,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "info",
             "audit",
-            t("imports.xshellImported"),
+            logMessage("imports.xshellImported"),
             {
               sourceCount: snapshot.sources.length,
               createdGroupCount,
@@ -617,7 +618,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "warn",
             "audit",
-            t("imports.xshellImportedWithWarnings"),
+            logMessage("imports.xshellImportedWithWarnings"),
             {
               sourceCount: snapshot.sources.length,
               warningCount: warnings.length,

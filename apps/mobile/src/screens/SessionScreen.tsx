@@ -49,6 +49,7 @@ import type { MainTabParamList } from '../navigation/RootNavigator';
 import { useMobileAppStore } from '../store/useMobileAppStore';
 import type { MobilePalette } from '../theme';
 import { useMobilePalette } from '../theme';
+import { useTranslation } from 'react-i18next';
 
 const TERMINAL_RESET_BYTES = Uint8Array.from(
   Buffer.from('\u001b[3J\u001b[2J\u001b[H', 'utf8'),
@@ -106,6 +107,7 @@ function isLiveSession(status: string) {
 }
 
 export function SessionScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
   const safeAreaInsets = useSafeAreaInsets();
@@ -842,23 +844,23 @@ export function SessionScreen(): React.JSX.Element {
             ]}
           >
             <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              열린 세션이 없습니다.
+              {translate("session.noSessionsTitle")}
             </Text>
             <Text style={[styles.emptyBody, { color: palette.mutedText }]}>
-              Home에서 호스트를 열면 여기에 현재 연결 탭이 표시됩니다.
+              {translate("session.noSessionsBody")}
             </Text>
             {reconnectableSessions.length > 0 ? (
               <View style={styles.reconnectList}>
                 <Text
                   style={[styles.reconnectHeading, { color: palette.mutedText }]}
                 >
-                  최근 세션
+                  {translate("session.recentSessions")}
                 </Text>
                 {reconnectableSessions.map(session => (
                   <Pressable
                     key={session.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`${session.title} 세션 재연결`}
+                    accessibilityLabel={translate("session.reconnectAria", { title: session.title })}
                     onPress={() => {
                       void resumeSession(session.id);
                     }}
@@ -879,7 +881,7 @@ export function SessionScreen(): React.JSX.Element {
                     <Text
                       style={[styles.reconnectAction, { color: palette.accent }]}
                     >
-                      재연결
+                      {translate("session.reconnect")}
                     </Text>
                   </Pressable>
                 ))}
@@ -918,7 +920,7 @@ export function SessionScreen(): React.JSX.Element {
               <Pressable
                 key={`${tab.kind}:${session.id}`}
                 accessibilityRole="button"
-                accessibilityLabel={`${title} ${tabStatus.label} 세션 탭`}
+                accessibilityLabel={translate("session.tabAria", { title, status: tabStatus.label })}
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
                   if (isTerminal) {
@@ -972,8 +974,8 @@ export function SessionScreen(): React.JSX.Element {
                   accessibilityRole="button"
                   accessibilityLabel={
                     isTerminal
-                      ? `${session.title} 세션 메뉴`
-                      : `${session.title} 닫기`
+                      ? translate("session.menuAria", { title: session.title })
+                      : translate("session.closeAria", { title: session.title })
                   }
                   hitSlop={8}
                   onPress={async event => {
@@ -1023,7 +1025,7 @@ export function SessionScreen(): React.JSX.Element {
             {menuSession ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${menuSession.title} 세션 복제`}
+                accessibilityLabel={translate("session.duplicateAria", { title: menuSession.title })}
                 onPress={async () => {
                   const sessionId = menuSession.id;
                   setMenuSessionId(null);
@@ -1057,7 +1059,7 @@ export function SessionScreen(): React.JSX.Element {
             {menuSession ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${menuSession.title} 세션 닫기`}
+                accessibilityLabel={translate("session.closeSessionAria", { title: menuSession.title })}
                 onPress={async () => {
                   const sessionId = menuSession.id;
                   setMenuSessionId(null);
@@ -1098,7 +1100,7 @@ export function SessionScreen(): React.JSX.Element {
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${activeSession.title} 세션 재연결`}
+            accessibilityLabel={translate("session.reconnectAria", { title: activeSession.title })}
             onPress={async () => {
               await resumeSession(activeSession.id);
               focusRequestedTerminalInput(true);
@@ -1114,7 +1116,7 @@ export function SessionScreen(): React.JSX.Element {
             <Text
               style={[styles.inlineBannerButtonText, { color: palette.text }]}
             >
-              재연결
+              {translate("session.reconnect")}
             </Text>
           </Pressable>
         </View>
@@ -1222,7 +1224,7 @@ export function SessionScreen(): React.JSX.Element {
                         { color: palette.text },
                       ]}
                     >
-                      터미널 준비 중
+                      {translate("session.terminalPreparing")}
                     </Text>
                     <Text
                       style={[
@@ -1230,7 +1232,7 @@ export function SessionScreen(): React.JSX.Element {
                         { color: palette.mutedText },
                       ]}
                     >
-                      연결 화면을 불러오고 있습니다.
+                      {translate("session.loadingScreen")}
                     </Text>
                   </View>
                 ) : null}
@@ -1346,7 +1348,7 @@ export function SessionScreen(): React.JSX.Element {
                     <Pressable
                       key={item.label}
                       accessibilityRole="button"
-                      accessibilityLabel={`${item.label} 제어키`}
+                      accessibilityLabel={translate("session.controlKeyAria", { label: item.label })}
                       onPress={() => sendShortcut(item.event)}
                       style={[
                         styles.toolbarButton,
@@ -1380,7 +1382,7 @@ export function SessionScreen(): React.JSX.Element {
                   <Pressable
                     key={item.label}
                     accessibilityRole="button"
-                    accessibilityLabel={`${item.label} 제어키`}
+                    accessibilityLabel={translate("session.controlKeyAria", { label: item.label })}
                     onPress={() => sendShortcut(item.event)}
                     style={[
                       styles.toolbarButton,
@@ -1404,8 +1406,8 @@ export function SessionScreen(): React.JSX.Element {
                   accessibilityRole="button"
                   accessibilityLabel={
                     showMoreShortcuts
-                      ? '추가 제어키 숨기기'
-                      : '추가 제어키 표시'
+                      ? translate("session.hideExtraKeys")
+                      : translate("session.showExtraKeys")
                   }
                   onPress={() => setShowMoreShortcuts(value => !value)}
                   style={[
@@ -1439,7 +1441,7 @@ export function SessionScreen(): React.JSX.Element {
                       },
                     ]}
                   >
-                    더보기
+                    {translate("session.more")}
                   </Text>
                 </Pressable>
               </ScrollView>
@@ -1447,7 +1449,7 @@ export function SessionScreen(): React.JSX.Element {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={
-                    keyboardToggleActive ? '키보드 닫기' : '키보드 열기'
+                    translate(keyboardToggleActive ? "session.closeKeyboard" : "session.openKeyboard")
                   }
                   onPress={toggleKeyboard}
                   style={[

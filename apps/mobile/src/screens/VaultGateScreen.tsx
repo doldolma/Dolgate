@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { validateNewVaultPassphrase } from '@dolssh/shared-core';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -14,6 +13,8 @@ import {
 import { useScreenPadding } from '../lib/screen-layout';
 import { useMobileAppStore } from '../store/useMobileAppStore';
 import { useMobilePalette } from '../theme';
+import { getNewVaultPassphraseMessage } from '../i18n/shared-messages';
+import { useTranslation } from 'react-i18next';
 
 interface VaultGateShellProps {
   title: string;
@@ -28,6 +29,7 @@ function VaultGateShell({
   children,
   logoutDisabled = false,
 }: VaultGateShellProps): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding({ topOffset: 24 });
   const logout = useMobileAppStore(state => state.logout);
@@ -83,7 +85,7 @@ function VaultGateShell({
           ]}
         >
           <Text style={[styles.logoutText, { color: palette.mutedText }]}>
-            다른 계정으로 로그인 (로그아웃)
+            {translate("vaultGate.switchAccount")}
           </Text>
         </Pressable>
       </ScrollView>
@@ -92,6 +94,7 @@ function VaultGateShell({
 }
 
 export function VaultSetupScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const setupVault = useMobileAppStore(state => state.setupVault);
   const [passphrase, setPassphrase] = useState('');
@@ -103,19 +106,19 @@ export function VaultSetupScreen(): React.JSX.Element {
     if (!passphrase) {
       return null;
     }
-    const passphraseMessage = validateNewVaultPassphrase(passphrase);
+    const passphraseMessage = getNewVaultPassphraseMessage(passphrase);
     if (passphraseMessage) {
       return passphraseMessage;
     }
     if (confirmPassphrase && passphrase !== confirmPassphrase) {
-      return '두 입력이 일치하지 않습니다.';
+      return translate("vaultGate.mismatch");
     }
     return null;
   })();
 
   const canSubmit =
     !busy &&
-    validateNewVaultPassphrase(passphrase) === null &&
+    getNewVaultPassphraseMessage(passphrase) === null &&
     passphrase === confirmPassphrase;
 
   const handleSubmit = async (): Promise<void> => {
@@ -131,7 +134,7 @@ export function VaultSetupScreen(): React.JSX.Element {
       setErrorMessage(
         error instanceof Error && error.message.trim()
           ? error.message
-          : '동기화 암호 설정에 실패했습니다.',
+          : translate("vaultGate.setupFailed"),
       );
     } finally {
       setBusy(false);
@@ -140,14 +143,14 @@ export function VaultSetupScreen(): React.JSX.Element {
 
   return (
     <VaultGateShell
-      title="동기화 암호 설정"
-      subtitle="종단간 암호화를 위한 동기화 암호를 설정해 주세요. 새 기기에서 로그인할 때 필요합니다."
+      title={translate("vaultGate.setupTitle")}
+      subtitle={translate("vaultGate.setupSubtitle")}
       logoutDisabled={busy}
     >
       <TextInput
         value={passphrase}
         onChangeText={setPassphrase}
-        placeholder="동기화 암호"
+        placeholder={translate("vaultGate.passphrasePlaceholder")}
         placeholderTextColor={palette.mutedText}
         secureTextEntry
         autoCapitalize="none"
@@ -164,7 +167,7 @@ export function VaultSetupScreen(): React.JSX.Element {
       <TextInput
         value={confirmPassphrase}
         onChangeText={setConfirmPassphrase}
-        placeholder="동기화 암호 확인"
+        placeholder={translate("vaultGate.confirmPlaceholder")}
         placeholderTextColor={palette.mutedText}
         secureTextEntry
         autoCapitalize="none"
@@ -189,8 +192,7 @@ export function VaultSetupScreen(): React.JSX.Element {
         </Text>
       ) : null}
       <Text style={[styles.noticeText, { color: palette.mutedText }]}>
-        암호를 잊으면 동기화된 데이터를 복구할 수 없습니다. 로그인된 다른 기기가
-        있으면 설정에서 변경할 수 있습니다.
+        {translate("vaultGate.warning")}
       </Text>
       <Pressable
         accessibilityRole="button"
@@ -205,7 +207,7 @@ export function VaultSetupScreen(): React.JSX.Element {
         ]}
       >
         <Text style={styles.primaryText}>
-          {busy ? '설정 중...' : '동기화 시작'}
+          {translate(busy ? "vaultGate.settingUp" : "vaultGate.startSync")}
         </Text>
       </Pressable>
     </VaultGateShell>
@@ -213,6 +215,7 @@ export function VaultSetupScreen(): React.JSX.Element {
 }
 
 export function VaultUnlockScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const unlockVault = useMobileAppStore(state => state.unlockVault);
   const resetVault = useMobileAppStore(state => state.resetVault);
@@ -234,7 +237,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
       setErrorMessage(
         error instanceof Error && error.message.trim()
           ? error.message
-          : '동기화 잠금 해제에 실패했습니다.',
+          : translate("vaultGate.unlockFailed"),
       );
     } finally {
       setBusy(false);
@@ -251,7 +254,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
       setErrorMessage(
         error instanceof Error && error.message.trim()
           ? error.message
-          : '볼트 초기화에 실패했습니다.',
+          : translate("vaultGate.resetFailed"),
       );
     } finally {
       setBusy(false);
@@ -260,18 +263,18 @@ export function VaultUnlockScreen(): React.JSX.Element {
 
   const confirmReset = (): void => {
     Alert.alert(
-      '동기화 데이터 초기화',
-      '동기화 암호 없이는 서버에 저장된 데이터를 복구할 수 없습니다. 초기화하면 서버의 호스트·자격 증명이 모두 삭제되고 새로 시작합니다.',
+      translate("vaultGate.resetTitle"),
+      translate("vaultGate.resetBody"),
       [
-        { text: '취소', style: 'cancel' },
+        { text: translate("common.cancel"), style: "cancel" },
         {
-          text: '계속',
+          text: translate("vaultGate.continue"),
           style: 'destructive',
           onPress: () => {
-            Alert.alert('정말 초기화할까요?', '이 작업은 되돌릴 수 없습니다.', [
-              { text: '취소', style: 'cancel' },
+            Alert.alert(translate("vaultGate.resetFinalTitle"), translate("vaultGate.resetFinalBody"), [
+              { text: translate("common.cancel"), style: "cancel" },
               {
-                text: '모두 삭제하고 새로 시작',
+                text: translate("vaultGate.resetConfirm"),
                 style: 'destructive',
                 onPress: () => void handleReset(),
               },
@@ -284,14 +287,14 @@ export function VaultUnlockScreen(): React.JSX.Element {
 
   return (
     <VaultGateShell
-      title="동기화 잠금 해제"
-      subtitle="이 계정의 동기화 암호를 입력해 주세요."
+      title={translate("vaultGate.unlockTitle")}
+      subtitle={translate("vaultGate.unlockSubtitle")}
       logoutDisabled={busy}
     >
       <TextInput
         value={passphrase}
         onChangeText={setPassphrase}
-        placeholder="동기화 암호"
+        placeholder={translate("vaultGate.passphrasePlaceholder")}
         placeholderTextColor={palette.mutedText}
         secureTextEntry
         autoCapitalize="none"
@@ -324,7 +327,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
         ]}
       >
         <Text style={styles.primaryText}>
-          {busy ? '확인 중...' : '잠금 해제'}
+          {translate(busy ? "vaultGate.checking" : "vaultGate.unlock")}
         </Text>
       </Pressable>
       <Pressable
@@ -334,7 +337,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
         style={styles.resetButton}
       >
         <Text style={[styles.resetText, { color: palette.danger }]}>
-          동기화 암호를 잊으셨나요? 데이터 초기화
+          {translate("vaultGate.forgot")}
         </Text>
       </Pressable>
     </VaultGateShell>
@@ -344,6 +347,7 @@ export function VaultUnlockScreen(): React.JSX.Element {
 // 기존(v1) 유저의 E2EE 전환 프롬프트. 전환해도 데이터는 재암호화 없이 그대로이며,
 // "나중에"로 이번 실행 동안 미룰 수 있다(다음 실행 때 다시 뜬다).
 export function VaultMigrateScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const migrationRequired = useMobileAppStore(
     state => state.vault.status === 'legacy' && state.vault.migrationRequired,
@@ -361,19 +365,19 @@ export function VaultMigrateScreen(): React.JSX.Element {
     if (!passphrase) {
       return null;
     }
-    const passphraseMessage = validateNewVaultPassphrase(passphrase);
+    const passphraseMessage = getNewVaultPassphraseMessage(passphrase);
     if (passphraseMessage) {
       return passphraseMessage;
     }
     if (confirmPassphrase && passphrase !== confirmPassphrase) {
-      return '두 입력이 일치하지 않습니다.';
+      return translate("vaultGate.mismatch");
     }
     return null;
   })();
 
   const canSubmit =
     !busy &&
-    validateNewVaultPassphrase(passphrase) === null &&
+    getNewVaultPassphraseMessage(passphrase) === null &&
     passphrase === confirmPassphrase;
 
   const handleSubmit = async (): Promise<void> => {
@@ -389,7 +393,7 @@ export function VaultMigrateScreen(): React.JSX.Element {
       setErrorMessage(
         error instanceof Error && error.message.trim()
           ? error.message
-          : '종단간 암호화 전환에 실패했습니다.',
+          : translate("vaultGate.migrateFailed"),
       );
     } finally {
       setBusy(false);
@@ -398,14 +402,14 @@ export function VaultMigrateScreen(): React.JSX.Element {
 
   return (
     <VaultGateShell
-      title="동기화 암호 설정"
-      subtitle="종단간 암호화를 위한 동기화 암호를 설정해 주세요. 기존 데이터는 그대로 유지됩니다."
+      title={translate("vaultGate.setupTitle")}
+      subtitle={translate("vaultGate.migrateSubtitle")}
       logoutDisabled={busy}
     >
       <TextInput
         value={passphrase}
         onChangeText={setPassphrase}
-        placeholder="동기화 암호"
+        placeholder={translate("vaultGate.passphrasePlaceholder")}
         placeholderTextColor={palette.mutedText}
         secureTextEntry
         autoCapitalize="none"
@@ -422,7 +426,7 @@ export function VaultMigrateScreen(): React.JSX.Element {
       <TextInput
         value={confirmPassphrase}
         onChangeText={setConfirmPassphrase}
-        placeholder="동기화 암호 확인"
+        placeholder={translate("vaultGate.confirmPlaceholder")}
         placeholderTextColor={palette.mutedText}
         secureTextEntry
         autoCapitalize="none"
@@ -447,8 +451,7 @@ export function VaultMigrateScreen(): React.JSX.Element {
         </Text>
       ) : null}
       <Text style={[styles.noticeText, { color: palette.mutedText }]}>
-        새 기기에서 로그인할 때 이 암호가 필요합니다. 암호를 잊으면 동기화된
-        데이터를 복구할 수 없습니다.
+        {translate("vaultGate.migrateWarning")}
       </Text>
       <Pressable
         accessibilityRole="button"
@@ -463,19 +466,19 @@ export function VaultMigrateScreen(): React.JSX.Element {
         ]}
       >
         <Text style={styles.primaryText}>
-          {busy ? '전환 중...' : '종단간 암호화 켜기'}
+          {translate(busy ? "vaultGate.migrating" : "vaultGate.enableE2ee")}
         </Text>
       </Pressable>
       {!migrationRequired ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="나중에"
+          accessibilityLabel={translate("vaultGate.later")}
           disabled={busy}
           onPress={deferVaultMigration}
           style={styles.resetButton}
         >
           <Text style={[styles.resetText, { color: palette.mutedText }]}>
-            나중에
+            {translate("vaultGate.later")}
           </Text>
         </Pressable>
       ) : null}
@@ -484,6 +487,7 @@ export function VaultMigrateScreen(): React.JSX.Element {
 }
 
 export function VaultErrorScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const errorMessage = useMobileAppStore(state =>
     state.vault.status === 'error' ? state.vault.errorMessage : null,
@@ -491,12 +495,12 @@ export function VaultErrorScreen(): React.JSX.Element {
 
   return (
     <VaultGateShell
-      title="동기화 볼트 오류"
-      subtitle="볼트 정보를 안전하게 확인하지 못해 동기화를 중단했습니다."
+      title={translate("vaultGate.errorTitle")}
+      subtitle={translate("vaultGate.errorSubtitle")}
     >
       <Text style={[styles.errorText, { color: palette.danger }]}>
         {errorMessage ??
-          '동기화 볼트 상태를 복원할 수 없습니다. 로그아웃한 뒤 다시 로그인해 주세요.'}
+          translate("vaultGate.restoreFailed")}
       </Text>
     </VaultGateShell>
   );

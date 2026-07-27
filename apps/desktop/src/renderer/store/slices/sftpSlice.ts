@@ -6,7 +6,6 @@ import { isEditableEntry } from "../../lib/file-detection";
 import {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
-  getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,
@@ -144,6 +143,7 @@ import {
 import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createSftpServices } from "../services/sftp";
 import { t } from '../../i18n';
+import { getAwsEc2SftpDisabledMessage } from '../../../common/shared-messages';
 
 export function createSftpSlice(deps: SliceDeps): SftpSlice {
   const { api, set, get } = deps;
@@ -323,7 +323,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             }
             const awsHost = isAwsEc2HostRecord(host) ? host : null;
             if (awsHost) {
-              const disabledReason = getAwsEc2HostSftpDisabledReason(awsHost);
+              const disabledReason = getAwsEc2SftpDisabledMessage(awsHost);
               if (disabledReason) {
                 set((state) => ({
                   activeWorkspaceTab: "sftp",

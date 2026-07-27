@@ -17,9 +17,6 @@ import { useTranslation } from "react-i18next";
 import {
   buildVisibleGroups,
   filterHostsInGroupTree,
-  getAwsEc2HostSftpDisabledReason,
-  getAwsSftpDiagnosticAction,
-  getAwsSftpDiagnosticTitle,
   getHostBadgeLabel,
   getHostSearchText,
   getHostSubtitle,
@@ -102,7 +99,9 @@ import {
   Toolbar,
 } from "../ui";
 import { cn } from "../lib/cn";
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
+import { getAwsSftpDiagnosticAction, getAwsSftpDiagnosticTitle } from "../../common/aws-diagnostics";
+import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../../common/shared-messages';
 
 const SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX = 220;
 const SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX = 460;
@@ -375,7 +374,7 @@ export function getSftpHostPickerDisabledReason(
   host: SftpConnectableHostRecord,
 ): string | null {
   if (isAwsEc2HostRecord(host)) {
-    return getAwsEc2HostSftpDisabledReason(host);
+    return getAwsEc2SftpDisabledMessage(host);
   }
   return null;
 }
@@ -887,7 +886,7 @@ function formatDate(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return "--";
   }
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat(getFormatLocale(), {
     month: "numeric",
     day: "numeric",
     hour: "numeric",
@@ -2208,7 +2207,7 @@ function HostPicker({
                     disabled={Boolean(disabledReason)}
                     badgeLabel={badgeLabel}
                     title={host.label}
-                    subtitle={getHostSubtitle(host)}
+                    subtitle={getHostSubtitle(host, hostSubtitleLabels())}
                     groupLabel={host.groupName || "Ungrouped"}
                     hint={hint}
                     onClick={() => {

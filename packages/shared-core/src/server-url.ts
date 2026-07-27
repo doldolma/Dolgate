@@ -1,28 +1,38 @@
 const ROOT_PATHNAME = '/';
 
-export function getServerUrlValidationMessage(value: string): string | null {
+// 검증 결과는 코드로 돌려준다 — 문구와 번역 키는 각 앱이 자기 카탈로그로 만든다.
+// 여기서 완성된 문장을 돌려주면 공용 패키지가 UI 언어를 결정해 버려, 데스크톱과 모바일이
+// 서로 다른 언어를 쓸 수 없다.
+export type ServerUrlIssue =
+  | 'empty'
+  | 'not-absolute'
+  | 'bad-scheme'
+  | 'has-path'
+  | 'has-query';
+
+export function getServerUrlIssue(value: string): ServerUrlIssue | null {
   const trimmed = value.trim();
   if (!trimmed) {
-    return '로그인 서버 주소를 입력해 주세요.';
+    return 'empty';
   }
 
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    return '로그인 서버 주소는 http:// 또는 https:// 로 시작하는 절대 URL이어야 합니다.';
+    return 'not-absolute';
   }
 
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return '로그인 서버 주소는 http:// 또는 https:// 로 시작해야 합니다.';
+    return 'bad-scheme';
   }
 
   if (parsed.pathname && parsed.pathname !== ROOT_PATHNAME) {
-    return '로그인 서버 주소에는 경로를 포함할 수 없습니다.';
+    return 'has-path';
   }
 
   if (parsed.search || parsed.hash) {
-    return '로그인 서버 주소에는 쿼리나 해시를 포함할 수 없습니다.';
+    return 'has-query';
   }
 
   return null;

@@ -17,6 +17,8 @@ import type {
   MobileSftpTransferRecord,
 } from '@dolssh/shared-core';
 import type { MobilePalette } from '../theme';
+import { useTranslation } from 'react-i18next';
+import { getFormatLocale } from '../i18n';
 
 type PromptKind = 'mkdir' | 'rename' | 'chmod';
 
@@ -63,6 +65,7 @@ export function SftpBrowserView({
   onPaste,
   onClearCopy,
 }: SftpBrowserViewProps): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionEntry, setActionEntry] = useState<FileEntry | null>(null);
   const [prompt, setPrompt] = useState<PromptState | null>(null);
@@ -102,8 +105,8 @@ export function SftpBrowserView({
       await action();
     } catch (error) {
       Alert.alert(
-        'SFTP 작업 실패',
-        error instanceof Error ? error.message : '작업을 완료하지 못했습니다.',
+        translate("sftp.actionFailedTitle"),
+        error instanceof Error ? error.message : translate("sftp.actionFailed"),
       );
     } finally {
       setBusyAction(null);
@@ -196,18 +199,18 @@ export function SftpBrowserView({
         {isSelectionMode ? (
           <View style={styles.selectionActions}>
             <Text style={[styles.selectionCount, { color: palette.accent }]}>
-              선택 {selectedPaths.length}개
+              {translate("sftp.selectedCount", { count: selectedPaths.length })}
             </Text>
             <HeaderTextButton
               palette={palette}
-              label="취소"
+              label={translate("common.cancel")}
               disabled={busyAction !== null}
               onPress={clearSelection}
             />
             <IconButton
               palette={palette}
               icon="cloud-download-outline"
-              label="다운로드"
+              label={translate("sftp.download")}
               disabled={session.status !== 'connected' || busyAction !== null}
               onPress={() =>
                 void runSelectedAction('download-selected', onDownloadEntries)
@@ -216,7 +219,7 @@ export function SftpBrowserView({
             <IconButton
               palette={palette}
               icon="copy-outline"
-              label="복사"
+              label={translate("sftp.copy")}
               disabled={session.status !== 'connected' || busyAction !== null}
               onPress={() => {
                 onCopy(selectedPaths);
@@ -226,15 +229,15 @@ export function SftpBrowserView({
             <IconButton
               palette={palette}
               icon="trash-outline"
-              label="삭제"
+              label={translate("sftp.delete")}
               disabled={session.status !== 'connected' || busyAction !== null}
               destructive
               onPress={() => {
                 const paths = [...selectedPaths];
-                Alert.alert('삭제', `선택한 ${paths.length}개 항목을 삭제할까요?`, [
-                  { text: '취소', style: 'cancel' },
+                Alert.alert(translate("sftp.delete"), translate("sftp.deleteManyBody", { count: paths.length }), [
+                  { text: translate("common.cancel"), style: "cancel" },
                   {
-                    text: '삭제',
+                    text: translate("sftp.delete"),
                     style: 'destructive',
                     onPress: () =>
                       void runSelectedAction('delete-selected', () =>
@@ -250,7 +253,7 @@ export function SftpBrowserView({
             <IconButton
               palette={palette}
               icon="arrow-up"
-              label="상위 폴더"
+              label={translate("sftp.parentFolder")}
               disabled={!canGoUp || busyAction !== null}
               onPress={() =>
                 runAction('up', () => onNavigate(parentPath(currentPath)))
@@ -259,21 +262,21 @@ export function SftpBrowserView({
             <IconButton
               palette={palette}
               icon="refresh"
-              label="새로고침"
+              label={translate("sftp.refresh")}
               disabled={busyAction !== null}
               onPress={() => runAction('refresh', onRefresh)}
             />
             <IconButton
               palette={palette}
               icon="cloud-upload-outline"
-              label="업로드"
+              label={translate("sftp.upload")}
               disabled={session.status !== 'connected' || busyAction !== null}
               onPress={() => runAction('upload', onUpload)}
             />
             <IconButton
               palette={palette}
               icon="folder-outline"
-              label="새 폴더"
+              label={translate("sftp.newFolder")}
               disabled={session.status !== 'connected' || busyAction !== null}
               onPress={() => setPrompt({ kind: 'mkdir', value: '' })}
             />
@@ -315,7 +318,7 @@ export function SftpBrowserView({
             >
               {formatTransferDirection(transfer.direction)} ·{' '}
               {transfer.localName} ·{' '}
-              {transfer.bytesTransferred.toLocaleString()} bytes
+              {transfer.bytesTransferred.toLocaleString(getFormatLocale())} bytes
               {transfer.status === 'error' ? ` · ${transfer.errorMessage}` : ''}
             </Text>
           ))}
@@ -336,20 +339,20 @@ export function SftpBrowserView({
             numberOfLines={1}
             style={[styles.pasteText, { color: palette.text }]}
           >
-            복사한 항목 {copyBufferCount}개
+            {translate("sftp.copiedCount", { count: copyBufferCount })}
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="붙여넣기"
+            accessibilityLabel={translate("sftp.paste")}
             disabled={busyAction !== null}
             onPress={() => void runAction('paste', onPaste)}
             style={[styles.pasteButton, { backgroundColor: palette.accent }]}
           >
-            <Text style={styles.pasteButtonText}>붙여넣기</Text>
+            <Text style={styles.pasteButtonText}>{translate("sftp.paste")}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="복사 취소"
+            accessibilityLabel={translate("sftp.cancelCopy")}
             disabled={busyAction !== null}
             onPress={onClearCopy}
             style={styles.pasteClearButton}
@@ -363,7 +366,7 @@ export function SftpBrowserView({
         <View style={styles.loading}>
           <ActivityIndicator size="small" color={palette.accent} />
           <Text style={[styles.loadingText, { color: palette.mutedText }]}>
-            SFTP 연결 중입니다.
+            {translate("sftp.connecting")}
           </Text>
         </View>
       ) : (
@@ -375,13 +378,13 @@ export function SftpBrowserView({
           }
           ListEmptyComponent={
             <Text style={[styles.emptyText, { color: palette.mutedText }]}>
-              이 폴더가 비어 있습니다.
+              {translate("sftp.emptyFolder")}
             </Text>
           }
           renderItem={({ item }) => (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`${item.name} ${item.isDirectory ? '폴더' : '파일'}`}
+              accessibilityLabel={`${item.name} ${translate(item.isDirectory ? "sftp.folder" : "sftp.file")}`}
               onLongPress={() => toggleSelection(item.path)}
               onPress={() => {
                 if (isSelectionMode) {
@@ -474,10 +477,10 @@ export function SftpBrowserView({
         }}
         onDelete={entry => {
           runAfterActionModalClose(() =>
-            Alert.alert('삭제', `${entry.name} 항목을 삭제할까요?`, [
-              { text: '취소', style: 'cancel' },
+            Alert.alert(translate("sftp.delete"), translate("sftp.deleteOneBody", { name: entry.name }), [
+              { text: translate("common.cancel"), style: "cancel" },
               {
-                text: '삭제',
+                text: translate("sftp.delete"),
                 style: 'destructive',
                 onPress: () =>
                   void runAction('delete', () => onDelete([entry.path])),
@@ -592,6 +595,7 @@ function EntryActionModal({
   onChmod: (entry: FileEntry) => void;
   onDelete: (entry: FileEntry) => void;
 }) {
+  const { t: translate } = useTranslation();
   if (!entry) {
     return null;
   }
@@ -682,16 +686,17 @@ function PromptModal({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { t: translate } = useTranslation();
   if (!prompt) {
     return null;
   }
   const title =
     prompt.kind === 'mkdir'
-      ? '새 폴더'
+      ? translate('sftp.newFolder')
       : prompt.kind === 'rename'
-        ? '이름 변경'
-        : '권한 변경';
-  const placeholder = prompt.kind === 'chmod' ? '0644' : '이름';
+        ? translate('sftp.rename')
+        : translate('sftp.chmod');
+  const placeholder = prompt.kind === 'chmod' ? '0644' : translate('sftp.namePlaceholder');
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
       <View style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}>
@@ -720,7 +725,7 @@ function PromptModal({
               <Text
                 style={[styles.promptButtonText, { color: palette.mutedText }]}
               >
-                취소
+                {translate("common.cancel")}
               </Text>
             </Pressable>
             <Pressable
@@ -728,7 +733,7 @@ function PromptModal({
               onPress={onSubmit}
             >
               <Text style={[styles.promptButtonText, { color: '#FFFFFF' }]}>
-                확인
+                {translate("sftp.confirm")}
               </Text>
             </Pressable>
           </View>
@@ -753,7 +758,7 @@ function formatTransferDirection(
 function formatEntryMeta(entry: FileEntry): string {
   const parts = [formatUnixPermissions(entry)].filter(Boolean);
   if (!entry.isDirectory) {
-    parts.push(`${entry.size.toLocaleString()} bytes`);
+    parts.push(`${entry.size.toLocaleString(getFormatLocale())} bytes`);
   }
   return parts.join(' · ');
 }

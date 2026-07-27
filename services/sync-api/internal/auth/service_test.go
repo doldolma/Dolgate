@@ -321,7 +321,7 @@ func TestExchangeCodeIsSingleUse(t *testing.T) {
 func TestBrowserLoginStateRoundTrip(t *testing.T) {
 	service, _ := newTestService(t)
 
-	token, err := service.NewBrowserLoginState("desktop", "dolgate://auth/callback", "state-123")
+	token, err := service.NewBrowserLoginState("desktop", "dolgate://auth/callback", "state-123", "ko")
 	if err != nil {
 		t.Fatalf("NewBrowserLoginState() error = %v", err)
 	}
@@ -332,6 +332,10 @@ func TestBrowserLoginStateRoundTrip(t *testing.T) {
 	}
 	if state.Client != "desktop" || state.RedirectURI != "dolgate://auth/callback" || state.State != "state-123" {
 		t.Fatalf("state = %+v", state)
+	}
+	// 언어를 잃으면 OIDC 를 다녀온 뒤 브리지 페이지가 브라우저 언어로 되돌아간다.
+	if state.Lang != "ko" {
+		t.Fatalf("state.Lang = %q, want ko", state.Lang)
 	}
 }
 

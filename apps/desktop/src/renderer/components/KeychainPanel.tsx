@@ -36,7 +36,7 @@ import { describeSecretType } from '../lib/secret-display';
 import { matchesKeyboardLayoutQuery } from '../lib/keyboard-layout-search';
 import { copySavedCredentialPassword } from '../services/desktop/settings';
 import { useTranslation } from 'react-i18next';
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
@@ -296,7 +296,7 @@ export function KeychainPanel({
                     </span>
                   ) : null}
                   <span>{translate('keychain.linkedHosts', { count: entry.linkedHostCount })}</span>
-                  <span>{new Date(entry.updatedAt).toLocaleString('ko-KR')}</span>
+                  <span>{new Date(entry.updatedAt).toLocaleString(getFormatLocale())}</span>
                 </CardMeta>
               </CardMain>
               <CardActions>

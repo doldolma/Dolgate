@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Alert,
   Modal,
@@ -15,6 +16,7 @@ import type {
 } from "@dolssh/shared-core";
 import type { PendingCredentialPromptState } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
+import { t } from "../i18n";
 
 interface CredentialPromptModalProps {
   prompt: PendingCredentialPromptState | null;
@@ -25,7 +27,7 @@ interface CredentialPromptModalProps {
 async function readPickedFileText(uri: string): Promise<string> {
   const response = await fetch(uri);
   if (!response.ok) {
-    throw new Error("파일을 읽지 못했습니다.");
+    throw new Error(t("credentialPrompt.fileReadFailed"));
   }
   return response.text();
 }
@@ -36,6 +38,7 @@ export function CredentialPromptModal({
   onCancel,
 }: CredentialPromptModalProps): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
   const [password, setPassword] = useState("");
   const [privateKeyPem, setPrivateKeyPem] = useState("");
   const [certificateText, setCertificateText] = useState("");
@@ -68,9 +71,9 @@ export function CredentialPromptModal({
       const message =
         error instanceof Error
           ? error.message
-          : "개인키 파일을 가져오지 못했습니다.";
+          : translate("credentialPrompt.keyImportFailed");
       setErrorMessage(message);
-      Alert.alert("가져오기 실패", message);
+      Alert.alert(translate("credentialPrompt.importFailedTitle"), message);
     }
   };
 
@@ -90,9 +93,9 @@ export function CredentialPromptModal({
       const message =
         error instanceof Error
           ? error.message
-          : "SSH 인증서 파일을 가져오지 못했습니다.";
+          : translate("credentialPrompt.certImportFailed");
       setErrorMessage(message);
-      Alert.alert("가져오기 실패", message);
+      Alert.alert(translate("credentialPrompt.importFailedTitle"), message);
     }
   };
 
@@ -102,7 +105,7 @@ export function CredentialPromptModal({
     }
 
     if (prompt.authType === "password" && !password.trim()) {
-      setErrorMessage("비밀번호를 입력해 주세요.");
+      setErrorMessage(translate("credentialPrompt.passwordRequired"));
       return;
     }
 
@@ -110,12 +113,12 @@ export function CredentialPromptModal({
       (prompt.authType === "privateKey" || prompt.authType === "certificate") &&
       !privateKeyPem.trim()
     ) {
-      setErrorMessage("개인키 PEM을 입력하거나 가져와 주세요.");
+      setErrorMessage(translate("credentialPrompt.keyRequired"));
       return;
     }
 
     if (prompt.authType === "certificate" && !certificateText.trim()) {
-      setErrorMessage("SSH 인증서를 입력하거나 가져와 주세요.");
+      setErrorMessage(translate("credentialPrompt.certRequired"));
       return;
     }
 
@@ -153,10 +156,10 @@ export function CredentialPromptModal({
         >
           <ScrollView contentContainerStyle={styles.content}>
             <Text style={[styles.title, { color: palette.text }]}>
-              {prompt?.hostLabel} 자격 증명
+              {translate("credentialPrompt.title", { label: prompt?.hostLabel ?? "" })}
             </Text>
             <Text style={[styles.body, { color: palette.mutedText }]}>
-              {prompt?.message ?? "모바일에서 사용할 비밀 정보를 입력해 주세요."}
+              {prompt?.message ?? translate("credentialPrompt.defaultMessage")}
             </Text>
 
             {prompt?.authType === "password" ? (
@@ -218,7 +221,7 @@ export function CredentialPromptModal({
                   ]}
                 >
                   <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
-                    파일에서 가져오기
+                    {translate("credentialPrompt.importFromFile")}
                   </Text>
                 </Pressable>
                 {prompt?.authType === "certificate" ? (
@@ -262,7 +265,7 @@ export function CredentialPromptModal({
                           { color: palette.text },
                         ]}
                       >
-                        인증서 파일에서 가져오기
+                        {translate("credentialPrompt.importCertFromFile")}
                       </Text>
                     </Pressable>
                   </>
@@ -290,7 +293,7 @@ export function CredentialPromptModal({
                   />
                 </View>
                 <Text style={[styles.caption, { color: palette.mutedText }]}>
-                  Passphrase가 있는 개인키라면 함께 입력해 주세요.
+                  {translate("credentialPrompt.passphraseHint")}
                 </Text>
               </>
             )}
@@ -313,7 +316,7 @@ export function CredentialPromptModal({
                 ]}
               >
                 <Text style={[styles.secondaryButtonText, { color: palette.text }]}>
-                  취소
+                  {translate("common.cancel")}
                 </Text>
               </Pressable>
               <Pressable
@@ -325,7 +328,7 @@ export function CredentialPromptModal({
                   },
                 ]}
               >
-                <Text style={styles.primaryButtonText}>저장 후 연결</Text>
+                <Text style={styles.primaryButtonText}>{translate("credentialPrompt.saveAndConnect")}</Text>
               </Pressable>
             </View>
           </ScrollView>

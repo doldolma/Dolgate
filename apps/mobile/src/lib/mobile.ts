@@ -32,7 +32,6 @@ import type {
 import {
   formatSyncRevisionEtag,
   isAwsEc2HostRecord,
-  getServerUrlValidationMessage,
   isSshHostRecord,
   normalizeServerUrl,
   parseVaultCacheRecord,
@@ -42,6 +41,8 @@ import {
 } from '@dolssh/shared-core';
 import { fromByteArray, toByteArray } from 'base64-js';
 import { APP_VERSION } from './app-metadata';
+import { getServerUrlValidationMessage } from '../i18n/shared-messages';
+import { getAppLocale, t } from '../i18n';
 
 export const DEFAULT_SERVER_URL = 'https://ssh.doldolma.com';
 export const AUTH_REDIRECT_URI = 'dolgate://auth/callback';
@@ -63,11 +64,14 @@ const VAULT_CACHE_V2_SERVICE = 'dolgate.mobile.vault-cache-v2';
 // verifier 가 정체성을 증명하므로 epoch 부재는 순서 비교 불가일 뿐 위험하지 않다.
 const VAULT_EPOCH_USERNAME_PREFIX = 'epoch:';
 export const VAULT_MUTATION_TIMEOUT_MS = 30_000;
-export const VAULT_MUTATION_TIMEOUT_MESSAGE =
-  '동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+// 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
+export function getVaultMutationTimeoutMessage(): string {
+  return t('mobileLib.vaultRequestTimeout');
+}
 export const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS = 10_000;
-export const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE =
-  '비밀번호 변경 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.';
+export function getAccountPasswordRequestTimeoutMessage(): string {
+  return t('mobileLib.passwordChangeTimeout');
+}
 
 const CLIENT_HEADER_NAME = 'X-Dolgate-Client';
 const CLIENT_VERSION_HEADER_NAME = 'X-Dolgate-Client-Version';
@@ -120,6 +124,7 @@ export function createDefaultMobileSettings(): MobileSettings {
   return {
     serverUrl: DEFAULT_SERVER_URL,
     theme: 'system',
+    language: 'system',
   };
 }
 
@@ -152,6 +157,9 @@ export function buildBrowserLoginUrl(serverUrl: string, state: string): string {
   loginUrl.searchParams.set('redirect_uri', AUTH_REDIRECT_URI);
   loginUrl.searchParams.set('state', state);
   loginUrl.searchParams.set('platform', resolveMobileClientPlatform());
+  // 로그인 페이지가 앱과 같은 언어로 뜨게 한다. 서버는 이 값이 없으면 브라우저 언어
+  // (Accept-Language)를 따른다.
+  loginUrl.searchParams.set('lang', getAppLocale());
   return loginUrl.toString();
 }
 
@@ -290,28 +298,28 @@ function resolveMobileClientPlatform(): string {
 
 export function formatRelativeTime(input: string | null | undefined): string {
   if (!input) {
-    return '방금';
+    return t('mobileLib.justNow');
   }
 
   const value = new Date(input).getTime();
   if (Number.isNaN(value)) {
-    return '방금';
+    return t('mobileLib.justNow');
   }
 
   const diffMs = Date.now() - value;
   const diffMinutes = Math.floor(diffMs / 60_000);
   if (diffMinutes <= 0) {
-    return '방금';
+    return t('mobileLib.justNow');
   }
   if (diffMinutes < 60) {
-    return `${diffMinutes}분 전`;
+    return t('mobileLib.minutesAgo', { minutes: diffMinutes });
   }
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}시간 전`;
+    return t('mobileLib.hoursAgo', { hours: diffHours });
   }
   const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}일 전`;
+  return t('mobileLib.daysAgo', { days: diffDays });
 }
 
 export function getSettingsValidationMessage(serverUrl: string): string | null {
@@ -341,7 +349,7 @@ export async function saveStoredAuthSession(
     accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
   if (!saved) {
-    throw new Error('인증 세션을 보안 저장소에 저장하지 못했습니다.');
+    throw new Error(t('mobileLib.sessionStoreFailed'));
   }
 }
 
@@ -598,7 +606,7 @@ async function fetchVaultMutation(
 ): Promise<VaultMutationResult> {
   const response = await fetchWithOptions(url, init, {
     timeoutMs: VAULT_MUTATION_TIMEOUT_MS,
-    timeoutMessage: VAULT_MUTATION_TIMEOUT_MESSAGE,
+    timeoutMessage: getVaultMutationTimeoutMessage(),
   });
   if (!response.ok) {
     throw await toApiError(response);
@@ -773,7 +781,7 @@ export async function saveStoredVaultDek(
       },
     );
     if (!saved) {
-      throw new Error('동기화 키를 보안 저장소에 저장하지 못했습니다.');
+      throw new Error(t('mobileLib.vaultKeyStoreFailed'));
     }
   } else {
     // epoch 없는 아주 오래된 캐시는 owner까지 원자적으로 묶을 수 없으므로 v2 레코드를
@@ -794,7 +802,7 @@ export async function saveStoredVaultDek(
       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     });
     if (!legacySaved && !hasV2Cache) {
-      throw new Error('동기화 키를 보안 저장소에 저장하지 못했습니다.');
+      throw new Error(t('mobileLib.vaultKeyStoreFailed'));
     }
   } catch (error) {
     if (!hasV2Cache) {
@@ -847,7 +855,7 @@ export async function changeRemoteAccountPassword(
     },
     {
       timeoutMs: ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS,
-      timeoutMessage: ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE,
+      timeoutMessage: getAccountPasswordRequestTimeoutMessage(),
     },
   );
 }
@@ -1219,7 +1227,7 @@ async function fetchWithOptions(
 
   const controller = new AbortController();
   const timeoutError = new Error(
-    options.timeoutMessage ?? '요청 시간이 초과되었습니다.',
+    options.timeoutMessage ?? t('mobileLib.requestTimeout'),
   );
   let timer: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -1263,7 +1271,7 @@ async function toApiError(response: Response): Promise<ApiError> {
   }
   const message =
     extractApiErrorMessage(trimmed) ||
-    `요청이 실패했습니다. (${response.status})`;
+    t('mobileLib.requestFailed', { status: response.status });
   return new ApiError(message, response.status, code);
 }
 

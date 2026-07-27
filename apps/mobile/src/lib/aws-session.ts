@@ -27,6 +27,7 @@ import {
   startAwsSsoLoopback,
   stopAwsSsoLoopback,
 } from "./aws-sso-bridge";
+import { t } from '../i18n';
 
 type AwsCredentialSet = {
   accessKeyId: string;
@@ -81,7 +82,7 @@ export async function resolveAwsSessionForHost(input: {
 
   const profile = resolveManagedProfileForHost(input.profiles, input.host);
   if (!profile) {
-    throw new Error("이 호스트에 연결할 AWS 프로필을 찾을 수 없습니다.");
+    throw new Error(t('aws.profileNotFound'));
   }
 
   const credentials = await resolveManagedProfileCredentials({
@@ -141,10 +142,10 @@ async function resolveManagedProfileCredentials(input: {
 }> {
   const nextDepth = input.context.depth + 1;
   if (nextDepth > AWS_PROFILE_CHAIN_DEPTH_LIMIT) {
-    throw new Error("AWS 프로필 참조 체인을 해석하지 못했습니다.");
+    throw new Error(t('aws.profileChainFailed'));
   }
   if (input.context.seenProfileIds.has(input.profile.id)) {
-    throw new Error("AWS 프로필 참조 체인을 해석하지 못했습니다.");
+    throw new Error(t('aws.profileChainFailed'));
   }
 
   input.context.seenProfileIds.add(input.profile.id);
@@ -182,7 +183,7 @@ async function resolveManagedProfileCredentials(input: {
           targetProfileName: input.targetProfileName,
         });
       default:
-        throw new Error("이 AWS 프로필 종류는 모바일에서 아직 지원하지 않습니다.");
+        throw new Error(t('aws.profileKindUnsupported'));
     }
   } finally {
     input.context.seenProfileIds.delete(input.profile.id);
@@ -224,7 +225,7 @@ async function resolveSsoProfileCredentials(input: {
     input.context.resolvedSsoProfileId &&
     input.context.resolvedSsoProfileId !== input.profile.id
   ) {
-    throw new Error("AWS 프로필 참조 체인을 해석하지 못했습니다.");
+    throw new Error(t('aws.profileChainFailed'));
   }
 
   const startPayload: AwsSsoMobileLoginStartRequest = {
@@ -260,7 +261,7 @@ async function resolveSsoProfileCredentials(input: {
   if (!loginId || !browserUrl) {
     throw new Error(
       startResponse.message?.trim() ||
-        "AWS SSO 브라우저 로그인을 시작하지 못했습니다.",
+        t('aws.ssoBrowserFailed'),
     );
   }
 
@@ -295,7 +296,7 @@ async function resolveSsoProfileCredentials(input: {
     await openAwsSsoBrowser(browserUrl);
     const callbackPayload = await callbackPromise;
     if (cancelled) {
-      throw new Error("AWS SSO 로그인이 취소되었습니다.");
+      throw new Error(t('aws.ssoCancelled'));
     }
 
     const handoff = await completeAwsSsoLoginHandoff(
@@ -312,19 +313,19 @@ async function resolveSsoProfileCredentials(input: {
       );
     }
     if (handoff.status === "cancelled") {
-      throw new Error(handoff.message?.trim() || "AWS SSO 로그인이 취소되었습니다.");
+      throw new Error(handoff.message?.trim() || t('aws.ssoCancelled'));
     }
     if (handoff.status === "expired") {
       throw new Error(
         handoff.message?.trim() ||
-          "AWS SSO 로그인 시간이 초과되었습니다. 다시 시도해 주세요.",
+          t('aws.ssoTimeout'),
       );
     }
     throw new Error(
-      handoff.message?.trim() || "AWS SSO 로그인을 완료하지 못했습니다.",
+      handoff.message?.trim() || t('aws.ssoIncomplete'),
     );
   } catch (error) {
-    throw normalizeAwsError(error, "AWS SSO 로그인을 완료하지 못했습니다.");
+    throw normalizeAwsError(error, t('aws.ssoIncomplete'));
   } finally {
     await closeAwsSsoBrowser().catch(() => undefined);
     await stopAwsSsoLoopback().catch(() => undefined);
@@ -350,7 +351,7 @@ async function resolveRoleProfileCredentials(input: {
     (profile) => profile.id === input.profile.sourceProfileId,
   );
   if (!sourceProfile) {
-    throw new Error("AWS role source profile을 찾을 수 없습니다.");
+    throw new Error(t('aws.roleSourceNotFound'));
   }
 
   const source = await resolveManagedProfileCredentials({
@@ -381,14 +382,14 @@ async function resolveRoleProfileCredentials(input: {
           RoleSessionName: `dolgate-mobile-${Date.now()}`,
         }),
       ),
-    "AWS role credential을 가져오지 못했습니다.",
+    t('aws.roleCredentialFailed'),
   );
   if (
     !response.Credentials?.AccessKeyId ||
     !response.Credentials.SecretAccessKey ||
     !response.Credentials.SessionToken
   ) {
-    throw new Error("AWS role credential을 가져오지 못했습니다.");
+    throw new Error(t('aws.roleCredentialFailed'));
   }
 
   const credentials: AwsCredentialSet = {
@@ -409,7 +410,7 @@ async function finalizeSsoCredentialResult(
   region: string;
 }> {
   if (!credential.accessKeyId || !credential.secretAccessKey) {
-    throw new Error("AWS SSO role credential을 가져오지 못했습니다.");
+    throw new Error(t('aws.ssoRoleCredentialFailed'));
   }
 
   const region = resolveAwsRegion(host.awsRegion, profile.region, profile.ssoRegion);
@@ -455,7 +456,7 @@ async function validateIdentity(
   });
   await sendAwsCommand(
     () => client.send(new GetCallerIdentityCommand({})),
-    "AWS 자격 증명을 검증하지 못했습니다.",
+    t('aws.credentialVerifyFailed'),
   );
 }
 
@@ -639,7 +640,7 @@ async function waitForAwsSsoCallback(
 
     timeoutTimer = setTimeout(() => {
       cleanup();
-      reject(new Error("AWS SSO 로그인 시간이 초과되었습니다. 다시 시도해 주세요."));
+      reject(new Error(t('aws.ssoTimeout')));
     }, Math.max(timeoutMs, 1_000));
   });
 }

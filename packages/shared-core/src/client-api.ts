@@ -1,4 +1,5 @@
 import type {
+  AppLanguage,
   AppTheme,
   AuthState,
   HostEnvVar,
@@ -45,6 +46,8 @@ export interface MobileAuthRedirectPayload {
 export interface MobileSettings {
   serverUrl: string;
   theme: AppTheme;
+  /** UI 언어. 생략/undefined 는 'system'(기기 언어 따르기). */
+  language?: AppLanguage;
 }
 
 export interface MobileSessionRecord {

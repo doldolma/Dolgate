@@ -37,6 +37,8 @@ import type {
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
+import { hostSubtitleLabels } from '../i18n/shared-messages';
+import { useTranslation } from "react-i18next";
 
 type HomeListItem =
   | {
@@ -50,6 +52,7 @@ type HomeListItem =
     };
 
 export function HomeScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
   const navigation =
@@ -251,24 +254,24 @@ export function HomeScreen(): React.JSX.Element {
     : "All Hosts";
   const currentGroupSubtitle = currentGroupPath
     ? currentGroupPath
-    : `${visibleGroups.length}개 폴더`;
+    : translate("home.folderCount", { count: visibleGroups.length });
 
   const emptyState = useMemo(() => {
     if (isSearching) {
       return {
-        title: "검색 결과가 없습니다.",
-        body: "다른 이름이나 주소로 다시 검색해보세요.",
+        title: translate("home.emptySearchTitle"),
+        body: translate("home.emptySearchBody"),
       };
     }
     if (currentGroupPath) {
       return {
-        title: "이 그룹에는 직접 속한 호스트가 없습니다.",
-        body: "하위 폴더를 열거나 다른 그룹으로 이동해보세요.",
+        title: translate("home.emptyGroupTitle"),
+        body: translate("home.emptyGroupBody"),
       };
     }
     return {
-      title: "아직 호스트가 없습니다.",
-      body: "여기에 접속 가능한 호스트 목록이 표시됩니다.",
+      title: translate("home.emptyTitle"),
+      body: translate("home.emptyBody"),
     };
   }, [currentGroupPath, isSearching]);
 
@@ -308,21 +311,21 @@ export function HomeScreen(): React.JSX.Element {
   const handleDeleteHost = useCallback(
     (host: HostRecord) => {
       Alert.alert(
-        "호스트 삭제",
-        `"${host.label}" 호스트를 삭제할까요? 동기화된 다른 기기에서도 함께 제거됩니다.`,
+        translate("home.deleteTitle"),
+        translate("home.deleteBody", { label: host.label }),
         [
-          { text: "취소", style: "cancel" },
+          { text: translate("common.cancel"), style: "cancel" },
           {
-            text: "삭제",
+            text: translate("home.delete"),
             style: "destructive",
             onPress: () => {
               setActionSheetHost(null);
               void deleteHost(host.id).catch((error) => {
                 Alert.alert(
-                  "호스트 삭제 실패",
+                  translate("home.deleteFailedTitle"),
                   error instanceof Error && error.message.trim()
                     ? error.message
-                    : "호스트를 삭제하지 못했습니다.",
+                    : translate("home.deleteFailed"),
                 );
               });
             },
@@ -336,17 +339,17 @@ export function HomeScreen(): React.JSX.Element {
   const statusBanner = useMemo(() => {
     if (auth.status === "offline-authenticated") {
       return {
-        title: "오프라인 캐시를 사용 중입니다.",
+        title: translate("home.offlineTitle"),
         body:
           syncStatus.errorMessage ??
-          "네트워크가 복구되면 최신 상태로 다시 확인합니다.",
+          translate("home.offlineBody"),
         borderColor: palette.warning,
       };
     }
 
     if (syncStatus.status === "error" && syncStatus.errorMessage) {
       return {
-        title: "최신 상태를 아직 확인하지 못했습니다.",
+        title: translate("home.staleTitle"),
         body: syncStatus.errorMessage,
         borderColor: palette.danger,
       };
@@ -368,11 +371,11 @@ export function HomeScreen(): React.JSX.Element {
   };
 
   const getCompactHostMeta = (host: HostRecord): string => {
-    const subtitle = getHostSubtitle(host);
+    const subtitle = getHostSubtitle(host, hostSubtitleLabels());
     const recentActivity = recentActivityByHostId.get(host.id);
     const activityLabel = recentActivity
-      ? `최근 사용 ${formatRelativeTime(recentActivity)}`
-      : "세션 없음";
+      ? translate("home.recentUse", { time: formatRelativeTime(recentActivity) })
+      : translate("home.noSession");
     return `${subtitle} • ${activityLabel}`;
   };
 
@@ -408,7 +411,7 @@ export function HomeScreen(): React.JSX.Element {
             ref={searchInputRef}
             value={query}
             onChangeText={setQuery}
-            placeholder="호스트 검색"
+            placeholder={translate("home.searchPlaceholder")}
             placeholderTextColor={palette.mutedText}
             style={[
               styles.searchInput,
@@ -422,7 +425,7 @@ export function HomeScreen(): React.JSX.Element {
           />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="호스트 추가"
+            accessibilityLabel={translate("home.addHost")}
             onPress={() => navigation.navigate("HostForm", undefined)}
             style={[
               styles.addHostButton,
@@ -460,7 +463,7 @@ export function HomeScreen(): React.JSX.Element {
             {groupHistory.length > 0 ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="이전 그룹으로 이동"
+                accessibilityLabel={translate("home.goToParentGroup")}
                 onPress={() => void goBackInHome()}
                 style={[
                   styles.groupBackButton,
@@ -526,7 +529,7 @@ export function HomeScreen(): React.JSX.Element {
               return (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.group.name} 그룹 열기`}
+                  accessibilityLabel={translate("home.openGroup", { name: item.group.name })}
                   onPress={() => {
                     openGroup(item.group.path);
                   }}
@@ -564,7 +567,7 @@ export function HomeScreen(): React.JSX.Element {
                         { color: palette.mutedText },
                       ]}
                     >
-                      {item.group.hostCount}개 호스트
+                      {translate("home.groupHostCount", { count: item.group.hostCount })}
                     </Text>
                   </View>
                   <Ionicons
@@ -618,7 +621,7 @@ export function HomeScreen(): React.JSX.Element {
                     numberOfLines={1}
                     style={[styles.hostGroupMeta, { color: palette.mutedText }]}
                   >
-                    그룹 {searchGroupMeta}
+                    {translate("home.groupMeta", { meta: searchGroupMeta })}
                   </Text>
                 ) : null}
                 <Text

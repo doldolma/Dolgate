@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
   createNativeStackNavigator,
@@ -110,6 +111,7 @@ function MainTabs(): React.JSX.Element {
 }
 
 function UnauthenticatedNavigator(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const { colors } = useTheme();
 
   return (
@@ -130,7 +132,7 @@ function UnauthenticatedNavigator(): React.JSX.Element {
       <AuthStack.Screen
         name="AuthSettings"
         component={AuthSettingsScreen}
-        options={{ title: "서버 설정" }}
+        options={{ title: translate("nav.authSettings") }}
       />
     </AuthStack.Navigator>
   );
@@ -185,6 +187,7 @@ export function RootNavigator({
 }
 
 function AuthenticatedNavigator(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const { colors } = useTheme();
 
   return (
@@ -201,7 +204,7 @@ function AuthenticatedNavigator(): React.JSX.Element {
           },
           headerTintColor: colors.text,
           headerShadowVisible: false,
-          title: route.params?.hostId ? "호스트 수정" : "호스트 추가",
+          title: route.params?.hostId ? translate("nav.hostEdit") : translate("nav.hostAdd"),
         })}
       />
     </RootStack.Navigator>

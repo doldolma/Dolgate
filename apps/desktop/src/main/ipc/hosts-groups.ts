@@ -5,6 +5,7 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 function normalizeSshDraftForPersistence(
   draft: HostDraft,
@@ -47,14 +48,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         : null;
       const secretRef = createdSecretRef ?? existingSecretRef;
       if (secretRef) {
-        ctx.activityLogs.append("info", "audit", t('hostsIpc.secretSaved'), {
+        ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretSaved'), {
           hostId,
           secretRef,
         });
       }
       const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
       const record = ctx.hosts.create(hostId, persistedDraft, secretRef);
-      ctx.activityLogs.append("info", "audit", t('hostsIpc.hostCreated'), {
+      ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.hostCreated'), {
         hostId: record.id,
         label: record.label,
         kind: record.kind,
@@ -118,7 +119,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
           ctx.describeHostLabel(draft),
           resolvedSecrets,
         );
-        ctx.activityLogs.append("info", "audit", t('hostsIpc.secretUpdated'), {
+        ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretUpdated'), {
           hostId: id,
           secretRef,
         });
@@ -127,7 +128,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       }
       const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
       const record = ctx.hosts.update(id, persistedDraft, secretRef);
-      ctx.activityLogs.append("info", "audit", t('hostsIpc.hostUpdated'), {
+      ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.hostUpdated'), {
         hostId: record.id,
         label: record.label,
         kind: record.kind,
@@ -145,7 +146,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ctx.syncOutbox.upsertDeletion("hosts", id);
     ctx.hosts.remove(id);
     if (current) {
-      ctx.activityLogs.append("warn", "audit", t('hostsIpc.hostDeleted'), {
+      ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.hostDeleted'), {
         hostId: current.id,
         label: current.label,
         kind: current.kind,
@@ -172,7 +173,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.groups.create,
     async (event, name: string, parentPath?: string | null) => {
       const group = ctx.groups.create(randomUUID(), name, parentPath);
-      ctx.activityLogs.append("info", "audit", t('hostsIpc.groupCreated'), {
+      ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupCreated'), {
         groupId: group.id,
         name: group.name,
         path: group.path,
@@ -194,7 +195,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       for (const hostId of result.removedHostIds) {
         ctx.syncOutbox.upsertDeletion("hosts", hostId);
       }
-      ctx.activityLogs.append("warn", "audit", t('hostsIpc.groupDeleted'), {
+      ctx.activityLogs.append("warn", "audit", logMessage('hostsIpc.groupDeleted'), {
         path,
         mode,
         removedGroupCount: result.removedGroupIds.length,
@@ -213,7 +214,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.groups.move,
     async (event, path: string, targetParentPath: string | null) => {
       const result = ctx.groups.move(path, targetParentPath);
-      ctx.activityLogs.append("info", "audit", t('hostsIpc.groupMoved'), {
+      ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupMoved'), {
         path,
         targetParentPath: targetParentPath ?? null,
         nextPath: result.nextPath,
@@ -228,7 +229,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.groups.rename,
     async (event, path: string, name: string) => {
       const result = ctx.groups.rename(path, name);
-      ctx.activityLogs.append("info", "audit", t('hostsIpc.groupRenamed'), {
+      ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.groupRenamed'), {
         path,
         nextPath: result.nextPath,
         name,

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="{{ .T.Lang }}">
+  <head>
+    {{ template "auth-head" }}
+    <meta name="robots" content="noindex" />
+    <title>{{ .T.RegisterPageTitle }}</title>
+    <style>
+      {{ template "auth-base-css" }}
+      .card { max-width:460px; }
+      h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
+      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
+      label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; margin-bottom:16px; }
+      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
+      button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#5f7cff; color:#fff; width:100%; }
+      .status { margin-top:16px; font-size:14px; min-height:20px; }
+      .ok { color:#8be9a3; }
+      .err { color:#ffb8b8; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">Dolgate</div>
+        <h1>{{ .T.RegisterHeading }}</h1>
+        <p>{{ .T.RegisterLede }}</p>
+        <label id="passkey-name-label">{{ .T.RegisterNameLabel }}
+          <input id="passkey-name" type="text" maxlength="60" placeholder="{{ .T.RegisterNamePlaceholder }}" />
+        </label>
+        <button id="register" class="button" type="button">{{ .T.RegisterButton }}</button>
+        <div id="status" class="status"></div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        // 티켓은 URL fragment(#ticket=)로만 전달된다 — 서버·로그·히스토리에 남지 않는다.
+        // 읽는 즉시 주소창/히스토리에서 제거해 재사용 노출을 더 줄인다.
+        var TICKET = (function () {
+          var prefix = '#ticket=';
+          var hash = window.location.hash || '';
+          if (hash.indexOf(prefix) !== 0) { return ''; }
+          var value = decodeURIComponent(hash.slice(prefix.length));
+          try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
+          return value;
+        })();
+        var statusEl = document.getElementById('status');
+        function setStatus(message, className) { statusEl.textContent = message; statusEl.className = 'status ' + (className || ''); }
+        if (!window.PublicKeyCredential || !window.isSecureContext) {
+          setStatus({{ .T.RegisterUnsupported }}, 'err');
+          document.getElementById('register').disabled = true;
+          return;
+        }
+        if (!TICKET) {
+          setStatus({{ .T.RegisterBadTicket }}, 'err');
+          document.getElementById('register').disabled = true;
+          return;
+        }
+        function b64urlToBuf(value) {
+          value = value.replace(/-/g, '+').replace(/_/g, '/');
+          var pad = value.length % 4; if (pad) { value += '='.repeat(4 - pad); }
+          var binary = atob(value); var bytes = new Uint8Array(binary.length);
+          for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+          return bytes.buffer;
+        }
+        function bufToB64url(buffer) {
+          var bytes = new Uint8Array(buffer); var binary = '';
+          for (var i = 0; i < bytes.length; i++) { binary += String.fromCharCode(bytes[i]); }
+          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function decodeCreationOptions(options) {
+          options.challenge = b64urlToBuf(options.challenge);
+          options.user.id = b64urlToBuf(options.user.id);
+          if (options.excludeCredentials) {
+            options.excludeCredentials = options.excludeCredentials.map(function (credential) {
+              credential.id = b64urlToBuf(credential.id); return credential;
+            });
+          }
+          return options;
+        }
+        function encodeAttestation(credential) {
+          var response = {
+            attestationObject: bufToB64url(credential.response.attestationObject),
+            clientDataJSON: bufToB64url(credential.response.clientDataJSON)
+          };
+          if (credential.response.getTransports) { response.transports = credential.response.getTransports(); }
+          return {
+            id: credential.id, type: credential.type, rawId: bufToB64url(credential.rawId),
+            response: response,
+            clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
+          };
+        }
+        // 서버가 내려준 문구를 그대로 쓴다. 안 읽으면 "개수 초과라 먼저 지우라"거나
+        // "등록 링크가 이미 사용됐다" 같은, 다음에 뭘 할지 알려 주는 안내가 사라진다.
+        async function serverError(response, fallback) {
+          try {
+            var body = await response.json();
+            return (body && typeof body.error === 'string' && body.error) || fallback;
+          } catch (error) {
+            return fallback;
+          }
+        }
+        async function register() {
+          setStatus({{ .T.RegisterInProgress }});
+          var beginResponse = await fetch({{ printf "/auth/webauthn/register/begin?lang=%s" .T.Lang }}, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: TICKET })
+          });
+          if (!beginResponse.ok) { throw new Error(await serverError(beginResponse, {{ .T.RegisterBeginFailed }})); }
+          var data = await beginResponse.json();
+          var credential = await navigator.credentials.create({ publicKey: decodeCreationOptions(data.publicKey) });
+          var finishResponse = await fetch({{ printf "/auth/webauthn/register/finish?lang=%s" .T.Lang }}, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticket: TICKET, ceremonyId: data.ceremonyId, name: document.getElementById('passkey-name').value, credential: encodeAttestation(credential) })
+          });
+          if (!finishResponse.ok) { throw new Error(await serverError(finishResponse, {{ .T.PasskeyRegisterFailed }})); }
+          markDone();
+        }
+        var registerButton = document.getElementById('register');
+        function markDone() {
+          // 성공 후 재클릭을 막고 완료 상태를 명확히 한다. 앱이 연 탭이 아니면 window.close()
+          // 가 막히므로, 닫힘이 실패해도 완료 안내가 남도록 UI를 먼저 정리한다.
+          registerButton.style.display = 'none';
+          var nameLabel = document.getElementById('passkey-name-label');
+          if (nameLabel) { nameLabel.style.display = 'none'; }
+          setStatus({{ .T.RegisterDone }}, 'ok');
+          setTimeout(function () { try { window.close(); } catch (e) {} }, 800);
+        }
+        function registerErrorMessage(error) {
+          if (error && error.name === 'NotAllowedError') {
+            return {{ .T.RegisterNotAllowed }};
+          }
+          if (error && error.name === 'InvalidStateError') {
+            return {{ .T.RegisterDuplicate }};
+          }
+          return (error && (error.message || error.name)) || {{ .T.GenericError }};
+        }
+        registerButton.addEventListener('click', function () {
+          registerButton.disabled = true;
+          register().catch(function (error) {
+            registerButton.disabled = false;
+            setStatus(registerErrorMessage(error), 'err');
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

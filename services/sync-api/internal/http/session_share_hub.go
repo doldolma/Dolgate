@@ -245,6 +245,7 @@ type ownerInputEnabledUpdate struct {
 type ownerShareEndedMessage struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type viewerInitMessage struct {
@@ -317,8 +318,12 @@ type viewerCountBroadcast struct {
 }
 
 type viewerShareEndedMessage struct {
-	Type    string `json:"type"`
+	Type string `json:"type"`
+	// Message 는 예전 클라이언트를 위한 완성된 문장이다. 종료 안내는 여러 언어의 시청자에게
+	// 동시에 브로드캐스트되므로 서버가 언어를 정할 수 없다 — Reason 코드를 보고 각 뷰어가
+	// 자기 페이지 언어로 문장을 만든다.
 	Message string `json:"message"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type shareConn struct {
@@ -506,7 +511,7 @@ func (hub *SessionShareHub) SetInputEnabled(ownerUserID, shareID string, inputEn
 	return true, nil
 }
 
-func (hub *SessionShareHub) Delete(ownerUserID, shareID string, message string) error {
+func (hub *SessionShareHub) Delete(ownerUserID, shareID string, reason string) error {
 	hub.mu.Lock()
 	share, ok := hub.shares[shareID]
 	if !ok {
@@ -528,14 +533,16 @@ func (hub *SessionShareHub) Delete(ownerUserID, shareID string, message string) 
 	if owner != nil {
 		_ = owner.WriteJSON(ownerShareEndedMessage{
 			Type:    "share-ended",
-			Message: message,
+			Message: shareEndedMessageFor(reason),
+			Reason:  reason,
 		})
 		_ = owner.Close()
 	}
 	for _, viewer := range viewers {
 		_ = viewer.WriteJSON(viewerShareEndedMessage{
 			Type:    "share-ended",
-			Message: message,
+			Message: shareEndedMessageFor(reason),
+			Reason:  reason,
 		})
 		_ = viewer.Close()
 	}
@@ -598,7 +605,7 @@ func (hub *SessionShareHub) HandleOwnerWebSocket(writer http.ResponseWriter, req
 		}
 	}
 
-	_ = hub.Delete(share.ownerUserID, shareID, "세션 공유가 종료되었습니다.")
+	_ = hub.Delete(share.ownerUserID, shareID, shareEndedReason)
 	return nil
 }
 
@@ -756,7 +763,7 @@ func (hub *SessionShareHub) handleOwnerPayload(shareID string, payload []byte) e
 			return err
 		}
 		_ = message
-		return hub.DeleteByShareID(shareID, "세션 공유가 종료되었습니다.")
+		return hub.DeleteByShareID(shareID, shareEndedReason)
 	default:
 		return nil
 	}
@@ -1163,7 +1170,7 @@ func (hub *SessionShareHub) SetInputEnabledForOwnerMessage(shareID string, input
 	return true, nil
 }
 
-func (hub *SessionShareHub) DeleteByShareID(shareID, message string) error {
+func (hub *SessionShareHub) DeleteByShareID(shareID, reason string) error {
 	hub.mu.Lock()
 	share, ok := hub.shares[shareID]
 	if !ok {
@@ -1181,14 +1188,16 @@ func (hub *SessionShareHub) DeleteByShareID(shareID, message string) error {
 	if owner != nil {
 		_ = owner.WriteJSON(ownerShareEndedMessage{
 			Type:    "share-ended",
-			Message: message,
+			Message: shareEndedMessageFor(reason),
+			Reason:  reason,
 		})
 		_ = owner.Close()
 	}
 	for _, viewer := range viewers {
 		_ = viewer.WriteJSON(viewerShareEndedMessage{
 			Type:    "share-ended",
-			Message: message,
+			Message: shareEndedMessageFor(reason),
+			Reason:  reason,
 		})
 		_ = viewer.Close()
 	}

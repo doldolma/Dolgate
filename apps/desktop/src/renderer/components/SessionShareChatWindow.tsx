@@ -9,6 +9,7 @@ import { SESSION_SHARE_CHAT_HISTORY_LIMIT } from '@shared';
 import { useSessionShareChatController } from '../controllers/useSessionShareChatController';
 import { Button, NoticeCard, SectionLabel, Textarea } from '../ui';
 import { useTranslation } from 'react-i18next';
+import { getFormatLocale } from '../i18n';
 
 function createInactiveSnapshot(sessionId: string): SessionShareOwnerChatSnapshot {
   return {
@@ -60,7 +61,7 @@ function formatChatTimestamp(sentAt: string): string {
     return '';
   }
 
-  return timestamp.toLocaleTimeString('ko-KR', {
+  return timestamp.toLocaleTimeString(getFormatLocale(), {
     hour: '2-digit',
     minute: '2-digit',
   });

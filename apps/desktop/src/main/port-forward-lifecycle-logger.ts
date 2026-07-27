@@ -10,6 +10,7 @@ import type {
 } from '@shared';
 import type { ActivityLogRepository, HostRepository, PortForwardRepository } from './database';
 import { t } from './i18n';
+import { logMessage } from "./activity-log-message";
 
 type ActivityLogWriter = Pick<ActivityLogRepository, 'upsert'>;
 type HostLookup = Pick<HostRepository, 'getById'>;
@@ -167,7 +168,7 @@ export class PortForwardLifecycleLogger {
       level: status === 'error' ? 'error' : 'info',
       category: 'audit',
       kind: 'port-forward-lifecycle',
-      message: t('misc.portForwardLog', { label: attempt.ruleLabel }),
+      ...logMessage('misc.portForwardLog', { label: attempt.ruleLabel }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: attempt.startedAt,
       updatedAt: stoppedAt ?? runtime.updatedAt ?? this.now(),

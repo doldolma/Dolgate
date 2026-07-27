@@ -49,6 +49,7 @@ import { registerNotificationsIpcHandlers } from './ipc/notifications';
 import { WarpgateService } from './warpgate-service';
 import { XshellImportService } from './xshell-import-service';
 import { shouldRequestSingleInstanceLock } from './app-runtime-policy';
+import type { ActivityLogMessage } from './activity-log-message';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -212,8 +213,23 @@ if (termiusHelperArgIndex >= 0) {
   const termiusImportService = new TermiusImportService();
   const opensshImportService = new OpenSshImportService();
   const xshellImportService = new XshellImportService(() => app.getPath('documents'));
-  const appendActivityLog = (entry: { level: 'info' | 'warn' | 'error'; category: 'session' | 'audit'; message: string; metadata?: Record<string, unknown> | null }) => {
-    activityLogRepository.append(entry.level, entry.category, entry.message, entry.metadata ?? null);
+  const appendActivityLog = (entry: {
+    level: 'info' | 'warn' | 'error';
+    category: 'session' | 'audit';
+    message: string;
+    messageKey?: string;
+    messageParams?: Record<string, unknown> | null;
+    metadata?: Record<string, unknown> | null;
+  }) => {
+    // 키가 실려 온 로그는 키까지 저장해 화면이 현재 언어로 다시 그릴 수 있게 한다.
+    const message: string | ActivityLogMessage = entry.messageKey
+      ? {
+          message: entry.message,
+          messageKey: entry.messageKey,
+          messageParams: entry.messageParams ?? null
+        }
+      : entry.message;
+    activityLogRepository.append(entry.level, entry.category, message, entry.metadata ?? null);
   };
   const upsertActivityLog = (record: import('@shared').ActivityLogRecord) => {
     activityLogRepository.upsert(record);

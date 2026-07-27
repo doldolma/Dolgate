@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import uPlot from "uplot";
 import { cn } from "../lib/cn";
+import { getFormatLocale } from '../i18n';
 
 export type MetricChartValueFormat = "percent" | "bytesPerSecond";
 export type MetricChartSeriesTone = "primary" | "secondary";
@@ -71,7 +72,7 @@ function formatMetricValue(
 }
 
 function formatMetricsAxisTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getFormatLocale(), {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
@@ -79,7 +80,7 @@ function formatMetricsAxisTime(value: number): string {
 }
 
 function formatMetricsTooltipTime(value: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getFormatLocale(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

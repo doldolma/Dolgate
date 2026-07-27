@@ -23,6 +23,7 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { t } from "../i18n";
+import { logMessage } from "../activity-log-message";
 
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
@@ -71,7 +72,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.dnsOverrides.remove(record.id);
         throw error;
       }
-      ctx.activityLogs.append("info", "audit", t("pfIpc.dnsCreated"), {
+      ctx.activityLogs.append("info", "audit", logMessage("pfIpc.dnsCreated"), {
         dnsOverrideId: record.id,
         type: record.type,
         hostname: record.hostname,
@@ -101,7 +102,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.dnsOverrides.replaceAll(previous);
         throw error;
       }
-      ctx.activityLogs.append("info", "audit", t("pfIpc.dnsUpdated"), {
+      ctx.activityLogs.append("info", "audit", logMessage("pfIpc.dnsUpdated"), {
         dnsOverrideId: record.id,
         type: record.type,
         hostname: record.hostname,
@@ -199,7 +200,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       ctx.syncOutbox.upsertDeletion("dnsOverrides", id);
       if (current) {
         ctx.hostsOverrideManager.removeStaticOverrideState(current.id);
-        ctx.activityLogs.append("warn", "audit", t("pfIpc.dnsDeleted"), {
+        ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.dnsDeleted"), {
           dnsOverrideId: current.id,
           type: current.type,
           hostname: current.hostname,
@@ -226,7 +227,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.assertSshHost(host);
       }
       const record = ctx.portForwards.create(draft);
-      ctx.activityLogs.append("info", "audit", t("pfIpc.ruleCreated"), {
+      ctx.activityLogs.append("info", "audit", logMessage("pfIpc.ruleCreated"), {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
@@ -259,7 +260,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.assertSshHost(host);
       }
       const record = ctx.portForwards.update(id, draft);
-      ctx.activityLogs.append("info", "audit", t("pfIpc.ruleUpdated"), {
+      ctx.activityLogs.append("info", "audit", logMessage("pfIpc.ruleUpdated"), {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
@@ -299,7 +300,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       ctx.syncOutbox.upsertDeletion("portForwards", id);
       ctx.portForwards.remove(id);
       if (current) {
-        ctx.activityLogs.append("warn", "audit", t("pfIpc.ruleDeleted"), {
+        ctx.activityLogs.append("warn", "audit", logMessage("pfIpc.ruleDeleted"), {
           ruleId: current.id,
           label: current.label,
           hostId: current.hostId,

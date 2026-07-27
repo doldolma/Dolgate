@@ -1,5 +1,6 @@
 import { NativeModules } from "react-native";
 import { AWS_SSO_APP_CALLBACK_URI } from "./mobile";
+import { t } from "../i18n";
 
 type AwsSsoBridgeModuleShape = {
   startLoopback(deepLinkBaseUri: string): Promise<{ redirectUri: string }>;
@@ -14,7 +15,7 @@ const nativeAwsSsoBridge = NativeModules.AwsSsoBridgeModule as
 
 function getNativeBridge(): AwsSsoBridgeModuleShape {
   if (!nativeAwsSsoBridge) {
-    throw new Error("AWS SSO 브라우저 모듈을 찾지 못했습니다.");
+    throw new Error(t("awsSso.browserModuleMissing"));
   }
   return nativeAwsSsoBridge;
 }

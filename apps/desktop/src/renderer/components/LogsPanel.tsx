@@ -23,7 +23,8 @@ import {
 } from '../ui';
 import { Play } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
+import { resolveLogMessage } from '../lib/activity-log-message';
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -266,7 +267,7 @@ function getContainerActionLabel(action: ContainerActionLogMetadata['action']): 
 }
 
 function formatLogTimestamp(value: string): string {
-  return new Date(value).toLocaleString('ko-KR');
+  return new Date(value).toLocaleString(getFormatLocale());
 }
 
 function formatBytes(value?: number | null): string | null {
@@ -693,7 +694,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
               <Card key={log.id}>
                 <CardMain>
                   <div className="flex flex-wrap items-center gap-[0.7rem]">
-                    <strong>{log.message}</strong>
+                    <strong>{resolveLogMessage(log, translate)}</strong>
                     <Badge tone={log.level === 'error' ? 'error' : log.level === 'warn' ? 'starting' : 'running'}>
                       {log.level.toUpperCase()}
                     </Badge>

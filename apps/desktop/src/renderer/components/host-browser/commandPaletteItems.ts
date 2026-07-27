@@ -26,6 +26,7 @@ import {
 } from '../../ui/icons';
 import type { HostBrowserModel } from './useHostBrowser';
 import { t } from '../../i18n';
+import { hostSubtitleLabels } from '../../../common/shared-messages';
 
 const MAX_PALETTE_HOSTS = 6;
 
@@ -39,7 +40,7 @@ function getHostPaletteText(host: HostRecord): string {
 }
 
 function getHostPaletteSubtitle(host: HostRecord, prefix?: string): string {
-  const subtitle = getHostSubtitle(host);
+  const subtitle = getHostSubtitle(host, hostSubtitleLabels());
   return prefix ? `${prefix} · ${subtitle}` : subtitle;
 }
 

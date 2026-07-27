@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="{{ .T.Lang }}">
+  <head>
+    {{ template "auth-head" }}
+    <meta name="robots" content="noindex" />
+    <title>{{ .T.OIDCBridgeTitle }}</title>
+    <style>
+      {{ template "auth-base-css" }}
+      .card { max-width:460px; }
+      h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
+      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
+      button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#24324a; color:#fff; border:1px solid rgba(185,200,255,.34); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">Dolgate</div>
+        <h1>{{ .T.OIDCBridgeHeading }}</h1>
+        <p>{{ .T.OIDCBridgeBody }}</p>
+        <form id="complete-form" method="POST" action="/auth/oidc/complete">
+          <input type="hidden" name="code" value="{{ .Code }}" />
+          <input type="hidden" name="state" value="{{ .State }}" />
+          <button type="submit" class="button">{{ .T.ContinueButton }}</button>
+        </form>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var form = document.getElementById('complete-form');
+        if (!form) { return; }
+        var submitted = false;
+        function submitOnce() {
+          if (submitted) { return; }
+          submitted = true;
+          form.submit();
+        }
+        // prefetch는 이 스크립트를 실행하지 않아 코드가 보존된다. prerender는 활성화(실제
+        // 사용자 네비게이션) 이후에만 제출해 미리 코드를 소진하지 않게 한다.
+        if (document.prerendering) {
+          document.addEventListener('prerenderingchange', submitOnce, { once: true });
+        } else {
+          submitOnce();
+        }
+      })();
+    </script>
+  </body>
+</html>

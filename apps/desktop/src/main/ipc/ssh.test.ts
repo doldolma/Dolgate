@@ -613,7 +613,7 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.activityLogs.append).toHaveBeenCalledWith(
       "warn",
       "session",
-      expect.stringContaining("SSM 셸로 폴백"),
+      expect.objectContaining({ messageKey: "sshIpc.fallbackNotice" }),
       expect.objectContaining({ hostId: "aws-host-1" }),
     );
   });
@@ -633,7 +633,7 @@ describe("registerSshIpcHandlers", () => {
     expect(ctx.activityLogs.append).toHaveBeenCalledWith(
       "warn",
       "session",
-      expect.stringContaining("SSM 셸로 폴백"),
+      expect.objectContaining({ messageKey: "sshIpc.fallbackNotice" }),
       expect.objectContaining({
         hostId: "aws-host-1",
         reason: "EIC not supported",

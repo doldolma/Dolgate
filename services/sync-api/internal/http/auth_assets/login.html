@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="{{ .T.Lang }}">
+  <head>
+    {{ template "auth-head" }}
+    <title>{{ if .IsSignup }}{{ .T.SignupTitle }}{{ else }}{{ .T.SignInTitle }}{{ end }}</title>
+    <style>
+      {{ template "auth-base-css" }}
+      .card { max-width:420px; }
+      h1 { margin:0 0 8px; font-size:34px; line-height:1.1; }
+      p { color:#9fb0d3; margin:0 0 24px; }
+      form { display:flex; flex-direction:column; gap:14px; }
+      label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; }
+      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
+      button, a.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:14px; padding:14px 16px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
+      .primary { background:#5f7cff; color:white; }
+      .secondary { background:#24324a; color:white; }
+      .stack { display:flex; flex-direction:column; gap:12px; }
+      .error { background:rgba(255,92,92,.12); color:#ffb8b8; border:1px solid rgba(255,92,92,.18); border-radius:14px; padding:12px 14px; margin-bottom:18px; }
+      .foot { margin-top:16px; color:#8fa0c5; font-size:13px; }
+      .divider { margin:18px 0; border-top:1px solid rgba(255,255,255,.08); }
+      .actions { display:flex; flex-direction:column; gap:12px; }
+      .passkey-status { margin-top:12px; font-size:13px; line-height:1.5; color:#9fb0d3; min-height:18px; text-align:center; }
+      .passkey-status.err { color:#ffb8b8; }
+      .passkey-status.ok { color:#8be9a3; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="eyebrow">Dolgate</div>
+        <h1>{{ if .IsSignup }}{{ .T.SignupTitle }}{{ else }}{{ .T.SignInTitle }}{{ end }}</h1>
+        <p>{{ .T.LoginLede }}</p>
+        {{ if .ErrorMessage }}
+          <div class="error">{{ .ErrorMessage }}</div>
+        {{ end }}
+        {{ if .LocalAuthEnabled }}
+          <form method="post" action="{{ if .IsSignup }}/signup{{ else }}/login{{ end }}">
+            <input type="hidden" name="client" value="{{ .Client }}" />
+            <input type="hidden" name="redirect_uri" value="{{ .RedirectURI }}" />
+            <input type="hidden" name="state" value="{{ .State }}" />
+            <input type="hidden" name="platform" value="{{ .Platform }}" />
+            <input type="hidden" name="lang" value="{{ .T.Lang }}" />
+            <label>{{ .T.EmailLabel }}
+              <input type="email" name="email" value="{{ .Email }}" required autocomplete="username webauthn" autofocus />
+            </label>
+            <label>{{ .T.PasswordLabel }}
+              <input type="password" name="password" required minlength="8" />
+            </label>
+            <button class="primary" type="submit">{{ if .IsSignup }}{{ .T.SignupSubmit }}{{ else }}{{ .T.SignInSubmit }}{{ end }}</button>
+          </form>
+        {{ end }}
+        {{ if and .ShowSignupLink (not .IsSignup) }}
+          <div class="foot">{{ .T.NoAccountPrompt }} <a href="/signup?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}&platform={{ .Platform }}&lang={{ .T.Lang }}" style="color:#b9c8ff">{{ .T.SignupLink }}</a></div>
+        {{ end }}
+        {{ if .WebAuthnEnabled }}
+          <div id="passkey-section" style="display:none">
+            {{ if .LocalAuthEnabled }}<div class="divider"></div>{{ end }}
+            <div class="actions">
+              <button id="passkey-login" class="button secondary" type="button">{{ .T.PasskeyLoginButton }}</button>
+            </div>
+            <div id="passkey-status" class="passkey-status"></div>
+          </div>
+        {{ end }}
+        {{ if .OIDCEnabled }}
+          {{ if or .LocalAuthEnabled .WebAuthnEnabled }}<div class="divider"></div>{{ end }}
+          <div class="actions">
+            <a class="button secondary" href="/auth/oidc/start?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}&lang={{ .T.Lang }}">{{ printf .T.ContinueWithFormat .OIDCDisplayName }}</a>
+          </div>
+        {{ end }}
+      </div>
+    </div>
+    <script>
+      // 로그인/회원가입 폼을 fetch 로 보내 페이지 이동을 없앤다. 폼을 네이티브로 전송하면
+      // 히스토리 항목이 하나 늘어나고, 그러면 브라우저가 콜백 탭의 window.close() 를 막아
+      // "이 탭은 닫아도 됩니다" 화면이 남는다. 이동을 안 하면 항목이 1개로 유지되어 닫힌다.
+      //
+      // 서버 응답 형식은 그대로 사용한다(하위 호환) — 성공 시 돌아오는 브리지 페이지의
+      // #open-app 링크에서 콜백 URL 을 읽고, 실패 시 다시 렌더된 로그인 페이지의 .error 문구를
+      // 그대로 표시한다. JS 미지원이면 리스너가 안 붙어 네이티브 전송이 그대로 동작하고,
+      // fetch 가 실패하면(네트워크·확장 차단) 네이티브 전송으로 폴백한다. 반대로 서버가
+      // 응답을 준 경우엔 절대 재전송하지 않는다 — 그 요청은 이미 처리됐을 수 있다.
+      (function () {
+        var form = document.querySelector('form[method="post"]');
+        if (!form || !window.fetch || !window.DOMParser || !window.FormData || !window.URLSearchParams) { return; }
+        var container = form.parentNode;
+        var submitButton = form.querySelector('button[type="submit"]');
+        var busy = false;
+
+        function showError(message) {
+          var box = container.querySelector('.error');
+          if (!box) {
+            box = document.createElement('div');
+            box.className = 'error';
+            container.insertBefore(box, form);
+          }
+          box.textContent = message;
+        }
+        function nativeSubmit() {
+          busy = true;
+          form.submit();
+        }
+        function unlock() {
+          busy = false;
+          if (submitButton) { submitButton.disabled = false; }
+        }
+
+        form.addEventListener('submit', function (event) {
+          if (busy) { return; }
+          event.preventDefault();
+          busy = true;
+          if (submitButton) { submitButton.disabled = true; }
+          // 응답 헤더가 오는 순간 서버는 이 요청을 이미 처리한 것이다. 그 뒤의 실패
+          // (본문이 잘림, 연결 끊김, 파싱 오류)는 재전송하면 안 된다.
+          var responded = false;
+          fetch(form.action, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(new FormData(form)).toString()
+          })
+            .then(function (response) { responded = true; return response.text(); })
+            .then(function (html) {
+              var doc = new DOMParser().parseFromString(html, 'text/html');
+              var callbackLink = doc.getElementById('open-app');
+              var target = callbackLink && callbackLink.getAttribute('href');
+              if (target) {
+                // assign 이 아니라 replace — 히스토리 항목을 1개로 유지해야 탭이 스스로 닫힌다.
+                window.location.replace(target);
+                return;
+              }
+              if (!doc.querySelector('form[method="post"]')) {
+                // 서버가 응답은 했는데 로그인 페이지도 브리지 페이지도 아니다(평문 4xx/5xx,
+                // 프록시의 502 페이지 …). 여기서 네이티브로 재전송하면 서버가 이미 처리한
+                // 요청이 한 번 더 실행된다 — 회원가입이면 첫 요청에서 계정이 만들어진 뒤
+                // 두 번째가 중복으로 실패해 "가입 실패"로 보인다. 재전송하지 않고 알린다.
+                showError({{ .T.LoginIncomplete }});
+                unlock();
+                return;
+              }
+              var serverError = doc.querySelector('.error');
+              showError(serverError ? serverError.textContent.trim() : {{ .T.LoginFailed }});
+              unlock();
+            })
+            .catch(function () {
+              if (responded) {
+                showError({{ .T.NoResponse }});
+                unlock();
+                return;
+              }
+              // 요청이 서버에 닿지도 못한 경우(네트워크 끊김, 확장/프록시가 fetch 만 차단)
+              // 에만 네이티브 전송으로 폴백한다 — 폴백이 없으면 fetch 가 막힌 환경에서
+              // 로그인이 아예 불가능해진다.
+              nativeSubmit();
+            });
+        });
+      })();
+    </script>
+    {{ if .WebAuthnEnabled }}
+    <script>
+      (function () {
+        var section = document.getElementById('passkey-section');
+        if (!window.PublicKeyCredential || !window.isSecureContext) { return; }
+        if (section) { section.style.display = 'block'; }
+        var CTX = { client: "{{ .Client }}", redirectUri: "{{ .RedirectURI }}", state: "{{ .State }}" };
+        var RP_ID = "{{ .WebAuthnRPID }}";
+        function b64urlToBuf(value) {
+          value = value.replace(/-/g, '+').replace(/_/g, '/');
+          var pad = value.length % 4; if (pad) { value += '='.repeat(4 - pad); }
+          var binary = atob(value); var bytes = new Uint8Array(binary.length);
+          for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+          return bytes.buffer;
+        }
+        function bufToB64url(buffer) {
+          var bytes = new Uint8Array(buffer); var binary = '';
+          for (var i = 0; i < bytes.length; i++) { binary += String.fromCharCode(bytes[i]); }
+          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function decodeRequestOptions(options) {
+          options.challenge = b64urlToBuf(options.challenge);
+          if (options.allowCredentials) {
+            options.allowCredentials = options.allowCredentials.map(function (credential) {
+              credential.id = b64urlToBuf(credential.id); return credential;
+            });
+          }
+          return options;
+        }
+        function encodeAssertion(credential) {
+          return {
+            id: credential.id, type: credential.type, rawId: bufToB64url(credential.rawId),
+            response: {
+              authenticatorData: bufToB64url(credential.response.authenticatorData),
+              clientDataJSON: bufToB64url(credential.response.clientDataJSON),
+              signature: bufToB64url(credential.response.signature),
+              userHandle: credential.response.userHandle ? bufToB64url(credential.response.userHandle) : null
+            },
+            clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
+          };
+        }
+        async function beginLogin() {
+          var response = await fetch({{ printf "/auth/webauthn/login/begin?lang=%s" .T.Lang }}, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+          });
+          if (!response.ok) { throw new Error('begin failed'); }
+          return response.json();
+        }
+        async function finishLogin(ceremonyId, assertion) {
+          var response = await fetch({{ printf "/auth/webauthn/login/finish?lang=%s" .T.Lang }}, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ceremonyId: ceremonyId, client: CTX.client, redirectUri: CTX.redirectUri, state: CTX.state, credential: assertion })
+          });
+          if (!response.ok) {
+            var body = {};
+            try { body = (await response.json()) || {}; } catch (e) {}
+            var loginError = new Error(body.error || ({{ .T.VerifyFailed }} + ' (' + response.status + ')'));
+            loginError.code = body.code || '';
+            throw loginError;
+          }
+          return response.json();
+        }
+        var statusEl = document.getElementById('passkey-status');
+        var conditionalController = null;
+        var busy = false;
+        function setStatus(message, kind) { if (statusEl) { statusEl.textContent = message || ''; statusEl.className = 'passkey-status' + (kind ? ' ' + kind : ''); } }
+        function errorMessage(error) {
+          if (error && error.name === 'NotAllowedError') { return {{ .T.PasskeyNotAllowed }}; }
+          return {{ .T.PasskeyFailedPrefix }} + ((error && (error.message || error.name)) || {{ .T.UnknownError }});
+        }
+        function signalUnknownCredential(credential) {
+          // WebAuthn Signal API — 지원 브라우저(Chrome 132+ 등)에서 비밀번호 관리자에게 이
+          // 자격증명이 이 서버에 없음을 알려 stale 패스키를 정리하게 한다. credential.id 는
+          // base64url 자격증명 ID. 미지원/실패는 조용히 무시한다.
+          if (!RP_ID || !credential) { return; }
+          if (!PublicKeyCredential.signalUnknownCredential) {
+            console.info('[passkey] signalUnknownCredential 미지원 브라우저 — stale 패스키는 수동 삭제 필요');
+            return;
+          }
+          try {
+            PublicKeyCredential.signalUnknownCredential({ rpId: RP_ID, credentialId: credential.id })
+              .then(function () {
+                // 신호를 보냈다고 항상 삭제되지는 않는다 — 반영 여부는 패스키 제공자가 결정한다.
+                // (Google 비밀번호 관리자는 반영, Apple Passwords/iCloud 키체인은 Chrome 경로에서 미반영)
+                console.info('[passkey] signalUnknownCredential 전송됨 (반영 여부는 패스키 제공자가 결정)');
+              })
+              .catch(function (error) { console.warn('[passkey] signalUnknownCredential 실패', error); });
+          } catch (e) { console.warn('[passkey] signalUnknownCredential 호출 실패', e); }
+        }
+        async function run(mediation) {
+          var data = await beginLogin();
+          var getOptions = { publicKey: decodeRequestOptions(data.publicKey) };
+          if (mediation === 'conditional') {
+            conditionalController = new AbortController();
+            getOptions.mediation = 'conditional';
+            getOptions.signal = conditionalController.signal;
+          }
+          var credential = await navigator.credentials.get(getOptions);
+          if (!credential) { return; }
+          setStatus({{ .T.LoginVerifying }});
+          // 자격증명을 고른 뒤의 서버 검증 실패는 conditional(autofill) 흐름이라도 반드시
+          // 표시한다 — 안 그러면 바깥 catch(function(){})가 삼켜 "로그인 확인 중…"에서 무한
+          // 정지한다. 실패 후엔 autofill 을 다시 쓸 수 있게 재무장한다.
+          var result;
+          try {
+            result = await finishLogin(data.ceremonyId, encodeAssertion(credential));
+          } catch (error) {
+            setStatus(errorMessage(error), 'err');
+            // 서버가 "미등록 자격증명"으로 확정하면, 비밀번호 관리자의 stale 패스키를 정리 신호.
+            if (error && error.code === 'unknown_credential') { signalUnknownCredential(credential); }
+            armConditional();
+            return;
+          }
+          if (result && result.redirectUrl) {
+            setStatus({{ .T.LoginSucceeded }}, 'ok');
+            // assign 이 아니라 replace 를 쓴다 — 히스토리 항목을 늘리지 않아야 콜백 탭의 세션
+            // 히스토리가 1개로 유지되고, 그래야 브라우저가 콜백 페이지의 window.close() 를 허용한다.
+            window.location.replace(result.redirectUrl);
+          }
+        }
+        function armConditional() {
+          if (!PublicKeyCredential.isConditionalMediationAvailable) { return; }
+          PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
+            if (available) { run('conditional').catch(function () {}); }
+          });
+        }
+        var button = document.getElementById('passkey-login');
+        if (button) {
+          button.addEventListener('click', function () {
+            if (busy) { return; }
+            busy = true;
+            setStatus({{ .T.PasskeyChecking }});
+            // 페이지 로드 시 시작한 conditional 요청이 대기 중이면 취소한다 — 안 그러면
+            // 버튼의 modal get() 이 "이미 요청 진행 중" 에러로 조용히 실패한다.
+            if (conditionalController) { conditionalController.abort(); conditionalController = null; }
+            run('optional')
+              .catch(function (error) {
+                setStatus(errorMessage(error), 'err');
+                // 모달을 취소/실패하면 conditional 요청도 abort된 상태이므로, 새로고침 없이
+                // email 필드 autofill 이 다시 뜨도록 conditional 을 재무장한다.
+                armConditional();
+              })
+              .finally(function () { busy = false; });
+          });
+        }
+        armConditional();
+      })();
+    </script>
+    {{ end }}
+  </body>
+</html>

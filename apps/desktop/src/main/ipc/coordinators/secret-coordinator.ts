@@ -15,6 +15,7 @@ import type {
 import type { SecretStore } from "../../secret-store";
 import type { SshHostRecord } from "../context";
 import { t } from '../../i18n';
+import { logMessage } from "../../activity-log-message";
 
 // 자동 재연결용 런타임 시크릿 캐시(메모리 전용). 디스크/keychain에 저장하지 않으며
 // 앱 종료 시 프로세스 메모리와 함께 소멸한다. TTL로 오래된 항목을 자동 폐기한다.
@@ -329,7 +330,7 @@ export function createSecretCoordinator(deps: {
     activityLogs.append(
       "info",
       "audit",
-      t('secretIpc.hostSecretSaved'),
+      logMessage('secretIpc.hostSecretSaved'),
       {
         hostId,
         secretRef,

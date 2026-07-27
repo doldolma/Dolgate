@@ -13,6 +13,7 @@ import {
   type TermiusSnapshot,
 } from './termius-import-service';
 import { t } from './i18n';
+import { logMessage } from "./activity-log-message";
 
 export interface TermiusImportExecutorContext {
   groups: GroupRepository;
@@ -144,7 +145,7 @@ export async function importTermiusSelection(
   }
 
   if (createdGroupCount > 0 || createdHostCount > 0 || createdSecretCount > 0) {
-    context.activityLogs.append('info', 'audit', t('termiusSvc.imported'), {
+    context.activityLogs.append('info', 'audit', logMessage('termiusSvc.imported'), {
       createdGroupCount,
       createdHostCount,
       createdSecretCount,

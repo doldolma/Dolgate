@@ -184,6 +184,8 @@ func TestDuplicateSignupHidesDriverError(t *testing.T) {
 	form.Set("email", "dup@example.com")
 	form.Set("password", "supersecure")
 	form.Set("redirect_uri", "http://127.0.0.1:53123/auth/callback")
+	// 로그인 페이지는 요청 언어를 따르므로 단정할 문구의 언어를 고정한다.
+	form.Set("lang", "ko")
 	formBody := signup("/signup", form.Encode(), "application/x-www-form-urlencoded").Body.String()
 	assertNoDriverError(t, "browser form", formBody)
 	if !strings.Contains(formBody, "이미 사용 중인 이메일입니다") {

@@ -21,6 +21,7 @@ import {
   type ServerPublicKeyInfo,
   type StartShellOptions,
 } from './types';
+import { t } from '../i18n';
 
 // Cursor and stream codes, matching the constants in
 // services/ssh-core/mobile/bind.go. They cross as plain numbers because
@@ -135,7 +136,7 @@ export function getGoEngineVersion(): Promise<string> {
 function requireNative(): GoSshEngineNativeModule {
   const native = nativeModule();
   if (!native) {
-    throw new Error('Go SSH 엔진 네이티브 모듈을 찾을 수 없습니다.');
+    throw new Error(t('engine.nativeModuleMissing'));
   }
   return native;
 }
@@ -626,7 +627,7 @@ export class GoSshEngineAdapter implements MobileSshEngine {
       await requireNative().inspectPrivateKey(privateKeyPem, passphrase ?? '');
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : '개인키를 확인할 수 없습니다.';
+      return error instanceof Error ? error.message : t('engine.privateKeyUnreadable');
     }
   }
 
@@ -637,11 +638,11 @@ export class GoSshEngineAdapter implements MobileSshEngine {
       // The engine reports a status rather than throwing for a well-formed but
       // unusable certificate, so anything other than "valid" is a problem.
       if (inspection.status && inspection.status !== 'valid') {
-        return `인증서를 사용할 수 없습니다: ${inspection.status}`;
+        return t('engine.certificateUnusable', { status: inspection.status });
       }
       return null;
     } catch (error) {
-      return error instanceof Error ? error.message : '인증서를 확인할 수 없습니다.';
+      return error instanceof Error ? error.message : t('engine.certificateUnreadable');
     }
   }
 }

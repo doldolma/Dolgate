@@ -143,6 +143,9 @@ type BrowserLoginState struct {
 	Client      string `json:"client"`
 	RedirectURI string `json:"redirectUri"`
 	State       string `json:"state"`
+	// Lang 은 로그인 페이지에서 고른 UI 언어다. OIDC 라운드트립에서 돌아오는 요청에는
+	// lang 파라미터가 없어서, 실어 두지 않으면 콜백 페이지가 브라우저 언어로 되돌아간다.
+	Lang string `json:"lang,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -362,11 +365,12 @@ func (s *Service) ResolveOIDCUser(ctx context.Context, provider string, subject 
 	return user, nil
 }
 
-func (s *Service) NewBrowserLoginState(client string, redirectURI string, state string) (string, error) {
+func (s *Service) NewBrowserLoginState(client string, redirectURI string, state string, lang string) (string, error) {
 	claims := BrowserLoginState{
 		Client:      client,
 		RedirectURI: redirectURI,
 		State:       state,
+		Lang:        lang,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(10 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

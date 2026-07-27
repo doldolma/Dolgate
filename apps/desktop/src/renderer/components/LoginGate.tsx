@@ -1,9 +1,9 @@
 import type { AuthState } from '@shared';
-import { getServerUrlValidationMessage } from '@shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { t } from '../i18n';
 import { Button, IconButton, Input, SectionLabel } from '../ui';
+import { getServerUrlValidationMessage } from '../../common/shared-messages';
 
 interface LoginGateProps {
   authState: AuthState;

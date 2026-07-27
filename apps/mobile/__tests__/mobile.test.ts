@@ -189,6 +189,8 @@ describe('buildBrowserLoginUrl', () => {
       expect(url.searchParams.get('client')).toBe('dolgate-mobile');
       expect(url.searchParams.get('state')).toBe('state-token');
       expect(url.searchParams.get('platform')).toBe(os);
+      // 로그인 페이지가 앱과 같은 언어로 뜨게 하는 값(서버는 없으면 브라우저 언어를 따른다).
+      expect(url.searchParams.get('lang')).toBe('ko');
     },
   );
 });

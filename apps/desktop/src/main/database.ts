@@ -18,7 +18,6 @@ import {
   isLinkedDnsOverrideRecord,
   isStaticDnsOverrideDraft,
   getGroupLabel,
-  getServerUrlValidationMessage,
   getParentGroupPath,
   isAwsEc2HostDraft,
   isAwsEcsHostDraft,
@@ -89,10 +88,12 @@ import type {
   WarpgateSshHostRecord
 } from '@shared';
 import { normalizeAppLanguage } from '../common/i18n/locale';
+import type { ActivityLogMessage } from './activity-log-message';
 import { DesktopConfigService } from './app-config';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 import type { LocalHistoryOwner } from './local-history-scope';
 import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
+import { getServerUrlValidationMessage } from '../common/shared-messages';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -2011,14 +2012,28 @@ export class ActivityLogRepository {
     return stateStorage.listActivityLogs();
   }
 
-  append(level: ActivityLogLevel, category: ActivityLogCategory, message: string, metadata?: Record<string, unknown> | null): ActivityLogRecord {
+  // message 는 logMessage() 로 만든 값을 권장한다 — 그러면 번역 키가 함께 저장돼 나중에
+  // 언어를 바꿔도 목록이 현재 언어로 다시 그려진다. 문자열을 그대로 넘기면 그 문구가
+  // 기록 당시 언어로 굳는다.
+  append(
+    level: ActivityLogLevel,
+    category: ActivityLogCategory,
+    message: string | ActivityLogMessage,
+    metadata?: Record<string, unknown> | null
+  ): ActivityLogRecord {
     const timestamp = nowIso();
+    const resolved =
+      typeof message === 'string'
+        ? { message, messageKey: undefined, messageParams: null }
+        : message;
     const record: ActivityLogRecord = {
       id: randomUUID(),
       level,
       category,
       kind: 'generic',
-      message,
+      message: resolved.message,
+      messageKey: resolved.messageKey,
+      messageParams: resolved.messageParams ?? null,
       metadata: metadata ?? null,
       createdAt: timestamp,
       updatedAt: timestamp

@@ -18,6 +18,7 @@ import {
 import type { AwsEc2HostRecord, MainIpcContext } from "./context";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 /**
  * Installs a persistent public key into an EC2 instance's authorized_keys over

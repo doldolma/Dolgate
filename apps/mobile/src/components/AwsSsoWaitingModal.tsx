@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Modal,
@@ -23,6 +24,7 @@ export function AwsSsoWaitingModal({
   onReopen,
 }: AwsSsoWaitingModalProps): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
 
   return (
     <Modal
@@ -48,10 +50,9 @@ export function AwsSsoWaitingModal({
             },
           ]}
         >
-          <Text style={[styles.title, { color: palette.text }]}>AWS 로그인</Text>
+          <Text style={[styles.title, { color: palette.text }]}>{translate("awsSso.title")}</Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            브라우저에서 AWS 로그인을 진행하고 있습니다. 로그인을 마친 뒤
-            Dolgate로 돌아오면 자동으로 다시 확인합니다.
+            {translate("awsSso.waitingBody")}
           </Text>
           {prompt ? (
             <View
@@ -74,7 +75,7 @@ export function AwsSsoWaitingModal({
           <View style={styles.spinnerRow}>
             <ActivityIndicator size="small" color={palette.accent} />
             <Text style={[styles.spinnerText, { color: palette.text }]}>
-              로그인 완료를 확인하는 중
+              {translate("awsSso.checking")}
             </Text>
           </View>
           <View style={styles.actions}>
@@ -91,7 +92,7 @@ export function AwsSsoWaitingModal({
               <Text
                 style={[styles.secondaryButtonText, { color: palette.mutedText }]}
               >
-                취소
+                {translate("common.cancel")}
               </Text>
             </Pressable>
             <Pressable
@@ -103,7 +104,7 @@ export function AwsSsoWaitingModal({
                 },
               ]}
             >
-              <Text style={styles.primaryButtonText}>브라우저 다시 열기</Text>
+              <Text style={styles.primaryButtonText}>{translate("awsSso.reopenBrowser")}</Text>
             </Pressable>
           </View>
         </View>

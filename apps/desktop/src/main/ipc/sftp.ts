@@ -32,6 +32,7 @@ import {
 } from "../aws-ws-proxy";
 import { runWithIpcSessionOwner } from "./session-owner";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 function resolveOwnerWebContentsId(
   event: IpcMainInvokeEvent | null,

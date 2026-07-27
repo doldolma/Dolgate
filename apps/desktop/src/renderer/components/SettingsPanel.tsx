@@ -18,8 +18,6 @@ import type {
   TerminalFontFamilyId,
 } from '@shared';
 import {
-  validateAccountPassword,
-  validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -50,6 +48,7 @@ import {
   ToggleSwitch,
 } from '../ui';
 import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
+import { getAccountPasswordValidationMessage, getNewVaultPassphraseMessage } from '../../common/shared-messages';
 
 // shared-core의 clampCommandNotificationThresholdSeconds 범위와 동일하게 유지.
 // @shared value를 직접 import하면 vite dev에서 export* 누락 이슈가 있어 인라인.
@@ -351,7 +350,7 @@ export function SettingsPanel({
     }
   }
   const accountPasswordValidationMessage = nextAccountPassword
-    ? validateAccountPassword(nextAccountPassword)
+    ? getAccountPasswordValidationMessage(nextAccountPassword)
     : null;
   // 동기화 암호 변경 다이얼로그 상태.
   const [vaultPassphraseOpen, setVaultPassphraseOpen] = useState(false);
@@ -362,7 +361,7 @@ export function SettingsPanel({
   const [vaultPassphraseError, setVaultPassphraseError] = useState<string | null>(null);
   const [vaultPassphraseNotice, setVaultPassphraseNotice] = useState<string | null>(null);
   const newVaultPassphraseValidationMessage = nextVaultPassphrase
-    ? validateNewVaultPassphrase(nextVaultPassphrase)
+    ? getNewVaultPassphraseMessage(nextVaultPassphrase)
     : null;
   // 동기화 볼트 초기화(암호 분실) 확인 다이얼로그 상태.
   const [vaultResetOpen, setVaultResetOpen] = useState(false);
@@ -999,25 +998,7 @@ export function SettingsPanel({
 
             <div className="mb-4">
               <div>
-                <SectionLabel>Appearance</SectionLabel>
-                <h3>Theme</h3>
-              </div>
-            </div>
-            <div className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
-              {themeOptions.map((option) => (
-                <OptionCard
-                  key={option.value}
-                  active={settings.theme === option.value}
-                  title={option.title}
-                  description={translate(option.descriptionKey)}
-                  preview={renderAppearanceThemePreview(option.value)}
-                  onClick={async () => onUpdateSettings({ theme: option.value })}
-                />
-              ))}
-            </div>
-
-            <div className="mb-4 mt-6">
-              <div>
+                <SectionLabel>General</SectionLabel>
                 <h3>{translate('settings.language.title')}</h3>
               </div>
             </div>
@@ -1040,12 +1021,31 @@ export function SettingsPanel({
                     </option>
                   ))}
                 </SelectField>
-                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  {(settings.language ?? 'system') === 'system'
-                    ? translate('settings.language.systemDescription')
-                    : translate('settings.language.reopenNote')}
-                </p>
+                {(settings.language ?? 'system') === 'system' ? null : (
+                  <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
+                    {translate('settings.language.reopenNote')}
+                  </p>
+                )}
               </FieldGroup>
+            </div>
+
+            <div className="mb-4 mt-6">
+              <div>
+                <SectionLabel>Appearance</SectionLabel>
+                <h3>Theme</h3>
+              </div>
+            </div>
+            <div className="grid grid-cols-[repeat(3,minmax(0,1fr))] gap-[0.9rem] max-[1320px]:grid-cols-[repeat(2,minmax(0,1fr))] max-[760px]:grid-cols-1">
+              {themeOptions.map((option) => (
+                <OptionCard
+                  key={option.value}
+                  active={settings.theme === option.value}
+                  title={option.title}
+                  description={translate(option.descriptionKey)}
+                  preview={renderAppearanceThemePreview(option.value)}
+                  onClick={async () => onUpdateSettings({ theme: option.value })}
+                />
+              ))}
             </div>
           </section>
 
@@ -1290,7 +1290,7 @@ export function SettingsPanel({
                     disabled={
                       vaultPassphraseBusy ||
                       !currentVaultPassphrase ||
-                      validateNewVaultPassphrase(nextVaultPassphrase) !== null ||
+                      getNewVaultPassphraseMessage(nextVaultPassphrase) !== null ||
                       nextVaultPassphrase !== confirmVaultPassphrase
                     }
                     onClick={() => void handleChangeVaultPassphrase()}
@@ -1380,7 +1380,7 @@ export function SettingsPanel({
                     disabled={
                       accountPasswordBusy ||
                       (passwordState === 'set' && !currentAccountPassword) ||
-                      validateAccountPassword(nextAccountPassword) !== null ||
+                      getAccountPasswordValidationMessage(nextAccountPassword) !== null ||
                       nextAccountPassword !== confirmAccountPassword
                     }
                     onClick={() => void handleChangeAccountPassword()}

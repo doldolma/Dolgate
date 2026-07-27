@@ -18,6 +18,7 @@ import type {
 } from '@shared';
 import { normalizeGroupPath } from '@shared';
 import { t } from './i18n';
+import { logMessage } from "./activity-log-message";
 
 const require = createRequire(import.meta.url);
 

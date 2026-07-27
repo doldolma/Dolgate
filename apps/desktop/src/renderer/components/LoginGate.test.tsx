@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { getServerUrlValidationMessage } from '@shared';
 import {
   LoginGate,
   resolveLoginGateActionLabel,
   resolveLoginGateStatusMessage,
   shouldDisableLoginGatePrimaryAction
 } from './LoginGate';
+import { getServerUrlValidationMessage } from '../../common/shared-messages';
 
 describe('LoginGate', () => {
   it('disables the login action while loading or sync bootstrap is in flight', () => {

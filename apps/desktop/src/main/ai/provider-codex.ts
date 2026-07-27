@@ -23,6 +23,7 @@ import {
 } from "./codex-app-server";
 import { CODEX_AUTO_MODEL, normalizeCodexModel } from "./codex-models";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 // codex 프로세스 env 에서 bearer 토큰을 읽게 할 변수 이름(mcp_servers.<name>.bearer_token_env_var).
 const MCP_TOKEN_ENV = "DOLGATE_MCP_TOKEN";

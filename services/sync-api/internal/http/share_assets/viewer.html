@@ -1,31 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ .T.Lang }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Dolgate Session Share</title>
+    <title>{{ .T.Title }}</title>
     <link rel="stylesheet" href="/share/assets/vendor/xterm.css?v={{ .AssetVersion }}" />
     <link rel="stylesheet" href="/share/assets/viewer.css?v={{ .AssetVersion }}" />
   </head>
-  <body data-share-id="{{ .ShareID }}" data-viewer-token="{{ .ViewerToken }}">
+  <body
+    data-share-id="{{ .ShareID }}"
+    data-viewer-token="{{ .ViewerToken }}"
+    data-viewer-text="{{ .TextJSON }}"
+  >
     <header class="viewer-header">
       <div class="viewer-header__titles">
         <div class="viewer-header__eyebrow">Dolgate</div>
-        <strong id="viewer-title">Shared Session</strong>
+        <strong id="viewer-title">{{ .T.SharedSession }}</strong>
       </div>
-      <div class="viewer-header__status" id="viewer-status">Connecting</div>
+      <div class="viewer-header__status" id="viewer-status">{{ .T.StatusConnecting }}</div>
     </header>
     <main id="viewer-shell" class="viewer-shell" data-chat-collapsed="true">
       <div id="viewer-search-overlay" class="viewer-search-overlay" hidden>
         <input
           id="viewer-search-input"
-          aria-label="Search terminal output"
+          aria-label="{{ .T.SearchAriaLabel }}"
           type="text"
-          placeholder="Search terminal output"
+          placeholder="{{ .T.SearchPlaceholder }}"
         />
-        <button id="viewer-search-prev" type="button" class="viewer-search-overlay__button">Prev</button>
-        <button id="viewer-search-next" type="button" class="viewer-search-overlay__button">Next</button>
-        <button id="viewer-search-close" type="button" class="viewer-search-overlay__button">Close</button>
+        <button id="viewer-search-prev" type="button" class="viewer-search-overlay__button">{{ .T.SearchPrev }}</button>
+        <button id="viewer-search-next" type="button" class="viewer-search-overlay__button">{{ .T.SearchNext }}</button>
+        <button id="viewer-search-close" type="button" class="viewer-search-overlay__button">{{ .T.SearchClose }}</button>
       </div>
       <button
         id="viewer-chat-open"
@@ -34,18 +38,18 @@
         aria-expanded="false"
         aria-controls="viewer-chat-panel"
       >
-        채팅 열기
+        {{ .T.ChatOpen }}
       </button>
       <div id="viewer-terminal-viewport" class="viewer-terminal-viewport">
         <div id="viewer-terminal-stage" class="viewer-terminal-stage">
           <div id="viewer-terminal" class="viewer-terminal"></div>
         </div>
       </div>
-      <aside id="viewer-chat-panel" class="viewer-chat-panel" aria-label="Session chat" data-collapsed="true">
+      <aside id="viewer-chat-panel" class="viewer-chat-panel" aria-label="{{ .T.ChatPanelAriaLabel }}" data-collapsed="true">
         <div class="viewer-chat-panel__header">
           <div class="viewer-chat-panel__title-wrap">
-            <strong>채팅</strong>
-            <span id="viewer-chat-status">연결 중</span>
+            <strong>{{ .T.ChatHeading }}</strong>
+            <span id="viewer-chat-status">{{ .T.ChatStatusConnecting }}</span>
           </div>
           <button
             id="viewer-chat-toggle"
@@ -54,7 +58,7 @@
             aria-expanded="false"
             aria-controls="viewer-chat-body"
           >
-            채팅 열기
+            {{ .T.ChatOpen }}
           </button>
         </div>
         <div id="viewer-chat-body" class="viewer-chat-panel__body" hidden>
@@ -62,27 +66,27 @@
           <form id="viewer-chat-form" class="viewer-chat-form">
             <div class="viewer-chat-form__row">
               <label class="viewer-chat-form__field">
-                <span>닉네임</span>
+                <span>{{ .T.ChatNicknameLabel }}</span>
                 <input
                   id="viewer-chat-nickname"
                   type="text"
                   maxlength="24"
                   autocomplete="nickname"
-                  placeholder="닉네임"
+                  placeholder="{{ .T.ChatNicknamePlaceholder }}"
                 />
               </label>
             </div>
             <div class="viewer-chat-form__row viewer-chat-form__row--composer">
               <label class="viewer-chat-form__field viewer-chat-form__field--message">
-                <span>메시지</span>
+                <span>{{ .T.ChatMessageLabel }}</span>
                 <textarea
                   id="viewer-chat-input"
                   maxlength="300"
                   rows="2"
-                  placeholder="메시지를 입력하세요"
+                  placeholder="{{ .T.ChatMessagePlaceholder }}"
                 ></textarea>
               </label>
-              <button id="viewer-chat-submit" type="submit" class="viewer-chat-form__submit">전송</button>
+              <button id="viewer-chat-submit" type="submit" class="viewer-chat-form__submit">{{ .T.ChatSend }}</button>
             </div>
           </form>
         </div>

@@ -42,7 +42,8 @@ import { terminalThemePresets } from '../../lib/terminal-presets';
 import { getHostAddress, getHostRegion, getHostTypeLabel } from './hostDisplay';
 import type { HostBrowserModel } from './useHostBrowser';
 import { useTranslation } from 'react-i18next';
-import { t } from '../../i18n';
+import { getFormatLocale, t } from '../../i18n';
+import { resolveLogMessage } from '../../lib/activity-log-message';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
@@ -74,7 +75,7 @@ function formatRelativeTime(value: string): string {
     return t('hostDetail.ago.days', { count: diffDay });
   }
   // 7일 넘은 과거는 절대 일시로 표시한다(날짜만이 아니라 시각까지 포함).
-  return new Date(timestamp).toLocaleString(undefined, {
+  return new Date(timestamp).toLocaleString(getFormatLocale(), {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -625,7 +626,7 @@ function EmptyDetail({
       // 부제: 세션 로그는 연결 타입(SSH/AWS SSM 등), 그 외는 로그 메시지(무슨 일인지).
       const detail = metadata?.connectionKind
         ? getConnectionKindLabel(metadata.connectionKind)
-        : log.message;
+        : resolveLogMessage(log, translate);
       items.push({
         id: log.id,
         hostId,
@@ -976,7 +977,7 @@ function ActivityList({
                 kind: getConnectionKindLabel(metadata?.connectionKind),
               })
             : getConnectionKindLabel(metadata?.connectionKind)
-          : log.message;
+          : resolveLogMessage(log, translate);
         // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).
         const secondary = isError ? metadata?.disconnectReason ?? null : null;
         return (

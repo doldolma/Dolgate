@@ -1,7 +1,6 @@
 import { Buffer } from "buffer";
 import { toByteArray } from "base64-js";
 import {
-  assertValidNewVaultPassphrase,
   decideVaultAccess,
   createVaultDek,
   createVaultKdfDescriptor,
@@ -13,7 +12,7 @@ import {
   VAULT_KDF_SALT_BYTE_LENGTH,
   wrapVaultDek,
   wrapVaultDekWithIv,
-  validateNewVaultPassphrase,
+  getNewVaultPassphraseIssue,
 } from "@dolssh/shared-core";
 import vaultLifecycleScenarios from "@dolssh/shared-core/src/vault-lifecycle-scenarios.json";
 import vaultTestVectors from "@dolssh/shared-core/src/vault-test-vectors.json";
@@ -90,15 +89,12 @@ describe("vault crypto", () => {
     });
   });
 
+  // shared-core 는 코드만 돌려준다 — 문구는 각 앱이 자기 카탈로그로 만든다.
   it("requires four characters only when creating a new passphrase", () => {
-    expect(validateNewVaultPassphrase("abc")).toBe(
-      "동기화 암호는 4자 이상이어야 합니다.",
-    );
-    expect(validateNewVaultPassphrase("abcd")).toBeNull();
-    expect(validateNewVaultPassphrase("가나다라")).toBeNull();
-    expect(() => assertValidNewVaultPassphrase("   ")).toThrow(
-      "동기화 암호에 문자를 입력해 주세요.",
-    );
+    expect(getNewVaultPassphraseIssue("abc")).toBe("too-short");
+    expect(getNewVaultPassphraseIssue("abcd")).toBeNull();
+    expect(getNewVaultPassphraseIssue("가나다라")).toBeNull();
+    expect(getNewVaultPassphraseIssue("   ")).toBe("blank");
   });
 
   it("rejects KDF descriptors with an unsupported algorithm", async () => {

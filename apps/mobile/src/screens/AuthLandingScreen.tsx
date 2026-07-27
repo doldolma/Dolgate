@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import Ionicons from "react-native-vector-icons/Ionicons";
@@ -11,6 +12,7 @@ type Props = NativeStackScreenProps<AuthStackParamList, "AuthLanding">;
 
 export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
   const screenPadding = useScreenPadding({
     horizontal: 22,
     bottomOffset: 24,
@@ -49,7 +51,7 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="로그인 서버 설정 열기"
+          accessibilityLabel={translate("authLanding.serverSettingsAria")}
           hitSlop={12}
           onPress={() => navigation.navigate("AuthSettings")}
           style={[
@@ -98,7 +100,7 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
           ]}
         >
           <Text style={styles.primaryText}>
-            {isAuthenticating ? "브라우저 여는 중" : "로그인"}
+            {isAuthenticating ? translate("authLanding.openingBrowser") : translate("authLanding.login")}
           </Text>
         </Pressable>
 
@@ -115,7 +117,7 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              취소
+              {translate("common.cancel")}
             </Text>
           </Pressable>
         ) : null}

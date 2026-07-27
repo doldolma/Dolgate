@@ -55,3 +55,7 @@ NativeModules.GoSshEngineModule = NativeModules.GoSshEngineModule ?? {
   addListener: jest.fn(),
   removeListeners: jest.fn(),
 };
+
+// UI 문구를 단정하는 테스트는 한국어 원문을 기대한다(한국어가 소스 언어). 초기화하지 않으면
+// t() 가 번역 키를 그대로 돌려줘 문구 단정이 전부 깨진다.
+require("./src/i18n").initMobileI18n("ko");

@@ -32,7 +32,7 @@ import {
 import { Badge, Button, EmptyState } from '../ui';
 import { ChevronDown, ChevronLeft, ChevronRight } from '../ui/icons';
 import { useTranslation } from "react-i18next";
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
 
 /** 스캔 전에도 자식 memo 가 깨지지 않도록 빈 목록은 고정 참조를 쓴다. */
 const NO_COMMAND_BLOCKS: readonly ReplayCommandBlock[] = [];
@@ -101,7 +101,7 @@ function formatTimestamp(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return date.toLocaleString("ko-KR");
+  return date.toLocaleString(getFormatLocale());
 }
 
 function getConnectionKindLabel(kind: SessionReplayRecording["connectionKind"]): string {

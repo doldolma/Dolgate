@@ -2,6 +2,41 @@
   const body = document.body;
   const shareId = body.dataset.shareId;
   const viewerToken = body.dataset.viewerToken;
+  // 서버가 요청 언어로 고른 문구 집합. 뷰어의 CSP 는 script-src 'self' 라 인라인 <script>
+  // 로는 넘길 수 없어서 data 속성으로 받는다. 속성이 없거나 깨져도 페이지는 떠야 하므로
+  // 영어 기본값으로 채운다.
+  const TEXT = (function () {
+    const fallback = {
+      lang: "en",
+      timeLocale: "en-US",
+      sharedSession: "Shared Session",
+      statusConnecting: "Connecting",
+      statusReadOnly: "Read only",
+      statusInputEnabled: "Input enabled",
+      statusEnded: "Ended",
+      viewerCountOneFormat: "%s · %d viewer",
+      viewerCountManyFormat: "%s · %d viewers",
+      shareEnded: "The session share has ended.",
+      chatOpen: "Open chat",
+      chatCollapse: "Collapse chat",
+      chatStatusConnecting: "Connecting",
+      chatStatusReady: "Ready",
+      chatStatusEnded: "Ended",
+      chatEmpty: "No messages yet. Send the first one.",
+      chatOwnerBadge: "Owner",
+      chatUnknownSender: "Unknown",
+    };
+    try {
+      const parsed = JSON.parse(body.dataset.viewerText || "{}");
+      return Object.assign(fallback, parsed && typeof parsed === "object" ? parsed : {});
+    } catch (error) {
+      return fallback;
+    }
+  })();
+
+  function formatCount(template, label, count) {
+    return String(template).replace("%s", label).replace("%d", String(count));
+  }
   const titleNode = document.getElementById("viewer-title");
   const statusNode = document.getElementById("viewer-status");
   const shellNode = document.getElementById("viewer-shell");
@@ -28,30 +63,89 @@
   const VIEWPORT_SAFE_GUTTER_PX = 24;
   const VIEWPORT_SAFE_SCALE_FACTOR = 0.98;
   const CHAT_NICKNAME_STORAGE_KEY = "dolssh.sessionShare.chatNickname";
-  const CHAT_EMPTY_MESSAGE = "아직 채팅이 없습니다. 첫 메시지를 보내보세요.";
-  const CHAT_COLLAPSED_LABEL = "채팅 열기";
-  const CHAT_EXPANDED_LABEL = "채팅 접기";
-  const CHAT_OWNER_ROLE_LABEL = "Owner";
-  const KOREAN_CHAT_ADJECTIVES = [
-    "맑은",
-    "반짝이는",
-    "든든한",
-    "재빠른",
-    "부드러운",
-    "고요한",
-    "용감한",
-    "기분좋은",
-  ];
-  const KOREAN_CHAT_NOUNS = [
-    "여우",
-    "고래",
-    "다람쥐",
-    "호랑이",
-    "참새",
-    "고양이",
-    "해달",
-    "별빛",
-  ];
+  // 소유자 앱이 닉네임 뒤에 붙여 보내는 와이어 값. 화면에 보이는 배지 문구
+  // (TEXT.chatOwnerBadge)와 달리 절대 번역하지 않는다 — 아래에서 이 접미사를 정규식으로
+  // 벗겨내므로, 번역하면 소유자 닉네임이 "Synology Owner" 처럼 그대로 남는다.
+  const OWNER_NICKNAME_WIRE_SUFFIX = "Owner";
+  // 익명 닉네임 후보. 8×8=64 조합은 방에 사람이 몇 명만 모여도 겹쳤다 — 16×16=256 으로 늘렸다.
+  const CHAT_NICKNAME_WORDS = {
+    ko: {
+      adjectives: [
+        "맑은",
+        "반짝이는",
+        "든든한",
+        "재빠른",
+        "부드러운",
+        "고요한",
+        "용감한",
+        "기분좋은",
+        "산뜻한",
+        "다정한",
+        "씩씩한",
+        "느긋한",
+        "총명한",
+        "발랄한",
+        "우아한",
+        "야무진",
+      ],
+      nouns: [
+        "여우",
+        "고래",
+        "다람쥐",
+        "호랑이",
+        "참새",
+        "고양이",
+        "해달",
+        "별빛",
+        "사슴",
+        "물범",
+        "학",
+        "부엉이",
+        "살쾡이",
+        "오리",
+        "나비",
+        "반달곰",
+      ],
+    },
+    en: {
+      adjectives: [
+        "Bright",
+        "Sparkling",
+        "Sturdy",
+        "Swift",
+        "Gentle",
+        "Quiet",
+        "Brave",
+        "Cheerful",
+        "Clever",
+        "Curious",
+        "Eager",
+        "Kind",
+        "Lively",
+        "Mellow",
+        "Nimble",
+        "Sunny",
+      ],
+      nouns: [
+        "Fox",
+        "Whale",
+        "Squirrel",
+        "Tiger",
+        "Sparrow",
+        "Cat",
+        "Otter",
+        "Starlight",
+        "Deer",
+        "Seal",
+        "Crane",
+        "Owl",
+        "Lynx",
+        "Duck",
+        "Moth",
+        "Bear",
+      ],
+    },
+  };
   const SEARCH_DECORATIONS = {
     matchBackground: "#243451",
     matchBorder: "#42567f",
@@ -136,9 +230,9 @@
     chatPanelNode.hidden = chatCollapsed;
     chatBodyNode.hidden = chatCollapsed;
     chatOpenNode.hidden = !chatCollapsed;
-    chatOpenNode.textContent = CHAT_COLLAPSED_LABEL;
+    chatOpenNode.textContent = TEXT.chatOpen;
     chatOpenNode.setAttribute("aria-expanded", chatCollapsed ? "false" : "true");
-    chatToggleNode.textContent = CHAT_EXPANDED_LABEL;
+    chatToggleNode.textContent = TEXT.chatCollapse;
     chatToggleNode.setAttribute("aria-expanded", chatCollapsed ? "false" : "true");
 
     if (!chatCollapsed) {
@@ -153,7 +247,7 @@
 
   function setInputEnabled(inputEnabled) {
     term.options.disableStdin = !inputEnabled;
-    setStatus(inputEnabled ? "Input enabled" : "Read only");
+    setStatus(inputEnabled ? TEXT.statusInputEnabled : TEXT.statusReadOnly);
   }
 
   function decodeBase64Bytes(input) {
@@ -292,10 +386,12 @@
     return trimmed;
   }
 
-  function randomKoreanNickname() {
-    const adjective =
-      KOREAN_CHAT_ADJECTIVES[Math.floor(Math.random() * KOREAN_CHAT_ADJECTIVES.length)] || "맑은";
-    const noun = KOREAN_CHAT_NOUNS[Math.floor(Math.random() * KOREAN_CHAT_NOUNS.length)] || "여우";
+  function randomNickname() {
+    const words = CHAT_NICKNAME_WORDS[TEXT.lang] || CHAT_NICKNAME_WORDS.en;
+    const adjectives = words.adjectives;
+    const nouns = words.nouns;
+    const adjective = adjectives[Math.floor(Math.random() * adjectives.length)] || adjectives[0];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)] || nouns[0];
     return `${adjective} ${noun}`;
   }
 
@@ -320,7 +416,7 @@
     if (stored) {
       return stored;
     }
-    const generated = randomKoreanNickname();
+    const generated = randomNickname();
     storeChatNickname(generated);
     return generated;
   }
@@ -330,7 +426,7 @@
     if (Number.isNaN(date.getTime())) {
       return "";
     }
-    return date.toLocaleTimeString("ko-KR", {
+    return date.toLocaleTimeString(TEXT.timeLocale, {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -343,13 +439,15 @@
   function getDisplayChatNickname(nickname, senderRole) {
     const normalized = String(nickname || "").trim();
     if (!normalized) {
-      return senderRole === "owner" ? CHAT_OWNER_ROLE_LABEL : "알 수 없음";
+      return senderRole === "owner" ? TEXT.chatOwnerBadge : TEXT.chatUnknownSender;
     }
     if (senderRole !== "owner") {
       return normalized;
     }
 
-    const withoutOwnerSuffix = normalized.replace(/\s+Owner$/u, "").trim();
+    const withoutOwnerSuffix = normalized
+      .replace(new RegExp(`\\s+${OWNER_NICKNAME_WIRE_SUFFIX}$`, "u"), "")
+      .trim();
     return withoutOwnerSuffix || normalized;
   }
 
@@ -359,7 +457,7 @@
     if (chatMessages.length === 0) {
       const emptyNode = document.createElement("div");
       emptyNode.className = "viewer-chat-empty";
-      emptyNode.textContent = CHAT_EMPTY_MESSAGE;
+      emptyNode.textContent = TEXT.chatEmpty;
       chatMessagesNode.appendChild(emptyNode);
       return;
     }
@@ -382,7 +480,7 @@
       if (senderRole === "owner") {
         const badge = document.createElement("span");
         badge.className = "viewer-chat-message__badge";
-        badge.textContent = CHAT_OWNER_ROLE_LABEL;
+        badge.textContent = TEXT.chatOwnerBadge;
         nameGroup.appendChild(badge);
       }
 
@@ -675,7 +773,7 @@
   initializeAddons();
   chatNicknameNode.value = resolveInitialChatNickname();
   renderChatMessages();
-  setChatStatus("연결 중");
+  setChatStatus(TEXT.chatStatusConnecting);
   setChatEnabled(false);
   setChatCollapsed(true);
   term.attachCustomKeyEventHandler((event) => {
@@ -690,7 +788,7 @@
     return false;
   });
   term.focus();
-  setStatus("Connecting");
+  setStatus(TEXT.statusConnecting);
 
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const socket = new WebSocket(
@@ -841,7 +939,7 @@
 
   socket.addEventListener("open", () => {
     setChatEnabled(true);
-    setChatStatus("대화 가능");
+    setChatStatus(TEXT.chatStatusReady);
     syncChatNicknameFromInput();
   });
 
@@ -850,7 +948,7 @@
 
     if (payload.type === "init") {
       currentTransport = payload.transport === "aws-ssm" ? "aws-ssm" : "ssh";
-      titleNode.textContent = payload.title || payload.hostLabel || "Shared Session";
+      titleNode.textContent = payload.title || payload.hostLabel || TEXT.sharedSession;
       applyViewerLayoutMetadata(payload);
       term.resize(payload.cols || 80, payload.rows || 24);
       setInputEnabled(Boolean(payload.inputEnabled));
@@ -912,8 +1010,10 @@
     }
 
     if (payload.type === "viewer-count") {
-      const suffix = term.options.disableStdin ? "Read only" : "Input enabled";
-      setStatus(`${suffix} · ${payload.viewerCount} viewer${payload.viewerCount === 1 ? "" : "s"}`);
+      const suffix = term.options.disableStdin ? TEXT.statusReadOnly : TEXT.statusInputEnabled;
+      const template =
+        payload.viewerCount === 1 ? TEXT.viewerCountOneFormat : TEXT.viewerCountManyFormat;
+      setStatus(formatCount(template, suffix, payload.viewerCount));
       return;
     }
 
@@ -921,11 +1021,15 @@
       term.options.disableStdin = true;
       clearChatMessages();
       setChatEnabled(false);
-      setChatStatus("종료됨");
-      setStatus("Ended");
-      if (payload.message) {
+      setChatStatus(TEXT.chatStatusEnded);
+      setStatus(TEXT.statusEnded);
+      // 종료 안내는 여러 언어의 시청자에게 한 번에 브로드캐스트되므로 서버가 문장을 정할
+      // 수 없다. 이유 코드를 알면 이 페이지 언어로 만들고, 모르는 코드면 서버 문장을 쓴다.
+      const endedNotice =
+        payload.reason === "ended" ? TEXT.shareEnded : payload.message;
+      if (endedNotice) {
         term.writeln("");
-        term.writeln(payload.message);
+        term.writeln(endedNotice);
       }
     }
   });
@@ -934,8 +1038,8 @@
     term.options.disableStdin = true;
     clearChatMessages();
     setChatEnabled(false);
-    setChatStatus("종료됨");
-    setStatus("Ended");
+    setChatStatus(TEXT.chatStatusEnded);
+    setStatus(TEXT.statusEnded);
     viewportResizeObserver.disconnect();
     window.removeEventListener("resize", scheduleScaleSync);
     window.removeEventListener("keydown", handleWindowKeyDown, true);

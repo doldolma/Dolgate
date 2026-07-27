@@ -7,7 +7,6 @@ import type { AuthState } from "@shared";
 import type { PasskeyCredential } from "@shared";
 import type { VaultMutationResponse } from "@shared";
 import {
-  assertValidNewVaultPassphrase,
   computeVaultDekVerifier,
   createVaultDek,
   createVaultKdfDescriptor,
@@ -38,7 +37,17 @@ import {
   normalizeAuthInvalidErrorMessage,
 } from "./auth-error-message";
 import { desktopArgon2idDerive } from "./vault-crypto";
-import { t } from "./i18n";
+import { getMainLocale, t } from "./i18n";
+import { getNewVaultPassphraseMessage } from "../common/shared-messages";
+
+// shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
+function assertVaultPassphrase(passphrase: string): void {
+  const message = getNewVaultPassphraseMessage(passphrase);
+  if (message) {
+    throw new Error(message);
+  }
+}
+import { logMessage } from "./activity-log-message";
 
 const REFRESH_TOKEN_ACCOUNT = "auth:refresh-token";
 const OFFLINE_SESSION_CACHE_ACCOUNT = "auth:offline-session-cache";
@@ -481,7 +490,11 @@ function readE2EAuthSessionFromEnv(): AuthSession | null {
 interface ActivityLogInput {
   level: "info" | "warn" | "error";
   category: "audit";
+  // logMessage() 결과를 스프레드하면 message 와 함께 번역 키가 실린다 —
+  // 화면은 키로 현재 언어에 맞춰 다시 그린다.
   message: string;
+  messageKey?: string;
+  messageParams?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -723,6 +736,7 @@ export class AuthService {
     loginUrl.searchParams.set("client", this.getDesktopClientId());
     loginUrl.searchParams.set("redirect_uri", redirectUri);
     loginUrl.searchParams.set("state", browserState);
+    loginUrl.searchParams.set("lang", getMainLocale());
 
     // openExternal 은 OS 핸들러를 부르므로 http(s) 만 허용한다. 설정 파일의 serverUrl 은
     // "비어 있지 않은 문자열" 검사만 받아서, file:/smb: 같은 스킴이 들어오면 파인더가 열리거나
@@ -818,7 +832,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: t("auth.signedIn"),
+        ...logMessage("auth.signedIn"),
         metadata: {
           userId: session.user.id,
           email: session.user.email,
@@ -852,7 +866,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: t("auth.signedOut"),
+        ...logMessage("auth.signedOut"),
         metadata: {
           userId: this.state.session.user.id,
           email: this.state.session.user.email,
@@ -914,7 +928,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: t("auth.accountDeleted"),
+        ...logMessage("auth.accountDeleted"),
         metadata: {
           userId: sessionUser.id,
           email: sessionUser.email,
@@ -1014,7 +1028,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: t("auth.passwordSet"),
+      ...logMessage("auth.passwordSet"),
       metadata: { userId: session.user.id, email: session.user.email },
     });
   }
@@ -1031,7 +1045,7 @@ export class AuthService {
       this.log({
         level: "warn",
         category: "audit",
-        message: t("auth.signedOutExpired"),
+        ...logMessage("auth.signedOutExpired"),
         metadata: {
           errorMessage,
         },
@@ -1268,7 +1282,7 @@ export class AuthService {
     }
     const setupState = this.vaultState;
     const operationContext = this.captureVaultOperationContext();
-    assertValidNewVaultPassphrase(passphrase);
+    assertVaultPassphrase(passphrase);
 
     const dek = createVaultDek();
     const kdf = createVaultKdfDescriptor();
@@ -1322,7 +1336,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: t("auth.vaultConfigured"),
+      ...logMessage("auth.vaultConfigured"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1458,7 +1472,7 @@ export class AuthService {
     this.log({
       level: "warn",
       category: "audit",
-      message: t("auth.vaultReset"),
+      ...logMessage("auth.vaultReset"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1473,7 +1487,7 @@ export class AuthService {
     }
     const legacyState = this.vaultState;
     const operationContext = this.captureVaultOperationContext();
-    assertValidNewVaultPassphrase(passphrase);
+    assertVaultPassphrase(passphrase);
     const keyBase64 = this.state.session?.vaultBootstrap.keyBase64;
     if (!keyBase64) {
       throw new Error(t("auth.noVaultKey"));
@@ -1534,7 +1548,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: t("auth.migratedToE2ee"),
+      ...logMessage("auth.migratedToE2ee"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1556,7 +1570,7 @@ export class AuthService {
       throw new Error(t("auth.unlockBeforeChange"));
     }
     const operationContext = this.captureVaultOperationContext();
-    assertValidNewVaultPassphrase(nextPassphrase);
+    assertVaultPassphrase(nextPassphrase);
 
     let unwrappedDek: Uint8Array;
     try {
@@ -2532,6 +2546,7 @@ export class AuthService {
     // file:// 같은 임의 URL 을 shell.openExternal 로 열게 하는 것을 차단한다. 티켓은 fragment 로
     // 실어 서버 로그·브라우저 히스토리에 남지 않게 한다.
     const registerUrl = new URL("/auth/webauthn/register", this.getServerUrl());
+    registerUrl.searchParams.set("lang", getMainLocale());
     registerUrl.hash = "ticket=" + encodeURIComponent(ticket);
     if (registerUrl.protocol !== "https:" && registerUrl.protocol !== "http:") {
       throw new Error(t("auth.registrationLinkInvalid"));

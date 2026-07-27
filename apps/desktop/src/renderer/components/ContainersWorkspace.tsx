@@ -70,7 +70,7 @@ import {
   normalizeLogsRelativeRange,
 } from "../lib/log-range";
 import { Trans, useTranslation } from "react-i18next";
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
 
 interface ContainersWorkspaceProps {
   host: HostRecord;
@@ -233,7 +233,7 @@ function formatCreatedAt(value: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return parsed.toLocaleString("ko-KR");
+  return parsed.toLocaleString(getFormatLocale());
 }
 
 function formatKeyValuePairs(
@@ -283,7 +283,7 @@ export function formatContainerLogTimestamp(value: string): string | null {
   if (Number.isNaN(parsed.getTime())) {
     return null;
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getFormatLocale(), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

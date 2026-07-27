@@ -12,10 +12,11 @@ import (
 // deferring under prerender so prefetch/prerender cannot burn the code early.
 func TestOIDCExchangeBridgeTemplateEscapesAndPosts(t *testing.T) {
 	var buf bytes.Buffer
-	if err := oidcExchangeBridgeTemplate.Execute(&buf, struct {
+	if err := authPageTemplates.ExecuteTemplate(&buf, oidcExchangeBridgeTemplateName, struct {
+		T     pageText
 		Code  string
 		State string
-	}{Code: `abc"><script>alert(1)</script>`, State: "st&ate<x>"}); err != nil {
+	}{T: pageTextKo, Code: `abc"><script>alert(1)</script>`, State: "st&ate<x>"}); err != nil {
 		t.Fatalf("template execute: %v", err)
 	}
 	out := buf.String()

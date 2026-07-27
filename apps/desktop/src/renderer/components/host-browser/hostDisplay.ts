@@ -1,5 +1,5 @@
 import type { HostRecord } from '@shared';
-import { t } from '../../i18n';
+import { getFormatLocale, t } from '../../i18n';
 
 /** 상세 패널용 풀 타입 라벨. */
 export function getHostTypeLabel(host: HostRecord): string {
@@ -72,7 +72,7 @@ export function formatLastUsed(ms: number): string {
   if (diffDay < 7) {
     return t('hostDisplay.days', { count: diffDay });
   }
-  return new Date(ms).toLocaleDateString();
+  return new Date(ms).toLocaleDateString(getFormatLocale());
 }
 
 export function getHostRegion(host: HostRecord): string | null {

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import {
   Modal,
   Pressable,
@@ -20,6 +21,7 @@ export function AwsSsoLoginModal({
   onCancel,
 }: AwsSsoLoginModalProps): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
 
   return (
     <Modal
@@ -46,7 +48,7 @@ export function AwsSsoLoginModal({
           ]}
         >
           <Text style={[styles.title, { color: palette.text }]}>
-            AWS 로그인
+            {translate("awsSso.title")}
           </Text>
           <Pressable
             onPress={onCancel}
@@ -59,7 +61,7 @@ export function AwsSsoLoginModal({
             ]}
           >
             <Text style={[styles.closeButtonText, { color: palette.text }]}>
-              닫기
+              {translate("common.close")}
             </Text>
           </Pressable>
         </View>

@@ -5,6 +5,7 @@ import {
   TransformStream as PolyfillTransformStream,
   WritableStream as PolyfillWritableStream,
 } from "web-streams-polyfill";
+import { t } from "../i18n";
 
 type AwsRuntimeGlobalTarget = {
   ReadableStream?: unknown;
@@ -46,7 +47,7 @@ class BufferTextDecoder {
   constructor(label = "utf-8") {
     const normalized = String(label).toLowerCase();
     if (normalized !== "utf-8" && normalized !== "utf8" && normalized !== "unicode-1-1-utf-8") {
-      throw new RangeError(`BufferTextDecoder 는 utf-8 만 지원합니다: ${label}`);
+      throw new RangeError(t('awsRuntime.decoderUnsupported', { label }));
     }
   }
 
@@ -141,7 +142,7 @@ export function installBlobArrayBufferPolyfill(
     return new Promise((resolve, reject) => {
       const reader = new FileReaderCtor();
       reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = () => reject(reader.error ?? new Error("Blob.arrayBuffer 폴리필 읽기 실패"));
+      reader.onerror = () => reject(reader.error ?? new Error(t('awsRuntime.blobReadFailed')));
       reader.readAsArrayBuffer(this);
     });
   };
@@ -163,6 +164,6 @@ export function assertAwsRuntimeReady(
   }
 
   throw new Error(
-    `모바일 AWS 런타임 초기화가 완료되지 않았습니다. 앱을 다시 실행해 주세요. (${missing.join(", ")})`,
+    t('awsRuntime.notInitialized', { missing: missing.join(", ") }),
   );
 }

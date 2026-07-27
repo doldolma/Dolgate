@@ -80,7 +80,8 @@ import {
   normalizeErrorMessage,
 } from "../store/utils";
 import { useTranslation } from "react-i18next";
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
+import { hostSubtitleLabels } from '../../common/shared-messages';
 
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
@@ -181,7 +182,7 @@ function formatLoadedAt(value: string): string {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return parsed.toLocaleString("ko-KR");
+  return parsed.toLocaleString(getFormatLocale());
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -1913,7 +1914,7 @@ export function AwsEcsWorkspace({
           <div>
             <div className="flex flex-wrap gap-2 text-[0.9rem] text-[var(--text-soft)]">
               <span>{getHostBadgeLabel(host)}</span>
-              <span>{getHostSubtitle(host)}</span>
+              <span>{getHostSubtitle(host, hostSubtitleLabels())}</span>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">

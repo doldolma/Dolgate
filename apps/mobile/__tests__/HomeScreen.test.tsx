@@ -348,8 +348,8 @@ describe("HomeScreen group browsing", () => {
 
     text = collectText(tree!.toJSON());
     expect(text).toContain("NAS Shell");
-    expect(text).toContain("그룹 ");
-    expect(text).toContain("Servers/NAS");
+    // 그룹 요약은 보간 문구 하나로 렌더된다(예전에는 "그룹 " + 경로 두 노드였다).
+    expect(text).toContain("그룹 Servers/NAS");
     expect(() =>
       tree!.root.findByProps({ accessibilityLabel: "NAS 그룹 열기" }),
     ).toThrow();

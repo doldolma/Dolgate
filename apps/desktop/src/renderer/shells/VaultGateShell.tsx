@@ -1,5 +1,4 @@
 import type { AuthState, DesktopWindowState } from "@shared";
-import { validateNewVaultPassphrase } from "@shared";
 import { useState } from "react";
 import { DesktopWindowControls } from "../components/DesktopWindowControls";
 import {
@@ -11,6 +10,7 @@ import {
 import { normalizeErrorMessage } from "../store/utils/errors-and-prompts";
 import { Button, Input } from "../ui";
 import { useTranslation } from "react-i18next";
+import { getNewVaultPassphraseMessage } from '../../common/shared-messages';
 
 interface VaultGateShellProps {
   mode: "setup-required" | "locked" | "migrate" | "error";
@@ -56,7 +56,7 @@ export function VaultGateShell({
     if (!isSetup || !passphrase) {
       return null;
     }
-    const passphraseMessage = validateNewVaultPassphrase(passphrase);
+    const passphraseMessage = getNewVaultPassphraseMessage(passphrase);
     if (passphraseMessage) {
       return passphraseMessage;
     }
@@ -69,7 +69,7 @@ export function VaultGateShell({
     !isSubmitting &&
     !isError &&
     (isSetup
-      ? validateNewVaultPassphrase(passphrase) === null &&
+      ? getNewVaultPassphraseMessage(passphrase) === null &&
         passphrase === confirmPassphrase
       : passphrase.length > 0);
 

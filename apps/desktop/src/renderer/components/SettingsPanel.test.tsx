@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS } from '@shared';
@@ -269,11 +269,23 @@ describe('SettingsPanel', () => {
     const select = screen.getByRole('combobox', { name: '언어' });
     // 기본값은 시스템 언어 따르기.
     expect(select).toHaveValue('system');
-    expect(screen.getByText('OS 언어를 따릅니다. 한국어면 한국어, 그 외에는 영어.')).toBeInTheDocument();
 
     fireEvent.change(select, { target: { value: 'en' } });
 
     expect(onUpdateSettings).toHaveBeenCalledWith({ language: 'en' });
+  });
+
+  // 시스템 따르기는 설명이 필요 없다. 명시 선택했을 때만 이미 열린 창을 다시 열어야 한다는
+  // 안내가 뜬다.
+  it('언어를 직접 고른 경우에만 창 재오픈 안내를 보여 준다', () => {
+    const note = '이미 열려 있는 리플레이·공유 창은 다시 열어야 새 언어로 표시됩니다.';
+
+    renderSettingsPanel();
+    expect(screen.queryByText(note)).not.toBeInTheDocument();
+
+    cleanup();
+    renderSettingsPanel({ settings: { ...settings, language: 'en' } });
+    expect(screen.getByText(note)).toBeInTheDocument();
   });
 
   it('언어 이름은 그 언어로 보여 준다', () => {
@@ -292,9 +304,17 @@ describe('SettingsPanel', () => {
 
     const headings = screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
 
-    expect(headings.indexOf('Theme')).toBeGreaterThan(-1);
-    expect(headings.indexOf('Terminal Theme')).toBeGreaterThan(-1);
-    expect(headings.indexOf('Theme')).toBeLessThan(headings.indexOf('Terminal Theme'));
+    // 언어 → 테마 → 터미널 테마. 테마 두 블록이 붙어 있어야 하고, 언어가 그 사이를 갈라
+    // 놓으면 안 된다.
+    const language = headings.indexOf('언어');
+    const theme = headings.indexOf('Theme');
+    const terminalTheme = headings.indexOf('Terminal Theme');
+
+    expect(language).toBeGreaterThan(-1);
+    expect(theme).toBeGreaterThan(-1);
+    expect(terminalTheme).toBeGreaterThan(-1);
+    expect(language).toBeLessThan(theme);
+    expect(theme).toBeLessThan(terminalTheme);
   });
 
   it('offers a System terminal theme option that updates the global theme mode', () => {

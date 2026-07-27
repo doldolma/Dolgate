@@ -1,14 +1,15 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import {
-  getAwsEc2HostSftpDisabledReason,
   getHostSubtitle,
   type HostRecord,
   isAwsEc2HostRecord,
   isSshHostRecord,
 } from "@dolssh/shared-core";
 import { useMobilePalette } from "../theme";
+import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../i18n/shared-messages';
 
 interface HostActionSheetProps {
   host: HostRecord | null;
@@ -39,23 +40,24 @@ export function HostActionSheet({
   onDelete,
 }: HostActionSheetProps): React.JSX.Element {
   const palette = useMobilePalette();
+  const { t: translate } = useTranslation();
 
   const actions: SheetAction[] = [];
   if (host) {
     const sftpDisabledReason = isAwsEc2HostRecord(host)
-      ? getAwsEc2HostSftpDisabledReason(host)
+      ? getAwsEc2SftpDisabledMessage(host)
       : null;
 
     actions.push({
       key: "connect",
       icon: "flash-outline",
-      label: "연결",
+      label: translate("hostActions.connect"),
       onPress: () => onConnect(host),
     });
     actions.push({
       key: "sftp",
       icon: "folder-open-outline",
-      label: "SFTP 연결",
+      label: translate("hostActions.sftp"),
       disabledReason: sftpDisabledReason,
       onPress: () => onConnectSftp(host),
     });
@@ -63,13 +65,13 @@ export function HostActionSheet({
       actions.push({
         key: "edit",
         icon: "create-outline",
-        label: "수정",
+        label: translate("common.edit"),
         onPress: () => onEdit(host),
       });
       actions.push({
         key: "delete",
         icon: "trash-outline",
-        label: "삭제",
+        label: translate("common.delete"),
         danger: true,
         onPress: () => onDelete(host),
       });
@@ -85,7 +87,7 @@ export function HostActionSheet({
     >
       <Pressable
         style={styles.backdrop}
-        accessibilityLabel="액션 시트 닫기"
+        accessibilityLabel={translate("hostActions.closeAria")}
         onPress={onClose}
       >
         <Pressable
@@ -110,7 +112,7 @@ export function HostActionSheet({
                 numberOfLines={1}
                 style={[styles.subtitle, { color: palette.mutedText }]}
               >
-                {getHostSubtitle(host)}
+                {getHostSubtitle(host, hostSubtitleLabels())}
               </Text>
             </View>
           ) : null}

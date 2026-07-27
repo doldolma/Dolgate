@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import {
   buildAwsSsmKnownHostIdentity,
   getAwsEc2HostSshPort,
-  getAwsSftpDiagnosticMessage,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isSshHostRecord,
@@ -43,6 +42,7 @@ import type {
   SshHostRecord,
 } from "../context";
 import { t } from "../../i18n";
+import { getAwsSftpDiagnosticMessage } from "../../../common/aws-diagnostics";
 
 export interface HostCoordinator {
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;

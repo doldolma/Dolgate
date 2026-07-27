@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  validateAccountPassword,
-  validateNewVaultPassphrase,
 } from "@dolssh/shared-core";
 import { useNavigation } from "@react-navigation/native";
 import type { NavigationProp } from "@react-navigation/native";
@@ -27,16 +25,26 @@ import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
+import { getAccountPasswordValidationMessage, getNewVaultPassphraseMessage } from '../i18n/shared-messages';
+import { useTranslation } from "react-i18next";
+import { APP_LANGUAGE_OPTIONS } from "@dolssh/shared-core";
 
 interface SettingsContentProps {
   mode: "auth" | "full";
   onServerUrlSaved?: () => void;
 }
 
+// 언어 이름은 그 언어로 적는다(자기 언어를 못 읽는 사용자가 없게).
+const LANGUAGE_LABELS: Record<"ko" | "en", string> = {
+  ko: "한국어",
+  en: "English",
+};
+
 function SettingsContent({
   mode,
   onServerUrlSaved,
 }: SettingsContentProps): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding({
     includeSafeTop: mode !== "auth",
@@ -145,10 +153,10 @@ function SettingsContent({
       // 성공하면 auth가 unauthenticated로 바뀌며 로그인 화면으로 전환된다.
     } catch (error) {
       Alert.alert(
-        "회원 탈퇴 실패",
+        translate("settings.deleteAccount.failedTitle"),
         error instanceof Error && error.message.trim()
           ? error.message
-          : "회원 탈퇴에 실패했습니다.",
+          : translate("settings.deleteAccount.failed"),
       );
     } finally {
       setDeletingAccount(false);
@@ -156,14 +164,14 @@ function SettingsContent({
   };
 
   const nextAccountPasswordValidationMessage = nextAccountPasswordDraft
-    ? validateAccountPassword(nextAccountPasswordDraft)
+    ? getAccountPasswordValidationMessage(nextAccountPasswordDraft)
     : null;
   const canChangeAccountPassword =
     !changingAccountPassword &&
     (accountPasswordState === "unset" || accountPasswordState === "set") &&
     (accountPasswordState === "unset" ||
       currentAccountPasswordDraft.length > 0) &&
-    validateAccountPassword(nextAccountPasswordDraft) === null &&
+    getAccountPasswordValidationMessage(nextAccountPasswordDraft) === null &&
     nextAccountPasswordDraft === confirmAccountPasswordDraft;
 
   const resetAccountPasswordForm = (): void => {
@@ -200,17 +208,17 @@ function SettingsContent({
       setAccountPasswordOpen(false);
       Alert.alert(
         isChanging
-          ? "로그인 비밀번호 변경 완료"
-          : "로그인 비밀번호 설정 완료",
+          ? translate("settings.accountPassword.changedTitle")
+          : translate("settings.accountPassword.setTitle"),
       );
     } catch (error) {
       Alert.alert(
         isChanging
-          ? "로그인 비밀번호 변경 실패"
-          : "로그인 비밀번호 설정 실패",
+          ? translate("settings.accountPassword.changeFailedTitle")
+          : translate("settings.accountPassword.setFailedTitle"),
         error instanceof Error && error.message.trim()
           ? error.message
-          : "로그인 비밀번호를 저장하지 못했습니다.",
+          : translate("settings.accountPassword.saveFailed"),
       );
     } finally {
       setChangingAccountPassword(false);
@@ -220,10 +228,10 @@ function SettingsContent({
   const canChangePassphrase =
     !changingPassphrase &&
     currentPassphraseDraft.length > 0 &&
-    validateNewVaultPassphrase(nextPassphraseDraft) === null &&
+    getNewVaultPassphraseMessage(nextPassphraseDraft) === null &&
     nextPassphraseDraft === confirmPassphraseDraft;
   const nextPassphraseValidationMessage = nextPassphraseDraft
-    ? validateNewVaultPassphrase(nextPassphraseDraft)
+    ? getNewVaultPassphraseMessage(nextPassphraseDraft)
     : null;
 
   const handleChangePassphrase = async (): Promise<void> => {
@@ -237,13 +245,13 @@ function SettingsContent({
       setNextPassphraseDraft("");
       setConfirmPassphraseDraft("");
       setChangePassphraseOpen(false);
-      Alert.alert("동기화 암호 변경 완료");
+      Alert.alert(translate("settings.vault.changedTitle"));
     } catch (error) {
       Alert.alert(
-        "동기화 암호 변경 실패",
+        translate("settings.vault.changeFailedTitle"),
         error instanceof Error && error.message.trim()
           ? error.message
-          : "동기화 암호 변경에 실패했습니다.",
+          : translate("settings.vault.changeFailed"),
       );
     } finally {
       setChangingPassphrase(false);
@@ -269,21 +277,21 @@ function SettingsContent({
 
   const confirmDeleteAccount = (): void => {
     Alert.alert(
-      "회원 탈퇴",
-      "서버에 저장된 모든 데이터(동기화된 호스트·시크릿·계정 정보)가 즉시 영구 삭제됩니다. 복구할 수 없으며, 로그인된 다른 기기도 곧 로그아웃됩니다.",
+      translate("settings.deleteAccount.confirmTitle"),
+      translate("settings.deleteAccount.confirmBody"),
       [
-        { text: "취소", style: "cancel" },
+        { text: translate("common.cancel"), style: "cancel" },
         {
-          text: "계속",
+          text: translate("settings.deleteAccount.continue"),
           style: "destructive",
           onPress: () => {
             Alert.alert(
-              "정말 탈퇴할까요?",
-              "이 기기의 로컬 데이터(호스트·자격 증명)도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+              translate("settings.deleteAccount.finalTitle"),
+              translate("settings.deleteAccount.finalBody"),
               [
-                { text: "취소", style: "cancel" },
+                { text: translate("common.cancel"), style: "cancel" },
                 {
-                  text: "영구 삭제",
+                  text: translate("settings.deleteAccount.permanentDelete"),
                   style: "destructive",
                   onPress: () => void handleDeleteAccount(),
                 },
@@ -330,19 +338,19 @@ function SettingsContent({
             Account
           </Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            {auth.session?.user.email ?? "로그인되지 않음"}
+            {auth.session?.user.email ?? translate("settings.account.notSignedIn")}
           </Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            인증 상태: {auth.status}
+            {translate("settings.account.authStatus", { status: auth.status })}
           </Text>
           {showSyncStatus ? (
             <Text style={[styles.body, { color: palette.mutedText }]}>
-              동기화 상태: {syncStatus.status}
+              {translate("settings.account.syncStatus", { status: syncStatus.status })}
             </Text>
           ) : null}
           {auth.status === "offline-authenticated" ? (
             <Text style={[styles.infoText, { color: palette.warning }]}>
-              오프라인 캐시로 사용 중입니다.
+              {translate("settings.account.offlineCache")}
             </Text>
           ) : null}
           {auth.errorMessage ? (
@@ -370,8 +378,8 @@ function SettingsContent({
               >
                 <Text style={[styles.secondaryText, { color: palette.text }]}>
                   {accountPasswordState === "set"
-                    ? "비밀번호 변경"
-                    : "비밀번호 설정"}
+                    ? translate("settings.accountPassword.change")
+                    : translate("settings.accountPassword.set")}
                 </Text>
               </Pressable>
             ) : null}
@@ -386,7 +394,7 @@ function SettingsContent({
               ]}
             >
               <Text style={[styles.secondaryText, { color: palette.text }]}>
-                로그아웃
+                {translate("settings.account.logout")}
               </Text>
             </Pressable>
             {auth.status === "authenticated" ? (
@@ -405,7 +413,7 @@ function SettingsContent({
                 <Text
                   style={[styles.secondaryText, { color: palette.danger }]}
                 >
-                  {deletingAccount ? "탈퇴 중..." : "회원 탈퇴"}
+                  {translate(deletingAccount ? "settings.deleteAccount.deleting" : "settings.deleteAccount.action")}
                 </Text>
               </Pressable>
             ) : null}
@@ -424,10 +432,10 @@ function SettingsContent({
           ]}
         >
           <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            동기화 암호
+            {translate("settings.vault.title")}
           </Text>
           <Text style={[styles.body, { color: palette.mutedText }]}>
-            동기화 암호가 설정되어 있습니다. 잊지 않도록 안전하게 보관해 주세요.
+            {translate("settings.vault.isSet")}
           </Text>
           <Pressable
             onPress={openChangePassphrase}
@@ -441,7 +449,7 @@ function SettingsContent({
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              암호 변경
+              {translate("settings.vault.changePassphrase")}
             </Text>
           </Pressable>
         </View>
@@ -494,7 +502,7 @@ function SettingsContent({
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              저장
+              {translate("settings.server.save")}
             </Text>
           </Pressable>
           <Pressable
@@ -511,9 +519,53 @@ function SettingsContent({
             ]}
           >
             <Text style={[styles.secondaryText, { color: palette.text }]}>
-              기본값 복원
+              {translate("settings.server.restoreDefault")}
             </Text>
           </Pressable>
+        </View>
+      </View>
+
+      {/* 언어 — 기본은 기기 언어를 따르고, 사용자가 직접 고를 수도 있다. */}
+      <View
+        style={[
+          styles.section,
+          {
+            backgroundColor: palette.surface,
+            borderColor: palette.border,
+          },
+        ]}
+      >
+        <Text style={[styles.sectionTitle, { color: palette.text }]}>
+          {translate("settings.language.title")}
+        </Text>
+        <View style={styles.row}>
+          {APP_LANGUAGE_OPTIONS.map((option) => {
+            const active = (settings.language ?? "system") === option;
+            return (
+              <Pressable
+                key={option}
+                onPress={() => void updateSettings({ language: option })}
+                style={[
+                  styles.secondaryButton,
+                  {
+                    backgroundColor: active ? palette.accentSoft : palette.surfaceAlt,
+                    borderColor: active ? palette.accent : palette.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.secondaryText,
+                    { color: palette.text },
+                  ]}
+                >
+                  {option === "system"
+                    ? translate("settings.language.system")
+                    : LANGUAGE_LABELS[option]}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -532,7 +584,7 @@ function SettingsContent({
           </Text>
           {knownHosts.length === 0 ? (
             <Text style={[styles.body, { color: palette.mutedText }]}>
-              아직 신뢰된 호스트 키가 없습니다.
+              {translate("settings.empty.knownHosts")}
             </Text>
           ) : (
             knownHosts.slice(0, 8).map((record) => (
@@ -564,7 +616,7 @@ function SettingsContent({
           </Text>
           {secretMetadata.length === 0 ? (
             <Text style={[styles.body, { color: palette.mutedText }]}>
-              아직 저장된 자격 증명이 없습니다.
+              {translate("settings.empty.credentials")}
             </Text>
           ) : (
             secretMetadata.slice(0, 8).map((record) => (
@@ -628,17 +680,17 @@ function SettingsContent({
               >
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: palette.text }]}>
-                    로그인 비밀번호 {accountPasswordState === "set" ? "변경" : "설정"}
+                    {translate(accountPasswordState === "set" ? "settings.accountPassword.sectionChange" : "settings.accountPassword.sectionSet")}
                   </Text>
                   <Text style={[styles.body, { color: palette.mutedText }]}>
-                    이메일 로그인에 사용하는 비밀번호입니다. 동기화 암호와는 별개입니다.
+                    {translate("settings.accountPassword.description")}
                   </Text>
                 </View>
                 {accountPasswordState === "set" ? (
                   <TextInput
                     value={currentAccountPasswordDraft}
                     onChangeText={setCurrentAccountPasswordDraft}
-                    placeholder="현재 로그인 비밀번호"
+                    placeholder={translate("settings.accountPassword.currentPlaceholder")}
                     placeholderTextColor={palette.mutedText}
                     secureTextEntry
                     autoCapitalize="none"
@@ -658,7 +710,7 @@ function SettingsContent({
                 <TextInput
                   value={nextAccountPasswordDraft}
                   onChangeText={setNextAccountPasswordDraft}
-                  placeholder="새 로그인 비밀번호"
+                  placeholder={translate("settings.accountPassword.newPlaceholder")}
                   placeholderTextColor={palette.mutedText}
                   secureTextEntry
                   autoCapitalize="none"
@@ -677,7 +729,7 @@ function SettingsContent({
                 <TextInput
                   value={confirmAccountPasswordDraft}
                   onChangeText={setConfirmAccountPasswordDraft}
-                  placeholder="새 로그인 비밀번호 확인"
+                  placeholder={translate("settings.accountPassword.confirmPlaceholder")}
                   placeholderTextColor={palette.mutedText}
                   secureTextEntry
                   autoCapitalize="none"
@@ -712,7 +764,7 @@ function SettingsContent({
                     ]}
                   >
                     <Text style={[styles.secondaryText, { color: palette.text }]}>
-                      취소
+                      {translate("common.cancel")}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -729,10 +781,10 @@ function SettingsContent({
                   >
                     <Text style={[styles.secondaryText, styles.primaryButtonText]}>
                       {changingAccountPassword
-                        ? "저장 중..."
+                        ? translate("settings.accountPassword.saving")
                         : accountPasswordState === "set"
-                          ? "비밀번호 변경"
-                          : "비밀번호 설정"}
+                          ? translate("settings.accountPassword.change")
+                          : translate("settings.accountPassword.set")}
                     </Text>
                   </Pressable>
                 </View>
@@ -769,16 +821,16 @@ function SettingsContent({
               >
                 <View style={styles.modalHeader}>
                   <Text style={[styles.modalTitle, { color: palette.text }]}>
-                    동기화 암호 변경
+                    {translate("settings.vault.changeTitle")}
                   </Text>
                   <Text style={[styles.body, { color: palette.mutedText }]}>
-                    현재 암호를 확인한 후 새 암호로 변경합니다.
+                    {translate("settings.vault.changeDescription")}
                   </Text>
                 </View>
                 <TextInput
                   value={currentPassphraseDraft}
                   onChangeText={setCurrentPassphraseDraft}
-                  placeholder="현재 동기화 암호"
+                  placeholder={translate("settings.vault.currentPlaceholder")}
                   placeholderTextColor={palette.mutedText}
                   secureTextEntry
                   autoCapitalize="none"
@@ -795,7 +847,7 @@ function SettingsContent({
                 <TextInput
                   value={nextPassphraseDraft}
                   onChangeText={setNextPassphraseDraft}
-                  placeholder="새 동기화 암호"
+                  placeholder={translate("settings.vault.newPlaceholder")}
                   placeholderTextColor={palette.mutedText}
                   secureTextEntry
                   autoCapitalize="none"
@@ -812,7 +864,7 @@ function SettingsContent({
                 <TextInput
                   value={confirmPassphraseDraft}
                   onChangeText={setConfirmPassphraseDraft}
-                  placeholder="새 동기화 암호 확인"
+                  placeholder={translate("settings.vault.confirmPlaceholder")}
                   placeholderTextColor={palette.mutedText}
                   secureTextEntry
                   autoCapitalize="none"
@@ -845,7 +897,7 @@ function SettingsContent({
                     ]}
                   >
                     <Text style={[styles.secondaryText, { color: palette.text }]}>
-                      취소
+                      {translate("common.cancel")}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -863,7 +915,7 @@ function SettingsContent({
                     <Text
                       style={[styles.secondaryText, styles.primaryButtonText]}
                     >
-                      {changingPassphrase ? "변경 중..." : "암호 변경"}
+                      {translate(changingPassphrase ? "settings.vault.changing" : "settings.vault.changePassphrase")}
                     </Text>
                   </Pressable>
                 </View>

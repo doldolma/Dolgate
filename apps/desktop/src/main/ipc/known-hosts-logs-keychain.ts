@@ -12,6 +12,7 @@ import { BrowserWindow, clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput {
   const privateKeyPem =
@@ -82,7 +83,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         ctx.activityLogs.append(
           "error",
           "session",
-          t('knownHostsIpc.connectFailed'),
+          logMessage('knownHostsIpc.connectFailed'),
           {
             hostId: input.hostId,
             hostLabel: host?.label ?? null,
@@ -118,7 +119,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.activityLogs.append(
         "info",
         "audit",
-        t('knownHostsIpc.hostKeyTrusted'),
+        logMessage('knownHostsIpc.hostKeyTrusted'),
         {
           host: input.host,
           port: input.port,
@@ -134,7 +135,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ipcChannels.knownHosts.replace,
     async (_event, input: KnownHostTrustInput) => {
       const record = ctx.knownHosts.trust(input);
-      ctx.activityLogs.append("warn", "audit", t('knownHostsIpc.hostKeyReplaced'), {
+      ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.hostKeyReplaced'), {
         host: input.host,
         port: input.port,
         fingerprintSha256: input.fingerprintSha256,
@@ -150,7 +151,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ctx.activityLogs.append(
       "info",
       "audit",
-      t('knownHostsIpc.hostKeyRemoved'),
+      logMessage('knownHostsIpc.hostKeyRemoved'),
       {
         knownHostId: id,
       },
@@ -241,7 +242,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.secretMetadata.remove(secretRef);
       ctx.hosts.clearSecretRef(secretRef);
       ctx.syncOutbox.upsertDeletion("secrets", secretRef);
-      ctx.activityLogs.append("warn", "audit", t('knownHostsIpc.secretRemoved'), {
+      ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.secretRemoved'), {
         secretRef,
       });
       ctx.queueSync();
@@ -332,7 +333,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           : undefined,
       });
 
-      ctx.activityLogs.append("info", "audit", t('knownHostsIpc.sharedSecretUpdated'), {
+      ctx.activityLogs.append("info", "audit", logMessage('knownHostsIpc.sharedSecretUpdated'), {
         secretRef: input.secretRef,
       });
       ctx.queueSync();
@@ -367,7 +368,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.activityLogs.append(
         "info",
         "audit",
-        t('knownHostsIpc.hostSecretCreated'),
+        logMessage('knownHostsIpc.hostSecretCreated'),
         {
           hostId: sshHost.id,
           sourceSecretRef: input.sourceSecretRef,

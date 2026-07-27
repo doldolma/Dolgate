@@ -15,6 +15,7 @@ import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { runWithIpcSessionOwner } from "./session-owner";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 // 로컬 agent 엔드포인트 해석은 agent-endpoint 모듈로 이전(포워딩+인증 공용 + 셸 환경 해석).
 // 기존 import 경로(테스트 포함) 호환을 위해 재노출한다.
@@ -271,7 +272,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               ctx.activityLogs.append(
                 "warn",
                 "session",
-                t('sshIpc.fallbackNotice'),
+                logMessage('sshIpc.fallbackNotice'),
                 { hostId: host.id, host: host.label, reason },
               );
             }

@@ -31,7 +31,6 @@ import type {
   VaultKdfDescriptor,
 } from '@dolssh/shared-core';
 import {
-  assertValidNewVaultPassphrase,
   buildAwsSsmKnownHostIdentity,
   computeVaultDekVerifier,
   createVaultDek,
@@ -41,7 +40,6 @@ import {
   formatSyncRevisionEtag,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
-  getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
   isSshHostRecord,
@@ -89,7 +87,7 @@ import {
   postVaultReset,
   postVaultSetup,
   putVaultRewrap,
-  VAULT_MUTATION_TIMEOUT_MESSAGE,
+  getVaultMutationTimeoutMessage,
   VAULT_MUTATION_TIMEOUT_MS,
   refreshAuthSession,
   saveStoredVaultDek,
@@ -136,17 +134,30 @@ import {
   type EngineSftpConnection,
   type EngineShell,
 } from '../engine';
+import { getAwsEc2SftpDisabledMessage, getNewVaultPassphraseMessage } from '../i18n/shared-messages';
+import { t } from '../i18n';
+
+// shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
+function assertVaultPassphrase(passphrase: string): void {
+  const message = getNewVaultPassphraseMessage(passphrase);
+  if (message) {
+    throw new Error(message);
+  }
+}
 
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
 const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
-const STARTUP_REFRESH_TIMEOUT_MESSAGE =
-  '서버 응답이 지연되고 있습니다. 다시 시도해 주세요.';
+// 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
+function getStartupRefreshTimeoutMessage(): string {
+  return t('store.serverSlow');
+}
 const OFFLINE_RECOVERY_RETRY_DELAYS_MS = [2_000, 5_000, 5_000, 5_000] as const;
-const SECURE_STATE_LOADING_MESSAGE =
-  '저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.';
+function getSecureStateLoadingMessage(): string {
+  return t('store.restoringSecrets');
+}
 
 function isStartupTimingLoggingEnabled(): boolean {
   return typeof __DEV__ !== 'undefined' && __DEV__;
@@ -305,12 +316,12 @@ function buildEngineCredential(
 
 function getMissingCredentialMessage(host: SshHostRecord): string {
   if (host.authType === 'password') {
-    return '비밀번호가 필요합니다.';
+    return t('store.passwordRequired');
   }
   if (host.authType === 'certificate') {
-    return '개인키 PEM과 SSH 인증서가 필요합니다.';
+    return t('store.keyAndCertRequired');
   }
-  return '개인키 PEM이 필요합니다.';
+  return t('store.keyRequired');
 }
 
 // 자격증명 사전 검증. 엔진이 네이티브로 파싱하므로 비동기이고, 반환값은
@@ -326,14 +337,14 @@ async function validateEngineCredential(
       security.passphrase,
     );
     if (problem) {
-      return '개인키 형식 또는 passphrase를 확인해 주세요.';
+      return t('store.keyFormatOrPassphrase');
     }
   }
 
   if (security.type === 'certificate') {
     const problem = await engine.validateCertificate(security.certificate);
     if (problem) {
-      return 'SSH 인증서 형식을 확인해 주세요.';
+      return t('store.certFormat');
     }
   }
 
@@ -713,7 +724,7 @@ function requireLegacyVaultKey(session: AuthSession): string {
   const keyBase64 = session.vaultBootstrap.keyBase64;
   if (!keyBase64) {
     throw new Error(
-      '볼트 키가 없습니다. 앱을 최신 버전으로 업데이트해 주세요.',
+      t('store.noVaultKey'),
     );
   }
   return keyBase64;
@@ -867,7 +878,7 @@ async function resolveVaultStateForSession(
       errorMessage:
         error instanceof Error && error.message.trim()
           ? error.message
-          : '동기화 볼트 정보를 처리할 수 없습니다.',
+          : t('store.vaultDataUnusable'),
     };
   }
 
@@ -958,7 +969,7 @@ async function resolveVaultStateForSession(
       errorMessage:
         error instanceof Error && error.message.trim()
           ? error.message
-          : '동기화 볼트 상태를 복원할 수 없습니다.',
+          : t('store.vaultStateRestoreFailed'),
     };
   }
 }
@@ -1259,7 +1270,7 @@ function remoteBasename(path: string): string {
 function parseUnixMode(value: string): number {
   const trimmed = value.trim();
   if (!/^[0-7]{3,4}$/.test(trimmed)) {
-    throw new Error('권한은 644 또는 0755 같은 8진수로 입력해 주세요.');
+    throw new Error(t('store.permissionOctal'));
   }
   return Number.parseInt(trimmed, 8);
 }
@@ -1570,11 +1581,14 @@ function isAuthExpiredError(error: unknown): boolean {
   }
 
   const message = getUnknownErrorMessage(error).toLowerCase();
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전 메시지와
+  // 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
   return (
     message.includes('token has invalid claims') ||
     message.includes('invalid claims') ||
     (message.includes('jwt') && message.includes('expired')) ||
-    message.includes('세션이 만료')
+    message.includes('세션이 만료') ||
+    message.includes('session has expired')
   );
 }
 
@@ -1798,7 +1812,7 @@ export const useMobileAppStore = create<MobileAppState>()(
       };
 
       const expireAuthSession = async (
-        errorMessage = '세션이 만료되어 다시 로그인해야 합니다.',
+        errorMessage = t('store.sessionExpiredSignIn'),
       ) => {
         clearOfflineRecoveryLoop();
         invalidateSyncRuntime();
@@ -1814,7 +1828,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           syncStatus: {
             ...createDefaultSyncStatus(),
             status: 'error',
-            errorMessage: '세션이 만료되었습니다.',
+            errorMessage: t('store.sessionExpired'),
           },
           ...createEmptyProtectedState(),
           authGateResolved: true,
@@ -1913,7 +1927,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         try {
           const received = await refreshAuthSession(serverUrl, session, {
             timeoutMs: STARTUP_REFRESH_TIMEOUT_MS,
-            timeoutMessage: STARTUP_REFRESH_TIMEOUT_MESSAGE,
+            timeoutMessage: getStartupRefreshTimeoutMessage(),
           });
           if (!isSessionRecoveryContextCurrent(session, serverUrl)) {
             return;
@@ -1947,7 +1961,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 session,
                 offline: buildOfflineState(
                   session,
-                  '네트워크 없이 저장된 세션을 복구했습니다.',
+                  t('store.restoredOffline'),
                 ),
                 errorMessage: null,
               },
@@ -1958,7 +1972,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : '네트워크에 연결할 수 없습니다.',
+                    : t('store.networkUnavailable'),
               },
             });
             scheduleOfflineRecoveryRetry(session, serverUrl, {
@@ -1978,7 +1992,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : '로그인 세션을 복구하지 못했습니다.',
+                  : t('store.sessionRestoreFailed'),
             },
             syncStatus: createDefaultSyncStatus(),
             ...createEmptyProtectedState(),
@@ -2076,12 +2090,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             set({
               auth: {
                 ...createUnauthenticatedState(),
-                errorMessage: '세션이 만료되어 다시 로그인해야 합니다.',
+                errorMessage: t('store.sessionExpiredSignIn'),
               },
               syncStatus: {
                 ...createDefaultSyncStatus(),
                 status: 'error',
-                errorMessage: '세션이 만료되었습니다.',
+                errorMessage: t('store.sessionExpired'),
               },
               ...createEmptyProtectedState(),
               authGateResolved: true,
@@ -2098,7 +2112,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : '네트워크에 연결할 수 없습니다.',
+                  : t('store.networkUnavailable'),
             },
           }));
           return 'retry';
@@ -2209,7 +2223,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         if (vault.status === 'legacy') {
           if (vault.migrationRequired) {
             throw new Error(
-              '계속 동기화하려면 먼저 동기화 암호를 설정해야 합니다.',
+              t('store.vaultSetupRequired'),
             );
           }
           return requireLegacyVaultKey(session);
@@ -2217,7 +2231,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         throw new Error(
           vault.status === 'error'
             ? vault.errorMessage
-            : '동기화 잠금 해제가 필요합니다.',
+            : t('store.vaultUnlockRequired'),
         );
       };
 
@@ -2379,7 +2393,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             status: 'error',
             errorMessage:
               error.message ||
-              '동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.',
+              t('store.vaultResetElsewhere'),
           },
         }));
         return true;
@@ -2432,7 +2446,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : 'known host 동기화에 실패했습니다.',
+                  : t('store.knownHostSyncFailed'),
             },
           }));
         }
@@ -2543,7 +2557,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const prompted = await promptForCredentials(
             host,
             promptBase,
-            '비밀번호를 입력해 주세요.',
+            t('store.enterPassword'),
           );
           if (!prompted) {
             return null;
@@ -2570,7 +2584,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const prompted = await promptForCredentials(
             host,
             promptBase,
-            '개인키 PEM을 입력하거나 파일에서 가져와 주세요.',
+            t('store.enterKey'),
           );
           if (!prompted) {
             return null;
@@ -2600,7 +2614,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const prompted = await promptForCredentials(
             host,
             promptBase,
-            '개인키 PEM과 SSH 인증서를 입력하거나 파일에서 가져와 주세요.',
+            t('store.enterKeyAndCert'),
           );
           if (!prompted) {
             return null;
@@ -2767,7 +2781,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSftpSessionState(
             sessionId,
             'error',
-            'SFTP 연결을 찾지 못했습니다.',
+            t('store.sftpNotFound'),
           );
           return;
         }
@@ -2797,7 +2811,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             'error',
             error instanceof Error
               ? error.message
-              : 'SFTP 폴더 목록을 불러오지 못했습니다.',
+              : t('store.sftpListFailed'),
           );
         }
       };
@@ -2828,7 +2842,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSftpSessionState(
               sftpSessionRecord.id,
               'error',
-              'SFTP는 모바일 v1에서 비밀번호, 개인키, 인증서 인증만 지원합니다.',
+              t('store.sftpAuthLimited'),
             );
             return;
           }
@@ -2838,7 +2852,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSftpSessionState(
               sftpSessionRecord.id,
               'closed',
-              'SFTP 연결이 취소되었습니다.',
+              t('store.sftpCancelled'),
             );
             return;
           }
@@ -2931,7 +2945,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             'error',
             error instanceof Error
               ? error.message
-              : 'SFTP 연결에 실패했습니다.',
+              : t('store.sftpConnectFailed'),
           );
         } finally {
           pendingSftpConnections.delete(sftpSessionRecord.id);
@@ -2948,7 +2962,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return;
         }
 
-        const disabledReason = getAwsEc2HostSftpDisabledReason(host);
+        const disabledReason = getAwsEc2SftpDisabledMessage(host);
         if (disabledReason) {
           markSftpSessionState(sftpSessionRecord.id, 'error', disabledReason);
           return;
@@ -2980,7 +2994,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSftpSessionState(
             sftpSessionRecord.id,
             'error',
-            '이 서버는 AWS SFTP를 지원하지 않습니다.',
+            t('store.awsSftpUnsupported'),
           );
           return;
         }
@@ -2991,7 +3005,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             sftpSessionRecord.id,
             'error',
             host.awsSshMetadataError ||
-              'AWS SFTP에 사용할 SSH 사용자명이 필요합니다.',
+              t('store.awsSftpUsernameRequired'),
           );
           return;
         }
@@ -3000,7 +3014,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSftpSessionState(
             sftpSessionRecord.id,
             'error',
-            'AWS SFTP에 사용할 Availability Zone 정보가 필요합니다.',
+            t('store.awsSftpAzRequired'),
           );
           return;
         }
@@ -3124,7 +3138,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 markSftpSessionState(
                   sftpSessionRecord.id,
                   'closed',
-                  'SFTP 연결이 취소되었습니다.',
+                  t('store.sftpCancelled'),
                 );
                 return;
               }
@@ -3158,7 +3172,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         markSftpSessionState(
           sftpSessionRecord.id,
           'error',
-          'AWS SFTP 호스트 키를 확인하지 못했습니다.',
+          t('store.awsSftpHostKeyFailed'),
         );
       };
 
@@ -3189,7 +3203,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         markSessionState(
           sessionRecord.id,
           'error',
-          '이 호스트 종류는 모바일에서 아직 지원하지 않습니다.',
+          t('store.hostKindUnsupported'),
         );
         pendingSessionConnections.delete(sessionRecord.id);
       };
@@ -3207,7 +3221,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               sessionRecord.id,
               'error',
-              '이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.',
+              t('store.authKindUnsupported'),
             );
             return;
           }
@@ -3217,7 +3231,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               sessionRecord.id,
               'closed',
-              '연결이 취소되었습니다.',
+              t('store.connectCancelled'),
             );
             return;
           }
@@ -3329,7 +3343,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSessionState(
             sessionRecord.id,
             'error',
-            error instanceof Error ? error.message : 'SSH 연결에 실패했습니다.',
+            error instanceof Error ? error.message : t('store.sshConnectFailed'),
           );
         } finally {
           pendingSessionConnections.delete(sessionRecord.id);
@@ -3378,7 +3392,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               sessionRecord.id,
               'error',
-              '이 서버는 AWS SSM 세션을 지원하지 않습니다.',
+              t('store.ssmUnsupported'),
             );
             return;
           }
@@ -3551,7 +3565,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               markSessionState(
                 sessionRecord.id,
                 'error',
-                message.message || 'AWS SSM 연결에 실패했습니다.',
+                message.message || t('store.ssmConnectFailed'),
               );
               return;
             }
@@ -3577,7 +3591,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 markSessionState(
                   sessionRecord.id,
                   'error',
-                  message.message || 'AWS SSM 세션이 시작 직후 종료되었습니다.',
+                  message.message || t('store.ssmClosedImmediately'),
                 );
                 return;
               }
@@ -3621,7 +3635,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               sessionRecord.id,
               'error',
-              'AWS SSM WebSocket 연결에 실패했습니다.',
+              t('store.ssmWebsocketFailed'),
             );
           };
 
@@ -3646,7 +3660,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 markSessionState(
                   sessionRecord.id,
                   'error',
-                  'AWS SSM 세션이 예기치 않게 종료되었습니다.',
+                  t('store.ssmClosedUnexpectedly'),
                 );
                 return;
               }
@@ -3664,7 +3678,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             'error',
             error instanceof Error
               ? error.message
-              : 'AWS SSM 연결에 실패했습니다.',
+              : t('store.ssmConnectFailed'),
           );
         } finally {
           pendingSessionConnections.delete(sessionRecord.id);
@@ -3897,7 +3911,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                     ...readySyncStatus,
                     status: 'error',
                     errorMessage:
-                      '동기화 데이터를 복호화할 수 없습니다. 데이터가 손상되었을 수 있습니다.',
+                      t('store.syncDecryptFailed'),
                   },
                 });
                 return;
@@ -3913,7 +3927,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   ...readySyncStatus,
                   status: 'error',
                   errorMessage:
-                    '동기화 암호가 초기화되었습니다. 새 동기화 암호로 잠금을 해제해 주세요.',
+                    t('store.vaultResetElsewhere'),
                 },
               });
               return;
@@ -4034,7 +4048,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   session: currentSession,
                   offline: buildOfflineState(
                     currentSession,
-                    '네트워크 없이 캐시된 데이터를 사용하고 있습니다.',
+                    t('store.usingCache'),
                   ),
                   errorMessage: null,
                 },
@@ -4045,7 +4059,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   errorMessage:
                     error instanceof Error
                       ? error.message
-                      : '네트워크에 연결할 수 없습니다.',
+                      : t('store.networkUnavailable'),
                 },
               });
               scheduleOfflineRecoveryRetry(
@@ -4064,12 +4078,12 @@ export const useMobileAppStore = create<MobileAppState>()(
               set({
                 auth: {
                   ...createUnauthenticatedState(),
-                  errorMessage: '세션이 만료되어 다시 로그인해야 합니다.',
+                  errorMessage: t('store.sessionExpiredSignIn'),
                 },
                 syncStatus: {
                   ...createDefaultSyncStatus(),
                   status: 'error',
-                  errorMessage: '세션이 만료되었습니다.',
+                  errorMessage: t('store.sessionExpired'),
                 },
                 ...createEmptyProtectedState(),
               });
@@ -4100,7 +4114,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         const auth = get().auth;
         const session = auth.session;
         if (auth.status !== 'authenticated' || !session) {
-          throw new Error('온라인 로그인 상태에서만 사용할 수 있습니다.');
+          throw new Error(t('store.onlineOnly'));
         }
         return {
           userId: session.user.id,
@@ -4120,7 +4134,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           normalizeServerUrl(get().settings.serverUrl) !== context.serverUrl
         ) {
           throw new Error(
-            '로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.',
+            t('store.vaultCancelledAccountChanged'),
           );
         }
       };
@@ -4137,7 +4151,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         const auth = get().auth;
         const session = auth.session;
         if (auth.status !== 'authenticated' || !session) {
-          throw new Error('온라인 로그인 상태에서만 사용할 수 있습니다.');
+          throw new Error(t('store.onlineOnly'));
         }
 
         try {
@@ -4165,7 +4179,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               session,
               {
                 timeoutMs: VAULT_MUTATION_TIMEOUT_MS,
-                timeoutMessage: VAULT_MUTATION_TIMEOUT_MESSAGE,
+                timeoutMessage: getVaultMutationTimeoutMessage(),
               },
             );
             if (operationContext) {
@@ -4180,7 +4194,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               assertVaultOperationContext(operationContext);
             }
             throw new Error(
-              '세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.',
+              t('store.sessionExpiredRetry'),
             );
           }
           set({
@@ -4414,7 +4428,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : '로그인 교환에 실패했습니다.',
+                    : t('store.loginExchangeFailed'),
               },
               pendingBrowserLoginState: null,
             });
@@ -4456,7 +4470,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : '브라우저 로그인을 시작하지 못했습니다.',
+                    : t('store.browserLoginFailed'),
               },
             });
           }
@@ -4488,7 +4502,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : '브라우저를 다시 열지 못했습니다.',
+                    : t('store.reopenBrowserFailed'),
               },
             }));
           }
@@ -4515,7 +4529,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         deleteAccount: async () => {
           if (get().auth.status !== 'authenticated' || !get().auth.session) {
             throw new Error(
-              '온라인 로그인 상태에서만 회원 탈퇴할 수 있습니다.',
+              t('store.deleteAccountOnlineOnly'),
             );
           }
 
@@ -4542,7 +4556,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const session = auth.session;
           if (auth.status !== 'authenticated' || !session) {
             throw new Error(
-              '온라인 로그인 상태에서만 비밀번호를 설정할 수 있습니다.',
+              t('store.passwordOnlineOnly'),
             );
           }
           const userID = session.user.id;
@@ -4551,7 +4565,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           await callWithFreshAccessToken(accessToken => {
             const currentSession = get().auth.session;
             if (!currentSession || currentSession.user.id !== userID) {
-              throw new Error('로그인 계정이 변경되어 작업을 취소했습니다.');
+              throw new Error(t('store.cancelledAccountChanged'));
             }
             return changeRemoteAccountPassword(
               serverUrl,
@@ -4571,7 +4585,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             normalizeServerUrl(get().settings.serverUrl) !== serverUrl
           ) {
             throw new Error(
-              '로그인 계정 또는 서버가 변경되어 작업을 취소했습니다.',
+              t('store.cancelledAccountOrServerChanged'),
             );
           }
           const updatedSession: AuthSession = {
@@ -4588,12 +4602,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         setupVault: async (passphrase: string) => {
           const setupState = get().vault;
           if (setupState.status !== 'setup-required') {
-            throw new Error('이미 동기화 암호가 설정되어 있습니다.');
+            throw new Error(t('store.vaultAlreadySet'));
           }
-          assertValidNewVaultPassphrase(passphrase);
+          assertVaultPassphrase(passphrase);
           const ownerSession = get().auth.session;
           if (!ownerSession) {
-            throw new Error('로그인이 필요합니다.');
+            throw new Error(t('store.signInRequired'));
           }
           const operationContext = captureVaultOperationContext();
           const cacheOwner = createVaultCacheOwner(
@@ -4665,7 +4679,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...state.auth,
                 errorMessage:
-                  '동기화 키를 보안 저장소에 저장하지 못했습니다. 앱을 다시 열면 동기화 암호를 다시 입력해야 할 수 있습니다.',
+                  t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -4719,7 +4733,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   errorMessage:
                     error instanceof Error
                       ? error.message
-                      : '로컬 데이터 재업로드에 실패했습니다. 잠시 후 다시 시도합니다.',
+                      : t('store.reuploadFailed'),
                 },
               }));
               ensureSyncPollingLifecycle();
@@ -4762,7 +4776,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           const ownerSession = get().auth.session;
           if (!ownerSession) {
-            throw new Error('로그인이 필요합니다.');
+            throw new Error(t('store.signInRequired'));
           }
           const operationContext = captureVaultOperationContext();
           const cacheOwner = createVaultCacheOwner(
@@ -4779,7 +4793,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
             dek = unwrapVaultDek(vault.wrappedDekBase64, kek);
           } catch {
-            throw new Error('동기화 암호가 올바르지 않습니다.');
+            throw new Error(t('store.vaultPassphraseWrong'));
           }
           assertVaultOperationContext(operationContext);
 
@@ -4791,7 +4805,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           ) {
             await refreshSessionAndResolveVault().catch(() => undefined);
             throw new Error(
-              '동기화 키 검증에 실패했습니다. 최신 볼트 정보를 다시 불러왔습니다.',
+              t('store.vaultKeyVerifyFailed'),
             );
           }
           // 볼트 세대의 경계 — 이전 세대의 ETag 로 304 를 받아 새 스냅샷을 놓치지 않게
@@ -4822,7 +4836,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...state.auth,
                 errorMessage:
-                  '동기화 키를 보안 저장소에 저장하지 못했습니다. 앱을 다시 열면 동기화 암호를 다시 입력해야 할 수 있습니다.',
+                  t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -4854,12 +4868,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         migrateVault: async (passphrase: string) => {
           const vault = get().vault;
           if (vault.status !== 'legacy') {
-            throw new Error('전환할 수 있는 상태가 아닙니다.');
+            throw new Error(t('store.migrationNotAvailable'));
           }
-          assertValidNewVaultPassphrase(passphrase);
+          assertVaultPassphrase(passphrase);
           const session = get().auth.session;
           if (get().auth.status !== 'authenticated' || !session) {
-            throw new Error('온라인 로그인 상태에서만 전환할 수 있습니다.');
+            throw new Error(t('store.migrationOnlineOnly'));
           }
           const operationContext = captureVaultOperationContext();
 
@@ -4897,7 +4911,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               // 이어진다.
               await refreshSessionAndResolveVault();
               throw new Error(
-                '다른 기기에서 이미 동기화 암호를 설정했습니다. 잠시 후 자동으로 이어집니다.',
+                t('store.vaultSetElsewhere'),
               );
             }
             throw error;
@@ -4933,7 +4947,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...state.auth,
                 errorMessage:
-                  '동기화 키를 보안 저장소에 저장하지 못했습니다. 앱을 다시 열면 동기화 암호를 다시 입력해야 할 수 있습니다.',
+                  t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -5035,12 +5049,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         ) => {
           const vault = get().vault;
           if (!hasCoherentVaultDescriptor(vault)) {
-            throw new Error('동기화 잠금을 해제한 뒤 변경할 수 있습니다.');
+            throw new Error(t('store.unlockBeforeChange'));
           }
-          assertValidNewVaultPassphrase(nextPassphrase);
+          assertVaultPassphrase(nextPassphrase);
           const ownerSession = get().auth.session;
           if (!ownerSession) {
-            throw new Error('로그인이 필요합니다.');
+            throw new Error(t('store.signInRequired'));
           }
           const operationContext = captureVaultOperationContext();
           const cacheOwner = createVaultCacheOwner(
@@ -5058,12 +5072,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             );
             unwrappedDek = unwrapVaultDek(vault.wrappedDekBase64, currentKek);
           } catch {
-            throw new Error('현재 동기화 암호가 올바르지 않습니다.');
+            throw new Error(t('store.currentPassphraseWrong'));
           }
           assertVaultOperationContext(operationContext);
           if (fromByteArray(unwrappedDek) !== vault.dekBase64) {
             throw new Error(
-              '로컬 볼트 캐시와 서버 키가 일치하지 않습니다. 세션을 새로고침한 뒤 다시 시도해 주세요.',
+              t('store.vaultCacheMismatch'),
             );
           }
 
@@ -5133,7 +5147,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...state.auth,
                 errorMessage:
-                  '동기화 키를 보안 저장소에 저장하지 못했습니다. 앱을 다시 열면 동기화 암호를 다시 입력해야 할 수 있습니다.',
+                  t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -5191,7 +5205,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 ...createUnauthenticatedState(),
                 errorMessage: get().auth.session
-                  ? '서버 주소가 변경되어 다시 로그인해 주세요.'
+                  ? t('store.serverChangedSignIn')
                   : null,
               },
               vault: { status: 'none' },
@@ -5224,7 +5238,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         // 올린다(다른 기기와 공유 — 볼트 키로 암호화되므로 E2EE 계정은 서버가 읽지 못한다).
         saveHost: async (input: MobileHostDraftInput) => {
           if (!get().secureStateReady) {
-            throw new Error(SECURE_STATE_LOADING_MESSAGE);
+            throw new Error(getSecureStateLoadingMessage());
           }
 
           const now = new Date().toISOString();
@@ -5232,7 +5246,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ? get().hosts.find(host => host.id === input.hostId)
             : undefined;
           if (input.hostId && (!existing || !isSshHostRecord(existing))) {
-            throw new Error('수정할 호스트를 찾을 수 없습니다.');
+            throw new Error(t('store.hostToEditNotFound'));
           }
           const existingSsh =
             existing && isSshHostRecord(existing) ? existing : undefined;
@@ -5251,7 +5265,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             (!existingSsh?.secretRef || existingSsh.authType !== input.authType)
           ) {
             throw new Error(
-              '인증 방식을 변경할 때는 새 자격 증명을 입력하거나 연결을 해제해야 합니다.',
+              t('store.authChangeNeedsCredential'),
             );
           }
           if (
@@ -5260,7 +5274,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             !hasReplacementCredential
           ) {
             throw new Error(
-              '교체할 자격 증명을 입력하거나 연결 해제를 선택해 주세요.',
+              t('store.replaceOrUnlink'),
             );
           }
           const secretRef =
@@ -5302,7 +5316,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             await callWithFreshAccessToken(async accessToken => {
               const currentSession = get().auth.session;
               if (!currentSession) {
-                throw new Error('온라인 로그인 상태에서만 사용할 수 있습니다.');
+                throw new Error(t('store.onlineOnly'));
               }
               const pushedRevision = await postSyncSnapshot(
                 get().settings.serverUrl,
@@ -5351,7 +5365,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             await callWithFreshAccessToken(async accessToken => {
               const currentSession = get().auth.session;
               if (!currentSession) {
-                throw new Error('온라인 로그인 상태에서만 사용할 수 있습니다.');
+                throw new Error(t('store.onlineOnly'));
               }
               const pushedRevision = await postSyncSnapshot(
                 get().settings.serverUrl,
@@ -5380,7 +5394,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               syncStatus: {
                 ...state.syncStatus,
-                errorMessage: SECURE_STATE_LOADING_MESSAGE,
+                errorMessage: getSecureStateLoadingMessage(),
               },
             }));
             return null;
@@ -5436,7 +5450,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               syncStatus: {
                 ...state.syncStatus,
-                errorMessage: SECURE_STATE_LOADING_MESSAGE,
+                errorMessage: getSecureStateLoadingMessage(),
               },
             }));
             return null;
@@ -5534,7 +5548,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               session.id,
               'error',
-              '이 세션의 호스트 정보를 찾을 수 없습니다.',
+              t('store.sessionHostNotFound'),
             );
             return session.id;
           }
@@ -5929,7 +5943,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             const message =
               error instanceof Error
                 ? error.message
-                : '파일 다운로드에 실패했습니다.';
+                : t('store.downloadFailed');
             set(state => ({
               sftpTransfers: patchSftpTransferRecord(
                 state.sftpTransfers,
@@ -6040,7 +6054,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               const message =
                 error instanceof Error
                   ? error.message
-                  : '파일 다운로드에 실패했습니다.';
+                  : t('store.downloadFailed');
               set(state => ({
                 sftpTransfers: patchSftpTransferRecord(
                   state.sftpTransfers,
@@ -6090,7 +6104,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 await deleteDownloadDestination(destinationDirectory.uri);
               } catch {}
               const message =
-                error instanceof Error ? error.message : '저장에 실패했습니다.';
+                error instanceof Error ? error.message : t('store.saveFailed');
               set(state => ({
                 sftpTransfers: pendingExportCompletions.reduce(
                   (nextTransfers, completion) =>
@@ -6205,7 +6219,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             const message =
               error instanceof Error
                 ? error.message
-                : '파일 업로드에 실패했습니다.';
+                : t('store.uploadFailed');
             set(state => ({
               sftpTransfers: patchSftpTransferRecord(
                 state.sftpTransfers,
@@ -6293,7 +6307,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
           } catch (error) {
             const message =
-              error instanceof Error ? error.message : '삭제에 실패했습니다.';
+              error instanceof Error ? error.message : t('store.deleteFailed');
             set(state => ({
               sftpSessions: patchSftpSessionRecord(
                 state.sftpSessions,
@@ -6406,7 +6420,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               }));
             } catch (error) {
               const message =
-                error instanceof Error ? error.message : '복사에 실패했습니다.';
+                error instanceof Error ? error.message : t('store.copyFailed');
               set(state => ({
                 sftpTransfers: patchSftpTransferRecord(
                   state.sftpTransfers,

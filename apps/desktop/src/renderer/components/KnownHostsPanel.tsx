@@ -11,6 +11,7 @@ import {
   PanelSection,
 } from '../ui';
 import { useTranslation } from 'react-i18next';
+import { getFormatLocale } from '../i18n';
 
 interface KnownHostsPanelProps {
   records: KnownHostRecord[];
@@ -48,7 +49,7 @@ export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
                 </CardTitleRow>
                 <CardMeta>
                   <span>{record.fingerprintSha256}</span>
-                  <span>Last seen {new Date(record.lastSeenAt).toLocaleString('ko-KR')}</span>
+                  <span>Last seen {new Date(record.lastSeenAt).toLocaleString(getFormatLocale())}</span>
                 </CardMeta>
               </CardMain>
               <CardActions>

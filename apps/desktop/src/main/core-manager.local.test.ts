@@ -554,7 +554,7 @@ describe("CoreManager local shell sessions", () => {
   });
 
   it("keeps a pre-connect local failure as one generic error without replay lifecycle", async () => {
-    const genericLogs: Array<{ level: string; message: string }> = [];
+    const genericLogs: Array<{ level: string; message: unknown }> = [];
     const lifecycleLogs: ActivityLogRecord[] = [];
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);
@@ -584,10 +584,14 @@ describe("CoreManager local shell sessions", () => {
       payload: { message: "unable to start shell" },
     });
 
+    // 로그는 번역 키를 함께 싣는다 — 화면은 키로 현재 언어에 맞춰 다시 그리고,
+    // message 는 키가 없는 예전 기록용 폴백이다.
     expect(genericLogs).toEqual([
       expect.objectContaining({
         level: "error",
         message: "Local 세션 오류가 발생했습니다.",
+        messageKey: "core.sessionErrorLog",
+        messageParams: { kind: "Local" },
       }),
     ]);
     expect(lifecycleLogs).toEqual([]);

@@ -87,6 +87,7 @@ import {
 } from "./core-framing";
 import { resolveDesktopRepoRoot } from "./repo-root";
 import { t } from "./i18n";
+import { logMessage } from "./activity-log-message";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 // AI run_command 기본 타임아웃(모델이 지정 안 하면). Go 코어가 최대 120s 로 상한을 건다.
@@ -142,7 +143,11 @@ const AUTOCOMPLETE_PREPARE_TIMEOUT_MS = 3_500;
 interface ActivityLogInput {
   level: "info" | "warn" | "error";
   category: "session" | "audit";
+  // logMessage() 결과를 스프레드하면 message 와 함께 번역 키가 실린다 —
+  // 화면은 키로 현재 언어에 맞춰 다시 그린다.
   message: string;
+  messageKey?: string;
+  messageParams?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -1180,7 +1185,7 @@ export class CoreManager {
       this.log({
         level: "warn",
         category: "session",
-        message: t("core.partialCleanupFailed"),
+        ...logMessage("core.partialCleanupFailed"),
         metadata: {
           endpointId,
           hostId,
@@ -1431,7 +1436,7 @@ export class CoreManager {
       level: metadata.status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",
-      message: t("core.sessionLog", {
+      ...logMessage("core.sessionLog", {
         kind: this.getConnectionKindLabel(lifecycle.connectionKind),
       }),
       metadata: metadata as unknown as Record<string, unknown>,
@@ -4700,7 +4705,7 @@ export class CoreManager {
               this.log({
                 level: "error",
                 category: "session",
-                message: t("core.sessionErrorLog", {
+                ...logMessage("core.sessionErrorLog", {
                   kind: this.getConnectionKindLabel(sessionLifecycle.connectionKind),
                 }),
                 metadata: {
@@ -4810,7 +4815,7 @@ export class CoreManager {
       this.log({
         level: "warn",
         category: "session",
-        message: t("core.startupCommandFailed"),
+        ...logMessage("core.startupCommandFailed"),
         metadata: {
           sessionId,
         },
@@ -5477,7 +5482,7 @@ export class CoreManager {
           : "info",
       category: "session",
       kind: "sftp-lifecycle",
-      message: t("core.sftpSession"),
+      ...logMessage("core.sftpSession"),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.startedAt,
       updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
@@ -5605,10 +5610,9 @@ export class CoreManager {
             : "info",
       category: "session",
       kind: "container-lifecycle",
-      message:
-        lifecycle.workspaceKind === "ecs-cluster"
-          ? t("core.ecsContainersBrowse")
-          : t("core.containersConnect"),
+      ...(lifecycle.workspaceKind === "ecs-cluster"
+        ? logMessage("core.ecsContainersBrowse")
+        : logMessage("core.containersConnect")),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.startedAt,
       updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
@@ -5684,7 +5688,7 @@ export class CoreManager {
             : "info",
       category: "audit",
       kind: "container-action",
-      message: t("core.containerActionLog", { action: actionLabel }),
+      ...logMessage("core.containerActionLog", { action: actionLabel }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: input.startedAt,
       updatedAt: completedAt,
@@ -5753,7 +5757,7 @@ export class CoreManager {
       level: "info",
       category: "session",
       kind: "session-lifecycle",
-      message: t("core.sessionLog", {
+      ...logMessage("core.sessionLog", {
         kind: this.getConnectionKindLabel(lifecycle.connectionKind),
       }),
       metadata: metadata as unknown as Record<string, unknown>,
@@ -5813,7 +5817,7 @@ export class CoreManager {
       level: status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",
-      message: t("core.sessionLog", {
+      ...logMessage("core.sessionLog", {
         kind: this.getConnectionKindLabel(lifecycle.connectionKind),
       }),
       metadata: metadata as unknown as Record<string, unknown>,

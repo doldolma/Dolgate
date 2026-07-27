@@ -18,6 +18,7 @@ import type {
   SshHostRecord,
 } from "../context";
 import { t } from '../../i18n';
+import { logMessage } from "../../activity-log-message";
 
 export interface SshKeyCoordinator {
   generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;

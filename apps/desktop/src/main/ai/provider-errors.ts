@@ -1,5 +1,6 @@
 import type { AiErrorPayload, AiFailureReason } from "../../shared/ai";
 import { t } from '../i18n';
+import { logMessage } from "../activity-log-message";
 
 // AiService/어댑터 내부에서 정규화된 실패를 던질 때 쓰는 에러.
 export class AiRequestError extends Error {

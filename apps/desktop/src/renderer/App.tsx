@@ -29,7 +29,7 @@ import {
   useSessionWorkspaceViewModel,
   useSftpViewModel,
 } from './view-models/appViewModels';
-import { t } from './i18n';
+import { getFormatLocale, t } from './i18n';
 
 function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   if (theme === 'light' || theme === 'dark') {
@@ -271,7 +271,7 @@ export function App() {
     if (!authState.offline?.expiresAt) {
       return null;
     }
-    return new Date(authState.offline.expiresAt).toLocaleString('ko-KR');
+    return new Date(authState.offline.expiresAt).toLocaleString(getFormatLocale());
   }, [authState.offline?.expiresAt]);
 
   // 다른 기기의 변경을 받아오는 폴링. 서버가 조건부 GET(ETag)을 지원하므로 변경이 없으면

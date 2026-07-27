@@ -18,7 +18,7 @@ import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceL
 import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
 import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
-import { t } from "../i18n";
+import { getFormatLocale, t } from '../i18n';
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -503,7 +503,7 @@ function formatPublishedAt(value?: string | null): string | null {
     return null;
   }
 
-  return new Intl.DateTimeFormat('ko-KR', {
+  return new Intl.DateTimeFormat(getFormatLocale(), {
     month: 'short',
     day: 'numeric'
   }).format(parsed);

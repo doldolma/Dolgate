@@ -92,24 +92,23 @@ export interface VaultCacheOwner {
 
 export const VAULT_PASSPHRASE_MIN_LENGTH = 4;
 
+// 문구가 아니라 코드를 돌려준다(server-url.ts 와 같은 이유) — 앱마다 자기 카탈로그로
+// 문구를 만든다.
+export type VaultPassphraseIssue = "blank" | "too-short";
+
 // 새로 설정하는 동기화 암호의 공통 정책. 입력값 자체는 trim하지 않는다. 앞뒤 공백도
 // 암호의 일부이지만, 공백만으로 이루어진 값은 실수 가능성이 높아 거부한다.
-export function validateNewVaultPassphrase(passphrase: string): string | null {
+export function getNewVaultPassphraseIssue(
+  passphrase: string,
+): VaultPassphraseIssue | null {
   const normalized = passphrase.normalize("NFC");
   if (normalized.trim().length === 0) {
-    return "동기화 암호에 문자를 입력해 주세요.";
+    return "blank";
   }
   if (Array.from(normalized).length < VAULT_PASSPHRASE_MIN_LENGTH) {
-    return `동기화 암호는 ${VAULT_PASSPHRASE_MIN_LENGTH}자 이상이어야 합니다.`;
+    return "too-short";
   }
   return null;
-}
-
-export function assertValidNewVaultPassphrase(passphrase: string): void {
-  const message = validateNewVaultPassphrase(passphrase);
-  if (message) {
-    throw new Error(message);
-  }
 }
 
 export function isSupportedVaultKdfDescriptor(

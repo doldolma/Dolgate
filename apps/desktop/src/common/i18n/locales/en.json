@@ -157,7 +157,6 @@
     "language": {
       "title": "Language",
       "system": "System",
-      "systemDescription": "Follow the OS language — Korean if the system is Korean, otherwise English.",
       "reopenNote": "Replay and share windows that are already open keep the previous language until reopened."
     }
   },
@@ -2967,5 +2966,79 @@
     "connectSuccess": "Connected successfully.",
     "noTerminalSession": "No terminal session is connected, so the command cannot be sent.",
     "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again."
+  },
+  "awsDiagnostic": {
+    "title": {
+      "missingUsername": "Could not determine the SSH username.",
+      "missingAvailabilityZone": "Could not determine the availability zone.",
+      "hostKeyMissing": "Host key verification is required.",
+      "ssmPluginMissing": "Session Manager Plugin is required.",
+      "notManagedInstance": "Not an SSM managed instance.",
+      "eicAccessDenied": "Insufficient Instance Connect permissions.",
+      "eicInvalidOsUser": "The Instance Connect username does not match.",
+      "eicAzMismatch": "The Instance Connect AZ information does not match.",
+      "tunnelOpenFailed": "Could not open the SSM tunnel.",
+      "sshAuthFailed": "SSH authentication failed.",
+      "sftpSubsystemFailed": "Could not start the SFTP subsystem.",
+      "unknown": "Could not complete the AWS SFTP connection."
+    },
+    "message": {
+      "missingUsername": "The SSH username for this instance could not be detected automatically.",
+      "missingAvailabilityZone": "The availability zone required for the Instance Connect request is missing.",
+      "hostKeyMissing": "The SSH host key of this AWS SSM target is not trusted yet.",
+      "ssmPluginMissing": "The AWS Session Manager Plugin cannot be run in this local environment.",
+      "notManagedInstance": "The selected EC2 instance is not currently recognized as an SSM managed instance.",
+      "eicAccessDenied": "The EC2 Instance Connect public key push was denied for permission reasons.",
+      "eicInvalidOsUser": "EC2 Instance Connect did not accept the current SSH username as a target OS user.",
+      "eicAzMismatch": "The availability zone in the EC2 Instance Connect request does not match the instance.",
+      "tunnelOpenFailed": "Could not open the internal AWS SSM tunnel for SFTP.",
+      "sshAuthFailed": "The SSM tunnel opened, but SSH authentication did not complete.",
+      "sftpSubsystemFailed": "The SFTP subsystem did not start after the SSH connection.",
+      "unknown": "An unidentified error occurred during the AWS SFTP connection."
+    },
+    "action": {
+      "missingUsername": "Enter the SSH username for this instance and try again.",
+      "missingAvailabilityZone": "Refresh the EC2 instance details or re-import the host, then try again.",
+      "hostKeyMissing": "Add the host key to the trust list, then retry the SFTP connection.",
+      "ssmPluginMissing": "Check that the AWS Session Manager Plugin is installed, then try again.",
+      "notManagedInstance": "Check the SSM Agent, the instance IAM role, and whether it is online, then try again.",
+      "eicAccessDenied": "Check that IAM allows ec2-instance-connect:SendSSHPublicKey.",
+      "eicInvalidOsUser": "Change the SSH settings to a real OS username such as ubuntu or ec2-user.",
+      "eicAzMismatch": "Refresh the EC2 metadata to store the current availability zone again.",
+      "tunnelOpenFailed": "Check the SSM connection and whether the local Session Manager Plugin can run.",
+      "sshAuthFailed": "Check the SSH username, port, and EC2 Instance Connect support.",
+      "sftpSubsystemFailed": "Check the SFTP subsystem configuration on the remote SSH server.",
+      "unknown": "Check the AWS profile, SSM status, and SSH settings, then try again."
+    },
+    "sshMetadata": {
+      "loading": "Checking SSH settings",
+      "ready": "SSH settings detected",
+      "error": "SSH settings check failed"
+    }
+  },
+  "shared": {
+    "serverUrl": {
+      "empty": "Enter the sign-in server address.",
+      "notAbsolute": "The sign-in server address must be an absolute URL starting with http:// or https://.",
+      "badScheme": "The sign-in server address must start with http:// or https://.",
+      "hasPath": "The sign-in server address cannot include a path.",
+      "hasQuery": "The sign-in server address cannot include a query or hash."
+    },
+    "accountPassword": {
+      "tooShort": "The password must be at least {{min}} characters.",
+      "tooLong": "The password must be at most {{max}} bytes in UTF-8."
+    },
+    "vaultPassphrase": {
+      "blank": "Enter characters for the sync passphrase.",
+      "tooShort": "The sync passphrase must be at least {{min}} characters."
+    },
+    "awsSftpDisabled": {
+      "windowsUnsupported": "Windows instances are not supported yet."
+    },
+    "hostSubtitle": {
+      "devicePathUnset": "No device path",
+      "remoteAddressUnset": "No remote address",
+      "usernameUnset": "No username"
+    }
   }
 }

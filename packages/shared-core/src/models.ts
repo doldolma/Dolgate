@@ -472,7 +472,15 @@ export function getHostSearchText(host: HostRecord): string[] {
   return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
 }
 
-export function getHostSubtitle(host: HostRecord): string {
+// 조립 결과를 코드로 돌려줄 수는 없으니(호출처마다 조립을 다시 써야 한다) 값이 비었을 때의
+// 폴백 라벨만 받는다. 필수 인자로 둬서 한 곳이라도 빠지면 컴파일러가 짚어 준다.
+export interface HostSubtitleLabels {
+  devicePathUnset: string;
+  remoteAddressUnset: string;
+  usernameUnset: string;
+}
+
+export function getHostSubtitle(host: HostRecord, labels: HostSubtitleLabels): string {
   if (host.kind === 'aws-ec2') {
     const parts = ['AWS', host.awsRegion, host.awsPrivateIp || host.awsInstanceId].filter(Boolean);
     return parts.join(' • ');
@@ -488,19 +496,19 @@ export function getHostSubtitle(host: HostRecord): string {
   }
   if (host.kind === 'serial') {
     if (host.transport === 'local') {
-      return ['Serial', host.devicePath ?? '장치 경로 미설정'].join(' • ');
+      return ['Serial', host.devicePath ?? labels.devicePathUnset].join(' • ');
     }
     return [
       'Serial',
       host.transport,
-      host.host && host.port ? `${host.host}:${host.port}` : '원격 주소 미설정',
+      host.host && host.port ? `${host.host}:${host.port}` : labels.remoteAddressUnset,
     ]
       .filter(Boolean)
       .join(' • ');
   }
   return host.username.trim()
     ? `${host.username}@${host.hostname}:${host.port}`
-    : `${host.hostname}:${host.port} • 사용자명 미설정`;
+    : `${host.hostname}:${host.port} • ${labels.usernameUnset}`;
 }
 
 export function getHostBadgeLabel(host: HostRecord): string {
@@ -563,28 +571,19 @@ export function isAwsEc2WindowsPlatform(value?: string | null): boolean {
   return normalized.includes('windows');
 }
 
-export function getAwsEc2HostSftpDisabledReason(input: {
+// 문구가 아니라 코드를 돌려준다 — 앱마다 자기 카탈로그로 문구를 만든다.
+export type AwsEc2SftpDisabledReason = 'windows-unsupported';
+
+export function getAwsEc2SftpDisabledReason(input: {
   awsPlatform?: string | null;
   awsSshUsername?: string | null;
-}): string | null {
+}): AwsEc2SftpDisabledReason | null {
   if (isAwsEc2WindowsPlatform(input.awsPlatform)) {
-    return 'Windows 인스턴스는 아직 지원하지 않습니다.';
+    return 'windows-unsupported';
   }
   return null;
 }
 
-export function getAwsEc2HostSshMetadataStatusLabel(status?: AwsSshMetadataStatus | null): string | null {
-  switch (status) {
-    case 'loading':
-      return 'SSH 설정 확인 중';
-    case 'ready':
-      return 'SSH 설정 자동 확인됨';
-    case 'error':
-      return 'SSH 설정 확인 실패';
-    default:
-      return null;
-  }
-}
 
 export const AWS_SFTP_DIAGNOSTIC_REASON_CODES: readonly AwsSftpDiagnosticReasonCode[] = [
   'missing-username',
@@ -612,6 +611,12 @@ export function isAwsSftpDiagnosticReasonCode(
   );
 }
 
+// 사람이 읽는 진단 문구(title/message/action)는 이 패키지에 두지 않는다 — 모바일이 쓰지
+// 않는 UI 문구이고, 앱마다 자기 언어 카탈로그로 만들어야 한다. 여기서는 원인 코드까지만
+// 만들고, 문구는 apps/desktop/src/common/aws-diagnostics.ts 가 담당한다.
+//
+// 아래 정규식의 한국어는 들어오는 오류 메시지를 판정하는 패턴이라 지우면 안 된다(영어
+// 대안과 함께 유지).
 export function inferAwsSftpDiagnosticReasonCode(
   stage: SftpConnectionStage | null | undefined,
   message: string,
@@ -676,98 +681,8 @@ export function inferAwsSftpDiagnosticReasonCode(
   return 'unknown';
 }
 
-export function getAwsSftpDiagnosticTitle(
-  reasonCode?: AwsSftpDiagnosticReasonCode | null,
-): string {
-  switch (reasonCode) {
-    case 'missing-username':
-      return 'SSH 사용자명을 확인하지 못했습니다.';
-    case 'missing-availability-zone':
-      return 'Availability Zone을 확인하지 못했습니다.';
-    case 'host-key-missing':
-      return '호스트 키 확인이 필요합니다.';
-    case 'ssm-plugin-missing':
-      return 'Session Manager Plugin이 필요합니다.';
-    case 'not-managed-instance':
-      return 'SSM managed instance가 아닙니다.';
-    case 'eic-access-denied':
-      return 'Instance Connect 권한이 부족합니다.';
-    case 'eic-invalid-os-user':
-      return 'Instance Connect 사용자명이 맞지 않습니다.';
-    case 'eic-az-mismatch':
-      return 'Instance Connect AZ 정보가 맞지 않습니다.';
-    case 'tunnel-open-failed':
-      return 'SSM 터널을 열지 못했습니다.';
-    case 'ssh-auth-failed':
-      return 'SSH 인증에 실패했습니다.';
-    case 'sftp-subsystem-failed':
-      return 'SFTP subsystem을 시작하지 못했습니다.';
-    default:
-      return 'AWS SFTP 연결을 완료하지 못했습니다.';
-  }
-}
 
-export function getAwsSftpDiagnosticMessage(
-  reasonCode?: AwsSftpDiagnosticReasonCode | null,
-): string {
-  switch (reasonCode) {
-    case 'missing-username':
-      return '인스턴스에 접속할 SSH 사용자명을 자동으로 찾지 못했습니다.';
-    case 'missing-availability-zone':
-      return 'Instance Connect 요청에 필요한 Availability Zone 정보가 없습니다.';
-    case 'host-key-missing':
-      return '이 AWS SSM 대상의 SSH 호스트 키가 아직 신뢰되지 않았습니다.';
-    case 'ssm-plugin-missing':
-      return '로컬 환경에서 AWS Session Manager Plugin을 실행할 수 없습니다.';
-    case 'not-managed-instance':
-      return '선택한 EC2 인스턴스가 현재 SSM managed instance로 확인되지 않습니다.';
-    case 'eic-access-denied':
-      return 'EC2 Instance Connect 공개 키 전송 요청이 권한 문제로 거부되었습니다.';
-    case 'eic-invalid-os-user':
-      return 'EC2 Instance Connect가 현재 SSH 사용자명을 대상 OS 사용자로 받아들이지 않았습니다.';
-    case 'eic-az-mismatch':
-      return 'EC2 Instance Connect 요청의 Availability Zone 정보가 인스턴스와 맞지 않습니다.';
-    case 'tunnel-open-failed':
-      return 'SFTP용 AWS SSM 내부 터널을 열지 못했습니다.';
-    case 'ssh-auth-failed':
-      return 'SSM 터널은 열렸지만 SSH 인증을 완료하지 못했습니다.';
-    case 'sftp-subsystem-failed':
-      return 'SSH 연결 후 SFTP subsystem을 시작하지 못했습니다.';
-    default:
-      return 'AWS SFTP 연결 중 확인되지 않은 오류가 발생했습니다.';
-  }
-}
 
-export function getAwsSftpDiagnosticAction(
-  reasonCode?: AwsSftpDiagnosticReasonCode | null,
-): string {
-  switch (reasonCode) {
-    case 'missing-username':
-      return '이 인스턴스의 SSH 사용자명을 입력한 뒤 다시 시도하세요.';
-    case 'missing-availability-zone':
-      return 'EC2 인스턴스 정보를 새로 확인하거나 호스트를 다시 가져온 뒤 다시 시도하세요.';
-    case 'host-key-missing':
-      return '호스트 키를 신뢰 목록에 추가한 뒤 SFTP 연결을 다시 시도하세요.';
-    case 'ssm-plugin-missing':
-      return 'AWS Session Manager Plugin 설치를 확인한 뒤 다시 시도하세요.';
-    case 'not-managed-instance':
-      return 'SSM Agent, 인스턴스 IAM role, 온라인 상태를 확인한 뒤 다시 시도하세요.';
-    case 'eic-access-denied':
-      return 'IAM 권한에 ec2-instance-connect:SendSSHPublicKey가 허용되어 있는지 확인하세요.';
-    case 'eic-invalid-os-user':
-      return 'ubuntu, ec2-user 같은 실제 OS 사용자명으로 SSH 설정을 수정하세요.';
-    case 'eic-az-mismatch':
-      return 'EC2 metadata를 새로고침해서 현재 Availability Zone을 다시 저장하세요.';
-    case 'tunnel-open-failed':
-      return 'SSM 연결 상태와 로컬 Session Manager Plugin 실행 가능 여부를 확인하세요.';
-    case 'ssh-auth-failed':
-      return 'SSH username, port, EC2 Instance Connect 지원 여부를 확인하세요.';
-    case 'sftp-subsystem-failed':
-      return '원격 SSH 서버의 SFTP subsystem 설정을 확인하세요.';
-    default:
-      return 'AWS 프로필, SSM 상태, SSH 설정을 확인한 뒤 다시 시도하세요.';
-  }
-}
 
 export function getAwsEc2HostSshPort(input: {
   awsSshPort?: number | null;
@@ -2297,7 +2212,15 @@ export interface ActivityLogRecord {
   level: ActivityLogLevel;
   category: ActivityLogCategory;
   kind?: ActivityLogKind;
+  /**
+   * 기록 당시 언어로 만들어진 문구. messageKey 가 없는 예전 기록을 그리기 위한
+   * 폴백이며, 언어를 바꿔도 이 값은 바뀌지 않는다.
+   */
   message: string;
+  /** 번역 키. 있으면 화면은 이 키로 현재 언어에 맞춰 다시 그린다. */
+  messageKey?: string;
+  /** messageKey 의 보간 값(개수·이름 등). */
+  messageParams?: Record<string, unknown> | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
   updatedAt?: string;

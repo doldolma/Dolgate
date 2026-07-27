@@ -1,7 +1,6 @@
 export {
   AWS_SFTP_DEFAULT_PORT,
   DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS,
-  getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
   getParentGroupPath,
   isAwsEc2HostRecord,
@@ -16,6 +15,7 @@ export {
   rebaseGroupPath,
   stripRemovedGroupSegment,
 } from "@shared";
+export { getAwsEc2SftpDisabledMessage } from '../../../common/shared-messages';
 export * from "./containers";
 export * from "./errors-and-prompts";
 export * from "./hosts";

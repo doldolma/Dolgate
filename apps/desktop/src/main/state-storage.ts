@@ -1105,6 +1105,9 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
       : 'generic';
   const metadata = isObject(value.metadata) ? value.metadata : null;
   const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : undefined;
+  // 예전 기록에는 messageKey 가 없다 — 그때는 저장된 message 를 그대로 보여준다.
+  const messageKey = typeof value.messageKey === 'string' ? value.messageKey : undefined;
+  const messageParams = isObject(value.messageParams) ? value.messageParams : null;
 
   return {
     id: value.id,
@@ -1112,6 +1115,8 @@ function normalizeActivityLogRecord(value: unknown): ActivityLogRecord | null {
     category,
     kind,
     message: value.message,
+    messageKey,
+    messageParams,
     metadata,
     createdAt: value.createdAt,
     updatedAt

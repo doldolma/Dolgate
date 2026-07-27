@@ -3,6 +3,7 @@ import { initReactI18next } from 'react-i18next';
 import type { AppLanguage } from '@shared';
 
 import {
+  INTL_LOCALE_TAGS,
   parseAppLocaleParam,
   resolveEffectiveAppLocale,
   type AppLocale
@@ -63,6 +64,12 @@ function rememberLanguage(language: AppLanguage | null | undefined): void {
   } catch {
     // 저장 실패는 무시한다 — 다음 실행의 첫 프레임만 시스템 언어로 시작할 뿐이다.
   }
+}
+
+// 날짜·숫자 포매터(Intl, toLocaleString)에 넘길 로케일. 렌더 시점에 읽어야 언어를 바꿨을
+// 때 같이 바뀐다 — 모듈 최상위에서 포매터를 만들어 두면 안 된다.
+export function getFormatLocale(): string {
+  return INTL_LOCALE_TAGS[i18next.language === 'ko' ? 'ko' : 'en'];
 }
 
 // 컴포넌트 밖(순수 함수·유틸)에서 쓰는 번역 함수. 컴포넌트에서는 useTranslation() 을 쓴다.

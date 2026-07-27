@@ -36,6 +36,10 @@ function buildEnvForIos(baseEnv) {
   const developerDir = resolveDeveloperDir();
 
   env.NODE_BINARY = env.NODE_BINARY || process.execPath;
+  // CocoaPods 는 경로에 unicode_normalize 를 걸어서, 로케일이 없으면(LANG 미설정 →
+  // ASCII-8BIT) `pod install` 이 Ruby 스택트레이스와 함께 죽는다. 원인을 알아보기
+  // 어려운 실패라 UTF-8 로케일을 기본값으로 채운다.
+  env.LANG = env.LANG || "en_US.UTF-8";
   if (developerDir) {
     env.DEVELOPER_DIR = developerDir;
     extraPaths.push(path.join(developerDir, "usr", "bin"));

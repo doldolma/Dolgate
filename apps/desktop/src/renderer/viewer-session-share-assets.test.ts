@@ -17,11 +17,40 @@ const viewerCssPath = path.join(
   'services/sync-api/internal/http/share_assets/viewer.css',
 );
 
-const viewerHtml = fs
-  .readFileSync(viewerHtmlPath, 'utf8')
-  .replaceAll('{{ .AssetVersion }}', 'test')
-  .replaceAll('{{ .ShareID }}', 'share-1')
-  .replaceAll('{{ .ViewerToken }}', 'viewer-token-1');
+// 서버(share_viewer_text.go)가 요청 언어로 골라 data 속성에 실어 주는 문구 집합. 여기서는
+// 그 전달 경로를 검증하는 것이 목적이라 필요한 항목만 담는다 — 카탈로그 자체의 완전성은
+// sync-api 쪽 테스트가 본다.
+const viewerTextFixture = {
+  lang: 'ko',
+  timeLocale: 'ko-KR',
+  sharedSession: '공유된 세션',
+  statusConnecting: '연결 중',
+  statusEnded: '종료됨',
+  shareEnded: '세션 공유가 종료되었습니다.',
+  chatOpen: '채팅 열기',
+  chatCollapse: '채팅 접기',
+  chatStatusConnecting: '연결 중',
+  chatStatusEnded: '종료됨',
+  chatEmpty: '아직 채팅이 없습니다. 첫 메시지를 보내보세요.',
+  chatOwnerBadge: '소유자',
+  chatUnknownSender: '알 수 없음',
+};
+
+const rawViewerHtml = fs.readFileSync(viewerHtmlPath, 'utf8');
+
+function renderViewerHtml(textJson: string | null): string {
+  return rawViewerHtml
+    .replaceAll('{{ .AssetVersion }}', 'test')
+    .replaceAll('{{ .ShareID }}', 'share-1')
+    .replaceAll('{{ .ViewerToken }}', 'viewer-token-1')
+    .replaceAll(
+      '{{ .TextJSON }}',
+      // html/template 이 속성 문맥에서 따옴표를 이스케이프하는 것과 같은 형태로 넣는다.
+      textJson === null ? '' : textJson.replaceAll('"', '&#34;'),
+    );
+}
+
+const viewerHtml = renderViewerHtml(JSON.stringify(viewerTextFixture));
 const viewerScript = fs.readFileSync(viewerJsPath, 'utf8');
 const viewerCss = fs.readFileSync(viewerCssPath, 'utf8');
 
@@ -102,9 +131,9 @@ class MockWebSocket extends EventTarget {
   }
 }
 
-function bootstrapViewerAsset() {
+function bootstrapViewerAsset(html: string = viewerHtml) {
   document.open();
-  document.write(viewerHtml);
+  document.write(html);
   document.close();
   window.history.replaceState({}, '', '/share/share-1/viewer-token-1');
   Object.defineProperty(window, 'Terminal', {
@@ -161,6 +190,37 @@ describe('session share viewer assets', () => {
 
   afterEach(() => {
     window.localStorage.clear();
+  });
+
+  // 뷰어의 CSP 는 script-src 'self' 라 문구를 data 속성으로 넘긴다. 속성이 비거나 깨져도
+  // 페이지는 떠야 한다 — 여기서 죽으면 공유 링크가 아예 열리지 않는다.
+  it('문구 속성이 없어도 기본 문구로 동작한다', async () => {
+    bootstrapViewerAsset(renderViewerHtml(null));
+    await Promise.resolve();
+
+    const chatOpenButton = document.getElementById('viewer-chat-open') as HTMLButtonElement;
+
+    expect(chatOpenButton.textContent?.trim()).toBe('Open chat');
+    expect(latestSocket()).toBeTruthy();
+  });
+
+  // 익명 닉네임은 페이지 언어에 맞는 낱말로 만들어야 한다 — 영어 페이지에서 "맑은 여우" 가
+  // 나오면 읽을 수 없는 사용자에게 자기 이름이 정체불명 문자열로 보인다.
+  it.each([
+    { lang: 'ko', pattern: /^[가-힣]+ [가-힣]+$/u },
+    { lang: 'en', pattern: /^[A-Z][a-z]+ [A-Z][a-z]+$/u },
+  ])('$lang 페이지의 익명 닉네임은 그 언어 낱말로 만든다', async ({ lang, pattern }) => {
+    window.localStorage.clear();
+    bootstrapViewerAsset(
+      renderViewerHtml(JSON.stringify({ ...viewerTextFixture, lang })),
+    );
+    await Promise.resolve();
+
+    const nicknameInput = document.getElementById(
+      'viewer-chat-nickname',
+    ) as HTMLInputElement;
+
+    expect(nicknameInput.value).toMatch(pattern);
   });
 
   it('starts collapsed and opens the chat panel from the small open button', async () => {
@@ -251,7 +311,7 @@ describe('session share viewer assets', () => {
 
     expect(messages.textContent).toContain('hello');
     expect(messages.textContent).toContain('there');
-    expect(messages.textContent).toContain('Owner');
+    expect(messages.textContent).toContain(viewerTextFixture.chatOwnerBadge);
     expect(messages.textContent).not.toContain('Synology Owner');
     expect(messages.querySelector('.viewer-chat-message--owner')).toBeTruthy();
     expect(
@@ -263,11 +323,12 @@ describe('session share viewer assets', () => {
         data: JSON.stringify({
           type: 'share-ended',
           message: 'share ended',
+          reason: 'ended',
         }),
       }),
     );
 
-    expect(messages.textContent).toContain('아직 채팅이 없습니다.');
+    expect(messages.textContent).toContain(viewerTextFixture.chatEmpty);
     expect(nicknameInput.disabled).toBe(true);
     expect(chatInput.disabled).toBe(true);
     expect(submitButton.disabled).toBe(true);

@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import {
-  getAwsEc2HostSftpDisabledReason,
   getAwsEc2HostSshPort,
-  getAwsSftpDiagnosticMessage,
   inferAwsSftpDiagnosticReasonCode,
   isAwsEc2HostRecord,
 } from "@shared";
@@ -22,6 +20,9 @@ import type {
   AwsSftpProgressStage,
 } from "../context";
 import { t } from "../../i18n";
+import { getAwsSftpDiagnosticMessage } from "../../../common/aws-diagnostics";
+import { logMessage } from "../../activity-log-message";
+import { getAwsEc2SftpDisabledMessage } from '../../../common/shared-messages';
 
 type AwsSftpStageErrorOptions = {
   reasonCode?: AwsSftpDiagnosticReasonCode;
@@ -554,7 +555,7 @@ export function createAwsSftpCoordinator(deps: {
         message: t("awsSftp.progress.checkingSshConfig"),
       });
       const hydratedHost = await loadHostSshMetadataRecord(refreshedHost);
-      const disabledReason = getAwsEc2HostSftpDisabledReason(hydratedHost);
+      const disabledReason = getAwsEc2SftpDisabledMessage(hydratedHost);
       if (disabledReason) {
         throw new Error(disabledReason);
       }

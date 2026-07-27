@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+import { t } from '../i18n';
 
 export interface PickedUploadFile {
   uri: string;
@@ -63,7 +64,7 @@ function getDocumentPicker(): DocumentPickerModule {
 
 function getNativeFileTransfer(): NativeFileTransferModule {
   if (!nativeFileTransfer) {
-    throw new Error('파일 전송 네이티브 모듈을 찾지 못했습니다.');
+    throw new Error(t('fileTransfer.nativeModuleMissing'));
   }
   return nativeFileTransfer;
 }
@@ -154,7 +155,7 @@ export async function finalizeDownloadDestination(
     );
   } catch (error) {
     if (isNativeCancelError(error)) {
-      throw new Error('저장이 취소되었습니다.');
+      throw new Error(t('fileTransfer.saveCancelled'));
     }
     throw error;
   }

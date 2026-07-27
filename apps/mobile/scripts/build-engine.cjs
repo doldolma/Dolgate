@@ -53,21 +53,43 @@ function goEnv(name) {
   return (result.stdout || "").trim();
 }
 
-function resolveGomobile() {
-  const binDir = path.join(goEnv("GOPATH"), "bin");
-  const gomobile = path.join(binDir, process.platform === "win32" ? "gomobile.exe" : "gomobile");
-  if (!fs.existsSync(gomobile)) {
+// gomobile/gobind 를 services/ssh-core 안에서 설치한다. 모듈 안에서 돌려야(@latest 없이)
+// go.mod 에 핀된 버전이 쓰이고, 그게 CI 가 바인드하는 버전이다.
+function installGomobile() {
+  console.log("gomobile not found — installing the pinned bind toolchain...");
+  const result = spawnSync(
+    "go",
+    ["install", "golang.org/x/mobile/cmd/gomobile", "golang.org/x/mobile/cmd/gobind"],
+    { cwd: serviceDir, stdio: "inherit" },
+  );
+  if (result.status !== 0) {
     throw new Error(
       [
-        "gomobile not found. Install the bind toolchain first:",
+        "Failed to install the gomobile bind toolchain. Run it by hand:",
         "  cd services/ssh-core",
         "  go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind",
-        "",
-        "Run it from inside the module (and without @latest) so the version in",
-        "go.mod is used — that is the version CI binds with.",
       ].join("\n"),
     );
   }
+}
+
+function resolveGomobile() {
+  const binDir = path.join(goEnv("GOPATH"), "bin");
+  const exeSuffix = process.platform === "win32" ? ".exe" : "";
+  const gomobile = path.join(binDir, `gomobile${exeSuffix}`);
+  // gomobile bind 는 gobind 도 함께 호출한다 — 한쪽만 있으면 바인드 중간에 깨진다.
+  const gobind = path.join(binDir, `gobind${exeSuffix}`);
+
+  if (!fs.existsSync(gomobile) || !fs.existsSync(gobind)) {
+    installGomobile();
+  }
+
+  if (!fs.existsSync(gomobile) || !fs.existsSync(gobind)) {
+    throw new Error(
+      `gomobile install reported success but the binaries are missing in ${binDir}.`,
+    );
+  }
+
   return { gomobile, binDir };
 }
 

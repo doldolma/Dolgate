@@ -347,7 +347,8 @@ type browserSignupForm struct {
 }
 
 type loginPageData struct {
-	Title              string
+	// T 는 이 요청의 언어에 맞는 문구 집합이다. renderLogin 이 채운다.
+	T                  pageText
 	IsSignup           bool
 	ErrorMessage       string
 	Email              string
@@ -430,6 +431,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	renderLogin := func(ctx *gin.Context, data loginPageData) {
 		data.WebAuthnEnabled = webAuthnEnabled
 		data.WebAuthnRPID = webAuthnRPID
+		data.T = pageTextOf(ctx)
 		renderLoginPage(ctx, data)
 	}
 
@@ -479,7 +481,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		renderLogin(ctx, loginPageData{
-			Title:              "Sign in to Dolgate",
 			IsSignup:           false,
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
@@ -499,9 +500,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			// 바인딩 실패 원문은 구조체 필드명이 드러나고 사용자가 할 수 있는 게 없다.
 			log.Printf("browser login form bind failed: %v", err)
 			renderLogin(ctx, loginPageData{
-				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
-				ErrorMessage:       "입력값을 확인해 주세요.",
+				ErrorMessage:       pageTextOf(ctx).InvalidInput,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -518,9 +518,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if !authLimiters.login.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
 			ctx.Status(http.StatusTooManyRequests)
 			renderLogin(ctx, loginPageData{
-				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
-				ErrorMessage:       tooManyAuthAttemptsMessage,
+				ErrorMessage:       pageTextOf(ctx).TooManyAttempts,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -536,9 +535,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		if !config.LocalAuthEnabled {
 			renderLogin(ctx, loginPageData{
-				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
-				ErrorMessage:       "이 서버에서는 비밀번호 로그인이 비활성화되어 있습니다.",
+				ErrorMessage:       pageTextOf(ctx).PasswordLoginDisabled,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -553,7 +551,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
-			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			logAndStringError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
 			return
 		}
 
@@ -562,9 +560,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		user, _, err := authService.Login(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
 		if err != nil {
 			renderLogin(ctx, loginPageData{
-				Title:              "Sign in to Dolgate",
 				IsSignup:           false,
-				ErrorMessage:       "이메일 또는 비밀번호가 올바르지 않습니다.",
+				ErrorMessage:       pageTextOf(ctx).BadCredentials,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -581,7 +578,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
 			return
 		}
 		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
@@ -597,7 +594,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		renderLogin(ctx, loginPageData{
-			Title:              "Create your Dolgate account",
 			IsSignup:           true,
 			Client:             ctx.Query("client"),
 			RedirectURI:        ctx.Query("redirect_uri"),
@@ -621,9 +617,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if err := ctx.ShouldBind(&form); err != nil {
 			log.Printf("browser signup form bind failed: %v", err)
 			renderLogin(ctx, loginPageData{
-				Title:              "Create your Dolgate account",
 				IsSignup:           true,
-				ErrorMessage:       "입력값을 확인해 주세요.",
+				ErrorMessage:       pageTextOf(ctx).InvalidInput,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -639,9 +634,8 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if !authLimiters.signup.Allow(authAttemptKeys(ctx.ClientIP(), form.Email)...) {
 			ctx.Status(http.StatusTooManyRequests)
 			renderLogin(ctx, loginPageData{
-				Title:              "Create your Dolgate account",
 				IsSignup:           true,
-				ErrorMessage:       tooManyAuthAttemptsMessage,
+				ErrorMessage:       pageTextOf(ctx).TooManyAttempts,
 				Email:              form.Email,
 				Client:             form.Client,
 				RedirectURI:        form.RedirectURI,
@@ -655,7 +649,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			return
 		}
 		if err := validateDesktopRedirectURI(form.RedirectURI); err != nil {
-			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			logAndStringError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
 			return
 		}
 
@@ -664,14 +658,13 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if err != nil {
 			// 드라이버 원문("Duplicate entry '…' for key 'users.email'")을 화면에 그대로
 			// 흘리지 않는다. 아는 원인만 문구로 바꾸고 나머지는 서버 로그로만 남긴다.
-			message := "회원가입에 실패했습니다."
+			message := pageTextOf(ctx).SignupFailed
 			if errors.Is(err, storepkg.ErrEmailAlreadyExists) {
-				message = "이미 사용 중인 이메일입니다."
+				message = pageTextOf(ctx).EmailTaken
 			} else {
 				log.Printf("browser signup failed: %v", err)
 			}
 			renderLogin(ctx, loginPageData{
-				Title:              "Create your Dolgate account",
 				IsSignup:           true,
 				ErrorMessage:       message,
 				Email:              form.Email,
@@ -688,7 +681,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		code, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
 			return
 		}
 		completeDesktopLogin(ctx, form.RedirectURI, code, form.State)
@@ -704,12 +697,14 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		redirectURI := ctx.Query("redirect_uri")
 		desktopState := ctx.Query("state")
 		if err := validateDesktopRedirectURI(redirectURI); err != nil {
-			logAndStringError(ctx, http.StatusBadRequest, "잘못된 요청입니다.", err)
+			logAndStringError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
 			return
 		}
-		signedState, err := authService.NewBrowserLoginState(client, redirectURI, desktopState)
+		// 로그인 페이지에서 고른 언어를 서명된 state 에 실어, 프로바이더를 다녀온 뒤에도
+		// 같은 언어로 브리지 페이지를 렌더한다.
+		signedState, err := authService.NewBrowserLoginState(client, redirectURI, desktopState, string(resolvePageLocale(ctx)))
 		if err != nil {
-			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
 			return
 		}
 		ctx.Redirect(http.StatusFound, oidcRuntime.oauth.AuthCodeURL(signedState))
@@ -731,10 +726,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			ctx.String(http.StatusBadRequest, "missing oidc callback state or code")
 			return
 		}
-		if _, err := authService.ParseBrowserLoginState(rawState); err != nil {
-			logAndStringError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+		loginState, err := authService.ParseBrowserLoginState(rawState)
+		if err != nil {
+			logAndStringError(ctx, http.StatusUnauthorized, pageTextOf(ctx).AuthFailed, err)
 			return
 		}
+		applyPageLocaleOverride(ctx, loginState.Lang)
 		renderOIDCExchangeBridgePage(ctx, code, rawState)
 	})
 
@@ -752,13 +749,14 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		loginState, err := authService.ParseBrowserLoginState(rawState)
 		if err != nil {
-			logAndStringError(ctx, http.StatusUnauthorized, "인증에 실패했습니다.", err)
+			logAndStringError(ctx, http.StatusUnauthorized, pageTextOf(ctx).AuthFailed, err)
 			return
 		}
+		applyPageLocaleOverride(ctx, loginState.Lang)
 
 		token, err := oidcRuntime.oauth.Exchange(ctx.Request.Context(), code)
 		if err != nil {
-			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusBadGateway, pageTextOf(ctx).RequestFailed, err)
 			return
 		}
 
@@ -770,7 +768,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 
 		idToken, err := oidcRuntime.verifier.Verify(ctx.Request.Context(), rawIDToken)
 		if err != nil {
-			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusBadGateway, pageTextOf(ctx).RequestFailed, err)
 			return
 		}
 
@@ -780,19 +778,19 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			EmailVerified bool   `json:"email_verified"`
 		}
 		if err := idToken.Claims(&claims); err != nil {
-			logAndStringError(ctx, http.StatusBadGateway, "요청 처리 중 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusBadGateway, pageTextOf(ctx).RequestFailed, err)
 			return
 		}
 
 		user, err := authService.ResolveOIDCUser(ctx.Request.Context(), "oidc", claims.Subject, claims.Email, claims.EmailVerified)
 		if err != nil {
-			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
 			return
 		}
 
 		exchangeCode, err := authService.IssueExchangeCode(ctx.Request.Context(), user)
 		if err != nil {
-			logAndStringError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			logAndStringError(ctx, http.StatusInternalServerError, pageTextOf(ctx).ServerError, err)
 			return
 		}
 		completeDesktopLogin(ctx, loginState.RedirectURI, exchangeCode, loginState.State)
@@ -1268,7 +1266,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		ctx.JSON(http.StatusOK, gin.H{"updated": updated})
 	})
 	sessionShareGroup.DELETE("/:shareId", func(ctx *gin.Context) {
-		if err := shareHub.Delete(ctx.GetString("userId"), ctx.Param("shareId"), "세션 공유가 종료되었습니다."); err != nil {
+		if err := shareHub.Delete(ctx.GetString("userId"), ctx.Param("shareId"), shareEndedReason); err != nil {
 			logAndJSONError(ctx, http.StatusNotFound, "대상을 찾을 수 없습니다.", err)
 			return
 		}
@@ -1303,10 +1301,15 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		applyShareResponseHeaders(ctx)
 		applyShareViewerResponseHeaders(ctx)
 		ctx.Header("Content-Type", "text/html; charset=utf-8")
+		// 공유 링크를 받는 사람의 브라우저 언어를 따른다 — 링크를 만든 사람과 다른 언어를
+		// 쓸 수 있다. lang 파라미터로 강제할 수도 있다(인증 페이지와 같은 규칙).
+		viewerCopy := viewerTextFor(resolvePageLocale(ctx))
 		_ = shareViewerTemplate.Execute(ctx.Writer, viewerPageData{
 			ShareID:      shareID,
 			ViewerToken:  viewerToken,
 			AssetVersion: shareAssetVersion,
+			T:            viewerCopy,
+			TextJSON:     viewerTextJSON(viewerCopy),
 		})
 	})
 	router.GET("/share/:shareId/:viewerToken/ws", func(ctx *gin.Context) {
@@ -1705,19 +1708,18 @@ func buildMobileAwsSsoCallbackURL(
 func renderLoginPage(ctx *gin.Context, data loginPageData) {
 	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
-	if data.Title == "" {
-		data.Title = "Sign in to Dolgate"
-	}
-	_ = loginPageTemplate.Execute(ctx.Writer, data)
+	_ = authPageTemplates.ExecuteTemplate(ctx.Writer, loginPageTemplateName, data)
 }
 
 func renderDesktopCallbackBridgePage(ctx *gin.Context, callbackURL string) {
 	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
-	_ = desktopCallbackBridgeTemplate.Execute(ctx.Writer, struct {
+	_ = authPageTemplates.ExecuteTemplate(ctx.Writer, desktopCallbackBridgeTemplateName, struct {
+		T               pageText
 		CallbackURLAttr template.URL
 		CallbackURLJSON template.JS
 	}{
+		T:               pageTextOf(ctx),
 		CallbackURLAttr: template.URL(callbackURL),
 		CallbackURLJSON: template.JS(strconv.Quote(callbackURL)),
 	})
@@ -1733,10 +1735,11 @@ func renderOIDCExchangeBridgePage(ctx *gin.Context, code string, state string) {
 	applyAuthHTMLResponseHeaders(ctx)
 	ctx.Header("Cache-Control", "no-store")
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
-	_ = oidcExchangeBridgeTemplate.Execute(ctx.Writer, struct {
+	_ = authPageTemplates.ExecuteTemplate(ctx.Writer, oidcExchangeBridgeTemplateName, struct {
+		T     pageText
 		Code  string
 		State string
-	}{Code: code, State: state})
+	}{T: pageTextOf(ctx), Code: code, State: state})
 }
 
 func renderWebAuthnRegisterPage(ctx *gin.Context) {
@@ -1744,7 +1747,9 @@ func renderWebAuthnRegisterPage(ctx *gin.Context) {
 	ctx.Header("Cache-Control", "no-store")
 	ctx.Header("Content-Type", "text/html; charset=utf-8")
 	// 티켓은 서버로 전달되지 않는다 — 페이지 JS 가 URL fragment 에서 읽는다.
-	_ = webauthnRegisterPageTemplate.Execute(ctx.Writer, nil)
+	_ = authPageTemplates.ExecuteTemplate(ctx.Writer, webauthnRegisterPageTemplateName, struct {
+		T pageText
+	}{T: pageTextOf(ctx)})
 }
 
 func completeDesktopLogin(ctx *gin.Context, redirectURI string, code string, state string) {
@@ -1806,9 +1811,13 @@ func extractBearerToken(ctx *gin.Context, options authMiddlewareOptions) string 
 	return ""
 }
 
-const tooManyAuthAttemptsMessage = "너무 많은 인증 시도가 감지되었습니다. 잠시 후 다시 시도해 주세요."
-
-const tooManyPasskeysMessage = "등록할 수 있는 패스키 개수를 초과했습니다. 사용하지 않는 패스키를 먼저 삭제해 주세요."
+// 앱용 API(Bearer) 응답에 쓰는 문구. 브라우저에 보이는 경로에서는 pageTextOf(ctx) 로 요청
+// 언어에 맞춘 문구를 쓴다 — 앱은 이 error 값을 그대로 표시하므로 앱 카탈로그로 옮기는 건
+// 별개 작업이다. 문장이 두 곳에 복사되지 않도록 한국어 카탈로그를 출처로 둔다.
+var (
+	tooManyAuthAttemptsMessage = pageTextKo.TooManyAttempts
+	serverErrorMessage         = pageTextKo.ServerError
+)
 
 // logAndJSONError/logAndStringError는 클라이언트에는 generic 메시지만 주고 원본 오류는 서버
 // 로그에만 남긴다 — DB/OIDC/JWT 등 내부 오류 문자열이 응답 body로 새어 나가는 것을 막는다.
@@ -1860,574 +1869,3 @@ func applyShareResponseHeaders(ctx *gin.Context) {
 	ctx.Header("Pragma", "no-cache")
 	ctx.Header("X-Robots-Tag", "noindex, nofollow")
 }
-
-var loginPageTemplate = template.Must(template.New("login").Parse(`
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ .Title }}</title>
-    <style>
-      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
-      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
-      .card { width:100%; max-width:420px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
-      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
-      h1 { margin:0 0 8px; font-size:34px; line-height:1.1; }
-      p { color:#9fb0d3; margin:0 0 24px; }
-      form { display:flex; flex-direction:column; gap:14px; }
-      label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; }
-      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
-      button, a.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:14px; padding:14px 16px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
-      .primary { background:#5f7cff; color:white; }
-      .secondary { background:#24324a; color:white; }
-      .stack { display:flex; flex-direction:column; gap:12px; }
-      .error { background:rgba(255,92,92,.12); color:#ffb8b8; border:1px solid rgba(255,92,92,.18); border-radius:14px; padding:12px 14px; margin-bottom:18px; }
-      .foot { margin-top:16px; color:#8fa0c5; font-size:13px; }
-      .divider { margin:18px 0; border-top:1px solid rgba(255,255,255,.08); }
-      .actions { display:flex; flex-direction:column; gap:12px; }
-      .passkey-status { margin-top:12px; font-size:13px; line-height:1.5; color:#9fb0d3; min-height:18px; text-align:center; }
-      .passkey-status.err { color:#ffb8b8; }
-      .passkey-status.ok { color:#8be9a3; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="eyebrow">Dolgate</div>
-        <h1>{{ .Title }}</h1>
-        <p>브라우저에서 로그인한 뒤 앱으로 돌아갑니다.</p>
-        {{ if .ErrorMessage }}
-          <div class="error">{{ .ErrorMessage }}</div>
-        {{ end }}
-        {{ if .LocalAuthEnabled }}
-          <form method="post" action="{{ if .IsSignup }}/signup{{ else }}/login{{ end }}">
-            <input type="hidden" name="client" value="{{ .Client }}" />
-            <input type="hidden" name="redirect_uri" value="{{ .RedirectURI }}" />
-            <input type="hidden" name="state" value="{{ .State }}" />
-            <input type="hidden" name="platform" value="{{ .Platform }}" />
-            <label>Email
-              <input type="email" name="email" value="{{ .Email }}" required autocomplete="username webauthn" autofocus />
-            </label>
-            <label>Password
-              <input type="password" name="password" required minlength="8" />
-            </label>
-            <button class="primary" type="submit">{{ if .IsSignup }}Create account{{ else }}Sign in{{ end }}</button>
-          </form>
-        {{ end }}
-        {{ if and .ShowSignupLink (not .IsSignup) }}
-          <div class="foot">계정이 없나요? <a href="/signup?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}&platform={{ .Platform }}" style="color:#b9c8ff">회원가입</a></div>
-        {{ end }}
-        {{ if .WebAuthnEnabled }}
-          <div id="passkey-section" style="display:none">
-            {{ if .LocalAuthEnabled }}<div class="divider"></div>{{ end }}
-            <div class="actions">
-              <button id="passkey-login" class="button secondary" type="button">패스키로 로그인</button>
-            </div>
-            <div id="passkey-status" class="passkey-status"></div>
-          </div>
-        {{ end }}
-        {{ if .OIDCEnabled }}
-          {{ if or .LocalAuthEnabled .WebAuthnEnabled }}<div class="divider"></div>{{ end }}
-          <div class="actions">
-            <a class="button secondary" href="/auth/oidc/start?client={{ .Client }}&redirect_uri={{ .RedirectURI }}&state={{ .State }}">Continue with {{ .OIDCDisplayName }}</a>
-          </div>
-        {{ end }}
-      </div>
-    </div>
-    <script>
-      // 로그인/회원가입 폼을 fetch 로 보내 페이지 이동을 없앤다. 폼을 네이티브로 전송하면
-      // 히스토리 항목이 하나 늘어나고, 그러면 브라우저가 콜백 탭의 window.close() 를 막아
-      // "이 탭은 닫아도 됩니다" 화면이 남는다. 이동을 안 하면 항목이 1개로 유지되어 닫힌다.
-      //
-      // 서버 응답 형식은 그대로 사용한다(하위 호환) — 성공 시 돌아오는 브리지 페이지의
-      // #open-app 링크에서 콜백 URL 을 읽고, 실패 시 다시 렌더된 로그인 페이지의 .error 문구를
-      // 그대로 표시한다. JS 미지원이면 리스너가 안 붙어 네이티브 전송이 그대로 동작하고,
-      // fetch 가 실패하면(네트워크·확장 차단) 네이티브 전송으로 폴백한다. 반대로 서버가
-      // 응답을 준 경우엔 절대 재전송하지 않는다 — 그 요청은 이미 처리됐을 수 있다.
-      (function () {
-        var form = document.querySelector('form[method="post"]');
-        if (!form || !window.fetch || !window.DOMParser || !window.FormData || !window.URLSearchParams) { return; }
-        var container = form.parentNode;
-        var submitButton = form.querySelector('button[type="submit"]');
-        var busy = false;
-
-        function showError(message) {
-          var box = container.querySelector('.error');
-          if (!box) {
-            box = document.createElement('div');
-            box.className = 'error';
-            container.insertBefore(box, form);
-          }
-          box.textContent = message;
-        }
-        function nativeSubmit() {
-          busy = true;
-          form.submit();
-        }
-        function unlock() {
-          busy = false;
-          if (submitButton) { submitButton.disabled = false; }
-        }
-
-        form.addEventListener('submit', function (event) {
-          if (busy) { return; }
-          event.preventDefault();
-          busy = true;
-          if (submitButton) { submitButton.disabled = true; }
-          // 응답 헤더가 오는 순간 서버는 이 요청을 이미 처리한 것이다. 그 뒤의 실패
-          // (본문이 잘림, 연결 끊김, 파싱 오류)는 재전송하면 안 된다.
-          var responded = false;
-          fetch(form.action, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(new FormData(form)).toString()
-          })
-            .then(function (response) { responded = true; return response.text(); })
-            .then(function (html) {
-              var doc = new DOMParser().parseFromString(html, 'text/html');
-              var callbackLink = doc.getElementById('open-app');
-              var target = callbackLink && callbackLink.getAttribute('href');
-              if (target) {
-                // assign 이 아니라 replace — 히스토리 항목을 1개로 유지해야 탭이 스스로 닫힌다.
-                window.location.replace(target);
-                return;
-              }
-              if (!doc.querySelector('form[method="post"]')) {
-                // 서버가 응답은 했는데 로그인 페이지도 브리지 페이지도 아니다(평문 4xx/5xx,
-                // 프록시의 502 페이지 …). 여기서 네이티브로 재전송하면 서버가 이미 처리한
-                // 요청이 한 번 더 실행된다 — 회원가입이면 첫 요청에서 계정이 만들어진 뒤
-                // 두 번째가 중복으로 실패해 "가입 실패"로 보인다. 재전송하지 않고 알린다.
-                showError('서버가 로그인을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.');
-                unlock();
-                return;
-              }
-              var serverError = doc.querySelector('.error');
-              showError(serverError ? serverError.textContent.trim() : '로그인에 실패했습니다.');
-              unlock();
-            })
-            .catch(function () {
-              if (responded) {
-                showError('서버 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
-                unlock();
-                return;
-              }
-              // 요청이 서버에 닿지도 못한 경우(네트워크 끊김, 확장/프록시가 fetch 만 차단)
-              // 에만 네이티브 전송으로 폴백한다 — 폴백이 없으면 fetch 가 막힌 환경에서
-              // 로그인이 아예 불가능해진다.
-              nativeSubmit();
-            });
-        });
-      })();
-    </script>
-    {{ if .WebAuthnEnabled }}
-    <script>
-      (function () {
-        var section = document.getElementById('passkey-section');
-        if (!window.PublicKeyCredential || !window.isSecureContext) { return; }
-        if (section) { section.style.display = 'block'; }
-        var CTX = { client: "{{ .Client }}", redirectUri: "{{ .RedirectURI }}", state: "{{ .State }}" };
-        var RP_ID = "{{ .WebAuthnRPID }}";
-        function b64urlToBuf(value) {
-          value = value.replace(/-/g, '+').replace(/_/g, '/');
-          var pad = value.length % 4; if (pad) { value += '='.repeat(4 - pad); }
-          var binary = atob(value); var bytes = new Uint8Array(binary.length);
-          for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-          return bytes.buffer;
-        }
-        function bufToB64url(buffer) {
-          var bytes = new Uint8Array(buffer); var binary = '';
-          for (var i = 0; i < bytes.length; i++) { binary += String.fromCharCode(bytes[i]); }
-          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-        function decodeRequestOptions(options) {
-          options.challenge = b64urlToBuf(options.challenge);
-          if (options.allowCredentials) {
-            options.allowCredentials = options.allowCredentials.map(function (credential) {
-              credential.id = b64urlToBuf(credential.id); return credential;
-            });
-          }
-          return options;
-        }
-        function encodeAssertion(credential) {
-          return {
-            id: credential.id, type: credential.type, rawId: bufToB64url(credential.rawId),
-            response: {
-              authenticatorData: bufToB64url(credential.response.authenticatorData),
-              clientDataJSON: bufToB64url(credential.response.clientDataJSON),
-              signature: bufToB64url(credential.response.signature),
-              userHandle: credential.response.userHandle ? bufToB64url(credential.response.userHandle) : null
-            },
-            clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
-          };
-        }
-        async function beginLogin() {
-          var response = await fetch('/auth/webauthn/login/begin', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
-          });
-          if (!response.ok) { throw new Error('begin failed'); }
-          return response.json();
-        }
-        async function finishLogin(ceremonyId, assertion) {
-          var response = await fetch('/auth/webauthn/login/finish', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ceremonyId: ceremonyId, client: CTX.client, redirectUri: CTX.redirectUri, state: CTX.state, credential: assertion })
-          });
-          if (!response.ok) {
-            var body = {};
-            try { body = (await response.json()) || {}; } catch (e) {}
-            var loginError = new Error(body.error || ('로그인 검증 실패 (' + response.status + ')'));
-            loginError.code = body.code || '';
-            throw loginError;
-          }
-          return response.json();
-        }
-        var statusEl = document.getElementById('passkey-status');
-        var conditionalController = null;
-        var busy = false;
-        function setStatus(message, kind) { if (statusEl) { statusEl.textContent = message || ''; statusEl.className = 'passkey-status' + (kind ? ' ' + kind : ''); } }
-        function errorMessage(error) {
-          if (error && error.name === 'NotAllowedError') { return '등록된 패스키가 없거나 인증이 취소되었습니다. 먼저 패스키를 등록해 주세요.'; }
-          return '패스키 로그인 실패: ' + ((error && (error.message || error.name)) || '알 수 없는 오류');
-        }
-        function signalUnknownCredential(credential) {
-          // WebAuthn Signal API — 지원 브라우저(Chrome 132+ 등)에서 비밀번호 관리자에게 이
-          // 자격증명이 이 서버에 없음을 알려 stale 패스키를 정리하게 한다. credential.id 는
-          // base64url 자격증명 ID. 미지원/실패는 조용히 무시한다.
-          if (!RP_ID || !credential) { return; }
-          if (!PublicKeyCredential.signalUnknownCredential) {
-            console.info('[passkey] signalUnknownCredential 미지원 브라우저 — stale 패스키는 수동 삭제 필요');
-            return;
-          }
-          try {
-            PublicKeyCredential.signalUnknownCredential({ rpId: RP_ID, credentialId: credential.id })
-              .then(function () {
-                // 신호를 보냈다고 항상 삭제되지는 않는다 — 반영 여부는 패스키 제공자가 결정한다.
-                // (Google 비밀번호 관리자는 반영, Apple Passwords/iCloud 키체인은 Chrome 경로에서 미반영)
-                console.info('[passkey] signalUnknownCredential 전송됨 (반영 여부는 패스키 제공자가 결정)');
-              })
-              .catch(function (error) { console.warn('[passkey] signalUnknownCredential 실패', error); });
-          } catch (e) { console.warn('[passkey] signalUnknownCredential 호출 실패', e); }
-        }
-        async function run(mediation) {
-          var data = await beginLogin();
-          var getOptions = { publicKey: decodeRequestOptions(data.publicKey) };
-          if (mediation === 'conditional') {
-            conditionalController = new AbortController();
-            getOptions.mediation = 'conditional';
-            getOptions.signal = conditionalController.signal;
-          }
-          var credential = await navigator.credentials.get(getOptions);
-          if (!credential) { return; }
-          setStatus('로그인 확인 중…');
-          // 자격증명을 고른 뒤의 서버 검증 실패는 conditional(autofill) 흐름이라도 반드시
-          // 표시한다 — 안 그러면 바깥 catch(function(){})가 삼켜 "로그인 확인 중…"에서 무한
-          // 정지한다. 실패 후엔 autofill 을 다시 쓸 수 있게 재무장한다.
-          var result;
-          try {
-            result = await finishLogin(data.ceremonyId, encodeAssertion(credential));
-          } catch (error) {
-            setStatus(errorMessage(error), 'err');
-            // 서버가 "미등록 자격증명"으로 확정하면, 비밀번호 관리자의 stale 패스키를 정리 신호.
-            if (error && error.code === 'unknown_credential') { signalUnknownCredential(credential); }
-            armConditional();
-            return;
-          }
-          if (result && result.redirectUrl) {
-            setStatus('로그인 성공 — 앱으로 돌아갑니다.', 'ok');
-            // assign 이 아니라 replace 를 쓴다 — 히스토리 항목을 늘리지 않아야 콜백 탭의 세션
-            // 히스토리가 1개로 유지되고, 그래야 브라우저가 콜백 페이지의 window.close() 를 허용한다.
-            window.location.replace(result.redirectUrl);
-          }
-        }
-        function armConditional() {
-          if (!PublicKeyCredential.isConditionalMediationAvailable) { return; }
-          PublicKeyCredential.isConditionalMediationAvailable().then(function (available) {
-            if (available) { run('conditional').catch(function () {}); }
-          });
-        }
-        var button = document.getElementById('passkey-login');
-        if (button) {
-          button.addEventListener('click', function () {
-            if (busy) { return; }
-            busy = true;
-            setStatus('패스키 확인 중…');
-            // 페이지 로드 시 시작한 conditional 요청이 대기 중이면 취소한다 — 안 그러면
-            // 버튼의 modal get() 이 "이미 요청 진행 중" 에러로 조용히 실패한다.
-            if (conditionalController) { conditionalController.abort(); conditionalController = null; }
-            run('optional')
-              .catch(function (error) {
-                setStatus(errorMessage(error), 'err');
-                // 모달을 취소/실패하면 conditional 요청도 abort된 상태이므로, 새로고침 없이
-                // email 필드 autofill 이 다시 뜨도록 conditional 을 재무장한다.
-                armConditional();
-              })
-              .finally(function () { busy = false; });
-          });
-        }
-        armConditional();
-      })();
-    </script>
-    {{ end }}
-  </body>
-</html>
-`))
-
-var webauthnRegisterPageTemplate = template.Must(template.New("webauthn-register").Parse(`
-<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>Dolgate 패스키 등록</title>
-    <style>
-      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
-      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
-      .card { width:100%; max-width:460px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
-      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
-      h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
-      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
-      label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; margin-bottom:16px; }
-      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
-      button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#5f7cff; color:#fff; width:100%; }
-      .status { margin-top:16px; font-size:14px; min-height:20px; }
-      .ok { color:#8be9a3; }
-      .err { color:#ffb8b8; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="eyebrow">Dolgate</div>
-        <h1>패스키 등록</h1>
-        <p>이 기기의 생체 인증 또는 보안 키로 패스키를 등록합니다. 다음 로그인부터 비밀번호 없이 사용할 수 있습니다.</p>
-        <label id="passkey-name-label">패스키 이름(선택)
-          <input id="passkey-name" type="text" maxlength="60" placeholder="예: 내 맥북" />
-        </label>
-        <button id="register" class="button" type="button">패스키 등록</button>
-        <div id="status" class="status"></div>
-      </div>
-    </div>
-    <script>
-      (function () {
-        // 티켓은 URL fragment(#ticket=)로만 전달된다 — 서버·로그·히스토리에 남지 않는다.
-        // 읽는 즉시 주소창/히스토리에서 제거해 재사용 노출을 더 줄인다.
-        var TICKET = (function () {
-          var prefix = '#ticket=';
-          var hash = window.location.hash || '';
-          if (hash.indexOf(prefix) !== 0) { return ''; }
-          var value = decodeURIComponent(hash.slice(prefix.length));
-          try { window.history.replaceState(null, '', window.location.pathname); } catch (e) {}
-          return value;
-        })();
-        var statusEl = document.getElementById('status');
-        function setStatus(message, className) { statusEl.textContent = message; statusEl.className = 'status ' + (className || ''); }
-        if (!window.PublicKeyCredential || !window.isSecureContext) {
-          setStatus('이 브라우저에서는 패스키를 사용할 수 없습니다.', 'err');
-          document.getElementById('register').disabled = true;
-          return;
-        }
-        if (!TICKET) {
-          setStatus('등록 링크가 올바르지 않거나 만료되었습니다. 앱에서 다시 시도해 주세요.', 'err');
-          document.getElementById('register').disabled = true;
-          return;
-        }
-        function b64urlToBuf(value) {
-          value = value.replace(/-/g, '+').replace(/_/g, '/');
-          var pad = value.length % 4; if (pad) { value += '='.repeat(4 - pad); }
-          var binary = atob(value); var bytes = new Uint8Array(binary.length);
-          for (var i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
-          return bytes.buffer;
-        }
-        function bufToB64url(buffer) {
-          var bytes = new Uint8Array(buffer); var binary = '';
-          for (var i = 0; i < bytes.length; i++) { binary += String.fromCharCode(bytes[i]); }
-          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        }
-        function decodeCreationOptions(options) {
-          options.challenge = b64urlToBuf(options.challenge);
-          options.user.id = b64urlToBuf(options.user.id);
-          if (options.excludeCredentials) {
-            options.excludeCredentials = options.excludeCredentials.map(function (credential) {
-              credential.id = b64urlToBuf(credential.id); return credential;
-            });
-          }
-          return options;
-        }
-        function encodeAttestation(credential) {
-          var response = {
-            attestationObject: bufToB64url(credential.response.attestationObject),
-            clientDataJSON: bufToB64url(credential.response.clientDataJSON)
-          };
-          if (credential.response.getTransports) { response.transports = credential.response.getTransports(); }
-          return {
-            id: credential.id, type: credential.type, rawId: bufToB64url(credential.rawId),
-            response: response,
-            clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {}
-          };
-        }
-        // 서버가 내려준 문구를 그대로 쓴다. 안 읽으면 "개수 초과라 먼저 지우라"거나
-        // "등록 링크가 이미 사용됐다" 같은, 다음에 뭘 할지 알려 주는 안내가 사라진다.
-        async function serverError(response, fallback) {
-          try {
-            var body = await response.json();
-            return (body && typeof body.error === 'string' && body.error) || fallback;
-          } catch (error) {
-            return fallback;
-          }
-        }
-        async function register() {
-          setStatus('진행 중…');
-          var beginResponse = await fetch('/auth/webauthn/register/begin', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: TICKET })
-          });
-          if (!beginResponse.ok) { throw new Error(await serverError(beginResponse, '등록을 시작할 수 없습니다.')); }
-          var data = await beginResponse.json();
-          var credential = await navigator.credentials.create({ publicKey: decodeCreationOptions(data.publicKey) });
-          var finishResponse = await fetch('/auth/webauthn/register/finish', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticket: TICKET, ceremonyId: data.ceremonyId, name: document.getElementById('passkey-name').value, credential: encodeAttestation(credential) })
-          });
-          if (!finishResponse.ok) { throw new Error(await serverError(finishResponse, '패스키 등록에 실패했습니다.')); }
-          markDone();
-        }
-        var registerButton = document.getElementById('register');
-        function markDone() {
-          // 성공 후 재클릭을 막고 완료 상태를 명확히 한다. 앱이 연 탭이 아니면 window.close()
-          // 가 막히므로, 닫힘이 실패해도 완료 안내가 남도록 UI를 먼저 정리한다.
-          registerButton.style.display = 'none';
-          var nameLabel = document.getElementById('passkey-name-label');
-          if (nameLabel) { nameLabel.style.display = 'none'; }
-          setStatus('패스키가 등록되었습니다. 이 창을 닫고 앱으로 돌아가 주세요.', 'ok');
-          setTimeout(function () { try { window.close(); } catch (e) {} }, 800);
-        }
-        function registerErrorMessage(error) {
-          if (error && error.name === 'NotAllowedError') {
-            return '등록이 취소되었거나 시간이 초과되었습니다. 이미 이 기기에 등록된 패스키가 있으면 중복 등록은 차단됩니다 — 다른 기기·보안 키로 추가하려면 인증 창에서 다른 옵션을 선택하세요.';
-          }
-          if (error && error.name === 'InvalidStateError') {
-            return '이 기기에는 이미 이 계정의 패스키가 등록되어 있습니다.';
-          }
-          return (error && (error.message || error.name)) || '오류가 발생했습니다.';
-        }
-        registerButton.addEventListener('click', function () {
-          registerButton.disabled = true;
-          register().catch(function (error) {
-            registerButton.disabled = false;
-            setStatus(registerErrorMessage(error), 'err');
-          });
-        });
-      })();
-    </script>
-  </body>
-</html>
-`))
-
-var oidcExchangeBridgeTemplate = template.Must(template.New("oidc-exchange-bridge").Parse(`
-<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>Dolgate 로그인 처리 중</title>
-    <style>
-      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
-      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
-      .card { width:100%; max-width:460px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
-      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
-      h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
-      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
-      button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#24324a; color:#fff; border:1px solid rgba(185,200,255,.34); }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="eyebrow">Dolgate</div>
-        <h1>로그인 처리 중…</h1>
-        <p>잠시만 기다려 주세요. 자동으로 진행되지 않으면 아래 버튼을 눌러 주세요.</p>
-        <form id="complete-form" method="POST" action="/auth/oidc/complete">
-          <input type="hidden" name="code" value="{{ .Code }}" />
-          <input type="hidden" name="state" value="{{ .State }}" />
-          <button type="submit" class="button">계속</button>
-        </form>
-      </div>
-    </div>
-    <script>
-      (function () {
-        var form = document.getElementById('complete-form');
-        if (!form) { return; }
-        var submitted = false;
-        function submitOnce() {
-          if (submitted) { return; }
-          submitted = true;
-          form.submit();
-        }
-        // prefetch는 이 스크립트를 실행하지 않아 코드가 보존된다. prerender는 활성화(실제
-        // 사용자 네비게이션) 이후에만 제출해 미리 코드를 소진하지 않게 한다.
-        if (document.prerendering) {
-          document.addEventListener('prerenderingchange', submitOnce, { once: true });
-        } else {
-          submitOnce();
-        }
-      })();
-    </script>
-  </body>
-</html>`))
-
-var desktopCallbackBridgeTemplate = template.Must(template.New("desktop-callback-bridge").Parse(`
-<!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Open Dolgate</title>
-    <style>
-      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f1726; color:#f5f7fb; }
-      .wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; }
-      .card { width:100%; max-width:460px; background:#162133; border:1px solid rgba(255,255,255,.08); border-radius:24px; box-shadow:0 18px 48px rgba(0,0,0,.35); padding:32px; }
-      .eyebrow { letter-spacing:.2em; font-size:12px; text-transform:uppercase; color:#9fb0d3; margin-bottom:10px; }
-      h1 { margin:0 0 10px; font-size:34px; line-height:1.08; }
-      p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
-      a.button { display:inline-flex; justify-content:center; align-items:center; gap:10px; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
-      .primary { background:#24324a; color:white; border:1px solid rgba(185,200,255,.34); box-shadow:0 12px 28px rgba(0,0,0,.22); }
-      .hint { margin-top:16px; color:#8fa0c5; font-size:13px; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="eyebrow">Dolgate</div>
-        <h1>앱으로 돌아가는 중</h1>
-        <p>로그인은 완료되었습니다. Dolgate 앱이 자동으로 열리지 않으면 아래 버튼을 눌러 돌아가세요.</p>
-        <a id="open-app" class="button primary" href="{{ .CallbackURLAttr }}">Dolgate 열기 ↗</a>
-        <div class="hint">앱이 이미 열려 있다면 이 탭은 닫아도 됩니다.</div>
-      </div>
-    </div>
-    <script>
-      const target = {{ .CallbackURLJSON }};
-      const openAppButton = document.getElementById('open-app');
-      const openApp = () => {
-        if (!target) {
-          return;
-        }
-        // assign 이 아니라 replace — 이 브리지 페이지를 히스토리에 남기면 콜백에서 뒤로 가기를
-        // 눌렀을 때 이 페이지로 돌아왔다가 아래 load 핸들러가 다시 앞으로 보내는 루프가 된다.
-        window.location.replace(target);
-      };
-      if (openAppButton && target) {
-        openAppButton.addEventListener('click', (event) => {
-          event.preventDefault();
-          openApp();
-        });
-      }
-      window.addEventListener('load', () => {
-        setTimeout(openApp, 80);
-      });
-    </script>
-  </body>
-</html>
-`))

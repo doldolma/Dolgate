@@ -16,18 +16,20 @@ import { isSshHostRecord } from "@dolssh/shared-core";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
+import { useTranslation } from "react-i18next";
 
 type HostAuthType = "password" | "privateKey";
 type CredentialMode = "preserve" | "replace" | "remove";
 
-const AUTH_TYPE_OPTIONS: Array<{ value: HostAuthType; label: string }> = [
-  { value: "password", label: "비밀번호" },
-  { value: "privateKey", label: "개인 키" },
+const AUTH_TYPE_OPTIONS: Array<{ value: HostAuthType; labelKey: string }> = [
+  { value: "password", labelKey: "hostForm.auth.password" },
+  { value: "privateKey", labelKey: "hostForm.auth.privateKey" },
 ];
 
 // SSH 호스트 생성·수정 폼. 데스크톱 전용 고급 필드(jump host·환경변수·시작 명령 등)는
 // 다루지 않는다 — 수정 시 스토어(saveHost)가 기존 값을 그대로 보존한다.
 export function HostFormScreen(): React.JSX.Element {
+  const { t: translate } = useTranslation();
   const palette = useMobilePalette();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, "HostForm">>();
@@ -64,16 +66,16 @@ export function HostFormScreen(): React.JSX.Element {
   const port = Number.parseInt(portDraft, 10);
   const validationMessage = (() => {
     if (!label.trim()) {
-      return "이름을 입력해 주세요.";
+      return translate("hostForm.validation.name");
     }
     if (!hostname.trim()) {
-      return "호스트 주소를 입력해 주세요.";
+      return translate("hostForm.validation.host");
     }
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      return "포트는 1~65535 사이의 숫자여야 합니다.";
+      return translate("hostForm.validation.port");
     }
     if (!username.trim()) {
-      return "사용자 이름을 입력해 주세요.";
+      return translate("hostForm.validation.username");
     }
     return null;
   })();
@@ -103,10 +105,10 @@ export function HostFormScreen(): React.JSX.Element {
       navigation.goBack();
     } catch (error) {
       Alert.alert(
-        hostId ? "호스트 수정 실패" : "호스트 추가 실패",
+        translate(hostId ? "hostForm.editFailedTitle" : "hostForm.addFailedTitle"),
         error instanceof Error && error.message.trim()
           ? error.message
-          : "호스트를 저장하지 못했습니다.",
+          : translate("hostForm.saveFailed"),
       );
     } finally {
       setSaving(false);
@@ -138,12 +140,12 @@ export function HostFormScreen(): React.JSX.Element {
           ]}
         >
           <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            기본 정보
+            {translate("hostForm.basicSection")}
           </Text>
           <TextInput
             value={label}
             onChangeText={setLabel}
-            placeholder="이름 (예: 개발 서버)"
+            placeholder={translate("hostForm.namePlaceholder")}
             placeholderTextColor={palette.mutedText}
             autoCorrect={false}
             style={inputStyle}
@@ -151,7 +153,7 @@ export function HostFormScreen(): React.JSX.Element {
           <TextInput
             value={hostname}
             onChangeText={setHostname}
-            placeholder="호스트 주소 (예: 10.0.0.1, example.com)"
+            placeholder={translate("hostForm.hostPlaceholder")}
             placeholderTextColor={palette.mutedText}
             autoCapitalize="none"
             autoCorrect={false}
@@ -161,7 +163,7 @@ export function HostFormScreen(): React.JSX.Element {
             <TextInput
               value={portDraft}
               onChangeText={setPortDraft}
-              placeholder="포트"
+              placeholder={translate("hostForm.portPlaceholder")}
               placeholderTextColor={palette.mutedText}
               keyboardType="number-pad"
               style={[...inputStyle, styles.portInput]}
@@ -169,7 +171,7 @@ export function HostFormScreen(): React.JSX.Element {
             <TextInput
               value={username}
               onChangeText={setUsername}
-              placeholder="사용자 이름"
+              placeholder={translate("hostForm.usernamePlaceholder")}
               placeholderTextColor={palette.mutedText}
               autoCapitalize="none"
               autoCorrect={false}
@@ -179,7 +181,7 @@ export function HostFormScreen(): React.JSX.Element {
           <TextInput
             value={groupName}
             onChangeText={setGroupName}
-            placeholder="그룹 (선택, 예: work/aws)"
+            placeholder={translate("hostForm.groupPlaceholder")}
             placeholderTextColor={palette.mutedText}
             autoCapitalize="none"
             autoCorrect={false}
@@ -194,7 +196,7 @@ export function HostFormScreen(): React.JSX.Element {
           ]}
         >
           <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            인증
+            {translate("hostForm.authSection")}
           </Text>
           <View style={styles.row}>
             {AUTH_TYPE_OPTIONS.map((option) => {
@@ -226,7 +228,7 @@ export function HostFormScreen(): React.JSX.Element {
                       { color: active ? palette.accent : palette.text },
                     ]}
                   >
-                    {option.label}
+                    {translate(option.labelKey)}
                   </Text>
                 </Pressable>
               );
@@ -236,9 +238,9 @@ export function HostFormScreen(): React.JSX.Element {
             <View style={styles.credentialModeRow}>
               {(
                 [
-                  ["preserve", "기존 유지"],
-                  ["replace", "교체"],
-                  ["remove", "연결 해제"],
+                  ["preserve", translate("hostForm.credential.preserve")],
+                  ["replace", translate("hostForm.credential.replace")],
+                  ["remove", translate("hostForm.credential.remove")],
                 ] as Array<[CredentialMode, string]>
               ).map(([mode, modeLabel]) => {
                 const active = credentialMode === mode;
@@ -275,19 +277,19 @@ export function HostFormScreen(): React.JSX.Element {
             <Text
               style={[styles.helpText, { color: palette.mutedText }]}
             >
-              저장된 자격 증명을 변경하지 않습니다.
+              {translate("hostForm.credential.preserveHint")}
             </Text>
           ) : credentialMode === "remove" ? (
             <Text
               style={[styles.helpText, { color: palette.mutedText }]}
             >
-              이 호스트와의 연결만 해제하며 저장된 자격 증명은 삭제하지 않습니다.
+              {translate("hostForm.credential.removeHint")}
             </Text>
           ) : authType === "password" ? (
             <TextInput
               value={password}
               onChangeText={setPassword}
-              placeholder="비밀번호 (비워두면 저장하지 않음)"
+              placeholder={translate("hostForm.passwordPlaceholder")}
               placeholderTextColor={palette.mutedText}
               secureTextEntry
               autoCapitalize="none"
@@ -300,7 +302,7 @@ export function HostFormScreen(): React.JSX.Element {
                 value={privateKeyPem}
                 onChangeText={setPrivateKeyPem}
                 placeholder={
-                  "개인 키 붙여넣기 (비워두면 저장하지 않음)\n-----BEGIN OPENSSH PRIVATE KEY-----"
+                  translate("hostForm.privateKeyPlaceholder")
                 }
                 placeholderTextColor={palette.mutedText}
                 multiline
@@ -311,7 +313,7 @@ export function HostFormScreen(): React.JSX.Element {
               <TextInput
                 value={passphrase}
                 onChangeText={setPassphrase}
-                placeholder="키 암호 (선택)"
+                placeholder={translate("hostForm.passphrasePlaceholder")}
                 placeholderTextColor={palette.mutedText}
                 secureTextEntry
                 autoCapitalize="none"
@@ -321,7 +323,7 @@ export function HostFormScreen(): React.JSX.Element {
             </>
           )}
           <Text style={[styles.helpText, { color: palette.mutedText }]}>
-            입력한 자격 증명은 암호화되어 다른 기기와 동기화됩니다.
+            {translate("hostForm.syncHint")}
           </Text>
         </View>
 
@@ -343,7 +345,11 @@ export function HostFormScreen(): React.JSX.Element {
           ]}
         >
           <Text style={styles.saveText}>
-            {saving ? "저장 중..." : hostId ? "변경 사항 저장" : "호스트 추가"}
+            {saving
+            ? translate("hostForm.saving")
+            : hostId
+              ? translate("hostForm.saveChanges")
+              : translate("hostForm.addHost")}
           </Text>
         </Pressable>
       </ScrollView>
