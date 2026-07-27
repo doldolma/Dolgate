@@ -124,6 +124,15 @@ jobs:
         working-directory: services/ssh-core
         run: go test ./... -cover
 
+      # Only here: GOOS=ios needs cgo, and cgo for an Apple target needs the
+      # Apple toolchain, so this cannot run on the Linux job that binds the
+      # Android ABIs. Riding the macOS matrix leg keeps it off a runner of its
+      # own.
+      - name: Verify the engine compiles for iOS
+        if: matrix.os == 'macos-latest'
+        working-directory: services/ssh-core
+        run: GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build $(go list ./... | grep -v '/cmd/')
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -255,8 +264,3 @@ jobs:
       # would otherwise reach a release unnoticed.
       - name: Bind the Go SSH engine for every Android ABI
         run: npm run mobile:engine:build -- android "arm64-v8a,armeabi-v7a,x86_64,x86"
-
-      - name: Verify the engine compiles for iOS targets
-        run: |
-          cd services/ssh-core
-          GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build $(go list ./... | grep -v '/cmd/')

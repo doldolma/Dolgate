@@ -4,15 +4,29 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"dolssh/services/ssh-core/internal/sshconn"
 )
 
+// The SFTP fixture serves the host filesystem as if it were the remote, so on
+// Windows these assertions end up describing Windows rather than the Unix host
+// an SFTP tab actually talks to: chmod only moves the read-only bit, and paths
+// come back with backslashes where the protocol uses '/'. The engine is built
+// for Android and iOS only, so there is nothing here Windows needs to prove.
+func skipUnlessPosixRemote(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("SFTP fixture assumes a POSIX remote; the mobile engine ships only for Android and iOS")
+	}
+}
+
 // The fixture's SFTP server serves the host filesystem, so these tests operate
 // inside a temp directory and assert against real protocol responses.
 func newSFTP(t *testing.T) (*SFTP, string) {
 	t.Helper()
+	skipUnlessPosixRemote(t)
 
 	server := newTestServer(t)
 	conn, err := Dial(DialOptions{ID: "conn-1", Target: server.Target(), Config: sshconn.DefaultConfig})

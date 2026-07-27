@@ -6,11 +6,23 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
+// Same reason as session.skipUnlessPosixRemote: the fixture's remote is the host
+// filesystem, and on Windows that is not the POSIX remote these assertions
+// describe.
+func skipUnlessPosixRemote(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("SFTP fixture assumes a POSIX remote; the mobile engine ships only for Android and iOS")
+	}
+}
+
 func newBoundSFTP(t *testing.T) (*SFTPSession, string) {
 	t.Helper()
+	skipUnlessPosixRemote(t)
 
 	server := newTestServer(t)
 	conn := connectTest(t, server, 30, 100)
