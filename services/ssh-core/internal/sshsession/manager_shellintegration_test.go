@@ -3,6 +3,7 @@ package sshsession
 import (
 	"bytes"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,13 +11,19 @@ import (
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
+// fakeWriteCloser stands in for the session's stdin. Injection happens on a
+// timer goroutine (see the reinject gate) while the test inspects the writer, so
+// the fake is mutex-guarded and must only be read through its accessors.
 type fakeWriteCloser struct {
+	mu     sync.Mutex
 	writes int
 	buf    bytes.Buffer
 	err    error
 }
 
 func (f *fakeWriteCloser) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.writes++
 	if f.err != nil {
 		return 0, f.err
@@ -25,6 +32,24 @@ func (f *fakeWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (f *fakeWriteCloser) Close() error { return nil }
+
+func (f *fakeWriteCloser) writeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writes
+}
+
+func (f *fakeWriteCloser) written() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.buf.String()
+}
+
+func (f *fakeWriteCloser) setErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
+}
 
 // installShellIntegration는 여러 번 호출해도 정확히 1회만 주입하고 핸드셰이크를 arm 한다.
 // 서버측 Connect 주입과 renderer 경유 InstallShellIntegration이 같은 상태를 공유하므로 어느
@@ -47,10 +72,10 @@ func TestInstallShellIntegrationInjectsOnce(t *testing.T) {
 		t.Fatalf("expected third install to be no-op, installed=%v err=%v", installed, err)
 	}
 
-	if w.writes != 1 {
-		t.Fatalf("expected exactly one injection across repeated calls, got %d", w.writes)
+	if got := w.writeCount(); got != 1 {
+		t.Fatalf("expected exactly one injection across repeated calls, got %d", got)
 	}
-	if got := w.buf.String(); got != autocomplete.ShellIntegrationInitCommand() {
+	if got := w.written(); got != autocomplete.ShellIntegrationInitCommand() {
 		t.Fatalf("unexpected injected command: %q", got)
 	}
 	// arm 되었으면 echo/마커가 없는 첫 청크는 흡수(버퍼링)되어 빈 forward를 반환한다.
@@ -72,8 +97,8 @@ func TestInstallShellIntegrationUnsupportedIsNoop(t *testing.T) {
 	if err != nil || installed {
 		t.Fatalf("expected unsupported install to be no-op, installed=%v err=%v", installed, err)
 	}
-	if w.writes != 0 {
-		t.Fatalf("unsupported shell should not receive init command, got %d writes", w.writes)
+	if got := w.writeCount(); got != 0 {
+		t.Fatalf("unsupported shell should not receive init command, got %d writes", got)
 	}
 	if forwarded := h.handshake.Filter([]byte("plain output")); string(forwarded) != "plain output" {
 		t.Fatalf("unsupported shell output should pass through, got %q", forwarded)
@@ -97,13 +122,13 @@ func TestInstallShellIntegrationWriteFailureCanRetry(t *testing.T) {
 		t.Fatalf("handshake should pass through after failed write, got %q", forwarded)
 	}
 
-	w.err = nil
+	w.setErr(nil)
 	installed, err = m.installShellIntegration("session-1", h, "bash")
 	if err != nil || !installed {
 		t.Fatalf("expected retry to install, installed=%v err=%v", installed, err)
 	}
-	if w.writes != 2 {
-		t.Fatalf("expected failed write plus retry, got %d writes", w.writes)
+	if got := w.writeCount(); got != 2 {
+		t.Fatalf("expected failed write plus retry, got %d writes", got)
 	}
 }
 
@@ -131,20 +156,20 @@ func TestReinjectShellIntegrationInjectsAfterPromptSettles(t *testing.T) {
 	// Connection/auth output that is not a prompt must not trigger injection.
 	h.reinjectGate.Observe([]byte("Connecting to remote2...\r\n"))
 	time.Sleep(45 * time.Millisecond)
-	if w.writes != 0 {
-		t.Fatalf("must not inject before a prompt settles, got %d writes", w.writes)
+	if got := w.writeCount(); got != 0 {
+		t.Fatalf("must not inject before a prompt settles, got %d writes", got)
 	}
 
 	// A settled subshell prompt then quiet triggers exactly one injection.
 	h.reinjectGate.Observe([]byte("user@remote2:~$ "))
 	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) && w.writes == 0 {
+	for time.Now().Before(deadline) && w.writeCount() == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if w.writes != 1 {
-		t.Fatalf("expected exactly one re-injection after prompt settle, got %d", w.writes)
+	if got := w.writeCount(); got != 1 {
+		t.Fatalf("expected exactly one re-injection after prompt settle, got %d", got)
 	}
-	if got := w.buf.String(); got != autocomplete.ShellIntegrationInitCommand() {
+	if got := w.written(); got != autocomplete.ShellIntegrationInitCommand() {
 		t.Fatalf("unexpected injected command: %q", got)
 	}
 	// The handshake must be armed so the injected command echo is suppressed.

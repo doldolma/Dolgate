@@ -24,9 +24,18 @@ type EventEmitter func(protocol.Event)
 type StreamEmitter func(protocol.StreamFrame, []byte)
 
 type sessionHandle struct {
-	client    *ssh.Client
-	session   *ssh.Session
-	stdin     io.WriteCloser
+	client  *ssh.Client
+	session *ssh.Session
+	// stdin은 여러 goroutine이 쓴다(사용자 키 입력·connect의 env export 폴백·shell
+	// integration 주입·서브셸 재주입 타이머). 반드시 writeStdin/closeStdin으로만
+	// 접근할 것 — 직접 Write하면 stdinMu를 우회한다.
+	stdin io.WriteCloser
+	// stdinMu는 stdin 접근을 직렬화한다. 실제 stdin은 x/crypto/ssh 채널이고
+	// channel.WriteExtended는 스트림별 packet 버퍼(packetPool)를 재사용하므로
+	// 동시 Write는 상류가 명시한 데이터 레이스다. 레이스가 아니어도 1KB짜리 통합 init
+	// 명령이 사용자 키 입력과 바이트 단위로 섞여 원격 PTY에 깨진 명령줄로 도착한다.
+	// Close(=CloseWrite)도 Write가 읽는 sentEOF를 건드리므로 같은 락으로 묶는다.
+	stdinMu   sync.Mutex
 	closed    chan struct{}
 	closer    sync.Once
 	handshake autocomplete.Handshake
@@ -42,6 +51,24 @@ type sessionHandle struct {
 
 	completionWorkerMu sync.Mutex
 	completionWorker   *sshcmd.CompletionWorker
+}
+
+// writeStdin writes p to the session's stdin as one indivisible unit. Every
+// stdin writer must go through here: the underlying ssh channel is not safe for
+// concurrent Write, and an injected command that interleaves with the user's
+// keystrokes corrupts the remote command line.
+func (h *sessionHandle) writeStdin(p []byte) (int, error) {
+	h.stdinMu.Lock()
+	defer h.stdinMu.Unlock()
+	return h.stdin.Write(p)
+}
+
+// closeStdin closes stdin under the write lock so a concurrent writeStdin never
+// overlaps the channel's CloseWrite.
+func (h *sessionHandle) closeStdin() error {
+	h.stdinMu.Lock()
+	defer h.stdinMu.Unlock()
+	return h.stdin.Close()
 }
 
 type ManagerConfig struct {
@@ -318,7 +345,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	// 비대화형(command 실행) 세션에는 주입하지 않는다. shell integration이 설치된 경우에는
 	// init 뒤에 와야 export echo도 통합 전 프롬프트와 함께 handshake에 흡수된다.
 	if payload.Command == "" && len(envFallback) > 0 {
-		_, _ = stdin.Write([]byte(buildEnvExportFallback(envFallback)))
+		_, _ = handle.writeStdin([]byte(buildEnvExportFallback(envFallback)))
 	}
 
 	// connected 이벤트는 renderer가 탭 상태를 연결 완료로 바꾸는 기준점이다.
@@ -376,7 +403,7 @@ func (m *Manager) WriteBytes(sessionID string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	_, err = session.stdin.Write(data)
+	_, err = session.writeStdin(data)
 	return err
 }
 
@@ -626,7 +653,7 @@ func (m *Manager) performShellIntegrationReinject(sessionID string, session *ses
 	// echo (and its prompt redraw) is hidden — the subshell's own login/motd and
 	// prompt were already shown to the user while the gate was waiting.
 	session.handshake.Arm(true)
-	if _, err := session.stdin.Write([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
+	if _, err := session.writeStdin([]byte(autocomplete.ShellIntegrationInitCommand())); err != nil {
 		if flushed := session.handshake.Flush(); len(flushed) > 0 {
 			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
 		}
@@ -716,7 +743,7 @@ func (m *Manager) installShellIntegration(sessionID string, session *sessionHand
 	}
 
 	session.handshake.Arm(true)
-	if _, err := session.stdin.Write([]byte(command)); err != nil {
+	if _, err := session.writeStdin([]byte(command)); err != nil {
 		flushed := session.handshake.Flush()
 		session.shellIntegrationState = shellIntegrationUnknown
 		session.shellIntegrationMu.Unlock()
@@ -943,7 +970,7 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 		close(session.closed)
 		session.closeCompletionWorker()
 		// stdin, session, client를 같은 순서로 정리해 하위 리소스를 남기지 않는다.
-		_ = session.stdin.Close()
+		_ = session.closeStdin()
 		_ = session.session.Close()
 		_ = session.client.Close()
 	})

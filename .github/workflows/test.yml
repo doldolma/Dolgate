@@ -124,6 +124,16 @@ jobs:
         working-directory: services/ssh-core
         run: go test ./... -cover
 
+      # 세션 stdin·프롬프트 게이트·핸드셰이크는 타이머/스트림 goroutine이 공유하는 상태라
+      # -race 없이는 레이스가 그대로 통과한다(실제로 통과했었다). 전체 ./...에 -race를 걸면
+      # 3-OS 매트릭스 비용이 늘고 타이밍 민감한 패키지(ssmforward 등)가 러너 부하에 따라
+      # 흔들릴 수 있어, 동시성 핵심 패키지만 좁게 검사한다. 레이스 검출은 OS에 거의
+      # 무관하므로 ubuntu에서만 돌린다. 필요해지면 대상 패키지를 넓히면 된다.
+      - name: Stress ssh-core session races
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: services/ssh-core
+        run: go test -race ./internal/sshsession ./internal/autocomplete -count=2
+
       # Only here: GOOS=ios needs cgo, and cgo for an Apple target needs the
       # Apple toolchain, so this cannot run on the Linux job that binds the
       # Android ABIs. Riding the macOS matrix leg keeps it off a runner of its
