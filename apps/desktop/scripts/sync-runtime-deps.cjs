@@ -158,6 +158,15 @@ function resolveInstalledPackageJson(packageName) {
   }
 }
 
+// Walks desktopPackage.dependencies, so what lives there decides what gets copied
+// into apps/desktop/node_modules.
+//
+// react and react-dom belong in devDependencies and must stay there. Vite bundles
+// them into the renderer — the built output has no bare `react` import left — so
+// the packaged app never resolves them from node_modules, and copying them in
+// gives the workspace a second React instance. Renderer tests then render the
+// tree with one copy while an externalized dependency (react-i18next) calls hooks
+// on the other, and every test in the file dies on a null dispatcher.
 async function collectRuntimeDependencyGraph() {
   const targetPlatform = resolveTargetPlatform();
   const queue = Object.keys(desktopPackage.dependencies || {})
