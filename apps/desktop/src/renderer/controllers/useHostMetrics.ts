@@ -49,7 +49,8 @@ export interface HostMetricsState {
 }
 
 interface Options {
-  sessionId: string;
+  /** 없으면 폴링하지 않는다 — 대상 pane 이 정해지기 전에도 훅은 호출되어야 하므로. */
+  sessionId: string | null;
   enabled: boolean;
   /** 이 탭이 화면에 보이는지. 보이지 않으면 폴링하지 않는다. */
   visible: boolean;

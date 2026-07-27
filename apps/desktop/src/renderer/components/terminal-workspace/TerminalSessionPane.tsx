@@ -193,10 +193,18 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
     (state) => state.settings?.hostMetricsEnabled ?? false,
   );
   // 연결된 호스트 세션에서만. 로컬 터미널은 원격 부하라는 개념이 없다.
+  //
+  // tmux pane 은 제외한다. 한 그룹의 pane 들은 모두 같은 호스트라 같은 값이 pane 수만큼
+  // 반복되고, pane 폭이 좁으면 바가 경계에서 잘려 옆 pane 것과 겹쳐 읽힌다. 그룹당 하나만
+  // 셸 하단에서 그린다(SessionShell). enabled 를 끄는 것으로 표시와 샘플링이 함께 멈춘다 —
+  // 바는 status 'off' 에서 null 을 반환하고, 호스트를 pane 수만큼 폴링하던 것도 없어진다.
   const hostMetrics = useHostMetrics({
     sessionId,
     enabled:
-      hostMetricsEnabled && tab?.source === 'host' && tab?.status === 'connected',
+      hostMetricsEnabled &&
+      tab?.source === 'host' &&
+      tab?.status === 'connected' &&
+      !tab?.tmux,
     visible,
   });
   // 스티키 헤더가 떠 있고 hover 한 블록이 그 아래로 파고들면(=블록 상단이 화면 위로 잘린

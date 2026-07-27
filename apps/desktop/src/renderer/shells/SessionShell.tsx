@@ -2,6 +2,10 @@ import { useMemo } from 'react';
 import type { AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
+import { TerminalHostStatusBar } from '../components/terminal-workspace/TerminalHostStatusBar';
+import { listWorkspaceSessionIds } from '../components/terminal-workspace/terminalWorkspaceLayout';
+import { useHostMetrics } from '../controllers/useHostMetrics';
+import { useAppStore } from '../store/appStore';
 import { TmuxSessionFooter } from '../components/terminal-workspace/TmuxSessionFooter';
 import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandPrompt';
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
@@ -84,6 +88,28 @@ export function SessionShell({
         (workspace) => workspace.id === activeTmuxGroup.activeWorkspaceId,
       ) ?? null
     : workspaceFromTab;
+  // tmux 그룹의 자원바는 pane 이 아니라 여기 하단에서 한 번만 그린다(pane 쪽은 enabled 를
+  // 끈다). 샘플링 대상 세션은 레이아웃 순서상 첫 pane 으로 고정한다 — 활성 pane 을 따라가면
+  // 포커스를 옮길 때마다 sessionId 가 바뀌고, 훅이 차분 기준을 버려서 NET·DISK 가 매번
+  // 깜빡인다. 같은 그룹이면 어느 pane 이든 호스트가 같으므로 고정해도 값은 동일하다.
+  const hostMetricsEnabled = useAppStore(
+    (state) => state.settings?.hostMetricsEnabled ?? false,
+  );
+  const tmuxMetricsSessionId =
+    activeTmuxGroup && activeWorkspace
+      ? listWorkspaceSessionIds(activeWorkspace.layout)[0] ?? null
+      : null;
+  const tmuxMetricsTab = tmuxMetricsSessionId
+    ? sessionViewModel.tabs.find((tab) => tab.sessionId === tmuxMetricsSessionId)
+    : undefined;
+  const tmuxHostMetrics = useHostMetrics({
+    sessionId: tmuxMetricsSessionId,
+    enabled:
+      hostMetricsEnabled &&
+      tmuxMetricsTab?.source === 'host' &&
+      tmuxMetricsTab?.status === 'connected',
+    visible: active,
+  });
   // 그룹의 윈도우 목록(같은 control 세션) — index 순 정렬, 윈도우 바에 표시.
   const tmuxWindows = activeTmuxGroup
     ? sessionViewModel.workspaces
@@ -232,6 +258,13 @@ export function SessionShell({
           <TerminalTransferToastRegion />
           <TmuxCommandPrompt />
         </div>
+        {activeTmuxGroup ? (
+          <TerminalHostStatusBar
+            status={tmuxHostMetrics.status}
+            metrics={tmuxHostMetrics.metrics}
+            onRetry={tmuxHostMetrics.retry}
+          />
+        ) : null}
         {activeTmuxGroup ? (
           <TmuxSessionFooter
             sessionName={activeTmuxGroup.sessionName}

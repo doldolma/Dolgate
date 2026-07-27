@@ -21,7 +21,11 @@ export function useScreenPadding(
 ): ScreenPadding {
   const insets = useSafeAreaInsets();
   const {
-    horizontal = 18,
+    // Phone screens are narrow enough that the gutter competes with the content:
+    // cards carry their own inner padding, so the outer margin only has to keep
+    // them off the bezel. The screens that want a wider gutter (the auth landing)
+    // ask for it rather than everyone paying for it.
+    horizontal = 12,
     includeSafeTop = true,
     includeSafeBottom = true,
     topOffset = 10,

@@ -734,6 +734,28 @@ export function AppTitleBar({
   const publishedAt = formatPublishedAt(updateState.release?.publishedAt);
   const releaseUrl = resolveReleaseUrl(updateState);
   const showInstallAction = updateState.status === 'downloaded';
+
+  // Installing quits and relaunches the app, and the gap before the window goes
+  // away reads as the click not having registered. Spin until then.
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
+
+  // The updater action reports failure by moving updateState to 'error' rather
+  // than rejecting, so that — not the promise — is what un-sticks the button.
+  // There is deliberately no reset on success: the app is on its way out, and
+  // dropping the spinner first would just flash the idle button.
+  useEffect(() => {
+    if (updateState.status === 'error') {
+      setIsInstallingUpdate(false);
+    }
+  }, [updateState.status]);
+
+  const handleInstallUpdate = useCallback(() => {
+    if (isInstallingUpdate) {
+      return;
+    }
+    setIsInstallingUpdate(true);
+    void onInstallUpdate();
+  }, [isInstallingUpdate, onInstallUpdate]);
   const showCheckAction =
     updateState.enabled &&
     (updateState.status === 'idle' ||
@@ -1591,10 +1613,18 @@ export function AppTitleBar({
                 size="sm"
                 className="h-9 min-h-9 whitespace-nowrap rounded-[9px] px-3"
                 aria-label={translate('titleBar.update.label')}
-                onClick={onInstallUpdate}
+                aria-busy={isInstallingUpdate}
+                disabled={isInstallingUpdate}
+                onClick={handleInstallUpdate}
               >
-                <Download className="h-4 w-4" aria-hidden="true" />
-                {translate('titleBar.update.badge')}
+                {isInstallingUpdate ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                )}
+                {isInstallingUpdate
+                  ? translate('titleBar.update.installing')
+                  : translate('titleBar.update.badge')}
               </Button>
             </Tooltip>
           ) : (

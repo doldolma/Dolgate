@@ -683,6 +683,7 @@
       "installTooltip": "{{version}} ready to install",
       "installTooltipFallback": "Update ready",
       "badge": "Update",
+      "installing": "Installing…",
       "viewStatus": "View update status",
       "label": "Update",
       "devOnly": "Auto-update only works in packaged release builds.",

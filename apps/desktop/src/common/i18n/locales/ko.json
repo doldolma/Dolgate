@@ -683,6 +683,7 @@
       "installTooltip": "{{version}} 업데이트 준비됨",
       "installTooltipFallback": "업데이트 준비됨",
       "badge": "업데이트",
+      "installing": "설치 중…",
       "viewStatus": "업데이트 상태 보기",
       "label": "업데이트",
       "devOnly": "자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.",

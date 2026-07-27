@@ -120,6 +120,55 @@ describe('AppTitleBar update popover', () => {
     expect(onInstallUpdate).toHaveBeenCalledTimes(1);
   });
 
+  // Installing quits and relaunches, so the button has to say it is working or
+  // the wait before the window disappears looks like a dropped click.
+  it('shows progress on the install button and ignores further clicks', async () => {
+    const onInstallUpdate = vi.fn(() => new Promise<void>(() => {}));
+    renderTitleBar({
+      updateState: {
+        ...createUpdateState(),
+        status: 'downloaded',
+        release: { version: 'v1.1.0', publishedAt: '2026-04-13T00:00:00.000Z' },
+      },
+      onInstallUpdate,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '업데이트' }));
+
+    const installing = await screen.findByRole('button', { name: '업데이트' });
+    expect(installing).toHaveTextContent('설치 중…');
+    expect(installing).toBeDisabled();
+    expect(installing).toHaveAttribute('aria-busy', 'true');
+
+    fireEvent.click(installing);
+    expect(onInstallUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  // The updater reports failure through updateState rather than by rejecting, so
+  // that is what has to bring the button back.
+  it('restores the install button when the update fails', async () => {
+    const onInstallUpdate = vi.fn(() => new Promise<void>(() => {}));
+    const downloaded = {
+      ...createUpdateState(),
+      status: 'downloaded' as const,
+      release: { version: 'v1.1.0', publishedAt: '2026-04-13T00:00:00.000Z' },
+    };
+    const { unmount } = renderTitleBar({ updateState: downloaded, onInstallUpdate });
+
+    fireEvent.click(screen.getByRole('button', { name: '업데이트' }));
+    expect(await screen.findByRole('button', { name: '업데이트' })).toBeDisabled();
+
+    unmount();
+    renderTitleBar({
+      updateState: { ...downloaded, status: 'error', errorMessage: '설치 실패' },
+      onInstallUpdate,
+    });
+
+    expect(
+      screen.queryByRole('button', { name: '업데이트 상태 보기' }),
+    ).toBeInTheDocument();
+  });
+
   it('closes when clicking outside the update menu', () => {
     renderTitleBar();
 

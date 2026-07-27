@@ -46,7 +46,10 @@ import {
   parseReportedTerminalGrid,
 } from '../lib/terminal-size';
 import type { MainTabParamList } from '../navigation/RootNavigator';
-import { useMobileAppStore } from '../store/useMobileAppStore';
+import {
+  sortSessionsByRecency,
+  useMobileAppStore,
+} from '../store/useMobileAppStore';
 import type { MobilePalette } from '../theme';
 import { useMobilePalette } from '../theme';
 import { useTranslation } from 'react-i18next';
@@ -224,15 +227,27 @@ export function SessionScreen(): React.JSX.Element {
   // OS 가 백그라운드에서 프로세스를 회수하면 SSH 연결도 함께 끊기고, 콜드스타트에서
   // 살아있던 세션은 closed 로 정규화된다. 탭은 live 세션만 보여주므로 사용자 눈에는
   // 세션이 사라진 것처럼 보인다 — 다시 붙을 수 있게 재연결 목록으로 남겨준다.
-  const reconnectableSessions = useMemo(
-    () =>
-      sessions
-        .filter(
-          session => !isLiveSession(session.status) && session.isRestorable,
-        )
-        .slice(0, 5),
-    [sessions],
-  );
+  // One entry per host, newest first. Reconnecting to the same host over a day
+  // leaves a closed session behind each time, so without this the list fills up
+  // with the same name repeated — and `sessions` is in tab order, not recency,
+  // so the five it used to show were an arbitrary five.
+  const reconnectableSessions = useMemo(() => {
+    const restorable = sortSessionsByRecency(
+      sessions.filter(
+        session => !isLiveSession(session.status) && session.isRestorable,
+      ),
+    );
+    const seenHosts = new Set<string>();
+    const newestPerHost: typeof restorable = [];
+    for (const session of restorable) {
+      if (seenHosts.has(session.hostId)) {
+        continue;
+      }
+      seenHosts.add(session.hostId);
+      newestPerHost.push(session);
+    }
+    return newestPerHost.slice(0, 5);
+  }, [sessions]);
   const liveSessions = useMemo(
     () => sessions.filter(session => isLiveSession(session.status)),
     [sessions],
