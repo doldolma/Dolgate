@@ -48,6 +48,7 @@ import {
   toLinkedHostSummary,
 } from './appShellUtils';
 import { OfflineModeBanner } from './OfflineModeBanner';
+import { useTranslation } from 'react-i18next';
 
 interface HomeShellProps {
   active: boolean;
@@ -72,6 +73,7 @@ export function HomeShell({
   loginController,
   onRequestSecretEditor,
 }: HomeShellProps) {
+  const { t: translate } = useTranslation();
   const settingsViewModel = useSettingsViewModel();
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'overview' | 'connection'>('overview');
@@ -162,7 +164,7 @@ export function HomeShell({
       setHostBrowserError(
         error instanceof Error
           ? error.message
-          : '호스트 레이아웃 설정을 저장하지 못했습니다.',
+          : translate('home.error.layoutSaveFailed'),
       );
     });
   }
@@ -291,8 +293,8 @@ export function HomeShell({
     const linkedHostCount = entry?.linkedHostCount ?? 0;
     const confirmed = window.confirm(
       linkedHostCount > 0
-        ? `이 secret을 삭제하면 ${linkedHostCount}개 호스트와의 secret 연결이 해제됩니다. 호스트 자체는 삭제되지 않습니다. 계속할까요?`
-        : '이 secret을 삭제할까요?',
+        ? translate('home.secret.deleteLinked', { count: linkedHostCount })
+        : translate('home.secret.delete'),
     );
     if (!confirmed) {
       return;
@@ -306,7 +308,7 @@ export function HomeShell({
   ) {
     const host = findHost(homeViewModel.hosts, hostId);
     if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
-      throw new Error('SSH host를 찾지 못했습니다.');
+      throw new Error(translate('home.error.sshHostNotFound'));
     }
     // EC2는 SSH-over-SSM(EIC)로 접속해 설치만 한다 — 매 연결 임시 키를 쓰므로
     // "이 키로 접속 전환"이 없다.
@@ -321,12 +323,12 @@ export function HomeShell({
     });
     const failed = result.results.find((entry) => entry.status === 'failed');
     if (failed) {
-      throw new Error(failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.');
+      throw new Error(failed.message ?? translate('home.error.keyInstallFailed'));
     }
     setHostBrowserStatus(
       isEc2
-        ? `${host.label} 인스턴스의 authorized_keys에 새 SSH 키를 설치했습니다.`
-        : `${host.label} 호스트가 새 SSH 키를 사용하도록 전환되었습니다.`,
+        ? translate('home.key.installedAuthorizedKeys', { label: host.label })
+        : translate('home.key.switched', { label: host.label }),
     );
   }
 
@@ -421,7 +423,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : '로컬 터미널을 시작하지 못했습니다.',
+                    : translate('home.error.localTerminalFailed'),
                 );
               });
             }}
@@ -476,13 +478,13 @@ export function HomeShell({
                 await homeViewModel.moveGroup(path, targetParentPath);
                 const nextPath = buildMovedGroupPath(path, targetParentPath);
                 setHostBrowserStatus(
-                  nextPath ? `그룹을 ${nextPath}(으)로 이동했습니다.` : '그룹을 이동했습니다.',
+                  nextPath ? translate('home.group.movedTo', { path: nextPath }) : translate('home.group.moved'),
                 );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : '그룹을 이동하지 못했습니다.',
+                    : translate('home.error.groupMoveFailed'),
                 );
                 throw error;
               }
@@ -493,13 +495,13 @@ export function HomeShell({
                 await homeViewModel.renameGroup(path, name);
                 const nextPath = buildRenamedGroupPath(path, name);
                 setHostBrowserStatus(
-                  nextPath ? `그룹 이름을 ${nextPath}(으)로 변경했습니다.` : '그룹 이름을 변경했습니다.',
+                  nextPath ? translate('home.group.renamedTo', { path: nextPath }) : translate('home.group.renamed'),
                 );
               } catch (error) {
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : '그룹 이름을 변경하지 못했습니다.',
+                    : translate('home.error.groupRenameFailed'),
                 );
                 throw error;
               }
@@ -544,7 +546,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : '호스트 연결을 시작하지 못했습니다.',
+                    : translate('home.error.connectFailed'),
                 );
               }
             }}
@@ -558,7 +560,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : 'tmux 연결을 시작하지 못했습니다.',
+                    : translate('home.error.tmuxFailed'),
                 );
               }
             }}
@@ -571,7 +573,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : '컨테이너 페이지를 열지 못했습니다.',
+                    : translate('home.error.containersFailed'),
                 );
               }
             }}
@@ -587,7 +589,7 @@ export function HomeShell({
                 setHostBrowserError(
                   error instanceof Error
                     ? error.message
-                    : 'Quick Connect를 시작하지 못했습니다.',
+                    : translate('home.error.quickConnectFailed'),
                 );
               }
             }}
@@ -596,7 +598,7 @@ export function HomeShell({
               setSelectedHostId(hostId);
               void homeViewModel.connectSftpHost('right', hostId).catch((error) => {
                 setHostBrowserError(
-                  error instanceof Error ? error.message : 'SFTP를 열지 못했습니다.',
+                  error instanceof Error ? error.message : translate('home.error.sftpFailed'),
                 );
               });
             }}
@@ -732,7 +734,11 @@ export function HomeShell({
         onClose={() => setExportHostIds(null)}
         onExported={(result) => {
           setHostBrowserStatus(
-            `${result.exportedHostCount}개 호스트를 내보냈습니다.${result.skippedHostCount > 0 ? ` ${result.skippedHostCount}개는 제외했습니다.` : ''}`,
+            `${translate('home.transfer.exported', { count: result.exportedHostCount })}${
+              result.skippedHostCount > 0
+                ? translate('home.transfer.exportSkipped', { count: result.skippedHostCount })
+                : ''
+            }`,
           );
           setHostBrowserError(result.warnings[0] ?? null);
         }}
@@ -744,7 +750,11 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshSyncedWorkspaceData();
           setHostBrowserStatus(
-            `Dolgate 파일에서 호스트 ${result.importedHostCount}개를 가져왔습니다.${result.skippedCount > 0 ? ` 이미 있는 항목 ${result.skippedCount}개는 건너뛰었습니다.` : ''}`,
+            `${translate('home.transfer.dolgateImported', { count: result.importedHostCount })}${
+              result.skippedCount > 0
+                ? translate('home.transfer.dolgateSkipped', { count: result.skippedCount })
+                : ''
+            }`,
           );
           setHostBrowserError(result.warnings[0] ?? null);
         }}
@@ -756,7 +766,15 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
           setHostBrowserStatus(
-            `Termius에서 ${result.createdHostCount}개 호스트, ${result.createdGroupCount}개 그룹, ${result.createdSecretCount}개 secret을 가져왔습니다.${result.skippedHostCount > 0 ? ` 불완전 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''}`,
+            `${translate('home.transfer.termiusImported', {
+              hosts: result.createdHostCount,
+              groups: result.createdGroupCount,
+              secrets: result.createdSecretCount,
+            })}${
+              result.skippedHostCount > 0
+                ? translate('home.transfer.termiusSkipped', { count: result.skippedHostCount })
+                : ''
+            }`,
           );
           setHostBrowserError(result.warnings[0]?.message ?? null);
         }}
@@ -769,13 +787,13 @@ export function HomeShell({
         onImported={async (result) => {
           await homeViewModel.refreshHostCatalog();
           setHostBrowserStatus(
-            `OpenSSH에서 호스트 ${result.createdHostCount}개를 가져왔습니다.${
+            `${translate('home.transfer.opensshImported', { count: result.createdHostCount })}${
               result.createdSecretCount > 0
-                ? ` 인증 정보 ${result.createdSecretCount}개를 함께 가져왔습니다.`
+                ? translate('home.transfer.opensshSecrets', { count: result.createdSecretCount })
                 : ''
             }${
               result.skippedHostCount > 0
-                ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.`
+                ? translate('home.transfer.skippedHosts', { count: result.skippedHostCount })
                 : ''
             }`,
           );
@@ -792,9 +810,12 @@ export function HomeShell({
             setHostBrowserStatus(buildXshellImportStatusMessage(result)),
           );
           setHostBrowserStatus(
-            `Xshell에서 호스트 ${result.createdHostCount}개와 그룹 ${result.createdGroupCount}개를 가져왔습니다.${
+            `${translate('home.transfer.xshellImported', {
+              hosts: result.createdHostCount,
+              groups: result.createdGroupCount,
+            })}${
               result.skippedHostCount > 0
-                ? ` 건너뛴 호스트 ${result.skippedHostCount}개가 있습니다.`
+                ? translate('home.transfer.skippedHosts', { count: result.skippedHostCount })
                 : ''
             }`,
           );

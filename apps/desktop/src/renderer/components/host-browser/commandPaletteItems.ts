@@ -25,6 +25,7 @@ import {
   SquareTerminal,
 } from '../../ui/icons';
 import type { HostBrowserModel } from './useHostBrowser';
+import { t } from '../../i18n';
 
 const MAX_PALETTE_HOSTS = 6;
 
@@ -87,6 +88,8 @@ function hostSupportsContainers(host: HostRecord): boolean {
   return isSshHostRecord(host) || isWarpgateSshHostRecord(host) || isAwsEc2HostRecord(host);
 }
 
+// keywords 는 화면에 보이지 않는 검색 별칭이라 번역하지 않는다 — 한글 별칭을 남겨 두면
+// UI 언어가 영어여도 한글로 타이핑해 찾을 수 있다(제목은 번역되어 영어로도 검색된다).
 export function buildHostBrowserCommandPaletteItems(
   hb: HostBrowserModel,
 ): CommandPaletteItem[] {
@@ -96,7 +99,7 @@ export function buildHostBrowserCommandPaletteItems(
       id: 'nav:home-hosts',
       group: 'navigation',
       title: 'Home',
-      subtitle: '호스트',
+      subtitle: t('palette.nav.hosts'),
       keywords: ['home', 'hosts', 'host browser', '호스트'],
       Icon: Home,
       run: () => hb.onSelectSection?.('hosts'),
@@ -105,7 +108,7 @@ export function buildHostBrowserCommandPaletteItems(
       id: 'nav:sftp',
       group: 'navigation',
       title: 'SFTP',
-      subtitle: '파일 전송',
+      subtitle: t('palette.nav.sftp'),
       keywords: ['sftp', 'files', 'file transfer', '파일'],
       Icon: Folder,
       run: () => hb.onActivateSftp?.(),
@@ -113,7 +116,7 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'nav:containers',
       group: 'navigation',
-      title: '컨테이너',
+      title: t('palette.nav.containers'),
       subtitle: 'Docker, Podman, ECS',
       keywords: ['containers', 'docker', 'podman', 'ecs', 'container'],
       Icon: Container,
@@ -122,8 +125,8 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'nav:port-forwarding',
       group: 'navigation',
-      title: '포트 포워딩',
-      subtitle: '터널',
+      title: t('palette.nav.portForwarding'),
+      subtitle: t('palette.nav.tunnels'),
       keywords: ['port', 'forward', 'forwarding', 'tunnel', '포트'],
       Icon: ArrowLeftRight,
       run: () => hb.onSelectSection?.('portForwarding'),
@@ -131,8 +134,8 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'nav:snippets',
       group: 'navigation',
-      title: '스니펫',
-      subtitle: '저장된 명령어',
+      title: t('palette.nav.snippets'),
+      subtitle: t('palette.nav.savedCommands'),
       keywords: ['snippets', 'snippet', 'commands', '명령'],
       Icon: Scissors,
       run: () => hb.onSelectSection?.('snippets'),
@@ -140,8 +143,8 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'nav:logs',
       group: 'navigation',
-      title: '로그',
-      subtitle: '활동 기록',
+      title: t('palette.nav.logs'),
+      subtitle: t('palette.nav.activity'),
       keywords: ['logs', 'activity', 'audit', '로그'],
       Icon: List,
       run: () => hb.onSelectSection?.('logs'),
@@ -149,8 +152,8 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'nav:settings',
       group: 'navigation',
-      title: '설정',
-      subtitle: '환경설정',
+      title: t('palette.nav.settings'),
+      subtitle: t('palette.nav.preferences'),
       keywords: ['settings', 'preferences', '설정'],
       Icon: Settings,
       run: () => hb.onSelectSection?.('settings'),
@@ -158,19 +161,19 @@ export function buildHostBrowserCommandPaletteItems(
     {
       id: 'terminal:local',
       group: 'local-terminal',
-      title: '로컬 터미널',
-      subtitle: '로컬 셸',
+      title: t('palette.nav.localTerminal'),
+      subtitle: t('palette.nav.localShell'),
       keywords: ['local', 'terminal', 'shell', '터미널'],
       Icon: SquareTerminal,
       run: () => hb.onOpenLocalTerminal(),
     },
     ...(
       [
-        ['general', '일반', '테마와 터미널', 'general appearance terminal'],
-        ['sftp', 'SFTP 설정', '전송 기본값', 'sftp transfer'],
-        ['security', '보안', '신뢰와 보안', 'security trust'],
-        ['secrets', '저장된 인증 정보', '비밀번호와 키', 'saved credentials password keys secrets'],
-        ['aws-profiles', 'AWS 프로필', 'AWS CLI 프로필', 'aws profiles cli'],
+        ['general', t('palette.settings.general'), t('palette.settings.generalSubtitle'), 'general appearance terminal'],
+        ['sftp', t('palette.settings.sftp'), t('palette.settings.sftpSubtitle'), 'sftp transfer'],
+        ['security', t('palette.settings.security'), t('palette.settings.securitySubtitle'), 'security trust'],
+        ['secrets', t('palette.settings.secrets'), t('palette.settings.secretsSubtitle'), 'saved credentials password keys secrets'],
+        ['aws-profiles', t('palette.settings.awsProfiles'), t('palette.settings.awsProfilesSubtitle'), 'aws profiles cli'],
       ] as const
     ).map(([section, title, subtitle, aliases]) => ({
       id: `settings:${section}`,
@@ -189,7 +192,7 @@ export function buildHostBrowserCommandPaletteItems(
     quickItems.push({
       id: `quick:ssh:${parsedQuickSsh.username}@${parsedQuickSsh.hostname}:${parsedQuickSsh.port}`,
       group: 'quick-connect',
-      title: '저장하고 SSH 연결',
+      title: t('palette.quickSsh'),
       subtitle: formatQuickSshHostLabel(parsedQuickSsh),
       keywords: ['ssh', 'quick connect', parsedQuickSsh.username, parsedQuickSsh.hostname],
       Icon: SquareTerminal,
@@ -214,10 +217,10 @@ export function buildHostBrowserCommandPaletteItems(
       hostItems.push({
         id: `host:connect:${host.id}`,
         group: 'host',
-        title: `${host.label} 연결`,
+        title: t('palette.host.connect', { label: host.label }),
         subtitle: getHostPaletteSubtitle(
           host,
-          !query && (hb.lastConnectedByHostId.get(host.id) ?? 0) > 0 ? '최근 접속' : undefined,
+          !query && (hb.lastConnectedByHostId.get(host.id) ?? 0) > 0 ? t('palette.host.recent') : undefined,
         ),
         keywords: [host.label, host.groupName ?? '', getHostPaletteText(host)],
         Icon: SquareTerminal,
@@ -239,7 +242,7 @@ export function buildHostBrowserCommandPaletteItems(
       hostItems.push({
         id: `host:containers:${host.id}`,
         group: 'host',
-        title: `${host.label} 컨테이너`,
+        title: t('palette.host.containers', { label: host.label }),
         subtitle: getHostPaletteSubtitle(host),
         keywords: ['containers', 'docker', 'podman', host.label, getHostPaletteText(host)],
         Icon: Container,

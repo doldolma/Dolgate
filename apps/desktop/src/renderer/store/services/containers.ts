@@ -38,6 +38,7 @@ import {
   findPendingConnectionAttempt,
   isPendingEcsShellAttempt,
 } from "../utils";
+import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
@@ -214,7 +215,7 @@ export function createContainersServices(deps: SliceDeps) {
         sessionId,
         createConnectionProgress(
           "retrying-session",
-          `${host.label} 컨테이너 셸을 여는 중입니다.`,
+          t("containersStore.openingShell", { label: host.label }),
         ),
       );
 
@@ -239,7 +240,7 @@ export function createContainersServices(deps: SliceDeps) {
               errorMessage: undefined,
               connectionProgress: createConnectionProgress(
                 "connecting",
-                `${host.label} 컨테이너 셸에 연결하는 중입니다.`,
+                t("containersStore.connectingShell", { label: host.label }),
               ),
               hasReceivedOutput: false,
               lastEventAt: new Date().toISOString(),
@@ -259,7 +260,7 @@ export function createContainersServices(deps: SliceDeps) {
         const message =
           error instanceof Error
             ? error.message
-            : "컨테이너 셸을 열지 못했습니다.";
+            : t("containersStore.shellFailed");
         sessionServices.markSessionError(set, sessionId, message);
       } finally {
         clearContainerTabConnectionOverlay(set, hostId);
@@ -284,7 +285,7 @@ export function createContainersServices(deps: SliceDeps) {
         sessionId,
         createConnectionProgress(
           "retrying-session",
-          `${host.label} ECS 셸을 여는 중입니다.`,
+          t("containersStore.openingEcsShell", { label: host.label }),
         ),
       );
 
@@ -317,7 +318,7 @@ export function createContainersServices(deps: SliceDeps) {
               errorMessage: undefined,
               connectionProgress: createConnectionProgress(
                 "connecting",
-                `${host.label} ECS 셸에 연결하는 중입니다.`,
+                t("containersStore.connectingEcsShell", { label: host.label }),
               ),
               hasReceivedOutput: false,
               lastEventAt: new Date().toISOString(),
@@ -336,8 +337,8 @@ export function createContainersServices(deps: SliceDeps) {
       } catch (error) {
         const message =
           normalizeEcsExecShellPermissionMessage(
-            error instanceof Error ? error.message : "ECS 셸을 열지 못했습니다.",
-          ) ?? "ECS 셸을 열지 못했습니다.";
+            error instanceof Error ? error.message : t("containersStore.ecsShellFailed"),
+          ) ?? t("containersStore.ecsShellFailed");
         set((state) => ({
           tabs: state.tabs.map((tab) =>
             tab.sessionId === sessionId
@@ -422,7 +423,7 @@ export function createContainersServices(deps: SliceDeps) {
             detailsError:
               error instanceof Error
                 ? error.message
-                : "컨테이너 상세 정보를 불러오지 못했습니다.",
+                : t("containersStore.detailsFailed"),
           }),
         };
       });
@@ -491,7 +492,7 @@ export function createContainersServices(deps: SliceDeps) {
             ecsSnapshot: nextSnapshot,
             ecsMetricsWarning: normalizeErrorMessage(
               error,
-              "현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.",
+              t("aws.ecs.metricsPartial"),
             ),
             ecsMetricsLoading: false,
             ecsUtilizationHistoryByServiceName: {},
@@ -553,7 +554,7 @@ export function createContainersServices(deps: SliceDeps) {
             hostId,
             buildContainersEndpointId(hostId),
             "checking-profile",
-            `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+            t("containersStore.checkingProfile", { profile: host.awsProfileName }),
           ),
           errorMessage: undefined,
         }),
@@ -582,13 +583,13 @@ export function createContainersServices(deps: SliceDeps) {
       try {
         setEcsProgress(
           "loading-ecs-cluster",
-          "ECS 클러스터와 서비스 목록을 불러오는 중입니다.",
+          t("containersStore.loadingEcs"),
         );
         snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
       } catch (error) {
         const message = normalizeErrorMessage(
           error,
-          "ECS 클러스터 정보를 불러오지 못했습니다.",
+          t("containersStore.ecsLoadFailed"),
         );
         if (
           profileStatus.isSsoProfile &&
@@ -601,7 +602,7 @@ export function createContainersServices(deps: SliceDeps) {
           );
           setEcsProgress(
             "loading-ecs-cluster",
-            "ECS 클러스터와 서비스 목록을 다시 불러오는 중입니다.",
+            t("containersStore.reloadingEcs"),
           );
           snapshot = await api.aws.loadEcsClusterSnapshot(hostId);
         } else {
@@ -630,7 +631,7 @@ export function createContainersServices(deps: SliceDeps) {
               hostId,
               buildContainersEndpointId(hostId),
               "loading-ecs-metrics",
-              "AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다.",
+              t("containersStore.loadingEcsMetrics"),
             ),
             ecsSnapshot: snapshot,
             ecsMetricsWarning: null,
@@ -667,7 +668,7 @@ export function createContainersServices(deps: SliceDeps) {
             connectionProgress: null,
             errorMessage: normalizeErrorMessage(
               error,
-              "ECS 클러스터 정보를 불러오지 못했습니다.",
+              t("containersStore.ecsLoadFailed"),
             ),
             ecsMetricsLoading: false,
           }),
@@ -700,7 +701,7 @@ export function createContainersServices(deps: SliceDeps) {
               hostId,
               buildContainersEndpointId(hostId),
               "connecting-containers",
-              `${host.label} 컨테이너 연결 상태를 확인하는 중입니다.`,
+              t("containersStore.checkingConnection", { label: host.label }),
             ),
           errorMessage: undefined,
         }),
@@ -832,7 +833,7 @@ export function createContainersServices(deps: SliceDeps) {
             errorMessage:
               error instanceof Error
                 ? error.message
-                : "컨테이너 목록을 불러오지 못했습니다.",
+                : t("containersStore.listFailed"),
           }),
         };
       });
@@ -928,9 +929,9 @@ export function createContainersServices(deps: SliceDeps) {
             logsError:
               error instanceof Error
                 ? classifyContainerLogsErrorMessage(error.message) === "malformed"
-                  ? "컨테이너 로그 응답을 해석하지 못했습니다. 다시 불러오기를 시도해 주세요."
+                  ? t("containersStore.logsParseFailed")
                   : error.message
-                : "컨테이너 로그를 불러오지 못했습니다.",
+                : t("containersStore.logsFailed"),
           }),
         };
       });
@@ -999,7 +1000,7 @@ export function createContainersServices(deps: SliceDeps) {
             metricsError:
               error instanceof Error
                 ? error.message
-                : "컨테이너 메트릭을 불러오지 못했습니다.",
+                : t("containersStore.metricsFailed"),
           }),
         };
       });
@@ -1073,7 +1074,7 @@ export function createContainersServices(deps: SliceDeps) {
             logsSearchError:
               error instanceof Error
                 ? error.message
-                : "원격 로그 검색에 실패했습니다.",
+                : t("containersStore.remoteSearchFailed"),
           }),
         };
       });
@@ -1143,7 +1144,7 @@ export function createContainersServices(deps: SliceDeps) {
             actionError:
               error instanceof Error
                 ? error.message
-                : "컨테이너 작업을 실행하지 못했습니다.",
+                : t("containersStore.actionFailed"),
           }),
         };
       });

@@ -11,6 +11,7 @@ import { isSshHostRecord, normalizeHostEnvVars } from "@shared";
 import { BrowserWindow, clipboard, ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext, SshHostRecord } from "./context";
+import { t } from '../i18n';
 
 function normalizeReplacementSecrets(secrets: HostSecretInput): HostSecretInput {
   const privateKeyPem =
@@ -41,13 +42,13 @@ function validateReplacementSecrets(secrets: HostSecretInput): string | null {
     !secrets.certificateText &&
     (!secrets.env || secrets.env.length === 0)
   ) {
-    return "저장할 인증 정보가 없습니다.";
+    return t('knownHostsIpc.noSecrets');
   }
   if (secrets.certificateText && !secrets.privateKeyPem) {
-    return "SSH 인증서를 저장하려면 개인키도 함께 포함해야 합니다.";
+    return t('knownHostsIpc.certificateNeedsKey');
   }
   if (secrets.passphrase && !secrets.privateKeyPem) {
-    return "패스프레이즈는 개인키와 함께만 저장할 수 있습니다.";
+    return t('knownHostsIpc.passphraseNeedsKey');
   }
   return null;
 }
@@ -81,7 +82,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         ctx.activityLogs.append(
           "error",
           "session",
-          "호스트 연결에 실패했습니다.",
+          t('knownHostsIpc.connectFailed'),
           {
             hostId: input.hostId,
             hostLabel: host?.label ?? null,
@@ -117,7 +118,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.activityLogs.append(
         "info",
         "audit",
-        "새 호스트 키를 신뢰 목록에 저장했습니다.",
+        t('knownHostsIpc.hostKeyTrusted'),
         {
           host: input.host,
           port: input.port,
@@ -133,7 +134,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ipcChannels.knownHosts.replace,
     async (_event, input: KnownHostTrustInput) => {
       const record = ctx.knownHosts.trust(input);
-      ctx.activityLogs.append("warn", "audit", "호스트 키를 교체했습니다.", {
+      ctx.activityLogs.append("warn", "audit", t('knownHostsIpc.hostKeyReplaced'), {
         host: input.host,
         port: input.port,
         fingerprintSha256: input.fingerprintSha256,
@@ -149,7 +150,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     ctx.activityLogs.append(
       "info",
       "audit",
-      "호스트 키를 신뢰 목록에서 제거했습니다.",
+      t('knownHostsIpc.hostKeyRemoved'),
       {
         knownHostId: id,
       },
@@ -216,17 +217,17 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     async (_event, secretRef: string) => {
       const metadata = ctx.secretMetadata.getBySecretRef(secretRef);
       if (!metadata) {
-        throw new Error("저장된 인증 정보를 찾지 못했습니다.");
+        throw new Error(t('knownHostsIpc.secretNotFound'));
       }
 
       const raw = await ctx.secretStore.load(secretRef);
       if (!raw) {
-        throw new Error("저장된 인증 정보를 불러오지 못했습니다.");
+        throw new Error(t('knownHostsIpc.secretLoadFailed'));
       }
 
       const payload = JSON.parse(raw) as ManagedSecretPayload;
       if (!payload.password) {
-        throw new Error("이 인증 정보에는 저장된 비밀번호가 없습니다.");
+        throw new Error(t('knownHostsIpc.noStoredPassword'));
       }
 
       clipboard.writeText(payload.password);
@@ -240,7 +241,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
       ctx.secretMetadata.remove(secretRef);
       ctx.hosts.clearSecretRef(secretRef);
       ctx.syncOutbox.upsertDeletion("secrets", secretRef);
-      ctx.activityLogs.append("warn", "audit", "호스트 secret을 제거했습니다.", {
+      ctx.activityLogs.append("warn", "audit", t('knownHostsIpc.secretRemoved'), {
         secretRef,
       });
       ctx.queueSync();
@@ -331,7 +332,7 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
           : undefined,
       });
 
-      ctx.activityLogs.append("info", "audit", "공유 secret을 갱신했습니다.", {
+      ctx.activityLogs.append("info", "audit", t('knownHostsIpc.sharedSecretUpdated'), {
         secretRef: input.secretRef,
       });
       ctx.queueSync();
@@ -359,14 +360,14 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
         replacementSecrets,
       );
       if (!nextSecretRef) {
-        throw new Error("새 secret을 생성하지 못했습니다.");
+        throw new Error(t('knownHostsIpc.secretCreateFailed'));
       }
 
       ctx.hosts.updateSecretRef(sshHost.id, nextSecretRef);
       ctx.activityLogs.append(
         "info",
         "audit",
-        "호스트 전용 secret을 새로 생성했습니다.",
+        t('knownHostsIpc.hostSecretCreated'),
         {
           hostId: sshHost.id,
           sourceSecretRef: input.sourceSecretRef,

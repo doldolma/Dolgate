@@ -9,6 +9,7 @@ import {
   RegisterClientCommand,
   SSOOIDCClient,
 } from "@aws-sdk/client-sso-oidc";
+import { t } from './i18n';
 
 // In-app replacement for `aws sso login`: runs the SSO OIDC authorization-code
 // flow (PKCE + loopback redirect, the same flow the AWS CLI uses) and writes
@@ -85,7 +86,7 @@ class SdkAwsSsoOidcApi implements AwsSsoOidcApi {
     const clientId = output.clientId?.trim();
     const clientSecret = output.clientSecret?.trim();
     if (!clientId || !clientSecret) {
-      throw new Error("AWS SSO client 등록 응답이 올바르지 않습니다.");
+      throw new Error(t('ssoLogin.badClientResponse'));
     }
     return {
       clientId,
@@ -116,7 +117,7 @@ class SdkAwsSsoOidcApi implements AwsSsoOidcApi {
     );
     const accessToken = output.accessToken?.trim();
     if (!accessToken) {
-      throw new Error("AWS SSO 토큰 응답이 올바르지 않습니다.");
+      throw new Error(t('ssoLogin.badTokenResponse'));
     }
     return {
       accessToken,
@@ -173,7 +174,7 @@ async function waitForSsoCallback(
 ): Promise<SsoCallbackResult> {
   return new Promise<SsoCallbackResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error("AWS SSO 로그인 대기 시간이 초과되었습니다. 다시 시도해 주세요."));
+      reject(new Error(t('ssoLogin.timeout')));
     }, timeoutMs);
     timeout.unref();
 
@@ -193,7 +194,7 @@ async function waitForSsoCallback(
       if (errorParam) {
         const description =
           url.searchParams.get("error_description")?.trim() || errorParam;
-        finish(200, renderCallbackPage("로그인 실패", "앱으로 돌아가 다시 시도해 주세요."));
+        finish(200, renderCallbackPage(t('ssoLogin.loginFailedTitle'), t('ssoLogin.retryInApp')));
         clearTimeout(timeout);
         reject(new Error(description));
         return;
@@ -202,13 +203,13 @@ async function waitForSsoCallback(
       const code = url.searchParams.get("code")?.trim() ?? "";
       const state = url.searchParams.get("state")?.trim() ?? "";
       if (!code || state !== expectedState) {
-        finish(200, renderCallbackPage("로그인 실패", "인증 응답 검증에 실패했습니다. 다시 시도해 주세요."));
+        finish(200, renderCallbackPage(t('ssoLogin.loginFailedTitle'), t('ssoLogin.verifyFailedBody')));
         clearTimeout(timeout);
-        reject(new Error("AWS SSO 인증 응답 검증에 실패했습니다."));
+        reject(new Error(t('ssoLogin.verifyFailed')));
         return;
       }
 
-      finish(200, renderCallbackPage("로그인 완료", "이 창을 닫고 앱으로 돌아가 주세요."));
+      finish(200, renderCallbackPage(t('ssoLogin.loginDoneTitle'), t('ssoLogin.closeWindow')));
       clearTimeout(timeout);
       resolve({ code });
     });
@@ -254,7 +255,7 @@ export async function performAwsSsoLogin(
   const startUrl = input.startUrl.trim();
   const ssoRegion = input.ssoRegion.trim();
   if (!startUrl || !ssoRegion) {
-    throw new Error("SSO Start URL과 SSO Region이 필요합니다.");
+    throw new Error(t('ssoLogin.startUrlRequired'));
   }
   const oidc = input.oidc ?? new SdkAwsSsoOidcApi();
   const timeoutMs = input.timeoutMs ?? DEFAULT_SSO_LOGIN_TIMEOUT_MS;

@@ -18,6 +18,7 @@ import {
   SectionLabel,
   StatusBadge,
 } from '../ui'
+import { Trans, useTranslation } from 'react-i18next';
 
 interface AwsExternalProfileImportDialogProps {
   open: boolean
@@ -53,6 +54,7 @@ export function AwsExternalProfileImportDialog({
   getExternalProfileDetails,
   importExternalProfiles,
 }: AwsExternalProfileImportDialogProps) {
+  const { t: translate } = useTranslation();
   const [profiles, setProfiles] = useState<AwsProfileSummary[]>([])
   const [selectedProfileNames, setSelectedProfileNames] = useState<string[]>([])
   const [detailsByProfileName, setDetailsByProfileName] = useState<
@@ -81,7 +83,7 @@ export function AwsExternalProfileImportDialog({
       })
       .catch((loadError) => {
         setError(
-          normalizeErrorMessage(loadError, '로컬 AWS CLI 프로필 목록을 불러오지 못했습니다.'),
+          normalizeErrorMessage(loadError, translate('awsExternalImport.listFailed')),
         )
       })
       .finally(() => {
@@ -128,7 +130,7 @@ export function AwsExternalProfileImportDialog({
           if (!firstErrorMessage) {
             firstErrorMessage = normalizeErrorMessage(
               result.reason,
-              '외부 AWS 프로필 정보를 불러오지 못했습니다.',
+              translate('awsExternalImport.detailsFailed'),
             )
           }
         }
@@ -156,9 +158,9 @@ export function AwsExternalProfileImportDialog({
 
   const selectedCountLabel = useMemo(() => {
     if (selectedProfileNames.length === 0) {
-      return '선택한 프로필 없음'
+      return translate('awsExternalImport.noSelection')
     }
-    return `${selectedProfileNames.length}개 선택됨`
+    return translate('awsExternalImport.selectedCount', { count: selectedProfileNames.length })
   }, [selectedProfileNames.length])
 
   function toggleProfileSelection(profileName: string) {
@@ -181,7 +183,7 @@ export function AwsExternalProfileImportDialog({
       onClose()
     } catch (importError) {
       setError(
-        normalizeErrorMessage(importError, '외부 AWS 프로필을 가져오지 못했습니다.'),
+        normalizeErrorMessage(importError, translate('awsExternalImport.importFailed')),
       )
     } finally {
       setIsImporting(false)
@@ -203,14 +205,19 @@ export function AwsExternalProfileImportDialog({
         <ModalHeader>
           <div>
             <SectionLabel>AWS</SectionLabel>
-            <h3 id="aws-external-profile-import-title">로컬 AWS CLI에서 가져오기</h3>
+            <h3 id="aws-external-profile-import-title">{translate('awsExternalImport.title')}</h3>
           </div>
         </ModalHeader>
 
         <ModalBody className="grid gap-4">
           <div className="grid gap-1.5 text-[0.9rem] text-[var(--text-soft)]">
-            <span>현재 PC의 <code>~/.aws</code> 설정에서 프로필을 읽어 앱 전용 프로필로 복사합니다.</span>
-            <span>SSO 프로필은 설정만 가져오며 로그인 상태와 캐시는 가져오지 않습니다.</span>
+            <span>
+              <Trans
+                i18nKey="awsExternalImport.descriptionPath"
+                components={{ code: <code /> }}
+              />
+            </span>
+            <span>{translate('awsExternalImport.descriptionSso')}</span>
           </div>
 
           {error ? (
@@ -221,14 +228,14 @@ export function AwsExternalProfileImportDialog({
 
           <div className="grid min-h-0 gap-3 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] p-4">
             <div className="flex items-center justify-between gap-3">
-              <strong>외부 프로필</strong>
+              <strong>{translate('awsExternalImport.externalProfiles')}</strong>
               <Badge tone="neutral">{selectedCountLabel}</Badge>
             </div>
 
             {isLoadingProfiles ? (
-              <NoticeCard tone="info">로컬 AWS CLI 프로필을 읽는 중입니다.</NoticeCard>
+              <NoticeCard tone="info">{translate('awsExternalImport.loading')}</NoticeCard>
             ) : profiles.length === 0 ? (
-              <EmptyState title="가져올 수 있는 로컬 AWS CLI 프로필이 없습니다." />
+              <EmptyState title={translate('awsExternalImport.empty')} />
             ) : (
               <div className="flex max-h-[26rem] flex-col gap-2 overflow-y-auto pr-1">
                 {profiles.map((profile) => {
@@ -275,7 +282,7 @@ export function AwsExternalProfileImportDialog({
                           {details ? (
                             <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-soft)]">
                               <StatusBadge tone={details.isAuthenticated ? 'running' : 'error'}>
-                                {details.isAuthenticated ? '인증됨' : '인증 필요'}
+                                {translate(details.isAuthenticated ? 'awsProfiles.status.authenticated' : 'awsProfiles.status.authRequired')}
                               </StatusBadge>
                               {details.configuredRegion ? (
                                 <span>{details.configuredRegion}</span>
@@ -284,7 +291,7 @@ export function AwsExternalProfileImportDialog({
                             </div>
                           ) : isLoadingDetails ? (
                             <span className="text-sm text-[var(--text-soft)]">
-                              프로필 정보를 불러오는 중입니다.
+                              {translate('awsExternalImport.detailsLoading')}
                             </span>
                           ) : null}
                         </div>
@@ -299,7 +306,7 @@ export function AwsExternalProfileImportDialog({
 
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isImporting}>
-            닫기
+            {translate('common.close')}
           </Button>
           <Button
             variant="primary"
@@ -308,7 +315,7 @@ export function AwsExternalProfileImportDialog({
             }}
             disabled={isImporting || selectedProfileNames.length === 0}
           >
-            {isImporting ? '가져오는 중..' : '선택한 프로필 가져오기'}
+            {isImporting ? translate('awsExternalImport.importing') : translate('awsExternalImport.import')}
           </Button>
         </ModalFooter>
       </ModalShell>

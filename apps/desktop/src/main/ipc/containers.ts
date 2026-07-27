@@ -26,6 +26,7 @@ import {
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { t } from '../i18n';
 
 function resolveOwnerWebContentsId(
   event: IpcMainInvokeEvent | null,
@@ -86,7 +87,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
     async (event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       if (!host) {
-        throw new Error("Containers host를 찾지 못했습니다.");
+        throw new Error(t('containersIpc.hostNotFound'));
       }
       registerContainerSubscriber(ctx, event, hostId);
       return beginContainersLifecycle(ctx, host);
@@ -107,7 +108,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         lifecycleId,
         message:
           input.message?.trim().slice(0, 4_000) ||
-          "Containers 연결 오류가 발생했습니다.",
+          t('containersIpc.connectionError'),
       });
     },
   );
@@ -130,7 +131,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
             lifecycleId,
             reason:
               runtimeInfo.unsupportedReason ||
-              "docker/podman 런타임을 확인하지 못했습니다.",
+              t('containersIpc.runtimeCheckFailed'),
           });
           return {
             runtime: null,
@@ -156,7 +157,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
           message:
             error instanceof Error
               ? error.message
-              : "컨테이너 목록을 불러오지 못했습니다.",
+              : t('containersIpc.listFailed'),
         });
         throw error;
       }
@@ -174,7 +175,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       return ctx.coreManager.containersInspect(runtimeInfo.endpointId, containerId);
@@ -192,7 +193,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       return ctx.coreManager.containersLogs(
@@ -242,7 +243,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       await ctx.coreManager.containersStart(runtimeInfo.endpointId, containerId);
@@ -260,7 +261,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       await ctx.coreManager.containersStop(runtimeInfo.endpointId, containerId);
@@ -278,7 +279,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       await ctx.coreManager.containersRestart(runtimeInfo.endpointId, containerId);
@@ -296,7 +297,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       await ctx.coreManager.containersRemove(runtimeInfo.endpointId, containerId);
@@ -314,7 +315,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       return ctx.coreManager.containersStats(runtimeInfo.endpointId, input.containerId);
@@ -332,7 +333,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       if (runtimeInfo.unsupportedReason || !runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "이 host에서는 docker/podman을 사용할 수 없습니다.",
+            t('containersIpc.runtimeUnavailable'),
         );
       }
       return ctx.coreManager.containersSearchLogs(
@@ -385,7 +386,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       const typedHost = host as SftpCompatibleHostRecord;
       const runtimeInfo = await ctx.ensureContainersEndpoint(typedHost);
       if (!runtimeInfo.runtime || !runtimeInfo.runtimeCommand) {
-        throw new Error("컨테이너 런타임을 먼저 확인해 주세요.");
+        throw new Error(t('containersIpc.checkRuntimeFirst'));
       }
       const title = `${typedHost.label} · ${containerId}`;
       const command = ctx.buildContainerShellCommand(
@@ -420,11 +421,11 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
         if (!sshUsername) {
           throw new Error(
             hydratedHost.awsSshMetadataError ||
-              "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+              t('pfIpc.sshUsernameUnknown'),
           );
         }
         if (!availabilityZone) {
-          throw new Error("Availability Zone을 확인하지 못했습니다.");
+          throw new Error(t('pfIpc.azUnknown'));
         }
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
 

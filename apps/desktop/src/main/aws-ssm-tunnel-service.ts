@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { t } from './i18n';
 
 export interface AwsSsmTunnelStartInput {
   runtimeId?: string;
@@ -56,7 +57,7 @@ export class AwsSsmTunnelService {
     const backend = this.inProcessBackend;
     if (!backend || !backend.shouldUse()) {
       throw new Error(
-        "AWS SSM 터널을 시작할 수 없습니다. 이 구성에서는 in-process SSM 터널만 지원됩니다.",
+        t('misc.ssmTunnelUnsupported'),
       );
     }
 

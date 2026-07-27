@@ -5,6 +5,7 @@ import type {
 } from '@shared';
 import { redactAiContext } from './ai-context-redact';
 import { captureTerminalTextSnapshot } from './terminal-write-registry';
+import { t } from '../i18n';
 
 const SNAPSHOT_TTL_MS = 10 * 60 * 1000;
 const MAX_SNAPSHOTS = 30;
@@ -91,7 +92,7 @@ export function readTerminalSnapshotLines({
   return {
     beforeRecentLines: before,
     lines: lineCount,
-    rangeLabel: `${firstLineAgo}~${lastLineAgo}줄 전`,
+    rangeLabel: t('misc.snapshotRange', { from: firstLineAgo, to: lastLineAgo }),
     text: redactAiContext(selected.join('\n')).trim(),
     reachedStart: start === 0 && selected.length < lineCount,
     returnedLines: selected.length,

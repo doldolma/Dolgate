@@ -12,6 +12,7 @@ import type {
 } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import { SecretStore } from "./secret-store";
+import { t } from "./i18n";
 
 const WARPGATE_API_PATH = "/@warpgate/api";
 const WARPGATE_IMPORT_PARTITION_PREFIX = "warpgate-import:";
@@ -48,7 +49,7 @@ interface WarpgateImportAttempt {
 function normalizeBaseUrl(baseUrl: string): URL {
   const trimmed = baseUrl.trim();
   if (!trimmed) {
-    throw new Error("Warpgate 주소를 입력해 주세요.");
+    throw new Error(t("warpgate.urlRequired"));
   }
 
   let parsed: URL;
@@ -59,7 +60,7 @@ function normalizeBaseUrl(baseUrl: string): URL {
   }
 
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error("Warpgate 주소는 http 또는 https여야 합니다.");
+    throw new Error(t("warpgate.urlScheme"));
   }
 
   parsed.pathname = parsed.pathname.replace(/\/+$/, "");
@@ -150,7 +151,7 @@ async function requestJson<T>(url: string, token: string): Promise<T> {
   });
 
   if (!response.ok) {
-    let message = `Warpgate 요청에 실패했습니다. (${response.status})`;
+    let message = t("warpgate.requestFailed", { status: response.status });
     try {
       const payload = (await response.json()) as {
         message?: string;
@@ -182,7 +183,7 @@ async function responseToErrorMessage(
     text.includes("<body>");
 
   if (looksLikeHtml) {
-    return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. Warpgate 주소를 다시 확인해 주세요. (${response.status})`;
+    return t("warpgate.htmlResponse", { fallback, status: response.status });
   }
 
   return text || `${fallback} (${response.status})`;
@@ -228,7 +229,7 @@ export class WarpgateService {
     token: string,
   ): Promise<WarpgateConnectionInfo> {
     if (!token.trim()) {
-      throw new Error("Warpgate API 토큰을 입력해 주세요.");
+      throw new Error(t("warpgate.tokenRequired"));
     }
 
     const info = await requestJson<WarpgateInfoResponse>(
@@ -256,7 +257,7 @@ export class WarpgateService {
     token: string,
   ): Promise<WarpgateTargetSummary[]> {
     if (!token.trim()) {
-      throw new Error("Warpgate API 토큰을 입력해 주세요.");
+      throw new Error(t("warpgate.tokenRequired"));
     }
     const targets = await requestJson<WarpgateTargetApiRecord[]>(
       buildApiUrl(baseUrl, "/targets"),
@@ -319,7 +320,7 @@ export class WarpgateService {
       }
       this.emitAttemptEvent(attempt, {
         status: "cancelled",
-        errorMessage: "Warpgate 로그인 창이 닫혔습니다.",
+        errorMessage: t("warpgate.loginWindowClosed"),
       });
       void this.cleanupAttempt(attemptId, { closeWindow: false });
     });
@@ -340,7 +341,7 @@ export class WarpgateService {
     }
     this.emitAttemptEvent(attempt, {
       status: "cancelled",
-      errorMessage: "Warpgate 로그인이 취소되었습니다.",
+      errorMessage: t("warpgate.loginCancelled"),
     });
     await this.cleanupAttempt(attemptId);
   }
@@ -386,7 +387,7 @@ export class WarpgateService {
         status: "error",
         errorMessage: toErrorMessage(
           error,
-          "Warpgate 로그인 창을 열지 못했습니다.",
+          t("warpgate.loginWindowFailed"),
         ),
       });
       await this.cleanupAttempt(activeAttempt.id);
@@ -444,7 +445,7 @@ export class WarpgateService {
         const info = await requestSessionJson<WarpgateInfoResponse>(
           authSession,
           buildApiUrl(attempt.baseUrl, "/info"),
-          "Warpgate 연결 정보를 불러오지 못했습니다.",
+          t("warpgate.connectionInfoFailed"),
         );
         this.broadcast({
           attemptId,
@@ -465,7 +466,7 @@ export class WarpgateService {
       throw new Error(
         await responseToErrorMessage(
           targetsResponse,
-          "Warpgate target 목록을 불러오지 못했습니다.",
+          t("warpgate.targetsFailed"),
         ),
       );
     } catch (error) {
@@ -477,7 +478,7 @@ export class WarpgateService {
         status: "error",
         errorMessage: toErrorMessage(
           error,
-          "Warpgate 인증 중 오류가 발생했습니다.",
+          t("warpgate.authError"),
         ),
       });
       await this.cleanupAttempt(attemptId);

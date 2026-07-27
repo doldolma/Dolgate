@@ -28,6 +28,7 @@ import {
   type GroupSortKey,
   type HostBrowserModel,
 } from './useHostBrowser';
+import { useTranslation } from 'react-i18next';
 
 interface HomeSidebarProps {
   hb: HostBrowserModel;
@@ -41,6 +42,7 @@ const SECTION_ITEMS: Array<{ section: HomeSection; label: string; Icon: LucideIc
 ];
 
 export function HomeSidebar({ hb }: HomeSidebarProps) {
+  const { t: translate } = useTranslation();
   const {
     hosts,
     groupTreeRows,
@@ -84,9 +86,9 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
   const groupMenuItemClass =
     'flex w-full items-center gap-[0.6rem] rounded-[8px] px-[0.7rem] py-[0.5rem] text-left text-[0.85rem] text-[var(--text)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)]';
   const groupSortOptions: Array<{ key: GroupSortKey; label: string }> = [
-    { key: 'name', label: '정렬: 이름순' },
-    { key: 'recent', label: '정렬: 최근 사용순' },
-    { key: 'count', label: '정렬: 호스트 많은 순' },
+    { key: 'name', label: translate('sidebar.sortName') },
+    { key: 'recent', label: translate('sidebar.sortRecent') },
+    { key: 'count', label: translate('sidebar.sortCount') },
   ];
 
   return (
@@ -109,8 +111,8 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
           <div className="relative" ref={groupMenuRef}>
             <button
               type="button"
-              aria-label="그룹 옵션"
-              title="그룹 옵션"
+              aria-label={translate('sidebar.groupOptions')}
+              title={translate('sidebar.groupOptions')}
               aria-haspopup="menu"
               aria-expanded={isGroupMenuOpen}
               className={cn(
@@ -159,7 +161,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                   }}
                 >
                   <UnfoldVertical className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden />
-                  <span className="flex-1">모두 펼치기</span>
+                  <span className="flex-1">{translate('sidebar.expandAll')}</span>
                 </button>
                 <button
                   type="button"
@@ -171,7 +173,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                   }}
                 >
                   <FoldVertical className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden />
-                  <span className="flex-1">모두 접기</span>
+                  <span className="flex-1">{translate('sidebar.collapseAll')}</span>
                 </button>
 
                 <div role="separator" className="my-[0.3rem] h-px bg-[var(--border)]" />
@@ -184,7 +186,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
                   onClick={() => setHideEmptyGroups((value) => !value)}
                 >
                   <EyeOff className="h-4 w-4 shrink-0 text-[var(--text-soft)]" aria-hidden />
-                  <span className="flex-1">빈 그룹 숨기기</span>
+                  <span className="flex-1">{translate('sidebar.hideEmpty')}</span>
                   {hideEmptyGroups ? (
                     <Check className="h-4 w-4 shrink-0 text-[var(--accent-strong)]" aria-hidden />
                   ) : null}
@@ -267,7 +269,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
         {/* 즐겨찾기 (UI only for now) */}
         <button
           type="button"
-          aria-label="즐겨찾기"
+          aria-label={translate('sidebar.favorites')}
           className={cn(
             'flex w-full min-w-0 items-center gap-[0.55rem] rounded-[10px] border border-transparent bg-transparent px-[0.55rem] py-[0.4rem] text-left text-[var(--text-soft)] transition-[background-color,border-color,color] duration-140 hover:bg-[color-mix(in_srgb,var(--surface-elevated)_72%,transparent_28%)] hover:text-[var(--text)]',
             favoritesFilterActive &&
@@ -281,7 +283,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
           >
             <Star className="h-[0.95rem] w-[0.95rem]" fill="currentColor" />
           </span>
-          <span className="min-w-0 flex-1 truncate font-semibold">즐겨찾기</span>
+          <span className="min-w-0 flex-1 truncate font-semibold">{translate('sidebar.favorites')}</span>
           <span className="shrink-0 text-[0.7rem] font-semibold text-[var(--text-muted)]">
             {favoriteHostIds.length}
           </span>
@@ -293,7 +295,7 @@ export function HomeSidebar({ hb }: HomeSidebarProps) {
         <div className="flex min-h-0 flex-1 flex-col gap-[0.25rem] overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {groupTreeRows.length === 0 ? (
           <div className="px-[0.55rem] py-[0.7rem] text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
-            아직 만든 그룹이 없습니다.
+            {translate('sidebar.noGroups')}
           </div>
         ) : (
           visibleGroupTreeRows.map((group) => {

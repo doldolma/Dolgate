@@ -10,6 +10,8 @@ import { listAwsProfiles } from '../services/desktop/imports';
 import { Button, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
 import type { SearchableSelectOption } from '../ui';
 import { ArrowDown, ArrowUp, X } from '../ui/icons';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 function agentStatusColor(
   status: SshAgentProbeResult['status'] | undefined,
@@ -29,21 +31,23 @@ function agentStatusColor(
 
 function agentStatusText(probe: SshAgentProbeResult | null): string {
   if (!probe) {
-    return '에이전트 상태 확인 중…';
+    return t('hostForm.agent.checking');
   }
   switch (probe.status) {
     case 'ok':
-      return `에이전트 감지됨${
-        typeof probe.keyCount === 'number' ? ` · 키 ${probe.keyCount}개` : ''
+      return `${t('hostForm.agent.detected')}${
+        typeof probe.keyCount === 'number'
+          ? t('hostForm.agent.keyCount', { count: probe.keyCount })
+          : ''
       }`;
     case 'empty':
-      return '에이전트에 등록된 키가 없습니다';
+      return t('hostForm.agent.noKeys');
     case 'unreachable':
-      return '에이전트에 연결할 수 없습니다';
+      return t('hostForm.agent.unreachable');
     case 'not-found':
-      return '에이전트를 찾을 수 없습니다';
+      return t('hostForm.agent.notFound');
     default:
-      return '에이전트 상태를 확인할 수 없습니다';
+      return t('hostForm.agent.unknown');
   }
 }
 
@@ -114,6 +118,7 @@ function JumpHostChainEditor({
   disabled?: boolean;
   onChange: (ids: string[]) => void;
 }) {
+  const { t: translate } = useTranslation();
   const optionsFor = (index: number) =>
     candidates.filter(
       (option) =>
@@ -141,8 +146,8 @@ function JumpHostChainEditor({
           <div className="min-w-0 flex-1">
             <SearchableSelect
               ariaLabel={`Jump host ${index + 1}`}
-              placeholder="점프 호스트 선택"
-              searchPlaceholder="이름, 호스트, 사용자 검색"
+              placeholder={translate('hostForm.jump.selectPlaceholder')}
+              searchPlaceholder={translate('hostForm.jump.searchPlaceholder')}
               value={id}
               options={optionsFor(index)}
               disabled={disabled}
@@ -160,7 +165,7 @@ function JumpHostChainEditor({
           <button
             type="button"
             className={iconButtonClass}
-            aria-label={`${index + 1}번째 점프 위로`}
+            aria-label={translate('hostForm.jump.moveUp', { index: index + 1 })}
             disabled={disabled || index === 0}
             onClick={() => move(index, -1)}
           >
@@ -169,7 +174,7 @@ function JumpHostChainEditor({
           <button
             type="button"
             className={iconButtonClass}
-            aria-label={`${index + 1}번째 점프 아래로`}
+            aria-label={translate('hostForm.jump.moveDown', { index: index + 1 })}
             disabled={disabled || index === value.length - 1}
             onClick={() => move(index, 1)}
           >
@@ -178,7 +183,7 @@ function JumpHostChainEditor({
           <button
             type="button"
             className={iconButtonClass}
-            aria-label={`${index + 1}번째 점프 제거`}
+            aria-label={translate('hostForm.jump.remove', { index: index + 1 })}
             disabled={disabled}
             onClick={() => onChange(value.filter((_, i) => i !== index))}
           >
@@ -188,9 +193,9 @@ function JumpHostChainEditor({
       ))}
       {remaining.length > 0 ? (
         <SearchableSelect
-          ariaLabel="점프 호스트 추가"
-          placeholder={value.length === 0 ? 'None (direct)' : '점프 호스트 추가…'}
-          searchPlaceholder="이름, 호스트, 사용자 검색"
+          ariaLabel={translate('hostForm.jump.addAria')}
+          placeholder={value.length === 0 ? 'None (direct)' : translate('hostForm.jump.addPlaceholder')}
+          searchPlaceholder={translate('hostForm.jump.searchPlaceholder')}
           value=""
           options={remaining}
           disabled={disabled}
@@ -557,6 +562,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onActionStateChange,
   onLabelChange
 }: HostFormProps, ref) {
+  const { t: translate } = useTranslation();
   const fieldClassName = 'flex flex-col gap-[0.4rem] text-[var(--text)]';
   const fieldLabelClassName =
     'text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]';
@@ -709,7 +715,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           : {
               value: '',
               profileId: null,
-              profileName: '프로필 선택',
+              profileName: translate('hostForm.profile.select'),
               isUnconfigured: true,
             },
       );
@@ -954,7 +960,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setSerialPorts(nextPorts);
     } catch (error) {
       setSerialPorts([]);
-      setSerialPortsError(error instanceof Error ? error.message : '시리얼 포트 목록을 불러오지 못했습니다.');
+      setSerialPortsError(error instanceof Error ? error.message : translate('hostForm.error.serialPortsFailed'));
     } finally {
       setIsLoadingSerialPorts(false);
     }
@@ -993,7 +999,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           return;
         }
         setAwsProfiles([]);
-        setAwsProfilesError(error instanceof Error ? error.message : 'AWS 프로필을 불러오지 못했습니다.');
+        setAwsProfilesError(error instanceof Error ? error.message : translate('hostForm.error.awsProfilesFailed'));
       })
       .finally(() => {
         if (canceled) {
@@ -1372,7 +1378,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             }
           />
           <span className="text-[0.76rem] text-[var(--text-soft)]">
-            연결 직후 명령과 Enter를 자동으로 전송합니다.
+            {translate('hostForm.startup.description')}
           </span>
         </div>
       ) : null}
@@ -1380,9 +1386,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         <div className="flex flex-col gap-[0.4rem]">
           <SearchableSelect
             ariaLabel="Startup snippet"
-            placeholder="Snippet 선택"
-            searchPlaceholder="이름, 키워드, 명령 검색"
-            emptyText="사용 가능한 Snippet이 없습니다."
+            placeholder={translate('hostForm.startup.selectPlaceholder')}
+            searchPlaceholder={translate('hostForm.startup.searchPlaceholder')}
+            emptyText={translate('hostForm.startup.emptyText')}
             value={startupCommand.snippetId}
             options={startupSnippetOptions}
             onChange={(snippetId) =>
@@ -1395,7 +1401,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </pre>
           ) : startupCommand.snippetId ? (
             <span className="text-[0.82rem] text-[var(--danger-text)]">
-              선택한 Snippet을 찾을 수 없습니다. 연결 시 Startup Command를 건너뜁니다.
+              {translate('hostForm.startup.missing')}
             </span>
           ) : null}
         </div>
@@ -1542,7 +1548,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             >
               {awsProfileOptions.map((profile) => (
                 <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent || profile.isUnconfigured}>
-                  {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
+                  {profile.isMissingCurrent ? translate('hostForm.profile.missingCurrent', { name: profile.profileName }) : profile.profileName}
                 </option>
               ))}
             </SelectField>
@@ -1579,13 +1585,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             <Input value={draft.awsState ?? ''} readOnly />
           </label>
           <div className="flex flex-col gap-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.9rem] py-[0.9rem]">
-            <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? 'SSH 설정 대기 중'}</strong>
+            <strong>{getAwsEc2HostSshMetadataStatusLabel(draft.awsSshMetadataStatus) ?? translate('hostForm.awsSsh.pending')}</strong>
             <span className="text-[var(--text-soft)] leading-[1.5]">
               {draft.awsSshMetadataError
                 ? draft.awsSshMetadataError
                 : draft.awsSshMetadataStatus === 'loading'
-                  ? '추가 정보 로드가 끝나면 SSH 사용자와 포트를 자동으로 채웁니다.'
-                  : '필요하면 아래 값만 수동으로 수정하면 됩니다.'}
+                  ? translate('hostForm.awsSsh.loadingHint')
+                  : translate('hostForm.awsSsh.manualHint')}
             </span>
           </div>
           <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
@@ -1628,8 +1634,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </div>
           <ToggleSwitch
               checked={draft.awsSsmServerProxyEnabled === true}
-              label="서버 프록시 사용"
-              description="활성화 시 서버가 AWS SSM 세션을 열고 터미널 입출력만 전달합니다."
+              label={translate('hostForm.serverProxy.label')}
+              description={translate('hostForm.serverProxy.description')}
               onClick={() =>
                   setDraft((current) =>
                       current.kind === 'aws-ec2'
@@ -1645,7 +1651,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           <ToggleSwitch
               checked={draft.agentForwarding === true}
               label="SSH Agent Forwarding"
-              description="로컬 SSH 키를 원격에서 쓸 수 있게 합니다(예: bastion에서 사설 호스트로 hop). 신뢰하는 호스트만 켜세요."
+              description={translate('hostForm.agentForward.awsDescription')}
               onClick={() =>
                   setDraft((current) =>
                       current.kind === 'aws-ec2'
@@ -1693,7 +1699,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             >
               {awsProfileOptions.map((profile) => (
                 <option key={profile.value} value={profile.value} disabled={profile.isMissingCurrent || profile.isUnconfigured}>
-                  {profile.isMissingCurrent ? `${profile.profileName} (앱 프로필 없음)` : profile.profileName}
+                  {profile.isMissingCurrent ? translate('hostForm.profile.missingCurrent', { name: profile.profileName }) : profile.profileName}
                 </option>
               ))}
             </SelectField>
@@ -1847,8 +1853,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             {sshDraft.authType === 'agent' ? (
               <div className="grid gap-[0.45rem]">
                 <p className="text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
-                  키 파일이나 비밀번호 없이, 이 컴퓨터의 SSH 에이전트로 인증합니다.
-                  1Password나 ssh-add로 등록해 둔 키가 자동으로 사용됩니다.
+                  {translate('hostForm.auth.agentHint')}
                 </p>
                 <div className="flex items-center gap-[0.5rem] text-[0.8rem]">
                   <span
@@ -1944,7 +1949,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   }
                 }}
               >
-                <option value="new">새 인증 정보 저장</option>
+                <option value="new">{translate('hostForm.auth.newCredential')}</option>
                 {reusableEntries.map((entry) => (
                   <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
                     {formatSavedSecretOptionLabel(entry)}
@@ -1961,7 +1966,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     variant="secondary"
                     onClick={() => onEditExistingSecret(selectedSecretRef)}
                   >
-                    편집
+                    {translate('hostForm.auth.edit')}
                   </Button>
                 ) : null}
               </div>
@@ -1976,17 +1981,16 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 onChange={commitJumpHostChain}
               />
               <span className="text-[0.82rem] text-[var(--text-soft)]">
-                다른 SSH 호스트를 거쳐 연결합니다 (배스천). 여러 개면 위에서부터 순서대로 거칩니다
-                — 첫 번째가 클라이언트에서 직접 연결, 마지막이 대상 바로 앞입니다.
+                {translate('hostForm.jump.description')}
               </span>
             </div>
             <div className={fieldClassName}>
               <ToggleSwitch
-                label="Mosh로 연결"
+                label={translate('hostForm.mosh.label')}
                 description={
                   jumpHostChain.length > 0
-                    ? 'jump host와 함께 쓸 수 없습니다.'
-                    : '네트워크가 끊겨도 세션이 유지됩니다 (서버에 mosh 필요).'
+                    ? translate('hostForm.mosh.jumpConflict')
+                    : translate('hostForm.mosh.description')
                 }
                 checked={sshDraft.useMosh === true && jumpHostChain.length === 0}
                 disabled={jumpHostChain.length > 0}
@@ -2007,8 +2011,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 label="SSH Agent Forwarding"
                 description={
                   sshDraft.useMosh === true
-                    ? 'mosh 세션에서는 지원하지 않습니다.'
-                    : '로컬 SSH 키를 원격에서 쓸 수 있게 합니다. 신뢰하는 호스트만 켜세요.'
+                    ? translate('hostForm.agentForward.moshUnsupported')
+                    : translate('hostForm.agentForward.description')
                 }
                 checked={
                   sshDraft.agentForwarding === true &&
@@ -2047,7 +2051,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 onChange={setEnvVars}
               />
               <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                연결 시 셸에 주입됩니다(SetEnv→export 폴백). 값은 비밀번호처럼 암호화되어 저장·동기화됩니다.
+                {translate('hostForm.env.description')}
               </span>
             </div>
           </FormSection>

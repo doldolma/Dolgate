@@ -6,6 +6,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
 import type { TerminalCommandBlockState } from '../../lib/terminal-command-blocks';
 import { formatBlockDuration } from './blockFormat';
+import { useTranslation } from 'react-i18next';
+import { t } from '../../i18n';
 
 export interface TerminalCommandPaletteItem {
   id: number;
@@ -29,16 +31,16 @@ interface TerminalCommandPaletteProps {
 function formatRelativeTime(startedAt: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
   if (seconds < 5) {
-    return '방금';
+    return t('cmdPalette.ago.justNow');
   }
   if (seconds < 60) {
-    return `${seconds}초 전`;
+    return t('cmdPalette.ago.seconds', { count: seconds });
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
-    return `${minutes}분 전`;
+    return t('cmdPalette.ago.minutes', { count: minutes });
   }
-  return `${Math.floor(minutes / 60)}시간 전`;
+  return t('cmdPalette.ago.hours', { count: Math.floor(minutes / 60) });
 }
 
 /** 공백으로 나눈 모든 토큰이 순서 상관없이 들어 있으면 통과(간단한 부분 일치 검색). */
@@ -57,6 +59,7 @@ export function TerminalCommandPalette({
   onJump,
   onRerun,
 }: TerminalCommandPaletteProps) {
+  const { t: translate } = useTranslation();
   const [query, setQuery] = useState('');
   const [failedOnly, setFailedOnly] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -135,7 +138,7 @@ export function TerminalCommandPalette({
         className="flex max-h-full w-full max-w-[36rem] flex-col overflow-hidden rounded-[12px] border border-[rgba(255,255,255,0.14)] bg-[rgba(22,33,51,0.98)] shadow-[var(--shadow)]"
         role="dialog"
         aria-modal="true"
-        aria-label="명령 팔레트"
+        aria-label={translate('cmdPalette.aria')}
         onKeyDown={handleKeyDown}
       >
         <div className="flex items-center gap-2.5 border-b border-[rgba(255,255,255,0.1)] px-3.5 py-3">
@@ -143,8 +146,8 @@ export function TerminalCommandPalette({
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="명령 검색"
-            aria-label="명령 검색"
+            placeholder={translate('cmdPalette.searchPlaceholder')}
+            aria-label={translate('cmdPalette.searchPlaceholder')}
             className="min-w-0 flex-1 border-none bg-transparent text-[0.9rem] text-[rgba(232,239,255,0.95)] outline-none placeholder:text-[rgba(226,234,255,0.4)]"
           />
           <button
@@ -158,7 +161,7 @@ export function TerminalCommandPalette({
                 : 'border-[rgba(255,255,255,0.14)] text-[rgba(226,234,255,0.6)] hover:text-[rgba(232,239,255,0.9)]',
             )}
           >
-            실패만
+            {translate('cmdPalette.failedOnly')}
           </button>
         </div>
 
@@ -166,8 +169,8 @@ export function TerminalCommandPalette({
           {visible.length === 0 ? (
             <p className="m-0 px-3.5 py-6 text-center text-[0.82rem] text-[rgba(226,234,255,0.45)]">
               {items.length === 0
-                ? '아직 기록된 명령이 없습니다. 셸 통합이 켜진 세션에서만 수집됩니다.'
-                : '검색 결과가 없습니다.'}
+                ? translate('cmdPalette.emptyNoCommands')
+                : translate('cmdPalette.emptySearch')}
             </p>
           ) : (
             visible.map((item, index) => {
@@ -205,13 +208,13 @@ export function TerminalCommandPalette({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-mono text-[0.8rem] text-[rgba(232,239,255,0.92)]">
-                      {item.command ?? '(명령을 읽지 못했습니다)'}
+                      {item.command ?? translate('cmdPalette.unreadableCommand')}
                     </span>
                     <span className="mt-0.5 block truncate text-[0.7rem] text-[rgba(226,234,255,0.45)]">
                       {[
                         item.cwd,
                         item.state === 'running'
-                          ? '실행 중'
+                          ? translate('cmdPalette.running')
                           : formatRelativeTime(item.startedAt, openedAt),
                       ]
                         .filter(Boolean)
@@ -221,9 +224,9 @@ export function TerminalCommandPalette({
                   {item.commandUnreliable ? (
                     <span
                       className="shrink-0 rounded-full bg-[rgba(255,255,255,0.08)] px-1.5 py-0.5 text-[0.68rem] text-[rgba(226,234,255,0.55)]"
-                      title="화면에서 읽은 명령이 실제 입력과 다를 수 있습니다(너무 길거나 여러 줄) — 재실행할 수 없습니다."
+                      title={translate('cmdPalette.rerunBlockedTitle')}
                     >
-                      재실행 불가
+                      {translate('cmdPalette.rerunBlocked')}
                     </span>
                   ) : null}
                   {item.state === 'failed' && item.exitCode !== null ? (
@@ -244,16 +247,20 @@ export function TerminalCommandPalette({
 
         <div className="flex items-center gap-3.5 border-t border-[rgba(255,255,255,0.1)] px-3.5 py-2 text-[0.7rem] text-[rgba(226,234,255,0.45)]">
           <span>
-            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">↑↓</strong> 이동
+            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">↑↓</strong>{' '}
+            {translate('cmdPalette.hint.move')}
           </span>
           <span>
-            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">⏎</strong> 그 위치로
+            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">⏎</strong>{' '}
+            {translate('cmdPalette.hint.jump')}
           </span>
           <span>
-            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">⌘⏎</strong> 재실행
+            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">⌘⏎</strong>{' '}
+            {translate('cmdPalette.hint.rerun')}
           </span>
           <span className="ml-auto">
-            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">esc</strong> 닫기
+            <strong className="font-semibold text-[rgba(226,234,255,0.75)]">esc</strong>{' '}
+            {translate('cmdPalette.hint.close')}
           </span>
         </div>
       </div>

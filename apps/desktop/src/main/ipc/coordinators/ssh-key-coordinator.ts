@@ -17,6 +17,7 @@ import type {
 import type {
   SshHostRecord,
 } from "../context";
+import { t } from '../../i18n';
 
 export interface SshKeyCoordinator {
   generateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
@@ -30,7 +31,7 @@ export interface SshKeyCoordinator {
 function normalizeLabel(label: string): string {
   const normalized = label.trim();
   if (!normalized) {
-    throw new Error("키 이름이 필요합니다.");
+    throw new Error(t('sshKeyIpc.nameRequired'));
   }
   return normalized;
 }
@@ -47,7 +48,7 @@ function normalizePublicKey(publicKey: string): string {
     keyType === "sk-ssh-ed25519@openssh.com" ||
     keyType === "sk-ecdsa-sha2-nistp256@openssh.com";
   if (!supportedKeyType || !keyData) {
-    throw new Error("SSH 공개 키를 해석하지 못했습니다.");
+    throw new Error(t('sshKeyIpc.publicKeyParseFailed'));
   }
   return normalized;
 }
@@ -133,7 +134,7 @@ export function createSshKeyCoordinator(deps: {
       generatedByApp: true,
     });
     if (!secretRef) {
-      throw new Error("SSH 키를 저장하지 못했습니다.");
+      throw new Error(t('sshKeyIpc.saveFailed'));
     }
     queueSync();
     return {
@@ -168,7 +169,7 @@ export function createSshKeyCoordinator(deps: {
       };
     }
     if (!secrets.privateKeyPem) {
-      throw new Error("이 인증 정보에는 SSH 개인키가 없습니다.");
+      throw new Error(t('sshKeyIpc.noPrivateKey'));
     }
     const inspected = await inspectPrivateKey(
       secrets.privateKeyPem,
@@ -261,7 +262,7 @@ export function createSshKeyCoordinator(deps: {
     const hostIds = [...new Set(input.hostIds.filter(Boolean))];
     const mode = input.mode === "installAndUse" ? "installAndUse" : "installOnly";
     if (hostIds.length === 0) {
-      throw new Error("설치할 호스트를 선택하세요.");
+      throw new Error(t('sshKeyIpc.selectHost'));
     }
     const keyMaterial = await resolveSshPublicKey(
       input.secretRef,
@@ -276,7 +277,7 @@ export function createSshKeyCoordinator(deps: {
           hostId,
           hostLabel: host?.label ?? hostId,
           status: "failed",
-          message: "SSH host가 아닙니다.",
+          message: t('sshKeyIpc.notSshHost'),
         });
         continue;
       }
@@ -297,7 +298,7 @@ export function createSshKeyCoordinator(deps: {
           message:
             error instanceof Error && error.message.trim()
               ? error.message
-              : "SSH 공개 키를 설치하지 못했습니다.",
+              : t('sshKeyIpc.installFailed'),
         });
       }
     }

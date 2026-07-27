@@ -18,6 +18,7 @@ import {
   isAwsSsoAuthenticationErrorMessage,
   normalizeRemoteInvokeErrorMessage,
 } from "../utils";
+import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
 
@@ -32,8 +33,8 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     const label = profileName.trim();
     throw new Error(
       label
-        ? `연결된 AWS 프로필 "${label}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`
-        : "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 선택해 주세요.",
+        ? t('aws.profile.linkedNotFoundNamed', { label })
+        : t('trustAuth.profileNotFoundSelect'),
     );
   };
 
@@ -86,7 +87,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     ) => void,
   ) => {
     const requiredProfileId = requireAwsProfileId(profileId, profileName);
-    reportProgress(`브라우저에서 ${profileName} AWS 로그인을 진행하는 중입니다.`, {
+    reportProgress(t('trustAuth.browserLogin', { profile: profileName }), {
       blockingKind: "browser",
       stage: "browser-login",
     });
@@ -96,16 +97,16 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       throw new Error(
         error instanceof Error
           ? normalizeRemoteInvokeErrorMessage(error.message)
-          : "AWS SSO 로그인을 시작하지 못했습니다.",
+          : t('awsProfiles.error.ssoLoginFailed'),
       );
     }
 
-    reportProgress(`${profileName} 프로필 로그인 결과를 확인하는 중입니다.`);
+    reportProgress(t('trustAuth.checkingLoginResult', { profile: profileName }));
     const refreshedStatus = await api.aws.getProfileStatusById(requiredProfileId);
     if (!refreshedStatus.isAuthenticated) {
       throw new Error(
         refreshedStatus.errorMessage ||
-          "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+          t('awsSftp.progress.ssoNotVerified'),
       );
     }
     return refreshedStatus;
@@ -123,7 +124,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     ) => void,
   ) => {
     const requiredProfileId = requireAwsProfileId(profileId, profileName);
-    reportProgress?.(`${profileName} 프로필 인증 상태를 확인하는 중입니다.`);
+    reportProgress?.(t('containersStore.checkingProfile', { profile: profileName }));
     const status = await api.aws.getProfileStatusById(requiredProfileId);
     if (status.isAuthenticated || !status.isSsoProfile) {
       return status;
@@ -161,7 +162,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     if (!status.isSsoProfile) {
       throw new Error(
         status.errorMessage ||
-          `${host.awsProfileName} 프로필에 AWS CLI 자격 증명이 필요합니다.`,
+          t('trustAuth.cliCredentialsNeeded', { profile: host.awsProfileName }),
       );
     }
   };

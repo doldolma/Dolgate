@@ -14,6 +14,7 @@ import type {
 } from "../../database";
 import type { SecretStore } from "../../secret-store";
 import type { SshHostRecord } from "../context";
+import { t } from '../../i18n';
 
 // 자동 재연결용 런타임 시크릿 캐시(메모리 전용). 디스크/keychain에 저장하지 않으며
 // 앱 종료 시 프로세스 메모리와 함께 소멸한다. TTL로 오래된 항목을 자동 폐기한다.
@@ -328,7 +329,7 @@ export function createSecretCoordinator(deps: {
     activityLogs.append(
       "info",
       "audit",
-      "호스트 전용 인증 정보를 저장했습니다.",
+      t('secretIpc.hostSecretSaved'),
       {
         hostId,
         secretRef,
@@ -473,29 +474,29 @@ export function createSecretCoordinator(deps: {
 
     if (!info) {
       throw new Error(
-        "SSH 인증서를 찾을 수 없습니다. 새 인증서를 가져와 다시 시도하세요.",
+        t('secretIpc.certNotFound'),
       );
     }
 
     if (info.status === "expired") {
       throw new Error(
-        "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
+        t('secretIpc.certExpired'),
       );
     }
     if (info.status === "not_yet_valid") {
       throw new Error(
         info.validAfter
-          ? `SSH 인증서가 아직 유효하지 않습니다. Valid after ${info.validAfter}`
-          : "SSH 인증서가 아직 유효하지 않습니다.",
+          ? t('secretIpc.certNotYetValidWith', { validAfter: info.validAfter })
+          : t('secretIpc.certNotYetValid'),
       );
     }
     if (info.status === "invalid") {
       throw new Error(
-        "SSH 인증서를 해석할 수 없습니다. 인증서 내용을 확인해 주세요.",
+        t('secretIpc.certParseFailed'),
       );
     }
     if (info.status !== "valid") {
-      throw new Error("SSH 인증서를 확인하지 못했습니다.");
+      throw new Error(t('secretIpc.certCheckFailed'));
     }
 
     return info;

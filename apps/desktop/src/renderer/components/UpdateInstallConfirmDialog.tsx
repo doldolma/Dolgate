@@ -1,5 +1,6 @@
 import { DialogBackdrop } from './DialogBackdrop';
 import { Button, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface UpdateInstallConfirmDialogProps {
   open: boolean;
@@ -12,6 +13,7 @@ export function UpdateInstallConfirmDialog({
   onClose,
   onConfirm,
 }: UpdateInstallConfirmDialogProps) {
+  const { t: translate } = useTranslation();
   if (!open) {
     return null;
   }
@@ -28,23 +30,21 @@ export function UpdateInstallConfirmDialog({
           <div>
             <SectionLabel>Update Ready</SectionLabel>
             <h3 id="update-install-title">
-              업데이트를 적용하려면 다시 시작이 필요합니다
+              {translate('updateConfirm.title')}
             </h3>
           </div>
         </ModalHeader>
         <ModalBody>
           <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-            현재 열려 있는 SSH 세션, 진행 중인 전송, 생성된 포트 포워딩이 모두
-            종료됩니다. 계속하면 Dolgate가 정리 후 다시 시작되며 새 버전이
-            적용됩니다.
+            {translate('updateConfirm.body')}
           </p>
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button variant="primary" onClick={() => void onConfirm()}>
-            다시 시작하고 업데이트
+            {translate('updateConfirm.confirm')}
           </Button>
         </ModalFooter>
       </ModalShell>

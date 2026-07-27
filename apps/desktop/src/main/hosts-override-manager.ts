@@ -17,6 +17,7 @@ import {
 } from '@shared';
 import type { DnsOverrideRecord, PortForwardRuleRecord, PortForwardRuntimeRecord } from '@shared';
 import { resolveDesktopRepoRoot } from './repo-root';
+import { t } from "./i18n";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HELPER_READY_TIMEOUT_MS = 15_000;
@@ -407,13 +408,13 @@ function toElevatedLaunchHostsOverrideError(error: unknown): HostsOverrideError 
   if (isPermissionDeniedMessage(rawError)) {
     return new HostsOverrideError(
       'permission-denied',
-      'DNS Override 권한 승인이 취소되었습니다.',
+      t("hostsOverride.permissionCancelled"),
       rawError,
     );
   }
   return new HostsOverrideError(
     'helper-not-ready',
-    'Dolgate DNS Helper를 시작하지 못했습니다.',
+    t("hostsOverride.helperStartFailed"),
     rawError,
   );
 }
@@ -605,17 +606,20 @@ function verifyManagedHostsRewrite(content: string, entries: ActiveDnsOverrideEn
   const hasStart = content.includes(HOSTS_MANAGED_BLOCK_START);
   const hasEnd = content.includes(HOSTS_MANAGED_BLOCK_END);
   if (!hasStart || !hasEnd) {
-    return 'hosts 파일에서 관리 블록을 찾지 못했습니다.';
+    return t("hostsOverride.blockMissing");
   }
 
   const actual = extractManagedHostsLines(content);
   const expected = buildExpectedManagedHostsLines(entries);
   if (actual.length !== expected.length) {
-    return `hosts 파일의 override 개수가 예상과 다릅니다. expected=${expected.length} actual=${actual.length}`;
+    return t("hostsOverride.countMismatch", { expected: expected.length, actual: actual.length });
   }
   for (let index = 0; index < expected.length; index += 1) {
     if (actual[index] !== expected[index]) {
-      return `hosts 파일의 override 내용이 예상과 다릅니다. expected=${expected.join(', ')} actual=${actual.join(', ')}`;
+      return t("hostsOverride.contentMismatch", {
+        expected: expected.join(", "),
+        actual: actual.join(", "),
+      });
     }
   }
   return null;
@@ -623,7 +627,7 @@ function verifyManagedHostsRewrite(content: string, entries: ActiveDnsOverrideEn
 
 function verifyManagedHostsCleared(content: string): string | null {
   if (content.includes(HOSTS_MANAGED_BLOCK_START) || content.includes(HOSTS_MANAGED_BLOCK_END)) {
-    return 'hosts 파일의 관리 블록이 제거되지 않았습니다.';
+    return t("hostsOverride.blockNotRemoved");
   }
   return null;
 }
@@ -888,7 +892,7 @@ export class HostsOverrideManager {
         }
         throw new HostsOverrideError(
           'helper-not-ready',
-          'Dolgate DNS Helper를 시작하지 못했습니다.',
+          t("hostsOverride.helperStartFailed"),
           normalizeUnknownErrorMessage(error),
         );
       }
@@ -931,7 +935,7 @@ export class HostsOverrideManager {
     const helperLogTail = await readHelperLaunchLogTail(helperLogPath);
     throw new HostsOverrideError(
       'helper-not-ready',
-      'Dolgate DNS Helper가 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.',
+      t("hostsOverride.helperNotReady"),
       combineHelperReadyDetails(lastError?.message, helperLogTail),
     );
   }
@@ -946,8 +950,8 @@ export class HostsOverrideManager {
       throw new HostsOverrideError(
         'helper-rpc',
         request.command === 'clear-block'
-          ? 'DNS Override를 제거하지 못했습니다. Dolgate DNS Helper와 통신하지 못했습니다.'
-          : 'DNS Override를 적용하지 못했습니다. Dolgate DNS Helper와 통신하지 못했습니다.',
+          ? t("hostsOverride.removeCommFailed")
+          : t("hostsOverride.applyCommFailed"),
         normalizeUnknownErrorMessage(error),
       );
     }
@@ -956,8 +960,8 @@ export class HostsOverrideManager {
       throw new HostsOverrideError(
         'helper-rpc',
         request.command === 'clear-block'
-          ? 'DNS Override를 제거하지 못했습니다. Dolgate DNS Helper가 요청을 처리하지 못했습니다.'
-          : 'DNS Override를 적용하지 못했습니다. Dolgate DNS Helper가 요청을 처리하지 못했습니다.',
+          ? t("hostsOverride.removeRequestFailed")
+          : t("hostsOverride.applyRequestFailed"),
         response.error || `Dolgate DNS Helper ${request.command} failed`,
       );
     }
@@ -971,7 +975,7 @@ export class HostsOverrideManager {
     } catch (error) {
       throw new HostsOverrideError(
         'hosts-verification',
-        'DNS Override를 적용한 뒤 hosts 파일을 확인하지 못했습니다.',
+        t("hostsOverride.verifyApplyFailed"),
         normalizeUnknownErrorMessage(error),
       );
     }
@@ -982,7 +986,7 @@ export class HostsOverrideManager {
     }
     throw new HostsOverrideError(
       'hosts-verification',
-      'DNS Override를 적용했지만 hosts 파일에서 확인되지 않았습니다.',
+      t("hostsOverride.applyNotVerified"),
       verificationError,
     );
   }
@@ -994,7 +998,7 @@ export class HostsOverrideManager {
     } catch (error) {
       throw new HostsOverrideError(
         'hosts-verification',
-        'DNS Override를 제거한 뒤 hosts 파일을 확인하지 못했습니다.',
+        t("hostsOverride.verifyRemoveFailed"),
         normalizeUnknownErrorMessage(error),
       );
     }
@@ -1005,7 +1009,7 @@ export class HostsOverrideManager {
     }
     throw new HostsOverrideError(
       'hosts-verification',
-      'DNS Override를 제거했지만 hosts 파일 정리가 확인되지 않았습니다.',
+      t("hostsOverride.removeNotVerified"),
       verificationError,
     );
   }

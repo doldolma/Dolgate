@@ -71,6 +71,8 @@ import {
 } from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KnownHostPromptDialog } from './KnownHostPromptDialog';
+import { Trans, useTranslation } from 'react-i18next';
+import { t } from '../i18n';
 
 type ForwardTab = 'ssh' | 'aws-ssm' | 'ecs-task' | 'container' | 'dns';
 type SshForwardHostRecord = Extract<HostRecord, { kind: 'ssh' }>;
@@ -478,34 +480,34 @@ function createButtonLabel(tab: ForwardTab) {
 
 function emptyStateTitle(tab: ForwardTab) {
   if (tab === 'ssh') {
-    return '아직 저장한 SSH 포워딩 규칙이 없습니다.';
+    return t('portForward.empty.sshTitle');
   }
   if (tab === 'aws-ssm') {
-    return '아직 저장한 AWS EC2 포워딩 규칙이 없습니다.';
+    return t('portForward.empty.awsTitle');
   }
   if (tab === 'ecs-task') {
-    return '아직 저장한 ECS Task 터널 규칙이 없습니다.';
+    return t('portForward.empty.ecsTitle');
   }
   if (tab === 'dns') {
-    return '아직 저장한 DNS Override가 없습니다.';
+    return t('portForward.empty.dnsTitle');
   }
-  return '아직 저장한 컨테이너 터널 규칙이 없습니다.';
+  return t('portForward.empty.containerTitle');
 }
 
 function emptyStateDescription(tab: ForwardTab) {
   if (tab === 'ssh') {
-    return 'New SSH Forward를 눌러 첫 번째 SSH 포워딩 규칙을 만들어 보세요.';
+    return t('portForward.empty.sshDescription');
   }
   if (tab === 'aws-ssm') {
-    return 'New AWS EC2 Forward를 눌러 첫 번째 AWS EC2 포워딩 규칙을 만들어 보세요.';
+    return t('portForward.empty.awsDescription');
   }
   if (tab === 'ecs-task') {
-    return 'New ECS Task Tunnel을 눌러 첫 번째 ECS task 터널 규칙을 만들어 보세요.';
+    return t('portForward.empty.ecsDescription');
   }
   if (tab === 'dns') {
-    return 'New DNS Override를 눌러 hosts 기반 도메인 override를 추가해 보세요.';
+    return t('portForward.empty.dnsDescription');
   }
-  return 'New Container Tunnel을 눌러 첫 번째 컨테이너 터널 규칙을 만들어 보세요.';
+  return t('portForward.empty.containerDescription');
 }
 
 export function filterPortForwardRules(rules: PortForwardRuleRecord[], tab: Exclude<ForwardTab, 'dns'>): PortForwardRuleRecord[] {
@@ -554,6 +556,7 @@ function isDnsHostname(hostname: string): boolean {
 }
 
 function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: InteractiveAuthFormProps) {
+  const { t: translate } = useTranslation();
   const [responses, setResponses] = useState<InteractivePromptResponses>({});
   const warpgateResponses = useMemo(
     () => (auth.provider === 'warpgate' ? resolveWarpgateResponses(auth) : null),
@@ -568,41 +571,45 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
     <NoticeCard title={title} className="mt-4">
       {auth.provider === 'warpgate' ? (
         <>
-          <p>브라우저에서 Warpgate 로그인과 승인을 마치면 앱이 자동으로 다음 단계를 진행합니다.</p>
+          <p>{translate('portForward.warpgate.browserHint')}</p>
           {auth.authCode ? (
             <p className="text-sm text-[var(--text-soft)]">
-              인증 코드 <code>{auth.authCode}</code>는 앱이 자동으로 처리합니다.
+              <Trans
+                i18nKey="portForward.warpgate.authCodeNote"
+                values={{ code: auth.authCode }}
+                components={{ code: <code /> }}
+              />
             </p>
           ) : null}
           <div className="mt-3 flex flex-wrap gap-3">
             {auth.approvalUrl ? (
               <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
-                브라우저 다시 열기
+                {translate('portForward.warpgate.reopenBrowser')}
               </Button>
             ) : null}
             <Button type="button" variant="ghost" size="sm" onClick={onClear}>
-              닫기
+              {translate('common.close')}
             </Button>
           </div>
           {warpgateResponses ? null : (
-            <NoticeCard title="추가 입력이 필요합니다." className="mt-3">
-              <p>이 Warpgate challenge는 자동 입력 형식과 다릅니다. 아래 prompt에 직접 응답해 주세요.</p>
+            <NoticeCard title={translate('portForward.warpgate.manualTitle')} className="mt-3">
+              <p>{translate('portForward.warpgate.manualHint')}</p>
             </NoticeCard>
           )}
           <pre className="mt-3 rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.82rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
-            {auth.instruction || '추가 인증이 필요합니다.'}
+            {auth.instruction || translate('portForward.warpgate.fallbackInstruction')}
           </pre>
         </>
       ) : (
-        <p>{auth.instruction || '추가 인증이 필요합니다.'}</p>
+        <p>{auth.instruction || translate('portForward.warpgate.fallbackInstruction')}</p>
       )}
       {auth.provider !== 'warpgate' && auth.approvalUrl ? (
         <div className="mt-3 flex flex-wrap gap-3">
           <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
-            브라우저 다시 열기
+            {translate('portForward.warpgate.reopenBrowser')}
           </Button>
           <Button type="button" variant="ghost" size="sm" onClick={onClear}>
-            닫기
+            {translate('common.close')}
           </Button>
         </div>
       ) : null}
@@ -627,7 +634,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
           ))}
           <div className="mt-3 flex items-center justify-end gap-3">
             <Button type="button" variant="secondary" onClick={onClear}>
-              취소
+              {translate('common.cancel')}
             </Button>
             <Button
               type="button"
@@ -639,7 +646,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
                 )
               }
             >
-              계속
+              {translate('portForward.warpgate.continue')}
             </Button>
           </div>
         </div>
@@ -748,6 +755,7 @@ export function PortForwardingPanel({
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth
 }: PortForwardingPanelProps) {
+  const { t: translate } = useTranslation();
   const {
     inspectHostContainer,
     listEcsTaskTunnelServices,
@@ -1305,7 +1313,7 @@ export function PortForwardingPanel({
       const services = await listEcsTaskTunnelServices(hostId);
       setEcsServices(services);
     } catch (cause) {
-      setEcsServicesError(cause instanceof Error ? cause.message : 'ECS 서비스 목록을 불러오지 못했습니다.');
+      setEcsServicesError(cause instanceof Error ? cause.message : translate('portForward.error.ecsServicesLoadFailed'));
     } finally {
       setEcsServicesLoading(false);
     }
@@ -1342,7 +1350,7 @@ export function PortForwardingPanel({
       });
     } catch (cause) {
       setEcsServiceDetails(null);
-      setEcsServicesError(cause instanceof Error ? cause.message : 'ECS 서비스 상세 정보를 불러오지 못했습니다.');
+      setEcsServicesError(cause instanceof Error ? cause.message : translate('portForward.error.ecsServiceDetailsLoadFailed'));
     } finally {
       setEcsServiceDetailsLoading(false);
     }
@@ -1495,7 +1503,7 @@ export function PortForwardingPanel({
       ) {
         return;
       }
-      setDiscoveryError(cause instanceof Error ? cause.message : '컨테이너 목록을 불러오지 못했습니다.');
+      setDiscoveryError(cause instanceof Error ? cause.message : translate('portForward.error.containersLoadFailed'));
       setDiscoveryContainers([]);
     } finally {
       if (requestId === discoveryListRequestRef.current) {
@@ -1541,7 +1549,7 @@ export function PortForwardingPanel({
         return;
       }
       setDiscoveryDetails(null);
-      setDiscoveryError(cause instanceof Error ? cause.message : '컨테이너 상세 정보를 불러오지 못했습니다.');
+      setDiscoveryError(cause instanceof Error ? cause.message : translate('portForward.error.containerDetailsLoadFailed'));
     } finally {
       if (requestId === discoveryDetailsRequestRef.current) {
         setDiscoveryDetailsLoading(false);
@@ -1579,16 +1587,16 @@ export function PortForwardingPanel({
 
     if (activeTab === 'dns') {
       if (!isDnsHostname(dnsDraft.hostname)) {
-        setError('호스트 이름을 올바르게 입력해 주세요.');
+        setError(translate('portForward.error.hostnameRequired'));
         return;
       }
       if (isLinkedDnsOverrideDraft(dnsDraft)) {
         if (!dnsDraft.portForwardRuleId) {
-          setError('연결할 포워딩 규칙을 선택해 주세요.');
+          setError(translate('portForward.error.ruleRequired'));
           return;
         }
       } else if (!dnsDraft.address.trim()) {
-        setError('IP 주소를 입력해 주세요.');
+        setError(translate('portForward.error.ipRequired'));
         return;
       }
 
@@ -1609,7 +1617,7 @@ export function PortForwardingPanel({
         await onSaveDnsOverride(editingDnsOverrideId, nextDnsDraft);
         setIsModalOpen(false);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'DNS override를 저장하지 못했습니다.');
+        setError(cause instanceof Error ? cause.message : translate('portForward.error.dnsSaveFailed'));
       } finally {
         setIsSubmitting(false);
       }
@@ -1617,29 +1625,29 @@ export function PortForwardingPanel({
     }
 
     if (!draft.label.trim()) {
-      setError('이름을 입력해 주세요.');
+      setError(translate('portForward.error.nameRequired'));
       return;
     }
     if (!draft.hostId) {
-      setError('호스트를 선택해 주세요.');
+      setError(translate('portForward.error.hostRequired'));
       return;
     }
 
     if (isEcsTaskPortForwardDraft(draft)) {
       if (draft.bindPort < 0) {
-        setError('로컬 포트를 올바르게 입력해 주세요.');
+        setError(translate('portForward.error.localPortInvalid'));
         return;
       }
       if (!draft.serviceName.trim()) {
-        setError('서비스를 선택해 주세요.');
+        setError(translate('portForward.error.serviceRequired'));
         return;
       }
       if (!draft.containerName.trim()) {
-        setError('컨테이너를 선택해 주세요.');
+        setError(translate('portForward.error.containerRequired'));
         return;
       }
       if (!draft.targetPort || draft.targetPort <= 0) {
-        setError('대상 포트를 선택해 주세요.');
+        setError(translate('portForward.error.targetPortRequired'));
         return;
       }
 
@@ -1654,7 +1662,7 @@ export function PortForwardingPanel({
         });
         await closeModal();
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+        setError(cause instanceof Error ? cause.message : translate('portForward.error.ruleSaveFailed'));
       } finally {
         setIsSubmitting(false);
       }
@@ -1663,19 +1671,19 @@ export function PortForwardingPanel({
 
     if (isContainerPortForwardDraft(draft)) {
       if (draft.bindPort < 0) {
-        setError('로컬 포트를 올바르게 입력해 주세요.');
+        setError(translate('portForward.error.localPortInvalid'));
         return;
       }
       if (!draft.containerId) {
-        setError('컨테이너를 선택해 주세요.');
+        setError(translate('portForward.error.containerRequired'));
         return;
       }
       if (!draft.networkName) {
-        setError('컨테이너 네트워크를 선택해 주세요.');
+        setError(translate('portForward.error.containerNetworkRequired'));
         return;
       }
       if (!draft.targetPort || draft.targetPort <= 0) {
-        setError('대상 포트를 선택해 주세요.');
+        setError(translate('portForward.error.targetPortRequired'));
         return;
       }
       setIsSubmitting(true);
@@ -1687,7 +1695,7 @@ export function PortForwardingPanel({
         });
         await closeModal();
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+        setError(cause instanceof Error ? cause.message : translate('portForward.error.ruleSaveFailed'));
       } finally {
         setIsSubmitting(false);
       }
@@ -1695,21 +1703,21 @@ export function PortForwardingPanel({
     }
 
     if (draft.bindPort <= 0) {
-      setError('로컬 포트를 올바르게 입력해 주세요.');
+      setError(translate('portForward.error.localPortInvalid'));
       return;
     }
 
     if (isAwsSsmPortForwardDraft(draft)) {
       if (!isLoopbackBindAddress(draft.bindAddress)) {
-        setError('AWS SSM 로컬 주소는 loopback 주소여야 합니다.');
+        setError(translate('portForward.error.ssmLoopbackRequired'));
         return;
       }
       if (!draft.targetPort || draft.targetPort <= 0) {
-        setError('대상 포트를 올바르게 입력해 주세요.');
+        setError(translate('portForward.error.targetPortInvalid'));
         return;
       }
       if (draft.targetKind === 'remote-host' && !draft.remoteHost?.trim()) {
-        setError('원격 호스트를 입력해 주세요.');
+        setError(translate('portForward.error.remoteHostRequired'));
         return;
       }
 
@@ -1723,7 +1731,7 @@ export function PortForwardingPanel({
         });
         await closeModal();
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+        setError(cause instanceof Error ? cause.message : translate('portForward.error.ruleSaveFailed'));
       } finally {
         setIsSubmitting(false);
       }
@@ -1731,7 +1739,7 @@ export function PortForwardingPanel({
     }
 
     if (draft.mode !== 'dynamic' && (!draft.targetHost?.trim() || !draft.targetPort || draft.targetPort <= 0)) {
-      setError('대상 호스트와 포트를 올바르게 입력해 주세요.');
+      setError(translate('portForward.error.targetHostPortInvalid'));
       return;
     }
 
@@ -1745,7 +1753,7 @@ export function PortForwardingPanel({
       });
       await closeModal();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '포워딩 규칙을 저장하지 못했습니다.');
+      setError(cause instanceof Error ? cause.message : translate('portForward.error.ruleSaveFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -1866,8 +1874,8 @@ export function PortForwardingPanel({
         normalizeErrorMessage(
           cause,
           active
-            ? 'DNS Override를 활성화하지 못했습니다.'
-            : 'DNS Override를 비활성화하지 못했습니다.',
+            ? translate('portForward.error.dnsEnableFailed')
+            : translate('portForward.error.dnsDisableFailed'),
         ),
       );
     } finally {
@@ -1884,7 +1892,7 @@ export function PortForwardingPanel({
       {interactiveAuth ? (
         <InteractiveAuthCard
           auth={interactiveAuth}
-          title="Container tunnel 승인을 기다리는 중입니다."
+          title={translate('portForward.waiting.containerTunnel')}
           onRespond={onRespondInteractiveAuth}
           onReopenUrl={onReopenInteractiveAuthUrl}
           onClear={onClearInteractiveAuth}
@@ -1894,7 +1902,7 @@ export function PortForwardingPanel({
       {!isModalOpen && discoveryInteractiveAuth ? (
         <InteractiveAuthCard
           auth={discoveryInteractiveAuth}
-          title="컨테이너 런타임 연결 승인을 기다리는 중입니다."
+          title={translate('portForward.waiting.containerRuntime')}
           onRespond={onRespondInteractiveAuth}
           onReopenUrl={onReopenInteractiveAuthUrl}
           onClear={onClearInteractiveAuth}
@@ -2140,7 +2148,7 @@ export function PortForwardingPanel({
                     ariaLabel="Host"
                     searchAriaLabel="Container forwarding host search"
                     placeholder="Select host"
-                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={containerHostOptions}
                     onChange={selectContainerForwardHost}
@@ -2153,7 +2161,7 @@ export function PortForwardingPanel({
                     ariaLabel="Host"
                     searchAriaLabel="SSH forwarding host search"
                     placeholder="Select host"
-                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={sshHostOptions}
                     onChange={selectSshForwardHost}
@@ -2166,7 +2174,7 @@ export function PortForwardingPanel({
                     ariaLabel="AWS EC2 Host"
                     searchAriaLabel="AWS EC2 forwarding host search"
                     placeholder="Select host"
-                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={awsHostOptions}
                     onChange={selectAwsForwardHost}
@@ -2179,7 +2187,7 @@ export function PortForwardingPanel({
                     ariaLabel="AWS ECS Host"
                     searchAriaLabel="ECS task forwarding host search"
                     placeholder="Select host"
-                    searchPlaceholder="이름, 주소, 프로필, 그룹, 태그 검색"
+                    searchPlaceholder={translate('portForward.form.hostSearchPlaceholder')}
                     value={draft.hostId}
                     options={ecsHostOptions}
                     onChange={selectEcsForwardHost}
@@ -2199,7 +2207,7 @@ export function PortForwardingPanel({
                   {discoveryInteractiveAuth && discoveryHost?.id === discoveryInteractiveAuth.hostId ? (
                     <InteractiveAuthCard
                       auth={discoveryInteractiveAuth}
-                      title="컨테이너 조회를 위한 승인을 기다리는 중입니다."
+                      title={translate('portForward.waiting.containerLookup')}
                       onRespond={onRespondInteractiveAuth}
                       onReopenUrl={onReopenInteractiveAuthUrl}
                       onClear={onClearInteractiveAuth}
@@ -2307,7 +2315,14 @@ export function PortForwardingPanel({
                           <option value="">Select network</option>
                           {availableNetworks.map((network) => (
                             <option key={network.name} value={network.name}>
-                              {network.ipAddress ? `${network.name} (${network.ipAddress})` : `${network.name} (IP 확인 대기)`}
+                              {network.ipAddress
+                                ? translate('portForward.form.networkWithIp', {
+                                    name: network.name,
+                                    ip: network.ipAddress,
+                                  })
+                                : translate('portForward.form.networkPendingIp', {
+                                    name: network.name,
+                                  })}
                             </option>
                           ))}
                         </SelectField>
@@ -2394,7 +2409,7 @@ export function PortForwardingPanel({
                             Auto (random)
                           </strong>
                           <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
-                            사용 가능한 로컬 포트를 자동으로 할당합니다.
+                            {translate('portForward.form.autoLocalPortHint')}
                           </span>
                         </span>
                       </button>
@@ -2413,7 +2428,7 @@ export function PortForwardingPanel({
                           )
                         }
                         disabled={isSubmitting || isAutoLocalPort}
-                        placeholder={isAutoLocalPort ? '자동 할당' : '9000'}
+                        placeholder={isAutoLocalPort ? translate('portForward.form.autoLocalPortPlaceholder') : '9000'}
                       />
                     </div>
                   </FieldGroup>
@@ -2421,24 +2436,24 @@ export function PortForwardingPanel({
                   {discoveryError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{discoveryError}</p> : null}
                   {discoveryDetailsLoading ? (
                     <NoticeCard>
-                      <p>컨테이너 상세 정보를 불러오는 중입니다.</p>
+                      <p>{translate('portForward.form.containerDetailsLoading')}</p>
                     </NoticeCard>
                   ) : null}
                   {discoveryDetails && eligiblePorts.length === 0 ? (
                     <EmptyState
-                      title="선택 가능한 TCP 포트가 없습니다."
-                      description="이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다."
+                      title={translate('portForward.form.noTcpPortsTitle')}
+                      description={translate('portForward.form.noTcpPortsDescription')}
                     />
                   ) : null}
                   {discoveryDetails && availableNetworks.length === 0 ? (
                     <EmptyState
-                      title="사용 가능한 네트워크 IP가 없습니다."
-                      description="이 컨테이너는 연결할 네트워크 정보가 없어 터널 규칙을 저장할 수 없습니다."
+                      title={translate('portForward.form.noNetworkIpTitle')}
+                      description={translate('portForward.form.noNetworkIpDescription')}
                     />
                   ) : null}
                   {discoveryDetails && availableNetworks.length > 0 && eligibleNetworks.length === 0 ? (
-                    <NoticeCard title="현재는 네트워크 IP가 보이지 않습니다.">
-                      <p>종료된 컨테이너일 수 있습니다. 규칙은 저장할 수 있고, 시작할 때 현재 IP를 다시 확인합니다.</p>
+                    <NoticeCard title={translate('portForward.form.networkIpHiddenTitle')}>
+                      <p>{translate('portForward.form.networkIpHiddenHint')}</p>
                     </NoticeCard>
                   ) : null}
                 </>
@@ -2598,7 +2613,7 @@ export function PortForwardingPanel({
                             Auto (random)
                           </strong>
                           <span className="text-[0.82rem] leading-[1.45] text-[var(--text-soft)]">
-                            사용 가능한 로컬 포트를 자동으로 할당합니다.
+                            {translate('portForward.form.autoLocalPortHint')}
                           </span>
                         </span>
                       </button>
@@ -2617,7 +2632,7 @@ export function PortForwardingPanel({
                           )
                         }
                         disabled={isSubmitting || isAutoEcsLocalPort}
-                        placeholder={isAutoEcsLocalPort ? '자동 할당' : '9000'}
+                        placeholder={isAutoEcsLocalPort ? translate('portForward.form.autoLocalPortPlaceholder') : '9000'}
                       />
                     </div>
                   </FieldGroup>
@@ -2628,24 +2643,24 @@ export function PortForwardingPanel({
                     </NoticeCard>
                   ) : null}
                   {ecsServicesError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{ecsServicesError}</p> : null}
-                  {ecsServicesLoading ? <NoticeCard><p>ECS 서비스 목록을 불러오는 중입니다.</p></NoticeCard> : null}
-                  {ecsServiceDetailsLoading ? <NoticeCard><p>ECS 서비스 상세 정보를 불러오는 중입니다.</p></NoticeCard> : null}
+                  {ecsServicesLoading ? <NoticeCard><p>{translate('portForward.form.ecsServicesLoading')}</p></NoticeCard> : null}
+                  {ecsServiceDetailsLoading ? <NoticeCard><p>{translate('portForward.form.ecsServiceDetailsLoading')}</p></NoticeCard> : null}
                   {!ecsServicesLoading && draft.hostId && ecsServices.length === 0 && !ecsServicesError ? (
                     <EmptyState
-                      title="가져올 수 있는 ECS 서비스가 없습니다."
-                      description="이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다."
+                      title={translate('portForward.form.noEcsServicesTitle')}
+                      description={translate('portForward.form.noEcsServicesDescription')}
                     />
                   ) : null}
                   {!ecsServiceDetailsLoading && draft.serviceName && ecsServiceDetails && ecsContainerOptions.length === 0 ? (
                     <EmptyState
-                      title="선택 가능한 컨테이너가 없습니다."
-                      description="이 서비스의 task definition에 사용할 컨테이너가 없습니다."
+                      title={translate('portForward.form.noEcsContainersTitle')}
+                      description={translate('portForward.form.noEcsContainersDescription')}
                     />
                   ) : null}
                   {!ecsServiceDetailsLoading && draft.containerName && ecsPortOptions.length === 0 ? (
                     <EmptyState
-                      title="선택 가능한 TCP 포트가 없습니다."
-                      description="이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다."
+                      title={translate('portForward.form.noTcpPortsTitle')}
+                      description={translate('portForward.form.noTcpPortsDescription')}
                     />
                   ) : null}
                 </>
@@ -2769,7 +2784,7 @@ export function PortForwardingPanel({
 
             <ModalFooter>
               <Button type="button" variant="secondary" onClick={() => void closeModal()} disabled={isSubmitting}>
-                취소
+                {translate('common.cancel')}
               </Button>
               <Button
                 type="button"
@@ -2783,7 +2798,7 @@ export function PortForwardingPanel({
                     (!draft.containerId || !draft.networkName || !draft.targetPort || availableNetworks.length === 0 || eligiblePorts.length === 0))
                 }
               >
-                저장
+                {translate('common.save')}
               </Button>
             </ModalFooter>
           </ModalShell>

@@ -34,6 +34,8 @@ import {
   TabButton,
   Tabs,
 } from '../ui';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 type AwsImportMode = 'ec2' | 'ecs';
 
@@ -78,10 +80,10 @@ function getSsmAvailabilityReason(instance: AwsEc2InstanceSummary): string | nul
     return trimmed;
   }
   if (instance.ssmAvailability === 'unavailable') {
-    return '이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.';
+    return t('aws.ssm.notManaged');
   }
   if (instance.ssmAvailability === 'unknown') {
-    return 'SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.';
+    return t('aws.ssm.statusUnknown');
   }
   return null;
 }
@@ -92,15 +94,15 @@ function canInspectEc2Instance(instance: AwsEc2InstanceSummary): boolean {
 
 function getInspectButtonLabel(instance: AwsEc2InstanceSummary): string {
   if (/windows/i.test(instance.platform || '')) {
-    return 'Windows 미지원';
+    return t('awsImport.badge.windowsUnsupported');
   }
   if (instance.ssmAvailability === 'unavailable') {
-    return 'SSM 사용 불가';
+    return t('awsImport.badge.ssmUnavailable');
   }
   if (instance.ssmAvailability === 'unknown') {
-    return '가져오기 차단됨';
+    return t('awsImport.badge.blocked');
   }
-  return 'SSH 정보 확인';
+  return t('awsImport.badge.inspect');
 }
 
 function resolveSelectedProfileName(
@@ -157,12 +159,13 @@ function toAwsSshPortValue(value: string): number | null {
   }
   const parsed = Number.parseInt(trimmed, 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-    throw new Error('SSH 포트는 1에서 65535 사이 숫자여야 합니다.');
+    throw new Error(t('awsImport.error.portRange'));
   }
   return parsed;
 }
 
 export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: AwsImportDialogProps) {
+  const { t: translate } = useTranslation();
   const {
     createAwsProfile,
     getSyncStatus,
@@ -303,7 +306,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         errorMessage:
           inspectError instanceof Error
             ? inspectError.message
-            : 'SSH 접속 정보를 자동으로 확인하지 못했습니다.',
+            : translate('awsImport.error.sshAutoFailed'),
       };
     }
 
@@ -339,7 +342,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         setSelectedProfile(resolveSelectedProfileName(items));
       })
       .catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : 'AWS 프로필 목록을 불러오지 못했습니다.');
+        setError(loadError instanceof Error ? loadError.message : translate('awsImport.error.profileListFailed'));
       })
       .finally(() => {
         setIsLoadingProfiles(false);
@@ -376,7 +379,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         if (cancelled) {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : 'AWS 프로필 상태를 확인하지 못했습니다.');
+        setError(loadError instanceof Error ? loadError.message : translate('awsImport.error.profileStatusFailed'));
       })
       .finally(() => {
         if (!cancelled) {
@@ -424,7 +427,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         if (cancelled) {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : 'AWS 리전 목록을 불러오지 못했습니다.');
+        setError(loadError instanceof Error ? loadError.message : translate('awsImport.error.regionListFailed'));
       })
       .finally(() => {
         if (!cancelled) {
@@ -475,8 +478,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           loadError instanceof Error
             ? loadError.message
             : importMode === 'ecs'
-              ? 'ECS 클러스터 목록을 불러오지 못했습니다.'
-              : 'EC2 인스턴스 목록을 불러오지 못했습니다.',
+              ? translate('awsImport.error.ecsClusterListFailed')
+              : translate('awsImport.error.ec2ListFailed'),
         );
       })
       .finally(() => {
@@ -504,10 +507,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   }) => {
     const parts: string[] = []
     if (result.importedProfileNames.length > 0) {
-      parts.push(`가져온 프로필 ${result.importedProfileNames.length}개`)
+      parts.push(translate('awsProfiles.import.imported', { count: result.importedProfileNames.length }))
     }
     if (result.skippedProfileNames.length > 0) {
-      parts.push(`건너뜀 ${result.skippedProfileNames.length}개`)
+      parts.push(translate('awsProfiles.import.skipped', { count: result.skippedProfileNames.length }))
     }
     setExternalImportSummary(parts.length > 0 ? `${parts.join(', ')}.` : null)
     const items = await listAwsProfiles()
@@ -525,7 +528,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     () =>
       instances.find((instance) => instance.ssmAvailability === 'unknown')
         ?.ssmAvailabilityReason?.trim() ||
-      'SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.',
+      translate('aws.ssm.statusUnknown'),
     [instances],
   );
   const shouldShowUnknownSsmNotice =
@@ -535,17 +538,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const loadingMessage = inspectionTarget
     ? null
     : isLoadingProfiles
-      ? 'AWS 프로필을 불러오는 중입니다.'
+      ? translate('awsImport.loading.profiles')
       : isLoadingStatus
-        ? '프로필 로그인 상태를 확인하는 중입니다.'
+        ? translate('awsImport.loading.profileStatus')
         : isLoggingIn
-          ? '브라우저에서 AWS 로그인을 진행 중입니다.'
+          ? translate('awsImport.loading.browserLogin')
           : isLoadingRegions
-            ? '리전 목록을 불러오는 중입니다.'
+            ? translate('awsImport.loading.regions')
             : isLoadingInstances
               ? importMode === 'ecs'
-                ? 'ECS 클러스터 목록을 불러오는 중입니다.'
-                : 'EC2 인스턴스 목록을 불러오는 중입니다.'
+                ? translate('awsImport.loading.ecsClusters')
+                : translate('awsImport.loading.ec2Instances')
               : null;
   const inspectionCandidateChips = useMemo(
     () =>
@@ -667,7 +670,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 setIsExternalImportOpen(true)
               }}
             >
-              로컬 AWS CLI에서 가져오기
+              {translate('awsImport.action.importFromCli')}
             </Button>
             <Button
               variant="secondary"
@@ -676,7 +679,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 setIsCreateProfileOpen((current) => !current);
               }}
             >
-              {isCreateProfileOpen ? '프로필 생성 닫기' : '프로필 생성'}
+              {translate(isCreateProfileOpen ? 'awsImport.action.closeCreateProfile' : 'awsImport.action.createProfile')}
             </Button>
           </div>
 
@@ -685,11 +688,11 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               <CardMain>
                 <AwsProfileCreateWizard
                   testId="aws-create-profile-fields"
-                  title="새 AWS 프로필 생성"
+                  title={translate('awsImport.profile.wizardTitle')}
                   descriptions={[
-                    '앱 전용 AWS CLI 프로필로 저장됩니다.',
+                    translate('awsImport.profile.wizardDescription'),
                     ...(awsProfilesServerSupport === 'unsupported'
-                      ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
+                      ? [translate('awsImport.profile.wizardSyncUnsupported')]
                       : []),
                   ]}
                   profiles={profiles}
@@ -708,7 +711,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
           {awsProfilesServerSupport === 'unsupported' ? (
             <NoticeCard tone="warning">
-              현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.
+              {translate('awsImport.profile.syncUnsupported')}
             </NoticeCard>
           ) : null}
 
@@ -717,16 +720,16 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           {shouldShowAwsProfileAuthError(profileStatus, isLoadingStatus) && profileStatus ? (
             <NoticeCard tone="danger" role="alert">
               {profileStatus.isSsoProfile
-                ? '이 프로필은 아직 로그인되지 않았습니다. 브라우저에서 AWS SSO 로그인을 완료해 주세요.'
-                : profileStatus.errorMessage || '이 프로필은 AWS CLI 자격 증명이 필요합니다.'}
+                ? translate('awsImport.profile.ssoLoginNeeded')
+                : profileStatus.errorMessage || translate('awsImport.profile.credentialsNeeded')}
             </NoticeCard>
           ) : null}
 
           {shouldShowMissingToolsBanner ? (
             <NoticeCard tone="danger" role="alert">
-              {missingTools.includes('aws-cli') ? 'AWS CLI가 설치되어 있어야 합니다. ' : ''}
+              {missingTools.includes('aws-cli') ? translate('awsImport.profile.awsCliRequired') : ''}
               {importMode === 'ec2' && missingTools.includes('session-manager-plugin')
-                ? 'session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다.'
+                ? translate('awsImport.profile.sessionManagerRequired')
                 : ''}
             </NoticeCard>
           ) : null}
@@ -752,14 +755,14 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                     const status = await getAwsProfileStatus(selectedProfile);
                     setProfileStatus(status);
                   } catch (loginError) {
-                    setError(loginError instanceof Error ? loginError.message : 'AWS SSO 로그인을 시작하지 못했습니다.');
+                    setError(loginError instanceof Error ? loginError.message : translate('awsImport.error.ssoLoginFailed'));
                   } finally {
                     setIsLoggingIn(false);
                   }
                 }}
                 disabled={isLoggingIn}
               >
-                {isLoggingIn ? '로그인 중...' : '브라우저에서 로그인'}
+                {translate(isLoggingIn ? 'awsImport.action.signingIn' : 'awsImport.action.signInBrowser')}
               </Button>
             </div>
           ) : null}
@@ -790,15 +793,15 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
 
               {inspectionStatus === 'loading' ? (
                 <NoticeCard tone="info">
-                  유저명 및 SSH 접속 정보를 확인 중입니다.
+                  {translate('awsImport.inspect.inProgress')}
                 </NoticeCard>
               ) : null}
 
               {inspectionStatus === 'ready' ? (
                 <NoticeCard
-                  title="자동으로 SSH 접속 정보를 확인했습니다."
+                  title={translate('awsImport.inspect.doneTitle')}
                 >
-                  <p>필요하면 아래 값을 바로 수정한 뒤 Host를 등록할 수 있습니다.</p>
+                  <p>{translate('awsImport.inspect.doneHint')}</p>
                 </NoticeCard>
               ) : null}
 
@@ -817,7 +820,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       usernameValueRef.current = event.target.value;
                       setInspectionUsername(event.target.value);
                     }}
-                    placeholder="자동으로 찾은 사용자명이 없으면 비워둘 수 있습니다."
+                    placeholder={translate('awsImport.inspect.usernamePlaceholder')}
                     disabled={inspectionStatus === 'loading' || isRegistering}
                   />
                 </FieldGroup>
@@ -832,7 +835,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       portValueRef.current = nextValue;
                       setInspectionPort(nextValue);
                     }}
-                    placeholder="비워두면 기본값 22를 사용합니다."
+                    placeholder={translate('awsImport.inspect.portPlaceholder')}
                     disabled={inspectionStatus === 'loading' || isRegistering}
                   />
                 </FieldGroup>
@@ -862,7 +865,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <div className="mt-[0.9rem]" data-testid="aws-import-ecs-cluster-list">
               <PanelSection>
                 {ecsClusters.length === 0 && !isLoadingInstances ? (
-                  <EmptyState title="이 리전에 가져올 수 있는 ECS 클러스터가 없습니다." />
+                  <EmptyState title={translate('awsImport.empty.noEcsClusters')} />
                 ) : (
                   ecsClusters.map((cluster) => (
                     <Card key={cluster.clusterArn}>
@@ -905,14 +908,14 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                               setError(
                                 submitError instanceof Error
                                   ? submitError.message
-                                  : 'ECS 클러스터를 가져오지 못했습니다.',
+                                  : translate('awsImport.error.clusterRegisterFailed'),
                               );
                             } finally {
                               setIsRegistering(false);
                             }
                           }}
                         >
-                          {isRegistering ? '추가 중...' : '클러스터 추가'}
+                          {translate(isRegistering ? 'awsImport.action.addingCluster' : 'awsImport.action.addCluster')}
                         </Button>
                       </CardActions>
                     </Card>
@@ -924,7 +927,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <div className="mt-[0.9rem]" data-testid="aws-import-instance-list">
               <PanelSection>
                 {instances.length === 0 && !isLoadingInstances ? (
-                  <EmptyState title="이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다." />
+                  <EmptyState title={translate('awsImport.empty.noEc2Instances')} />
                 ) : (
                   instances.map((instance) => (
                     <Card key={instance.instanceId}>
@@ -970,8 +973,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             <EmptyState
               title={
                 importMode === 'ecs'
-                  ? '리전을 선택하면 ECS 클러스터를 불러옵니다.'
-                  : '리전을 선택하면 EC2 인스턴스를 불러옵니다.'
+                  ? translate('awsImport.empty.selectRegionEcs')
+                  : translate('awsImport.empty.selectRegionEc2')
               }
               data-testid="aws-import-region-hint"
             />
@@ -988,7 +991,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   resetInspection();
                 }}
               >
-                뒤로
+                {translate('awsImport.action.back')}
               </Button>
               <div className="ml-auto flex items-center justify-end gap-3">
                 <Button
@@ -998,7 +1001,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                     void inspectInstance(inspectionTarget, true);
                   }}
                 >
-                  다시 확인
+                  {translate('awsImport.action.recheck')}
                 </Button>
                 <Button
                   variant="primary"
@@ -1031,20 +1034,20 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       onClose();
                     } catch (submitError) {
                       setInspectionStatus('error');
-                      setInspectionError(submitError instanceof Error ? submitError.message : 'AWS host를 등록하지 못했습니다.');
+                      setInspectionError(submitError instanceof Error ? submitError.message : translate('awsImport.error.hostRegisterFailed'));
                     } finally {
                       setIsRegistering(false);
                     }
                   }}
                 >
-                  {isRegistering ? '등록 중...' : 'Host 등록'}
+                  {translate(isRegistering ? 'awsImport.action.registering' : 'awsImport.action.registerHost')}
                 </Button>
               </div>
             </>
           ) : (
             <div className="ml-auto flex items-center justify-end gap-3">
               <Button variant="secondary" onClick={onClose}>
-                닫기
+                {translate('common.close')}
               </Button>
             </div>
           )}

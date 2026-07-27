@@ -16,6 +16,7 @@ import { isIP } from 'node:net';
 import path from 'node:path';
 import type {
   ActivityLogRecord,
+  AppLanguage,
   AwsProfileMetadataRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
@@ -62,6 +63,7 @@ import {
   normalizeSftpBrowserColumnWidths
 } from '@shared';
 import type { SyncKind } from '@shared';
+import { normalizeAppLanguage } from '../common/i18n/locale';
 import {
   resolveLocalHistoryScope,
   type LocalHistoryOwner
@@ -89,6 +91,7 @@ export interface DesktopStateFile {
   schemaVersion: number;
   settings: {
     theme: AppTheme;
+    language: AppLanguage;
     homeHostViewMode: HomeHostViewMode;
     sftpBrowserColumnWidths: SftpBrowserColumnWidths;
     sftpConflictPolicy: SftpConflictPolicy;
@@ -510,6 +513,7 @@ function createDefaultStateFile(): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: 'system',
+      language: 'system',
       homeHostViewMode: 'grid',
       sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
       sftpConflictPolicy: 'ask',
@@ -922,6 +926,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     schemaVersion: DESKTOP_STATE_SCHEMA_VERSION,
     settings: {
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
+      language: normalizeAppLanguage(settings.language),
       homeHostViewMode: normalizeHomeHostViewMode(settings.homeHostViewMode),
       sftpBrowserColumnWidths: normalizeSftpBrowserColumnWidths(
         isObject(settings.sftpBrowserColumnWidths) ? settings.sftpBrowserColumnWidths : null

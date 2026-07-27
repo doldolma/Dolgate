@@ -1,6 +1,7 @@
 import { DialogBackdrop } from './DialogBackdrop';
 import { ModalBody, ModalHeader, ModalShell, SectionLabel } from '../ui';
 import { tmuxPrefixKeyLabels } from '../lib/tmux-prefix';
+import { useTranslation } from 'react-i18next';
 
 interface ShortcutsDialogProps {
   open: boolean;
@@ -28,6 +29,7 @@ export function ShortcutsDialog({
   onClose,
   tmuxPrefixKey,
 }: ShortcutsDialogProps) {
+  const { t: translate } = useTranslation();
   if (!open) {
     return null;
   }
@@ -36,37 +38,37 @@ export function ShortcutsDialog({
   const shift = mac ? '⇧' : 'Shift';
   const sections: ShortcutSection[] = [
     {
-      title: '일반',
+      title: translate('shortcuts.group.general'),
       items: [
-        { label: '새 창', keys: [cmd, 'N'] },
-        { label: '호스트 검색', keys: [cmd, 'K'] },
-        { label: '검색 / 찾기', keys: [cmd, 'F'] },
+        { label: translate('shortcuts.item.newWindow'), keys: [cmd, 'N'] },
+        { label: translate('shortcuts.item.searchHosts'), keys: [cmd, 'K'] },
+        { label: translate('shortcuts.item.find'), keys: [cmd, 'F'] },
       ],
     },
     {
-      title: '탭',
+      title: translate('shortcuts.group.tabs'),
       items: [
-        { label: '다음 탭', keys: mac ? ['⌘', '⌥', '→'] : ['Ctrl', 'Tab'] },
-        { label: '이전 탭', keys: mac ? ['⌘', '⌥', '←'] : ['Ctrl', 'Shift', 'Tab'] },
-        { label: '1~8번째 탭', keys: [cmd, '1…8'] },
-        { label: '마지막 탭', keys: [cmd, '9'] },
-        { label: '닫은 탭 다시 열기', keys: [cmd, shift, 'T'] },
-        { label: '탭 닫기', keys: [cmd, 'W'] },
+        { label: translate('shortcuts.item.nextTab'), keys: mac ? ['⌘', '⌥', '→'] : ['Ctrl', 'Tab'] },
+        { label: translate('shortcuts.item.prevTab'), keys: mac ? ['⌘', '⌥', '←'] : ['Ctrl', 'Shift', 'Tab'] },
+        { label: translate('shortcuts.item.tab1to8'), keys: [cmd, '1…8'] },
+        { label: translate('shortcuts.item.lastTab'), keys: [cmd, '9'] },
+        { label: translate('shortcuts.item.reopenTab'), keys: [cmd, shift, 'T'] },
+        { label: translate('shortcuts.item.closeTab'), keys: [cmd, 'W'] },
       ],
     },
     {
-      title: '터미널',
+      title: translate('shortcuts.group.terminal'),
       items: [
-        { label: '명령 팔레트', keys: [cmd, shift, 'P'] },
-        { label: 'AI 어시스턴트', keys: [cmd, 'I'] },
-        { label: '이전 / 다음 명령', keys: [cmd, '↑ / ↓'] },
-        { label: '이전 / 다음 실패한 명령', keys: [cmd, shift, '↑ / ↓'] },
+        { label: translate('shortcuts.item.commandPalette'), keys: [cmd, shift, 'P'] },
+        { label: translate('shortcuts.item.aiAssistant'), keys: [cmd, 'I'] },
+        { label: translate('shortcuts.item.prevNextCommand'), keys: [cmd, '↑ / ↓'] },
+        { label: translate('shortcuts.item.prevNextFailed'), keys: [cmd, shift, '↑ / ↓'] },
       ],
     },
     {
       title: 'tmux',
       items: [
-        { label: 'tmux 프리픽스', keys: tmuxPrefixKeyLabels(tmuxPrefixKey) },
+        { label: translate('shortcuts.item.tmuxPrefix'), keys: tmuxPrefixKeyLabels(tmuxPrefixKey) },
       ],
     },
   ];
@@ -74,8 +76,8 @@ export function ShortcutsDialog({
     <DialogBackdrop onDismiss={onClose}>
       <ModalShell role="dialog" aria-modal="true" aria-labelledby="shortcuts-dialog-title">
         <ModalHeader className="block">
-          <SectionLabel>도움말</SectionLabel>
-          <h3 id="shortcuts-dialog-title">키보드 단축키</h3>
+          <SectionLabel>{translate('shortcuts.help')}</SectionLabel>
+          <h3 id="shortcuts-dialog-title">{translate('shortcuts.title')}</h3>
         </ModalHeader>
         <ModalBody className="grid gap-[1.1rem]">
           {sections.map((section) => (
@@ -104,7 +106,7 @@ export function ShortcutsDialog({
             </div>
           ))}
           <p className="m-0 text-[0.72rem] leading-[1.5] text-[var(--text-soft)]">
-            명령 팔레트와 명령 이동은 셸 통합(OSC 133)이 동작하는 세션에서만 쓸 수 있습니다.
+            {translate('shortcuts.note')}
           </p>
         </ModalBody>
       </ModalShell>

@@ -1,5 +1,6 @@
 import type { AiToolDef } from "../../../shared/ai";
 import { redactSecrets } from "../redact";
+import { t } from '../../i18n';
 
 export const RUN_IN_TERMINAL_TOOL: AiToolDef = {
   name: "run_in_terminal",
@@ -51,13 +52,17 @@ export async function runInTerminalTool(
 ): Promise<string> {
   const command = typeof args.command === "string" ? args.command.trim() : "";
   if (!command) {
-    return "error: 실행할 명령(command)이 비어 있습니다.";
+    return t('runCommand.empty');
   }
   const { output, running } = await runInTerminal(command);
   const body = clip(redactSecrets(output));
-  const parts = [`사용자의 터미널에서 실행: ${command}`, "", body || "(출력 없음)"];
+  const parts = [
+    t('runCommand.header', { command }),
+    "",
+    body || t('runCommand.noOutput'),
+  ];
   if (running) {
-    parts.push("", "(명령이 아직 실행 중입니다 — 스트리밍/장기 실행. 위는 처음 몇 초의 출력이며, 사용자가 터미널에서 계속 보거나 중단할 수 있습니다. 다시 실행하지 마세요.)");
+    parts.push("", t('runCommand.stillRunning'));
   }
   return parts.join("\n");
 }
@@ -66,5 +71,5 @@ function clip(text: string): string {
   if (text.length <= MAX_OUTPUT_CHARS) {
     return text;
   }
-  return `${text.slice(0, MAX_OUTPUT_CHARS)}\n…(생략됨)`;
+  return `${text.slice(0, MAX_OUTPUT_CHARS)}\n${t('runCommand.truncated')}`;
 }

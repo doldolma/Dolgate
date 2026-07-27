@@ -33,6 +33,7 @@ import {
   resolveCurrentXshellPasswordSecurityContext,
 } from "../xshell-password-decryptor";
 import type { MainIpcContext } from "./context";
+import { t } from "../i18n";
 
 const hostTransferService = new HostTransferService();
 
@@ -66,7 +67,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         !Array.isArray(input.hostIds) ||
         (input.format !== "dolgate" && input.format !== "openssh")
       ) {
-        throw new Error("내보내기 요청이 올바르지 않습니다.");
+        throw new Error(t("imports.exportRequestInvalid"));
       }
       const window = ctx.resolveWindowFromSender(event.sender);
       if (input.format === "dolgate") {
@@ -76,7 +77,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           app.getVersion(),
         );
         const result = await dialog.showSaveDialog(window, {
-          title: "Dolgate 호스트 내보내기",
+          title: t("imports.dolgateExportTitle"),
           defaultPath: path.join(
             app.getPath("documents"),
             createHostExportFileName("dolgate"),
@@ -94,7 +95,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         }
         const savedPath = ensureExtension(result.filePath, ".dolgate");
         await writeFileAtomically(savedPath, exported.bytes);
-        ctx.activityLogs.append("info", "audit", "선택한 호스트를 Dolgate 파일로 내보냈습니다.", {
+        ctx.activityLogs.append("info", "audit", t("imports.dolgateExported"), {
           exportedHostCount: exported.hostCount,
         });
         return {
@@ -108,10 +109,10 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
 
       const exported = hostTransferService.createOpenSshExport(input.hostIds);
       if (!exported.content) {
-        throw new Error("선택한 호스트 중 OpenSSH 형식으로 내보낼 수 있는 항목이 없습니다.");
+        throw new Error(t("imports.opensshNoExportable"));
       }
       const result = await dialog.showSaveDialog(window, {
-        title: "OpenSSH config 내보내기",
+        title: t("imports.opensshExportTitle"),
         defaultPath: path.join(
           app.getPath("documents"),
           createHostExportFileName("ssh-config"),
@@ -129,7 +130,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       }
       const savedPath = ensureExtension(result.filePath, ".ssh-config");
       await writeFileAtomically(savedPath, exported.content);
-      ctx.activityLogs.append("info", "audit", "선택한 호스트를 OpenSSH config로 내보냈습니다.", {
+      ctx.activityLogs.append("info", "audit", t("imports.opensshExported"), {
         exportedHostCount: exported.exportedRootCount,
         dependencyCount: exported.dependencyCount,
         skippedHostCount: exported.skippedCount,
@@ -146,7 +147,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(ipcChannels.hostTransfer.pickImportFile, async (event) => {
     const result = await dialog.showOpenDialog(ctx.resolveWindowFromSender(event.sender), {
-      title: "Dolgate 호스트 파일 가져오기",
+      title: t("imports.dolgateImportTitle"),
       properties: ["openFile"],
       filters: [{ name: "Dolgate encrypted host bundle", extensions: ["dolgate"] }],
     });
@@ -161,11 +162,11 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.hostTransfer.probeImport,
     async (_event, filePath: string, password: string) => {
       if (typeof filePath !== "string" || typeof password !== "string") {
-        throw new Error("가져오기 요청이 올바르지 않습니다.");
+        throw new Error(t("imports.importRequestInvalid"));
       }
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || fileStat.size > MAX_DOLGATE_FILE_BYTES) {
-        throw new Error("Dolgate 파일이 너무 크거나 올바른 파일이 아닙니다.");
+        throw new Error(t("imports.fileTooLarge"));
       }
       return hostTransferService.probeImport(await readFile(filePath), password);
     },
@@ -175,7 +176,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.hostTransfer.commitImport,
     async (event, snapshotId: string) => {
       if (typeof snapshotId !== "string" || !snapshotId) {
-        throw new Error("가져오기 상태가 올바르지 않습니다.");
+        throw new Error(t("imports.importStateInvalid"));
       }
       const result = hostTransferService.commitImport(snapshotId);
       const importedCount =
@@ -192,20 +193,20 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         await ctx.awsService.materializeManagedProfiles().catch((error: unknown) => {
           result.warnings.push(
             error instanceof Error
-              ? `AWS 프로필 파일 반영 실패: ${error.message}`
-              : "AWS 프로필 파일을 반영하지 못했습니다.",
+              ? t("imports.awsProfileApplyFailedDetail", { message: error.message })
+              : t("imports.awsProfileApplyFailed"),
           );
         });
         await ctx.rewriteActiveDnsOverrides().catch((error: unknown) => {
           result.warnings.push(
             error instanceof Error
-              ? `DNS override 반영 실패: ${error.message}`
-              : "DNS override를 반영하지 못했습니다.",
+              ? t("imports.dnsApplyFailedDetail", { message: error.message })
+              : t("imports.dnsApplyFailed"),
           );
         });
         ctx.emitWorkspaceChanged(event.sender);
       }
-      ctx.activityLogs.append("info", "audit", "Dolgate 파일에서 호스트 데이터를 가져왔습니다.", {
+      ctx.activityLogs.append("info", "audit", t("imports.dolgateImported"), {
         importedHostCount: result.importedHostCount,
         skippedCount: result.skippedCount,
         warningCount: result.warnings.length,
@@ -282,7 +283,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       const snapshot = ctx.termiusImportService.getSnapshot(input.snapshotId);
       if (!snapshot) {
         throw new Error(
-          "Termius import snapshot을 찾지 못했습니다. 목록을 다시 불러와 주세요.",
+          t("imports.termiusSnapshotMissing"),
         );
       }
 
@@ -300,7 +301,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
         ctx.activityLogs.append(
           "warn",
           "audit",
-          "Termius import 중 일부 항목을 건너뛰거나 경고가 발생했습니다.",
+          t("imports.termiusPartial"),
           {
             warningCount: result.warnings.length,
           },
@@ -318,7 +319,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       const snapshot = ctx.opensshImportService.getSnapshot(input.snapshotId);
       if (!snapshot) {
         throw new Error(
-          "OpenSSH 가져오기 상태를 찾을 수 없습니다. 다시 파일을 선택해 주세요.",
+          t("imports.opensshStateMissing"),
         );
       }
 
@@ -405,7 +406,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "info",
             "audit",
-            "OpenSSH 소스에서 호스트를 가져왔습니다.",
+            t("imports.opensshImported"),
             {
               sourceCount: snapshot.sources.length,
               targetGroupPath,
@@ -422,7 +423,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "warn",
             "audit",
-            "OpenSSH 가져오기가 경고와 함께 완료되었습니다.",
+            t("imports.opensshImportedWithWarnings"),
             {
               sourceCount: snapshot.sources.length,
               warningCount: warnings.length,
@@ -448,7 +449,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
       const snapshot = ctx.xshellImportService.getSnapshot(input.snapshotId);
       if (!snapshot) {
         throw new Error(
-          "Xshell 가져오기 상태를 찾지 못했습니다. 대화상자를 다시 열어주세요.",
+          t("imports.xshellStateMissing"),
         );
       }
 
@@ -504,7 +505,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             if (!host.privateKeyPath) {
               warnings.push({
                 code: "private-key-import-failed",
-                message: `${host.label}: 개인키 파일 경로를 찾지 못해 호스트를 가져오지 않았습니다.`,
+                message: t("imports.xshellKeyPathMissing", { label: host.label }),
                 filePath: host.sourceFilePath,
               });
               skippedHostCount += 1;
@@ -530,7 +531,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
             } else {
               warnings.push({
                 code: "private-key-import-failed",
-                message: `${host.label}: 개인키를 저장하지 못해 호스트를 가져오지 않았습니다.`,
+                message: t("imports.xshellKeySaveFailed", { label: host.label }),
                 filePath: host.sourceFilePath,
               });
               skippedHostCount += 1;
@@ -567,8 +568,8 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
                 code: warningCode,
                 message:
                   warningCode === "password-import-unsupported"
-                    ? `${host.label}: 이 Windows 사용자 환경에서는 저장된 Xshell 비밀번호를 자동으로 가져올 수 없습니다.`
-                    : `${host.label}: 저장된 Xshell 비밀번호를 복호화하지 못해 호스트만 가져왔습니다.`,
+                    ? t("imports.xshellPasswordWindowsOnly", { label: host.label })
+                    : t("imports.xshellPasswordDecryptFailed", { label: host.label }),
                 filePath: host.sourceFilePath,
               });
             }
@@ -600,7 +601,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "info",
             "audit",
-            "Xshell 세션에서 호스트를 가져왔습니다.",
+            t("imports.xshellImported"),
             {
               sourceCount: snapshot.sources.length,
               createdGroupCount,
@@ -616,7 +617,7 @@ export function registerImportIpcHandlers(ctx: MainIpcContext): void {
           ctx.activityLogs.append(
             "warn",
             "audit",
-            "Xshell 가져오기가 경고와 함께 완료되었습니다.",
+            t("imports.xshellImportedWithWarnings"),
             {
               sourceCount: snapshot.sources.length,
               warningCount: warnings.length,

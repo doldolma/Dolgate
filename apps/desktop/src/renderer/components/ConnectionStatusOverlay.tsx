@@ -2,6 +2,7 @@ import { cn } from '../lib/cn';
 import { Button } from '../ui';
 import type { TerminalConnectionHop } from '@shared';
 import { ConnectionHopSteps } from './ConnectionHopSteps';
+import { useTranslation } from 'react-i18next';
 
 export interface ConnectionStatusOverlayProps {
   error: boolean;
@@ -28,6 +29,7 @@ export function ConnectionStatusOverlay({
   onCancel,
   steps,
 }: ConnectionStatusOverlayProps) {
+  const { t: translate } = useTranslation();
   const interactive = error || showCancel;
   return (
     <div
@@ -65,7 +67,7 @@ export function ConnectionStatusOverlay({
         ) : showCancel ? (
           <div className="flex w-full justify-end pt-[0.4rem]">
             <Button type="button" variant="secondary" onClick={onCancel}>
-              재연결 취소
+              {translate('misc.cancelReconnect')}
             </Button>
           </div>
         ) : null}

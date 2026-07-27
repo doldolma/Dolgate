@@ -2,6 +2,7 @@
 // 공유한다(무거운 SftpWorkspace 모듈을 토스트가 끌어오지 않도록 분리).
 
 import type { TransferJob } from "@shared";
+import { t } from '../i18n';
 
 export function formatSize(size: number): string {
   if (!size) {
@@ -33,20 +34,20 @@ export function formatEta(seconds?: number | null): string | null {
     return null;
   }
   if (seconds < 60) {
-    return `남은 시간 ${seconds}초`;
+    return t('transferFmt.etaSeconds', { seconds });
   }
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   if (minutes < 60) {
     return remainder > 0
-      ? `남은 시간 ${minutes}분 ${remainder}초`
-      : `남은 시간 ${minutes}분`;
+      ? t('transferFmt.etaMinutesSeconds', { minutes, seconds: remainder })
+      : t('transferFmt.etaMinutes', { minutes });
   }
   const hours = Math.floor(minutes / 60);
   const minuteRemainder = minutes % 60;
   return minuteRemainder > 0
-    ? `남은 시간 ${hours}시간 ${minuteRemainder}분`
-    : `남은 시간 ${hours}시간`;
+    ? t('transferFmt.etaHoursMinutes', { hours, minutes: minuteRemainder })
+    : t('transferFmt.etaHours', { hours });
 }
 
 export function buildTransferDirection(job: TransferJob): string {
@@ -57,7 +58,7 @@ export function buildTransferCardTitle(job: TransferJob): string {
   const firstRequestedItemName = job.request?.items[0]?.name?.trim();
   if (firstRequestedItemName) {
     if (job.itemCount > 1) {
-      return `${firstRequestedItemName} 외 ${job.itemCount - 1}개`;
+      return t('transferFmt.andMore', { name: firstRequestedItemName, count: job.itemCount - 1 });
     }
     return firstRequestedItemName;
   }
@@ -71,7 +72,7 @@ export function buildTransferCardTitle(job: TransferJob): string {
 
 export function getTransferFailureDisplayMessage(job: TransferJob): string {
   if (job.failedItemCount && job.failedItemCount > 0) {
-    return `${job.failedItemCount}개 항목 전송에 실패했습니다.`;
+    return t('transferFmt.failedItems', { count: job.failedItemCount });
   }
-  return job.errorMessage?.trim() || "전송에 실패했습니다.";
+  return job.errorMessage?.trim() || t('core.transferFailed');
 }

@@ -17,6 +17,8 @@ import {
 import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
 import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
 import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface DraggedSessionPayload {
   sessionId: string;
@@ -182,7 +184,7 @@ type TitlebarDynamicItem =
 function connectionKindLabel(kind: SessionConnectionKind): string {
   switch (kind) {
     case 'local':
-      return '로컬 셸';
+      return t('titleBar.kind.local');
     case 'ssh':
       return 'SSH';
     case 'mosh':
@@ -194,7 +196,7 @@ function connectionKindLabel(kind: SessionConnectionKind): string {
     case 'warpgate':
       return 'Warpgate';
     case 'serial':
-      return '시리얼';
+      return t('titleBar.kind.serial');
     default:
       return kind;
   }
@@ -258,40 +260,44 @@ function formatHostTarget(host: HostRecord): string | null {
 function formatElapsed(sinceMs: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
   if (sec < 60) {
-    return `${sec}초`;
+    return t('titleBar.elapsed.seconds', { count: sec });
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
-    return `${min}분`;
+    return t('titleBar.elapsed.minutes', { count: min });
   }
   const hr = Math.floor(min / 60);
   if (hr < 24) {
     const remMin = min % 60;
-    return remMin > 0 ? `${hr}시간 ${remMin}분` : `${hr}시간`;
+    return remMin > 0
+      ? t('titleBar.elapsed.hoursMinutes', { hours: hr, minutes: remMin })
+      : t('titleBar.elapsed.hours', { count: hr });
   }
   const days = Math.floor(hr / 24);
   const remHr = hr % 24;
-  return remHr > 0 ? `${days}일 ${remHr}시간` : `${days}일`;
+  return remHr > 0
+    ? t('titleBar.elapsed.daysHours', { days, hours: remHr })
+    : t('titleBar.elapsed.days', { count: days });
 }
 
 // 상대 시각("2분 전"). 마지막 명령 시각용.
 function formatAgo(atMs: number): string {
   const sec = Math.max(0, Math.floor((Date.now() - atMs) / 1000));
   if (sec < 10) {
-    return '방금';
+    return t('titleBar.ago.justNow');
   }
   if (sec < 60) {
-    return `${sec}초 전`;
+    return t('titleBar.ago.seconds', { count: sec });
   }
   const min = Math.floor(sec / 60);
   if (min < 60) {
-    return `${min}분 전`;
+    return t('titleBar.ago.minutes', { count: min });
   }
   const hr = Math.floor(min / 60);
   if (hr < 24) {
-    return `${hr}시간 전`;
+    return t('titleBar.ago.hours', { count: hr });
   }
-  return `${Math.floor(hr / 24)}일 전`;
+  return t('titleBar.ago.days', { count: Math.floor(hr / 24) });
 }
 
 type TabHoverRow = { label: string; value: string; valueColor?: string };
@@ -320,25 +326,28 @@ function buildTabHoverInfo(
     const kind = deriveSessionConnectionKind(tab, host);
     if (host?.kind === 'ssh' && host.jumpHostId) {
       const jump = hosts.find((candidate) => candidate.id === host.jumpHostId);
-      rows.push({ label: '점프', value: jump?.label ?? host.jumpHostId });
+      rows.push({ label: t('titleBar.hover.jump'), value: jump?.label ?? host.jumpHostId });
     }
     if (tab?.reconnect) {
       rows.push({
-        label: '재연결',
+        label: t('titleBar.hover.reconnect'),
         value: tab.reconnect.waitingForNetwork
-          ? '네트워크 대기 중'
-          : `${tab.reconnect.attempt}/${tab.reconnect.maxAttempts}회 시도`,
+          ? t('titleBar.hover.waitingNetwork')
+          : t('titleBar.hover.attempts', {
+              attempt: tab.reconnect.attempt,
+              max: tab.reconnect.maxAttempts,
+            }),
         valueColor: TAB_DOT_COLOR.reconnecting,
       });
     } else if (tab?.status === 'error' && tab.errorMessage) {
-      rows.push({ label: '오류', value: tab.errorMessage, valueColor: TAB_DOT_COLOR.error });
+      rows.push({ label: t('titleBar.hover.error'), value: tab.errorMessage, valueColor: TAB_DOT_COLOR.error });
     }
     const cwd = getSessionCwd(item.sessionId);
     if (cwd) {
-      rows.push({ label: '현재 위치', value: cwd });
+      rows.push({ label: t('titleBar.hover.cwd'), value: cwd });
     }
     if (tab?.shellKind) {
-      rows.push({ label: '셸', value: tab.shellKind });
+      rows.push({ label: t('titleBar.hover.shell'), value: tab.shellKind });
     }
     // "연결 경과"는 현재 실제로 연결된 동안만 의미가 있다. tmux control 연결은 SSH 가
     // 붙는 순간 코어가 낙관적으로 connected 를 emit 해 connectedAt 이 찍히는데, 직후
@@ -346,35 +355,39 @@ function buildTabHoverInfo(
     // 안 되므로 status==='connected' 일 때만 표시한다.
     const connectedAt = getSessionConnectedAt(item.sessionId);
     if (connectedAt != null && tab?.status === 'connected') {
-      rows.push({ label: '연결 경과', value: formatElapsed(connectedAt) });
+      rows.push({ label: t('titleBar.hover.connectedFor'), value: formatElapsed(connectedAt) });
     }
     if (tab?.commandState === 'running') {
-      rows.push({ label: '명령', value: '실행 중', valueColor: TAB_DOT_COLOR.running });
+      rows.push({
+        label: t('titleBar.hover.command'),
+        value: t('titleBar.hover.running'),
+        valueColor: TAB_DOT_COLOR.running,
+      });
     } else {
       const lastCommandAt = getSessionLastCommandAt(item.sessionId);
       if (lastCommandAt != null) {
         rows.push({
-          label: '마지막 명령',
+          label: t('titleBar.hover.lastCommand'),
           value:
             tab?.commandState === 'failed'
-              ? `${formatAgo(lastCommandAt)} · 실패`
+              ? t('titleBar.hover.lastCommandFailed', { ago: formatAgo(lastCommandAt) })
               : formatAgo(lastCommandAt),
           valueColor: tab?.commandState === 'failed' ? TAB_DOT_COLOR.error : undefined,
         });
       }
     }
     if (item.rttMs != null) {
-      rows.push({ label: '지연', value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+      rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
     }
     if (tab?.sessionShare?.shareUrl) {
       rows.push({
-        label: '공유',
-        value: `관전 ${tab.sessionShare.viewerCount}명`,
+        label: t('titleBar.hover.share'),
+        value: t('titleBar.hover.viewers', { count: tab.sessionShare.viewerCount }),
         valueColor: TAB_DOT_COLOR.running,
       });
     }
     return {
-      heading: kind ? connectionKindLabel(kind) : '세션',
+      heading: kind ? connectionKindLabel(kind) : t('titleBar.kind.session'),
       target: host ? formatHostTarget(host) : null,
       rows,
     };
@@ -387,16 +400,22 @@ function buildTabHoverInfo(
       : null;
     if (group?.reconnect) {
       rows.push({
-        label: '재연결',
+        label: t('titleBar.hover.reconnect'),
         value: group.reconnect.waitingForNetwork
-          ? '네트워크 대기 중'
-          : `${group.reconnect.attempt}/${group.reconnect.maxAttempts}회 시도`,
+          ? t('titleBar.hover.waitingNetwork')
+          : t('titleBar.hover.attempts', {
+              attempt: group.reconnect.attempt,
+              max: group.reconnect.maxAttempts,
+            }),
         valueColor: TAB_DOT_COLOR.reconnecting,
       });
     }
-    rows.push({ label: '윈도우', value: `${item.windowCount}개` });
+    rows.push({
+      label: t('titleBar.hover.windows'),
+      value: t('titleBar.hover.windowCount', { count: item.windowCount }),
+    });
     if (item.rttMs != null) {
-      rows.push({ label: '지연', value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
+      rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
     }
     return {
       heading: 'tmux',
@@ -413,13 +432,13 @@ function buildTabHoverInfo(
         ? hosts.find((candidate) => candidate.id === paneTab.hostId) ?? null
         : null;
       rows.push({
-        label: `패널 ${index + 1}`,
-        value: paneHost?.label ?? paneTab?.title ?? '로컬',
+        label: t('titleBar.hover.pane', { index: index + 1 }),
+        value: paneHost?.label ?? paneTab?.title ?? t('titleBar.kind.local'),
       });
     });
   }
   return {
-    heading: item.isTmux ? '분할 · tmux' : '분할 워크스페이스',
+    heading: t(item.isTmux ? 'titleBar.kind.splitTmux' : 'titleBar.kind.split'),
     target: null,
     rows,
   };
@@ -469,7 +488,7 @@ function shouldShowBadge(updateState: UpdateState): boolean {
 
 export function getEmptyReleaseMessage(updateState: UpdateState): string | null {
   if (updateState.status === 'checking') {
-    return 'GitHub Releases에서 새 버전을 확인하고 있습니다.';
+    return t('titleBar.update.checking');
   }
   return null;
 }
@@ -598,6 +617,7 @@ export function AppTitleBar({
   onRestoreWindow,
   onCloseWindow
 }: AppTitleBarProps) {
+  const { t: translate } = useTranslation();
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
   const [isDetachHovering, setIsDetachHovering] = useState(false);
   const [tabDropPreview, setTabDropPreview] = useState<{ targetKey: string; placement: 'before' | 'after' } | null>(null);
@@ -723,13 +743,15 @@ export function AppTitleBar({
   const isAutoDownloading =
     updateState.status === 'available' || updateState.status === 'downloading';
   const titleText = showInstallAction
-    ? '업데이트를 적용할 준비가 됐습니다'
+    ? translate('titleBar.update.readyTitle')
     : isAutoDownloading
-      ? '업데이트를 다운로드하고 있습니다'
-      : '앱 업데이트';
+      ? translate('titleBar.update.downloadingTitle')
+      : translate('titleBar.update.title');
   const installTooltip = updateState.release?.version
-    ? `${updateState.release.version.startsWith('v') ? '' : 'v'}${updateState.release.version} 업데이트 준비됨`
-    : '업데이트 준비됨';
+    ? translate('titleBar.update.installTooltip', {
+        version: `${updateState.release.version.startsWith('v') ? '' : 'v'}${updateState.release.version}`,
+      })
+    : translate('titleBar.update.installTooltipFallback');
 
   const canDetachToTabs = draggedSession?.source === 'workspace-pane' && Boolean(draggedSession.workspaceId);
   const isTitlebarInternalDragActive = isTabDragging || canDetachToTabs;
@@ -1326,7 +1348,7 @@ export function AppTitleBar({
                   size="sm"
                   tone="ghost"
                   className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={`${item.title} 세션 종료`}
+                  aria-label={translate('titleBar.tab.closeSession', { title: item.title })}
                   onClick={async (event) => {
                     event.stopPropagation();
                     await onCloseSession(item.sessionId);
@@ -1422,7 +1444,7 @@ export function AppTitleBar({
                   size="sm"
                   tone="ghost"
                   className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={`${item.title} tmux 세션 detach`}
+                  aria-label={translate('titleBar.tab.detachTmux', { title: item.title })}
                   onClick={(event) => {
                     event.stopPropagation();
                     onCloseTmuxGroup(item.tmuxGroupId);
@@ -1504,8 +1526,8 @@ export function AppTitleBar({
                   size="sm"
                   tone="ghost"
                   className={getTitlebarCloseButtonClass(item.active)}
-                  aria-label={`${item.title} 새 tmux 창`}
-                  title="새 tmux 창 (new-window)"
+                  aria-label={translate('titleBar.tab.newTmuxWindow', { title: item.title })}
+                  title={translate('titleBar.tab.newTmuxWindowTitle')}
                   onClick={(event) => {
                     event.stopPropagation();
                     onNewTmuxWindow?.(item.workspaceId);
@@ -1523,12 +1545,12 @@ export function AppTitleBar({
                 // detach 는 pane 하단 control 바의 Detach 로만 한다.
                 aria-label={
                   item.isTmux
-                    ? `${item.title} 이 창 닫기`
-                    : `${item.title} 닫기`
+                    ? translate('titleBar.tab.closeThisWindow', { title: item.title })
+                    : translate('titleBar.tab.close', { title: item.title })
                 }
                 title={
                   item.isTmux
-                    ? '이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요.'
+                    ? translate('titleBar.tab.closeThisWindowTooltip')
                     : undefined
                 }
                 onClick={async (event) => {
@@ -1568,11 +1590,11 @@ export function AppTitleBar({
                 variant="primary"
                 size="sm"
                 className="h-9 min-h-9 whitespace-nowrap rounded-[9px] px-3"
-                aria-label="업데이트"
+                aria-label={translate('titleBar.update.label')}
                 onClick={onInstallUpdate}
               >
                 <Download className="h-4 w-4" aria-hidden="true" />
-                업데이트
+                {translate('titleBar.update.badge')}
               </Button>
             </Tooltip>
           ) : (
@@ -1580,7 +1602,7 @@ export function AppTitleBar({
               tone="default"
               active={isUpdateOpen}
               className="relative h-9 w-9 rounded-full border-transparent bg-[rgba(255,255,255,0.06)] text-[1.15rem] text-white shadow-none hover:bg-[rgba(255,255,255,0.1)]"
-              aria-label="업데이트 상태 보기"
+              aria-label={translate('titleBar.update.viewStatus')}
               onClick={() => setIsUpdateOpen((current) => !current)}
             >
               <Bell className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
@@ -1611,22 +1633,26 @@ export function AppTitleBar({
 
               <div className="space-y-3 pb-4 text-[0.9rem] leading-[1.55] text-[var(--text-soft)]">
                 {!updateState.enabled ? (
-                  <p>자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.</p>
+                  <p>{translate('titleBar.update.devOnly')}</p>
                 ) : null}
 
                 {!updateState.release && getEmptyReleaseMessage(updateState) ? (
                   <p>{getEmptyReleaseMessage(updateState)}</p>
                 ) : null}
 
-                {updateState.status === 'upToDate' ? <p>현재 최신 버전을 사용 중입니다.</p> : null}
+                {updateState.status === 'upToDate' ? <p>{translate('titleBar.update.upToDate')}</p> : null}
                 {updateState.status === 'available' ? (
-                  <p>새 버전을 확인했습니다. 백그라운드 다운로드를 준비하고 있습니다.</p>
+                  <p>{translate('titleBar.update.available')}</p>
                 ) : null}
                 {updateState.status === 'downloading' ? (
-                  <p>업데이트를 다운로드하는 중입니다. {formatProgressPercent(updateState)}</p>
+                  <p>
+                    {translate('titleBar.update.downloading', {
+                      percent: formatProgressPercent(updateState),
+                    })}
+                  </p>
                 ) : null}
                 {updateState.status === 'downloaded' ? (
-                  <p>업데이트가 준비되었습니다. 재시작하면 새 버전이 적용됩니다.</p>
+                  <p>{translate('titleBar.update.downloaded')}</p>
                 ) : null}
                 {updateState.status === 'error' && updateState.errorMessage ? (
                   <p className="text-[var(--danger-text)]">{updateState.errorMessage}</p>
@@ -1642,12 +1668,12 @@ export function AppTitleBar({
                 </Button>
                 {showCheckAction ? (
                   <Button variant="primary" onClick={onCheckForUpdates}>
-                    {updateState.status === 'error' ? '다시 시도' : '업데이트 확인'}
+                    {translate(updateState.status === 'error' ? 'titleBar.update.retry' : 'titleBar.update.check')}
                   </Button>
                 ) : null}
                 {showDevDisabledAction ? (
                   <Button variant="secondary" disabled>
-                    개발 실행에서는 비활성
+                    {translate('titleBar.update.devDisabled')}
                   </Button>
                 ) : null}
               </div>

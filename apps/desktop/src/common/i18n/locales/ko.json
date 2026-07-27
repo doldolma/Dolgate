@@ -1,0 +1,2971 @@
+{
+  "menu": {
+    "file": "파일",
+    "newWindow": "새 창",
+    "tabs": "탭",
+    "nextTab": "다음 탭",
+    "prevTab": "이전 탭",
+    "nthTab": "{{index}}번째 탭",
+    "lastTab": "마지막 탭",
+    "reopenClosedTab": "닫은 탭 다시 열기",
+    "window": "윈도우",
+    "closeTab": "탭 닫기",
+    "closeWindow": "창 닫기"
+  },
+  "common": {
+    "save": "저장",
+    "cancel": "취소",
+    "close": "닫기",
+    "delete": "삭제",
+    "apply": "적용"
+  },
+  "login": {
+    "openBrowser": "브라우저로 로그인하기",
+    "reopenBrowser": "브라우저 다시 열기",
+    "syncingLatestData": "최신 데이터 동기화 중...",
+    "startFailed": "작업을 시작하지 못했습니다.",
+    "cancelFailed": "로그인 대기를 취소하지 못했습니다.",
+    "server": {
+      "openSettings": "로그인 서버 설정 열기",
+      "rootUrlHint": "경로 없이 서버 루트 주소만 입력해 주세요.",
+      "reset": "기본 서버로 복원",
+      "resetFailed": "기본 로그인 서버를 복원하지 못했습니다.",
+      "saveFailed": "로그인 서버 주소를 저장하지 못했습니다."
+    }
+  },
+  "settings": {
+    "theme": {
+      "system": {
+        "description": "기기 라이트/다크 설정을 따라갑니다."
+      },
+      "light": {
+        "description": "밝은 배경과 또렷한 대비를 사용합니다."
+      },
+      "dark": {
+        "description": "어두운 배경으로 눈부심을 줄입니다."
+      }
+    },
+    "passkey": {
+      "loadFailed": "패스키 목록을 불러오지 못했습니다.",
+      "addFailed": "패스키 추가를 시작하지 못했습니다.",
+      "deleteFailed": "패스키 삭제에 실패했습니다.",
+      "title": "패스키",
+      "intro": "생체 인증이나 보안 키로 비밀번호 없이 로그인합니다. “패스키 추가”를 누르면 브라우저에서 등록을 마친 뒤 이 목록에 표시됩니다.",
+      "unnamed": "패스키",
+      "registeredAt": "등록 {{date}}",
+      "delete": "삭제",
+      "loading": "불러오는 중…",
+      "empty": "등록된 패스키가 없습니다.",
+      "add": "패스키 추가",
+      "refresh": "새로고침"
+    },
+    "accountPassword": {
+      "changed": "로그인 비밀번호를 변경했습니다.",
+      "set": "비밀번호 설정",
+      "saveFailed": "로그인 비밀번호를 저장하지 못했습니다.",
+      "changeTitle": "계정 비밀번호 변경",
+      "setTitle": "계정 비밀번호 설정",
+      "changeDescription": "현재 비밀번호를 확인한 후 새 비밀번호로 변경합니다.",
+      "setDescription": "설정하면 현재 이메일로 비밀번호 로그인을 사용할 수 있습니다.",
+      "separateNote": "동기화 암호와는 별개입니다.",
+      "current": "현재 비밀번호",
+      "new": "새 비밀번호",
+      "confirm": "새 비밀번호 확인",
+      "currentAria": "현재 계정 비밀번호",
+      "newAria": "새 계정 비밀번호",
+      "confirmAria": "새 계정 비밀번호 확인",
+      "saving": "저장 중...",
+      "change": "비밀번호 변경"
+    },
+    "vault": {
+      "passphraseChanged": "동기화 암호를 변경했습니다.",
+      "passphraseChangeFailed": "동기화 암호 변경에 실패했습니다.",
+      "resetFailed": "동기화 볼트 초기화에 실패했습니다.",
+      "title": "동기화 암호",
+      "isSet": "동기화 암호가 설정되어 있습니다. 잊지 않도록 안전하게 보관해 주세요.",
+      "changePassphrase": "암호 변경",
+      "forgot": "동기화 암호를 잊으셨나요? 초기화",
+      "changeDialog": {
+        "title": "동기화 암호 변경",
+        "description": "현재 암호를 확인한 후 새 암호로 변경합니다.",
+        "current": "현재 동기화 암호",
+        "new": "새 동기화 암호",
+        "confirm": "새 동기화 암호 확인",
+        "submitting": "변경 중...",
+        "submit": "암호 변경"
+      },
+      "resetDialog": {
+        "title": "동기화 초기화",
+        "warning": "서버의 동기화 데이터가 <strong>모두 삭제</strong>되고, 새 동기화 암호 설정 화면으로 이동합니다. 이 작업은 되돌릴 수 없습니다.",
+        "localNote": "이 기기의 로컬 데이터(호스트·시크릿·스니펫)는 유지되며, 새 암호를 설정하면 다시 암호화되어 업로드됩니다. 다른 기기는 다음 동기화 때 새 암호 입력이 필요하고, 서버에만 있던 데이터는 복구할 수 없습니다.",
+        "submitting": "초기화 중...",
+        "submit": "서버 데이터 삭제하고 새로 시작"
+      }
+    },
+    "preferences": {
+      "scrollbackHint": "보관할 터미널 히스토리 줄 수입니다.",
+      "lineHeightHint": "문자 줄 간격을 조절합니다.",
+      "letterSpacingHint": "문자 사이 간격을 조금 더 넓힐 수 있습니다.",
+      "contrastHint": "가독성이 낮은 색 조합을 자동으로 보정합니다.",
+      "replayRetentionHint": "로컬에 보관할 종료된 세션 replay 개수입니다.",
+      "replayUsage": " 현재 {{count}}개 · {{size}} 사용 중.",
+      "webglDescription": "지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다.",
+      "completionDescription": "PATH·history에 더해 Fig 스펙·generator로 자동완성합니다. (SSM 에서는 일부 기능 제한)",
+      "optionAsMetaDescription": "macOS에서 Option 키를 터미널 메타 키로 사용합니다.",
+      "tmuxPrefixLabel": "Tmux Prefix 키",
+      "tmuxPrefixHint": "tmux 제어 모드에서 prefix 다음 키를 네이티브 tmux 동작으로 매핑합니다.",
+      "shellIntegrationRecoveryLabel": "서브셸 셸 통합 자동 복구",
+      "shellIntegrationRecoveryDescription": "중첩 ssh·sudo su·docker exec 등 서브셸에 들어가면 셸 통합(명령 상태·현재 경로)을 자동으로 다시 설정합니다.",
+      "hostMetricsLabel": "호스트 상태 표시",
+      "hostMetricsDescription": "접속한 서버의 CPU·메모리·디스크·네트워크를 터미널 하단에 표시합니다. (SSM 셸·mosh 미지원)",
+      "commandNotifyLabel": "명령 완료 알림",
+      "commandNotifyDescription": "오래 걸리거나 실패한 명령이 끝나면 OS 알림으로 알려줍니다.",
+      "notifyThresholdLabel": "알림 기준 시간(초)",
+      "notifyThresholdHint": "이 시간 이상 걸린 명령이 끝나면 알립니다.",
+      "notifyOnlyInactiveLabel": "비활성 상태일 때만 알림",
+      "notifyOnlyInactiveDescription": "앱을 보고 있고 해당 탭이 활성일 때는 알리지 않습니다.",
+      "notifyFailuresLabel": "실패한 명령은 항상 알림",
+      "notifyFailuresDescription": "0이 아닌 종료 코드는 시간과 무관하게 알립니다.",
+      "notifySoundLabel": "알림 소리",
+      "notifySoundDescription": "알림이 표시될 때 소리를 함께 재생합니다.",
+      "autoReconnectLabel": "자동 재연결",
+      "autoReconnectDescription": "연결이 예기치 않게 끊기면 자동으로 다시 연결합니다 (SSH/Warpgate 터미널, SFTP, 포트포워딩).",
+      "maxRetriesLabel": "최대 재시도 횟수",
+      "maxRetriesHint": "이 횟수만큼 실패하면 수동 재연결로 전환합니다.",
+      "maxRetryDelayLabel": "최대 재시도 간격(초)",
+      "maxRetryDelayHint": "지수 백오프가 늘어날 수 있는 최대 간격입니다."
+    },
+    "account": {
+      "changePassword": "비밀번호 변경",
+      "setPassword": "비밀번호 설정",
+      "logout": "로그아웃",
+      "deleteAccount": "회원 탈퇴"
+    },
+    "deleteAccount": {
+      "title": "회원 탈퇴",
+      "warning": "서버에 저장된 모든 데이터(동기화된 호스트·시크릿·스니펫·계정 정보)가 <strong>즉시 영구 삭제</strong>됩니다. 복구할 수 없으며, 로그인된 다른 기기도 곧 로그아웃됩니다.",
+      "localNote": "이 기기의 로컬 데이터(호스트·시크릿·세션 리플레이·활동 로그·AI 키)도 함께 삭제됩니다.",
+      "failed": "회원 탈퇴에 실패했습니다.",
+      "submitting": "탈퇴 중...",
+      "submit": "탈퇴"
+    },
+    "transfer": {
+      "editorMaxSizeHint": "이 크기 이하의 텍스트 파일만 내장 편집기로 열 수 있습니다.",
+      "preserveMtimeDescription": "전송 완료 후 원본 수정 시간을 대상 파일에 적용합니다.",
+      "preserveModeDescription": "가능한 경우 원본 권한 비트를 대상 파일에 적용합니다."
+    },
+    "language": {
+      "title": "언어",
+      "system": "시스템 설정",
+      "systemDescription": "OS 언어를 따릅니다. 한국어면 한국어, 그 외에는 영어.",
+      "reopenNote": "이미 열려 있는 리플레이·공유 창은 다시 열어야 새 언어로 표시됩니다."
+    }
+  },
+  "sftp": {
+    "drives": {
+      "loadFailed": "드라이브 목록을 불러오지 못했습니다.",
+      "loading": "드라이브 불러오는 중...",
+      "empty": "사용할 수 있는 드라이브가 없습니다."
+    },
+    "toolbar": {
+      "newFolder": "새 폴더",
+      "refreshing": "새로고침 중...",
+      "refresh": "새로고침",
+      "reloading": "목록을 새로 읽는 중...",
+      "disconnect": "연결 종료"
+    },
+    "entryMenu": {
+      "rename": "이름 변경",
+      "permissions": "권한 수정",
+      "ownership": "소유권 변경",
+      "edit": "편집",
+      "download": "다운로드",
+      "delete": "삭제"
+    },
+    "failure": {
+      "retry": "다시 시도",
+      "editSshConfig": "SSH 설정 수정",
+      "copyDiagnostics": "진단 정보 복사",
+      "diagnosticsCopied": "진단 정보를 클립보드에 복사했습니다.",
+      "diagnosticsCopyFailed": "진단 정보를 복사하지 못했습니다."
+    },
+    "hostPicker": {
+      "emptyNoHosts": "표시할 host가 없습니다.",
+      "emptySearch": "검색 결과가 없습니다.",
+      "emptyGroup": "이 위치에는 아직 host가 없습니다.",
+      "hintNoHosts": "Home에서 원격 host를 추가한 뒤 다시 확인해보세요.",
+      "hintSearch": "검색어를 지우거나 다른 이름으로 다시 찾아보세요.",
+      "hintGroup": "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요.",
+      "connecting": "연결 중",
+      "openSettings": "설정 열기"
+    },
+    "connecting": {
+      "withHost": "{{label}} 연결 중...",
+      "generic": "SFTP 연결 중...",
+      "preparing": "원격 파일 목록을 준비하고 있습니다."
+    },
+    "jobStatus": {
+      "queued": "대기 중",
+      "running": "전송 중",
+      "paused": "일시정지",
+      "cancelling": "취소 중",
+      "completed": "완료",
+      "failed": "실패",
+      "cancelled": "취소됨"
+    },
+    "failureDetail": {
+      "more": "외 {{count}}개",
+      "item": "항목: {{name}}",
+      "path": "경로: {{path}}",
+      "originalError": "원본 오류: {{message}}",
+      "error": "오류: {{message}}"
+    },
+    "transfer": {
+      "hideDetails": "Details 숨기기",
+      "details": "Details",
+      "calculatingSpeed": "속도 계산 중",
+      "cancelPending": "취소 요청을 처리하는 중입니다.",
+      "pausedNotice": "전송이 일시정지되었습니다.",
+      "pause": "일시정지",
+      "resume": "재개",
+      "cancelling": "취소 중",
+      "retryFailedItems": "실패 항목 재시도",
+      "retry": "재시도",
+      "toRight": "왼쪽 선택 항목을 오른쪽 현재 폴더로 전송",
+      "toLeft": "오른쪽 선택 항목을 왼쪽 현재 폴더로 전송",
+      "bothPanesRequired": "양쪽 pane이 모두 파일 브라우저일 때 사용할 수 있습니다."
+    },
+    "conflict": {
+      "title": "같은 이름의 파일이 이미 존재합니다",
+      "remember": "이 선택 기억",
+      "skip": "건너뛰기",
+      "rename": "이름 바꿔 저장",
+      "overwrite": "덮어쓰기"
+    },
+    "permissions": {
+      "titleMultiple": "선택한 {{count}}개 항목 권한 수정",
+      "titleSingle": "{{name}} 권한 수정"
+    },
+    "principal": {
+      "searchPlaceholder": "{{label}} 검색",
+      "manualPlaceholder": "{{label}} 직접 입력",
+      "loading": "불러오는 중...",
+      "empty": "결과가 없습니다.",
+      "loadFailed": "사용자/그룹 목록을 불러오지 못했습니다."
+    },
+    "ownership": {
+      "titleMultiple": "선택한 {{count}}개 항목 소유권 변경",
+      "titleSingle": "{{name}} 소유권 변경",
+      "user": "사용자",
+      "group": "그룹",
+      "recursive": "하위 항목까지 적용",
+      "recursiveHint": "폴더를 선택한 경우 내부 파일과 하위 폴더의 소유권도 함께 변경합니다.",
+      "failed": "소유권을 변경하지 못했습니다."
+    },
+    "delete": {
+      "confirmSingle": "\"{{name}}\"을 삭제할까요?",
+      "confirmMultiple": "선택한 {{count}}개 항목을 삭제할까요?",
+      "folderWarning": "폴더를 삭제하면 하위 항목도 함께 삭제됩니다.",
+      "failed": "선택한 항목을 삭제하지 못했습니다."
+    },
+    "prompt": {
+      "newFolderTitle": "새 폴더 이름",
+      "newFolderPlaceholder": "예: uploads",
+      "newFolderSubmit": "생성",
+      "renameTitle": "이름 변경",
+      "renamePlaceholder": "새 이름",
+      "renameSubmit": "변경"
+    }
+  },
+  "portForward": {
+    "empty": {
+      "sshTitle": "아직 저장한 SSH 포워딩 규칙이 없습니다.",
+      "awsTitle": "아직 저장한 AWS EC2 포워딩 규칙이 없습니다.",
+      "ecsTitle": "아직 저장한 ECS Task 터널 규칙이 없습니다.",
+      "dnsTitle": "아직 저장한 DNS Override가 없습니다.",
+      "containerTitle": "아직 저장한 컨테이너 터널 규칙이 없습니다.",
+      "sshDescription": "New SSH Forward를 눌러 첫 번째 SSH 포워딩 규칙을 만들어 보세요.",
+      "awsDescription": "New AWS EC2 Forward를 눌러 첫 번째 AWS EC2 포워딩 규칙을 만들어 보세요.",
+      "ecsDescription": "New ECS Task Tunnel을 눌러 첫 번째 ECS task 터널 규칙을 만들어 보세요.",
+      "dnsDescription": "New DNS Override를 눌러 hosts 기반 도메인 override를 추가해 보세요.",
+      "containerDescription": "New Container Tunnel을 눌러 첫 번째 컨테이너 터널 규칙을 만들어 보세요."
+    },
+    "warpgate": {
+      "browserHint": "브라우저에서 Warpgate 로그인과 승인을 마치면 앱이 자동으로 다음 단계를 진행합니다.",
+      "reopenBrowser": "브라우저 다시 열기",
+      "manualTitle": "추가 입력이 필요합니다.",
+      "manualHint": "이 Warpgate challenge는 자동 입력 형식과 다릅니다. 아래 prompt에 직접 응답해 주세요.",
+      "fallbackInstruction": "추가 인증이 필요합니다.",
+      "continue": "계속",
+      "authCodeNote": "인증 코드 <code>{{code}}</code>는 앱이 자동으로 처리합니다."
+    },
+    "error": {
+      "ecsServicesLoadFailed": "ECS 서비스 목록을 불러오지 못했습니다.",
+      "ecsServiceDetailsLoadFailed": "ECS 서비스 상세 정보를 불러오지 못했습니다.",
+      "containersLoadFailed": "컨테이너 목록을 불러오지 못했습니다.",
+      "containerDetailsLoadFailed": "컨테이너 상세 정보를 불러오지 못했습니다.",
+      "hostnameRequired": "호스트 이름을 올바르게 입력해 주세요.",
+      "ruleRequired": "연결할 포워딩 규칙을 선택해 주세요.",
+      "ipRequired": "IP 주소를 입력해 주세요.",
+      "dnsSaveFailed": "DNS override를 저장하지 못했습니다.",
+      "nameRequired": "이름을 입력해 주세요.",
+      "hostRequired": "호스트를 선택해 주세요.",
+      "localPortInvalid": "로컬 포트를 올바르게 입력해 주세요.",
+      "serviceRequired": "서비스를 선택해 주세요.",
+      "containerRequired": "컨테이너를 선택해 주세요.",
+      "targetPortRequired": "대상 포트를 선택해 주세요.",
+      "ruleSaveFailed": "포워딩 규칙을 저장하지 못했습니다.",
+      "containerNetworkRequired": "컨테이너 네트워크를 선택해 주세요.",
+      "ssmLoopbackRequired": "AWS SSM 로컬 주소는 loopback 주소여야 합니다.",
+      "targetPortInvalid": "대상 포트를 올바르게 입력해 주세요.",
+      "remoteHostRequired": "원격 호스트를 입력해 주세요.",
+      "targetHostPortInvalid": "대상 호스트와 포트를 올바르게 입력해 주세요.",
+      "dnsEnableFailed": "DNS Override를 활성화하지 못했습니다.",
+      "dnsDisableFailed": "DNS Override를 비활성화하지 못했습니다."
+    },
+    "waiting": {
+      "containerTunnel": "Container tunnel 승인을 기다리는 중입니다.",
+      "containerRuntime": "컨테이너 런타임 연결 승인을 기다리는 중입니다.",
+      "containerLookup": "컨테이너 조회를 위한 승인을 기다리는 중입니다."
+    },
+    "form": {
+      "hostSearchPlaceholder": "이름, 주소, 프로필, 그룹, 태그 검색",
+      "networkWithIp": "{{name}} ({{ip}})",
+      "networkPendingIp": "{{name}} (IP 확인 대기)",
+      "autoLocalPortHint": "사용 가능한 로컬 포트를 자동으로 할당합니다.",
+      "autoLocalPortPlaceholder": "자동 할당",
+      "containerDetailsLoading": "컨테이너 상세 정보를 불러오는 중입니다.",
+      "noTcpPortsTitle": "선택 가능한 TCP 포트가 없습니다.",
+      "noTcpPortsDescription": "이 컨테이너에는 포워딩에 사용할 TCP 포트가 감지되지 않았습니다.",
+      "noNetworkIpTitle": "사용 가능한 네트워크 IP가 없습니다.",
+      "noNetworkIpDescription": "이 컨테이너는 연결할 네트워크 정보가 없어 터널 규칙을 저장할 수 없습니다.",
+      "networkIpHiddenTitle": "현재는 네트워크 IP가 보이지 않습니다.",
+      "networkIpHiddenHint": "종료된 컨테이너일 수 있습니다. 규칙은 저장할 수 있고, 시작할 때 현재 IP를 다시 확인합니다.",
+      "ecsServicesLoading": "ECS 서비스 목록을 불러오는 중입니다.",
+      "ecsServiceDetailsLoading": "ECS 서비스 상세 정보를 불러오는 중입니다.",
+      "noEcsServicesTitle": "가져올 수 있는 ECS 서비스가 없습니다.",
+      "noEcsServicesDescription": "이 클러스터에는 포트 포워딩에 사용할 서비스가 없습니다.",
+      "noEcsContainersTitle": "선택 가능한 컨테이너가 없습니다.",
+      "noEcsContainersDescription": "이 서비스의 task definition에 사용할 컨테이너가 없습니다."
+    }
+  },
+  "ai": {
+    "provider": {
+      "codex": "Codex (ChatGPT 계정)",
+      "openaiCompat": "OpenAI 호환 (OpenAI · Ollama · LM Studio · vLLM 등)"
+    },
+    "model": {
+      "autoLabel": "Auto (권장)",
+      "autoDescription": "Codex 권장 모델을 자동 선택 · 업데이트를 자동으로 따라감",
+      "autoDescriptionWithDefault": "Codex 권장 모델 자동 선택 (현재: {{model}})",
+      "gpt56sol": "최신 프론티어 에이전틱 코딩 모델",
+      "gpt56terra": "일상 작업용 균형형 에이전틱 코딩 모델",
+      "gpt56luna": "빠르고 저렴한 에이전틱 코딩 모델",
+      "gpt55": "복잡한 코딩·리서치·실무용 프론티어 모델 (이전 세대)",
+      "gpt54": "일상 코딩용 강력한 모델 (이전 세대)",
+      "gpt54mini": "작고 빠르고 저렴 · 단순한 코딩 작업",
+      "currentValue": "현재 설정값 - {{model}}",
+      "placeholderAnthropic": "claude-… (모델 id)",
+      "placeholderCompat": "gpt-4o-mini · llama3.1 …",
+      "listFromAccount": "내 계정에서 사용 가능한 모델 목록입니다(Codex에서 실시간 조회).",
+      "listAfterLogin": "Codex 로그인 후 계정에서 사용 가능한 모델 목록을 실시간으로 가져옵니다. 아래는 기본 목록입니다.",
+      "autoFollowsRecommended": "기본값 Auto는 Codex 권장 모델을 자동으로 따라갑니다."
+    },
+    "usage": {
+      "weekly": "주간",
+      "days": "{{count}}일",
+      "hours": "{{count}}시간",
+      "minutes": "{{count}}분",
+      "resetInMinutes": "약 {{count}}분 후 리셋",
+      "resetInHours": "약 {{count}}시간 후 리셋",
+      "resetInDays": "약 {{count}}일 후 리셋",
+      "windowLimit": "{{window}} 한도",
+      "remaining": "{{percent}}% 남음",
+      "planRemaining": "플랜 남은 용량"
+    },
+    "error": {
+      "statusFailed": "Codex 상태를 확인하지 못했습니다.",
+      "loginTimeout": "로그인 확인 시간이 초과되었습니다. 로그인을 완료했다면 상태 새로고침을 눌러 주세요.",
+      "loginFailed": "Codex 로그인을 시작하지 못했습니다.",
+      "reopenBrowserFailed": "브라우저를 다시 열지 못했습니다.",
+      "logoutFailed": "Codex 로그아웃에 실패했습니다.",
+      "testFailed": "연결 테스트에 실패했습니다."
+    },
+    "enable": {
+      "label": "AI 어시스턴트 사용",
+      "description": "세션에서 AI 도우미를 사용할 수 있게 합니다. API 키는 이 기기의 키체인에만 저장되며 동기화되지 않습니다."
+    },
+    "baseUrl": {
+      "placeholder": "서버 주소를 입력하세요 — 예: https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)",
+      "hint": "서버 주소 (필수). 예: https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)"
+    },
+    "anthropic": {
+      "accountLoginPlanned": "Claude 계정 로그인 예정",
+      "accountLoginNote": "현재는 API 키 기반 Claude API로 연결합니다. 추후 Anthropic이 서드파티 앱용 Claude 계정 로그인을 공식 지원하면 Claude Agent SDK 기반 연결로 변경될 예정입니다."
+    },
+    "codex": {
+      "accountLabel": "Codex 계정",
+      "checkingStatus": "상태 확인 중…",
+      "signedIn": "로그인됨",
+      "signInRequired": "로그인이 필요합니다.",
+      "waitingBrowser": "브라우저에서 로그인 대기 중…",
+      "signInAgain": "다시 로그인",
+      "signIn": "Codex 로그인",
+      "reopenBrowser": "브라우저 다시 열기",
+      "logout": "로그아웃",
+      "refreshStatus": "상태 새로고침",
+      "loginNote": "버튼을 누르면 브라우저에서 ChatGPT 계정으로 로그인합니다. 로그인 정보는 이 앱 전용 공간(codex)에 저장되며 API 키가 필요 없습니다."
+    },
+    "context": {
+      "label": "컨텍스트 창 (토큰)",
+      "hint": "서버에 로드된 컨텍스트 길이(예: Ollama num_ctx). 대화·도구 출력이 이 예산을 넘으면 오래된 대화부터 잘라 보냅니다."
+    },
+    "apiKey": {
+      "placeholderSaved": "•••••••• (저장됨 — 새 키 입력 시 교체)",
+      "hintSaved": "키가 이 기기 키체인에 저장되어 있습니다(설정 저장과 별도로 즉시 저장).",
+      "hintOptional": "openai-호환 로컬 서버는 키가 필요 없을 수 있습니다.",
+      "testing": "테스트 중…",
+      "test": "연결 테스트",
+      "saveKey": "키 저장",
+      "deleteKey": "키 삭제",
+      "issueKey": "API 키 발급 ↗"
+    },
+    "test": {
+      "success": "연결 성공",
+      "failure": "연결 실패",
+      "detectedModels": "감지된 모델: {{models}}",
+      "detectedMore": " 외 {{count}}개"
+    },
+    "search": {
+      "section": "웹 검색",
+      "tavilyLabel": "Tavily 검색 API 키 (선택)",
+      "tavilyPlaceholderSaved": "•••••••• (저장됨)",
+      "tavilyPlaceholder": "tvly-… (선택)",
+      "hint": "웹 검색·URL 읽기는 기본으로 켜져 있고 키 없이 DuckDuckGo 로 검색합니다. Tavily 키를 넣으면 더 안정적·고품질 검색으로 업그레이드됩니다.",
+      "issueKey": "Tavily 키 발급 ↗"
+    },
+    "save": {
+      "button": "설정 저장",
+      "baseUrlRequired": "Base URL을 입력해야 저장할 수 있습니다.",
+      "unsaved": "저장하지 않은 변경사항이 있습니다. (키는 위에서 개별 저장)",
+      "saved": "저장되었습니다.",
+      "noChanges": "변경사항 없음"
+    }
+  },
+  "awsProfiles": {
+    "status": {
+      "lookupFailed": "조회 실패",
+      "checking": "확인 중",
+      "authenticated": "인증됨",
+      "authRequired": "인증 필요"
+    },
+    "import": {
+      "imported": "가져온 프로필 {{count}}개",
+      "skipped": "건너뜀 {{count}}개",
+      "none": "가져온 프로필이 없습니다."
+    },
+    "error": {
+      "detailLoadFailed": "AWS 프로필 상세 정보를 불러오지 못했습니다.",
+      "listLoadFailed": "AWS 프로필 목록을 불러오지 못했습니다.",
+      "saveFailed": "AWS 프로필을 저장하지 못했습니다.",
+      "regionSaveFailed": "AWS 프로필 기본 Region을 저장하지 못했습니다.",
+      "renameFailed": "AWS 프로필명을 변경하지 못했습니다.",
+      "deleteFailed": "AWS 프로필을 삭제하지 못했습니다.",
+      "ssoLoginFailed": "AWS SSO 로그인을 시작하지 못했습니다."
+    },
+    "intro": "앱 전용 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다. 기존 로컬 AWS CLI 프로필은 가져오기 후 사용할 수 있습니다.",
+    "action": {
+      "refresh": "새로고침",
+      "importFromCli": "로컬 AWS CLI에서 가져오기",
+      "newProfile": "새 프로필",
+      "rename": "이름 변경",
+      "changeRegion": "기본 Region 변경",
+      "edit": "수정",
+      "ssoLogin": "AWS SSO 로그인",
+      "ssoLoggingIn": "로그인 시작 중..."
+    },
+    "syncUnsupported": "현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.",
+    "loadingList": "AWS 프로필 목록을 불러오는 중입니다.",
+    "loadingDetails": "AWS 프로필 상세 정보를 불러오는 중입니다.",
+    "empty": {
+      "title": "등록된 AWS 프로필이 없습니다.",
+      "description": "새 프로필을 생성하면 기존 AWS import와 SSM 연결 흐름에서 바로 사용할 수 있습니다.",
+      "noSelectionTitle": "선택된 프로필이 없습니다.",
+      "noSelectionDescription": "왼쪽 목록에서 AWS 프로필을 선택하면 상세 정보와 관리 액션이 표시됩니다."
+    },
+    "detail": {
+      "noRegion": "Region 없음",
+      "accountAfterAuth": "인증 후 확인 가능",
+      "authOk": "현재 인증 가능한 상태입니다.",
+      "authNeeded": "추가 로그인이 필요하거나 자격 증명을 다시 확인해야 합니다.",
+      "missingTools": "누락된 도구: {{tools}}",
+      "hostReferences": "이 프로필을 참조하는 host",
+      "sourceProfileReferences": "이 프로필을 source_profile로 참조하는 로컬 프로필",
+      "defaultRegion": "기본 Region",
+      "sessionTokenSet": "설정됨"
+    },
+    "form": {
+      "createTitle": "AWS 프로필 생성",
+      "editTitle": "AWS 프로필 수정",
+      "createDescription": "앱 전용 AWS CLI 프로필로 저장합니다.",
+      "editDescription": "Static access key 기반 프로필만 수정할 수 있습니다.",
+      "wizardTitle": "새 AWS 프로필 생성",
+      "wizardSyncUnsupported": "현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.",
+      "staticEditTitle": "Static AWS 프로필 수정",
+      "staticEditDescription": "수정 전 STS 호출로 자격 증명을 다시 검증합니다.",
+      "updateSubmit": "프로필 업데이트",
+      "updateSubmitting": "업데이트 중...",
+      "profileName": "프로필명",
+      "currentAccessKey": "현재 저장된 access key: {{key}}"
+    },
+    "region": {
+      "title": "기본 Region 변경",
+      "description": "앱 전용 AWS 프로필의 기본 Region만 저장합니다.",
+      "label": "기본 Region",
+      "none": "Region 없음",
+      "saving": "저장 중...",
+      "save": "Region 저장"
+    },
+    "rename": {
+      "title": "프로필명 변경",
+      "description": "로컬 AWS CLI 설정 파일의 프로필명만 변경합니다.",
+      "newNameLabel": "새 프로필명",
+      "warningTitle": "주의",
+      "warningBody": "현재 앱의 host가 이 프로필을 참조하고 있습니다. 이름을 바꾸면 연결된 host의 표시용 프로필명도 함께 갱신됩니다.",
+      "noteTitle": "참고",
+      "noteBody": "다음 로컬 프로필의 `source_profile` 참조는 새 이름으로 자동 갱신됩니다.",
+      "submitting": "변경 중...",
+      "submit": "프로필명 변경"
+    },
+    "delete": {
+      "title": "프로필 삭제",
+      "description": "로컬 AWS CLI 설정 파일에서 이 프로필을 제거합니다.",
+      "warning": "삭제 후에는 이 프로필을 참조하던 host가 프로필 없음 상태가 될 수 있습니다.",
+      "hostReferences": "이 프로필을 쓰는 host",
+      "ssoSessions": "함께 삭제될 sso-session",
+      "submitting": "삭제 중...",
+      "submit": "프로필 삭제"
+    }
+  },
+  "containers": {
+    "tunnel": {
+      "errorTitle": "컨테이너 Tunnel을 표시하지 못했습니다.",
+      "retry": "다시 시도",
+      "emptyTitle": "컨테이너를 선택하면 터널을 열 수 있습니다.",
+      "emptyDescription": "실행 중인 컨테이너를 선택한 뒤 네트워크와 포트를 고르세요.",
+      "preparing": "터널 정보를 준비하는 중입니다...",
+      "noNetwork": "선택 가능한 네트워크 없음",
+      "noPort": "포트 없음",
+      "autoPortDescription": "사용 가능한 로컬 포트를 자동으로 할당합니다.",
+      "statusTitle": "터널 상태",
+      "stopping": "정지 중...",
+      "starting": "시작 중...",
+      "runningOnly": "실행 중인 컨테이너에서만 터널을 시작할 수 있습니다.",
+      "networkRequired": "네트워크를 선택해 주세요.",
+      "portRequired": "포트를 선택해 주세요.",
+      "localPortInvalid": "로컬 포트를 확인해 주세요.",
+      "startFailed": "컨테이너 터널을 시작하지 못했습니다.",
+      "stopFailed": "컨테이너 터널을 중지하지 못했습니다."
+    },
+    "overview": {
+      "emptyTitle": "컨테이너를 선택하면 상세 정보를 볼 수 있습니다.",
+      "emptyDescription": "목록에서 컨테이너를 선택하면 실행 정보와 메타데이터를 보여줍니다.",
+      "image": "이미지",
+      "status": "상태",
+      "createdAt": "생성 시간",
+      "runtimeInfo": "실행 정보",
+      "mounts": "마운트",
+      "noMounts": "마운트 정보가 없습니다.",
+      "networks": "네트워크",
+      "noNetworks": "네트워크 정보가 없습니다.",
+      "noIp": "IP 없음",
+      "environment": "환경 변수",
+      "noEnvironment": "환경 변수가 없습니다.",
+      "labels": "라벨",
+      "noLabels": "라벨이 없습니다."
+    },
+    "metrics": {
+      "loading": "메트릭을 불러오는 중입니다...",
+      "emptyTitle": "표시할 메트릭이 없습니다.",
+      "emptyDescription": "컨테이너가 실행 중인지 확인한 뒤 잠시 후 다시 새로고침해 주세요."
+    },
+    "list": {
+      "refreshing": "새로고침 중...",
+      "refresh": "새로고침",
+      "noRuntimeTitle": "이 호스트에서는 컨테이너 런타임을 찾지 못했습니다.",
+      "heading": "컨테이너",
+      "empty": "감지된 컨테이너가 없습니다.",
+      "selectPrompt": "컨테이너를 선택하세요"
+    },
+    "action": {
+      "shell": "셸 접속",
+      "plainView": "일반 보기",
+      "detailPanel": "컨테이너 상세 패널",
+      "expandLogs": "로그 크게 보기",
+      "detailLoading": "상세 정보를 불러오는 중입니다..."
+    },
+    "logs": {
+      "showTime": "시간 표시",
+      "rangeLabel": "로그 범위",
+      "searchPlaceholder": "로그 검색",
+      "searching": "검색 중...",
+      "remoteSearch": "원격 검색",
+      "clearSearch": "검색 지우기",
+      "loadMore": "더 보기",
+      "loading": "불러오는 중...",
+      "reload": "다시 불러오기",
+      "remoteMatches": "원격 검색 결과 {{count}}건",
+      "bufferMatches": "현재 버퍼에서 {{count}}건 일치",
+      "loadingBody": "로그를 불러오는 중입니다...",
+      "emptyForRange": "{{range}} 기준 로그가 없습니다.",
+      "retryHint": "다시 불러오기를 시도해 주세요.",
+      "noSearchResults": "검색 결과가 없습니다."
+    },
+    "connecting": {
+      "withHost": "{{label}} 연결 중...",
+      "preparing": "컨테이너 런타임과 연결 상태를 준비하고 있습니다."
+    },
+    "confirm": {
+      "removeTitle": "컨테이너를 삭제할까요?",
+      "actionTitle": "컨테이너를 {{action}}할까요?",
+      "running": "실행 중...",
+      "confirm": "확인",
+      "body": "<name>{{name}}</name> 컨테이너에 <action>{{action}}</action> 작업을 실행합니다."
+    }
+  },
+  "titleBar": {
+    "kind": {
+      "local": "로컬 셸",
+      "serial": "시리얼",
+      "session": "세션",
+      "splitTmux": "분할 · tmux",
+      "split": "분할 워크스페이스"
+    },
+    "elapsed": {
+      "seconds": "{{count}}초",
+      "minutes": "{{count}}분",
+      "hours": "{{count}}시간",
+      "hoursMinutes": "{{hours}}시간 {{minutes}}분",
+      "days": "{{count}}일",
+      "daysHours": "{{days}}일 {{hours}}시간"
+    },
+    "ago": {
+      "justNow": "방금",
+      "seconds": "{{count}}초 전",
+      "minutes": "{{count}}분 전",
+      "hours": "{{count}}시간 전",
+      "days": "{{count}}일 전"
+    },
+    "hover": {
+      "jump": "점프",
+      "reconnect": "재연결",
+      "waitingNetwork": "네트워크 대기 중",
+      "attempts": "{{attempt}}/{{max}}회 시도",
+      "error": "오류",
+      "cwd": "현재 위치",
+      "shell": "셸",
+      "connectedFor": "연결 경과",
+      "command": "명령",
+      "running": "실행 중",
+      "lastCommand": "마지막 명령",
+      "lastCommandFailed": "{{ago}} · 실패",
+      "latency": "지연",
+      "share": "공유",
+      "viewers": "관전 {{count}}명",
+      "windows": "윈도우",
+      "windowCount": "{{count}}개",
+      "pane": "패널 {{index}}"
+    },
+    "update": {
+      "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",
+      "readyTitle": "업데이트를 적용할 준비가 됐습니다",
+      "downloadingTitle": "업데이트를 다운로드하고 있습니다",
+      "title": "앱 업데이트",
+      "installTooltip": "{{version}} 업데이트 준비됨",
+      "installTooltipFallback": "업데이트 준비됨",
+      "badge": "업데이트",
+      "viewStatus": "업데이트 상태 보기",
+      "label": "업데이트",
+      "devOnly": "자동 업데이트는 패키지된 릴리즈 빌드에서만 동작합니다.",
+      "upToDate": "현재 최신 버전을 사용 중입니다.",
+      "available": "새 버전을 확인했습니다. 백그라운드 다운로드를 준비하고 있습니다.",
+      "downloading": "업데이트를 다운로드하는 중입니다. {{percent}}",
+      "downloaded": "업데이트가 준비되었습니다. 재시작하면 새 버전이 적용됩니다.",
+      "retry": "다시 시도",
+      "check": "업데이트 확인",
+      "devDisabled": "개발 실행에서는 비활성"
+    },
+    "tab": {
+      "closeSession": "{{title}} 세션 종료",
+      "detachTmux": "{{title}} tmux 세션 detach",
+      "newTmuxWindow": "{{title}} 새 tmux 창",
+      "newTmuxWindowTitle": "새 tmux 창 (new-window)",
+      "closeThisWindow": "{{title}} 이 창 닫기",
+      "close": "{{title}} 닫기",
+      "closeThisWindowTooltip": "이 창 닫기 — 이 tmux window 만 닫습니다. 세션 전체는 하단 바의 Detach/Kill 을 쓰세요."
+    }
+  },
+  "aws": {
+    "ssm": {
+      "statusTimeout": "SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.",
+      "statusForbidden": "SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.",
+      "statusUnknown": "SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.",
+      "connectionLost": "이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.",
+      "connectionInactive": "이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.",
+      "notManaged": "이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.",
+      "invocationPending": "SSM 명령 실행 결과가 아직 등록되지 않았습니다.",
+      "statusFailed": "SSM managed instance 상태를 확인하지 못했습니다.",
+      "sessionNoStream": "SSM 세션 응답에 스트림 정보가 없습니다.",
+      "sessionStartFailed": "SSM 세션을 시작하지 못했습니다.",
+      "forwardNoStream": "SSM 포트 포워딩 세션 응답에 스트림 정보가 없습니다.",
+      "forwardStartFailed": "SSM 포트 포워딩 세션을 시작하지 못했습니다.",
+      "sendCommandFailed": "SSM 명령을 전송하지 못했습니다.",
+      "commandIdMissing": "SSM 명령 ID를 확인하지 못했습니다.",
+      "invocationReadFailed": "SSM 명령 실행 결과를 읽지 못했습니다.",
+      "pingStatus": "이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 {{status}}입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.",
+      "commandExitStatus": "SSM 명령이 {{status}} 상태로 종료되었습니다."
+    },
+    "credentials": {
+      "checkFailed": "AWS 자격 증명을 확인하지 못해 가져오기를 차단했습니다. 선택한 프로필의 로그인 상태와 자격 증명을 먼저 확인해 주세요.",
+      "badSecret": "입력한 Access Key 또는 Secret이 올바르지 않습니다. Secret이 다르거나 잘못된 키 조합일 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+      "badAccessKey": "입력한 Access Key 또는 Secret이 올바르지 않습니다. Access Key가 잘못되었거나 비활성화되었을 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+      "invalid": "입력한 AWS 자격 증명이 유효하지 않습니다."
+    },
+    "sso": {
+      "expired": "AWS SSO 로그인이 만료되었습니다. 다시 로그인해 주세요.",
+      "sourceProfileInvalid": "선택한 source profile의 AWS SSO 로그인 세션이 유효하지 않습니다. 먼저 해당 source profile로 다시 로그인해 주세요.",
+      "loginFailedDetail": "AWS SSO 로그인에 실패했습니다. SSO Start URL, SSO Region, 브라우저 로그인 상태를 확인해 주세요.",
+      "listFailed": "SSO 로그인 후 account 또는 role 목록을 불러오지 못했습니다. 권한과 SSO 설정을 확인해 주세요.",
+      "authIncomplete": "선택한 account/role로 인증을 완료하지 못했습니다. 다시 로그인하거나 다른 role을 선택해 주세요.",
+      "noTokenCache": "AWS SSO access token cache를 찾지 못했습니다. 다시 로그인해 주세요.",
+      "prepMissing": "SSO 준비 정보가 만료되었거나 존재하지 않습니다. 다시 로그인해 주세요.",
+      "prepExpired": "SSO 준비 정보가 만료되었습니다. 다시 로그인해 주세요.",
+      "accountListFailed": "AWS SSO 계정 목록을 불러오지 못했습니다.",
+      "roleListFailed": "AWS SSO role 목록을 불러오지 못했습니다.",
+      "prepProfileMismatch": "SSO 준비 정보와 선택한 프로필명이 일치하지 않습니다.",
+      "prepInputMismatch": "SSO 준비 정보가 현재 입력값과 일치하지 않습니다. 다시 로그인해 주세요.",
+      "authIncompleteShort": "선택한 account/role로 인증을 완료하지 못했습니다.",
+      "cancelledAccountChanged": "계정이 변경되어 AWS SSO 로그인을 취소했습니다.",
+      "loginFailed": "AWS SSO 로그인에 실패했습니다.",
+      "noAccounts": "선택 가능한 AWS SSO 계정을 찾지 못했습니다.",
+      "noAccountRolePairs": "선택 가능한 AWS SSO account/role 조합을 찾지 못했습니다.",
+      "configMissing": "프로필의 SSO 설정(sso_start_url/sso_region)을 찾지 못했습니다."
+    },
+    "profile": {
+      "noneManaged": "앱 전용 AWS 프로필을 찾지 못했습니다. 먼저 프로필을 가져오거나 생성해 주세요.",
+      "duplicateName": "같은 이름의 AWS 프로필이 이미 존재합니다.",
+      "sourceNotFound": "선택한 source profile을 찾지 못했습니다.",
+      "accessKeyOnly": "이 프로필은 access key 기반 프로필만 수정할 수 있습니다.",
+      "notFound": "선택한 AWS 프로필을 찾지 못했습니다.",
+      "sameName": "새 프로필명이 기존 프로필명과 같습니다.",
+      "linkedNotFoundNamed": "연결된 AWS 프로필 \"{{label}}\"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
+      "linkedNotFound": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요."
+    },
+    "role": {
+      "assumeDenied": "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",
+      "arnInvalid": "입력한 Role ARN이 올바르지 않거나 대상 Role을 찾을 수 없습니다. Role ARN 형식과 대상 Role을 다시 확인해 주세요.",
+      "verifyFailed": "선택한 source profile로 이 Role을 검증하지 못했습니다."
+    },
+    "logs": {
+      "noCloudWatch": "이 컨테이너에는 CloudWatch Logs 설정이 없습니다.",
+      "awslogsOnly": "v2 로그는 awslogs 드라이버만 지원합니다.",
+      "noGroupOrPrefix": "CloudWatch Logs 그룹 또는 stream prefix가 설정되지 않았습니다.",
+      "targetNotFound": "선택한 컨테이너 로그 대상을 찾지 못했습니다."
+    },
+    "error": {
+      "unknown": "알 수 없는 오류가 발생했습니다.",
+      "requestTimeout": "{{message}} (요청 시간 초과)"
+    },
+    "field": {
+      "accessKeyRequired": "Access key를 입력해 주세요.",
+      "secretRequired": "Secret을 입력해 주세요.",
+      "roleArnRequired": "Role ARN을 입력해 주세요.",
+      "ssoAccountRequired": "SSO 계정을 선택해 주세요.",
+      "ssoRoleRequired": "SSO Role을 선택해 주세요.",
+      "ssoStartUrlRequired": "SSO Start URL을 입력해 주세요.",
+      "ssoRegionRequired": "SSO Region을 선택해 주세요.",
+      "profileName": "프로필명",
+      "newProfileName": "새 프로필명",
+      "required": "{{field}}을 입력해 주세요.",
+      "invalidChars": "{{field}}에 사용할 수 없는 문자가 포함되어 있습니다."
+    },
+    "auth": {
+      "browserLoginRequired": "브라우저 로그인이 필요합니다.",
+      "storedCredentialsFailed": "이 프로필은 저장된 AWS 자격 증명으로 인증하지 못했습니다.",
+      "usesStoredCredentials": "이 프로필은 브라우저 로그인 대신 저장된 AWS 자격 증명을 사용합니다."
+    },
+    "region": {
+      "unsupported": "지원하지 않는 AWS Region입니다.",
+      "listFailed": "AWS 리전 목록을 읽지 못했습니다."
+    },
+    "ec2": {
+      "listFailed": "EC2 인스턴스 목록을 읽지 못했습니다.",
+      "detailsFailed": "EC2 인스턴스 정보를 읽지 못했습니다."
+    },
+    "ecs": {
+      "clusterListFailed": "ECS 클러스터 목록을 읽지 못했습니다.",
+      "metricsPartial": "현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.",
+      "serviceNotFound": "선택한 ECS 서비스를 찾지 못했습니다.",
+      "noRunningTask": "이 서비스에 실행 중인 task가 없습니다.",
+      "runningTaskDetailsMissing": "실행 중인 ECS task 상세 정보를 찾지 못했습니다.",
+      "execDisabled": "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+      "containerNotInTask": "선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.",
+      "runtimeIdMissing": "선택한 컨테이너의 runtime ID를 확인하지 못했습니다.",
+      "targetBuildFailed": "ECS task target을 구성하지 못했습니다.",
+      "taskDetailsMissing": "선택한 ECS task 상세 정보를 찾지 못했습니다.",
+      "clusterNotFound": "선택한 ECS 클러스터를 찾지 못했습니다.",
+      "execNoStream": "ECS Exec 세션 응답에 스트림 정보가 없습니다.",
+      "execStartFailed": "ECS Exec 세션을 시작하지 못했습니다."
+    },
+    "time": {
+      "endBeforeStart": "종료 시간이 시작 시간보다 빠를 수 없습니다."
+    },
+    "eic": {
+      "pushDenied": "EC2 Instance Connect 공개 키 전송이 거부되었습니다.",
+      "pushFailed": "EC2 Instance Connect 공개 키 전송에 실패했습니다."
+    },
+    "ssh": {
+      "noUserCandidates": "SSH 로그인 사용자 후보를 찾지 못했습니다.",
+      "configCheckFailed": "SSH 설정을 자동으로 확인하지 못했습니다.",
+      "configCheckTimeout": "SSH 설정 확인이 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요."
+    },
+    "instanceState": "이 인스턴스는 현재 {{state}} 상태라 SSM import를 사용할 수 없습니다. 인스턴스를 실행한 뒤 다시 시도해 주세요.",
+    "stage": {
+      "sendCommand": "SSM 명령 전송",
+      "readSshConfig": "SSH 설정 조회",
+      "analyzeUsers": "사용자 후보 분석"
+    }
+  },
+  "transfer": {
+    "field": {
+      "groupPath": "그룹 경로",
+      "groupId": "그룹 ID",
+      "groupName": "그룹 이름",
+      "groupCreatedAt": "그룹 생성 시각",
+      "groupUpdatedAt": "그룹 수정 시각",
+      "secretId": "자격증명 ID",
+      "secretLabel": "자격증명 이름",
+      "secretUpdatedAt": "자격증명 수정 시각",
+      "awsProfileId": "AWS 프로필 ID",
+      "awsProfileName": "AWS 프로필 이름",
+      "awsProfileUpdatedAt": "AWS 프로필 수정 시각",
+      "ssoRegion": "AWS SSO 리전",
+      "ssoAccount": "AWS SSO 계정",
+      "ssoRole": "AWS SSO 역할",
+      "awsSourceProfileId": "AWS 원본 프로필 ID",
+      "awsRoleArn": "AWS 역할 ARN",
+      "knownHostAddress": "known host 주소",
+      "knownHostAlgorithm": "known host 알고리즘",
+      "knownHostPublicKey": "known host 공개 키",
+      "knownHostCreatedAt": "known host 생성 시각",
+      "knownHostLastSeenAt": "known host 확인 시각",
+      "knownHostUpdatedAt": "known host 수정 시각",
+      "snippetLabel": "snippet 이름",
+      "snippetCommand": "snippet 명령",
+      "snippetCreatedAt": "snippet 생성 시각",
+      "snippetUpdatedAt": "snippet 수정 시각",
+      "selectedHostId": "선택 호스트 ID",
+      "selectedHosts": "선택 호스트",
+      "groups": "그룹",
+      "hosts": "호스트",
+      "secrets": "자격증명",
+      "portForwards": "포트 포워딩",
+      "awsProfiles": "AWS 프로필",
+      "exportedAt": "내보내기 시각"
+    },
+    "error": {
+      "invalidValue": "Dolgate 파일의 {{field}} 값이 올바르지 않습니다.",
+      "invalidList": "Dolgate 파일의 {{field}} 목록이 올바르지 않습니다.",
+      "duplicateId": "Dolgate 파일에 중복된 {{field}} ID가 있습니다.",
+      "invalidGroup": "Dolgate 파일의 그룹 정보가 올바르지 않습니다.",
+      "invalidGroupPath": "Dolgate 파일의 그룹 경로가 올바르지 않습니다.",
+      "invalidHost": "Dolgate 파일의 호스트 정보가 올바르지 않습니다.",
+      "invalidSecret": "Dolgate 파일의 자격증명 정보가 올바르지 않습니다.",
+      "invalidSecretId": "Dolgate 파일의 자격증명 ID가 올바르지 않습니다.",
+      "invalidAwsProfile": "Dolgate 파일의 AWS 프로필 정보가 올바르지 않습니다.",
+      "invalidAwsProfileRegion": "Dolgate 파일의 AWS 프로필 리전이 올바르지 않습니다.",
+      "invalidAwsProfileKind": "Dolgate 파일의 AWS 프로필 종류가 올바르지 않습니다.",
+      "invalidKnownHost": "Dolgate 파일의 known host 정보가 올바르지 않습니다.",
+      "invalidKnownHostPort": "Dolgate 파일의 known host 포트가 올바르지 않습니다.",
+      "invalidSnippet": "Dolgate 파일의 snippet 정보가 올바르지 않습니다.",
+      "unsupportedBundle": "지원하지 않는 Dolgate 내보내기 데이터입니다.",
+      "invalidPortForwardKind": "Dolgate 파일의 포트 포워딩 종류가 올바르지 않습니다.",
+      "invalidPortForward": "Dolgate 파일의 포트 포워딩 정보가 올바르지 않습니다.",
+      "invalidDnsKind": "Dolgate 파일의 DNS override 종류가 올바르지 않습니다.",
+      "invalidDnsOverride": "Dolgate 파일의 DNS override 정보가 올바르지 않습니다.",
+      "tooManyItems": "Dolgate 파일에 항목이 너무 많습니다.",
+      "duplicateSelectedHostId": "Dolgate 파일에 중복된 선택 호스트 ID가 있습니다.",
+      "invalidSelectedHostRef": "Dolgate 파일의 선택 호스트 참조가 올바르지 않습니다.",
+      "missingSecret": "{{label}}: 연결된 자격증명이 파일에 없습니다.",
+      "missingJumpHost": "{{label}}: 연결된 점프 호스트가 파일에 없습니다.",
+      "missingAwsProfile": "{{label}}: 연결된 AWS 프로필이 파일에 없습니다.",
+      "missingSnippet": "{{label}}: 연결된 snippet이 파일에 없습니다.",
+      "missingSourceProfile": "{{label}}: 연결된 원본 AWS 프로필이 파일에 없습니다.",
+      "missingRuleHost": "{{label}}: 연결된 호스트가 파일에 없습니다.",
+      "missingDnsRule": "{{label}}: 연결된 포트 포워딩이 파일에 없습니다.",
+      "secureValueMissing": "{{label}}의 보안 저장 값을 찾을 수 없습니다.",
+      "secureValueUnreadable": "{{label}}의 보안 저장 값을 읽을 수 없습니다.",
+      "secureValueCorrupt": "{{label}}의 저장 값이 손상되었습니다.",
+      "selectHostRequired": "내보낼 호스트를 선택해 주세요.",
+      "selectedHostMissing": "선택한 호스트를 찾을 수 없습니다. 목록을 새로고침해 주세요.",
+      "jumpHostCycle": "{{label}}: 점프 호스트 연결에 순환 참조가 있습니다.",
+      "awsRoleCycle": "AWS 역할 프로필 연결에 순환 참조가 있습니다.",
+      "secretIdMismatch": "자격증명 ID와 저장 값이 일치하지 않습니다.",
+      "startupSnippetMissing": "연결된 startup snippet을 찾을 수 없습니다.",
+      "awsProfileRenamed": "AWS 프로필 {{from}}은(는) {{to}}(으)로 이름을 바꿨습니다.",
+      "dnsOverrideSkipped": "{{hostname}} DNS override가 이미 있어 가져오지 않았습니다.",
+      "unresolvedSecretRef": "{{label}}: 가져올 자격증명 참조를 확인할 수 없습니다.",
+      "unresolvedJumpHostRef": "{{label}}: 가져올 점프 호스트 참조를 확인할 수 없습니다.",
+      "unresolvedAwsProfileRef": "{{label}}: 가져올 AWS 프로필 참조를 확인할 수 없습니다.",
+      "unresolvedSnippetRef": "{{label}}: 가져올 snippet 참조를 확인할 수 없습니다.",
+      "unresolvedSourceProfileRef": "{{label}}: 원본 AWS 프로필 참조를 확인할 수 없습니다.",
+      "unresolvedRuleHostRef": "{{label}}: 가져올 호스트 참조를 확인할 수 없습니다.",
+      "unresolvedDnsRuleRef": "{{label}}: 포트 포워딩 참조를 확인할 수 없습니다.",
+      "importStateExpired": "가져오기 상태가 만료되었습니다. 파일을 다시 열어 주세요."
+    }
+  },
+  "auth": {
+    "vaultRequestTimeout": "동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
+    "passwordChangeTimeout": "비밀번호 변경 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.",
+    "e2eSessionInvalid": "DOLSSH_E2E_AUTH_SESSION_JSON 값이 올바른 AuthSession 형식이 아닙니다.",
+    "sessionRestoreFailed": "세션을 복구하지 못했습니다.",
+    "sessionExpired": "세션이 만료되었습니다. 다시 로그인해 주세요.",
+    "loginServerInvalid": "로그인 서버 주소가 올바르지 않습니다.",
+    "callbackMissingCode": "로그인 콜백에 code가 없습니다.",
+    "callbackStateMismatch": "로그인 상태 값이 일치하지 않습니다.",
+    "signedIn": "로그인되었습니다.",
+    "signedOut": "로그아웃되었습니다.",
+    "sessionExpiredRetry": "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+    "accountDeleted": "회원 탈퇴로 서버 계정과 데이터가 삭제되었습니다.",
+    "passwordOnlineOnly": "온라인 로그인 상태에서만 비밀번호를 설정할 수 있습니다.",
+    "passwordChangeFailed": "로그인 비밀번호를 변경하지 못했습니다.",
+    "passwordSet": "로그인 비밀번호가 설정되었습니다.",
+    "signedOutExpired": "세션이 만료되어 로그아웃되었습니다.",
+    "offlineUnavailable": "오프라인 모드에서는 서버 연결이 필요한 기능을 사용할 수 없습니다.",
+    "signInRequired": "로그인이 필요합니다.",
+    "noVaultKey": "세션 vault key가 없습니다.",
+    "vaultUnlockRequired": "동기화 잠금 해제가 필요합니다.",
+    "syncOnlineOnly": "온라인 로그인 상태에서만 동기화할 수 있습니다.",
+    "onlineOnly": "온라인 로그인 상태에서만 사용할 수 있습니다.",
+    "vaultCancelledAccountChanged": "로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.",
+    "vaultAlreadySet": "이미 동기화 암호가 설정되어 있습니다.",
+    "vaultConfigured": "동기화 암호를 설정했습니다(종단간 암호화 활성).",
+    "vaultPassphraseWrong": "동기화 암호가 올바르지 않습니다.",
+    "vaultKeyVerifyFailed": "동기화 볼트의 키 검증에 실패했습니다. 세션을 새로고침한 뒤 다시 시도해 주세요.",
+    "vaultReset": "동기화 볼트를 초기화했습니다(서버 동기화 데이터 삭제).",
+    "migrationNotAvailable": "전환할 수 있는 상태가 아닙니다.",
+    "vaultSetElsewhere": "다른 기기에서 이미 동기화 암호를 설정했습니다. 잠시 후 자동으로 이어집니다.",
+    "migratedToE2ee": "기존 계정을 종단간 암호화로 전환했습니다.",
+    "unlockBeforeChange": "동기화 잠금을 해제한 뒤 변경할 수 있습니다.",
+    "currentPassphraseWrong": "현재 동기화 암호가 올바르지 않습니다.",
+    "vaultCacheMismatch": "로컬 볼트 캐시와 서버 키가 일치하지 않습니다. 세션을 새로고침한 뒤 다시 시도해 주세요.",
+    "vaultKeyStoreFailed": "동기화 키를 보안 저장소에 저장하지 못했습니다. 이번 실행에서는 잠금 해제 상태를 유지합니다.",
+    "vaultResetElsewhere": "다른 기기에서 동기화 암호가 초기화되어 이 기기의 잠금을 해제해야 합니다.",
+    "serverUnreachable": "서버에 연결하지 못했습니다.",
+    "authRequestFailed": "인증 요청에 실패했습니다.",
+    "authResponseInvalid": "인증 응답 형식이 올바르지 않습니다.",
+    "vaultStateRestoreFailed": "동기화 볼트 상태를 복원할 수 없습니다.",
+    "offlineLeaseExpired": "오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.",
+    "passkeyRegisterUnavailable": "패스키 등록을 시작할 수 없습니다.",
+    "registrationLinkInvalid": "등록 링크가 올바르지 않습니다.",
+    "callbackPortFailed": "로컬 로그인 콜백 포트를 열지 못했습니다.",
+    "loginComplete": "로그인이 완료되었습니다.",
+    "returnToApp": "Dolgate 앱으로 돌아갑니다. 이 탭은 닫아도 됩니다.",
+    "browserExchangeFailed": "브라우저 로그인 교환에 실패했습니다.",
+    "loginFailed": "로그인에 실패했습니다.",
+    "htmlResponse": "{{fallback}} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. ({{status}})",
+    "accountDeleteFailed": "회원 탈퇴에 실패했습니다. ({{status}})",
+    "requestFailed": "요청이 실패했습니다. ({{status}})"
+  },
+  "core": {
+    "shutdownSession": "앱 종료로 세션이 정리되었습니다.",
+    "shutdownSftp": "앱 종료로 SFTP 연결이 정리되었습니다.",
+    "shutdownContainers": "앱 종료로 Containers 연결이 정리되었습니다.",
+    "transferFailed": "전송에 실패했습니다.",
+    "noReadPermission": "원본 파일을 읽을 권한이 없습니다.",
+    "noOverwritePermission": "기존 항목을 덮어쓰거나 삭제할 권한이 없습니다.",
+    "noWritePermission": "대상 폴더에 쓸 권한이 없습니다.",
+    "noTransferPermission": "파일을 전송할 권한이 없습니다.",
+    "partialCleanupFailed": "이전 SFTP partial 파일 정리에 실패했습니다.",
+    "sftpOwnedByOtherWindow": "다른 창에서 사용 중인 SFTP 연결입니다.",
+    "sftpNotInThisWindow": "이 창에 속한 SFTP 연결이 아닙니다.",
+    "transferNotInThisWindow": "이 창에 속한 파일 전송이 아닙니다.",
+    "containerTabNotInThisWindow": "이 창에서 연 Container 탭이 아닙니다.",
+    "containerWindowsClosed": "Container 탭을 연 창이 모두 닫혔습니다.",
+    "ssmProxyTimeout": "서버 AWS SSM 프록시 연결 시간이 초과되었습니다.",
+    "requestWindowClosed": "연결을 요청한 창이 닫혔습니다.",
+    "ssmProxyConnectFailed": "서버 AWS SSM 프록시 연결에 실패했습니다.",
+    "ssmProxyClosed": "서버 AWS SSM 프록시 연결이 종료되었습니다.",
+    "ssmProxyParseFailed": "서버 AWS SSM 프록시 응답을 해석하지 못했습니다.",
+    "ssmProxyOutputParseFailed": "서버 AWS SSM 프록시 출력 데이터를 해석하지 못했습니다.",
+    "ssmProxyError": "서버 AWS SSM 프록시 오류가 발생했습니다.",
+    "ssmSessionClosed": "AWS SSM 세션이 종료되었습니다.",
+    "serialOnly": "이 기능은 Serial 세션에서만 사용할 수 있습니다.",
+    "containersConnectionError": "Containers 연결 오류가 발생했습니다.",
+    "localSessionClosed": "로컬 터미널 세션이 종료되었습니다.",
+    "warpgateSessionClosed": "Warpgate 세션이 종료되었습니다.",
+    "sshSessionClosed": "SSH 세션이 종료되었습니다.",
+    "localSessionConnected": "로컬 터미널 세션이 연결되었습니다.",
+    "ssmSessionConnected": "AWS SSM 세션이 연결되었습니다.",
+    "warpgateSessionConnected": "Warpgate 세션이 연결되었습니다.",
+    "sshSessionConnected": "SSH 세션이 연결되었습니다.",
+    "localSessionError": "로컬 터미널 세션 오류가 발생했습니다.",
+    "ssmSessionError": "AWS SSM 세션 오류가 발생했습니다.",
+    "warpgateSessionError": "Warpgate 세션 오류가 발생했습니다.",
+    "sshSessionError": "SSH 세션 오류가 발생했습니다.",
+    "startupCommandFailed": "Startup command를 터미널에 전송하지 못했습니다.",
+    "transferWindowClosed": "파일 전송을 요청한 창이 닫혔습니다.",
+    "sftpSession": "SFTP 세션",
+    "ecsContainersBrowse": "ECS Containers 탐색",
+    "containersConnect": "Containers 연결",
+    "sessionLog": "{{kind}} 세션",
+    "sessionErrorLog": "{{kind}} 세션 오류가 발생했습니다.",
+    "containerActionLog": "컨테이너 {{action}}",
+    "action": {
+      "start": "시작",
+      "stop": "중지",
+      "restart": "재시작",
+      "remove": "삭제"
+    }
+  },
+  "ecs": {
+    "error": {
+      "execContextFailed": "ECS Exec 컨텍스트를 불러오지 못했습니다.",
+      "noRunningTask": "이 서비스에 실행 중인 task가 없습니다.",
+      "noExecContainer": "ECS Exec로 연결할 수 있는 컨테이너가 없습니다.",
+      "ssoWindowFailed": "AWS SSO 로그인 창을 열지 못했습니다.",
+      "actionContextFailed": "서비스 액션 정보를 불러오지 못했습니다.",
+      "logsFailed": "ECS 서비스 로그를 불러오지 못했습니다.",
+      "portRequired": "포트를 선택해 주세요.",
+      "localPortInvalid": "로컬 포트를 확인해 주세요.",
+      "tunnelStartFailed": "ECS 터널을 시작하지 못했습니다.",
+      "tunnelStopFailed": "ECS 터널을 중지하지 못했습니다.",
+      "shellStartFailed": "ECS 셸 연결을 시작하지 못했습니다."
+    },
+    "metrics": {
+      "noCpuTrend": "최근 10분 CPU 추세 데이터가 없습니다.",
+      "noMemoryTrend": "최근 10분 Memory 추세 데이터가 없습니다."
+    },
+    "connecting": {
+      "clusterLookup": "ECS 클러스터 조회",
+      "snapshotHint": "AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다."
+    },
+    "action": {
+      "autoAssigning": "자동 할당 중...",
+      "openingBrowser": "브라우저 여는 중...",
+      "reopenBrowser": "브라우저 다시 열기",
+      "loading": "불러오는 중...",
+      "signInBrowser": "브라우저에서 로그인",
+      "retry": "다시 시도",
+      "shell": "쉘 접속",
+      "plainView": "일반 보기",
+      "detailPanel": "ECS 서비스 상세 패널",
+      "expandLogs": "로그 크게 보기",
+      "connecting": "연결 중..."
+    },
+    "list": {
+      "lastUpdated": "마지막 갱신 {{at}}",
+      "noServices": "이 클러스터에는 표시할 서비스가 없습니다.",
+      "noSelection": "선택된 서비스가 없습니다."
+    },
+    "detail": {
+      "summary": "서비스 요약",
+      "deployment": "배포 정보",
+      "noDeployments": "표시할 deployment 정보가 없습니다.",
+      "noEvents": "표시할 최근 이벤트가 없습니다."
+    },
+    "logs": {
+      "showTime": "시간 표시",
+      "rangeLabel": "로그 범위",
+      "searchLabel": "로그 검색",
+      "reload": "다시 불러오기",
+      "bufferMatches": "현재 버퍼에서 {{count}}건 일치",
+      "loadingCard": "서비스 로그를 불러오는 중입니다.",
+      "refreshing": "갱신 중...",
+      "noSearchResults": "검색 결과가 없습니다.",
+      "noLogs": "표시할 로그가 없습니다."
+    },
+    "tunnel": {
+      "preparing": "터널 대상을 준비하는 중입니다.",
+      "noRunningTask": "실행 중인 task 없음",
+      "noContainer": "선택 가능한 컨테이너 없음",
+      "noPort": "포트 없음",
+      "autoPortDescription": "사용 가능한 로컬 포트를 자동으로 할당합니다.",
+      "statusTitle": "터널 상태",
+      "stopping": "정지 중...",
+      "starting": "시작 중..."
+    },
+    "shell": {
+      "title": "쉘 접속",
+      "description": "실행 중인 task와 컨테이너를 고른 뒤 ECS Exec 세션을 엽니다."
+    }
+  },
+  "awsImport": {
+    "badge": {
+      "windowsUnsupported": "Windows 미지원",
+      "ssmUnavailable": "SSM 사용 불가",
+      "blocked": "가져오기 차단됨",
+      "inspect": "SSH 정보 확인"
+    },
+    "error": {
+      "portRange": "SSH 포트는 1에서 65535 사이 숫자여야 합니다.",
+      "sshAutoFailed": "SSH 접속 정보를 자동으로 확인하지 못했습니다.",
+      "profileListFailed": "AWS 프로필 목록을 불러오지 못했습니다.",
+      "profileStatusFailed": "AWS 프로필 상태를 확인하지 못했습니다.",
+      "regionListFailed": "AWS 리전 목록을 불러오지 못했습니다.",
+      "ecsClusterListFailed": "ECS 클러스터 목록을 불러오지 못했습니다.",
+      "ec2ListFailed": "EC2 인스턴스 목록을 불러오지 못했습니다.",
+      "ssoLoginFailed": "AWS SSO 로그인을 시작하지 못했습니다.",
+      "clusterRegisterFailed": "ECS 클러스터를 가져오지 못했습니다.",
+      "hostRegisterFailed": "AWS host를 등록하지 못했습니다."
+    },
+    "loading": {
+      "profiles": "AWS 프로필을 불러오는 중입니다.",
+      "profileStatus": "프로필 로그인 상태를 확인하는 중입니다.",
+      "browserLogin": "브라우저에서 AWS 로그인을 진행 중입니다.",
+      "regions": "리전 목록을 불러오는 중입니다.",
+      "ecsClusters": "ECS 클러스터 목록을 불러오는 중입니다.",
+      "ec2Instances": "EC2 인스턴스 목록을 불러오는 중입니다."
+    },
+    "action": {
+      "importFromCli": "로컬 AWS CLI에서 가져오기",
+      "closeCreateProfile": "프로필 생성 닫기",
+      "createProfile": "프로필 생성",
+      "signingIn": "로그인 중...",
+      "signInBrowser": "브라우저에서 로그인",
+      "back": "뒤로",
+      "recheck": "다시 확인",
+      "registering": "등록 중...",
+      "registerHost": "Host 등록",
+      "addingCluster": "추가 중...",
+      "addCluster": "클러스터 추가"
+    },
+    "profile": {
+      "wizardTitle": "새 AWS 프로필 생성",
+      "wizardDescription": "앱 전용 AWS CLI 프로필로 저장됩니다.",
+      "wizardSyncUnsupported": "현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.",
+      "syncUnsupported": "현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.",
+      "ssoLoginNeeded": "이 프로필은 아직 로그인되지 않았습니다. 브라우저에서 AWS SSO 로그인을 완료해 주세요.",
+      "credentialsNeeded": "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+      "awsCliRequired": "AWS CLI가 설치되어 있어야 합니다. ",
+      "sessionManagerRequired": "session-manager-plugin이 설치되어 있어야 SSM 연결을 시작할 수 있습니다."
+    },
+    "inspect": {
+      "inProgress": "유저명 및 SSH 접속 정보를 확인 중입니다.",
+      "doneTitle": "자동으로 SSH 접속 정보를 확인했습니다.",
+      "doneHint": "필요하면 아래 값을 바로 수정한 뒤 Host를 등록할 수 있습니다.",
+      "usernamePlaceholder": "자동으로 찾은 사용자명이 없으면 비워둘 수 있습니다.",
+      "portPlaceholder": "비워두면 기본값 22를 사용합니다."
+    },
+    "empty": {
+      "noEcsClusters": "이 리전에 가져올 수 있는 ECS 클러스터가 없습니다.",
+      "noEc2Instances": "이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다.",
+      "selectRegionEcs": "리전을 선택하면 ECS 클러스터를 불러옵니다.",
+      "selectRegionEc2": "리전을 선택하면 EC2 인스턴스를 불러옵니다."
+    }
+  },
+  "xshellImport": {
+    "notice": {
+      "warningsWithPassword": "주의 사항 {{count}}건, 저장된 비밀번호 포함",
+      "warnings": "주의 사항 {{count}}건",
+      "passwordIncluded": "저장된 비밀번호 포함",
+      "additionalSources": "추가 세션 소스 {{count}}개"
+    },
+    "sources": {
+      "count": "세션 소스 {{count}}개",
+      "more": "외 {{count}}개",
+      "decryptHint": "암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.",
+      "defaultDir": "기본 경로",
+      "additionalDir": "추가 폴더"
+    },
+    "tree": {
+      "selectHost": "{{label}} 호스트 선택",
+      "rootSession": "루트 세션",
+      "privateKey": "개인 키",
+      "password": "비밀번호",
+      "savedPassword": "저장된 비밀번호",
+      "authProfile": "인증 프로필",
+      "collapse": "접기",
+      "expand": "펼치기",
+      "groupToggle": "{{name}} 그룹 {{action}}",
+      "selectGroup": "{{name}} 그룹 선택",
+      "childHosts": "하위 호스트 {{count}}개",
+      "emptyGroup": "빈 그룹",
+      "noImportableHosts": "이 그룹에는 가져올 호스트가 없습니다."
+    },
+    "error": {
+      "loadFailed": "로컬 Xshell 세션을 불러오지 못했습니다.",
+      "addFolderFailed": "선택한 Xshell 세션 폴더를 추가하지 못했습니다.",
+      "importFailed": "Xshell 데이터를 가져오지 못했습니다."
+    },
+    "dialog": {
+      "title": "Xshell 가져오기",
+      "close": "Xshell 가져오기 대화상자 닫기",
+      "loading": "로컬 Xshell 세션을 읽는 중입니다.",
+      "searchLabel": "검색",
+      "searchPlaceholder": "그룹, 호스트, 사용자명, 경로 검색",
+      "addingFolder": "폴더를 불러오는 중...",
+      "pickFolder": "세션 폴더 선택",
+      "selectVisible": "보이는 항목 선택",
+      "deselectVisible": "보이는 항목 해제",
+      "deselectAll": "전체 선택 해제",
+      "statSources": "소스 {{count}}",
+      "statTreeItems": "트리 항목 {{count}}",
+      "statSelected": "선택 항목 {{count}}",
+      "statHosts": "가져올 호스트 {{count}}",
+      "statGroups": "생성될 그룹 {{count}}",
+      "statSkippedExisting": "기존 중복 제외 {{count}}",
+      "statSkippedDuplicate": "세션 중복 제외 {{count}}",
+      "selectionHint": "호스트 선택 시 상위 그룹은 자동 생성되고, 그룹 선택 시 하위 그룹과 호스트를 함께 가져옵니다.",
+      "itemsHeading": "가져올 항목",
+      "emptyTitle": "현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다.",
+      "emptyDescription": "다른 세션 폴더를 선택하거나 검색어를 바꿔보세요.",
+      "treeLabel": "Xshell 가져오기 항목",
+      "importing": "가져오는 중...",
+      "import": "가져오기"
+    }
+  },
+  "logs": {
+    "duration": {
+      "zero": "0초",
+      "hoursMinutes": "{{hours}}시간 {{minutes}}분",
+      "minutesSeconds": "{{minutes}}분 {{seconds}}초",
+      "seconds": "{{seconds}}초"
+    },
+    "sftp": {
+      "countWithBytes": "{{label}} {{count}}개 · {{bytes}}",
+      "count": "{{label}} {{count}}개",
+      "download": "다운로드",
+      "upload": "업로드",
+      "remoteCopy": "원격 복사",
+      "delete": "삭제 {{count}}개",
+      "mkdir": "폴더 생성 {{count}}개",
+      "rename": "이름 변경 {{count}}개",
+      "chmod": "권한 변경 {{count}}개",
+      "chown": "소유권 변경 {{count}}개",
+      "visitedPaths": "경로 탐색 {{count}}개",
+      "errors": "오류 {{count}}개",
+      "lastPath": "마지막 경로: {{path}}"
+    },
+    "empty": {
+      "title": "조건에 맞는 로그가 없습니다.",
+      "description": "세션 연결 기록과 보안·설정 변경 기록만 여기에 남습니다."
+    },
+    "field": {
+      "browseStarted": "탐색 시작",
+      "browseEnded": "탐색 종료",
+      "heldFor": "유지 시간",
+      "connecting": "연결 중",
+      "resourceCount": "{{kind}} {{count}}개",
+      "service": "서비스",
+      "container": "컨테이너",
+      "refreshCount": "새로고침 {{count}}회",
+      "errorCount": "오류 {{count}}회",
+      "ranAt": "실행 시각",
+      "runDuration": "실행 시간",
+      "connectStarted": "연결 시작",
+      "connectEnded": "연결 종료",
+      "connectDuration": "연결 시간",
+      "forwardStarted": "포워딩 시작",
+      "forwardEnded": "포워딩 종료",
+      "forwarding": "포워딩 중"
+    }
+  },
+  "hostForm": {
+    "agent": {
+      "checking": "에이전트 상태 확인 중…",
+      "detected": "에이전트 감지됨",
+      "keyCount": " · 키 {{count}}개",
+      "noKeys": "에이전트에 등록된 키가 없습니다",
+      "unreachable": "에이전트에 연결할 수 없습니다",
+      "notFound": "에이전트를 찾을 수 없습니다",
+      "unknown": "에이전트 상태를 확인할 수 없습니다"
+    },
+    "jump": {
+      "selectPlaceholder": "점프 호스트 선택",
+      "searchPlaceholder": "이름, 호스트, 사용자 검색",
+      "moveUp": "{{index}}번째 점프 위로",
+      "moveDown": "{{index}}번째 점프 아래로",
+      "remove": "{{index}}번째 점프 제거",
+      "addAria": "점프 호스트 추가",
+      "addPlaceholder": "점프 호스트 추가…",
+      "description": "다른 SSH 호스트를 거쳐 연결합니다 (배스천). 여러 개면 위에서부터 순서대로 거칩니다 — 첫 번째가 클라이언트에서 직접 연결, 마지막이 대상 바로 앞입니다."
+    },
+    "profile": {
+      "select": "프로필 선택",
+      "missingCurrent": "{{name}} (앱 프로필 없음)"
+    },
+    "error": {
+      "serialPortsFailed": "시리얼 포트 목록을 불러오지 못했습니다.",
+      "awsProfilesFailed": "AWS 프로필을 불러오지 못했습니다."
+    },
+    "startup": {
+      "description": "연결 직후 명령과 Enter를 자동으로 전송합니다.",
+      "selectPlaceholder": "Snippet 선택",
+      "searchPlaceholder": "이름, 키워드, 명령 검색",
+      "emptyText": "사용 가능한 Snippet이 없습니다.",
+      "missing": "선택한 Snippet을 찾을 수 없습니다. 연결 시 Startup Command를 건너뜁니다."
+    },
+    "awsSsh": {
+      "pending": "SSH 설정 대기 중",
+      "loadingHint": "추가 정보 로드가 끝나면 SSH 사용자와 포트를 자동으로 채웁니다.",
+      "manualHint": "필요하면 아래 값만 수동으로 수정하면 됩니다."
+    },
+    "serverProxy": {
+      "label": "서버 프록시 사용",
+      "description": "활성화 시 서버가 AWS SSM 세션을 열고 터미널 입출력만 전달합니다."
+    },
+    "agentForward": {
+      "awsDescription": "로컬 SSH 키를 원격에서 쓸 수 있게 합니다(예: bastion에서 사설 호스트로 hop). 신뢰하는 호스트만 켜세요.",
+      "description": "로컬 SSH 키를 원격에서 쓸 수 있게 합니다. 신뢰하는 호스트만 켜세요.",
+      "moshUnsupported": "mosh 세션에서는 지원하지 않습니다."
+    },
+    "auth": {
+      "agentHint": "키 파일이나 비밀번호 없이, 이 컴퓨터의 SSH 에이전트로 인증합니다. 1Password나 ssh-add로 등록해 둔 키가 자동으로 사용됩니다.",
+      "newCredential": "새 인증 정보 저장",
+      "edit": "편집"
+    },
+    "mosh": {
+      "label": "Mosh로 연결",
+      "jumpConflict": "jump host와 함께 쓸 수 없습니다.",
+      "description": "네트워크가 끊겨도 세션이 유지됩니다 (서버에 mosh 필요)."
+    },
+    "env": {
+      "description": "연결 시 셸에 주입됩니다(SetEnv→export 폴백). 값은 비밀번호처럼 암호화되어 저장·동기화됩니다."
+    }
+  },
+  "hostTransfer": {
+    "kind": {
+      "hosts": "호스트",
+      "groups": "그룹",
+      "secrets": "자격증명",
+      "awsProfiles": "AWS 프로필",
+      "portForwards": "포트 포워딩"
+    },
+    "counts": "{{label}} {{count}}개",
+    "export": {
+      "title": "선택한 호스트 내보내기",
+      "close": "내보내기 닫기",
+      "loading": "연결된 항목을 확인하는 중입니다.",
+      "previewFailed": "내보내기 항목을 확인하지 못했습니다.",
+      "passphraseShort": "4자 이상 입력해 주세요.",
+      "passphraseTooShort": "암호는 4자 이상이어야 합니다.",
+      "confirmRequired": "암호 확인을 입력해 주세요.",
+      "confirmMismatch": "암호와 암호 확인이 일치하지 않습니다.",
+      "passphraseMatch": "암호가 일치합니다.",
+      "dolgateTitle": "Dolgate 파일",
+      "dolgateDescription": "선택한 호스트와 연결에 필요한 자격증명 및 설정을 암호화해 저장합니다.",
+      "dolgateHostCount": " 총 {{count}}개 호스트가 포함됩니다.",
+      "opensshNoSecrets": "자격증명은 제외됩니다.",
+      "opensshCount": " {{count}}개 호스트{{jump}}를 내보낼 수 있습니다.",
+      "opensshJump": "와 점프 호스트 {{count}}개",
+      "passphraseLabel": "암호",
+      "confirmLabel": "암호 확인",
+      "passphraseWarning": "이 암호는 복구할 수 없으며 가져올 때 동일한 암호가 필요합니다.",
+      "opensshSkipped": "OpenSSH로 표현할 수 없는 호스트 {{count}}개는 제외됩니다.",
+      "confirmMismatchError": "암호 확인이 일치하지 않습니다.",
+      "exportFailed": "호스트를 내보내지 못했습니다.",
+      "exporting": "내보내는 중..",
+      "submit": "내보내기"
+    },
+    "import": {
+      "title": "Dolgate 파일 가져오기",
+      "close": "Dolgate 가져오기 닫기",
+      "pickFile": "파일 선택",
+      "noFile": "선택된 파일 없음",
+      "passphraseLabel": "내보내기 암호",
+      "ready": "{{summary}}를 가져올 준비가 됐습니다.",
+      "nothingNew": "가져올 새 항목이 없습니다.",
+      "skipped": "이미 존재하여 제외: {{summary}}.",
+      "probeFailed": "Dolgate 파일을 열지 못했습니다.",
+      "importFailed": "Dolgate 파일을 가져오지 못했습니다.",
+      "probing": "확인하는 중..",
+      "probe": "내용 확인",
+      "importing": "가져오는 중..",
+      "submit": "가져오기"
+    }
+  },
+  "hostBrowser": {
+    "menu": {
+      "connect": "연결",
+      "connectMany": "연결 ({{count}}개)",
+      "connectNewWindow": "새 창에서 연결",
+      "sftp": "SFTP 연결",
+      "tmux": "tmux로 연결",
+      "tmuxMany": "tmux로 연결 ({{count}}개)",
+      "containers": "컨테이너",
+      "containersMany": "컨테이너 ({{count}}개)",
+      "edit": "수정",
+      "copy": "복사",
+      "copyMany": "복사 ({{count}}개)",
+      "export": "내보내기...",
+      "exportMany": "내보내기... ({{count}}개)",
+      "newSubgroup": "하위 그룹 생성",
+      "rename": "이름 변경",
+      "exportGroup": "내보내기... ({{count}}개 호스트)"
+    },
+    "error": {
+      "groupCreateFailed": "그룹을 만들지 못했습니다.",
+      "groupRenameFailed": "그룹 이름을 변경하지 못했습니다.",
+      "hostDeleteFailed": "호스트를 삭제하지 못했습니다.",
+      "unusedSecretDeleteFailed": "사용하지 않는 secret을 삭제하지 못했습니다.",
+      "groupDeleteFailed": "그룹을 삭제하지 못했습니다."
+    },
+    "delete": {
+      "hostSingle": "{{title}} 호스트를 삭제할까요?",
+      "hostMany": "선택한 {{count}}개 호스트를 삭제할까요?",
+      "groupSingle": "{{title}} 그룹을 삭제할까요?",
+      "groupMany": "선택한 {{count}}개 그룹을 삭제할까요?",
+      "groupImpact": "하위 그룹 {{groups}}개와 호스트 {{hosts}}개가 함께 영향을 받습니다.",
+      "groupEmpty": "이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.",
+      "keepChildren": "하위 항목 유지",
+      "deleteChildren": "하위 항목까지 삭제"
+    }
+  },
+  "awsWizard": {
+    "error": {
+      "roleArnRequired": "Role ARN을 입력해 주세요.",
+      "roleArnInvalid": "입력한 Role ARN이 올바르지 않습니다. Role ARN 형식을 다시 확인해 주세요.",
+      "createFailed": "AWS 프로필을 생성하지 못했습니다.",
+      "ssoSelectionRequired": "SSO 계정과 Role을 모두 선택해 주세요.",
+      "ssoCreateFailed": "AWS SSO 프로필을 생성하지 못했습니다.",
+      "roleCreateFailed": "Role profile을 생성하지 못했습니다."
+    },
+    "static": {
+      "submit": "프로필 저장",
+      "submitting": "생성 중...",
+      "profileName": "새 프로필명"
+    },
+    "field": {
+      "newProfileName": "새 프로필명",
+      "ssoProfileName": "SSO 프로필명",
+      "defaultRegion": "기본 Region",
+      "ssoDefaultRegion": "SSO 기본 Region",
+      "none": "선택 안 함",
+      "ssoRegionSelect": "SSO Region 선택",
+      "accountSelect": "계정 선택",
+      "roleSelect": "Role 선택",
+      "roleProfileName": "Role 프로필명",
+      "roleDefaultRegion": "Role 기본 Region",
+      "sourceProfileSelect": "source profile 선택"
+    },
+    "sso": {
+      "loggedIn": "SSO 로그인에 성공했습니다. 사용할 account와 role을 선택한 뒤 저장하세요.",
+      "reenter": "다시 입력",
+      "saving": "저장 중...",
+      "signingIn": "로그인 중...",
+      "save": "프로필 저장",
+      "signInAndLoad": "로그인 후 계정 불러오기"
+    },
+    "role": {
+      "sourceProfileRequired": "Role profile 생성에는 먼저 사용할 source profile이 필요합니다.",
+      "submitting": "생성 중...",
+      "submit": "프로필 저장"
+    }
+  },
+  "vaultGate": {
+    "mismatch": "두 입력이 일치하지 않습니다.",
+    "error": {
+      "migrateFailed": "종단간 암호화 전환에 실패했습니다.",
+      "setupFailed": "동기화 암호 설정에 실패했습니다.",
+      "unlockFailed": "동기화 잠금 해제에 실패했습니다.",
+      "resetFailed": "볼트 초기화에 실패했습니다."
+    },
+    "title": {
+      "error": "동기화 볼트 오류",
+      "setup": "동기화 암호 설정",
+      "unlock": "동기화 잠금 해제"
+    },
+    "description": {
+      "error": "볼트 정보를 안전하게 확인하지 못해 동기화를 중단했습니다.",
+      "migrate": "종단간 암호화를 위한 동기화 암호를 설정해 주세요. 기존 데이터는 그대로 유지됩니다.",
+      "setup": "종단간 암호화를 위한 동기화 암호를 설정해 주세요. 새 기기에서 로그인할 때 필요합니다.",
+      "unlock": "이 계정의 동기화 암호를 입력해 주세요."
+    },
+    "restoreFailed": "동기화 볼트 상태를 복원할 수 없습니다. 로그아웃한 뒤 다시 로그인해 주세요.",
+    "field": {
+      "passphrase": "동기화 암호",
+      "confirm": "동기화 암호 확인"
+    },
+    "warning": "암호를 잊으면 동기화된 데이터를 복구할 수 없습니다. 로그인된 다른 기기가 있으면 설정에서 변경할 수 있습니다.",
+    "submit": {
+      "migrating": "전환 중...",
+      "settingUp": "설정 중...",
+      "checking": "확인 중...",
+      "enableE2ee": "종단간 암호화 켜기",
+      "startSync": "동기화 시작",
+      "unlock": "잠금 해제",
+      "later": "나중에"
+    },
+    "reset": {
+      "warning": "동기화 암호 없이는 서버에 저장된 데이터를 복구할 수 없습니다. 초기화하면 서버의 동기화 데이터가 모두 삭제되고 새로 시작합니다. 이 작업은 되돌릴 수 없습니다.",
+      "confirm": "모두 삭제하고 새로 시작",
+      "open": "동기화 암호를 잊으셨나요? 데이터 초기화"
+    },
+    "switchAccount": "다른 계정으로 로그인 (로그아웃)"
+  },
+  "hostDetail": {
+    "ago": {
+      "justNow": "방금 전",
+      "minutes": "{{count}}분 전",
+      "hours": "{{count}}시간 전",
+      "days": "{{count}}일 전"
+    },
+    "replay": "세션 리플레이 보기",
+    "startup": {
+      "snippetWithLabel": "스니펫 · {{label}}",
+      "snippet": "스니펫"
+    },
+    "serial": {
+      "local": "로컬"
+    },
+    "credential": {
+      "none": "저장 안 함 (연결 시 입력)",
+      "saved": "저장된 자격증명",
+      "sharedCount": "· {{count}}개 호스트 공유"
+    },
+    "row": {
+      "usernameUnset": "미설정",
+      "enabled": "사용",
+      "serverProxy": "서버 프록시",
+      "startupCommand": "시작 명령",
+      "terminalTheme": "터미널 테마"
+    },
+    "env": {
+      "heading": "환경 변수 ({{count}})",
+      "hide": "값 숨기기",
+      "show": "값 표시"
+    },
+    "empty": {
+      "title": "호스트를 선택하세요",
+      "description": "왼쪽의 호스트 카드 또는 그룹에서 하나를 선택하면 상세 정보가 표시됩니다.",
+      "quickStart": "빠른 시작",
+      "newHost": "새 호스트",
+      "import": "가져오기",
+      "localTerminal": "로컬 터미널",
+      "newGroup": "새 그룹",
+      "shortcuts": "단축키",
+      "logs": "로그",
+      "recentLogs": "최근 로그"
+    },
+    "favorite": "{{label}} 즐겨찾기",
+    "close": "상세 닫기",
+    "activity": {
+      "connectFailed": "{{kind}} · 연결 실패"
+    }
+  },
+  "palette": {
+    "nav": {
+      "hosts": "호스트",
+      "sftp": "파일 전송",
+      "containers": "컨테이너",
+      "portForwarding": "포트 포워딩",
+      "tunnels": "터널",
+      "snippets": "스니펫",
+      "savedCommands": "저장된 명령어",
+      "logs": "로그",
+      "activity": "활동 기록",
+      "settings": "설정",
+      "preferences": "환경설정",
+      "localTerminal": "로컬 터미널",
+      "localShell": "로컬 셸"
+    },
+    "settings": {
+      "general": "일반",
+      "generalSubtitle": "테마와 터미널",
+      "sftp": "SFTP 설정",
+      "sftpSubtitle": "전송 기본값",
+      "security": "보안",
+      "securitySubtitle": "신뢰와 보안",
+      "secrets": "저장된 인증 정보",
+      "secretsSubtitle": "비밀번호와 키",
+      "awsProfiles": "AWS 프로필",
+      "awsProfilesSubtitle": "AWS CLI 프로필"
+    },
+    "quickSsh": "저장하고 SSH 연결",
+    "host": {
+      "connect": "{{label}} 연결",
+      "containers": "{{label}} 컨테이너",
+      "recent": "최근 접속"
+    },
+    "group": {
+      "navigation": "이동",
+      "settings": "설정",
+      "host": "호스트",
+      "quickConnect": "빠른 연결",
+      "localTerminal": "터미널"
+    },
+    "noResults": "검색 결과가 없습니다."
+  },
+  "aiChat": {
+    "copy": "복사",
+    "copied": "복사됨",
+    "thinking": "생각중",
+    "dropToAttach": "첨부하려면 놓으세요",
+    "clear": "지우기",
+    "closePanel": "AI 패널 닫기",
+    "disabled": "AI 어시스턴트가 꺼져 있습니다.",
+    "enableLink": "설정 → AI에서 활성화 ↗",
+    "intro": "무엇이든 물어보세요. 터미널 최근 출력이 자동으로 함께 전달됩니다.",
+    "attachmentAlt": "첨부 이미지",
+    "toolRuns": "작업 내역",
+    "toolCount": "도구 {{count}}개",
+    "copyResponse": "응답 복사",
+    "approveCommand": "명령 실행 승인",
+    "autoApprove": "이 세션에서 자동 승인",
+    "reject": "거부",
+    "approve": "승인",
+    "removeAttachment": "첨부 제거",
+    "inputLabel": "AI 메시지 입력",
+    "inputPlaceholder": "메시지 입력",
+    "attachFile": "파일 첨부",
+    "stop": "정지",
+    "stopAria": "응답 생성 정지",
+    "send": "전송",
+    "sendAria": "메시지 전송",
+    "disabledHint": "AI 어시스턴트가 꺼져 있습니다. 설정 → AI에서 켜세요.",
+    "modelMissing": "설정 → AI에서 모델을 지정하세요.",
+    "sessionContext": "현재 세션 컨텍스트:",
+    "requestFailed": "요청에 실패했습니다."
+  },
+  "imports": {
+    "exportRequestInvalid": "내보내기 요청이 올바르지 않습니다.",
+    "dolgateExportTitle": "Dolgate 호스트 내보내기",
+    "dolgateExported": "선택한 호스트를 Dolgate 파일로 내보냈습니다.",
+    "opensshNoExportable": "선택한 호스트 중 OpenSSH 형식으로 내보낼 수 있는 항목이 없습니다.",
+    "opensshExportTitle": "OpenSSH config 내보내기",
+    "opensshExported": "선택한 호스트를 OpenSSH config로 내보냈습니다.",
+    "dolgateImportTitle": "Dolgate 호스트 파일 가져오기",
+    "importRequestInvalid": "가져오기 요청이 올바르지 않습니다.",
+    "fileTooLarge": "Dolgate 파일이 너무 크거나 올바른 파일이 아닙니다.",
+    "importStateInvalid": "가져오기 상태가 올바르지 않습니다.",
+    "awsProfileApplyFailedDetail": "AWS 프로필 파일 반영 실패: {{message}}",
+    "awsProfileApplyFailed": "AWS 프로필 파일을 반영하지 못했습니다.",
+    "dnsApplyFailedDetail": "DNS override 반영 실패: {{message}}",
+    "dnsApplyFailed": "DNS override를 반영하지 못했습니다.",
+    "dolgateImported": "Dolgate 파일에서 호스트 데이터를 가져왔습니다.",
+    "termiusSnapshotMissing": "Termius import snapshot을 찾지 못했습니다. 목록을 다시 불러와 주세요.",
+    "termiusPartial": "Termius import 중 일부 항목을 건너뛰거나 경고가 발생했습니다.",
+    "opensshStateMissing": "OpenSSH 가져오기 상태를 찾을 수 없습니다. 다시 파일을 선택해 주세요.",
+    "opensshImported": "OpenSSH 소스에서 호스트를 가져왔습니다.",
+    "opensshImportedWithWarnings": "OpenSSH 가져오기가 경고와 함께 완료되었습니다.",
+    "xshellStateMissing": "Xshell 가져오기 상태를 찾지 못했습니다. 대화상자를 다시 열어주세요.",
+    "xshellKeyPathMissing": "{{label}}: 개인키 파일 경로를 찾지 못해 호스트를 가져오지 않았습니다.",
+    "xshellKeySaveFailed": "{{label}}: 개인키를 저장하지 못해 호스트를 가져오지 않았습니다.",
+    "xshellPasswordWindowsOnly": "{{label}}: 이 Windows 사용자 환경에서는 저장된 Xshell 비밀번호를 자동으로 가져올 수 없습니다.",
+    "xshellPasswordDecryptFailed": "{{label}}: 저장된 Xshell 비밀번호를 복호화하지 못해 호스트만 가져왔습니다.",
+    "xshellImported": "Xshell 세션에서 호스트를 가져왔습니다.",
+    "xshellImportedWithWarnings": "Xshell 가져오기가 경고와 함께 완료되었습니다."
+  },
+  "awsSftp": {
+    "ecsShellFailed": "ECS Exec 셸을 열지 못했습니다.",
+    "cloudShellHint": "AWS Console에서 CloudShell로 ECS Exec를 테스트하려면 `cloudshell:ApproveCommand` 권한이 필요합니다. Dolgate 앱 자체에는 필수 권한이 아니며, 앱에서 계속 실패하면 `ecs:ExecuteCommand`와 `ecs:DescribeTasks` 권한도 함께 확인해 주세요.",
+    "ecsExecDenied": "ECS Exec 권한이 없습니다. 사용자/역할에 `ecs:ExecuteCommand`와 보통 `ecs:DescribeTasks` 권한이 필요합니다. 원본 오류: {{error}}",
+    "ecsDescribeDenied": "ECS task 조회 권한이 없습니다. 사용자/역할에 `ecs:DescribeTasks` 권한이 필요합니다. 원본 오류: {{error}}",
+    "ssmDenied": "Session Manager 권한이 없습니다. 사용자/역할에 `ssm:StartSession` 권한이 필요한지 확인해 주세요. 원본 오류: {{error}}",
+    "localPortFailed": "로컬 포트를 예약하지 못했습니다.",
+    "stage": {
+      "sshConfig": "SSH 설정 확인",
+      "profile": "프로필 확인",
+      "awsLogin": "AWS 로그인",
+      "ssm": "SSM 확인",
+      "hostKey": "호스트 키 확인",
+      "tempKey": "임시 키 생성",
+      "pushKey": "공개 키 전송",
+      "tunnel": "터널 연결",
+      "sftp": "SFTP 연결"
+    },
+    "progress": {
+      "checkingProfile": "{{profile}} 프로필 인증 상태를 확인하는 중입니다.",
+      "cliAuthNeeded": "{{profile}} 프로필에 AWS CLI 인증이 필요합니다.",
+      "browserLogin": "브라우저에서 {{profile}} AWS 로그인을 진행하는 중입니다.",
+      "checkingLoginResult": "{{profile}} 프로필 로그인 결과를 확인하는 중입니다.",
+      "ssoNotVerified": "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+      "checkingSsm": "{{label}} 인스턴스의 SSM 연결 상태를 확인하는 중입니다.",
+      "notManaged": "이 인스턴스는 현재 SSM managed instance가 아닙니다.",
+      "checkingSshConfig": "SSH 설정을 자동으로 확인하는 중입니다."
+    }
+  },
+  "pfIpc": {
+    "failureWithCause": "{{message}} 원인: {{cause}}",
+    "dnsCreated": "DNS override를 생성했습니다.",
+    "dnsUpdated": "DNS override를 수정했습니다.",
+    "dnsDeleted": "DNS override를 삭제했습니다.",
+    "dnsEnableFailed": "Static DNS override를 활성화하지 못했습니다.",
+    "dnsDisableFailed": "Static DNS override를 비활성화하지 못했습니다.",
+    "dnsEnabled": "Static DNS override를 활성화했습니다.",
+    "dnsDisabled": "Static DNS override를 비활성화했습니다.",
+    "ruleCreated": "포트 포워딩 규칙을 생성했습니다.",
+    "ruleUpdated": "포트 포워딩 규칙을 수정했습니다.",
+    "ruleDeleted": "포트 포워딩 규칙을 삭제했습니다.",
+    "cliCredentialsNeeded": "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+    "ssoResultUnknown": "AWS SSO 로그인 결과를 확인하지 못했습니다.",
+    "ecsTunnelStartFailed": "ECS task tunnel을 시작하지 못했습니다.",
+    "checkSsmAgent": "SSM Agent 또는 managed instance 상태를 확인해 주세요.",
+    "sshUsernameUnknown": "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+    "azUnknown": "Availability Zone을 확인하지 못했습니다.",
+    "remoteHostUnknown": "원격 호스트 주소를 확인해 주세요.",
+    "hostsOverrideFailed": "hosts override를 적용하지 못했습니다.",
+    "ssmForwardStartFailed": "AWS SSM port forward를 시작하지 못했습니다."
+  },
+  "aiService": {
+    "apiKeyEmpty": "API 키가 비어 있습니다.",
+    "searchKeyEmpty": "검색 API 키가 비어 있습니다.",
+    "requestInFlight": "이미 진행 중인 요청입니다.",
+    "toolLoopGuard": "도구를 너무 여러 번 연속 호출해 중단했어요(무한 반복 방지 안전장치). 질문을 더 구체적으로 다시 시도해 주세요.",
+    "commandRejected": "사용자가 명령 실행을 거부했습니다.",
+    "inspectCommandOnly": "변경·스트리밍·대화형 명령은 inspect_command 로 실행할 수 없습니다. 사용자가 볼 수 있도록 run_in_terminal 을 사용하세요.",
+    "mutatingCommand": "변경 가능성이 있는 명령",
+    "disabled": "AI 어시스턴트가 비활성화되어 있습니다.",
+    "apiKeyMissing": "API 키가 설정되지 않았습니다.",
+    "modelMissing": "사용할 모델이 설정되지 않았습니다.",
+    "codexStatusFailed": "Codex 로그인 상태를 확인하지 못했습니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
+    "codexLoginRequired": "Codex 로그인이 필요합니다. 설정에서 'Codex 로그인' 버튼을 눌러 주세요.",
+    "tool": {
+      "webSearch": "🔍 웹 검색: {{query}}",
+      "fetchUrl": "🌐 URL 읽기: {{url}}",
+      "run": "⚡ 실행: {{command}}",
+      "inspect": "🔎 조회: {{command}}",
+      "readTerminal": "터미널 출력 읽기: {{range}}",
+      "generic": "도구 실행: {{name}}"
+    },
+    "attachedFile": "[첨부 파일: {{name}}]"
+  },
+  "opensshImport": {
+    "source": {
+      "default": "기본",
+      "file": "파일"
+    },
+    "error": {
+      "defaultReadFailed": "기본 OpenSSH 설정을 읽지 못했습니다.",
+      "addFileFailed": "선택한 OpenSSH 파일을 추가하지 못했습니다.",
+      "importFailed": "선택한 OpenSSH 호스트를 가져오지 못했습니다."
+    },
+    "dialog": {
+      "close": "Import OpenSSH 닫기",
+      "scanning": "기본 OpenSSH 설정에서 호스트를 찾는 중입니다.",
+      "targetGroup": "대상 그룹",
+      "ungrouped": "미분류",
+      "searchLabel": "검색",
+      "searchPlaceholder": "별칭, 호스트, 사용자 또는 키 경로 검색",
+      "addingFile": "파일 불러오는 중...",
+      "addFile": "파일 불러오기",
+      "selectVisible": "보이는 항목 모두 선택",
+      "deselectAll": "선택 해제",
+      "statSources": "소스 {{count}}",
+      "statHosts": "가져올 호스트 {{count}}",
+      "statSelected": "선택한 호스트 {{count}}",
+      "statSkippedExisting": "기존 호스트 생략 {{count}}",
+      "statSkippedDuplicate": "중복 호스트 생략 {{count}}",
+      "hostsHeading": "호스트",
+      "emptyTitle": "가져올 수 있는 OpenSSH 호스트가 없습니다.",
+      "emptyDescription": "기본 설정에서 자동 감지된 호스트가 여기에 표시됩니다. 다른 설정 파일은 <strong>파일 불러오기</strong>로 추가할 수 있습니다.",
+      "passwordAuth": "비밀번호 인증",
+      "key": "키",
+      "password": "비밀번호",
+      "importing": "가져오는 중...",
+      "import": "가져오기"
+    }
+  },
+  "home": {
+    "error": {
+      "layoutSaveFailed": "호스트 레이아웃 설정을 저장하지 못했습니다.",
+      "sshHostNotFound": "SSH host를 찾지 못했습니다.",
+      "keyInstallFailed": "SSH 공개 키를 설치하지 못했습니다.",
+      "localTerminalFailed": "로컬 터미널을 시작하지 못했습니다.",
+      "groupMoveFailed": "그룹을 이동하지 못했습니다.",
+      "groupRenameFailed": "그룹 이름을 변경하지 못했습니다.",
+      "connectFailed": "호스트 연결을 시작하지 못했습니다.",
+      "tmuxFailed": "tmux 연결을 시작하지 못했습니다.",
+      "containersFailed": "컨테이너 페이지를 열지 못했습니다.",
+      "quickConnectFailed": "Quick Connect를 시작하지 못했습니다.",
+      "sftpFailed": "SFTP를 열지 못했습니다."
+    },
+    "secret": {
+      "deleteLinked": "이 secret을 삭제하면 {{count}}개 호스트와의 secret 연결이 해제됩니다. 호스트 자체는 삭제되지 않습니다. 계속할까요?",
+      "delete": "이 secret을 삭제할까요?"
+    },
+    "key": {
+      "installedAuthorizedKeys": "{{label}} 인스턴스의 authorized_keys에 새 SSH 키를 설치했습니다.",
+      "switched": "{{label}} 호스트가 새 SSH 키를 사용하도록 전환되었습니다."
+    },
+    "group": {
+      "movedTo": "그룹을 {{path}}(으)로 이동했습니다.",
+      "moved": "그룹을 이동했습니다.",
+      "renamedTo": "그룹 이름을 {{path}}(으)로 변경했습니다.",
+      "renamed": "그룹 이름을 변경했습니다."
+    },
+    "transfer": {
+      "exported": "{{count}}개 호스트를 내보냈습니다.",
+      "exportSkipped": " {{count}}개는 제외했습니다.",
+      "dolgateImported": "Dolgate 파일에서 호스트 {{count}}개를 가져왔습니다.",
+      "dolgateSkipped": " 이미 있는 항목 {{count}}개는 건너뛰었습니다.",
+      "termiusImported": "Termius에서 {{hosts}}개 호스트, {{groups}}개 그룹, {{secrets}}개 secret을 가져왔습니다.",
+      "termiusSkipped": " 불완전 호스트 {{count}}개는 건너뛰었습니다.",
+      "opensshImported": "OpenSSH에서 호스트 {{count}}개를 가져왔습니다.",
+      "opensshSecrets": " 인증 정보 {{count}}개를 함께 가져왔습니다.",
+      "skippedHosts": " 건너뛴 호스트 {{count}}개가 있습니다.",
+      "xshellImported": "Xshell에서 호스트 {{hosts}}개와 그룹 {{groups}}개를 가져왔습니다."
+    }
+  },
+  "warpgateImport": {
+    "status": {
+      "opening": "Warpgate 로그인 창을 여는 중입니다.",
+      "opened": "Warpgate 로그인 창이 열려 있습니다.",
+      "done": "Warpgate 로그인은 완료되었습니다.",
+      "cancelled": "Warpgate 로그인을 중단했습니다."
+    },
+    "detail": {
+      "wait": "잠시만 기다려 주세요.",
+      "completeOrCancel": "로그인을 완료하거나 아래에서 중단할 수 있습니다.",
+      "loadingTargets": "SSH target 목록을 불러오는 중입니다.",
+      "retryHint": "주소를 확인한 뒤 다시 시도할 수 있습니다."
+    },
+    "error": {
+      "targetsFailed": "Warpgate target 목록을 불러오지 못했습니다.",
+      "cancelFailed": "Warpgate 로그인을 중단하지 못했습니다.",
+      "openFailed": "Warpgate 로그인 창을 열지 못했습니다.",
+      "usernameRequired": "Warpgate 사용자명을 입력해 주세요.",
+      "saveFailed": "Warpgate host를 저장하지 못했습니다."
+    },
+    "endpointDetected": "SSH endpoint는 <code>{{endpoint}}</code>로 감지되었습니다.",
+    "currentUser": "현재 로그인 사용자는 <code>{{username}}</code>입니다.",
+    "usernameUnknown": " 로그인 사용자명을 자동으로 확인하지 못해 직접 입력이 필요합니다.",
+    "cancelling": "중단 중...",
+    "cancel": "중단",
+    "signInBrowser": "브라우저에서 로그인",
+    "emptyTitle": "Warpgate 주소를 입력한 뒤 브라우저에서 로그인해 SSH target 목록을 불러와 주세요."
+  },
+  "warpgate": {
+    "urlRequired": "Warpgate 주소를 입력해 주세요.",
+    "urlScheme": "Warpgate 주소는 http 또는 https여야 합니다.",
+    "requestFailed": "Warpgate 요청에 실패했습니다. ({{status}})",
+    "htmlResponse": "{{fallback}} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. Warpgate 주소를 다시 확인해 주세요. ({{status}})",
+    "tokenRequired": "Warpgate API 토큰을 입력해 주세요.",
+    "loginWindowClosed": "Warpgate 로그인 창이 닫혔습니다.",
+    "loginCancelled": "Warpgate 로그인이 취소되었습니다.",
+    "loginWindowFailed": "Warpgate 로그인 창을 열지 못했습니다.",
+    "connectionInfoFailed": "Warpgate 연결 정보를 불러오지 못했습니다.",
+    "targetsFailed": "Warpgate target 목록을 불러오지 못했습니다.",
+    "authError": "Warpgate 인증 중 오류가 발생했습니다."
+  },
+  "secretEdit": {
+    "loadFailed": "저장된 인증 정보를 불러오지 못했습니다.",
+    "validation": {
+      "password": "비밀번호를 입력해 주세요.",
+      "privateKey": "개인키 내용을 입력하거나 파일을 가져와 주세요.",
+      "certificate": "SSH 인증서 내용을 입력하거나 파일을 가져와 주세요.",
+      "detachHost": "분리할 호스트를 선택해 주세요."
+    },
+    "title": "저장된 인증 정보 편집",
+    "intro": "<label>{{label}}</label> 저장된 인증 정보 전체를 수정합니다.",
+    "mode": {
+      "detach": "이 호스트만 새 인증 정보로 분리",
+      "shared": "연결된 호스트 전체 변경",
+      "sharedHint": "이 저장된 인증 정보를 쓰는 {{count}}개 호스트가 모두 같은 변경 내용을 사용합니다.",
+      "detachHint": "현재 편집 중인 호스트만 새 인증 정보로 분리하고, 다른 호스트들은 기존 인증 정보를 유지합니다."
+    },
+    "detachHostLabel": "분리할 호스트",
+    "loading": "저장된 인증 정보를 불러오는 중입니다.",
+    "passwordPlaceholder": "비밀번호를 입력하세요",
+    "filePlaceholder": "파일을 가져오면 이름이 표시됩니다",
+    "passphrasePlaceholder": "패스프레이즈를 입력하세요",
+    "envLabel": "환경 변수",
+    "envHint": "연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.",
+    "saveFailed": "저장된 인증 정보를 수정하는 중 오류가 발생했습니다.",
+    "submitShared": "공유 인증 정보 저장",
+    "submitDetach": "호스트 전용 인증 정보 생성"
+  },
+  "containersStore": {
+    "openingShell": "{{label}} 컨테이너 셸을 여는 중입니다.",
+    "connectingShell": "{{label}} 컨테이너 셸에 연결하는 중입니다.",
+    "shellFailed": "컨테이너 셸을 열지 못했습니다.",
+    "openingEcsShell": "{{label}} ECS 셸을 여는 중입니다.",
+    "connectingEcsShell": "{{label}} ECS 셸에 연결하는 중입니다.",
+    "ecsShellFailed": "ECS 셸을 열지 못했습니다.",
+    "detailsFailed": "컨테이너 상세 정보를 불러오지 못했습니다.",
+    "checkingProfile": "{{profile}} 프로필 인증 상태를 확인하는 중입니다.",
+    "loadingEcs": "ECS 클러스터와 서비스 목록을 불러오는 중입니다.",
+    "ecsLoadFailed": "ECS 클러스터 정보를 불러오지 못했습니다.",
+    "reloadingEcs": "ECS 클러스터와 서비스 목록을 다시 불러오는 중입니다.",
+    "loadingEcsMetrics": "AWS ECS/CloudWatch 사용량 지표를 가져오는 중입니다.",
+    "checkingConnection": "{{label}} 컨테이너 연결 상태를 확인하는 중입니다.",
+    "listFailed": "컨테이너 목록을 불러오지 못했습니다.",
+    "logsParseFailed": "컨테이너 로그 응답을 해석하지 못했습니다. 다시 불러오기를 시도해 주세요.",
+    "logsFailed": "컨테이너 로그를 불러오지 못했습니다.",
+    "metricsFailed": "컨테이너 메트릭을 불러오지 못했습니다.",
+    "remoteSearchFailed": "원격 로그 검색에 실패했습니다.",
+    "actionFailed": "컨테이너 작업을 실행하지 못했습니다."
+  },
+  "keychain": {
+    "copyFailed": "비밀번호를 복사하지 못했습니다.",
+    "copied": "비밀번호를 클립보드에 복사했습니다.",
+    "publicKeyCopied": "SSH 공개 키를 클립보드에 복사했습니다.",
+    "publicKeyCopyFailed": "SSH 공개 키를 복사하지 못했습니다.",
+    "intro": "호스트가 사용하는 비밀번호, 패스프레이즈, 개인키, SSH 인증서를 안전하게 저장하고 연결 상태를 관리합니다.",
+    "empty": {
+      "title": "저장된 인증 정보가 없습니다.",
+      "description": "호스트를 저장할 때 인증 정보를 저장하면 이 목록에 표시됩니다.",
+      "searchTitle": "검색 결과가 없습니다.",
+      "searchDescription": "검색어를 지우거나 다른 인증 정보로 다시 찾아보세요."
+    },
+    "linkedHosts": "{{count}}개 호스트에서 사용 중",
+    "action": {
+      "copying": "복사 중...",
+      "copyPassword": "비밀번호 복사",
+      "edit": "편집",
+      "copyPublicKey": "공개 키 복사",
+      "installOnHost": "호스트에 설치"
+    },
+    "keyCreated": "{{label}} SSH 키를 생성했습니다.",
+    "keyCreateFailed": "SSH 키를 생성하지 못했습니다.",
+    "install": {
+      "noHosts": "설치 가능한 호스트가 없습니다.",
+      "noResults": "검색 결과가 없습니다.",
+      "failed": "SSH 공개 키를 설치하지 못했습니다.",
+      "busy": "설치 중..."
+    }
+  },
+  "sshKeyInstall": {
+    "generateTitle": "새 SSH 키 생성·설치",
+    "generateSubmit": "생성 후 설치",
+    "installFailed": "SSH 키를 설치하지 못했습니다.",
+    "publicKeyInstallFailed": "SSH 공개 키를 설치하지 못했습니다.",
+    "installedEc2": "EC2 인스턴스의 authorized_keys에 공개 키를 설치했습니다.",
+    "installedHost": "호스트에 공개 키를 설치하고 이 키로 접속하도록 전환했습니다.",
+    "title": "공개 키 설치",
+    "descriptionAws": "SSH-over-SSM(EC2 Instance Connect)으로 접속해 authorized_keys에 공개 키를 등록합니다. 기존 키를 올리거나 새 키를 생성해 설치할 수 있습니다.",
+    "description": "호스트의 현재 로그인 방식(예: 비밀번호)으로 접속해 공개 키를 등록하고, 이후 그 키로 접속하도록 전환합니다. 기존 키를 올리거나 새 키를 생성해 설치할 수 있습니다.",
+    "existingHeading": "기존 키 설치",
+    "noManagedKeys": "등록된 관리형 SSH 키가 없습니다. 아래에서 새 키를 생성·설치하세요.",
+    "selectKeyAria": "설치할 SSH 키",
+    "currentlyUsed": " (현재 사용 중)",
+    "passphrasePlaceholder": "암호화된 개인키의 패스프레이즈",
+    "installing": "설치 중...",
+    "install": "설치",
+    "newKeyHeading": "새 키 생성·설치",
+    "generate": "생성"
+  },
+  "shortcuts": {
+    "group": {
+      "general": "일반",
+      "tabs": "탭",
+      "terminal": "터미널"
+    },
+    "item": {
+      "newWindow": "새 창",
+      "searchHosts": "호스트 검색",
+      "find": "검색 / 찾기",
+      "nextTab": "다음 탭",
+      "prevTab": "이전 탭",
+      "tab1to8": "1~8번째 탭",
+      "lastTab": "마지막 탭",
+      "reopenTab": "닫은 탭 다시 열기",
+      "closeTab": "탭 닫기",
+      "commandPalette": "명령 팔레트",
+      "aiAssistant": "AI 어시스턴트",
+      "prevNextCommand": "이전 / 다음 명령",
+      "prevNextFailed": "이전 / 다음 실패한 명령",
+      "tmuxPrefix": "tmux 프리픽스"
+    },
+    "help": "도움말",
+    "title": "키보드 단축키",
+    "note": "명령 팔레트와 명령 이동은 셸 통합(OSC 133)이 동작하는 세션에서만 쓸 수 있습니다."
+  },
+  "logRange": {
+    "weekday": {
+      "sun": "일",
+      "mon": "월",
+      "tue": "화",
+      "wed": "수",
+      "thu": "목",
+      "fri": "금",
+      "sat": "토"
+    },
+    "preset": {
+      "30m": "30분 전부터",
+      "1h": "1시간 전부터",
+      "6h": "6시간 전부터",
+      "1d": "1일 전부터",
+      "3d": "3일 전부터",
+      "1w": "1주 전부터"
+    },
+    "unit": {
+      "second": "초",
+      "minute": "분",
+      "hour": "시간",
+      "day": "일",
+      "week": "주",
+      "month": "월",
+      "year": "년"
+    },
+    "recentAmount": "최근 {{amount}}{{unit}}",
+    "recentPreset": "최근 {{preset}}",
+    "recentDefault": "최근 30분",
+    "monthLabel": "{{year}}년 {{month}}월",
+    "dialog": {
+      "aria": "로그 범위 선택",
+      "modeAria": "로그 범위 모드",
+      "relative": "상대 범위",
+      "absolute": "절대 범위",
+      "prevMonth": "이전 달",
+      "nextMonth": "다음 달",
+      "startDate": "시작 날짜",
+      "startTime": "시작 시간",
+      "endDate": "종료 날짜",
+      "endTime": "종료 시간",
+      "absoluteHint": "날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.",
+      "customRange": "사용자 지정 범위",
+      "amount": "기간",
+      "unit": "단위",
+      "relativeHint": "상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.",
+      "absoluteError": "시작 시간과 종료 시간을 확인해 주세요.",
+      "relativeError": "상대 범위 값을 확인해 주세요."
+    },
+    "presetShort": {
+      "30m": "30분",
+      "1h": "1시간",
+      "6h": "6시간",
+      "1d": "1일",
+      "3d": "3일",
+      "1w": "1주"
+    }
+  },
+  "cmdPalette": {
+    "ago": {
+      "justNow": "방금",
+      "seconds": "{{count}}초 전",
+      "minutes": "{{count}}분 전",
+      "hours": "{{count}}시간 전"
+    },
+    "aria": "명령 팔레트",
+    "searchPlaceholder": "명령 검색",
+    "failedOnly": "실패만",
+    "emptyNoCommands": "아직 기록된 명령이 없습니다. 셸 통합이 켜진 세션에서만 수집됩니다.",
+    "emptySearch": "검색 결과가 없습니다.",
+    "unreadableCommand": "(명령을 읽지 못했습니다)",
+    "running": "실행 중",
+    "rerunBlockedTitle": "화면에서 읽은 명령이 실제 입력과 다를 수 있습니다(너무 길거나 여러 줄) — 재실행할 수 없습니다.",
+    "rerunBlocked": "재실행 불가",
+    "hint": {
+      "move": "이동",
+      "jump": "그 위치로",
+      "rerun": "재실행",
+      "close": "닫기"
+    }
+  },
+  "replay": {
+    "scanFailed": "명령 스캔 실패",
+    "loadFailed": "세션 replay를 불러오지 못했습니다.",
+    "terminalInitFailedWith": "세션 replay 터미널을 초기화하지 못했습니다. {{message}}",
+    "terminalInitFailed": "세션 replay 터미널을 초기화하지 못했습니다.",
+    "windowTitle": "세션 Replay",
+    "windowTitleWith": "세션 Replay · {{title}}",
+    "loading": "세션 replay를 불러오는 중입니다.",
+    "connectStarted": "연결 시작",
+    "connectEnded": "연결 종료",
+    "speed": "속도",
+    "collapseCommands": "명령 목록 접기",
+    "expandCommands": "명령 목록 펼치기"
+  },
+  "share": {
+    "timeout": "세션 공유 서버 응답이 지연되어 요청을 취소했습니다. 잠시 후 다시 시도해 주세요.",
+    "badResponse": "{{fallback}} (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 {{status}})",
+    "startFailed": "세션 공유를 시작하지 못했습니다.",
+    "notActive": "세션 공유가 활성 상태가 아닙니다.",
+    "messageRequired": "메시지를 입력해 주세요.",
+    "chatNotReady": "채팅 연결이 아직 준비되지 않았습니다.",
+    "inputToggleFailed": "공유 입력 허용 상태를 저장하지 못했습니다.",
+    "stopFailed": "세션 공유를 종료하지 못했습니다.",
+    "linkFailed": "세션 공유 링크를 만들지 못했습니다.",
+    "messageHandleFailed": "세션 공유 메시지를 처리하지 못했습니다.",
+    "connectionClosed": "세션 공유 연결이 종료되었습니다.",
+    "connectionOpenFailed": "세션 공유 연결을 열지 못했습니다.",
+    "ended": "세션 공유가 종료되었습니다.",
+    "chatHistoryWith": "채팅 기록 · {{title}}",
+    "chatHistory": "채팅 기록",
+    "chatWindowBaseUrlMissing": "채팅 기록 창을 열 기준 URL을 찾지 못했습니다."
+  },
+  "hostIpc": {
+    "usernameRequired": "사용자명이 필요합니다.",
+    "sshOnly": "이 기능은 SSH host에서만 사용할 수 있습니다.",
+    "sshAwsWarpgateOnly": "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+    "awsOnly": "이 기능은 AWS host에서만 사용할 수 있습니다.",
+    "awsEcsOnly": "이 기능은 AWS ECS host에서만 사용할 수 있습니다.",
+    "ecsNoHostKey": "ECS 호스트는 SSH 호스트 키 확인을 지원하지 않습니다.",
+    "probingViaProxy": "서버 프록시로 SSH 호스트 키를 확인하는 중입니다.",
+    "openingTunnel": "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+    "probingHostKey": "SSH 호스트 키를 확인하는 중입니다.",
+    "jumpChainTooDeep": "점프 호스트는 최대 {{max}}단까지 설정할 수 있습니다.",
+    "jumpChainSelf": "점프 호스트 체인에 자기 자신을 포함할 수 없습니다.",
+    "jumpHostMissing": "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
+    "jumpHostMustBeSsh": "점프 호스트는 일반 SSH 호스트여야 합니다."
+  },
+  "hostsOverride": {
+    "permissionCancelled": "DNS Override 권한 승인이 취소되었습니다.",
+    "helperStartFailed": "Dolgate DNS Helper를 시작하지 못했습니다.",
+    "blockMissing": "hosts 파일에서 관리 블록을 찾지 못했습니다.",
+    "countMismatch": "hosts 파일의 override 개수가 예상과 다릅니다. expected={{expected}} actual={{actual}}",
+    "contentMismatch": "hosts 파일의 override 내용이 예상과 다릅니다. expected={{expected}} actual={{actual}}",
+    "blockNotRemoved": "hosts 파일의 관리 블록이 제거되지 않았습니다.",
+    "helperNotReady": "Dolgate DNS Helper가 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+    "removeCommFailed": "DNS Override를 제거하지 못했습니다. Dolgate DNS Helper와 통신하지 못했습니다.",
+    "applyCommFailed": "DNS Override를 적용하지 못했습니다. Dolgate DNS Helper와 통신하지 못했습니다.",
+    "removeRequestFailed": "DNS Override를 제거하지 못했습니다. Dolgate DNS Helper가 요청을 처리하지 못했습니다.",
+    "applyRequestFailed": "DNS Override를 적용하지 못했습니다. Dolgate DNS Helper가 요청을 처리하지 못했습니다.",
+    "verifyApplyFailed": "DNS Override를 적용한 뒤 hosts 파일을 확인하지 못했습니다.",
+    "applyNotVerified": "DNS Override를 적용했지만 hosts 파일에서 확인되지 않았습니다.",
+    "verifyRemoveFailed": "DNS Override를 제거한 뒤 hosts 파일을 확인하지 못했습니다.",
+    "removeNotVerified": "DNS Override를 제거했지만 hosts 파일 정리가 확인되지 않았습니다."
+  },
+  "xshellSvc": {
+    "defaultSessionDir": "기본 Xshell 세션",
+    "protocolUnsupported": "{{label}}: {{protocol}} 프로토콜은 가져오기를 지원하지 않아 건너뛰었습니다.",
+    "noHost": "{{label}}: Host 값이 없어 세션을 건너뛰었습니다.",
+    "noUserName": "{{label}}: UserName 값이 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.",
+    "badPort": "{{label}}: Port 값 \"{{port}}\"가 잘못되어 22번 포트를 사용합니다.",
+    "userKeyMissing": "{{label}}: UserKey \"{{userKey}}\" 경로를 찾지 못해 키 경로 없이 가져옵니다.",
+    "passwordUnsupported": "{{label}}: 저장된 Xshell 비밀번호는 현재 버전에서 가져오지 않습니다.",
+    "authProfileUnsupported": "{{label}}: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.",
+    "masterPassword": "{{label}}: Xshell 마스터 비밀번호가 활성화되어 있어 저장된 비밀번호는 자동으로 가져오지 않습니다.",
+    "stateMissing": "Xshell 가져오기 상태를 찾지 못했습니다. 대화상자를 다시 열어주세요."
+  },
+  "snippets": {
+    "validationRequired": "이름과 명령을 모두 입력해 주세요.",
+    "saveFailed": "저장에 실패했습니다.",
+    "searchPlaceholder": "이름, 키워드, 명령 검색",
+    "keywordLabel": "Keyword (선택)",
+    "variablesLabel": "변수:",
+    "save": "저장",
+    "add": "추가",
+    "emptyTitle": "아직 저장된 snippet이 없습니다.",
+    "emptyDescription": "자주 쓰는 명령을 추가하면 터미널 자동완성에서 바로 꺼내 쓸 수 있습니다.",
+    "variableCount": "{{count}}개 변수",
+    "insert": "삽입",
+    "edit": "편집",
+    "noResults": "검색 결과가 없습니다."
+  },
+  "sessionPane": {
+    "dropPathFailed": "드롭한 파일 경로를 읽지 못했습니다.",
+    "uploadPreparing": "{{count}}개 파일 업로드 준비 중… (SFTP 연결)",
+    "hostKeyPrompt": "호스트 키를 저장하면 업로드를 계속합니다.",
+    "uploadUnsupported": "이 세션은 SFTP 업로드를 지원하지 않습니다.",
+    "sftpFailed": "SFTP 연결 실패: {{message}}",
+    "nothingToUpload": "업로드할 항목이 없습니다.",
+    "cwdFallback": "현재 경로를 찾지 못해 홈({{path}})에 업로드합니다.",
+    "uploadStarted": "{{path}} 에 업로드를 시작했습니다.",
+    "aiTitle": "AI 어시스턴트 (⌘I)",
+    "aiClose": "AI 어시스턴트 닫기",
+    "aiOpen": "AI 어시스턴트 열기",
+    "dropHere": "여기로 업로드 → {{path}}",
+    "homeDirectory": "홈 디렉터리"
+  },
+  "fileEditor": {
+    "confirmClose": "저장하지 않은 변경사항이 있습니다. 편집기를 닫을까요?",
+    "section": "원격 파일 편집",
+    "loading": "파일을 불러오는 중입니다…",
+    "changedRemotely": "편집하는 동안 원격 파일이 변경되었습니다.",
+    "changedHint": "다시 불러와 변경 내용을 확인하거나, 현재 내용으로 덮어쓸 수 있습니다.",
+    "reload": "다시 불러오기",
+    "overwrite": "덮어쓰기",
+    "sudoRequired": "이 파일을 저장하려면 sudo 권한이 필요합니다.",
+    "sudoPlaceholder": "sudo 비밀번호",
+    "saveWithSudo": "sudo로 저장",
+    "editorLoading": "편집기를 불러오는 중…",
+    "revert": "되돌리기",
+    "saving": "저장 중…"
+  },
+  "runtime": {
+    "reconnecting": "연결이 끊겨 재연결 중입니다…",
+    "containerShellFailed": "컨테이너 셸을 시작하지 못했습니다. /bin/sh 또는 /bin/bash가 없거나 셸이 바로 종료되었습니다.",
+    "ecsShellFailed": "ECS 컨테이너 셸을 시작하지 못했습니다. /bin/sh가 없거나 셸 프로세스가 바로 종료되었을 수 있습니다.",
+    "containerConnecting": "{{label}} 컨테이너 연결을 진행하는 중입니다.",
+    "warpgateApproval": "{{label}} Warpgate 승인을 기다리는 중입니다.",
+    "extraAuth": "{{label}} 추가 인증 응답이 필요합니다.",
+    "session": "세션",
+    "disconnected": "연결이 끊어졌습니다. 다시 연결해 주세요.",
+    "ecsExecClosed": "ECS Exec 세션이 종료되었습니다.",
+    "disconnectedRetry": "연결이 끊어졌습니다. 다시 연결하려면 Retry를 누르세요.",
+    "waitingFirstOutput": "원격 셸이 첫 출력을 보내는 중입니다."
+  },
+  "sharePopover": {
+    "title": "현재 세션을 브라우저로 공유합니다.",
+    "hint": "링크를 아는 사용자는 로그인 없이 접속할 수 있습니다.",
+    "start": "공유 시작",
+    "failed": "세션 공유에 실패했습니다.",
+    "preparing": "공유를 준비하는 중입니다.",
+    "ready": "공유 링크가 준비되었습니다.",
+    "copyLink": "공유 링크 복사",
+    "copyLinkTitle": "클릭하여 링크 복사",
+    "creatingLink": "공유 링크를 생성하는 중입니다.",
+    "viewers": "시청자 {{count}}명",
+    "inputModeAria": "세션 공유 입력 모드",
+    "readOnly": "읽기 전용",
+    "allowInput": "입력 허용",
+    "chatHistory": "채팅 기록",
+    "stop": "공유 종료"
+  },
+  "hostList": {
+    "name": "이름",
+    "type": "타입",
+    "group": "그룹",
+    "tags": "태그",
+    "lastConnected": "최근 접속",
+    "favorite": "즐겨찾기",
+    "favoriteFor": "{{label}} 즐겨찾기",
+    "menuFor": "{{label}} 작업 메뉴"
+  },
+  "awsExternalImport": {
+    "listFailed": "로컬 AWS CLI 프로필 목록을 불러오지 못했습니다.",
+    "detailsFailed": "외부 AWS 프로필 정보를 불러오지 못했습니다.",
+    "noSelection": "선택한 프로필 없음",
+    "selectedCount": "{{count}}개 선택됨",
+    "importFailed": "외부 AWS 프로필을 가져오지 못했습니다.",
+    "title": "로컬 AWS CLI에서 가져오기",
+    "descriptionPath": "현재 PC의 <code>~/.aws</code> 설정에서 프로필을 읽어 앱 전용 프로필로 복사합니다.",
+    "descriptionSso": "SSO 프로필은 설정만 가져오며 로그인 상태와 캐시는 가져오지 않습니다.",
+    "externalProfiles": "외부 프로필",
+    "loading": "로컬 AWS CLI 프로필을 읽는 중입니다.",
+    "empty": "가져올 수 있는 로컬 AWS CLI 프로필이 없습니다.",
+    "detailsLoading": "프로필 정보를 불러오는 중입니다.",
+    "importing": "가져오는 중..",
+    "import": "선택한 프로필 가져오기"
+  },
+  "containersIpc": {
+    "hostNotFound": "Containers host를 찾지 못했습니다.",
+    "connectionError": "Containers 연결 오류가 발생했습니다.",
+    "runtimeCheckFailed": "docker/podman 런타임을 확인하지 못했습니다.",
+    "listFailed": "컨테이너 목록을 불러오지 못했습니다.",
+    "runtimeUnavailable": "이 host에서는 docker/podman을 사용할 수 없습니다.",
+    "checkRuntimeFirst": "컨테이너 런타임을 먼저 확인해 주세요."
+  },
+  "transferFormat": {
+    "passwordRequired": "내보내기 암호를 입력해 주세요.",
+    "passwordTooShort": "내보내기 암호는 4자 이상이어야 합니다.",
+    "passwordTooLong": "내보내기 암호가 너무 깁니다.",
+    "notDolgateFile": "올바른 Dolgate 내보내기 파일이 아닙니다.",
+    "unsupportedOrCorrupt": "지원하지 않거나 손상된 Dolgate 내보내기 파일입니다.",
+    "headerTooLarge": "Dolgate 내보내기 헤더가 너무 큽니다.",
+    "payloadTooLarge": "선택한 항목이 너무 커서 하나의 파일로 내보낼 수 없습니다.",
+    "unsupportedVersion": "이 버전의 앱에서 지원하지 않는 Dolgate 파일입니다.",
+    "wrongPassword": "암호가 올바르지 않거나 파일이 손상되었습니다."
+  },
+  "connectFailure": {
+    "targetHost": "대상 호스트",
+    "viaJump": " · 점프 경유 {{target}}",
+    "ssmExit": "AWS SSM 세션이 종료되었습니다. (code {{code}})",
+    "agentNoKeys": "SSH 에이전트에 등록된 키가 없습니다. 에이전트에 키를 추가한 뒤 다시 연결해 주세요.",
+    "agentUnreachable": "SSH 에이전트에 연결하지 못했습니다. 에이전트가 실행 중인지 확인해 주세요.",
+    "hostKeyUntrusted": "이 호스트의 SSH 호스트 키를 아직 신뢰하지 않았습니다. 호스트 키를 신뢰한 뒤 다시 시도해 주세요.",
+    "awsAuthFailed": "AWS 인증을 확인하지 못했습니다. 다시 로그인해 주세요.",
+    "noRoute": "{{target}}에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.",
+    "refused": "{{target}}에서 연결을 거부했습니다.",
+    "timeout": "{{target}} 연결 시간이 초과되었습니다.",
+    "reset": "{{target}} 연결이 중간에 끊겼습니다.",
+    "generic": "연결을 완료하지 못했습니다."
+  },
+  "knownHostsIpc": {
+    "noSecrets": "저장할 인증 정보가 없습니다.",
+    "certificateNeedsKey": "SSH 인증서를 저장하려면 개인키도 함께 포함해야 합니다.",
+    "passphraseNeedsKey": "패스프레이즈는 개인키와 함께만 저장할 수 있습니다.",
+    "connectFailed": "호스트 연결에 실패했습니다.",
+    "hostKeyTrusted": "새 호스트 키를 신뢰 목록에 저장했습니다.",
+    "hostKeyReplaced": "호스트 키를 교체했습니다.",
+    "hostKeyRemoved": "호스트 키를 신뢰 목록에서 제거했습니다.",
+    "secretNotFound": "저장된 인증 정보를 찾지 못했습니다.",
+    "secretLoadFailed": "저장된 인증 정보를 불러오지 못했습니다.",
+    "noStoredPassword": "이 인증 정보에는 저장된 비밀번호가 없습니다.",
+    "secretRemoved": "호스트 secret을 제거했습니다.",
+    "sharedSecretUpdated": "공유 secret을 갱신했습니다.",
+    "secretCreateFailed": "새 secret을 생성하지 못했습니다.",
+    "hostSecretCreated": "호스트 전용 secret을 새로 생성했습니다."
+  },
+  "connectStage": {
+    "sshConfig": "SSH 설정 확인",
+    "awsProfile": "AWS 프로필 확인",
+    "browserLogin": "브라우저 로그인",
+    "ssmStatus": "SSM 상태 확인",
+    "hostKey": "호스트 키 확인",
+    "tempKey": "임시 키 생성",
+    "pushKey": "공개 키 전송",
+    "internalTunnel": "내부 터널 연결",
+    "sftp": "SFTP 연결",
+    "containers": "컨테이너 연결",
+    "ecsClusters": "ECS 클러스터 조회",
+    "usageMetrics": "사용량 지표 조회",
+    "preparing": "연결 준비"
+  },
+  "termTheme": {
+    "lightDefault": "기본 라이트",
+    "darkDefault": "기본 다크",
+    "inkBlue": "깊은 잉크 블루",
+    "warmAsh": "따뜻한 잿빛",
+    "softPaper": "부드러운 종이 톤",
+    "forestDark": "숲빛 다크",
+    "forestLight": "숲빛 라이트",
+    "nightContrast": "선명한 야간 대비",
+    "brightPaperBlue": "밝은 종이와 선명한 청색",
+    "roseSubtle": "은은한 로즈 톤",
+    "neonGreen": "형광 녹색 콘솔",
+    "coolBlue": "냉한 청색 콘솔",
+    "strongRed": "강한 적색 콘솔"
+  },
+  "sync": {
+    "generationChanged": "동기화 작업의 계정 또는 볼트 세대가 변경되었습니다.",
+    "decryptFailed": "동기화 데이터를 복호화하지 못했습니다.",
+    "htmlResponse": "{{fallback}} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. ({{status}})",
+    "pausedOffline": "오프라인 모드에서는 동기화를 일시 중지합니다.",
+    "pausedNeedsVault": "동기화 암호를 입력하면 동기화를 시작합니다.",
+    "decryptCorrupt": "동기화 데이터를 복호화할 수 없습니다. 데이터가 손상되었을 수 있습니다.",
+    "initialFailed": "초기 동기화에 실패했습니다.",
+    "pausedOfflineUpload": "오프라인 모드에서는 변경 내용을 로컬에 보관하고 나중에 동기화합니다.",
+    "pausedNeedsVaultUpload": "동기화 암호를 입력하면 변경 내용을 동기화합니다.",
+    "uploadFailed": "동기화 업로드에 실패했습니다.",
+    "fetchFailed": "동기화 데이터 조회에 실패했습니다."
+  },
+  "shareChat": {
+    "titleWith": "채팅 기록 · {{title}}",
+    "title": "채팅 기록",
+    "loadFailed": "채팅 기록을 불러오지 못했습니다.",
+    "sendFailed": "채팅 메시지를 보내지 못했습니다.",
+    "loading": "불러오는 중",
+    "sending": "전송 중",
+    "live": "실시간 채팅",
+    "empty": "아직 채팅이 없습니다.",
+    "messageLabel": "메시지",
+    "messagePlaceholder": "메시지를 입력해 주세요",
+    "send": "전송"
+  },
+  "connectProgress": {
+    "hostKeyChecking": "{{label}} 호스트 키를 확인하는 중입니다.",
+    "hostKeyNeeded": "{{label}} 호스트 키 확인이 필요합니다.",
+    "ssmStarting": "{{label}} SSM 세션을 시작하는 중입니다.",
+    "warpgateConnecting": "{{label}} Warpgate SSH 세션을 연결하는 중입니다.",
+    "serialConnecting": "{{label}} Serial 세션을 연결하는 중입니다.",
+    "sshConnecting": "{{label}} SSH 세션을 연결하는 중입니다.",
+    "localStarting": "로컬 터미널을 시작하는 중입니다.",
+    "waitingFirstOutput": "{{label}} 원격 셸이 첫 출력을 보내는 중입니다.",
+    "waitingShell": "셸이 준비되는 중입니다.",
+    "credentialRetry": "{{label}} 인증 정보를 다시 확인해 주세요."
+  },
+  "authOverlay": {
+    "warpgateTitle": "Warpgate 승인을 기다리는 중입니다.",
+    "warpgateHint": "브라우저에서 Warpgate 로그인 후 <code>Authorize</code>를 눌러 주세요. 가능한 입력은 앱이 자동으로 처리합니다.",
+    "authCodeNote": "인증 코드 <code>{{code}}</code> 는 자동으로 입력됩니다.",
+    "reopenBrowser": "브라우저 다시 열기",
+    "copyLink": "링크 복사",
+    "extraAuthTitle": "추가 인증 입력이 필요합니다.",
+    "sendResponse": "응답 보내기"
+  },
+  "sidebar": {
+    "sortName": "정렬: 이름순",
+    "sortRecent": "정렬: 최근 사용순",
+    "sortCount": "정렬: 호스트 많은 순",
+    "groupOptions": "그룹 옵션",
+    "expandAll": "모두 펼치기",
+    "collapseAll": "모두 접기",
+    "hideEmpty": "빈 그룹 숨기기",
+    "favorites": "즐겨찾기",
+    "noGroups": "아직 만든 그룹이 없습니다."
+  },
+  "sessionStore": {
+    "ecsShellReopening": "{{label}} ECS 셸을 다시 여는 중입니다.",
+    "localRestarting": "로컬 터미널을 다시 시작하는 중입니다.",
+    "autoReconnectCancelled": "자동 재연결을 취소했습니다.",
+    "authInputCancelled": "{{label}} 인증 입력이 취소되었습니다.",
+    "usernameRequired": "사용자명을 입력해 주세요.",
+    "usernameUpdateFailed": "사용자명을 업데이트하지 못했습니다."
+  },
+  "reconnect": {
+    "waitingNetwork": "네트워크 대기 중입니다. 연결이 복구되면 재연결합니다.",
+    "reconnecting": "연결이 끊겨 재연결 중입니다… (시도 {{attempt}}/{{max}})",
+    "failed": "재연결에 실패했습니다 ({{attempts}}회 시도). 수동으로 다시 연결해 주세요.",
+    "waitingNetworkShort": "네트워크 대기 중입니다. 복구되면 재연결합니다.",
+    "sftpFailed": "SFTP 재연결에 실패했습니다 ({{attempts}}회 시도). 다시 연결해 주세요.",
+    "waitingNetworkBadge": "네트워크 대기 중",
+    "reconnectingShort": "재연결 중… ({{attempt}}/{{max}})",
+    "failedBadge": "재연결 실패 ({{attempts}}회 시도)",
+    "tmuxFailed": "tmux 재연결에 실패했습니다 ({{attempts}}회 시도). 다시 연결해 주세요."
+  },
+  "termView": {
+    "initFailed": "터미널을 초기화하지 못했습니다. 설정을 확인하거나 앱을 다시 열어주세요.",
+    "truncated": "…(생략)",
+    "command": "명령: {{command}}",
+    "commandUnknown": "(알 수 없음)",
+    "cwd": "작업 디렉터리: {{cwd}}",
+    "exitCode": "종료 코드: {{code}}",
+    "output": "출력:",
+    "askFailed": "이 명령이 왜 실패했는지 설명하고 해결 방법을 알려줘.",
+    "askExplain": "이 명령의 출력을 설명해줘.",
+    "linkCopied": "링크를 복사했습니다.",
+    "linkCopyFailed": "링크를 복사하지 못했습니다."
+  },
+  "tmuxMenu": {
+    "newSessionPlaceholder": "새 세션 이름 입력 후 Enter",
+    "newSessionAria": "새 tmux 세션 이름",
+    "remoteSessions": "원격 tmux 세션",
+    "noSessions": "감지된 세션이 없습니다",
+    "windows": "창 {{count}}",
+    "current": "현재",
+    "attachedElsewhere": "다른 클라이언트가 attach 중",
+    "killTitle": "세션 종료 (kill-session)",
+    "killAria": "{{name}} 세션 종료"
+  },
+  "hostStatus": {
+    "cpuCount": "{{count}}개",
+    "none": "—",
+    "loading": "호스트 상태를 읽는 중…",
+    "unstable": "연결이 불안정해 멈췄습니다 · 다시 시도",
+    "cpuCores": "CPU 코어",
+    "uptime": "가동 시간",
+    "disk": "디스크 {{mount}}",
+    "containerNote": "컨테이너 안에서는 호스트 전체 값이 표시됩니다."
+  },
+  "missingUsername": {
+    "sftp": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SFTP 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
+    "containers": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
+    "containerShell": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 셸 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
+    "portForward": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 포트 포워딩을 시작하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
+    "ssh": "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SSH 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.",
+    "prompt": "{{label}} 사용자명을 입력해 주세요.",
+    "saveFailed": "사용자명을 저장하지 못했습니다.",
+    "submit": "저장 후 계속"
+  },
+  "credentialRetry": {
+    "prompt": "{{label}} 인증 정보를 다시 확인해 주세요.",
+    "usernameRequired": "사용자명을 입력해 주세요.",
+    "passwordRequired": "비밀번호를 입력해 주세요.",
+    "keyRequired": "개인키를 가져오거나 기존 저장된 인증 정보를 사용해 주세요.",
+    "keyImportRequired": "개인키를 가져와 주세요.",
+    "certificateRequired": "SSH 인증서를 가져와 주세요.",
+    "retryFailed": "다시 시도하지 못했습니다.",
+    "retry": "다시 시도"
+  },
+  "opensshSvc": {
+    "circularInclude": "{{path}}에서 순환 Include를 건너뛰었습니다.",
+    "readFailed": "OpenSSH 설정 파일을 읽지 못했습니다: {{path}} ({{reason}})",
+    "includeNoMatch": "Include 패턴과 일치하는 파일이 없습니다: {{pattern}}",
+    "includedReadFailed": "포함된 설정 파일을 읽지 못했습니다: {{path}}",
+    "noUser": "\"{{alias}}\" 항목은 User가 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.",
+    "noSpecificAlias": "구체적인 별칭이 없는 Host 블록은 가져오지 않았습니다.",
+    "badPort": "\"{{alias}}\"의 Port 값 \"{{port}}\"는 잘못되어 무시했습니다.",
+    "keyUnsupported": "{{file}} 키는 지원되지 않는 형식이라 가져오지 않았습니다.",
+    "keyReadFailed": "{{file}} 키 파일을 읽지 못해 가져오지 않았습니다.",
+    "stateMissing": "OpenSSH 가져오기 상태를 찾을 수 없습니다. 다이얼로그를 다시 열어 주세요."
+  },
+  "attachment": {
+    "truncated": "…(파일이 잘렸습니다)",
+    "imageLimit": "이미지는 한 번에 최대 {{max}}장까지 첨부할 수 있습니다.",
+    "textLimit": "텍스트 파일은 한 번에 최대 {{max}}개까지 첨부할 수 있습니다.",
+    "imageTooLarge": "이미지가 너무 큽니다(다운스케일 후에도 4MB 초과).",
+    "imageUnreadable": "이미지를 읽을 수 없습니다.",
+    "fileTooLarge": "파일이 너무 큽니다(최대 2MB).",
+    "binaryNotAllowed": "바이너리 파일은 첨부할 수 없습니다.",
+    "fileUnreadable": "파일을 읽을 수 없습니다."
+  },
+  "workspace": {
+    "broadcastOff": "브로드캐스트 끄기",
+    "broadcastOn": "브로드캐스트 켜기",
+    "broadcastActive": "브로드캐스트 활성 상태",
+    "broadcastNeedsPanes": "원격 pane 2개 이상 연결 시 사용 가능",
+    "readySection": "연결 준비 완료",
+    "readyTitle": "첫 SSH 세션을 시작해보세요",
+    "readyHint": "호스트 카드를 더블클릭하면 새 세션이 탭으로 열리고, 탭을 아래로 끌어내리면 여러 세션을 나란히 볼 수 있습니다."
+  },
+  "sshIpc": {
+    "ssmSupportFailed": "서버 AWS SSM 지원 여부를 확인하지 못했습니다. {{message}}",
+    "serverAuthRequired": "서버 인증이 필요합니다.",
+    "ssmSupportStatus": "서버 AWS SSM 지원 여부를 확인하지 못했습니다. ({{status}})",
+    "ssmUnsupported": "서버에서 AWS SSM 세션을 지원하지 않습니다.",
+    "fallbackFailed": "SSH-over-SSM 연결 실패 후 SSM 셸 폴백도 실패했습니다. SSH-over-SSM: {{primary}} / SSM 셸: {{fallback}}",
+    "ecsUseContainers": "ECS 호스트는 세션 연결 대신 Containers 화면에서 엽니다.",
+    "fallbackNotice": "SSH-over-SSM 연결에 실패해 SSM 셸로 폴백합니다.",
+    "externalLinkScheme": "외부 링크는 http 또는 https만 열 수 있습니다."
+  },
+  "hostsIpc": {
+    "secretSaved": "호스트 secret이 저장되었습니다.",
+    "hostCreated": "호스트를 생성했습니다.",
+    "secretUpdated": "호스트 secret이 갱신되었습니다.",
+    "hostUpdated": "호스트를 수정했습니다.",
+    "hostDeleted": "호스트를 삭제했습니다.",
+    "groupCreated": "그룹을 생성했습니다.",
+    "groupDeleted": "그룹을 삭제했습니다.",
+    "groupMoved": "그룹을 이동했습니다.",
+    "groupRenamed": "그룹 이름을 변경했습니다."
+  },
+  "awsIpc": {
+    "ecsOnly": "이 기능은 ECS host에서만 사용할 수 있습니다.",
+    "runningTaskNotFound": "선택한 실행 중 task를 찾지 못했습니다.",
+    "execDisabledShell": "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다."
+  },
+  "ssmSsh": {
+    "checkingHostKeyTrust": "{{label}} 호스트 키 신뢰 정보를 확인하는 중입니다.",
+    "generatingTempKey": "임시 SSH 키를 생성하는 중입니다.",
+    "preparingProxy": "서버 프록시로 EC2 공개 키 주입과 SSM 터널 생성을 준비하는 중입니다.",
+    "startingSession": "{{label}} SSH 세션을 시작하는 중입니다.",
+    "pushingKey": "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    "openingTunnel": "SSH 연결용 내부 SSM 터널을 여는 중입니다."
+  },
+  "webSearch": {
+    "queryEmpty": "error: 검색어(query)가 비어 있습니다.",
+    "noTavilyKey": "error: Tavily API 키가 설정되지 않았습니다. 설정 → AI 에서 키를 저장하세요.",
+    "networkFailed": "error: 검색 요청에 실패했습니다(네트워크).",
+    "httpFailed": "error: 검색 실패 (HTTP {{status}}).",
+    "parseFailed": "error: 검색 응답을 해석하지 못했습니다.",
+    "noResults": "결과 없음."
+  },
+  "providerError": {
+    "cancelledOrTimeout": "요청이 취소되었거나 시간이 초과되었습니다.",
+    "timeout": "요청 시간이 초과되었습니다. baseUrl·포트·네트워크를 확인하세요.",
+    "connectFailed": "프로바이더에 연결하지 못했습니다{{hint}}. baseUrl·포트·네트워크를 확인하세요.",
+    "authFailed": "인증에 실패했습니다. API 키를 확인하세요.",
+    "notFound": "모델 또는 엔드포인트를 찾을 수 없습니다(baseUrl 에 /v1 경로가 필요한지 확인).",
+    "providerStatus": "프로바이더 오류({{status}})가 발생했습니다. 잠시 후 다시 시도하세요.",
+    "noVision": "모델이 이미지 입력을 지원하지 않는 것 같습니다. 텍스트만 다시 보내거나 설정에서 비전 지원 모델로 바꿔 주세요.",
+    "rejected": "요청이 거부되었습니다. 모델·설정을 확인하세요.",
+    "requestFailed": "요청에 실패했습니다{{detail}}"
+  },
+  "containersSlice": {
+    "lifecycleLogFailed": "Containers 연결 기록을 시작하지 못했습니다.",
+    "pageOpenFailed": "컨테이너 페이지를 열지 못했습니다.",
+    "ecsShellPreparing": "{{label}} ECS 셸을 준비하는 중입니다."
+  },
+  "trustAuth": {
+    "profileNotFoundSelect": "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 선택해 주세요.",
+    "browserLogin": "브라우저에서 {{profile}} AWS 로그인을 진행하는 중입니다.",
+    "checkingLoginResult": "{{profile}} 프로필 로그인 결과를 확인하는 중입니다.",
+    "cliCredentialsNeeded": "{{profile}} 프로필에 AWS CLI 자격 증명이 필요합니다."
+  },
+  "sftpStore": {
+    "hostKeyTrustNeeded": "터미널 업로드를 계속하려면 호스트 키 신뢰가 필요합니다.",
+    "listFailed": "SFTP 목록을 읽지 못했습니다.",
+    "entryReadFailed": "{{name}} 항목을 읽지 못했습니다.",
+    "connectFailed": "SFTP 연결에 실패했습니다.",
+    "checkingHostKey": "SSH 호스트 키를 확인하는 중입니다.",
+    "dropPathFailed": "드롭한 항목 경로를 읽지 못했습니다."
+  },
+  "transferFmt": {
+    "etaSeconds": "남은 시간 {{seconds}}초",
+    "etaMinutesSeconds": "남은 시간 {{minutes}}분 {{seconds}}초",
+    "etaMinutes": "남은 시간 {{minutes}}분",
+    "etaHoursMinutes": "남은 시간 {{hours}}시간 {{minutes}}분",
+    "etaHours": "남은 시간 {{hours}}시간",
+    "andMore": "{{name}} 외 {{count}}개",
+    "failedItems": "{{count}}개 항목 전송에 실패했습니다."
+  },
+  "tmuxBar": {
+    "aria": "tmux 윈도우",
+    "windowTitle": "{{label}} — 클릭: 전환 · 더블클릭: 이름변경",
+    "closeWindow": "윈도우 닫기 (kill-window)",
+    "newWindow": "새 tmux 윈도우 (Ctrl-b c)",
+    "splitHorizontalTitle": "활성 pane 좌우 분할 (Ctrl-b %)",
+    "splitHorizontal": "좌우 분할",
+    "splitVerticalTitle": "활성 pane 상하 분할 (Ctrl-b \")",
+    "splitVertical": "상하 분할"
+  },
+  "mosh": {
+    "connected": "연결됨",
+    "reconnecting": "재연결 중",
+    "disconnected": "끊김",
+    "justNow": "방금",
+    "seconds": "{{count}}초 전",
+    "minutes": "{{count}}분 전",
+    "hours": "{{count}}시간 전",
+    "reply": "{{ago}} 응답"
+  },
+  "logFind": {
+    "placeholder": "현재 로그에서 찾기",
+    "prevAria": "이전 로그 찾기 결과",
+    "prev": "이전",
+    "nextAria": "다음 로그 찾기 결과",
+    "next": "다음",
+    "closeAria": "로그 찾기 닫기"
+  },
+  "offlineLease": {
+    "badFormat": "offline lease 형식이 올바르지 않습니다.",
+    "badAlgorithm": "offline lease 서명 알고리즘을 확인할 수 없습니다.",
+    "badSignature": "offline lease 서명 검증에 실패했습니다.",
+    "serverMismatch": "offline lease 발급 서버가 현재 로그인 서버와 다릅니다.",
+    "userMismatch": "offline lease 사용자 정보가 현재 세션과 다릅니다.",
+    "audienceMismatch": "offline lease 대상이 이 데스크톱 앱이 아닙니다.",
+    "expired": "offline lease 유효기간이 지났습니다.",
+    "verifyFailed": "offline lease를 검증하지 못했습니다."
+  },
+  "mainApp": {
+    "keychainTitle": "OS 키체인에 접근할 수 없습니다",
+    "keychainMessage": "OS 키체인(보안 저장소)에 접근할 수 없어 저장된 호스트와 로그인 정보를 불러올 수 없습니다.",
+    "keychainDetail": "Linux 자동 로그인 세션에서는 키링(GNOME Keyring/KWallet)이 잠긴 채 시작되어 발생할 수 있습니다. 로그아웃 후 비밀번호로 다시 로그인하거나 키링 잠금을 해제한 뒤 앱을 다시 실행해 주세요.",
+    "ok": "확인",
+    "newWindow": "새 창",
+    "newWindowDescription": "새 Dolgate 창 열기"
+  },
+  "runtimeCoord": {
+    "preparing": "{{label}} 컨테이너 런타임 연결을 준비하는 중입니다.",
+    "preparingProxy": "서버 프록시로 컨테이너 런타임 연결을 준비하는 중입니다.",
+    "openingTunnel": "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
+    "notRunning": "{{name}} 컨테이너가 실행 중이 아닙니다. 현재 상태: {{status}}",
+    "tunnelStartFailed": "Container tunnel을 시작하지 못했습니다."
+  },
+  "ssoLogin": {
+    "badClientResponse": "AWS SSO client 등록 응답이 올바르지 않습니다.",
+    "badTokenResponse": "AWS SSO 토큰 응답이 올바르지 않습니다.",
+    "timeout": "AWS SSO 로그인 대기 시간이 초과되었습니다. 다시 시도해 주세요.",
+    "loginFailedTitle": "로그인 실패",
+    "retryInApp": "앱으로 돌아가 다시 시도해 주세요.",
+    "verifyFailedBody": "인증 응답 검증에 실패했습니다. 다시 시도해 주세요.",
+    "verifyFailed": "AWS SSO 인증 응답 검증에 실패했습니다.",
+    "loginDoneTitle": "로그인 완료",
+    "closeWindow": "이 창을 닫고 앱으로 돌아가 주세요.",
+    "startUrlRequired": "SSO Start URL과 SSO Region이 필요합니다."
+  },
+  "tmuxControl": {
+    "title": "tmux 제어 모드",
+    "keptOnServer": "서버에서 유지 중",
+    "killConfirm": "세션을 종료할까요? 되돌릴 수 없습니다.",
+    "kill": "종료",
+    "detachTitle": "서버 tmux 세션은 살린 채 이 클라이언트만 분리합니다. 다시 attach 하면 복원됩니다.",
+    "killTitle": "서버의 tmux 세션을 종료합니다(프로세스째 종료, 복원 불가)."
+  },
+  "hostBrowserEmpty": {
+    "noHostsHint": "New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.",
+    "searchHint": "검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.",
+    "addHint": "New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.",
+    "noHosts": "아직 등록된 호스트가 없습니다.",
+    "noResults": "검색 결과가 없습니다.",
+    "noHostsHere": "이 위치에는 아직 호스트가 없습니다.",
+    "selectedHosts": "선택한 {{count}}개 호스트"
+  },
+  "hostListPanel": {
+    "sortName": "이름순",
+    "sortLastConnected": "최근 연결순",
+    "sortRecent": "최근 수정순",
+    "favoriteFor": "{{label}} 즐겨찾기",
+    "gridView": "격자 보기",
+    "listView": "목록 보기",
+    "sort": "정렬"
+  },
+  "transferToast": {
+    "completed": "완료",
+    "failed": "실패",
+    "cancelled": "취소됨",
+    "cancelling": "취소 중…",
+    "openFolder": "폴더 열기"
+  },
+  "knownHostPrompt": {
+    "mismatchTitle": "호스트 키가 변경되었습니다.",
+    "newTitle": "새 호스트 키를 확인해 주세요.",
+    "savedFingerprint": "저장된 지문",
+    "currentFingerprint": "현재 서버 지문",
+    "mismatchHint": "저장된 호스트 키와 현재 서버 키가 다릅니다. 정말 교체할 서버인지 확인한 뒤 진행하세요.",
+    "newHint": "처음 연결하는 서버입니다. 지문을 확인한 뒤 신뢰 목록에 저장하면 이후부터 엄격하게 검증합니다.",
+    "replaceContinue": "교체 후 계속",
+    "saveContinue": "저장 후 계속"
+  },
+  "awsSftpRetry": {
+    "title": "{{label}} SSH 설정을 확인해 주세요.",
+    "hideAdvanced": "고급 옵션 숨기기",
+    "advanced": "고급 옵션",
+    "usernameRequired": "SSH Username을 입력해 주세요.",
+    "portRequired": "올바른 SSH Port를 입력해 주세요.",
+    "retryFailed": "다시 시도하지 못했습니다.",
+    "retry": "다시 시도"
+  },
+  "sftpIpc": {
+    "generatingTempKey": "임시 SSH 키를 생성하는 중입니다.",
+    "proxyOpening": "서버 프록시로 SFTP 세션을 여는 중입니다.",
+    "pushingKey": "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    "openingTunnel": "SFTP 연결용 내부 터널을 여는 중입니다.",
+    "startingSession": "SFTP 세션을 시작하는 중입니다."
+  },
+  "sshKeyIpc": {
+    "nameRequired": "키 이름이 필요합니다.",
+    "publicKeyParseFailed": "SSH 공개 키를 해석하지 못했습니다.",
+    "saveFailed": "SSH 키를 저장하지 못했습니다.",
+    "noPrivateKey": "이 인증 정보에는 SSH 개인키가 없습니다.",
+    "selectHost": "설치할 호스트를 선택하세요.",
+    "notSshHost": "SSH host가 아닙니다.",
+    "installFailed": "SSH 공개 키를 설치하지 못했습니다."
+  },
+  "secretIpc": {
+    "hostSecretSaved": "호스트 전용 인증 정보를 저장했습니다.",
+    "certNotFound": "SSH 인증서를 찾을 수 없습니다. 새 인증서를 가져와 다시 시도하세요.",
+    "certExpired": "SSH 인증서가 만료되었습니다. 새 인증서를 가져와 다시 시도하세요.",
+    "certNotYetValidWith": "SSH 인증서가 아직 유효하지 않습니다. Valid after {{validAfter}}",
+    "certNotYetValid": "SSH 인증서가 아직 유효하지 않습니다.",
+    "certParseFailed": "SSH 인증서를 해석할 수 없습니다. 인증서 내용을 확인해 주세요.",
+    "certCheckFailed": "SSH 인증서를 확인하지 못했습니다."
+  },
+  "codex": {
+    "loginRequired": "Codex 로그인이 필요합니다. 설정에서 'Codex 로그인' 버튼을 눌러 주세요.",
+    "signedIn": "로그인되어 있습니다{{detail}}.",
+    "webSearch": "🔍 웹 검색: {{query}}",
+    "localRun": "💻 로컬 실행: {{command}}",
+    "unsupportedModel": "Codex에서 지원하지 않는 모델입니다. 설정에서 Codex 모델을 기본값으로 다시 저장해 주세요.",
+    "authExpired": "Codex 인증이 만료되었거나 로그인이 필요합니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
+    "requestFailed": "Codex 요청에 실패했습니다."
+  },
+  "sessionSvc": {
+    "connectFailed": "호스트 연결을 시작하지 못했습니다.",
+    "localFailed": "로컬 터미널을 시작하지 못했습니다.",
+    "ssmRetrying": "{{label}} SSM 연결을 다시 시도하는 중입니다.",
+    "connectFailedSsm": "호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다."
+  },
+  "blockOverlay": {
+    "copyOutput": "출력 복사",
+    "copyCommand": "명령 복사",
+    "rerun": "재실행",
+    "commandRunning": "명령이 실행 중입니다",
+    "sessionDisconnected": "세션이 연결되어 있지 않습니다",
+    "rerunBlocked": "화면에서 읽은 명령이 실제 입력과 다를 수 있어 재실행할 수 없습니다(너무 길거나 여러 줄)."
+  },
+  "updateConfirm": {
+    "title": "업데이트를 적용하려면 다시 시작이 필요합니다",
+    "body": "현재 열려 있는 SSH 세션, 진행 중인 전송, 생성된 포트 포워딩이 모두 종료됩니다. 계속하면 Dolgate가 정리 후 다시 시작되며 새 버전이 적용됩니다.",
+    "confirm": "다시 시작하고 업데이트"
+  },
+  "updateSvc": {
+    "unsignedMac": "이 mac 릴리즈는 코드 서명되지 않은 앱이라 자동 업데이트를 적용할 수 없습니다. 나중에 서명된 버전이 배포되면 앱 안에서 바로 업데이트할 수 있습니다.",
+    "unknownError": "업데이트 확인 중 알 수 없는 오류가 발생했습니다.",
+    "noDownload": "다운로드된 업데이트가 없습니다.",
+    "notificationTitle": "Dolgate 업데이트",
+    "notificationBody": "업데이트를 설치합니다. 설치가 끝나면 Dolgate를 다시 열어 주세요."
+  },
+  "cmdNotify": {
+    "seconds": "{{seconds}}초",
+    "minutesSeconds": "{{minutes}}분 {{seconds}}초",
+    "minutes": "{{minutes}}분",
+    "hoursMinutes": "{{hours}}시간 {{minutes}}분",
+    "hours": "{{hours}}시간",
+    "failed": "실패 (exit {{code}})",
+    "completed": "완료",
+    "fallbackTitle": "터미널"
+  },
+  "paneHeader": {
+    "closeSession": "{{title}} 세션 종료",
+    "splitHorizontalAria": "좌우로 분할",
+    "splitHorizontalTitle": "좌우 분할 (Ctrl-b %)",
+    "splitVerticalAria": "상하로 분할",
+    "splitVerticalTitle": "상하 분할 (Ctrl-b \")"
+  },
+  "termiusImport": {
+    "loadFailed": "Termius 데이터를 불러오지 못했습니다.",
+    "loading": "로컬 Termius 데이터를 읽는 중입니다.",
+    "noGroups": "검색에 맞는 그룹이 없습니다.",
+    "noHosts": "검색에 맞는 호스트가 없습니다.",
+    "importFailed": "Termius 데이터를 가져오지 못했습니다."
+  },
+  "envEditor": {
+    "nameAria": "환경변수 이름",
+    "valueAria": "환경변수 값",
+    "deleteAria": "환경변수 삭제",
+    "addVariable": "+ 변수 추가"
+  },
+  "staticProfile": {
+    "profileName": "프로필명",
+    "defaultRegion": "기본 Region",
+    "none": "선택 안 함",
+    "profileNameLabel": "프로필명"
+  },
+  "termiusSvc": {
+    "readFailed": "Termius 데이터를 읽지 못했습니다.",
+    "platformUnsupported": "Termius import는 현재 macOS와 Windows에서만 지원합니다.",
+    "notInstalled": "로컬 Termius 설치를 찾지 못했습니다.",
+    "noDataDir": "로컬 Termius 데이터 디렉터리를 찾지 못했습니다.",
+    "nothingToImport": "로컬 Termius 데이터에서 가져올 그룹이나 호스트를 찾지 못했습니다.",
+    "missingAddress": "{{label}}: address 또는 port가 없어 건너뛰었습니다.",
+    "missingUsername": "{{label}}: 사용자명이 없어 가져왔지만, 첫 연결 전에 입력이 필요합니다.",
+    "noCredential": "{{label}}: 저장 가능한 credential이 없어 비밀번호 없이 호스트만 가져왔습니다.",
+    "imported": "Termius 로컬 데이터를 가져왔습니다."
+  },
+  "opensshExport": {
+    "jumpCycle": "{{label}}: 점프 호스트 연결에 순환 참조가 있어 건너뛰었습니다.",
+    "jumpMissing": "{{label}}: 연결된 점프 호스트를 찾을 수 없어 건너뛰었습니다.",
+    "jumpUnsupported": "{{label}}: OpenSSH로 내보낼 수 없는 점프 호스트를 사용해 건너뛰었습니다.",
+    "hostMissing": "ID {{id}}: 호스트를 찾을 수 없어 건너뛰었습니다.",
+    "kindUnsupported": "{{label}}: {{kind}} 호스트는 OpenSSH 형식으로 내보낼 수 없습니다."
+  },
+  "authorizedKey": {
+    "notEc2": "EC2 host가 아닙니다.",
+    "installFailed": "SSH 공개 키를 설치하지 못했습니다."
+  },
+  "containersShell": {
+    "closeTab": "{{title}} 닫기",
+    "emptyInline": "열린 컨테이너 화면이 없습니다.",
+    "emptyTitle": "열린 컨테이너 화면이 없습니다.",
+    "emptyDescription": "Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요."
+  },
+  "tmuxPrompt": {
+    "raw": "tmux 명령",
+    "renameWindow": "윈도우 이름",
+    "renameSession": "세션 이름",
+    "rawPlaceholder": "예: resize-pane -Z",
+    "namePlaceholder": "이름 입력"
+  },
+  "hostDisplay": {
+    "justNow": "방금",
+    "minutes": "{{count}}분 전",
+    "hours": "{{count}}시간 전",
+    "days": "{{count}}일 전"
+  },
+  "windowControls": {
+    "minimize": "최소화",
+    "restore": "복원",
+    "maximize": "최대화",
+    "close": "닫기",
+    "aria": "윈도우 창 제어"
+  },
+  "sshKeyMaterial": {
+    "parseFailed": "SSH 공개 키를 해석하지 못했습니다.",
+    "generateFailed": "SSH 공개 키를 생성하지 못했습니다."
+  },
+  "runCommand": {
+    "empty": "error: 실행할 명령(command)이 비어 있습니다.",
+    "header": "사용자의 터미널에서 실행: {{command}}",
+    "noOutput": "(출력 없음)",
+    "stillRunning": "(명령이 아직 실행 중입니다 — 스트리밍/장기 실행. 위는 처음 몇 초의 출력이며, 사용자가 터미널에서 계속 보거나 중단할 수 있습니다. 다시 실행하지 마세요.)",
+    "truncated": "…(생략됨)"
+  },
+  "readTerminal": {
+    "lines": ", {{count}}줄",
+    "header": "터미널 출력 ({{label}}{{lines}})",
+    "noOutput": "(해당 범위에 출력 없음)",
+    "snapshotStart": "(스냅샷 시작에 도달했습니다.)",
+    "rangeLabel": "{{from}}~{{to}}줄 전"
+  },
+  "fetchUrl": {
+    "badUrl": "error: 잘못된 URL 입니다.",
+    "schemeOnly": "error: http/https URL 만 허용됩니다.",
+    "networkFailed": "error: 페이지를 가져오지 못했습니다(네트워크).",
+    "emptyResponse": "(빈 응답)"
+  },
+  "codexServer": {
+    "exited": "Codex app-server 가 종료되었습니다 ({{code}})",
+    "notRunning": "Codex app-server 가 실행 중이 아닙니다.",
+    "nonJson": "Codex app-server 비-JSON 출력: {{line}}",
+    "noLoginUrl": "Codex 가 브라우저 로그인 URL을 반환하지 않았습니다."
+  },
+  "replayCommands": {
+    "aria": "명령 목록",
+    "analyzing": "명령을 분석하는 중…",
+    "noCommands": "기록된 명령이 없습니다.",
+    "noShellIntegration": "이 녹화에는 셸 통합 정보가 없어 명령을 표시할 수 없습니다.",
+    "unreadable": "(명령을 읽지 못했습니다)"
+  },
+  "hostDelete": {
+    "alsoDeleteSecrets": "더 이상 사용되지 않는 저장된 인증 정보 {{count}}개도 함께 삭제",
+    "unusedSecrets": "호스트를 삭제한 뒤 더 이상 사용되지 않는 저장된 인증 정보가 있습니다.",
+    "secretsKept": "연결된 저장된 인증 정보는 유지됩니다."
+  },
+  "select": {
+    "search": "검색",
+    "noResults": "검색 결과가 없습니다.",
+    "searchAria": "{{label}} 검색"
+  },
+  "sftpSlice": {
+    "hostKeyCheckFailed": "호스트 키를 확인하지 못했습니다."
+  },
+  "appShell": {
+    "xshellImported": "Xshell에서 호스트 {{hosts}}개와 그룹 {{groups}}개를 가져왔습니다.",
+    "xshellSecrets": " 저장된 비밀번호 {{count}}개를 함께 가져왔습니다.",
+    "xshellSkipped": " 호스트 {{count}}개는 건너뛰었습니다.",
+    "selectTargetHost": "대상 호스트를 선택해 주세요.",
+    "retry": "다시 시도"
+  },
+  "offlineBanner": {
+    "body": "인터넷 연결이 없어 오프라인 모드로 실행 중입니다.",
+    "until": " {{expiry}}까지 사용할 수 있습니다.",
+    "retrying": "다시 연결 중...",
+    "retry": "다시 연결"
+  },
+  "hostMetrics": {
+    "daysHours": "{{days}}일 {{hours}}시간",
+    "hoursMinutes": "{{hours}}시간 {{minutes}}분",
+    "minutes": "{{minutes}}분"
+  },
+  "sessionHelpers": {
+    "waitingFirstOutput": "원격 셸이 첫 출력을 보내는 중입니다...",
+    "connectFailed": "세션 연결에 실패했습니다.",
+    "connecting": "세션을 연결하는 중입니다..."
+  },
+  "snippetVars": {
+    "title": "Snippet 변수 입력",
+    "confirm": "삽입"
+  },
+  "knownHosts": {
+    "intro": "신뢰한 호스트 키 목록입니다. 새 연결은 이 목록과 정확히 일치해야만 진행됩니다.",
+    "emptyTitle": "아직 저장된 known host가 없습니다.",
+    "emptyDescription": "처음 연결하는 서버의 지문을 승인하면 이 목록에 자동으로 추가됩니다."
+  },
+  "hopSteps": {
+    "connected": "연결됨",
+    "failed": "실패",
+    "connecting": "연결 중…"
+  },
+  "replaySvc": {
+    "ownerOnly": "로그인된 계정의 Replay만 열 수 있습니다.",
+    "titleWith": "세션 Replay · {{title}}",
+    "title": "세션 Replay"
+  },
+  "networkSlice": {
+    "hostKeyCancelled": "{{label}} 호스트 키 확인이 취소되었습니다."
+  },
+  "appModals": {
+    "startupVarsTitle": "Startup Command 변수 입력",
+    "startupVarsConfirm": "연결"
+  },
+  "zmodem": {
+    "tooLarge": "파일이 너무 큽니다(512MB 초과). SFTP를 사용하세요.",
+    "downloadFailed": "다운로드에 실패했습니다."
+  },
+  "aiContext": {
+    "hostInfo": "호스트 정보:",
+    "recentOutput": "최근 터미널 출력 (최근 {{lines}}줄):"
+  },
+  "tmuxStatus": {
+    "sessionCount": "세션 {{count}}개",
+    "noSessions": "세션 없음",
+    "open": "열기"
+  },
+  "stickyHeader": {
+    "jumpToCommand": "이 명령 줄로 이동",
+    "unreadable": "(명령을 읽지 못했습니다)"
+  },
+  "hostCard": {
+    "favorite": "즐겨찾기",
+    "menuFor": "{{label}} 작업 메뉴"
+  },
+  "containerTarget": {
+    "portNotFound": "{{name}} 컨테이너에서 TCP {{port}} 포트를 찾지 못했습니다.",
+    "networkIpNotFound": "{{name}} 컨테이너의 {{network}} 네트워크 IP를 확인하지 못했습니다."
+  },
+  "authErrorMessage": {
+    "sessionInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요."
+  },
+  "tagInput": {
+    "removeTag": "{{tag}} 태그 제거"
+  },
+  "misc": {
+    "tmuxPrefixDefault": "Ctrl-B (기본)",
+    "secretSummary": "{{label}} · {{type}} ({{count}}개 호스트)",
+    "snapshotRange": "{{from}}~{{to}}줄 전",
+    "updateActionFailed": "업데이트 작업 중 오류가 발생했습니다.",
+    "detachTitle": "detach — 세션은 유지하고 분리(Ctrl-b d). 재접속으로 복원.",
+    "serialActionFailed": "시리얼 제어 액션을 실행하지 못했습니다.",
+    "generating": "생성 중...",
+    "commandUnreadable": "(명령을 읽지 못했습니다)",
+    "save": "저장",
+    "favorite": "즐겨찾기",
+    "cancelReconnect": "재연결 취소",
+    "workspaceLoadFailed": "초기 워크스페이스를 불러오지 못했습니다.",
+    "secureStorageUnavailable": "이 환경에서는 안전한 저장소를 사용할 수 없어 secret을 저장할 수 없습니다.",
+    "portForwardLog": "{{label}} 포트 포워딩",
+    "noUserIdForHistory": "로컬 기록을 저장할 사용자 ID가 없습니다.",
+    "serialOnlyHost": "이 기능은 Serial host에서만 사용할 수 있습니다.",
+    "windowNotFound": "호출한 브라우저 윈도우를 찾을 수 없습니다.",
+    "skippedEntries": "잠겨 있거나 접근할 수 없는 항목 {{count}}개는 표시되지 않았습니다.",
+    "ssmTunnelUnsupported": "AWS SSM 터널을 시작할 수 없습니다. 이 구성에서는 in-process SSM 터널만 지원됩니다.",
+    "connectSuccess": "연결에 성공했습니다.",
+    "noTerminalSession": "연결된 터미널 세션이 없어 명령을 입력할 수 없습니다.",
+    "sessionExpiredOrInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요."
+  }
+}

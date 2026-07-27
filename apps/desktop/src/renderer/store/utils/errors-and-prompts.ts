@@ -1,4 +1,5 @@
 import type { TerminalConnectionProgress } from "@shared";
+import { t } from '../../i18n';
 
 export function normalizeRemoteInvokeErrorMessage(message: string): string {
   return message
@@ -33,7 +34,7 @@ function extractDialTarget(message: string): string {
   if (rw) {
     return `${rw[1]}:${rw[2]}`;
   }
-  return "대상 호스트";
+  return t('connectFailure.targetHost');
 }
 
 // main이 호스트 키 probe 실패에 붙이는 식별자(라벨+주소)를 파싱한다. 다단 ProxyJump에서
@@ -59,8 +60,8 @@ export function resolveConnectionFailurePresentation(
   // 타깃 주소와 다를 수 있어(예: 베스천에서 리셋) 함께 덧붙인다.
   const target = probe
     ? `'${probe.label}' (${probe.addr})${
-        probe.viaJump && dialTarget !== "대상 호스트" && dialTarget !== probe.addr
-          ? ` · 점프 경유 ${dialTarget}`
+        probe.viaJump && dialTarget !== t('connectFailure.targetHost') && dialTarget !== probe.addr
+          ? t('connectFailure.viaJump', { target: dialTarget })
           : ""
       }`
     : dialTarget;
@@ -69,28 +70,28 @@ export function resolveConnectionFailurePresentation(
   if (awsSsmExitCodeMatch) {
     return {
       title: "Connection Failed",
-      message: `AWS SSM 세션이 종료되었습니다. (code ${awsSsmExitCodeMatch[1]})`,
+      message: t('connectFailure.ssmExit', { code: awsSsmExitCodeMatch[1] }),
     };
   }
   if (/ssh-agent has no keys/i.test(normalized)) {
     return {
       title: "Connection Failed",
       message:
-        "SSH 에이전트에 등록된 키가 없습니다. 에이전트에 키를 추가한 뒤 다시 연결해 주세요.",
+        t('connectFailure.agentNoKeys'),
     };
   }
   if (/ssh-agent (connection failed|key listing failed)/i.test(normalized)) {
     return {
       title: "Connection Failed",
       message:
-        "SSH 에이전트에 연결하지 못했습니다. 에이전트가 실행 중인지 확인해 주세요.",
+        t('connectFailure.agentUnreachable'),
     };
   }
   if (/host key is not trusted yet/i.test(normalized)) {
     return {
       title: "Host Key Not Trusted",
       message:
-        "이 호스트의 SSH 호스트 키를 아직 신뢰하지 않았습니다. 호스트 키를 신뢰한 뒤 다시 시도해 주세요.",
+        t('connectFailure.hostKeyUntrusted'),
     };
   }
   if (
@@ -100,36 +101,36 @@ export function resolveConnectionFailurePresentation(
   ) {
     return {
       title: "AWS Authentication Required",
-      message: "AWS 인증을 확인하지 못했습니다. 다시 로그인해 주세요.",
+      message: t('connectFailure.awsAuthFailed'),
     };
   }
   if (/network is unreachable|no route to host/i.test(normalized)) {
     return {
       title: "Connection Failed",
-      message: `${target}에 연결할 수 없습니다. 현재 네트워크에서 해당 호스트로 가는 경로가 없습니다.`,
+      message: t('connectFailure.noRoute', { target }),
     };
   }
   if (/connection refused/i.test(normalized)) {
     return {
       title: "Connection Failed",
-      message: `${target}에서 연결을 거부했습니다.`,
+      message: t('connectFailure.refused', { target }),
     };
   }
   if (/i\/o timeout|timed out|operation timed out/i.test(normalized)) {
     return {
       title: "Connection Failed",
-      message: `${target} 연결 시간이 초과되었습니다.`,
+      message: t('connectFailure.timeout', { target }),
     };
   }
   if (/connection reset|\bEOF\b/i.test(normalized)) {
     return {
       title: "Connection Failed",
-      message: `${target} 연결이 중간에 끊겼습니다.`,
+      message: t('connectFailure.reset', { target }),
     };
   }
   return {
     title: "Connection Failed",
-    message: normalized || "연결을 완료하지 못했습니다.",
+    message: normalized || t('connectFailure.generic'),
   };
 }
 
@@ -149,7 +150,9 @@ export function createConnectionProgress(
 }
 
 export function isAwsSsoAuthenticationErrorMessage(message: string): boolean {
-  return /sso session associated with this profile has expired|sso token.+expired|aws sso login|브라우저 로그인이 필요합니다/iu.test(
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
+  return /sso session associated with this profile has expired|sso token.+expired|aws sso login|브라우저 로그인이 필요합니다|a browser sign-in is required/iu.test(
     message,
   );
 }

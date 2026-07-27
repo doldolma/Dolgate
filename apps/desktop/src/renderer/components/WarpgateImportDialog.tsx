@@ -28,6 +28,8 @@ import {
   SectionLabel,
   StatusBadge,
 } from "../ui";
+import { Trans, useTranslation } from "react-i18next";
+import { t } from "../i18n";
 
 interface WarpgateImportDialogProps {
   open: boolean;
@@ -62,16 +64,16 @@ function normalizeBaseUrl(value: string): URL | null {
 
 function getStatusMessage(status: WarpgateImportStatus | null): string | null {
   if (status === "opening-browser") {
-    return "Warpgate 로그인 창을 여는 중입니다.";
+    return t("warpgateImport.status.opening");
   }
   if (status === "waiting-for-login") {
-    return "Warpgate 로그인 창이 열려 있습니다.";
+    return t("warpgateImport.status.opened");
   }
   if (status === "loading-targets") {
-    return "Warpgate 로그인은 완료되었습니다.";
+    return t("warpgateImport.status.done");
   }
   if (status === "cancelled") {
-    return "Warpgate 로그인을 중단했습니다.";
+    return t("warpgateImport.status.cancelled");
   }
   return null;
 }
@@ -81,18 +83,18 @@ function getStatusDetail(
   noticeMessage: string | null,
 ): string | null {
   if (status === "opening-browser") {
-    return "잠시만 기다려 주세요.";
+    return t("warpgateImport.detail.wait");
   }
   if (status === "waiting-for-login") {
-    return "로그인을 완료하거나 아래에서 중단할 수 있습니다.";
+    return t("warpgateImport.detail.completeOrCancel");
   }
   if (status === "loading-targets") {
-    return "SSH target 목록을 불러오는 중입니다.";
+    return t("warpgateImport.detail.loadingTargets");
   }
   if (status === "cancelled") {
     return (
       noticeMessage ??
-      "주소를 확인한 뒤 다시 시도할 수 있습니다."
+      t("warpgateImport.detail.retryHint")
     );
   }
   return null;
@@ -104,6 +106,7 @@ export function WarpgateImportDialog({
   onClose,
   onImport,
 }: WarpgateImportDialogProps) {
+  const { t: translate } = useTranslation();
   const {
     cancelWarpgateBrowserImport,
     onWarpgateImportEvent,
@@ -170,7 +173,7 @@ export function WarpgateImportDialog({
         setTargets([]);
         setConnectionInfo(null);
         setNoticeMessage(null);
-        setError(event.errorMessage ?? "Warpgate target 목록을 불러오지 못했습니다.");
+        setError(event.errorMessage ?? translate("warpgateImport.error.targetsFailed"));
         return;
       }
 
@@ -182,7 +185,9 @@ export function WarpgateImportDialog({
         setConnectionInfo(null);
         setError(null);
         setNoticeMessage(
-          event.errorMessage?.includes("창이 닫혔습니다.")
+          // 메인이 보내는 문구를 같은 카탈로그 키로 비교한다 — 원문 문자열을 substring
+          // 으로 찾으면 UI 언어가 바뀌는 순간 감지가 깨진다.
+          event.errorMessage === translate("warpgate.loginWindowClosed")
             ? event.errorMessage
             : null,
         );
@@ -235,7 +240,7 @@ export function WarpgateImportDialog({
       setError(
         cancelError instanceof Error
           ? cancelError.message
-          : "Warpgate 로그인을 중단하지 못했습니다.",
+          : translate("warpgateImport.error.cancelFailed"),
       );
     } finally {
       setIsCancelling(false);
@@ -281,15 +286,24 @@ export function WarpgateImportDialog({
 
           {connectionInfo ? (
             <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-              SSH endpoint는 <code>{connectionInfo.sshHost}:{connectionInfo.sshPort}</code>
-              로 감지되었습니다.
+              <Trans
+                i18nKey="warpgateImport.endpointDetected"
+                values={{
+                  endpoint: `${connectionInfo.sshHost}:${connectionInfo.sshPort}`,
+                }}
+                components={{ code: <code /> }}
+              />
               {connectionInfo.username ? (
                 <>
                   {" "}
-                  현재 로그인 사용자는 <code>{connectionInfo.username}</code>입니다.
+                  <Trans
+                    i18nKey="warpgateImport.currentUser"
+                    values={{ username: connectionInfo.username }}
+                    components={{ code: <code /> }}
+                  />
                 </>
               ) : (
-                <> 로그인 사용자명을 자동으로 확인하지 못해 직접 입력이 필요합니다.</>
+                <>{translate("warpgateImport.usernameUnknown")}</>
               )}
             </p>
           ) : null}
@@ -300,7 +314,7 @@ export function WarpgateImportDialog({
                 value={fallbackUsername}
                 onChange={(event) => {
                   setFallbackUsername(event.target.value);
-                  if (error === "Warpgate 사용자명을 입력해 주세요.") {
+                  if (error === translate("warpgateImport.error.usernameRequired")) {
                     setError(null);
                   }
                 }}
@@ -324,7 +338,7 @@ export function WarpgateImportDialog({
                   void handleCancelAttempt();
                 }}
               >
-                {isCancelling ? "중단 중..." : "중단"}
+                {translate(isCancelling ? "warpgateImport.cancelling" : "warpgateImport.cancel")}
               </Button>
             ) : null}
             <Button
@@ -353,12 +367,12 @@ export function WarpgateImportDialog({
                   setError(
                     startError instanceof Error
                       ? startError.message
-                      : "Warpgate 로그인 창을 열지 못했습니다.",
+                      : translate("warpgateImport.error.openFailed"),
                   );
                 }
               }}
             >
-              브라우저에서 로그인
+              {translate("warpgateImport.signInBrowser")}
             </Button>
           </div>
 
@@ -370,7 +384,7 @@ export function WarpgateImportDialog({
 
           {targets.length === 0 && !status ? (
             <NoticeCard
-              title="Warpgate 주소를 입력한 뒤 브라우저에서 로그인해 SSH target 목록을 불러와 주세요."
+              title={translate("warpgateImport.emptyTitle")}
             />
           ) : null}
 
@@ -402,7 +416,7 @@ export function WarpgateImportDialog({
                         disabled={!connectionInfo || savingTargetId === target.id}
                         onClick={async () => {
                           if (!connectionInfo || !resolvedUsername) {
-                            setError("Warpgate 사용자명을 입력해 주세요.");
+                            setError(translate("warpgateImport.error.usernameRequired"));
                             return;
                           }
                           setError(null);
@@ -426,7 +440,7 @@ export function WarpgateImportDialog({
                             setError(
                               importError instanceof Error
                                 ? importError.message
-                                : "Warpgate host를 저장하지 못했습니다.",
+                                : translate("warpgateImport.error.saveFailed"),
                             );
                           } finally {
                             setSavingTargetId(null);
@@ -444,7 +458,7 @@ export function WarpgateImportDialog({
         </ModalBody>
         <ModalFooter className="justify-start">
           <Button variant="secondary" onClick={() => void handleClose()} disabled={Boolean(savingTargetId)}>
-            닫기
+            {translate('common.close')}
           </Button>
         </ModalFooter>
       </ModalShell>

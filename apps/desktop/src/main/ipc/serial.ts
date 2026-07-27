@@ -7,6 +7,7 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { MainIpcContext } from "./context";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { t } from '../i18n';
 
 export function registerSerialIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(
@@ -18,7 +19,7 @@ export function registerSerialIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("Host not found");
       }
       if (!isSerialHostRecord(host)) {
-        throw new Error("이 기능은 Serial host에서만 사용할 수 있습니다.");
+        throw new Error(t('misc.serialOnlyHost'));
       }
 
       const connection = await ctx.coreManager.connectSerialSession({

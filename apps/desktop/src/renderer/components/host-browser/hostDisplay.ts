@@ -1,4 +1,5 @@
 import type { HostRecord } from '@shared';
+import { t } from '../../i18n';
 
 /** 상세 패널용 풀 타입 라벨. */
 export function getHostTypeLabel(host: HostRecord): string {
@@ -58,18 +59,18 @@ export function getHostAddress(host: HostRecord): string | null {
 export function formatLastUsed(ms: number): string {
   const diffMin = Math.round((Date.now() - ms) / 60000);
   if (diffMin < 1) {
-    return '방금';
+    return t('hostDisplay.justNow');
   }
   if (diffMin < 60) {
-    return `${diffMin}분 전`;
+    return t('hostDisplay.minutes', { count: diffMin });
   }
   const diffHour = Math.round(diffMin / 60);
   if (diffHour < 24) {
-    return `${diffHour}시간 전`;
+    return t('hostDisplay.hours', { count: diffHour });
   }
   const diffDay = Math.round(diffHour / 24);
   if (diffDay < 7) {
-    return `${diffDay}일 전`;
+    return t('hostDisplay.days', { count: diffDay });
   }
   return new Date(ms).toLocaleDateString();
 }

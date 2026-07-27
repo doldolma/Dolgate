@@ -36,6 +36,7 @@ import { TerminalCommandPalette } from './TerminalCommandPalette';
 import { SnippetVariablesDialog } from './SnippetVariablesDialog';
 import type { CommandFinishedInfo } from '../../lib/command-notification';
 import { supportsTmuxControlMode } from '../../lib/tmux-version';
+import { useTranslation } from 'react-i18next';
 
 // PASSTHROUGH_TMUX_COMMAND: control mode floor(2.6) 미만 tmux 를 일반 SSH 세션으로 띄울
 // 때 접속 직후 셸에 자동 입력하는 호환 attach-or-create 명령. 모든 tmux 버전에서 동작
@@ -44,6 +45,7 @@ import { supportsTmuxControlMode } from '../../lib/tmux-version';
 const PASSTHROUGH_TMUX_COMMAND = 'tmux attach 2>/dev/null || tmux new';
 
 export function TerminalSessionPane(props: TerminalSessionPaneProps) {
+  const { t: translate } = useTranslation();
   const {
     sessionId,
     title,
@@ -363,13 +365,13 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         if (localPaths.length === 0) {
           setUploadNotice({
             tone: 'danger',
-            message: '드롭한 파일 경로를 읽지 못했습니다.',
+            message: translate('sessionPane.dropPathFailed'),
           });
           return;
         }
         setUploadNotice(null);
         setUploadPending(
-          `${localPaths.length}개 파일 업로드 준비 중… (SFTP 연결)`,
+          translate('sessionPane.uploadPreparing', { count: localPaths.length }),
         );
         try {
           const result = await uploadLocalFilesToHost(
@@ -385,12 +387,12 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             setUploadNotice({
               tone: awaitingHostTrust ? 'info' : 'danger',
               message: awaitingHostTrust
-                ? (result.message ?? '호스트 키를 저장하면 업로드를 계속합니다.')
+                ? (result.message ?? translate('sessionPane.hostKeyPrompt'))
                 : result.reason === 'unsupported'
-                  ? '이 세션은 SFTP 업로드를 지원하지 않습니다.'
+                  ? translate('sessionPane.uploadUnsupported')
                   : result.reason === 'connect-failed'
-                    ? `SFTP 연결 실패: ${result.message ?? ''}`
-                    : (result.message ?? '업로드할 항목이 없습니다.'),
+                    ? translate('sessionPane.sftpFailed', { message: result.message ?? '' })
+                    : (result.message ?? translate('sessionPane.nothingToUpload')),
             });
             return;
           }
@@ -398,11 +400,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             result.usedHomeFallback
               ? {
                   tone: 'warning',
-                  message: `현재 경로를 찾지 못해 홈(${result.targetPath})에 업로드합니다.`,
+                  message: translate('sessionPane.cwdFallback', { path: result.targetPath }),
                 }
               : {
                   tone: 'info',
-                  message: `${result.targetPath} 에 업로드를 시작했습니다.`,
+                  message: translate('sessionPane.uploadStarted', { path: result.targetPath }),
                 },
           );
         } finally {
@@ -421,8 +423,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
       active={aiPanelOpen}
       className="min-h-9 rounded-full px-3.5"
       onClick={() => toggleAiPanel(sessionId)}
-      title="AI 어시스턴트 (⌘I)"
-      aria-label={aiPanelOpen ? 'AI 어시스턴트 닫기' : 'AI 어시스턴트 열기'}
+      title={translate('sessionPane.aiTitle')}
+      aria-label={translate(aiPanelOpen ? 'sessionPane.aiClose' : 'sessionPane.aiOpen')}
     >
       AI
     </Button>
@@ -621,7 +623,9 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             {isFileDropActive ? (
               <div className="pointer-events-none absolute inset-0 z-[6] flex items-center justify-center rounded-[6px] border-2 border-dashed border-[color-mix(in_srgb,var(--accent-strong)_60%,transparent)] bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]">
                 <span className="rounded-[6px] bg-[var(--surface)] px-3 py-1.5 text-sm font-medium text-[var(--text)] shadow-[var(--shadow)]">
-                  여기로 업로드 → {getSessionCwd(sessionId) ?? '홈 디렉터리'}
+                  {translate('sessionPane.dropHere', {
+                    path: getSessionCwd(sessionId) ?? translate('sessionPane.homeDirectory'),
+                  })}
                 </span>
               </div>
             ) : null}

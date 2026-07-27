@@ -11,6 +11,7 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { AwsEc2HostRecord, AwsEcsHostRecord, MainIpcContext } from "./context";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { t } from '../i18n';
 
 export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   const resolveHostProfileName = (host: {
@@ -25,9 +26,9 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
   const shouldRetryEcsExecSelectionError = (error: unknown): boolean => {
     const message = error instanceof Error ? error.message : "";
     return (
-      message === "선택한 실행 중 task를 찾지 못했습니다." ||
-      message === "선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다." ||
-      message === "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다."
+      message === t('awsIpc.runningTaskNotFound') ||
+      message === t('aws.ecs.containerNotInTask') ||
+      message === t('awsIpc.execDisabledShell')
     );
   };
 
@@ -175,7 +176,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     async (_event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       if (!host || !isAwsEcsHostRecord(host)) {
-        throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
+        throw new Error(t('awsIpc.ecsOnly'));
       }
       const scopeId = ctx.buildContainersEndpointId(host.id);
       const { lifecycleId } = ctx.coreManager.beginContainerLifecycle({
@@ -204,7 +205,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
           message:
             error instanceof Error
               ? error.message
-              : "ECS 클러스터 정보를 불러오지 못했습니다.",
+              : t('containersStore.ecsLoadFailed'),
         });
         throw error;
       }
@@ -216,7 +217,7 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     async (_event, hostId: string) => {
       const host = ctx.hosts.getById(hostId);
       if (!host || !isAwsEcsHostRecord(host)) {
-        throw new Error("이 기능은 ECS host에서만 사용할 수 있습니다.");
+        throw new Error(t('awsIpc.ecsOnly'));
       }
       return ctx.awsService.describeEcsClusterUtilization(
         resolveHostProfileName(host),
@@ -298,18 +299,18 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
             (item) => item.taskArn === input.taskArn,
           );
           if (!task) {
-            throw new Error("선택한 실행 중 task를 찾지 못했습니다.");
+            throw new Error(t('awsIpc.runningTaskNotFound'));
           }
           if (!task.enableExecuteCommand) {
             throw new Error(
-              "이 task는 ECS Exec가 활성화되어 있지 않아 셸에 접속할 수 없습니다.",
+              t('awsIpc.execDisabledShell'),
             );
           }
           const container = task.containers.find(
             (item) => item.containerName === input.containerName,
           );
           if (!container) {
-            throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+            throw new Error(t('aws.ecs.containerNotInTask'));
           }
           const taskId =
             input.taskArn.split("/").filter(Boolean).at(-1) ?? input.taskArn;

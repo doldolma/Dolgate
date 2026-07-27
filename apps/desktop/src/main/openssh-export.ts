@@ -3,6 +3,7 @@ import {
   type HostRecord,
   type SshHostRecord,
 } from "@shared";
+import { t } from './i18n';
 
 export interface OpenSshExportBuild {
   content: string;
@@ -95,16 +96,16 @@ export function buildOpenSshConfig(
     visiting: Set<string>,
   ): string | null => {
     if (visiting.has(host.id)) {
-      return `${host.label}: 점프 호스트 연결에 순환 참조가 있어 건너뛰었습니다.`;
+      return t('opensshExport.jumpCycle', { label: host.label });
     }
     visiting.add(host.id);
     for (const jumpHostId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
       const jumpHost = hostsById.get(jumpHostId);
       if (!jumpHost) {
-        return `${host.label}: 연결된 점프 호스트를 찾을 수 없어 건너뛰었습니다.`;
+        return t('opensshExport.jumpMissing', { label: host.label });
       }
       if (jumpHost.kind !== "ssh") {
-        return `${host.label}: OpenSSH로 내보낼 수 없는 점프 호스트를 사용해 건너뛰었습니다.`;
+        return t('opensshExport.jumpUnsupported', { label: host.label });
       }
       const nestedError = collectSshDependencies(jumpHost, collected, visiting);
       if (nestedError) {
@@ -120,11 +121,11 @@ export function buildOpenSshConfig(
   for (const hostId of selectedIds) {
     const host = hostsById.get(hostId);
     if (!host) {
-      warnings.push(`ID ${hostId}: 호스트를 찾을 수 없어 건너뛰었습니다.`);
+      warnings.push(t('opensshExport.hostMissing', { id: hostId }));
       continue;
     }
     if (host.kind !== "ssh" && host.kind !== "warpgate-ssh") {
-      warnings.push(`${host.label}: ${host.kind} 호스트는 OpenSSH 형식으로 내보낼 수 없습니다.`);
+      warnings.push(t('opensshExport.kindUnsupported', { label: host.label, kind: host.kind }));
       continue;
     }
     const collected = new Set<string>();

@@ -9,6 +9,7 @@ import {
   getHostRegion,
   getHostShortType,
 } from './hostDisplay';
+import { useTranslation } from 'react-i18next';
 
 const MAX_VISIBLE_TAGS = 3;
 
@@ -31,13 +32,14 @@ export function HostListCard({
   selected = false,
   focused = false,
   favorite = false,
-  favoriteLabel = '즐겨찾기',
+  favoriteLabel,
   onToggleFavorite,
   lastUsedAt,
   onOpenMenu,
   className,
   ...props
 }: HostListCardProps) {
+  const { t: translate } = useTranslation();
   const shortType = getHostShortType(host);
   const region = getHostRegion(host);
   const address = getHostAddress(host);
@@ -79,7 +81,7 @@ export function HostListCard({
         {onToggleFavorite ? (
           <button
             type="button"
-            aria-label={favoriteLabel}
+            aria-label={favoriteLabel ?? translate('hostCard.favorite')}
             aria-pressed={favorite}
             className={cn(
               'inline-grid h-[1.7rem] w-[1.7rem] shrink-0 place-items-center rounded-[8px] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)]',
@@ -96,7 +98,7 @@ export function HostListCard({
         {onOpenMenu ? (
           <button
             type="button"
-            aria-label={`${host.label} 작업 메뉴`}
+            aria-label={translate('hostCard.menuFor', { label: host.label })}
             className="inline-grid h-[1.7rem] w-[1.7rem] shrink-0 place-items-center rounded-[8px] text-[var(--text-muted)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]"
             onClick={(event) => {
               event.stopPropagation();

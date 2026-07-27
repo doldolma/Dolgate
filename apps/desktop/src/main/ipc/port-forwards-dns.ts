@@ -22,6 +22,7 @@ import type {
   SshHostRecord,
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
+import { t } from "../i18n";
 
 export function registerPortForwardAndDnsIpcHandlers(
   ctx: MainIpcContext,
@@ -46,7 +47,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       failure.stage === "hosts-verification" ||
       failure.stage === "unknown"
     ) {
-      return `${failure.message} 원인: ${failure.rawError}`;
+      return t("pfIpc.failureWithCause", { message: failure.message, cause: failure.rawError });
     }
     return failure.message;
   };
@@ -70,7 +71,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.dnsOverrides.remove(record.id);
         throw error;
       }
-      ctx.activityLogs.append("info", "audit", "DNS override를 생성했습니다.", {
+      ctx.activityLogs.append("info", "audit", t("pfIpc.dnsCreated"), {
         dnsOverrideId: record.id,
         type: record.type,
         hostname: record.hostname,
@@ -100,7 +101,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.dnsOverrides.replaceAll(previous);
         throw error;
       }
-      ctx.activityLogs.append("info", "audit", "DNS override를 수정했습니다.", {
+      ctx.activityLogs.append("info", "audit", t("pfIpc.dnsUpdated"), {
         dnsOverrideId: record.id,
         type: record.type,
         hostname: record.hostname,
@@ -137,8 +138,8 @@ export function registerPortForwardAndDnsIpcHandlers(
         const failure = describeHostsOverrideManagerFailure(
           error,
           active
-            ? "Static DNS override를 활성화하지 못했습니다."
-            : "Static DNS override를 비활성화하지 못했습니다.",
+            ? t("pfIpc.dnsEnableFailed")
+            : t("pfIpc.dnsDisableFailed"),
         );
         const userFacingMessage = buildUserFacingDnsOverrideErrorMessage(failure);
         ctx.activityLogs.append(
@@ -162,8 +163,8 @@ export function registerPortForwardAndDnsIpcHandlers(
         "info",
         "audit",
         active
-          ? "Static DNS override를 활성화했습니다."
-          : "Static DNS override를 비활성화했습니다.",
+          ? t("pfIpc.dnsEnabled")
+          : t("pfIpc.dnsDisabled"),
         {
           dnsOverrideId: record.id,
           type: record.type,
@@ -198,7 +199,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       ctx.syncOutbox.upsertDeletion("dnsOverrides", id);
       if (current) {
         ctx.hostsOverrideManager.removeStaticOverrideState(current.id);
-        ctx.activityLogs.append("warn", "audit", "DNS override를 삭제했습니다.", {
+        ctx.activityLogs.append("warn", "audit", t("pfIpc.dnsDeleted"), {
           dnsOverrideId: current.id,
           type: current.type,
           hostname: current.hostname,
@@ -225,7 +226,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.assertSshHost(host);
       }
       const record = ctx.portForwards.create(draft);
-      ctx.activityLogs.append("info", "audit", "포트 포워딩 규칙을 생성했습니다.", {
+      ctx.activityLogs.append("info", "audit", t("pfIpc.ruleCreated"), {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
@@ -258,7 +259,7 @@ export function registerPortForwardAndDnsIpcHandlers(
         ctx.assertSshHost(host);
       }
       const record = ctx.portForwards.update(id, draft);
-      ctx.activityLogs.append("info", "audit", "포트 포워딩 규칙을 수정했습니다.", {
+      ctx.activityLogs.append("info", "audit", t("pfIpc.ruleUpdated"), {
         ruleId: record.id,
         label: record.label,
         hostId: record.hostId,
@@ -298,7 +299,7 @@ export function registerPortForwardAndDnsIpcHandlers(
       ctx.syncOutbox.upsertDeletion("portForwards", id);
       ctx.portForwards.remove(id);
       if (current) {
-        ctx.activityLogs.append("warn", "audit", "포트 포워딩 규칙을 삭제했습니다.", {
+        ctx.activityLogs.append("warn", "audit", t("pfIpc.ruleDeleted"), {
           ruleId: current.id,
           label: current.label,
           hostId: current.hostId,
@@ -369,7 +370,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             if (!profileStatus.isSsoProfile) {
               throw new Error(
                 profileStatus.errorMessage ||
-                  "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+                  t("pfIpc.cliCredentialsNeeded"),
               );
             }
             publishRuntime("starting", "Opening AWS SSO login");
@@ -381,7 +382,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             if (!profileStatus.isAuthenticated) {
               throw new Error(
                 profileStatus.errorMessage ||
-                  "AWS SSO 로그인 결과를 확인하지 못했습니다.",
+                  t("pfIpc.ssoResultUnknown"),
               );
             }
           }
@@ -415,7 +416,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             "error",
             error instanceof Error
               ? error.message
-              : "ECS task tunnel을 시작하지 못했습니다.",
+              : t("pfIpc.ecsTunnelStartFailed"),
           );
           throw error;
         }
@@ -452,7 +453,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             if (!profileStatus.isSsoProfile) {
               throw new Error(
                 profileStatus.errorMessage ||
-                  "이 프로필은 AWS CLI 자격 증명이 필요합니다.",
+                  t("pfIpc.cliCredentialsNeeded"),
               );
             }
             publishRuntime("starting", "Opening AWS SSO login");
@@ -464,7 +465,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             if (!profileStatus.isAuthenticated) {
               throw new Error(
                 profileStatus.errorMessage ||
-                  "AWS SSO 로그인 결과를 확인하지 못했습니다.",
+                  t("pfIpc.ssoResultUnknown"),
               );
             }
           }
@@ -476,7 +477,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             awsHost.awsInstanceId,
           );
           if (!isManaged) {
-            throw new Error("SSM Agent 또는 managed instance 상태를 확인해 주세요.");
+            throw new Error(t("pfIpc.checkSsmAgent"));
           }
 
           if (awsHost.awsSsmServerProxyEnabled === true) {
@@ -505,19 +506,19 @@ export function registerPortForwardAndDnsIpcHandlers(
             if (!sshUsername) {
               throw new Error(
                 hydratedHost.awsSshMetadataError ||
-                  "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+                  t("pfIpc.sshUsernameUnknown"),
               );
             }
             const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
             if (!availabilityZone) {
-              throw new Error("Availability Zone을 확인하지 못했습니다.");
+              throw new Error(t("pfIpc.azUnknown"));
             }
             const targetHost =
               rule.targetKind === "remote-host"
                 ? (rule.remoteHost ?? "").trim()
                 : "localhost";
             if (!targetHost) {
-              throw new Error("원격 호스트 주소를 확인해 주세요.");
+              throw new Error(t("pfIpc.remoteHostUnknown"));
             }
             const { privateKeyPem, publicKey } =
               ctx.createEphemeralAwsSftpKeyPair();
@@ -570,7 +571,7 @@ export function registerPortForwardAndDnsIpcHandlers(
                 "error",
                 error instanceof Error
                   ? error.message
-                  : "hosts override를 적용하지 못했습니다.",
+                  : t("pfIpc.hostsOverrideFailed"),
               );
               throw error;
             }
@@ -602,7 +603,7 @@ export function registerPortForwardAndDnsIpcHandlers(
               "error",
               error instanceof Error
                 ? error.message
-                : "hosts override를 적용하지 못했습니다.",
+                : t("pfIpc.hostsOverrideFailed"),
             );
             throw error;
           }
@@ -612,7 +613,7 @@ export function registerPortForwardAndDnsIpcHandlers(
             "error",
             error instanceof Error
               ? error.message
-              : "AWS SSM port forward를 시작하지 못했습니다.",
+              : t("pfIpc.ssmForwardStartFailed"),
           );
           throw error;
         }
@@ -670,7 +671,7 @@ export function registerPortForwardAndDnsIpcHandlers(
           message:
             error instanceof Error
               ? error.message
-              : "hosts override를 적용하지 못했습니다.",
+              : t("pfIpc.hostsOverrideFailed"),
         });
         throw error;
       }

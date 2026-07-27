@@ -40,6 +40,7 @@ import {
   decodeSecretFromStorage,
   encodeSecretForStorage,
 } from "./secret-store";
+import { t } from "./i18n";
 
 const SNAPSHOT_TTL_MS = 10 * 60 * 1000;
 
@@ -68,26 +69,26 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function requireString(value: unknown, label: string): string {
+function requireString(value: unknown, labelKey: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`Dolgate 파일의 ${label} 값이 올바르지 않습니다.`);
+    throw new Error(t("transfer.error.invalidValue", { field: t(labelKey) }));
   }
   return value;
 }
 
-function requireArray(value: unknown, label: string): unknown[] {
+function requireArray(value: unknown, labelKey: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new Error(`Dolgate 파일의 ${label} 목록이 올바르지 않습니다.`);
+    throw new Error(t("transfer.error.invalidList", { field: t(labelKey) }));
   }
   return value;
 }
 
-function assertUniqueIds<T>(items: T[], idOf: (item: T) => string, label: string): void {
+function assertUniqueIds<T>(items: T[], idOf: (item: T) => string, labelKey: string): void {
   const ids = new Set<string>();
   for (const item of items) {
     const id = idOf(item);
     if (ids.has(id)) {
-      throw new Error(`Dolgate 파일에 중복된 ${label} ID가 있습니다.`);
+      throw new Error(t("transfer.error.duplicateId", { field: t(labelKey) }));
     }
     ids.add(id);
   }
@@ -95,21 +96,21 @@ function assertUniqueIds<T>(items: T[], idOf: (item: T) => string, label: string
 
 function parseGroup(value: unknown): GroupRecord {
   if (!isObject(value)) {
-    throw new Error("Dolgate 파일의 그룹 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidGroup"));
   }
-  const path = normalizeGroupPath(requireString(value.path, "그룹 경로"));
+  const path = normalizeGroupPath(requireString(value.path, "transfer.field.groupPath"));
   if (!path) {
-    throw new Error("Dolgate 파일의 그룹 경로가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidGroupPath"));
   }
   return {
-    id: requireString(value.id, "그룹 ID"),
-    name: requireString(value.name, "그룹 이름"),
+    id: requireString(value.id, "transfer.field.groupId"),
+    name: requireString(value.name, "transfer.field.groupName"),
     path,
     parentPath: normalizeGroupPath(
       typeof value.parentPath === "string" ? value.parentPath : null,
     ),
-    createdAt: requireString(value.createdAt, "그룹 생성 시각"),
-    updatedAt: requireString(value.updatedAt, "그룹 수정 시각"),
+    createdAt: requireString(value.createdAt, "transfer.field.groupCreatedAt"),
+    updatedAt: requireString(value.updatedAt, "transfer.field.groupUpdatedAt"),
   };
 }
 
@@ -124,25 +125,25 @@ function parseHost(value: unknown): HostRecord {
     typeof value.createdAt !== "string" ||
     typeof value.updatedAt !== "string"
   ) {
-    throw new Error("Dolgate 파일의 호스트 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidHost"));
   }
   const host = normalizeHostRecord(value);
   if (!host || !host.id.trim() || !host.label.trim()) {
-    throw new Error("Dolgate 파일의 호스트 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidHost"));
   }
   return host;
 }
 
 function parseSecret(value: unknown): ManagedSecretPayload {
   if (!isObject(value)) {
-    throw new Error("Dolgate 파일의 자격증명 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidSecret"));
   }
-  const secretRef = requireString(value.secretRef, "자격증명 ID");
+  const secretRef = requireString(value.secretRef, "transfer.field.secretId");
   if (!secretRef.startsWith("secret:")) {
-    throw new Error("Dolgate 파일의 자격증명 ID가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidSecretId"));
   }
-  const label = requireString(value.label, "자격증명 이름");
-  const updatedAt = requireString(value.updatedAt, "자격증명 수정 시각");
+  const label = requireString(value.label, "transfer.field.secretLabel");
+  const updatedAt = requireString(value.updatedAt, "transfer.field.secretUpdatedAt");
   const stringFields = [
     "password",
     "passphrase",
@@ -161,26 +162,26 @@ function parseSecret(value: unknown): ManagedSecretPayload {
   ];
   for (const field of stringFields) {
     if (value[field] !== undefined && typeof value[field] !== "string") {
-      throw new Error("Dolgate 파일의 자격증명 정보가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidSecret"));
     }
   }
   for (const field of booleanFields) {
     if (value[field] !== undefined && typeof value[field] !== "boolean") {
-      throw new Error("Dolgate 파일의 자격증명 정보가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidSecret"));
     }
   }
   if (
     value.keyBits !== undefined &&
     (typeof value.keyBits !== "number" || !Number.isFinite(value.keyBits))
   ) {
-    throw new Error("Dolgate 파일의 자격증명 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidSecret"));
   }
   if (
     value.privateKeyKdfRounds !== undefined &&
     (typeof value.privateKeyKdfRounds !== "number" ||
       !Number.isFinite(value.privateKeyKdfRounds))
   ) {
-    throw new Error("Dolgate 파일의 자격증명 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidSecret"));
   }
   return {
     ...value,
@@ -192,16 +193,16 @@ function parseSecret(value: unknown): ManagedSecretPayload {
 
 function parseAwsProfile(value: unknown): ManagedAwsProfilePayload {
   if (!isObject(value)) {
-    throw new Error("Dolgate 파일의 AWS 프로필 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidAwsProfile"));
   }
   if (value.region !== undefined && value.region !== null && typeof value.region !== "string") {
-    throw new Error("Dolgate 파일의 AWS 프로필 리전이 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidAwsProfileRegion"));
   }
   const base = {
-    id: requireString(value.id, "AWS 프로필 ID"),
-    name: requireString(value.name, "AWS 프로필 이름"),
+    id: requireString(value.id, "transfer.field.awsProfileId"),
+    name: requireString(value.name, "transfer.field.awsProfileName"),
     region: typeof value.region === "string" ? value.region : null,
-    updatedAt: requireString(value.updatedAt, "AWS 프로필 수정 시각"),
+    updatedAt: requireString(value.updatedAt, "transfer.field.awsProfileUpdatedAt"),
   };
   if (value.kind === "static") {
     return {
@@ -216,68 +217,68 @@ function parseAwsProfile(value: unknown): ManagedAwsProfilePayload {
       ...base,
       kind: "sso",
       ssoStartUrl: requireString(value.ssoStartUrl, "AWS SSO URL"),
-      ssoRegion: requireString(value.ssoRegion, "AWS SSO 리전"),
-      ssoAccountId: requireString(value.ssoAccountId, "AWS SSO 계정"),
-      ssoRoleName: requireString(value.ssoRoleName, "AWS SSO 역할"),
+      ssoRegion: requireString(value.ssoRegion, "transfer.field.ssoRegion"),
+      ssoAccountId: requireString(value.ssoAccountId, "transfer.field.ssoAccount"),
+      ssoRoleName: requireString(value.ssoRoleName, "transfer.field.ssoRole"),
     };
   }
   if (value.kind === "role") {
     return {
       ...base,
       kind: "role",
-      sourceProfileId: requireString(value.sourceProfileId, "AWS 원본 프로필 ID"),
-      roleArn: requireString(value.roleArn, "AWS 역할 ARN"),
+      sourceProfileId: requireString(value.sourceProfileId, "transfer.field.awsSourceProfileId"),
+      roleArn: requireString(value.roleArn, "transfer.field.awsRoleArn"),
     };
   }
-  throw new Error("Dolgate 파일의 AWS 프로필 종류가 올바르지 않습니다.");
+  throw new Error(t("transfer.error.invalidAwsProfileKind"));
 }
 
 function parseKnownHost(value: unknown): KnownHostRecord {
   if (!isObject(value)) {
-    throw new Error("Dolgate 파일의 known host 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidKnownHost"));
   }
   if (typeof value.port !== "number" || !Number.isInteger(value.port)) {
-    throw new Error("Dolgate 파일의 known host 포트가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidKnownHostPort"));
   }
   return {
     id: requireString(value.id, "known host ID"),
-    host: requireString(value.host, "known host 주소"),
+    host: requireString(value.host, "transfer.field.knownHostAddress"),
     port: value.port,
-    algorithm: requireString(value.algorithm, "known host 알고리즘"),
-    publicKeyBase64: requireString(value.publicKeyBase64, "known host 공개 키"),
+    algorithm: requireString(value.algorithm, "transfer.field.knownHostAlgorithm"),
+    publicKeyBase64: requireString(value.publicKeyBase64, "transfer.field.knownHostPublicKey"),
     fingerprintSha256: requireString(value.fingerprintSha256, "known host fingerprint"),
-    createdAt: requireString(value.createdAt, "known host 생성 시각"),
-    lastSeenAt: requireString(value.lastSeenAt, "known host 확인 시각"),
-    updatedAt: requireString(value.updatedAt, "known host 수정 시각"),
+    createdAt: requireString(value.createdAt, "transfer.field.knownHostCreatedAt"),
+    lastSeenAt: requireString(value.lastSeenAt, "transfer.field.knownHostLastSeenAt"),
+    updatedAt: requireString(value.updatedAt, "transfer.field.knownHostUpdatedAt"),
   };
 }
 
 function parseSnippet(value: unknown): SnippetRecord {
   if (!isObject(value)) {
-    throw new Error("Dolgate 파일의 snippet 정보가 올바르지 않습니다.");
+    throw new Error(t("transfer.error.invalidSnippet"));
   }
   return {
     id: requireString(value.id, "snippet ID"),
-    label: requireString(value.label, "snippet 이름"),
-    command: requireString(value.command, "snippet 명령"),
+    label: requireString(value.label, "transfer.field.snippetLabel"),
+    command: requireString(value.command, "transfer.field.snippetCommand"),
     keyword: typeof value.keyword === "string" ? value.keyword : null,
-    createdAt: requireString(value.createdAt, "snippet 생성 시각"),
-    updatedAt: requireString(value.updatedAt, "snippet 수정 시각"),
+    createdAt: requireString(value.createdAt, "transfer.field.snippetCreatedAt"),
+    updatedAt: requireString(value.updatedAt, "transfer.field.snippetUpdatedAt"),
   };
 }
 
 function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
   if (!isObject(value) || value.schemaVersion !== 1 || value.scope !== "hosts") {
-    throw new Error("지원하지 않는 Dolgate 내보내기 데이터입니다.");
+    throw new Error(t("transfer.error.unsupportedBundle"));
   }
-  const rootHostIds = requireArray(value.rootHostIds, "선택 호스트").map((id) =>
-    requireString(id, "선택 호스트 ID"),
+  const rootHostIds = requireArray(value.rootHostIds, "transfer.field.selectedHosts").map((id) =>
+    requireString(id, "transfer.field.selectedHostId"),
   );
-  const groups = requireArray(value.groups, "그룹").map(parseGroup);
-  const hosts = requireArray(value.hosts, "호스트").map(parseHost);
-  const secrets = requireArray(value.secrets, "자격증명").map(parseSecret);
+  const groups = requireArray(value.groups, "transfer.field.groups").map(parseGroup);
+  const hosts = requireArray(value.hosts, "transfer.field.hosts").map(parseHost);
+  const secrets = requireArray(value.secrets, "transfer.field.secrets").map(parseSecret);
   const knownHosts = requireArray(value.knownHosts, "known host").map(parseKnownHost);
-  const portForwards = requireArray(value.portForwards, "포트 포워딩").map((record) => {
+  const portForwards = requireArray(value.portForwards, "transfer.field.portForwards").map((record) => {
     if (
       !isObject(record) ||
       (record.transport !== "ssh" &&
@@ -285,25 +286,25 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
         record.transport !== "ecs-task" &&
         record.transport !== "container")
     ) {
-      throw new Error("Dolgate 파일의 포트 포워딩 종류가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidPortForwardKind"));
     }
     const normalized = normalizePortForwardRule(record);
     if (!normalized) {
-      throw new Error("Dolgate 파일의 포트 포워딩 정보가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidPortForward"));
     }
     return normalized;
   });
   const dnsOverrides = requireArray(value.dnsOverrides, "DNS override").map((record) => {
     if (!isObject(record) || (record.type !== "linked" && record.type !== "static")) {
-      throw new Error("Dolgate 파일의 DNS override 종류가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidDnsKind"));
     }
     const normalized = normalizeDnsOverrideRecord(record);
     if (!normalized) {
-      throw new Error("Dolgate 파일의 DNS override 정보가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidDnsOverride"));
     }
     return normalized;
   });
-  const awsProfiles = requireArray(value.awsProfiles, "AWS 프로필").map(parseAwsProfile);
+  const awsProfiles = requireArray(value.awsProfiles, "transfer.field.awsProfiles").map(parseAwsProfile);
   const snippets = requireArray(value.snippets, "snippet").map(parseSnippet);
   const totalRecords =
     groups.length +
@@ -315,25 +316,25 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     awsProfiles.length +
     snippets.length;
   if (totalRecords > MAX_DOLGATE_RECORDS) {
-    throw new Error("Dolgate 파일에 항목이 너무 많습니다.");
+    throw new Error(t("transfer.error.tooManyItems"));
   }
 
-  assertUniqueIds(groups, (record) => record.id, "그룹");
-  assertUniqueIds(hosts, (record) => record.id, "호스트");
-  assertUniqueIds(secrets, (record) => record.secretRef, "자격증명");
+  assertUniqueIds(groups, (record) => record.id, "transfer.field.groups");
+  assertUniqueIds(hosts, (record) => record.id, "transfer.field.hosts");
+  assertUniqueIds(secrets, (record) => record.secretRef, "transfer.field.secrets");
   assertUniqueIds(knownHosts, (record) => record.id, "known host");
-  assertUniqueIds(portForwards, (record) => record.id, "포트 포워딩");
+  assertUniqueIds(portForwards, (record) => record.id, "transfer.field.portForwards");
   assertUniqueIds(dnsOverrides, (record) => record.id, "DNS override");
-  assertUniqueIds(awsProfiles, (record) => record.id, "AWS 프로필");
+  assertUniqueIds(awsProfiles, (record) => record.id, "transfer.field.awsProfiles");
   assertUniqueIds(snippets, (record) => record.id, "snippet");
   if (new Set(rootHostIds).size !== rootHostIds.length) {
-    throw new Error("Dolgate 파일에 중복된 선택 호스트 ID가 있습니다.");
+    throw new Error(t("transfer.error.duplicateSelectedHostId"));
   }
 
   const bundle: DolgateHostBundleV1 = {
     schemaVersion: 1,
     scope: "hosts",
-    exportedAt: requireString(value.exportedAt, "내보내기 시각"),
+    exportedAt: requireString(value.exportedAt, "transfer.field.exportedAt"),
     rootHostIds,
     groups,
     hosts,
@@ -356,17 +357,17 @@ function assertBundleReferences(bundle: DolgateHostBundleV1): void {
   const portForwardIds = new Set(bundle.portForwards.map((record) => record.id));
   for (const id of bundle.rootHostIds) {
     if (!hostIds.has(id)) {
-      throw new Error("Dolgate 파일의 선택 호스트 참조가 올바르지 않습니다.");
+      throw new Error(t("transfer.error.invalidSelectedHostRef"));
     }
   }
   for (const host of bundle.hosts) {
     if (host.kind === "ssh") {
       if (host.secretRef && !secretIds.has(host.secretRef)) {
-        throw new Error(`${host.label}: 연결된 자격증명이 파일에 없습니다.`);
+        throw new Error(t("transfer.error.missingSecret", { label: host.label }));
       }
       for (const jumpId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
         if (!hostIds.has(jumpId)) {
-          throw new Error(`${host.label}: 연결된 점프 호스트가 파일에 없습니다.`);
+          throw new Error(t("transfer.error.missingJumpHost", { label: host.label }));
         }
       }
     }
@@ -375,45 +376,45 @@ function assertBundleReferences(bundle: DolgateHostBundleV1): void {
       host.awsProfileId &&
       !profileIds.has(host.awsProfileId)
     ) {
-      throw new Error(`${host.label}: 연결된 AWS 프로필이 파일에 없습니다.`);
+      throw new Error(t("transfer.error.missingAwsProfile", { label: host.label }));
     }
     if (
       "startupCommand" in host &&
       host.startupCommand?.type === "snippet" &&
       !snippetIds.has(host.startupCommand.snippetId)
     ) {
-      throw new Error(`${host.label}: 연결된 snippet이 파일에 없습니다.`);
+      throw new Error(t("transfer.error.missingSnippet", { label: host.label }));
     }
   }
   for (const profile of bundle.awsProfiles) {
     if (profile.kind === "role" && !profileIds.has(profile.sourceProfileId)) {
-      throw new Error(`${profile.name}: 연결된 원본 AWS 프로필이 파일에 없습니다.`);
+      throw new Error(t("transfer.error.missingSourceProfile", { label: profile.name }));
     }
   }
   for (const rule of bundle.portForwards) {
     if (!hostIds.has(rule.hostId)) {
-      throw new Error(`${rule.label}: 연결된 호스트가 파일에 없습니다.`);
+      throw new Error(t("transfer.error.missingRuleHost", { label: rule.label }));
     }
   }
   for (const record of bundle.dnsOverrides) {
     if (record.type === "linked" && !portForwardIds.has(record.portForwardRuleId)) {
-      throw new Error(`${record.hostname}: 연결된 포트 포워딩이 파일에 없습니다.`);
+      throw new Error(t("transfer.error.missingDnsRule", { label: record.hostname }));
     }
   }
 }
 
 function decodeJsonRecord<T>(record: StoredEncryptedValue | undefined, label: string): T {
   if (!record) {
-    throw new Error(`${label}의 보안 저장 값을 찾을 수 없습니다.`);
+    throw new Error(t("transfer.error.secureValueMissing", { label }));
   }
   const raw = decodeSecretFromStorage(record);
   if (!raw) {
-    throw new Error(`${label}의 보안 저장 값을 읽을 수 없습니다.`);
+    throw new Error(t("transfer.error.secureValueUnreadable", { label }));
   }
   try {
     return JSON.parse(raw) as T;
   } catch {
-    throw new Error(`${label}의 저장 값이 손상되었습니다.`);
+    throw new Error(t("transfer.error.secureValueCorrupt", { label }));
   }
 }
 
@@ -423,20 +424,20 @@ export function buildDolgateHostBundle(
 ): DolgateHostBundleV1 {
   const rootHostIds = [...new Set(requestedHostIds)];
   if (rootHostIds.length === 0) {
-    throw new Error("내보낼 호스트를 선택해 주세요.");
+    throw new Error(t("transfer.error.selectHostRequired"));
   }
   const hostsById = new Map(state.data.hosts.map((record) => [record.id, record]));
   const includedHostIds = new Set<string>();
   const collectHost = (hostId: string, visiting: Set<string>) => {
     const host = hostsById.get(hostId);
     if (!host) {
-      throw new Error("선택한 호스트를 찾을 수 없습니다. 목록을 새로고침해 주세요.");
+      throw new Error(t("transfer.error.selectedHostMissing"));
     }
     if (includedHostIds.has(hostId)) {
       return;
     }
     if (visiting.has(hostId)) {
-      throw new Error(`${host.label}: 점프 호스트 연결에 순환 참조가 있습니다.`);
+      throw new Error(t("transfer.error.jumpHostCycle", { label: host.label }));
     }
     visiting.add(hostId);
     if (host.kind === "ssh") {
@@ -488,7 +489,7 @@ export function buildDolgateHostBundle(
       return false;
     }
     if (visiting.has(profileId)) {
-      throw new Error("AWS 역할 프로필 연결에 순환 참조가 있습니다.");
+      throw new Error(t("transfer.error.awsRoleCycle"));
     }
     const metadata = profileMetadataById.get(profileId);
     const storedProfile = state.secure.managedAwsProfilesById[profileId];
@@ -542,7 +543,7 @@ export function buildDolgateHostBundle(
       ),
     );
     if (payload.secretRef !== secretRef) {
-      throw new Error("자격증명 ID와 저장 값이 일치하지 않습니다.");
+      throw new Error(t("transfer.error.secretIdMismatch"));
     }
     return payload;
   });
@@ -550,7 +551,7 @@ export function buildDolgateHostBundle(
   const snippets = [...snippetIds].map((id) => {
     const snippet = snippetsById.get(id);
     if (!snippet) {
-      throw new Error("연결된 startup snippet을 찾을 수 없습니다.");
+      throw new Error(t("transfer.error.startupSnippetMissing"));
     }
     return snippet;
   });
@@ -681,7 +682,7 @@ export function buildHostTransferImportPlan(
         name = `${base}-${suffix}`;
         suffix += 1;
       }
-      warnings.push(`AWS 프로필 ${record.name}은(는) ${name}(으)로 이름을 바꿨습니다.`);
+      warnings.push(t("transfer.error.awsProfileRenamed", { from: record.name, to: name }));
     }
     usedProfileNames.add(name);
     profileNameById.set(record.id, name);
@@ -754,7 +755,7 @@ export function buildHostTransferImportPlan(
         return true;
       }
       recordSkip("dnsOverrides");
-      warnings.push(`${record.hostname} DNS override가 이미 있어 가져오지 않았습니다.`);
+      warnings.push(t("transfer.error.dnsOverrideSkipped", { hostname: record.hostname }));
       return false;
     })
     .map((record) => ({ ...record, updatedAt: now }));
@@ -779,11 +780,11 @@ export function buildHostTransferImportPlan(
   for (const host of hosts) {
     if (host.kind === "ssh") {
       if (host.secretRef && !availableSecretIds.has(host.secretRef)) {
-        throw new Error(`${host.label}: 가져올 자격증명 참조를 확인할 수 없습니다.`);
+        throw new Error(t("transfer.error.unresolvedSecretRef", { label: host.label }));
       }
       for (const jumpId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
         if (!availableHostIds.has(jumpId)) {
-          throw new Error(`${host.label}: 가져올 점프 호스트 참조를 확인할 수 없습니다.`);
+          throw new Error(t("transfer.error.unresolvedJumpHostRef", { label: host.label }));
         }
       }
     }
@@ -792,29 +793,29 @@ export function buildHostTransferImportPlan(
       host.awsProfileId &&
       !availableProfileIds.has(host.awsProfileId)
     ) {
-      throw new Error(`${host.label}: 가져올 AWS 프로필 참조를 확인할 수 없습니다.`);
+      throw new Error(t("transfer.error.unresolvedAwsProfileRef", { label: host.label }));
     }
     if (
       "startupCommand" in host &&
       host.startupCommand?.type === "snippet" &&
       !availableSnippetIds.has(host.startupCommand.snippetId)
     ) {
-      throw new Error(`${host.label}: 가져올 snippet 참조를 확인할 수 없습니다.`);
+      throw new Error(t("transfer.error.unresolvedSnippetRef", { label: host.label }));
     }
   }
   for (const profile of awsProfiles) {
     if (profile.kind === "role" && !availableProfileIds.has(profile.sourceProfileId)) {
-      throw new Error(`${profile.name}: 원본 AWS 프로필 참조를 확인할 수 없습니다.`);
+      throw new Error(t("transfer.error.unresolvedSourceProfileRef", { label: profile.name }));
     }
   }
   for (const rule of portForwards) {
     if (!availableHostIds.has(rule.hostId)) {
-      throw new Error(`${rule.label}: 가져올 호스트 참조를 확인할 수 없습니다.`);
+      throw new Error(t("transfer.error.unresolvedRuleHostRef", { label: rule.label }));
     }
   }
   for (const record of dnsOverrides) {
     if (record.type === "linked" && !availablePortIds.has(record.portForwardRuleId)) {
-      throw new Error(`${record.hostname}: 포트 포워딩 참조를 확인할 수 없습니다.`);
+      throw new Error(t("transfer.error.unresolvedDnsRuleRef", { label: record.hostname }));
     }
   }
 
@@ -938,7 +939,7 @@ export class HostTransferService {
     this.pruneSnapshots();
     const snapshot = this.importSnapshots.get(snapshotId);
     if (!snapshot) {
-      throw new Error("가져오기 상태가 만료되었습니다. 파일을 다시 열어 주세요.");
+      throw new Error(t("transfer.error.importStateExpired"));
     }
     try {
       const plan = buildHostTransferImportPlan(snapshot.bundle, this.storage.getState());

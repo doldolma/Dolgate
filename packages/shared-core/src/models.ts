@@ -15,6 +15,10 @@ export type SerialFlowControl = 'none' | 'xon-xoff' | 'rts-cts' | 'dsr-dtr';
 export type SerialLineEnding = 'none' | 'cr' | 'lf' | 'crlf';
 export type SerialControlAction = 'break' | 'set-dtr' | 'set-rts';
 export type AppTheme = 'system' | 'light' | 'dark';
+
+// UI 언어 선택. 'system' 은 OS 언어를 따르고(한국어면 한국어, 그 외 영어),
+// 'ko'/'en' 은 사용자가 명시적으로 고른 언어다.
+export type AppLanguage = 'system' | 'ko' | 'en';
 export type TerminalThemeId =
   | 'dolssh-dark'
   | 'dolssh-light'
@@ -1047,6 +1051,8 @@ export type HomeHostViewMode = 'grid' | 'list';
 
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
+  /** UI 언어. 생략/undefined 는 'system'(OS 언어 따르기). */
+  language?: AppLanguage;
   homeHostViewMode?: HomeHostViewMode;
   sftpBrowserColumnWidths: SftpBrowserColumnWidths;
   sftpConflictPolicy?: SftpConflictPolicy;

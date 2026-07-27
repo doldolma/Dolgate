@@ -142,6 +142,7 @@ import { createContainersServices } from "../services/containers";
 import { createNetworkServices } from "../services/network";
 import { createSessionServices } from "../services/session";
 import { createSftpServices } from "../services/sftp";
+import { t } from '../../i18n';
 
 export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
   const { api, set, get } = deps;
@@ -395,7 +396,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     dismissPendingHostKeyPrompt: () => {
             const pending = get().pendingHostKeyPrompt;
             if (pending?.action.kind === "containerShell" && pending.sessionId) {
-              const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
+              const message = t('networkSlice.hostKeyCancelled', { label: pending.probe.hostLabel });
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });
@@ -404,7 +405,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               return;
             }
             if (pending?.sessionId) {
-              const message = `${pending.probe.hostLabel} 호스트 키 확인이 취소되었습니다.`;
+              const message = t('networkSlice.hostKeyCancelled', { label: pending.probe.hostLabel });
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 import { IconButton } from '../../ui';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalPaneHeaderProps {
   sessionId: string;
@@ -36,6 +37,7 @@ export function TerminalPaneHeader({
   onSplitVertical,
   actions,
 }: TerminalPaneHeaderProps) {
+  const { t: translate } = useTranslation();
   return (
     <div
       className={cn(
@@ -74,7 +76,7 @@ export function TerminalPaneHeader({
           />
         ) : null}
         <IconButton
-          aria-label={`${title} 세션 종료`}
+          aria-label={translate('paneHeader.closeSession', { title })}
           tone="ghost"
           size="sm"
           className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
@@ -102,14 +104,15 @@ export function TerminalSplitButtons({
   onSplitHorizontal,
   onSplitVertical,
 }: TerminalSplitButtonsProps) {
+  const { t: translate } = useTranslation();
   const stop = (event: { stopPropagation: () => void }) => {
     event.stopPropagation();
   };
   return (
     <>
       <IconButton
-        aria-label="좌우로 분할"
-        title="좌우 분할 (Ctrl-b %)"
+        aria-label={translate('paneHeader.splitHorizontalAria')}
+        title={translate('paneHeader.splitHorizontalTitle')}
         tone="ghost"
         size="sm"
         className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"
@@ -123,8 +126,8 @@ export function TerminalSplitButtons({
         <span aria-hidden>│</span>
       </IconButton>
       <IconButton
-        aria-label="상하로 분할"
-        title='상하 분할 (Ctrl-b ")'
+        aria-label={translate('paneHeader.splitVerticalAria')}
+        title={translate('paneHeader.splitVerticalTitle')}
         tone="ghost"
         size="sm"
         className="h-[1.55rem] w-[1.55rem] rounded-[6px] text-[0.9rem] leading-none text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)]"

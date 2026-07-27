@@ -7,6 +7,8 @@
 // /proc/net/dev 의 바이트는 모두 부팅 이후 누적값이다. 그래서 이전 폴링 샘플과의 *차분*으로
 // 계산한다. 폴링을 어차피 주기적으로 하므로 왕복이 늘지 않는다(첫 샘플에서는 값이 없다).
 
+import { t } from '../i18n';
+
 /** 파서가 구분자로 쓰는 마커. 명령 출력에 섞일 일이 없도록 흔치 않은 형태로. */
 const SECTION = '@@dolgate';
 
@@ -404,12 +406,12 @@ export function formatUptime(seconds: number | null): string {
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   if (days > 0) {
-    return `${days}일 ${hours}시간`;
+    return t('hostMetrics.daysHours', { days, hours });
   }
   if (hours > 0) {
-    return `${hours}시간 ${minutes}분`;
+    return t('hostMetrics.hoursMinutes', { hours, minutes });
   }
-  return `${minutes}분`;
+  return t('hostMetrics.minutes', { minutes });
 }
 
 /** 상태바에서 색을 바꿀지 판단한다. 임계치를 넘을 때만 강조해 평소에는 조용하도록. */

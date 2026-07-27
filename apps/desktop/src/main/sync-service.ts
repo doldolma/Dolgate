@@ -43,6 +43,7 @@ import {
   extractApiErrorMessage,
   normalizeAuthInvalidErrorMessage,
 } from './auth-error-message';
+import { t } from './i18n';
 
 const RETRY_DELAY_MS = 30_000;
 
@@ -58,7 +59,7 @@ interface SyncTask {
 
 class StaleSyncLeaseError extends Error {
   constructor() {
-    super('동기화 작업의 계정 또는 볼트 세대가 변경되었습니다.');
+    super(t('sync.generationChanged'));
     this.name = 'StaleSyncLeaseError';
   }
 }
@@ -235,7 +236,7 @@ function decodeEncryptedPayload<T>(payload: string, keyBase64: string): T {
   } catch (error) {
     // GCM 인증 실패(잘못된 DEK) 등 — stale DEK 신호로 올려보내 재잠금을 유도한다.
     throw new SyncVaultDecodeError(
-      error instanceof Error ? error.message : '동기화 데이터를 복호화하지 못했습니다.',
+      error instanceof Error ? error.message : t('sync.decryptFailed'),
     );
   }
 }
@@ -250,7 +251,7 @@ async function toApiErrorMessage(response: Response, fallback: string): Promise<
     text.includes('<body>');
 
   if (looksLikeHtml) {
-    return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. (${response.status})`;
+    return t("sync.htmlResponse", { fallback, status: response.status });
   }
 
   const extracted = extractApiErrorMessage(text);
@@ -269,7 +270,9 @@ function isLikelyAuthError(response: Response, message: string): boolean {
     return true;
   }
 
-  return /token is expired|invalid claims|unauthorized|forbidden|jwt|로그인이 필요합니다|세션이 만료/i.test(message);
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
+  return /token is expired|invalid claims|unauthorized|forbidden|jwt|로그인이 필요합니다|sign-in is required|세션이 만료|session has expired/i.test(message);
 }
 
 async function toApiError(response: Response, fallback: string): Promise<Error> {
@@ -463,11 +466,11 @@ export class SyncService {
     }
 
     if (this.authService.getState().status === 'offline-authenticated') {
-      return this.pause('오프라인 모드에서는 동기화를 일시 중지합니다.');
+      return this.pause(t('sync.pausedOffline'));
     }
 
     if (!this.authService.isVaultReadyForSync()) {
-      return this.pause('동기화 암호를 입력하면 동기화를 시작합니다.');
+      return this.pause(t('sync.pausedNeedsVault'));
     }
 
     const lease = this.captureSyncLease();
@@ -590,14 +593,14 @@ export class SyncService {
           // 원인은 DEK 가 아니라 데이터 손상이다. 재잠금해 봐야 같은 DEK 를 다시 받을
           // 뿐이므로(무한 재입력 루프) 오류로 표시한다.
           return this.pause(
-            '동기화 데이터를 복호화할 수 없습니다. 데이터가 손상되었을 수 있습니다.',
+            t('sync.decryptCorrupt'),
           );
         }
         return this.pause(error.message);
       }
       this.patchState({
         status: 'error',
-        errorMessage: error instanceof Error ? error.message : '초기 동기화에 실패했습니다.',
+        errorMessage: error instanceof Error ? error.message : t('sync.initialFailed'),
         pendingPush: true
       });
       throw error;
@@ -625,11 +628,11 @@ export class SyncService {
     this.markPendingPush();
 
     if (this.authService.getState().status === 'offline-authenticated') {
-      return this.pause('오프라인 모드에서는 변경 내용을 로컬에 보관하고 나중에 동기화합니다.');
+      return this.pause(t('sync.pausedOfflineUpload'));
     }
 
     if (!this.authService.isVaultReadyForSync()) {
-      return this.pause('동기화 암호를 입력하면 변경 내용을 동기화합니다.');
+      return this.pause(t('sync.pausedNeedsVaultUpload'));
     }
 
     const lease = this.captureSyncLease();
@@ -690,7 +693,7 @@ export class SyncService {
           this.patchState({
             status: 'error',
             pendingPush: true,
-            errorMessage: error instanceof Error ? error.message : '동기화 업로드에 실패했습니다.'
+            errorMessage: error instanceof Error ? error.message : t('sync.uploadFailed')
           });
           this.scheduleRetry();
         }
@@ -851,7 +854,7 @@ export class SyncService {
       lease,
       new URL('/sync', lease.serverUrl),
       { headers },
-      '동기화 데이터 조회에 실패했습니다.',
+      t('sync.fetchFailed'),
     );
     if (response.status === 304) {
       return { payload: null, etag: this.lastSyncRevision };
@@ -885,7 +888,7 @@ export class SyncService {
         headers,
         body: JSON.stringify(payload)
       },
-      '동기화 업로드에 실패했습니다.',
+      t('sync.uploadFailed'),
     );
     // push 응답의 리비전은 "직전 pull 리비전 + 1"일 때만 저장한다. 그보다 크면 내 push
     // 이전에 다른 기기의 변경이 끼어 있다는 뜻 — 그대로 저장하면 다음 폴링이 304 로 그

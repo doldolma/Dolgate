@@ -3,6 +3,7 @@ import {
   getDesktopStateStorage,
   type StoredEncryptedValue,
 } from "./state-storage";
+import { t } from './i18n';
 
 const REFRESH_TOKEN_ACCOUNT = "auth:refresh-token";
 const insecureSecretStorageOverrideEnv =
@@ -11,7 +12,7 @@ const insecureSecretStorageOverrideEnv =
 export class SecureStorageUnavailableError extends Error {
   constructor() {
     super(
-      "이 환경에서는 안전한 저장소를 사용할 수 없어 secret을 저장할 수 없습니다.",
+      t('misc.secureStorageUnavailable'),
     );
     this.name = "SecureStorageUnavailableError";
   }

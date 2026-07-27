@@ -1,4 +1,5 @@
 import type { AiErrorPayload, AiFailureReason } from "../../shared/ai";
+import { t } from '../i18n';
 
 // AiService/어댑터 내부에서 정규화된 실패를 던질 때 쓰는 에러.
 export class AiRequestError extends Error {
@@ -49,10 +50,10 @@ export function normalizeAiError(error: unknown): AiErrorPayload {
   }
 
   if (name === "APIUserAbortError" || name === "AbortError") {
-    return { reason: "timeout", message: "요청이 취소되었거나 시간이 초과되었습니다." };
+    return { reason: "timeout", message: t('providerError.cancelledOrTimeout') };
   }
   if (name === "APIConnectionTimeoutError" || (code && TIMEOUT_CODES.has(code))) {
-    return { reason: "timeout", message: "요청 시간이 초과되었습니다. baseUrl·포트·네트워크를 확인하세요." };
+    return { reason: "timeout", message: t('providerError.timeout') };
   }
   // 두 SDK 모두 진짜 연결 실패는 APIConnectionError 로 감싸므로, name==="TypeError" 를
   // 통째로 network 로 보지 않는다(응답 파싱/shape 버그를 network 로 가려버림).
@@ -65,23 +66,23 @@ export function normalizeAiError(error: unknown): AiErrorPayload {
     const hint = code ? ` (${code})` : "";
     return {
       reason: "network",
-      message: `프로바이더에 연결하지 못했습니다${hint}. baseUrl·포트·네트워크를 확인하세요.`,
+      message: t('providerError.connectFailed', { hint }),
     };
   }
   if (typeof status === "number") {
     if (status === 401 || status === 403) {
-      return { reason: "auth", message: "인증에 실패했습니다. API 키를 확인하세요." };
+      return { reason: "auth", message: t('providerError.authFailed') };
     }
     if (status === 404) {
       return {
         reason: "model-not-found",
-        message: "모델 또는 엔드포인트를 찾을 수 없습니다(baseUrl 에 /v1 경로가 필요한지 확인).",
+        message: t('providerError.notFound'),
       };
     }
     if (status === 429 || status >= 500) {
       return {
         reason: "server",
-        message: `프로바이더 오류(${status})가 발생했습니다. 잠시 후 다시 시도하세요.`,
+        message: t('providerError.providerStatus', { status }),
       };
     }
     if (status === 400 || status === 422) {
@@ -90,16 +91,19 @@ export function normalizeAiError(error: unknown): AiErrorPayload {
         return {
           reason: "invalid-response",
           message:
-            "모델이 이미지 입력을 지원하지 않는 것 같습니다. 텍스트만 다시 보내거나 설정에서 비전 지원 모델로 바꿔 주세요.",
+            t('providerError.noVision'),
         };
       }
-      return { reason: "invalid-response", message: "요청이 거부되었습니다. 모델·설정을 확인하세요." };
+      return { reason: "invalid-response", message: t('providerError.rejected') };
     }
   }
 
   // 사유 미상: 안전하게 요약한 원인을 메시지에 포함해 진단을 돕는다.
   const detail = summarize(name, code, rawMessage);
-  return { reason: "network", message: `요청에 실패했습니다${detail ? `: ${detail}` : ""}` };
+  return {
+    reason: "network",
+    message: t('providerError.requestFailed', { detail: detail ? `: ${detail}` : "" }),
+  };
 }
 
 function extractStatus(error: unknown): number | undefined {

@@ -22,6 +22,7 @@ import {
   X,
 } from '../../ui/icons';
 import type { AiToolRun } from '../../store/types';
+import { useTranslation } from 'react-i18next';
 
 interface AiChatPanelProps {
   sessionId: string;
@@ -59,13 +60,14 @@ function hastToText(node: unknown): string {
 
 function CopyButton({
   text,
-  label = '복사',
+  label,
   className,
 }: {
   text: string;
   label?: string;
   className?: string;
 }) {
+  const { t: translate } = useTranslation();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -80,7 +82,7 @@ function CopyButton({
     <button
       type="button"
       aria-label={label}
-      title={copied ? '복사됨' : label}
+      title={copied ? translate('aiChat.copied') : (label ?? translate('aiChat.copy'))}
       className={className}
       onClick={() => {
         void navigator.clipboard
@@ -120,12 +122,13 @@ function ToolRunRow({ run }: { run: AiToolRun }) {
 }
 
 function ThinkingIndicator() {
+  const { t: translate } = useTranslation();
   return (
     <span
       className="inline-flex items-center gap-1.5 text-[0.82rem] font-medium text-[var(--text-soft)]"
-      aria-label="생각중"
+      aria-label={translate('aiChat.thinking')}
     >
-      <span>생각중</span>
+      <span>{translate('aiChat.thinking')}</span>
       <span className="inline-flex w-5 items-center gap-0.5" aria-hidden>
         <span
           className="h-1 w-1 rounded-full bg-current opacity-70 animate-bounce"
@@ -145,6 +148,7 @@ function ThinkingIndicator() {
 }
 
 export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
+  const { t: translate } = useTranslation();
   const conversation = useAppStore((state) => state.aiConversations[sessionId]);
   const aiEnabled = useAppStore((state) => state.settings.ai?.enabled ?? false);
   const sendAiMessage = useAppStore((state) => state.sendAiMessage);
@@ -313,7 +317,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
       />
       {isDropActive ? (
         <div className="pointer-events-none absolute inset-0 z-[3] flex items-center justify-center rounded-[4px] border-2 border-dashed border-[var(--accent-strong)] bg-[color-mix(in_srgb,var(--accent-strong)_8%,transparent)] text-[0.85rem] font-medium text-[var(--accent-strong)]">
-          첨부하려면 놓으세요
+          {translate('aiChat.dropToAttach')}
         </div>
       ) : null}
 
@@ -327,13 +331,13 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
             className="rounded-[6px] px-2 py-1 text-[0.8rem] text-[var(--text-soft)] hover:bg-[var(--surface-strong)]"
             onClick={() => clearAiConversation(sessionId)}
           >
-            지우기
+            {translate('aiChat.clear')}
           </button>
           <button
             type="button"
             className="rounded-[6px] px-2 py-1 text-[0.8rem] text-[var(--text-soft)] hover:bg-[var(--surface-strong)]"
             onClick={() => toggleAiPanel(sessionId)}
-            aria-label="AI 패널 닫기"
+            aria-label={translate('aiChat.closePanel')}
           >
             ✕
           </button>
@@ -346,18 +350,18 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
       >
         {!aiEnabled ? (
           <div className="flex flex-col items-start gap-2 text-[0.85rem] text-[var(--text-soft)]">
-            <p>AI 어시스턴트가 꺼져 있습니다.</p>
+            <p>{translate('aiChat.disabled')}</p>
             <button
               type="button"
               className="font-medium text-[var(--accent-strong)] hover:underline"
               onClick={() => openSettingsSection('ai')}
             >
-              설정 → AI에서 활성화 ↗
+              {translate('aiChat.enableLink')}
             </button>
           </div>
         ) : messages.length === 0 && !streaming ? (
           <p className="text-[0.85rem] text-[var(--text-soft)]">
-            무엇이든 물어보세요. 터미널 최근 출력이 자동으로 함께 전달됩니다.
+            {translate('aiChat.intro')}
           </p>
         ) : null}
 
@@ -375,7 +379,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                         <img
                           key={attachmentIndex}
                           src={`data:${attachment.mediaType};base64,${attachment.dataBase64}`}
-                          alt={attachment.name ?? '첨부 이미지'}
+                          alt={attachment.name ?? translate('aiChat.attachmentAlt')}
                           className="max-h-32 max-w-full rounded-[6px] border border-[var(--border)] object-cover"
                         />
                       ) : (
@@ -411,10 +415,10 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                       aria-hidden
                     />
                     <Wrench className="h-3 w-3 shrink-0" aria-hidden />
-                    <span>작업 내역</span>
+                    <span>{translate('aiChat.toolRuns')}</span>
                     {toolRunCount > 0 ? (
                       <span className="rounded-full bg-[var(--surface-strong)] px-1.5 py-0.5 text-[0.68rem]">
-                        도구 {toolRunCount}개
+                        {translate('aiChat.toolCount', { count: toolRunCount })}
                       </span>
                     ) : null}
                   </summary>
@@ -490,7 +494,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
               </div>
               <CopyButton
                 text={message.content}
-                label="응답 복사"
+                label={translate('aiChat.copyResponse')}
                 className="inline-flex items-center rounded-[6px] p-1 text-[var(--text-soft)] opacity-0 transition-opacity hover:bg-[var(--surface-strong)] hover:text-[var(--text)] group-hover/msg:opacity-100"
               />
             </div>
@@ -528,7 +532,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           <div className="flex flex-col gap-2.5 self-stretch rounded-[12px] border border-[color-mix(in_srgb,var(--warning-text)_26%,var(--border))] bg-[var(--warning-bg)] p-3">
             <div className="flex items-center gap-1.5 text-[0.78rem] font-semibold text-[var(--warning-text)]">
               <span aria-hidden>⚠</span>
-              <span>명령 실행 승인</span>
+              <span>{translate('aiChat.approveCommand')}</span>
             </div>
             <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-[8px] border border-[var(--border)] bg-[var(--surface-strong)] px-2.5 py-2 font-mono text-[0.8rem] leading-snug text-[var(--text)]">
               {pendingApproval.command}
@@ -541,7 +545,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                 checked={rememberApproval}
                 onChange={(event) => setRememberApproval(event.target.checked)}
               />
-              <span>이 세션에서 자동 승인</span>
+              <span>{translate('aiChat.autoApprove')}</span>
             </label>
             <div className="mt-0.5 grid grid-cols-2 gap-2">
               <Button
@@ -551,7 +555,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                   setRememberApproval(false);
                 }}
               >
-                거부
+                {translate('aiChat.reject')}
               </Button>
               <Button
                 variant="primary"
@@ -560,7 +564,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                   setRememberApproval(false);
                 }}
               >
-                승인
+                {translate('aiChat.approve')}
               </Button>
             </div>
           </div>
@@ -582,7 +586,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                   {attachment.kind === 'image' ? (
                     <img
                       src={`data:${attachment.mediaType};base64,${attachment.dataBase64}`}
-                      alt={attachment.name ?? '첨부 이미지'}
+                      alt={attachment.name ?? translate('aiChat.attachmentAlt')}
                       className="h-12 w-12 rounded-[8px] border border-[var(--border)] object-cover"
                     />
                   ) : (
@@ -593,7 +597,7 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
                   )}
                   <button
                     type="button"
-                    aria-label="첨부 제거"
+                    aria-label={translate('aiChat.removeAttachment')}
                     className="absolute -right-1.5 -top-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] hover:text-[var(--danger-text)]"
                     onClick={() => removeAttachment(index)}
                   >
@@ -608,11 +612,11 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           ) : null}
           <textarea
             ref={inputRef}
-            aria-label="AI 메시지 입력"
+            aria-label={translate('aiChat.inputLabel')}
             rows={1}
             value={input}
             disabled={!aiEnabled}
-            placeholder="메시지 입력"
+            placeholder={translate('aiChat.inputPlaceholder')}
             className="max-h-[200px] min-h-[56px] w-full resize-none border-0 bg-transparent py-4 pl-12 pr-14 text-[0.9rem] leading-normal text-[var(--text)] outline-none placeholder:text-[var(--text-soft)] disabled:cursor-default disabled:opacity-60"
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -656,8 +660,8 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           />
           <button
             type="button"
-            aria-label="파일 첨부"
-            title="파일 첨부"
+            aria-label={translate('aiChat.attachFile')}
+            title={translate('aiChat.attachFile')}
             disabled={!aiEnabled}
             className="absolute bottom-3 left-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-elevated)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] disabled:cursor-default disabled:opacity-60"
             onClick={() => fileInputRef.current?.click()}
@@ -667,8 +671,8 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           {streaming ? (
             <button
               type="button"
-              aria-label="응답 생성 정지"
-              title="정지"
+              aria-label={translate('aiChat.stopAria')}
+              title={translate('aiChat.stop')}
               className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-soft)] transition-colors hover:bg-[var(--surface-elevated)] hover:text-[var(--danger-text)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]"
               onClick={() => cancelAiMessage(sessionId)}
             >
@@ -677,8 +681,8 @@ export function AiChatPanel({ sessionId, stableId, width }: AiChatPanelProps) {
           ) : (
             <button
               type="button"
-              aria-label="메시지 전송"
-              title="전송"
+              aria-label={translate('aiChat.sendAria')}
+              title={translate('aiChat.send')}
               className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--accent-strong)_76%,black_24%)] bg-[var(--accent-strong)] text-[var(--accent-contrast)] transition-colors hover:bg-[color-mix(in_srgb,var(--accent-strong)_92%,white_8%)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)] disabled:cursor-default disabled:border-[var(--border)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-soft)]"
               onClick={handleSend}
               disabled={!aiEnabled || (!input.trim() && pendingAttachments.length === 0)}

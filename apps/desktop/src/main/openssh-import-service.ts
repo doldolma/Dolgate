@@ -11,6 +11,7 @@ import type {
   OpenSshSourceOrigin,
   OpenSshSourceSummary,
 } from '@shared';
+import { t } from './i18n';
 
 interface OpenSshConfigLine {
   filePath: string;
@@ -340,7 +341,7 @@ async function flattenConfigLines(
   if (stack.has(realFilePath)) {
     warnings.push(
       toWarning(
-        `${absoluteFilePath}에서 순환 Include를 건너뛰었습니다.`,
+        t('opensshSvc.circularInclude', { path: absoluteFilePath }),
         'include-cycle',
         absoluteFilePath,
       ),
@@ -357,7 +358,7 @@ async function flattenConfigLines(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `OpenSSH 설정 파일을 읽지 못했습니다: ${absoluteFilePath} (${reason})`,
+      t('opensshSvc.readFailed', { path: absoluteFilePath, reason }),
     );
   }
 
@@ -382,7 +383,7 @@ async function flattenConfigLines(
           if (matches.length === 0) {
             warnings.push(
               toWarning(
-                `Include 패턴과 일치하는 파일이 없습니다: ${includePattern}`,
+                t('opensshSvc.includeNoMatch', { pattern: includePattern }),
                 'include-not-found',
                 absoluteFilePath,
                 lineNumber,
@@ -406,7 +407,7 @@ async function flattenConfigLines(
                 toWarning(
                   error instanceof Error
                     ? error.message
-                    : `포함된 설정 파일을 읽지 못했습니다: ${match}`,
+                    : t('opensshSvc.includedReadFailed', { path: match }),
                   'include-read-failed',
                   absoluteFilePath,
                   lineNumber,
@@ -444,7 +445,7 @@ function finalizeHostBlock(
   if (!username) {
     warnings.push(
       toWarning(
-        `"${hostBlock.alias}" 항목은 User가 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
+        t('opensshSvc.noUser', { alias: hostBlock.alias }),
         'missing-user',
         hostBlock.sourceFilePath,
         hostBlock.sourceLine,
@@ -517,7 +518,7 @@ async function buildParsedSource(
         currentHostBlock = null;
         warnings.push(
           toWarning(
-            '구체적인 별칭이 없는 Host 블록은 가져오지 않았습니다.',
+            t('opensshSvc.noSpecificAlias'),
             'unsupported-host-pattern',
             line.filePath,
             line.lineNumber,
@@ -559,7 +560,7 @@ async function buildParsedSource(
       } else {
         warnings.push(
           toWarning(
-            `"${currentHostBlock.alias}"의 Port 값 "${directive.value.trim()}"는 잘못되어 무시했습니다.`,
+            t('opensshSvc.badPort', { alias: currentHostBlock.alias, port: directive.value.trim() }),
             'invalid-port',
             line.filePath,
             line.lineNumber,
@@ -660,7 +661,7 @@ export async function resolveOpenSshIdentityImport(
       return {
         kind: 'path-fallback',
         warning: toWarning(
-          `${path.basename(identityFilePath)} 키는 지원되지 않는 형식이라 가져오지 않았습니다.`,
+          t('opensshSvc.keyUnsupported', { file: path.basename(identityFilePath) }),
           'unsupported-key-format',
           identityFilePath,
         ),
@@ -675,7 +676,7 @@ export async function resolveOpenSshIdentityImport(
     return {
       kind: 'path-fallback',
       warning: toWarning(
-        `${path.basename(identityFilePath)} 키 파일을 읽지 못해 가져오지 않았습니다.`,
+        t('opensshSvc.keyReadFailed', { file: path.basename(identityFilePath) }),
         'identity-read-failed',
         identityFilePath,
       ),
@@ -736,7 +737,7 @@ export class OpenSshImportService {
     const snapshot = this.snapshots.get(input.snapshotId);
     if (!snapshot) {
       throw new Error(
-        'OpenSSH 가져오기 상태를 찾을 수 없습니다. 다이얼로그를 다시 열어 주세요.',
+        t('opensshSvc.stateMissing'),
       );
     }
 

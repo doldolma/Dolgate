@@ -1,0 +1,2971 @@
+{
+  "menu": {
+    "file": "File",
+    "newWindow": "New Window",
+    "tabs": "Tabs",
+    "nextTab": "Next Tab",
+    "prevTab": "Previous Tab",
+    "nthTab": "Tab {{index}}",
+    "lastTab": "Last Tab",
+    "reopenClosedTab": "Reopen Closed Tab",
+    "window": "Window",
+    "closeTab": "Close Tab",
+    "closeWindow": "Close Window"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "apply": "Apply"
+  },
+  "login": {
+    "openBrowser": "Sign in with Browser",
+    "reopenBrowser": "Reopen Browser",
+    "syncingLatestData": "Syncing latest data…",
+    "startFailed": "Could not start the request.",
+    "cancelFailed": "Could not cancel the pending sign-in.",
+    "server": {
+      "openSettings": "Open login server settings",
+      "rootUrlHint": "Enter the server root address without a path.",
+      "reset": "Restore default server",
+      "resetFailed": "Could not restore the default login server.",
+      "saveFailed": "Could not save the login server address."
+    }
+  },
+  "settings": {
+    "theme": {
+      "system": {
+        "description": "Follows your device light/dark setting."
+      },
+      "light": {
+        "description": "Bright background with crisp contrast."
+      },
+      "dark": {
+        "description": "Dark background to reduce glare."
+      }
+    },
+    "passkey": {
+      "loadFailed": "Could not load your passkeys.",
+      "addFailed": "Could not start adding a passkey.",
+      "deleteFailed": "Could not delete the passkey.",
+      "title": "Passkeys",
+      "intro": "Sign in without a password using biometrics or a security key. Choose “Add passkey” to finish registration in your browser, then it appears in this list.",
+      "unnamed": "Passkey",
+      "registeredAt": "Added {{date}}",
+      "delete": "Delete",
+      "loading": "Loading…",
+      "empty": "No passkeys registered.",
+      "add": "Add passkey",
+      "refresh": "Refresh"
+    },
+    "accountPassword": {
+      "changed": "Your sign-in password has been changed.",
+      "set": "Set password",
+      "saveFailed": "Could not save the sign-in password.",
+      "changeTitle": "Change account password",
+      "setTitle": "Set account password",
+      "changeDescription": "Confirm your current password, then set a new one.",
+      "setDescription": "Once set, you can sign in with your email and password.",
+      "separateNote": "This is separate from your sync passphrase.",
+      "current": "Current password",
+      "new": "New password",
+      "confirm": "Confirm new password",
+      "currentAria": "Current account password",
+      "newAria": "New account password",
+      "confirmAria": "Confirm new account password",
+      "saving": "Saving…",
+      "change": "Change password"
+    },
+    "vault": {
+      "passphraseChanged": "Your sync passphrase has been changed.",
+      "passphraseChangeFailed": "Could not change the sync passphrase.",
+      "resetFailed": "Could not reset the sync vault.",
+      "title": "Sync passphrase",
+      "isSet": "A sync passphrase is set. Keep it somewhere safe so you don't lose it.",
+      "changePassphrase": "Change passphrase",
+      "forgot": "Forgot your sync passphrase? Reset",
+      "changeDialog": {
+        "title": "Change sync passphrase",
+        "description": "Confirm your current passphrase, then set a new one.",
+        "current": "Current sync passphrase",
+        "new": "New sync passphrase",
+        "confirm": "Confirm new sync passphrase",
+        "submitting": "Changing…",
+        "submit": "Change passphrase"
+      },
+      "resetDialog": {
+        "title": "Reset sync",
+        "warning": "<strong>All synced data on the server will be deleted</strong> and you'll be taken to set a new sync passphrase. This cannot be undone.",
+        "localNote": "Local data on this device (hosts, secrets, snippets) is kept and will be re-encrypted and uploaded once you set a new passphrase. Other devices will need the new passphrase at their next sync, and anything that existed only on the server cannot be recovered.",
+        "submitting": "Resetting…",
+        "submit": "Delete server data and start over"
+      }
+    },
+    "preferences": {
+      "scrollbackHint": "Number of terminal history lines to keep.",
+      "lineHeightHint": "Adjusts spacing between lines.",
+      "letterSpacingHint": "Adds a little extra space between characters.",
+      "contrastHint": "Automatically corrects low-contrast color pairs.",
+      "replayRetentionHint": "Number of finished session replays to keep locally.",
+      "replayUsage": " Currently {{count}} · {{size}} used.",
+      "webglDescription": "Falls back to the default renderer where WebGL is unsupported.",
+      "completionDescription": "Completes from PATH and history plus Fig specs and generators. (Limited under SSM)",
+      "optionAsMetaDescription": "Use the Option key as the terminal meta key on macOS.",
+      "tmuxPrefixLabel": "Tmux prefix key",
+      "tmuxPrefixHint": "Maps the key after the prefix to native tmux actions in control mode.",
+      "shellIntegrationRecoveryLabel": "Auto-recover shell integration in subshells",
+      "shellIntegrationRecoveryDescription": "Re-applies shell integration (command status, current path) when you enter a subshell such as nested ssh, sudo su, or docker exec.",
+      "hostMetricsLabel": "Show host status",
+      "hostMetricsDescription": "Shows the server's CPU, memory, disk, and network at the bottom of the terminal. (Not supported on SSM shell or mosh)",
+      "commandNotifyLabel": "Command completion notifications",
+      "commandNotifyDescription": "Notifies you through the OS when a long-running or failed command finishes.",
+      "notifyThresholdLabel": "Notify after (seconds)",
+      "notifyThresholdHint": "Notifies when a command that ran at least this long finishes.",
+      "notifyOnlyInactiveLabel": "Only notify when inactive",
+      "notifyOnlyInactiveDescription": "Stays quiet while you are looking at the app with that tab active.",
+      "notifyFailuresLabel": "Always notify on failure",
+      "notifyFailuresDescription": "Non-zero exit codes notify regardless of duration.",
+      "notifySoundLabel": "Notification sound",
+      "notifySoundDescription": "Plays a sound with the notification.",
+      "autoReconnectLabel": "Auto-reconnect",
+      "autoReconnectDescription": "Reconnects automatically when a connection drops unexpectedly (SSH/Warpgate terminals, SFTP, port forwarding).",
+      "maxRetriesLabel": "Maximum retries",
+      "maxRetriesHint": "Switches to manual reconnect after this many failures.",
+      "maxRetryDelayLabel": "Maximum retry interval (seconds)",
+      "maxRetryDelayHint": "Upper bound for the exponential backoff interval."
+    },
+    "account": {
+      "changePassword": "Change Password",
+      "setPassword": "Set Password",
+      "logout": "Sign Out",
+      "deleteAccount": "Delete Account"
+    },
+    "deleteAccount": {
+      "title": "Delete account",
+      "warning": "<strong>All data stored on the server will be permanently deleted immediately</strong> — synced hosts, secrets, snippets, and account details. This cannot be recovered, and other signed-in devices will be signed out shortly.",
+      "localNote": "Local data on this device (hosts, secrets, session replays, activity logs, AI keys) is deleted as well.",
+      "failed": "Could not delete the account.",
+      "submitting": "Deleting…",
+      "submit": "Delete"
+    },
+    "transfer": {
+      "editorMaxSizeHint": "Only text files up to this size can open in the built-in editor.",
+      "preserveMtimeDescription": "Applies the source modification time to the target file after transfer.",
+      "preserveModeDescription": "Applies the source permission bits to the target file when possible."
+    },
+    "language": {
+      "title": "Language",
+      "system": "System",
+      "systemDescription": "Follow the OS language — Korean if the system is Korean, otherwise English.",
+      "reopenNote": "Replay and share windows that are already open keep the previous language until reopened."
+    }
+  },
+  "sftp": {
+    "drives": {
+      "loadFailed": "Could not load the drive list.",
+      "loading": "Loading drives…",
+      "empty": "No drives available."
+    },
+    "toolbar": {
+      "newFolder": "New Folder",
+      "refreshing": "Refreshing…",
+      "refresh": "Refresh",
+      "reloading": "Reloading the listing…",
+      "disconnect": "Disconnect"
+    },
+    "entryMenu": {
+      "rename": "Rename",
+      "permissions": "Permissions",
+      "ownership": "Ownership",
+      "edit": "Edit",
+      "download": "Download",
+      "delete": "Delete"
+    },
+    "failure": {
+      "retry": "Try again",
+      "editSshConfig": "Edit SSH settings",
+      "copyDiagnostics": "Copy diagnostics",
+      "diagnosticsCopied": "Diagnostics copied to the clipboard.",
+      "diagnosticsCopyFailed": "Could not copy the diagnostics."
+    },
+    "hostPicker": {
+      "emptyNoHosts": "No hosts to show.",
+      "emptySearch": "No search results.",
+      "emptyGroup": "No hosts here yet.",
+      "hintNoHosts": "Add a remote host from Home, then check again.",
+      "hintSearch": "Clear the search or try a different name.",
+      "hintGroup": "Move to another group, or review your hosts from Home.",
+      "connecting": "Connecting",
+      "openSettings": "Open settings"
+    },
+    "connecting": {
+      "withHost": "Connecting to {{label}}…",
+      "generic": "Connecting over SFTP…",
+      "preparing": "Preparing the remote file listing."
+    },
+    "jobStatus": {
+      "queued": "Queued",
+      "running": "Transferring",
+      "paused": "Paused",
+      "cancelling": "Cancelling",
+      "completed": "Done",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "failureDetail": {
+      "more": "and {{count}} more",
+      "item": "Item: {{name}}",
+      "path": "Path: {{path}}",
+      "originalError": "Original error: {{message}}",
+      "error": "Error: {{message}}"
+    },
+    "transfer": {
+      "hideDetails": "Hide details",
+      "details": "Details",
+      "calculatingSpeed": "Measuring speed",
+      "cancelPending": "Processing the cancel request.",
+      "pausedNotice": "The transfer is paused.",
+      "pause": "Pause",
+      "resume": "Resume",
+      "cancelling": "Cancelling",
+      "retryFailedItems": "Retry failed items",
+      "retry": "Retry",
+      "toRight": "Send the left selection to the current folder on the right",
+      "toLeft": "Send the right selection to the current folder on the left",
+      "bothPanesRequired": "Available only when both panes are file browsers."
+    },
+    "conflict": {
+      "title": "A file with the same name already exists",
+      "remember": "Remember this choice",
+      "skip": "Skip",
+      "rename": "Save as a new name",
+      "overwrite": "Overwrite"
+    },
+    "permissions": {
+      "titleMultiple": "Permissions for {{count}} selected items",
+      "titleSingle": "Permissions for {{name}}"
+    },
+    "principal": {
+      "searchPlaceholder": "Search {{label}}",
+      "manualPlaceholder": "Enter {{label}} manually",
+      "loading": "Loading…",
+      "empty": "No results.",
+      "loadFailed": "Could not load the user/group list."
+    },
+    "ownership": {
+      "titleMultiple": "Ownership for {{count}} selected items",
+      "titleSingle": "Ownership for {{name}}",
+      "user": "User",
+      "group": "Group",
+      "recursive": "Apply to nested items",
+      "recursiveHint": "For folders, ownership of the files and folders inside is changed too.",
+      "failed": "Could not change the ownership."
+    },
+    "delete": {
+      "confirmSingle": "Delete \"{{name}}\"?",
+      "confirmMultiple": "Delete {{count}} selected items?",
+      "folderWarning": "Deleting a folder also deletes everything inside it.",
+      "failed": "Could not delete the selected items."
+    },
+    "prompt": {
+      "newFolderTitle": "New folder name",
+      "newFolderPlaceholder": "e.g. uploads",
+      "newFolderSubmit": "Create",
+      "renameTitle": "Rename",
+      "renamePlaceholder": "New name",
+      "renameSubmit": "Rename"
+    }
+  },
+  "portForward": {
+    "empty": {
+      "sshTitle": "No SSH forwarding rules saved yet.",
+      "awsTitle": "No AWS EC2 forwarding rules saved yet.",
+      "ecsTitle": "No ECS task tunnel rules saved yet.",
+      "dnsTitle": "No DNS overrides saved yet.",
+      "containerTitle": "No container tunnel rules saved yet.",
+      "sshDescription": "Press New SSH Forward to create your first SSH forwarding rule.",
+      "awsDescription": "Press New AWS EC2 Forward to create your first AWS EC2 forwarding rule.",
+      "ecsDescription": "Press New ECS Task Tunnel to create your first ECS task tunnel rule.",
+      "dnsDescription": "Press New DNS Override to add a hosts-based domain override.",
+      "containerDescription": "Press New Container Tunnel to create your first container tunnel rule."
+    },
+    "warpgate": {
+      "browserHint": "Finish the Warpgate login and approval in your browser and the app continues on its own.",
+      "reopenBrowser": "Reopen browser",
+      "manualTitle": "More input is needed.",
+      "manualHint": "This Warpgate challenge does not match the auto-fill format. Respond to the prompt below yourself.",
+      "fallbackInstruction": "Additional authentication is required.",
+      "continue": "Continue",
+      "authCodeNote": "The app handles verification code <code>{{code}}</code> automatically."
+    },
+    "error": {
+      "ecsServicesLoadFailed": "Could not load the ECS service list.",
+      "ecsServiceDetailsLoadFailed": "Could not load the ECS service details.",
+      "containersLoadFailed": "Could not load the container list.",
+      "containerDetailsLoadFailed": "Could not load the container details.",
+      "hostnameRequired": "Enter a valid host name.",
+      "ruleRequired": "Choose a forwarding rule to attach.",
+      "ipRequired": "Enter an IP address.",
+      "dnsSaveFailed": "Could not save the DNS override.",
+      "nameRequired": "Enter a name.",
+      "hostRequired": "Choose a host.",
+      "localPortInvalid": "Enter a valid local port.",
+      "serviceRequired": "Choose a service.",
+      "containerRequired": "Choose a container.",
+      "targetPortRequired": "Choose a target port.",
+      "ruleSaveFailed": "Could not save the forwarding rule.",
+      "containerNetworkRequired": "Choose a container network.",
+      "ssmLoopbackRequired": "The AWS SSM local address must be a loopback address.",
+      "targetPortInvalid": "Enter a valid target port.",
+      "remoteHostRequired": "Enter a remote host.",
+      "targetHostPortInvalid": "Enter a valid target host and port.",
+      "dnsEnableFailed": "Could not enable the DNS override.",
+      "dnsDisableFailed": "Could not disable the DNS override."
+    },
+    "waiting": {
+      "containerTunnel": "Waiting for the container tunnel to be approved.",
+      "containerRuntime": "Waiting for the container runtime connection to be approved.",
+      "containerLookup": "Waiting for approval to look up containers."
+    },
+    "form": {
+      "hostSearchPlaceholder": "Search name, address, profile, group, tag",
+      "networkWithIp": "{{name}} ({{ip}})",
+      "networkPendingIp": "{{name}} (waiting for IP)",
+      "autoLocalPortHint": "Assigns an available local port automatically.",
+      "autoLocalPortPlaceholder": "Automatic",
+      "containerDetailsLoading": "Loading the container details.",
+      "noTcpPortsTitle": "No TCP ports to choose from.",
+      "noTcpPortsDescription": "No forwardable TCP port was detected on this container.",
+      "noNetworkIpTitle": "No network IP available.",
+      "noNetworkIpDescription": "This container has no network information, so a tunnel rule cannot be saved.",
+      "networkIpHiddenTitle": "No network IP is visible right now.",
+      "networkIpHiddenHint": "The container may be stopped. You can still save the rule — the current IP is checked again on start.",
+      "ecsServicesLoading": "Loading the ECS service list.",
+      "ecsServiceDetailsLoading": "Loading the ECS service details.",
+      "noEcsServicesTitle": "No ECS services to import.",
+      "noEcsServicesDescription": "This cluster has no service usable for port forwarding.",
+      "noEcsContainersTitle": "No containers to choose from.",
+      "noEcsContainersDescription": "This service's task definition has no usable container."
+    }
+  },
+  "ai": {
+    "provider": {
+      "codex": "Codex (ChatGPT account)",
+      "openaiCompat": "OpenAI-compatible (OpenAI · Ollama · LM Studio · vLLM, …)"
+    },
+    "model": {
+      "autoLabel": "Auto (recommended)",
+      "autoDescription": "Picks the Codex-recommended model and follows updates automatically",
+      "autoDescriptionWithDefault": "Picks the Codex-recommended model automatically (currently {{model}})",
+      "gpt56sol": "Latest frontier agentic coding model",
+      "gpt56terra": "Balanced agentic coding model for everyday work",
+      "gpt56luna": "Fast, inexpensive agentic coding model",
+      "gpt55": "Frontier model for complex coding, research, and production (previous generation)",
+      "gpt54": "Strong model for everyday coding (previous generation)",
+      "gpt54mini": "Small, fast, and cheap — for simple coding tasks",
+      "currentValue": "Current setting — {{model}}",
+      "placeholderAnthropic": "claude-… (model id)",
+      "placeholderCompat": "gpt-4o-mini · llama3.1 …",
+      "listFromAccount": "Models available on your account (queried live from Codex).",
+      "listAfterLogin": "After signing in to Codex, the models available on your account are fetched live. The list below is the default.",
+      "autoFollowsRecommended": "The default, Auto, follows the model Codex recommends."
+    },
+    "usage": {
+      "weekly": "Weekly",
+      "days": "{{count}} days",
+      "hours": "{{count}} hours",
+      "minutes": "{{count}} minutes",
+      "resetInMinutes": "resets in about {{count}} min",
+      "resetInHours": "resets in about {{count}} h",
+      "resetInDays": "resets in about {{count}} days",
+      "windowLimit": "{{window}} limit",
+      "remaining": "{{percent}}% left",
+      "planRemaining": "Plan capacity left"
+    },
+    "error": {
+      "statusFailed": "Could not check the Codex status.",
+      "loginTimeout": "Timed out waiting for the sign-in. If you finished signing in, press Refresh status.",
+      "loginFailed": "Could not start the Codex sign-in.",
+      "reopenBrowserFailed": "Could not reopen the browser.",
+      "logoutFailed": "Codex sign-out failed.",
+      "testFailed": "The connection test failed."
+    },
+    "enable": {
+      "label": "Use the AI assistant",
+      "description": "Lets you use the AI helper inside sessions. API keys are stored only in this device's keychain and are never synced."
+    },
+    "baseUrl": {
+      "placeholder": "Enter the server URL — e.g. https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)",
+      "hint": "Server URL (required). e.g. https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)"
+    },
+    "anthropic": {
+      "accountLoginPlanned": "Claude account sign-in planned",
+      "accountLoginNote": "For now this connects to the Claude API with an API key. Once Anthropic officially supports Claude account sign-in for third-party apps, this will move to a Claude Agent SDK connection."
+    },
+    "codex": {
+      "accountLabel": "Codex account",
+      "checkingStatus": "Checking status…",
+      "signedIn": "Signed in",
+      "signInRequired": "Sign-in required.",
+      "waitingBrowser": "Waiting for the browser sign-in…",
+      "signInAgain": "Sign in again",
+      "signIn": "Sign in to Codex",
+      "reopenBrowser": "Reopen browser",
+      "logout": "Sign out",
+      "refreshStatus": "Refresh status",
+      "loginNote": "The button signs you in with your ChatGPT account in the browser. Credentials are stored in this app's own codex space and no API key is needed."
+    },
+    "context": {
+      "label": "Context window (tokens)",
+      "hint": "The context length loaded on the server (e.g. Ollama num_ctx). When the conversation and tool output exceed this budget, the oldest turns are dropped."
+    },
+    "apiKey": {
+      "placeholderSaved": "•••••••• (saved — enter a new key to replace it)",
+      "hintSaved": "The key is stored in this device's keychain (saved immediately, separate from Save settings).",
+      "hintOptional": "OpenAI-compatible local servers may not need a key.",
+      "testing": "Testing…",
+      "test": "Test connection",
+      "saveKey": "Save key",
+      "deleteKey": "Delete key",
+      "issueKey": "Get an API key ↗"
+    },
+    "test": {
+      "success": "Connected",
+      "failure": "Connection failed",
+      "detectedModels": "Models detected: {{models}}",
+      "detectedMore": " and {{count}} more"
+    },
+    "search": {
+      "section": "Web search",
+      "tavilyLabel": "Tavily search API key (optional)",
+      "tavilyPlaceholderSaved": "•••••••• (saved)",
+      "tavilyPlaceholder": "tvly-… (optional)",
+      "hint": "Web search and URL reading are on by default and use DuckDuckGo without a key. A Tavily key upgrades this to more reliable, higher-quality search.",
+      "issueKey": "Get a Tavily key ↗"
+    },
+    "save": {
+      "button": "Save settings",
+      "baseUrlRequired": "Enter a Base URL before saving.",
+      "unsaved": "You have unsaved changes. (Keys are saved separately above.)",
+      "saved": "Saved.",
+      "noChanges": "No changes"
+    }
+  },
+  "awsProfiles": {
+    "status": {
+      "lookupFailed": "Lookup failed",
+      "checking": "Checking",
+      "authenticated": "Authenticated",
+      "authRequired": "Auth required"
+    },
+    "import": {
+      "imported": "{{count}} profiles imported",
+      "skipped": "{{count}} skipped",
+      "none": "No profiles were imported."
+    },
+    "error": {
+      "detailLoadFailed": "Could not load the AWS profile details.",
+      "listLoadFailed": "Could not load the AWS profile list.",
+      "saveFailed": "Could not save the AWS profile.",
+      "regionSaveFailed": "Could not save the AWS profile's default region.",
+      "renameFailed": "Could not rename the AWS profile.",
+      "deleteFailed": "Could not delete the AWS profile.",
+      "ssoLoginFailed": "Could not start the AWS SSO sign-in."
+    },
+    "intro": "Review, create, edit, rename, and delete AWS CLI profiles that belong to this app. Existing local AWS CLI profiles are usable once imported.",
+    "action": {
+      "refresh": "Refresh",
+      "importFromCli": "Import from local AWS CLI",
+      "newProfile": "New profile",
+      "rename": "Rename",
+      "changeRegion": "Change default region",
+      "edit": "Edit",
+      "ssoLogin": "AWS SSO sign-in",
+      "ssoLoggingIn": "Starting sign-in…"
+    },
+    "syncUnsupported": "This server does not support AWS profile sync yet. Until it is updated, profiles are stored on this device only.",
+    "loadingList": "Loading the AWS profile list.",
+    "loadingDetails": "Loading the AWS profile details.",
+    "empty": {
+      "title": "No AWS profiles registered.",
+      "description": "Create a profile and it becomes available in the AWS import and SSM connection flows right away.",
+      "noSelectionTitle": "No profile selected.",
+      "noSelectionDescription": "Select an AWS profile on the left to see its details and management actions."
+    },
+    "detail": {
+      "noRegion": "No region",
+      "accountAfterAuth": "Available after authentication",
+      "authOk": "Ready to authenticate.",
+      "authNeeded": "Another sign-in is needed, or the credentials must be checked again.",
+      "missingTools": "Missing tools: {{tools}}",
+      "hostReferences": "Hosts referencing this profile",
+      "sourceProfileReferences": "Local profiles referencing this as source_profile",
+      "defaultRegion": "Default region",
+      "sessionTokenSet": "Set"
+    },
+    "form": {
+      "createTitle": "Create AWS profile",
+      "editTitle": "Edit AWS profile",
+      "createDescription": "Saved as an AWS CLI profile owned by this app.",
+      "editDescription": "Only static access key profiles can be edited.",
+      "wizardTitle": "Create a new AWS profile",
+      "wizardSyncUnsupported": "This server does not support AWS profile sync, so the profile is stored on this device only.",
+      "staticEditTitle": "Edit static AWS profile",
+      "staticEditDescription": "Credentials are re-verified with an STS call before saving.",
+      "updateSubmit": "Update profile",
+      "updateSubmitting": "Updating…",
+      "profileName": "Profile name",
+      "currentAccessKey": "Currently stored access key: {{key}}"
+    },
+    "region": {
+      "title": "Change default region",
+      "description": "Saves only the default region of an app-owned AWS profile.",
+      "label": "Default region",
+      "none": "No region",
+      "saving": "Saving…",
+      "save": "Save region"
+    },
+    "rename": {
+      "title": "Rename profile",
+      "description": "Renames the profile in the local AWS CLI config file only.",
+      "newNameLabel": "New profile name",
+      "warningTitle": "Careful",
+      "warningBody": "Hosts in this app reference this profile. Renaming it also updates the profile name shown on those hosts.",
+      "noteTitle": "Note",
+      "noteBody": "`source_profile` references in the local profiles below are updated to the new name automatically.",
+      "submitting": "Renaming…",
+      "submit": "Rename profile"
+    },
+    "delete": {
+      "title": "Delete profile",
+      "description": "Removes this profile from the local AWS CLI config file.",
+      "warning": "After deletion, hosts that referenced this profile may end up with no profile.",
+      "hostReferences": "Hosts using this profile",
+      "ssoSessions": "sso-session entries deleted along with it",
+      "submitting": "Deleting…",
+      "submit": "Delete profile"
+    }
+  },
+  "containers": {
+    "tunnel": {
+      "errorTitle": "Could not show the container tunnel.",
+      "retry": "Try again",
+      "emptyTitle": "Select a container to open a tunnel.",
+      "emptyDescription": "Select a running container, then choose a network and port.",
+      "preparing": "Preparing the tunnel information…",
+      "noNetwork": "No selectable network",
+      "noPort": "No port",
+      "autoPortDescription": "Assigns an available local port automatically.",
+      "statusTitle": "Tunnel status",
+      "stopping": "Stopping…",
+      "starting": "Starting…",
+      "runningOnly": "A tunnel can only be started for a running container.",
+      "networkRequired": "Choose a network.",
+      "portRequired": "Choose a port.",
+      "localPortInvalid": "Check the local port.",
+      "startFailed": "Could not start the container tunnel.",
+      "stopFailed": "Could not stop the container tunnel."
+    },
+    "overview": {
+      "emptyTitle": "Select a container to see its details.",
+      "emptyDescription": "Select a container in the list to see its runtime information and metadata.",
+      "image": "Image",
+      "status": "Status",
+      "createdAt": "Created",
+      "runtimeInfo": "Runtime information",
+      "mounts": "Mounts",
+      "noMounts": "No mount information.",
+      "networks": "Networks",
+      "noNetworks": "No network information.",
+      "noIp": "No IP",
+      "environment": "Environment variables",
+      "noEnvironment": "No environment variables.",
+      "labels": "Labels",
+      "noLabels": "No labels."
+    },
+    "metrics": {
+      "loading": "Loading metrics…",
+      "emptyTitle": "No metrics to show.",
+      "emptyDescription": "Check that the container is running, then refresh again in a moment."
+    },
+    "list": {
+      "refreshing": "Refreshing…",
+      "refresh": "Refresh",
+      "noRuntimeTitle": "No container runtime found on this host.",
+      "heading": "Containers",
+      "empty": "No containers detected.",
+      "selectPrompt": "Select a container"
+    },
+    "action": {
+      "shell": "Open shell",
+      "plainView": "Plain view",
+      "detailPanel": "Container detail panel",
+      "expandLogs": "Expand logs",
+      "detailLoading": "Loading the details…"
+    },
+    "logs": {
+      "showTime": "Show time",
+      "rangeLabel": "Log range",
+      "searchPlaceholder": "Search logs",
+      "searching": "Searching…",
+      "remoteSearch": "Remote search",
+      "clearSearch": "Clear search",
+      "loadMore": "Load more",
+      "loading": "Loading…",
+      "reload": "Reload",
+      "remoteMatches": "{{count}} remote search results",
+      "bufferMatches": "{{count}} matches in the current buffer",
+      "loadingBody": "Loading logs…",
+      "emptyForRange": "No logs for {{range}}.",
+      "retryHint": "Try reloading.",
+      "noSearchResults": "No search results."
+    },
+    "connecting": {
+      "withHost": "Connecting to {{label}}…",
+      "preparing": "Preparing the container runtime and connection state."
+    },
+    "confirm": {
+      "removeTitle": "Delete this container?",
+      "actionTitle": "Run {{action}} on this container?",
+      "running": "Running…",
+      "confirm": "Confirm",
+      "body": "Runs <action>{{action}}</action> on container <name>{{name}}</name>."
+    }
+  },
+  "titleBar": {
+    "kind": {
+      "local": "Local shell",
+      "serial": "Serial",
+      "session": "Session",
+      "splitTmux": "Split · tmux",
+      "split": "Split workspace"
+    },
+    "elapsed": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "hoursMinutes": "{{hours}}h {{minutes}}m",
+      "days": "{{count}}d",
+      "daysHours": "{{days}}d {{hours}}h"
+    },
+    "ago": {
+      "justNow": "just now",
+      "seconds": "{{count}}s ago",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago",
+      "days": "{{count}}d ago"
+    },
+    "hover": {
+      "jump": "Jump",
+      "reconnect": "Reconnect",
+      "waitingNetwork": "Waiting for network",
+      "attempts": "attempt {{attempt}}/{{max}}",
+      "error": "Error",
+      "cwd": "Location",
+      "shell": "Shell",
+      "connectedFor": "Connected for",
+      "command": "Command",
+      "running": "Running",
+      "lastCommand": "Last command",
+      "lastCommandFailed": "{{ago}} · failed",
+      "latency": "Latency",
+      "share": "Share",
+      "viewers": "{{count}} watching",
+      "windows": "Windows",
+      "windowCount": "{{count}}",
+      "pane": "Pane {{index}}"
+    },
+    "update": {
+      "checking": "Checking GitHub Releases for a new version.",
+      "readyTitle": "An update is ready to install",
+      "downloadingTitle": "Downloading the update",
+      "title": "App update",
+      "installTooltip": "{{version}} ready to install",
+      "installTooltipFallback": "Update ready",
+      "badge": "Update",
+      "viewStatus": "View update status",
+      "label": "Update",
+      "devOnly": "Auto-update only works in packaged release builds.",
+      "upToDate": "You're on the latest version.",
+      "available": "A new version was found. Preparing the background download.",
+      "downloading": "Downloading the update. {{percent}}",
+      "downloaded": "The update is ready. Restart to apply it.",
+      "retry": "Try again",
+      "check": "Check for updates",
+      "devDisabled": "Disabled in dev runs"
+    },
+    "tab": {
+      "closeSession": "End the {{title}} session",
+      "detachTmux": "Detach the {{title}} tmux session",
+      "newTmuxWindow": "New tmux window in {{title}}",
+      "newTmuxWindowTitle": "New tmux window (new-window)",
+      "closeThisWindow": "Close this {{title}} window",
+      "close": "Close {{title}}",
+      "closeThisWindowTooltip": "Close this window — closes only this tmux window. Use Detach/Kill in the bottom bar for the whole session."
+    }
+  },
+  "aws": {
+    "ssm": {
+      "statusTimeout": "The SSM status lookup timed out. Check the SSM connection and permissions, then try again.",
+      "statusForbidden": "The import was blocked because there is no permission to query the SSM status. Check that the user/role includes `ssm:DescribeInstanceInformation`.",
+      "statusUnknown": "The import was blocked because the SSM status could not be checked. Review the user/role permissions or the SSM configuration first.",
+      "connectionLost": "This instance is registered as an SSM managed instance, but its Session Manager connection is offline (ConnectionLost). Check the SSM Agent, the instance profile, and network connectivity.",
+      "connectionInactive": "This instance is registered as an SSM managed instance, but the connection is currently inactive. Check the SSM Agent, the instance profile, and network connectivity.",
+      "notManaged": "This instance does not appear in the Systems Manager managed instance list. Check that the SSM Agent is installed and the instance profile (AmazonSSMManagedInstanceCore) is attached.",
+      "invocationPending": "The SSM command result is not registered yet.",
+      "statusFailed": "Could not check the SSM managed instance status.",
+      "sessionNoStream": "The SSM session response has no stream information.",
+      "sessionStartFailed": "Could not start the SSM session.",
+      "forwardNoStream": "The SSM port forwarding session response has no stream information.",
+      "forwardStartFailed": "Could not start the SSM port forwarding session.",
+      "sendCommandFailed": "Could not send the SSM command.",
+      "commandIdMissing": "Could not determine the SSM command ID.",
+      "invocationReadFailed": "Could not read the SSM command result.",
+      "pingStatus": "This instance is registered as an SSM managed instance, but its Session Manager connection status is {{status}}. Check the SSM Agent, the instance profile, and network connectivity.",
+      "commandExitStatus": "The SSM command finished with status {{status}}."
+    },
+    "credentials": {
+      "checkFailed": "The import was blocked because the AWS credentials could not be verified. Check the selected profile's sign-in state and credentials first.",
+      "badSecret": "The Access Key or Secret you entered is not valid. The Secret may be wrong or the key pair may not match. Check the AWS credentials again.",
+      "badAccessKey": "The Access Key or Secret you entered is not valid. The Access Key may be wrong or disabled. Check the AWS credentials again.",
+      "invalid": "The AWS credentials you entered are not valid."
+    },
+    "sso": {
+      "expired": "The AWS SSO sign-in has expired. Sign in again.",
+      "sourceProfileInvalid": "The AWS SSO session of the selected source profile is not valid. Sign in again with that source profile first.",
+      "loginFailedDetail": "The AWS SSO sign-in failed. Check the SSO start URL, the SSO region, and the browser sign-in.",
+      "listFailed": "The account or role list could not be loaded after signing in to SSO. Check the permissions and the SSO configuration.",
+      "authIncomplete": "Authentication with the selected account/role did not complete. Sign in again or choose a different role.",
+      "noTokenCache": "The AWS SSO access token cache was not found. Sign in again.",
+      "prepMissing": "The SSO preparation data has expired or does not exist. Sign in again.",
+      "prepExpired": "The SSO preparation data has expired. Sign in again.",
+      "accountListFailed": "Could not load the AWS SSO account list.",
+      "roleListFailed": "Could not load the AWS SSO role list.",
+      "prepProfileMismatch": "The SSO preparation data does not match the selected profile name.",
+      "prepInputMismatch": "The SSO preparation data does not match the current input. Sign in again.",
+      "authIncompleteShort": "Authentication with the selected account/role did not complete.",
+      "cancelledAccountChanged": "The AWS SSO sign-in was cancelled because the account changed.",
+      "loginFailed": "The AWS SSO sign-in failed.",
+      "noAccounts": "No selectable AWS SSO account was found.",
+      "noAccountRolePairs": "No selectable AWS SSO account/role pair was found.",
+      "configMissing": "The profile's SSO configuration (sso_start_url/sso_region) was not found."
+    },
+    "profile": {
+      "noneManaged": "No app-owned AWS profile was found. Import or create a profile first.",
+      "duplicateName": "An AWS profile with the same name already exists.",
+      "sourceNotFound": "The selected source profile was not found.",
+      "accessKeyOnly": "Only access key based profiles can be edited.",
+      "notFound": "The selected AWS profile was not found.",
+      "sameName": "The new profile name is the same as the current one.",
+      "linkedNotFoundNamed": "The linked AWS profile \"{{label}}\" could not be found. Choose the profile again in the host settings.",
+      "linkedNotFound": "The linked AWS profile could not be found. Choose the profile again in the host settings."
+    },
+    "role": {
+      "assumeDenied": "This role cannot be assumed with the selected source profile. Check the IAM permissions and the target role's trust policy.",
+      "arnInvalid": "The Role ARN is not valid, or the target role could not be found. Check the ARN format and the target role again.",
+      "verifyFailed": "This role could not be verified with the selected source profile."
+    },
+    "logs": {
+      "noCloudWatch": "This container has no CloudWatch Logs configuration.",
+      "awslogsOnly": "v2 logs support the awslogs driver only.",
+      "noGroupOrPrefix": "The CloudWatch Logs group or stream prefix is not configured.",
+      "targetNotFound": "The log target for the selected container was not found."
+    },
+    "error": {
+      "unknown": "An unknown error occurred.",
+      "requestTimeout": "{{message}} (request timed out)"
+    },
+    "field": {
+      "accessKeyRequired": "Enter an access key.",
+      "secretRequired": "Enter a secret.",
+      "roleArnRequired": "Enter a Role ARN.",
+      "ssoAccountRequired": "Choose an SSO account.",
+      "ssoRoleRequired": "Choose an SSO role.",
+      "ssoStartUrlRequired": "Enter an SSO start URL.",
+      "ssoRegionRequired": "Choose an SSO region.",
+      "profileName": "Profile name",
+      "newProfileName": "New profile name",
+      "required": "Enter a {{field}}.",
+      "invalidChars": "{{field}} contains characters that cannot be used."
+    },
+    "auth": {
+      "browserLoginRequired": "A browser sign-in is required.",
+      "storedCredentialsFailed": "This profile could not authenticate with the stored AWS credentials.",
+      "usesStoredCredentials": "This profile uses stored AWS credentials instead of a browser sign-in."
+    },
+    "region": {
+      "unsupported": "That AWS region is not supported.",
+      "listFailed": "Could not read the AWS region list."
+    },
+    "ec2": {
+      "listFailed": "Could not read the EC2 instance list.",
+      "detailsFailed": "Could not read the EC2 instance details."
+    },
+    "ecs": {
+      "clusterListFailed": "Could not read the ECS cluster list.",
+      "metricsPartial": "Current usage metrics could not be read, so utilization may be missing for some services.",
+      "serviceNotFound": "The selected ECS service was not found.",
+      "noRunningTask": "This service has no running task.",
+      "runningTaskDetailsMissing": "Details for the running ECS task were not found.",
+      "execDisabled": "A tunnel cannot be opened because ECS Exec is not enabled on this task.",
+      "containerNotInTask": "The selected container was not found in the running task.",
+      "runtimeIdMissing": "Could not determine the runtime ID of the selected container.",
+      "targetBuildFailed": "Could not build the ECS task target.",
+      "taskDetailsMissing": "Details for the selected ECS task were not found.",
+      "clusterNotFound": "The selected ECS cluster was not found.",
+      "execNoStream": "The ECS Exec session response has no stream information.",
+      "execStartFailed": "Could not start the ECS Exec session."
+    },
+    "time": {
+      "endBeforeStart": "The end time cannot be earlier than the start time."
+    },
+    "eic": {
+      "pushDenied": "Sending the public key over EC2 Instance Connect was denied.",
+      "pushFailed": "Sending the public key over EC2 Instance Connect failed."
+    },
+    "ssh": {
+      "noUserCandidates": "No SSH login user candidate was found.",
+      "configCheckFailed": "Could not check the SSH configuration automatically.",
+      "configCheckTimeout": "The SSH configuration check timed out. Check the SSM connection and permissions, then try again."
+    },
+    "instanceState": "SSM import is unavailable because this instance is currently {{state}}. Start the instance and try again.",
+    "stage": {
+      "sendCommand": "Sending the SSM command",
+      "readSshConfig": "Reading the SSH configuration",
+      "analyzeUsers": "Analyzing user candidates"
+    }
+  },
+  "transfer": {
+    "field": {
+      "groupPath": "group path",
+      "groupId": "group ID",
+      "groupName": "group name",
+      "groupCreatedAt": "group creation time",
+      "groupUpdatedAt": "group update time",
+      "secretId": "credential ID",
+      "secretLabel": "credential name",
+      "secretUpdatedAt": "credential update time",
+      "awsProfileId": "AWS profile ID",
+      "awsProfileName": "AWS profile name",
+      "awsProfileUpdatedAt": "AWS profile update time",
+      "ssoRegion": "AWS SSO region",
+      "ssoAccount": "AWS SSO account",
+      "ssoRole": "AWS SSO role",
+      "awsSourceProfileId": "AWS source profile ID",
+      "awsRoleArn": "AWS role ARN",
+      "knownHostAddress": "known host address",
+      "knownHostAlgorithm": "known host algorithm",
+      "knownHostPublicKey": "known host public key",
+      "knownHostCreatedAt": "known host creation time",
+      "knownHostLastSeenAt": "known host last-seen time",
+      "knownHostUpdatedAt": "known host update time",
+      "snippetLabel": "snippet name",
+      "snippetCommand": "snippet command",
+      "snippetCreatedAt": "snippet creation time",
+      "snippetUpdatedAt": "snippet update time",
+      "selectedHostId": "selected host ID",
+      "selectedHosts": "selected hosts",
+      "groups": "groups",
+      "hosts": "hosts",
+      "secrets": "credentials",
+      "portForwards": "port forwards",
+      "awsProfiles": "AWS profiles",
+      "exportedAt": "export time"
+    },
+    "error": {
+      "invalidValue": "The {{field}} value in the Dolgate file is not valid.",
+      "invalidList": "The {{field}} list in the Dolgate file is not valid.",
+      "duplicateId": "The Dolgate file has duplicate {{field}} IDs.",
+      "invalidGroup": "The group data in the Dolgate file is not valid.",
+      "invalidGroupPath": "The group path in the Dolgate file is not valid.",
+      "invalidHost": "The host data in the Dolgate file is not valid.",
+      "invalidSecret": "The credential data in the Dolgate file is not valid.",
+      "invalidSecretId": "The credential ID in the Dolgate file is not valid.",
+      "invalidAwsProfile": "The AWS profile data in the Dolgate file is not valid.",
+      "invalidAwsProfileRegion": "The AWS profile region in the Dolgate file is not valid.",
+      "invalidAwsProfileKind": "The AWS profile kind in the Dolgate file is not valid.",
+      "invalidKnownHost": "The known host data in the Dolgate file is not valid.",
+      "invalidKnownHostPort": "The known host port in the Dolgate file is not valid.",
+      "invalidSnippet": "The snippet data in the Dolgate file is not valid.",
+      "unsupportedBundle": "This Dolgate export data is not supported.",
+      "invalidPortForwardKind": "The port forward kind in the Dolgate file is not valid.",
+      "invalidPortForward": "The port forward data in the Dolgate file is not valid.",
+      "invalidDnsKind": "The DNS override kind in the Dolgate file is not valid.",
+      "invalidDnsOverride": "The DNS override data in the Dolgate file is not valid.",
+      "tooManyItems": "The Dolgate file has too many items.",
+      "duplicateSelectedHostId": "The Dolgate file has duplicate selected host IDs.",
+      "invalidSelectedHostRef": "The selected host reference in the Dolgate file is not valid.",
+      "missingSecret": "{{label}}: the linked credential is not in the file.",
+      "missingJumpHost": "{{label}}: the linked jump host is not in the file.",
+      "missingAwsProfile": "{{label}}: the linked AWS profile is not in the file.",
+      "missingSnippet": "{{label}}: the linked snippet is not in the file.",
+      "missingSourceProfile": "{{label}}: the linked source AWS profile is not in the file.",
+      "missingRuleHost": "{{label}}: the linked host is not in the file.",
+      "missingDnsRule": "{{label}}: the linked port forward is not in the file.",
+      "secureValueMissing": "The secure stored value for {{label}} could not be found.",
+      "secureValueUnreadable": "The secure stored value for {{label}} could not be read.",
+      "secureValueCorrupt": "The stored value for {{label}} is corrupted.",
+      "selectHostRequired": "Choose the hosts to export.",
+      "selectedHostMissing": "The selected host could not be found. Refresh the list.",
+      "jumpHostCycle": "{{label}}: the jump host chain has a circular reference.",
+      "awsRoleCycle": "The AWS role profile chain has a circular reference.",
+      "secretIdMismatch": "The credential ID does not match the stored value.",
+      "startupSnippetMissing": "The linked startup snippet could not be found.",
+      "awsProfileRenamed": "The AWS profile {{from}} was renamed to {{to}}.",
+      "dnsOverrideSkipped": "A DNS override for {{hostname}} already exists, so it was not imported.",
+      "unresolvedSecretRef": "{{label}}: the credential reference to import could not be resolved.",
+      "unresolvedJumpHostRef": "{{label}}: the jump host reference to import could not be resolved.",
+      "unresolvedAwsProfileRef": "{{label}}: the AWS profile reference to import could not be resolved.",
+      "unresolvedSnippetRef": "{{label}}: the snippet reference to import could not be resolved.",
+      "unresolvedSourceProfileRef": "{{label}}: the source AWS profile reference could not be resolved.",
+      "unresolvedRuleHostRef": "{{label}}: the host reference to import could not be resolved.",
+      "unresolvedDnsRuleRef": "{{label}}: the port forward reference could not be resolved.",
+      "importStateExpired": "The import state expired. Open the file again."
+    }
+  },
+  "auth": {
+    "vaultRequestTimeout": "The sync passphrase request timed out. Check your network and try again.",
+    "passwordChangeTimeout": "The password change request timed out. Check your network and try again.",
+    "e2eSessionInvalid": "DOLSSH_E2E_AUTH_SESSION_JSON is not a valid AuthSession.",
+    "sessionRestoreFailed": "The session could not be restored.",
+    "sessionExpired": "Your session has expired. Sign in again.",
+    "loginServerInvalid": "The sign-in server address is not valid.",
+    "callbackMissingCode": "The sign-in callback has no code.",
+    "callbackStateMismatch": "The sign-in state value does not match.",
+    "signedIn": "Signed in.",
+    "signedOut": "Signed out.",
+    "sessionExpiredRetry": "Your session has expired. Sign in again and retry.",
+    "accountDeleted": "The server account and its data were deleted.",
+    "passwordOnlineOnly": "A password can only be set while signed in online.",
+    "passwordChangeFailed": "Could not change the sign-in password.",
+    "passwordSet": "The sign-in password was set.",
+    "signedOutExpired": "Signed out because the session expired.",
+    "offlineUnavailable": "Features that need a server connection are unavailable in offline mode.",
+    "signInRequired": "Sign-in is required.",
+    "noVaultKey": "There is no session vault key.",
+    "vaultUnlockRequired": "The sync vault must be unlocked.",
+    "syncOnlineOnly": "Syncing is only possible while signed in online.",
+    "onlineOnly": "Available only while signed in online.",
+    "vaultCancelledAccountChanged": "The sync vault operation was cancelled because the account or server changed.",
+    "vaultAlreadySet": "A sync passphrase is already set.",
+    "vaultConfigured": "The sync passphrase is set (end-to-end encryption is on).",
+    "vaultPassphraseWrong": "The sync passphrase is not correct.",
+    "vaultKeyVerifyFailed": "The sync vault key check failed. Refresh the session and try again.",
+    "vaultReset": "The sync vault was reset (server sync data deleted).",
+    "migrationNotAvailable": "This is not a state that can be migrated.",
+    "vaultSetElsewhere": "Another device already set the sync passphrase. This continues automatically in a moment.",
+    "migratedToE2ee": "The existing account was migrated to end-to-end encryption.",
+    "unlockBeforeChange": "Unlock the sync vault before changing it.",
+    "currentPassphraseWrong": "The current sync passphrase is not correct.",
+    "vaultCacheMismatch": "The local vault cache does not match the server key. Refresh the session and try again.",
+    "vaultKeyStoreFailed": "The sync key could not be saved to secure storage. It stays unlocked for this run only.",
+    "vaultResetElsewhere": "The sync passphrase was reset on another device, so this device must be unlocked again.",
+    "serverUnreachable": "Could not reach the server.",
+    "authRequestFailed": "The authentication request failed.",
+    "authResponseInvalid": "The authentication response format is not valid.",
+    "vaultStateRestoreFailed": "The sync vault state could not be restored.",
+    "offlineLeaseExpired": "The offline period expired, so signing in again is required.",
+    "passkeyRegisterUnavailable": "Passkey registration cannot be started.",
+    "registrationLinkInvalid": "The registration link is not valid.",
+    "callbackPortFailed": "Could not open the local sign-in callback port.",
+    "loginComplete": "Sign-in complete.",
+    "returnToApp": "Returning to the Dolgate app. You can close this tab.",
+    "browserExchangeFailed": "The browser sign-in exchange failed.",
+    "loginFailed": "Sign-in failed.",
+    "htmlResponse": "{{fallback}} The server returned an HTML page instead of an API response. Check the deployment URL or the reverse proxy configuration. ({{status}})",
+    "accountDeleteFailed": "Deleting the account failed. ({{status}})",
+    "requestFailed": "The request failed. ({{status}})"
+  },
+  "core": {
+    "shutdownSession": "The session was closed because the app is exiting.",
+    "shutdownSftp": "The SFTP connection was closed because the app is exiting.",
+    "shutdownContainers": "The Containers connection was closed because the app is exiting.",
+    "transferFailed": "The transfer failed.",
+    "noReadPermission": "There is no permission to read the source file.",
+    "noOverwritePermission": "There is no permission to overwrite or delete the existing item.",
+    "noWritePermission": "There is no permission to write to the target folder.",
+    "noTransferPermission": "There is no permission to transfer files.",
+    "partialCleanupFailed": "Cleaning up the previous SFTP partial files failed.",
+    "sftpOwnedByOtherWindow": "This SFTP connection is in use by another window.",
+    "sftpNotInThisWindow": "This SFTP connection does not belong to this window.",
+    "transferNotInThisWindow": "This file transfer does not belong to this window.",
+    "containerTabNotInThisWindow": "This container tab was not opened in this window.",
+    "containerWindowsClosed": "Every window that opened a container tab has been closed.",
+    "ssmProxyTimeout": "The server AWS SSM proxy connection timed out.",
+    "requestWindowClosed": "The window that requested the connection was closed.",
+    "ssmProxyConnectFailed": "The server AWS SSM proxy connection failed.",
+    "ssmProxyClosed": "The server AWS SSM proxy connection closed.",
+    "ssmProxyParseFailed": "Could not parse the server AWS SSM proxy response.",
+    "ssmProxyOutputParseFailed": "Could not parse the server AWS SSM proxy output data.",
+    "ssmProxyError": "A server AWS SSM proxy error occurred.",
+    "ssmSessionClosed": "The AWS SSM session closed.",
+    "serialOnly": "This feature is available only in serial sessions.",
+    "containersConnectionError": "A Containers connection error occurred.",
+    "localSessionClosed": "The local terminal session closed.",
+    "warpgateSessionClosed": "The Warpgate session closed.",
+    "sshSessionClosed": "The SSH session closed.",
+    "localSessionConnected": "The local terminal session connected.",
+    "ssmSessionConnected": "The AWS SSM session connected.",
+    "warpgateSessionConnected": "The Warpgate session connected.",
+    "sshSessionConnected": "The SSH session connected.",
+    "localSessionError": "A local terminal session error occurred.",
+    "ssmSessionError": "An AWS SSM session error occurred.",
+    "warpgateSessionError": "A Warpgate session error occurred.",
+    "sshSessionError": "An SSH session error occurred.",
+    "startupCommandFailed": "Could not send the startup command to the terminal.",
+    "transferWindowClosed": "The window that requested the file transfer was closed.",
+    "sftpSession": "SFTP session",
+    "ecsContainersBrowse": "ECS Containers browse",
+    "containersConnect": "Containers connection",
+    "sessionLog": "{{kind}} session",
+    "sessionErrorLog": "A {{kind}} session error occurred.",
+    "containerActionLog": "Container {{action}}",
+    "action": {
+      "start": "Start",
+      "stop": "Stop",
+      "restart": "Restart",
+      "remove": "Remove"
+    }
+  },
+  "ecs": {
+    "error": {
+      "execContextFailed": "Could not load the ECS Exec context.",
+      "noRunningTask": "This service has no running task.",
+      "noExecContainer": "No container is reachable over ECS Exec.",
+      "ssoWindowFailed": "Could not open the AWS SSO sign-in window.",
+      "actionContextFailed": "Could not load the service action information.",
+      "logsFailed": "Could not load the ECS service logs.",
+      "portRequired": "Choose a port.",
+      "localPortInvalid": "Check the local port.",
+      "tunnelStartFailed": "Could not start the ECS tunnel.",
+      "tunnelStopFailed": "Could not stop the ECS tunnel.",
+      "shellStartFailed": "Could not start the ECS shell connection."
+    },
+    "metrics": {
+      "noCpuTrend": "No CPU trend data for the last 10 minutes.",
+      "noMemoryTrend": "No memory trend data for the last 10 minutes."
+    },
+    "connecting": {
+      "clusterLookup": "ECS cluster lookup",
+      "snapshotHint": "Fetching the AWS ECS service snapshot and current usage metrics."
+    },
+    "action": {
+      "autoAssigning": "Assigning…",
+      "openingBrowser": "Opening the browser…",
+      "reopenBrowser": "Reopen browser",
+      "loading": "Loading…",
+      "signInBrowser": "Sign in with the browser",
+      "retry": "Try again",
+      "shell": "Open shell",
+      "plainView": "Plain view",
+      "detailPanel": "ECS service detail panel",
+      "expandLogs": "Expand logs",
+      "connecting": "Connecting…"
+    },
+    "list": {
+      "lastUpdated": "Updated {{at}}",
+      "noServices": "This cluster has no services to show.",
+      "noSelection": "No service selected."
+    },
+    "detail": {
+      "summary": "Service summary",
+      "deployment": "Deployment",
+      "noDeployments": "No deployment information to show.",
+      "noEvents": "No recent events to show."
+    },
+    "logs": {
+      "showTime": "Show time",
+      "rangeLabel": "Log range",
+      "searchLabel": "Search logs",
+      "reload": "Reload",
+      "bufferMatches": "{{count}} matches in the current buffer",
+      "loadingCard": "Loading the service logs.",
+      "refreshing": "Refreshing…",
+      "noSearchResults": "No search results.",
+      "noLogs": "No logs to show."
+    },
+    "tunnel": {
+      "preparing": "Preparing the tunnel target.",
+      "noRunningTask": "No running task",
+      "noContainer": "No selectable container",
+      "noPort": "No port",
+      "autoPortDescription": "Assigns an available local port automatically.",
+      "statusTitle": "Tunnel status",
+      "stopping": "Stopping…",
+      "starting": "Starting…"
+    },
+    "shell": {
+      "title": "Open shell",
+      "description": "Choose a running task and container, then open an ECS Exec session."
+    }
+  },
+  "awsImport": {
+    "badge": {
+      "windowsUnsupported": "Windows unsupported",
+      "ssmUnavailable": "SSM unavailable",
+      "blocked": "Import blocked",
+      "inspect": "Check SSH info"
+    },
+    "error": {
+      "portRange": "The SSH port must be a number between 1 and 65535.",
+      "sshAutoFailed": "Could not detect the SSH connection details automatically.",
+      "profileListFailed": "Could not load the AWS profile list.",
+      "profileStatusFailed": "Could not check the AWS profile status.",
+      "regionListFailed": "Could not load the AWS region list.",
+      "ecsClusterListFailed": "Could not load the ECS cluster list.",
+      "ec2ListFailed": "Could not load the EC2 instance list.",
+      "ssoLoginFailed": "Could not start the AWS SSO sign-in.",
+      "clusterRegisterFailed": "Could not import the ECS cluster.",
+      "hostRegisterFailed": "Could not register the AWS host."
+    },
+    "loading": {
+      "profiles": "Loading the AWS profiles.",
+      "profileStatus": "Checking the profile sign-in status.",
+      "browserLogin": "Signing in to AWS in the browser.",
+      "regions": "Loading the region list.",
+      "ecsClusters": "Loading the ECS cluster list.",
+      "ec2Instances": "Loading the EC2 instance list."
+    },
+    "action": {
+      "importFromCli": "Import from local AWS CLI",
+      "closeCreateProfile": "Close profile creation",
+      "createProfile": "Create profile",
+      "signingIn": "Signing in…",
+      "signInBrowser": "Sign in with the browser",
+      "back": "Back",
+      "recheck": "Check again",
+      "registering": "Registering…",
+      "registerHost": "Register host",
+      "addingCluster": "Adding…",
+      "addCluster": "Add cluster"
+    },
+    "profile": {
+      "wizardTitle": "Create a new AWS profile",
+      "wizardDescription": "Saved as an AWS CLI profile owned by this app.",
+      "wizardSyncUnsupported": "This server does not support AWS profile sync, so the profile is stored on this device only.",
+      "syncUnsupported": "This server does not support AWS profile sync yet. Until it is updated, profiles are stored on this device only.",
+      "ssoLoginNeeded": "This profile is not signed in yet. Finish the AWS SSO sign-in in the browser.",
+      "credentialsNeeded": "This profile needs AWS CLI credentials.",
+      "awsCliRequired": "The AWS CLI must be installed. ",
+      "sessionManagerRequired": "session-manager-plugin must be installed to start an SSM connection."
+    },
+    "inspect": {
+      "inProgress": "Checking the username and SSH connection details.",
+      "doneTitle": "The SSH connection details were detected automatically.",
+      "doneHint": "Adjust the values below if needed, then register the host.",
+      "usernamePlaceholder": "Leave empty if no username was detected.",
+      "portPlaceholder": "Leave empty to use the default, 22."
+    },
+    "empty": {
+      "noEcsClusters": "No importable ECS cluster in this region.",
+      "noEc2Instances": "No importable EC2 instance in this region.",
+      "selectRegionEcs": "Choose a region to load its ECS clusters.",
+      "selectRegionEc2": "Choose a region to load its EC2 instances."
+    }
+  },
+  "xshellImport": {
+    "notice": {
+      "warningsWithPassword": "{{count}} warnings, includes saved passwords",
+      "warnings": "{{count}} warnings",
+      "passwordIncluded": "Includes saved passwords",
+      "additionalSources": "{{count}} additional session sources"
+    },
+    "sources": {
+      "count": "{{count}} session sources",
+      "more": "and {{count}} more",
+      "decryptHint": "Encrypted passwords are decrypted where possible. If that fails, only the host is added.",
+      "defaultDir": "Default path",
+      "additionalDir": "Additional folder"
+    },
+    "tree": {
+      "selectHost": "Select host {{label}}",
+      "rootSession": "Root session",
+      "privateKey": "Private key",
+      "password": "Password",
+      "savedPassword": "Saved password",
+      "authProfile": "Auth profile",
+      "collapse": "collapse",
+      "expand": "expand",
+      "groupToggle": "{{action}} group {{name}}",
+      "selectGroup": "Select group {{name}}",
+      "childHosts": "{{count}} hosts inside",
+      "emptyGroup": "Empty group",
+      "noImportableHosts": "This group has no importable host."
+    },
+    "error": {
+      "loadFailed": "Could not load the local Xshell sessions.",
+      "addFolderFailed": "Could not add the selected Xshell session folder.",
+      "importFailed": "Could not import the Xshell data."
+    },
+    "dialog": {
+      "title": "Import from Xshell",
+      "close": "Close the Xshell import dialog",
+      "loading": "Reading the local Xshell sessions.",
+      "searchLabel": "Search",
+      "searchPlaceholder": "Search group, host, username, path",
+      "addingFolder": "Loading the folder…",
+      "pickFolder": "Choose session folder",
+      "selectVisible": "Select visible",
+      "deselectVisible": "Deselect visible",
+      "deselectAll": "Deselect all",
+      "statSources": "{{count}} sources",
+      "statTreeItems": "{{count}} tree items",
+      "statSelected": "{{count}} selected",
+      "statHosts": "{{count}} hosts to import",
+      "statGroups": "{{count}} groups to create",
+      "statSkippedExisting": "{{count}} existing duplicates skipped",
+      "statSkippedDuplicate": "{{count}} session duplicates skipped",
+      "selectionHint": "Selecting a host creates its parent groups automatically; selecting a group imports its subgroups and hosts too.",
+      "itemsHeading": "Items to import",
+      "emptyTitle": "No Xshell group or host matches the current filter.",
+      "emptyDescription": "Choose a different session folder or change the search term.",
+      "treeLabel": "Xshell import items",
+      "importing": "Importing…",
+      "import": "Import"
+    }
+  },
+  "logs": {
+    "duration": {
+      "zero": "0s",
+      "hoursMinutes": "{{hours}}h {{minutes}}m",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "seconds": "{{seconds}}s"
+    },
+    "sftp": {
+      "countWithBytes": "{{label}} {{count}} · {{bytes}}",
+      "count": "{{label}} {{count}}",
+      "download": "Downloaded",
+      "upload": "Uploaded",
+      "remoteCopy": "Remote copy",
+      "delete": "{{count}} deleted",
+      "mkdir": "{{count}} folders created",
+      "rename": "{{count}} renamed",
+      "chmod": "{{count}} permission changes",
+      "chown": "{{count}} ownership changes",
+      "visitedPaths": "{{count}} paths visited",
+      "errors": "{{count}} errors",
+      "lastPath": "Last path: {{path}}"
+    },
+    "empty": {
+      "title": "No logs match the filter.",
+      "description": "Only session connections and security/settings changes are recorded here."
+    },
+    "field": {
+      "browseStarted": "Browse started",
+      "browseEnded": "Browse ended",
+      "heldFor": "Held for",
+      "connecting": "Connecting",
+      "resourceCount": "{{count}} {{kind}}",
+      "service": "services",
+      "container": "containers",
+      "refreshCount": "{{count}} refreshes",
+      "errorCount": "{{count}} errors",
+      "ranAt": "Ran at",
+      "runDuration": "Run time",
+      "connectStarted": "Connected at",
+      "connectEnded": "Disconnected at",
+      "connectDuration": "Connection time",
+      "forwardStarted": "Forwarding started",
+      "forwardEnded": "Forwarding ended",
+      "forwarding": "Forwarding"
+    }
+  },
+  "hostForm": {
+    "agent": {
+      "checking": "Checking the agent…",
+      "detected": "Agent detected",
+      "keyCount": " · {{count}} keys",
+      "noKeys": "No keys are registered with the agent",
+      "unreachable": "Cannot reach the agent",
+      "notFound": "No agent found",
+      "unknown": "Cannot determine the agent status"
+    },
+    "jump": {
+      "selectPlaceholder": "Choose a jump host",
+      "searchPlaceholder": "Search name, host, user",
+      "moveUp": "Move jump {{index}} up",
+      "moveDown": "Move jump {{index}} down",
+      "remove": "Remove jump {{index}}",
+      "addAria": "Add jump host",
+      "addPlaceholder": "Add a jump host…",
+      "description": "Connects through other SSH hosts (bastions). With several, they are traversed top to bottom — the first is reached directly from the client, the last sits right before the target."
+    },
+    "profile": {
+      "select": "Choose a profile",
+      "missingCurrent": "{{name}} (no app profile)"
+    },
+    "error": {
+      "serialPortsFailed": "Could not load the serial port list.",
+      "awsProfilesFailed": "Could not load the AWS profiles."
+    },
+    "startup": {
+      "description": "Sends the command plus Enter automatically right after connecting.",
+      "selectPlaceholder": "Choose a snippet",
+      "searchPlaceholder": "Search name, keyword, command",
+      "emptyText": "No snippet available.",
+      "missing": "The selected snippet could not be found. The startup command is skipped on connect."
+    },
+    "awsSsh": {
+      "pending": "Waiting for SSH settings",
+      "loadingHint": "The SSH user and port are filled in automatically once the extra data loads.",
+      "manualHint": "Adjust the values below by hand if needed."
+    },
+    "serverProxy": {
+      "label": "Use the server proxy",
+      "description": "When on, the server opens the AWS SSM session and only relays terminal I/O."
+    },
+    "agentForward": {
+      "awsDescription": "Lets the remote host use your local SSH keys (e.g. hopping from a bastion to a private host). Enable only for hosts you trust.",
+      "description": "Lets the remote host use your local SSH keys. Enable only for hosts you trust.",
+      "moshUnsupported": "Not supported in mosh sessions."
+    },
+    "auth": {
+      "agentHint": "Authenticates with this computer's SSH agent — no key file or password. Keys registered through 1Password or ssh-add are used automatically.",
+      "newCredential": "Save new credential",
+      "edit": "Edit"
+    },
+    "mosh": {
+      "label": "Connect with Mosh",
+      "jumpConflict": "Cannot be combined with a jump host.",
+      "description": "The session survives network drops (mosh must be on the server)."
+    },
+    "env": {
+      "description": "Injected into the shell on connect (SetEnv with an export fallback). Values are encrypted like passwords when stored and synced."
+    }
+  },
+  "hostTransfer": {
+    "kind": {
+      "hosts": "hosts",
+      "groups": "groups",
+      "secrets": "credentials",
+      "awsProfiles": "AWS profiles",
+      "portForwards": "port forwards"
+    },
+    "counts": "{{count}} {{label}}",
+    "export": {
+      "title": "Export selected hosts",
+      "close": "Close export",
+      "loading": "Checking the linked items.",
+      "previewFailed": "Could not check the items to export.",
+      "passphraseShort": "Enter at least 4 characters.",
+      "passphraseTooShort": "The passphrase must be at least 4 characters.",
+      "confirmRequired": "Confirm the passphrase.",
+      "confirmMismatch": "The passphrase and its confirmation do not match.",
+      "passphraseMatch": "The passphrases match.",
+      "dolgateTitle": "Dolgate file",
+      "dolgateDescription": "Encrypts and saves the selected hosts along with the credentials and settings they need.",
+      "dolgateHostCount": " {{count}} hosts are included.",
+      "opensshNoSecrets": "Credentials are excluded.",
+      "opensshCount": " {{count}} hosts{{jump}} can be exported.",
+      "opensshJump": " and {{count}} jump hosts",
+      "passphraseLabel": "Passphrase",
+      "confirmLabel": "Confirm passphrase",
+      "passphraseWarning": "This passphrase cannot be recovered, and the same one is required to import.",
+      "opensshSkipped": "{{count}} hosts that OpenSSH cannot represent are excluded.",
+      "confirmMismatchError": "The passphrase confirmation does not match.",
+      "exportFailed": "Could not export the hosts.",
+      "exporting": "Exporting…",
+      "submit": "Export"
+    },
+    "import": {
+      "title": "Import a Dolgate file",
+      "close": "Close Dolgate import",
+      "pickFile": "Choose file",
+      "noFile": "No file selected",
+      "passphraseLabel": "Export passphrase",
+      "ready": "{{summary}} ready to import.",
+      "nothingNew": "Nothing new to import.",
+      "skipped": "Already present, skipped: {{summary}}.",
+      "probeFailed": "Could not open the Dolgate file.",
+      "importFailed": "Could not import the Dolgate file.",
+      "probing": "Checking…",
+      "probe": "Check contents",
+      "importing": "Importing…",
+      "submit": "Import"
+    }
+  },
+  "hostBrowser": {
+    "menu": {
+      "connect": "Connect",
+      "connectMany": "Connect ({{count}})",
+      "connectNewWindow": "Connect in a new window",
+      "sftp": "Connect over SFTP",
+      "tmux": "Connect with tmux",
+      "tmuxMany": "Connect with tmux ({{count}})",
+      "containers": "Containers",
+      "containersMany": "Containers ({{count}})",
+      "edit": "Edit",
+      "copy": "Duplicate",
+      "copyMany": "Duplicate ({{count}})",
+      "export": "Export…",
+      "exportMany": "Export… ({{count}})",
+      "newSubgroup": "New subgroup",
+      "rename": "Rename",
+      "exportGroup": "Export… ({{count}} hosts)"
+    },
+    "error": {
+      "groupCreateFailed": "Could not create the group.",
+      "groupRenameFailed": "Could not rename the group.",
+      "hostDeleteFailed": "Could not delete the host.",
+      "unusedSecretDeleteFailed": "Could not delete the unused secret.",
+      "groupDeleteFailed": "Could not delete the group."
+    },
+    "delete": {
+      "hostSingle": "Delete host {{title}}?",
+      "hostMany": "Delete {{count}} selected hosts?",
+      "groupSingle": "Delete group {{title}}?",
+      "groupMany": "Delete {{count}} selected groups?",
+      "groupImpact": "{{groups}} subgroups and {{hosts}} hosts are affected as well.",
+      "groupEmpty": "This group is empty. Deleting it removes it immediately.",
+      "keepChildren": "Keep contents",
+      "deleteChildren": "Delete contents too"
+    }
+  },
+  "awsWizard": {
+    "error": {
+      "roleArnRequired": "Enter a Role ARN.",
+      "roleArnInvalid": "The Role ARN is not valid. Check the ARN format again.",
+      "createFailed": "Could not create the AWS profile.",
+      "ssoSelectionRequired": "Choose both an SSO account and a role.",
+      "ssoCreateFailed": "Could not create the AWS SSO profile.",
+      "roleCreateFailed": "Could not create the role profile."
+    },
+    "static": {
+      "submit": "Save profile",
+      "submitting": "Creating…",
+      "profileName": "New profile name"
+    },
+    "field": {
+      "newProfileName": "New profile name",
+      "ssoProfileName": "SSO profile name",
+      "defaultRegion": "Default region",
+      "ssoDefaultRegion": "SSO default region",
+      "none": "Not set",
+      "ssoRegionSelect": "Choose an SSO region",
+      "accountSelect": "Choose an account",
+      "roleSelect": "Choose a role",
+      "roleProfileName": "Role profile name",
+      "roleDefaultRegion": "Role default region",
+      "sourceProfileSelect": "Choose a source profile"
+    },
+    "sso": {
+      "loggedIn": "SSO sign-in succeeded. Choose the account and role you want, then save.",
+      "reenter": "Start over",
+      "saving": "Saving…",
+      "signingIn": "Signing in…",
+      "save": "Save profile",
+      "signInAndLoad": "Sign in and load accounts"
+    },
+    "role": {
+      "sourceProfileRequired": "Creating a role profile requires a source profile first.",
+      "submitting": "Creating…",
+      "submit": "Save profile"
+    }
+  },
+  "vaultGate": {
+    "mismatch": "The two entries do not match.",
+    "error": {
+      "migrateFailed": "Switching to end-to-end encryption failed.",
+      "setupFailed": "Setting the sync passphrase failed.",
+      "unlockFailed": "Unlocking the sync vault failed.",
+      "resetFailed": "Resetting the vault failed."
+    },
+    "title": {
+      "error": "Sync vault error",
+      "setup": "Set the sync passphrase",
+      "unlock": "Unlock the sync vault"
+    },
+    "description": {
+      "error": "Syncing stopped because the vault information could not be verified safely.",
+      "migrate": "Set a sync passphrase for end-to-end encryption. Your existing data is kept as is.",
+      "setup": "Set a sync passphrase for end-to-end encryption. You need it when signing in on a new device.",
+      "unlock": "Enter this account's sync passphrase."
+    },
+    "restoreFailed": "The sync vault state could not be restored. Sign out and sign in again.",
+    "field": {
+      "passphrase": "Sync passphrase",
+      "confirm": "Confirm sync passphrase"
+    },
+    "warning": "If you forget the passphrase, synced data cannot be recovered. If another device is still signed in, you can change it from its settings.",
+    "submit": {
+      "migrating": "Switching…",
+      "settingUp": "Setting…",
+      "checking": "Checking…",
+      "enableE2ee": "Turn on end-to-end encryption",
+      "startSync": "Start syncing",
+      "unlock": "Unlock",
+      "later": "Later"
+    },
+    "reset": {
+      "warning": "Without the sync passphrase, data stored on the server cannot be recovered. Resetting deletes all server sync data and starts over. This cannot be undone.",
+      "confirm": "Delete everything and start over",
+      "open": "Forgot the sync passphrase? Reset the data"
+    },
+    "switchAccount": "Sign in with a different account (sign out)"
+  },
+  "hostDetail": {
+    "ago": {
+      "justNow": "just now",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago",
+      "days": "{{count}}d ago"
+    },
+    "replay": "View the session replay",
+    "startup": {
+      "snippetWithLabel": "Snippet · {{label}}",
+      "snippet": "Snippet"
+    },
+    "serial": {
+      "local": "Local"
+    },
+    "credential": {
+      "none": "Not saved (entered on connect)",
+      "saved": "Saved credential",
+      "sharedCount": "· shared by {{count}} hosts"
+    },
+    "row": {
+      "usernameUnset": "Not set",
+      "enabled": "On",
+      "serverProxy": "Server proxy",
+      "startupCommand": "Startup command",
+      "terminalTheme": "Terminal theme"
+    },
+    "env": {
+      "heading": "Environment variables ({{count}})",
+      "hide": "Hide values",
+      "show": "Show values"
+    },
+    "empty": {
+      "title": "Select a host",
+      "description": "Choose a host card or group on the left to see its details.",
+      "quickStart": "Quick start",
+      "newHost": "New host",
+      "import": "Import",
+      "localTerminal": "Local terminal",
+      "newGroup": "New group",
+      "shortcuts": "Shortcuts",
+      "logs": "Logs",
+      "recentLogs": "Recent logs"
+    },
+    "favorite": "Favorite {{label}}",
+    "close": "Close details",
+    "activity": {
+      "connectFailed": "{{kind}} · connection failed"
+    }
+  },
+  "palette": {
+    "nav": {
+      "hosts": "Hosts",
+      "sftp": "File transfer",
+      "containers": "Containers",
+      "portForwarding": "Port forwarding",
+      "tunnels": "Tunnels",
+      "snippets": "Snippets",
+      "savedCommands": "Saved commands",
+      "logs": "Logs",
+      "activity": "Activity log",
+      "settings": "Settings",
+      "preferences": "Preferences",
+      "localTerminal": "Local terminal",
+      "localShell": "Local shell"
+    },
+    "settings": {
+      "general": "General",
+      "generalSubtitle": "Theme and terminal",
+      "sftp": "SFTP settings",
+      "sftpSubtitle": "Transfer defaults",
+      "security": "Security",
+      "securitySubtitle": "Trust and security",
+      "secrets": "Saved credentials",
+      "secretsSubtitle": "Passwords and keys",
+      "awsProfiles": "AWS profiles",
+      "awsProfilesSubtitle": "AWS CLI profiles"
+    },
+    "quickSsh": "Save and connect over SSH",
+    "host": {
+      "connect": "Connect to {{label}}",
+      "containers": "{{label}} containers",
+      "recent": "Recent"
+    },
+    "group": {
+      "navigation": "Navigate",
+      "settings": "Settings",
+      "host": "Hosts",
+      "quickConnect": "Quick connect",
+      "localTerminal": "Terminal"
+    },
+    "noResults": "No search results."
+  },
+  "aiChat": {
+    "copy": "Copy",
+    "copied": "Copied",
+    "thinking": "Thinking",
+    "dropToAttach": "Drop to attach",
+    "clear": "Clear",
+    "closePanel": "Close the AI panel",
+    "disabled": "The AI assistant is off.",
+    "enableLink": "Enable it in Settings → AI ↗",
+    "intro": "Ask anything. Recent terminal output is sent along automatically.",
+    "attachmentAlt": "Attached image",
+    "toolRuns": "Tool activity",
+    "toolCount": "{{count}} tools",
+    "copyResponse": "Copy the response",
+    "approveCommand": "Approve command execution",
+    "autoApprove": "Auto-approve in this session",
+    "reject": "Reject",
+    "approve": "Approve",
+    "removeAttachment": "Remove attachment",
+    "inputLabel": "AI message input",
+    "inputPlaceholder": "Type a message",
+    "attachFile": "Attach a file",
+    "stop": "Stop",
+    "stopAria": "Stop generating",
+    "send": "Send",
+    "sendAria": "Send the message",
+    "disabledHint": "The AI assistant is off. Turn it on in Settings → AI.",
+    "modelMissing": "Choose a model in Settings → AI.",
+    "sessionContext": "Current session context:",
+    "requestFailed": "The request failed."
+  },
+  "imports": {
+    "exportRequestInvalid": "The export request is not valid.",
+    "dolgateExportTitle": "Export Dolgate hosts",
+    "dolgateExported": "Exported the selected hosts to a Dolgate file.",
+    "opensshNoExportable": "None of the selected hosts can be exported in OpenSSH format.",
+    "opensshExportTitle": "Export OpenSSH config",
+    "opensshExported": "Exported the selected hosts to an OpenSSH config.",
+    "dolgateImportTitle": "Import a Dolgate host file",
+    "importRequestInvalid": "The import request is not valid.",
+    "fileTooLarge": "The Dolgate file is too large or not a valid file.",
+    "importStateInvalid": "The import state is not valid.",
+    "awsProfileApplyFailedDetail": "Failed to apply the AWS profile file: {{message}}",
+    "awsProfileApplyFailed": "Could not apply the AWS profile file.",
+    "dnsApplyFailedDetail": "Failed to apply the DNS override: {{message}}",
+    "dnsApplyFailed": "Could not apply the DNS override.",
+    "dolgateImported": "Imported host data from the Dolgate file.",
+    "termiusSnapshotMissing": "The Termius import snapshot was not found. Reload the list.",
+    "termiusPartial": "Some items were skipped or produced warnings during the Termius import.",
+    "opensshStateMissing": "The OpenSSH import state was not found. Choose the file again.",
+    "opensshImported": "Imported hosts from the OpenSSH source.",
+    "opensshImportedWithWarnings": "The OpenSSH import finished with warnings.",
+    "xshellStateMissing": "The Xshell import state was not found. Reopen the dialog.",
+    "xshellKeyPathMissing": "{{label}}: the private key file path was not found, so the host was not imported.",
+    "xshellKeySaveFailed": "{{label}}: the private key could not be saved, so the host was not imported.",
+    "xshellPasswordWindowsOnly": "{{label}}: saved Xshell passwords cannot be imported automatically under this Windows user.",
+    "xshellPasswordDecryptFailed": "{{label}}: the saved Xshell password could not be decrypted, so only the host was imported.",
+    "xshellImported": "Imported hosts from the Xshell sessions.",
+    "xshellImportedWithWarnings": "The Xshell import finished with warnings."
+  },
+  "awsSftp": {
+    "ecsShellFailed": "Could not open the ECS Exec shell.",
+    "cloudShellHint": "Testing ECS Exec from CloudShell in the AWS Console needs the `cloudshell:ApproveCommand` permission. Dolgate itself does not require it — if the app keeps failing, also check the `ecs:ExecuteCommand` and `ecs:DescribeTasks` permissions.",
+    "ecsExecDenied": "No ECS Exec permission. The user/role needs `ecs:ExecuteCommand` and usually `ecs:DescribeTasks`. Original error: {{error}}",
+    "ecsDescribeDenied": "No permission to describe ECS tasks. The user/role needs `ecs:DescribeTasks`. Original error: {{error}}",
+    "ssmDenied": "No Session Manager permission. Check whether the user/role needs `ssm:StartSession`. Original error: {{error}}",
+    "localPortFailed": "Could not reserve a local port.",
+    "stage": {
+      "sshConfig": "Checking SSH settings",
+      "profile": "Checking the profile",
+      "awsLogin": "AWS sign-in",
+      "ssm": "Checking SSM",
+      "hostKey": "Checking the host key",
+      "tempKey": "Generating a temporary key",
+      "pushKey": "Sending the public key",
+      "tunnel": "Opening the tunnel",
+      "sftp": "Connecting over SFTP"
+    },
+    "progress": {
+      "checkingProfile": "Checking the authentication state of profile {{profile}}.",
+      "cliAuthNeeded": "Profile {{profile}} needs AWS CLI authentication.",
+      "browserLogin": "Signing in to AWS as {{profile}} in the browser.",
+      "checkingLoginResult": "Checking the sign-in result for profile {{profile}}.",
+      "ssoNotVerified": "Authentication was still not verified after the AWS SSO sign-in.",
+      "checkingSsm": "Checking the SSM connection state of instance {{label}}.",
+      "notManaged": "This instance is not an SSM managed instance right now.",
+      "checkingSshConfig": "Checking the SSH settings automatically."
+    }
+  },
+  "pfIpc": {
+    "failureWithCause": "{{message}} Cause: {{cause}}",
+    "dnsCreated": "Created a DNS override.",
+    "dnsUpdated": "Updated a DNS override.",
+    "dnsDeleted": "Deleted a DNS override.",
+    "dnsEnableFailed": "Could not enable the static DNS override.",
+    "dnsDisableFailed": "Could not disable the static DNS override.",
+    "dnsEnabled": "Enabled the static DNS override.",
+    "dnsDisabled": "Disabled the static DNS override.",
+    "ruleCreated": "Created a port forwarding rule.",
+    "ruleUpdated": "Updated a port forwarding rule.",
+    "ruleDeleted": "Deleted a port forwarding rule.",
+    "cliCredentialsNeeded": "This profile needs AWS CLI credentials.",
+    "ssoResultUnknown": "Could not confirm the AWS SSO sign-in result.",
+    "ecsTunnelStartFailed": "Could not start the ECS task tunnel.",
+    "checkSsmAgent": "Check the SSM Agent or the managed instance state.",
+    "sshUsernameUnknown": "Could not determine the SSH username automatically.",
+    "azUnknown": "Could not determine the availability zone.",
+    "remoteHostUnknown": "Check the remote host address.",
+    "hostsOverrideFailed": "Could not apply the hosts override.",
+    "ssmForwardStartFailed": "Could not start the AWS SSM port forward."
+  },
+  "aiService": {
+    "apiKeyEmpty": "The API key is empty.",
+    "searchKeyEmpty": "The search API key is empty.",
+    "requestInFlight": "A request is already in flight.",
+    "toolLoopGuard": "Stopped after too many consecutive tool calls (a loop guard). Try again with a more specific question.",
+    "commandRejected": "The user rejected running the command.",
+    "inspectCommandOnly": "Mutating, streaming, or interactive commands cannot run through inspect_command. Use run_in_terminal so the user can see it.",
+    "mutatingCommand": "Command that may change state",
+    "disabled": "The AI assistant is disabled.",
+    "apiKeyMissing": "No API key is configured.",
+    "modelMissing": "No model is configured.",
+    "codexStatusFailed": "Could not check the Codex sign-in status. Run 'Codex sign-in' again from the settings.",
+    "codexLoginRequired": "Codex sign-in is required. Press the 'Codex sign-in' button in the settings.",
+    "tool": {
+      "webSearch": "🔍 Web search: {{query}}",
+      "fetchUrl": "🌐 Reading URL: {{url}}",
+      "run": "⚡ Running: {{command}}",
+      "inspect": "🔎 Inspecting: {{command}}",
+      "readTerminal": "Reading terminal output: {{range}}",
+      "generic": "Running tool: {{name}}"
+    },
+    "attachedFile": "[attached file: {{name}}]"
+  },
+  "opensshImport": {
+    "source": {
+      "default": "Default",
+      "file": "File"
+    },
+    "error": {
+      "defaultReadFailed": "Could not read the default OpenSSH configuration.",
+      "addFileFailed": "Could not add the selected OpenSSH file.",
+      "importFailed": "Could not import the selected OpenSSH hosts."
+    },
+    "dialog": {
+      "close": "Close OpenSSH import",
+      "scanning": "Looking for hosts in the default OpenSSH configuration.",
+      "targetGroup": "Target group",
+      "ungrouped": "Ungrouped",
+      "searchLabel": "Search",
+      "searchPlaceholder": "Search alias, host, user, or key path",
+      "addingFile": "Loading the file…",
+      "addFile": "Load a file",
+      "selectVisible": "Select all visible",
+      "deselectAll": "Deselect",
+      "statSources": "{{count}} sources",
+      "statHosts": "{{count}} hosts to import",
+      "statSelected": "{{count}} hosts selected",
+      "statSkippedExisting": "{{count}} existing hosts skipped",
+      "statSkippedDuplicate": "{{count}} duplicate hosts skipped",
+      "hostsHeading": "Hosts",
+      "emptyTitle": "No importable OpenSSH host.",
+      "emptyDescription": "Hosts detected in the default configuration appear here. Add other configuration files with <strong>Load a file</strong>.",
+      "passwordAuth": "Password authentication",
+      "key": "Key",
+      "password": "Password",
+      "importing": "Importing…",
+      "import": "Import"
+    }
+  },
+  "home": {
+    "error": {
+      "layoutSaveFailed": "Could not save the host layout setting.",
+      "sshHostNotFound": "The SSH host was not found.",
+      "keyInstallFailed": "Could not install the SSH public key.",
+      "localTerminalFailed": "Could not start the local terminal.",
+      "groupMoveFailed": "Could not move the group.",
+      "groupRenameFailed": "Could not rename the group.",
+      "connectFailed": "Could not start the host connection.",
+      "tmuxFailed": "Could not start the tmux connection.",
+      "containersFailed": "Could not open the containers page.",
+      "quickConnectFailed": "Could not start Quick Connect.",
+      "sftpFailed": "Could not open SFTP."
+    },
+    "secret": {
+      "deleteLinked": "Deleting this secret unlinks it from {{count}} hosts. The hosts themselves are kept. Continue?",
+      "delete": "Delete this secret?"
+    },
+    "key": {
+      "installedAuthorizedKeys": "Installed a new SSH key in authorized_keys on instance {{label}}.",
+      "switched": "Host {{label}} now uses the new SSH key."
+    },
+    "group": {
+      "movedTo": "Moved the group to {{path}}.",
+      "moved": "Moved the group.",
+      "renamedTo": "Renamed the group to {{path}}.",
+      "renamed": "Renamed the group."
+    },
+    "transfer": {
+      "exported": "Exported {{count}} hosts.",
+      "exportSkipped": " {{count}} were excluded.",
+      "dolgateImported": "Imported {{count}} hosts from the Dolgate file.",
+      "dolgateSkipped": " {{count}} already-present items were skipped.",
+      "termiusImported": "Imported {{hosts}} hosts, {{groups}} groups, and {{secrets}} secrets from Termius.",
+      "termiusSkipped": " {{count}} incomplete hosts were skipped.",
+      "opensshImported": "Imported {{count}} hosts from OpenSSH.",
+      "opensshSecrets": " {{count}} credentials were imported as well.",
+      "skippedHosts": " {{count}} hosts were skipped.",
+      "xshellImported": "Imported {{hosts}} hosts and {{groups}} groups from Xshell."
+    }
+  },
+  "warpgateImport": {
+    "status": {
+      "opening": "Opening the Warpgate sign-in window.",
+      "opened": "The Warpgate sign-in window is open.",
+      "done": "The Warpgate sign-in is complete.",
+      "cancelled": "The Warpgate sign-in was cancelled."
+    },
+    "detail": {
+      "wait": "Please wait a moment.",
+      "completeOrCancel": "Finish the sign-in, or cancel it below.",
+      "loadingTargets": "Loading the SSH target list.",
+      "retryHint": "Check the address and try again."
+    },
+    "error": {
+      "targetsFailed": "Could not load the Warpgate target list.",
+      "cancelFailed": "Could not cancel the Warpgate sign-in.",
+      "openFailed": "Could not open the Warpgate sign-in window.",
+      "usernameRequired": "Enter the Warpgate username.",
+      "saveFailed": "Could not save the Warpgate host."
+    },
+    "endpointDetected": "The SSH endpoint was detected as <code>{{endpoint}}</code>.",
+    "currentUser": "The signed-in user is <code>{{username}}</code>.",
+    "usernameUnknown": " The signed-in username could not be detected, so enter it yourself.",
+    "cancelling": "Cancelling…",
+    "cancel": "Cancel",
+    "signInBrowser": "Sign in with the browser",
+    "emptyTitle": "Enter the Warpgate address, sign in with the browser, and the SSH target list loads."
+  },
+  "warpgate": {
+    "urlRequired": "Enter the Warpgate address.",
+    "urlScheme": "The Warpgate address must use http or https.",
+    "requestFailed": "The Warpgate request failed. ({{status}})",
+    "htmlResponse": "{{fallback}} The server returned an HTML page instead of an API response. Check the Warpgate address. ({{status}})",
+    "tokenRequired": "Enter the Warpgate API token.",
+    "loginWindowClosed": "The Warpgate sign-in window was closed.",
+    "loginCancelled": "The Warpgate sign-in was cancelled.",
+    "loginWindowFailed": "Could not open the Warpgate sign-in window.",
+    "connectionInfoFailed": "Could not load the Warpgate connection info.",
+    "targetsFailed": "Could not load the Warpgate target list.",
+    "authError": "An error occurred during Warpgate authentication."
+  },
+  "secretEdit": {
+    "loadFailed": "Could not load the saved credential.",
+    "validation": {
+      "password": "Enter a password.",
+      "privateKey": "Enter the private key contents or import a file.",
+      "certificate": "Enter the SSH certificate contents or import a file.",
+      "detachHost": "Choose the host to detach."
+    },
+    "title": "Edit saved credential",
+    "intro": "Edits the whole saved credential <label>{{label}}</label>.",
+    "mode": {
+      "detach": "Detach only this host to a new credential",
+      "shared": "Change every linked host",
+      "sharedHint": "All {{count}} hosts using this saved credential get the same change.",
+      "detachHint": "Only the host being edited moves to a new credential; the others keep the existing one."
+    },
+    "detachHostLabel": "Host to detach",
+    "loading": "Loading the saved credential.",
+    "passwordPlaceholder": "Enter a password",
+    "filePlaceholder": "The file name appears after importing",
+    "passphrasePlaceholder": "Enter the passphrase",
+    "envLabel": "Environment variables",
+    "envHint": "Injected into the shell on connect. Values are encrypted along with the password when stored and synced.",
+    "saveFailed": "An error occurred while updating the saved credential.",
+    "submitShared": "Save shared credential",
+    "submitDetach": "Create a host-only credential"
+  },
+  "containersStore": {
+    "openingShell": "Opening the container shell for {{label}}.",
+    "connectingShell": "Connecting to the container shell for {{label}}.",
+    "shellFailed": "Could not open the container shell.",
+    "openingEcsShell": "Opening the ECS shell for {{label}}.",
+    "connectingEcsShell": "Connecting to the ECS shell for {{label}}.",
+    "ecsShellFailed": "Could not open the ECS shell.",
+    "detailsFailed": "Could not load the container details.",
+    "checkingProfile": "Checking the authentication state of profile {{profile}}.",
+    "loadingEcs": "Loading the ECS clusters and services.",
+    "ecsLoadFailed": "Could not load the ECS cluster information.",
+    "reloadingEcs": "Reloading the ECS clusters and services.",
+    "loadingEcsMetrics": "Fetching AWS ECS/CloudWatch usage metrics.",
+    "checkingConnection": "Checking the container connection state for {{label}}.",
+    "listFailed": "Could not load the container list.",
+    "logsParseFailed": "Could not parse the container log response. Try reloading.",
+    "logsFailed": "Could not load the container logs.",
+    "metricsFailed": "Could not load the container metrics.",
+    "remoteSearchFailed": "The remote log search failed.",
+    "actionFailed": "Could not run the container action."
+  },
+  "keychain": {
+    "copyFailed": "Could not copy the password.",
+    "copied": "Copied the password to the clipboard.",
+    "publicKeyCopied": "Copied the SSH public key to the clipboard.",
+    "publicKeyCopyFailed": "Could not copy the SSH public key.",
+    "intro": "Stores the passwords, passphrases, private keys, and SSH certificates your hosts use, and manages how they are linked.",
+    "empty": {
+      "title": "No saved credentials.",
+      "description": "Credentials saved along with a host appear in this list.",
+      "searchTitle": "No search results.",
+      "searchDescription": "Clear the search or look for a different credential."
+    },
+    "linkedHosts": "Used by {{count}} hosts",
+    "action": {
+      "copying": "Copying…",
+      "copyPassword": "Copy password",
+      "edit": "Edit",
+      "copyPublicKey": "Copy public key",
+      "installOnHost": "Install on a host"
+    },
+    "keyCreated": "Created the SSH key {{label}}.",
+    "keyCreateFailed": "Could not create the SSH key.",
+    "install": {
+      "noHosts": "No host available to install on.",
+      "noResults": "No search results.",
+      "failed": "Could not install the SSH public key.",
+      "busy": "Installing…"
+    }
+  },
+  "sshKeyInstall": {
+    "generateTitle": "Generate and install a new SSH key",
+    "generateSubmit": "Generate and install",
+    "installFailed": "Could not install the SSH key.",
+    "publicKeyInstallFailed": "Could not install the SSH public key.",
+    "installedEc2": "Installed the public key in authorized_keys on the EC2 instance.",
+    "installedHost": "Installed the public key on the host and switched to it for connecting.",
+    "title": "Install a public key",
+    "descriptionAws": "Connects over SSH-over-SSM (EC2 Instance Connect) and registers the public key in authorized_keys. You can upload an existing key or generate a new one.",
+    "description": "Connects with the host's current sign-in method (e.g. a password), registers the public key, then switches to it for future connections. You can upload an existing key or generate a new one.",
+    "existingHeading": "Install an existing key",
+    "noManagedKeys": "No managed SSH key is registered. Generate and install a new one below.",
+    "selectKeyAria": "SSH key to install",
+    "currentlyUsed": " (in use)",
+    "passphrasePlaceholder": "Passphrase for the encrypted private key",
+    "installing": "Installing…",
+    "install": "Install",
+    "newKeyHeading": "Generate and install a new key",
+    "generate": "Generate"
+  },
+  "shortcuts": {
+    "group": {
+      "general": "General",
+      "tabs": "Tabs",
+      "terminal": "Terminal"
+    },
+    "item": {
+      "newWindow": "New window",
+      "searchHosts": "Search hosts",
+      "find": "Search / find",
+      "nextTab": "Next tab",
+      "prevTab": "Previous tab",
+      "tab1to8": "Tabs 1–8",
+      "lastTab": "Last tab",
+      "reopenTab": "Reopen closed tab",
+      "closeTab": "Close tab",
+      "commandPalette": "Command palette",
+      "aiAssistant": "AI assistant",
+      "prevNextCommand": "Previous / next command",
+      "prevNextFailed": "Previous / next failed command",
+      "tmuxPrefix": "tmux prefix"
+    },
+    "help": "Help",
+    "title": "Keyboard shortcuts",
+    "note": "The command palette and command navigation work only in sessions where shell integration (OSC 133) is active."
+  },
+  "logRange": {
+    "weekday": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    },
+    "preset": {
+      "30m": "last 30 minutes",
+      "1h": "last hour",
+      "6h": "last 6 hours",
+      "1d": "last day",
+      "3d": "last 3 days",
+      "1w": "last week"
+    },
+    "unit": {
+      "second": "s",
+      "minute": "m",
+      "hour": "h",
+      "day": "d",
+      "week": "w",
+      "month": "mo",
+      "year": "y"
+    },
+    "recentAmount": "Last {{amount}}{{unit}}",
+    "recentPreset": "{{preset}}",
+    "recentDefault": "Last 30 minutes",
+    "monthLabel": "{{month}}/{{year}}",
+    "dialog": {
+      "aria": "Choose the log range",
+      "modeAria": "Log range mode",
+      "relative": "Relative range",
+      "absolute": "Absolute range",
+      "prevMonth": "Previous month",
+      "nextMonth": "Next month",
+      "startDate": "Start date",
+      "startTime": "Start time",
+      "endDate": "End date",
+      "endTime": "End time",
+      "absoluteHint": "Dates use your local time zone. Applying an absolute range turns Follow off automatically.",
+      "customRange": "Custom range",
+      "amount": "Amount",
+      "unit": "Unit",
+      "relativeHint": "Applying a relative range recalculates it from the current time and re-queries.",
+      "absoluteError": "Check the start and end times.",
+      "relativeError": "Check the relative range value."
+    },
+    "presetShort": {
+      "30m": "30 minutes",
+      "1h": "hour",
+      "6h": "6 hours",
+      "1d": "day",
+      "3d": "3 days",
+      "1w": "week"
+    }
+  },
+  "cmdPalette": {
+    "ago": {
+      "justNow": "just now",
+      "seconds": "{{count}}s ago",
+      "minutes": "{{count}}m ago",
+      "hours": "{{count}}h ago"
+    },
+    "aria": "Command palette",
+    "searchPlaceholder": "Search commands",
+    "failedOnly": "Failed only",
+    "emptyNoCommands": "No commands recorded yet. They are only collected in sessions with shell integration on.",
+    "emptySearch": "No search results.",
+    "unreadableCommand": "(the command could not be read)",
+    "running": "Running",
+    "rerunBlockedTitle": "The command read from the screen may differ from what was typed (too long or multi-line) — it cannot be re-run.",
+    "rerunBlocked": "Cannot re-run",
+    "hint": {
+      "move": "move",
+      "jump": "jump there",
+      "rerun": "re-run",
+      "close": "close"
+    }
+  },
+  "replay": {
+    "scanFailed": "Command scan failed",
+    "loadFailed": "Could not load the session replay.",
+    "terminalInitFailedWith": "Could not initialize the session replay terminal. {{message}}",
+    "terminalInitFailed": "Could not initialize the session replay terminal.",
+    "windowTitle": "Session replay",
+    "windowTitleWith": "Session replay · {{title}}",
+    "loading": "Loading the session replay.",
+    "connectStarted": "Connected at",
+    "connectEnded": "Disconnected at",
+    "speed": "Speed",
+    "collapseCommands": "Collapse the command list",
+    "expandCommands": "Expand the command list"
+  },
+  "share": {
+    "timeout": "The session share server did not respond in time, so the request was cancelled. Try again in a moment.",
+    "badResponse": "{{fallback}} (the server did not return a valid response. Status {{status}})",
+    "startFailed": "Could not start session sharing.",
+    "notActive": "Session sharing is not active.",
+    "messageRequired": "Enter a message.",
+    "chatNotReady": "The chat connection is not ready yet.",
+    "inputToggleFailed": "Could not save the shared-input setting.",
+    "stopFailed": "Could not stop session sharing.",
+    "linkFailed": "Could not create the session share link.",
+    "messageHandleFailed": "Could not handle the session share message.",
+    "connectionClosed": "The session share connection closed.",
+    "connectionOpenFailed": "Could not open the session share connection.",
+    "ended": "Session sharing ended.",
+    "chatHistoryWith": "Chat history · {{title}}",
+    "chatHistory": "Chat history",
+    "chatWindowBaseUrlMissing": "Could not find the base URL for the chat history window."
+  },
+  "hostIpc": {
+    "usernameRequired": "A username is required.",
+    "sshOnly": "This feature is available only for SSH hosts.",
+    "sshAwsWarpgateOnly": "This feature is available only for SSH, AWS, and Warpgate hosts.",
+    "awsOnly": "This feature is available only for AWS hosts.",
+    "awsEcsOnly": "This feature is available only for AWS ECS hosts.",
+    "ecsNoHostKey": "ECS hosts do not support SSH host key verification.",
+    "probingViaProxy": "Checking the SSH host key through the server proxy.",
+    "openingTunnel": "Opening an internal tunnel to check the SSH host key.",
+    "probingHostKey": "Checking the SSH host key.",
+    "jumpChainTooDeep": "A jump host chain can be at most {{max}} levels deep.",
+    "jumpChainSelf": "A jump host chain cannot include the host itself.",
+    "jumpHostMissing": "The jump host was not found. Choose it again in the host settings.",
+    "jumpHostMustBeSsh": "The jump host must be a plain SSH host."
+  },
+  "hostsOverride": {
+    "permissionCancelled": "The DNS override permission prompt was cancelled.",
+    "helperStartFailed": "Could not start the Dolgate DNS Helper.",
+    "blockMissing": "The managed block was not found in the hosts file.",
+    "countMismatch": "The hosts file has an unexpected number of overrides. expected={{expected}} actual={{actual}}",
+    "contentMismatch": "The hosts file overrides differ from what was expected. expected={{expected}} actual={{actual}}",
+    "blockNotRemoved": "The managed block in the hosts file was not removed.",
+    "helperNotReady": "The Dolgate DNS Helper is not ready. Try again in a moment.",
+    "removeCommFailed": "Could not remove the DNS override — communication with the Dolgate DNS Helper failed.",
+    "applyCommFailed": "Could not apply the DNS override — communication with the Dolgate DNS Helper failed.",
+    "removeRequestFailed": "Could not remove the DNS override — the Dolgate DNS Helper did not handle the request.",
+    "applyRequestFailed": "Could not apply the DNS override — the Dolgate DNS Helper did not handle the request.",
+    "verifyApplyFailed": "Could not verify the hosts file after applying the DNS override.",
+    "applyNotVerified": "The DNS override was applied but could not be confirmed in the hosts file.",
+    "verifyRemoveFailed": "Could not verify the hosts file after removing the DNS override.",
+    "removeNotVerified": "The DNS override was removed but the hosts file cleanup could not be confirmed."
+  },
+  "xshellSvc": {
+    "defaultSessionDir": "Default Xshell sessions",
+    "protocolUnsupported": "{{label}}: the {{protocol}} protocol is not supported for import, so it was skipped.",
+    "noHost": "{{label}}: the session was skipped because it has no Host value.",
+    "noUserName": "{{label}}: imported without a UserName value — enter a username before the first connection.",
+    "badPort": "{{label}}: the Port value \"{{port}}\" is invalid, so port 22 is used.",
+    "userKeyMissing": "{{label}}: the UserKey path \"{{userKey}}\" was not found, so it is imported without a key path.",
+    "passwordUnsupported": "{{label}}: saved Xshell passwords are not imported in this version.",
+    "authProfileUnsupported": "{{label}}: Xshell auth profiles are not imported in this version.",
+    "masterPassword": "{{label}}: an Xshell master password is enabled, so saved passwords are not imported automatically.",
+    "stateMissing": "The Xshell import state was not found. Reopen the dialog."
+  },
+  "snippets": {
+    "validationRequired": "Enter both a name and a command.",
+    "saveFailed": "Saving failed.",
+    "searchPlaceholder": "Search name, keyword, command",
+    "keywordLabel": "Keyword (optional)",
+    "variablesLabel": "Variables:",
+    "save": "Save",
+    "add": "Add",
+    "emptyTitle": "No snippets saved yet.",
+    "emptyDescription": "Add the commands you use often and pull them straight from terminal autocomplete.",
+    "variableCount": "{{count}} variables",
+    "insert": "Insert",
+    "edit": "Edit",
+    "noResults": "No search results."
+  },
+  "sessionPane": {
+    "dropPathFailed": "Could not read the dropped file paths.",
+    "uploadPreparing": "Preparing to upload {{count}} files… (connecting SFTP)",
+    "hostKeyPrompt": "Save the host key to continue the upload.",
+    "uploadUnsupported": "This session does not support SFTP uploads.",
+    "sftpFailed": "SFTP connection failed: {{message}}",
+    "nothingToUpload": "Nothing to upload.",
+    "cwdFallback": "The current path could not be found, so uploading to home ({{path}}).",
+    "uploadStarted": "Started uploading to {{path}}.",
+    "aiTitle": "AI assistant (⌘I)",
+    "aiClose": "Close the AI assistant",
+    "aiOpen": "Open the AI assistant",
+    "dropHere": "Upload here → {{path}}",
+    "homeDirectory": "home directory"
+  },
+  "fileEditor": {
+    "confirmClose": "You have unsaved changes. Close the editor?",
+    "section": "Edit remote file",
+    "loading": "Loading the file…",
+    "changedRemotely": "The remote file changed while you were editing.",
+    "changedHint": "Reload to see the changes, or overwrite with the current contents.",
+    "reload": "Reload",
+    "overwrite": "Overwrite",
+    "sudoRequired": "Saving this file needs sudo.",
+    "sudoPlaceholder": "sudo password",
+    "saveWithSudo": "Save with sudo",
+    "editorLoading": "Loading the editor…",
+    "revert": "Revert",
+    "saving": "Saving…"
+  },
+  "runtime": {
+    "reconnecting": "Disconnected — reconnecting…",
+    "containerShellFailed": "Could not start the container shell. /bin/sh or /bin/bash is missing, or the shell exited immediately.",
+    "ecsShellFailed": "Could not start the ECS container shell. /bin/sh may be missing, or the shell process exited immediately.",
+    "containerConnecting": "Connecting to the containers on {{label}}.",
+    "warpgateApproval": "Waiting for Warpgate approval on {{label}}.",
+    "extraAuth": "{{label}} needs an additional authentication response.",
+    "session": "Session",
+    "disconnected": "Disconnected. Connect again.",
+    "ecsExecClosed": "The ECS Exec session closed.",
+    "disconnectedRetry": "Disconnected. Press Retry to connect again.",
+    "waitingFirstOutput": "Waiting for the remote shell's first output."
+  },
+  "sharePopover": {
+    "title": "Share this session through a browser.",
+    "hint": "Anyone with the link can view it without signing in.",
+    "start": "Start sharing",
+    "failed": "Session sharing failed.",
+    "preparing": "Preparing the share.",
+    "ready": "The share link is ready.",
+    "copyLink": "Copy the share link",
+    "copyLinkTitle": "Click to copy the link",
+    "creatingLink": "Creating the share link.",
+    "viewers": "{{count}} viewers",
+    "inputModeAria": "Session share input mode",
+    "readOnly": "Read-only",
+    "allowInput": "Allow input",
+    "chatHistory": "Chat history",
+    "stop": "Stop sharing"
+  },
+  "hostList": {
+    "name": "Name",
+    "type": "Type",
+    "group": "Group",
+    "tags": "Tags",
+    "lastConnected": "Last connected",
+    "favorite": "Favorite",
+    "favoriteFor": "Favorite {{label}}",
+    "menuFor": "Actions for {{label}}"
+  },
+  "awsExternalImport": {
+    "listFailed": "Could not load the local AWS CLI profile list.",
+    "detailsFailed": "Could not load the external AWS profile details.",
+    "noSelection": "No profile selected",
+    "selectedCount": "{{count}} selected",
+    "importFailed": "Could not import the external AWS profiles.",
+    "title": "Import from local AWS CLI",
+    "descriptionPath": "Reads profiles from this computer's <code>~/.aws</code> configuration and copies them as app-owned profiles.",
+    "descriptionSso": "For SSO profiles only the configuration is imported — the sign-in state and cache are not.",
+    "externalProfiles": "External profiles",
+    "loading": "Reading the local AWS CLI profiles.",
+    "empty": "No importable local AWS CLI profile.",
+    "detailsLoading": "Loading the profile details.",
+    "importing": "Importing…",
+    "import": "Import selected profiles"
+  },
+  "containersIpc": {
+    "hostNotFound": "The containers host was not found.",
+    "connectionError": "A containers connection error occurred.",
+    "runtimeCheckFailed": "Could not check the docker/podman runtime.",
+    "listFailed": "Could not load the container list.",
+    "runtimeUnavailable": "docker/podman is not available on this host.",
+    "checkRuntimeFirst": "Check the container runtime first."
+  },
+  "transferFormat": {
+    "passwordRequired": "Enter an export passphrase.",
+    "passwordTooShort": "The export passphrase must be at least 4 characters.",
+    "passwordTooLong": "The export passphrase is too long.",
+    "notDolgateFile": "This is not a valid Dolgate export file.",
+    "unsupportedOrCorrupt": "This Dolgate export file is unsupported or corrupted.",
+    "headerTooLarge": "The Dolgate export header is too large.",
+    "payloadTooLarge": "The selection is too large to export as one file.",
+    "unsupportedVersion": "This version of the app does not support that Dolgate file.",
+    "wrongPassword": "The passphrase is wrong, or the file is corrupted."
+  },
+  "connectFailure": {
+    "targetHost": "the target host",
+    "viaJump": " · via jump {{target}}",
+    "ssmExit": "The AWS SSM session ended. (code {{code}})",
+    "agentNoKeys": "The SSH agent has no keys. Add a key to the agent and connect again.",
+    "agentUnreachable": "Could not reach the SSH agent. Check that it is running.",
+    "hostKeyUntrusted": "This host's SSH host key is not trusted yet. Trust the host key and try again.",
+    "awsAuthFailed": "Could not verify the AWS authentication. Sign in again.",
+    "noRoute": "Cannot reach {{target}}. There is no route to that host from the current network.",
+    "refused": "{{target}} refused the connection.",
+    "timeout": "The connection to {{target}} timed out.",
+    "reset": "The connection to {{target}} was reset.",
+    "generic": "The connection could not be completed."
+  },
+  "knownHostsIpc": {
+    "noSecrets": "There is no credential to save.",
+    "certificateNeedsKey": "Saving an SSH certificate requires the private key too.",
+    "passphraseNeedsKey": "A passphrase can only be saved together with a private key.",
+    "connectFailed": "Connecting to the host failed.",
+    "hostKeyTrusted": "Saved the new host key to the trust list.",
+    "hostKeyReplaced": "Replaced the host key.",
+    "hostKeyRemoved": "Removed the host key from the trust list.",
+    "secretNotFound": "The saved credential was not found.",
+    "secretLoadFailed": "Could not load the saved credential.",
+    "noStoredPassword": "This credential has no stored password.",
+    "secretRemoved": "Removed the host secret.",
+    "sharedSecretUpdated": "Updated the shared secret.",
+    "secretCreateFailed": "Could not create the new secret.",
+    "hostSecretCreated": "Created a new host-only secret."
+  },
+  "connectStage": {
+    "sshConfig": "Checking SSH settings",
+    "awsProfile": "Checking the AWS profile",
+    "browserLogin": "Browser sign-in",
+    "ssmStatus": "Checking SSM status",
+    "hostKey": "Checking the host key",
+    "tempKey": "Generating a temporary key",
+    "pushKey": "Sending the public key",
+    "internalTunnel": "Opening the internal tunnel",
+    "sftp": "Connecting over SFTP",
+    "containers": "Connecting to containers",
+    "ecsClusters": "Looking up ECS clusters",
+    "usageMetrics": "Fetching usage metrics",
+    "preparing": "Preparing the connection"
+  },
+  "termTheme": {
+    "lightDefault": "Default light",
+    "darkDefault": "Default dark",
+    "inkBlue": "Deep ink blue",
+    "warmAsh": "Warm ash",
+    "softPaper": "Soft paper tone",
+    "forestDark": "Forest dark",
+    "forestLight": "Forest light",
+    "nightContrast": "Sharp night contrast",
+    "brightPaperBlue": "Bright paper with vivid blue",
+    "roseSubtle": "Subtle rose tone",
+    "neonGreen": "Neon green console",
+    "coolBlue": "Cool blue console",
+    "strongRed": "Strong red console"
+  },
+  "sync": {
+    "generationChanged": "The account or vault generation of the sync job changed.",
+    "decryptFailed": "Could not decrypt the sync data.",
+    "htmlResponse": "{{fallback}} The server returned an HTML page instead of an API response. Check the deployment URL or the reverse proxy configuration. ({{status}})",
+    "pausedOffline": "Syncing is paused in offline mode.",
+    "pausedNeedsVault": "Enter the sync passphrase to start syncing.",
+    "decryptCorrupt": "The sync data could not be decrypted. It may be corrupted.",
+    "initialFailed": "The initial sync failed.",
+    "pausedOfflineUpload": "In offline mode changes are kept locally and synced later.",
+    "pausedNeedsVaultUpload": "Enter the sync passphrase to sync your changes.",
+    "uploadFailed": "The sync upload failed.",
+    "fetchFailed": "Fetching the sync data failed."
+  },
+  "shareChat": {
+    "titleWith": "Chat history · {{title}}",
+    "title": "Chat history",
+    "loadFailed": "Could not load the chat history.",
+    "sendFailed": "Could not send the chat message.",
+    "loading": "Loading",
+    "sending": "Sending",
+    "live": "Live chat",
+    "empty": "No chat yet.",
+    "messageLabel": "Message",
+    "messagePlaceholder": "Type a message",
+    "send": "Send"
+  },
+  "connectProgress": {
+    "hostKeyChecking": "Checking the host key for {{label}}.",
+    "hostKeyNeeded": "{{label}} needs host key verification.",
+    "ssmStarting": "Starting the SSM session for {{label}}.",
+    "warpgateConnecting": "Connecting the Warpgate SSH session for {{label}}.",
+    "serialConnecting": "Connecting the serial session for {{label}}.",
+    "sshConnecting": "Connecting the SSH session for {{label}}.",
+    "localStarting": "Starting the local terminal.",
+    "waitingFirstOutput": "Waiting for the first output from the remote shell on {{label}}.",
+    "waitingShell": "Waiting for the shell.",
+    "credentialRetry": "Check the credentials for {{label}} again."
+  },
+  "authOverlay": {
+    "warpgateTitle": "Waiting for Warpgate approval.",
+    "warpgateHint": "Sign in to Warpgate in the browser and press <code>Authorize</code>. The app fills in what it can automatically.",
+    "authCodeNote": "Verification code <code>{{code}}</code> is entered automatically.",
+    "reopenBrowser": "Reopen browser",
+    "copyLink": "Copy link",
+    "extraAuthTitle": "Additional authentication input is required.",
+    "sendResponse": "Send response"
+  },
+  "sidebar": {
+    "sortName": "Sort: by name",
+    "sortRecent": "Sort: recently used",
+    "sortCount": "Sort: most hosts",
+    "groupOptions": "Group options",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "hideEmpty": "Hide empty groups",
+    "favorites": "Favorites",
+    "noGroups": "No groups created yet."
+  },
+  "sessionStore": {
+    "ecsShellReopening": "Reopening the ECS shell for {{label}}.",
+    "localRestarting": "Restarting the local terminal.",
+    "autoReconnectCancelled": "Auto-reconnect was cancelled.",
+    "authInputCancelled": "Authentication input for {{label}} was cancelled.",
+    "usernameRequired": "Enter a username.",
+    "usernameUpdateFailed": "Could not update the username."
+  },
+  "reconnect": {
+    "waitingNetwork": "Waiting for the network. Reconnecting once it recovers.",
+    "reconnecting": "Disconnected — reconnecting… (attempt {{attempt}}/{{max}})",
+    "failed": "Reconnecting failed after {{attempts}} attempts. Connect again manually.",
+    "waitingNetworkShort": "Waiting for the network. Reconnecting once it recovers.",
+    "sftpFailed": "SFTP reconnect failed after {{attempts}} attempts. Connect again.",
+    "waitingNetworkBadge": "Waiting for network",
+    "reconnectingShort": "Reconnecting… ({{attempt}}/{{max}})",
+    "failedBadge": "Reconnect failed ({{attempts}} attempts)",
+    "tmuxFailed": "tmux reconnect failed after {{attempts}} attempts. Connect again."
+  },
+  "termView": {
+    "initFailed": "Could not initialize the terminal. Check the settings or reopen the app.",
+    "truncated": "…(truncated)",
+    "command": "Command: {{command}}",
+    "commandUnknown": "(unknown)",
+    "cwd": "Working directory: {{cwd}}",
+    "exitCode": "Exit code: {{code}}",
+    "output": "Output:",
+    "askFailed": "Explain why this command failed and how to fix it.",
+    "askExplain": "Explain the output of this command.",
+    "linkCopied": "Link copied.",
+    "linkCopyFailed": "Could not copy the link."
+  },
+  "tmuxMenu": {
+    "newSessionPlaceholder": "Type a new session name and press Enter",
+    "newSessionAria": "New tmux session name",
+    "remoteSessions": "Remote tmux sessions",
+    "noSessions": "No sessions detected",
+    "windows": "{{count}} windows",
+    "current": "current",
+    "attachedElsewhere": "Another client is attached",
+    "killTitle": "End the session (kill-session)",
+    "killAria": "End session {{name}}"
+  },
+  "hostStatus": {
+    "cpuCount": "{{count}}",
+    "none": "—",
+    "loading": "Reading the host status…",
+    "unstable": "Paused — unstable connection · retry",
+    "cpuCores": "CPU cores",
+    "uptime": "Uptime",
+    "disk": "Disk {{mount}}",
+    "containerNote": "Inside a container these show the whole host's values."
+  },
+  "missingUsername": {
+    "sftp": "This host has no saved SSH username yet. Enter one to continue the SFTP connection. What you enter is saved on this host and reused from the next connection on.",
+    "containers": "This host has no saved SSH username yet. Enter one to continue the container connection. What you enter is saved on this host and reused from the next connection on.",
+    "containerShell": "This host has no saved SSH username yet. Enter one to continue the container shell connection. What you enter is saved on this host and reused from the next connection on.",
+    "portForward": "This host has no saved SSH username yet. Enter one to start port forwarding. What you enter is saved on this host and reused from the next connection on.",
+    "ssh": "This host has no saved SSH username yet. Enter one to continue the SSH connection. What you enter is saved on this host and reused from the next connection on.",
+    "prompt": "Enter the username for {{label}}.",
+    "saveFailed": "Could not save the username.",
+    "submit": "Save and continue"
+  },
+  "credentialRetry": {
+    "prompt": "Check the credentials for {{label}} again.",
+    "usernameRequired": "Enter a username.",
+    "passwordRequired": "Enter a password.",
+    "keyRequired": "Import a private key, or use an existing saved credential.",
+    "keyImportRequired": "Import a private key.",
+    "certificateRequired": "Import an SSH certificate.",
+    "retryFailed": "The retry failed.",
+    "retry": "Try again"
+  },
+  "opensshSvc": {
+    "circularInclude": "Skipped a circular Include in {{path}}.",
+    "readFailed": "Could not read the OpenSSH config file: {{path}} ({{reason}})",
+    "includeNoMatch": "No file matches the Include pattern: {{pattern}}",
+    "includedReadFailed": "Could not read the included config file: {{path}}",
+    "noUser": "\"{{alias}}\" was imported without a User value — enter a username before the first connection.",
+    "noSpecificAlias": "Host blocks without a specific alias were not imported.",
+    "badPort": "The Port value \"{{port}}\" for \"{{alias}}\" is invalid and was ignored.",
+    "keyUnsupported": "The key {{file}} is in an unsupported format and was not imported.",
+    "keyReadFailed": "The key file {{file}} could not be read and was not imported.",
+    "stateMissing": "The OpenSSH import state was not found. Reopen the dialog."
+  },
+  "attachment": {
+    "truncated": "…(file truncated)",
+    "imageLimit": "You can attach at most {{max}} images at once.",
+    "textLimit": "You can attach at most {{max}} text files at once.",
+    "imageTooLarge": "The image is too large (over 4MB even after downscaling).",
+    "imageUnreadable": "The image could not be read.",
+    "fileTooLarge": "The file is too large (2MB max).",
+    "binaryNotAllowed": "Binary files cannot be attached.",
+    "fileUnreadable": "The file could not be read."
+  },
+  "workspace": {
+    "broadcastOff": "Turn broadcast off",
+    "broadcastOn": "Turn broadcast on",
+    "broadcastActive": "Broadcast is active",
+    "broadcastNeedsPanes": "Available when two or more remote panes are connected",
+    "readySection": "Ready to connect",
+    "readyTitle": "Start your first SSH session",
+    "readyHint": "Double-click a host card to open a new session in a tab, and drag a tab downward to view several sessions side by side."
+  },
+  "sshIpc": {
+    "ssmSupportFailed": "Could not check whether the server supports AWS SSM. {{message}}",
+    "serverAuthRequired": "Server authentication is required.",
+    "ssmSupportStatus": "Could not check whether the server supports AWS SSM. ({{status}})",
+    "ssmUnsupported": "The server does not support AWS SSM sessions.",
+    "fallbackFailed": "The SSH-over-SSM connection failed and the SSM shell fallback failed too. SSH-over-SSM: {{primary}} / SSM shell: {{fallback}}",
+    "ecsUseContainers": "ECS hosts open from the Containers screen instead of a session connection.",
+    "fallbackNotice": "The SSH-over-SSM connection failed, falling back to the SSM shell.",
+    "externalLinkScheme": "External links can only be opened over http or https."
+  },
+  "hostsIpc": {
+    "secretSaved": "The host secret was saved.",
+    "hostCreated": "Created a host.",
+    "secretUpdated": "The host secret was updated.",
+    "hostUpdated": "Updated a host.",
+    "hostDeleted": "Deleted a host.",
+    "groupCreated": "Created a group.",
+    "groupDeleted": "Deleted a group.",
+    "groupMoved": "Moved a group.",
+    "groupRenamed": "Renamed a group."
+  },
+  "awsIpc": {
+    "ecsOnly": "This feature is available only for ECS hosts.",
+    "runningTaskNotFound": "The selected running task was not found.",
+    "execDisabledShell": "A shell cannot be opened because ECS Exec is not enabled on this task."
+  },
+  "ssmSsh": {
+    "checkingHostKeyTrust": "Checking the host key trust for {{label}}.",
+    "generatingTempKey": "Generating a temporary SSH key.",
+    "preparingProxy": "Preparing the EC2 public key injection and SSM tunnel through the server proxy.",
+    "startingSession": "Starting the SSH session for {{label}}.",
+    "pushingKey": "Sending the public key over EC2 Instance Connect.",
+    "openingTunnel": "Opening the internal SSM tunnel for the SSH connection."
+  },
+  "webSearch": {
+    "queryEmpty": "error: the search query is empty.",
+    "noTavilyKey": "error: no Tavily API key is configured. Save one in Settings → AI.",
+    "networkFailed": "error: the search request failed (network).",
+    "httpFailed": "error: search failed (HTTP {{status}}).",
+    "parseFailed": "error: could not parse the search response.",
+    "noResults": "No results."
+  },
+  "providerError": {
+    "cancelledOrTimeout": "The request was cancelled or timed out.",
+    "timeout": "The request timed out. Check the baseUrl, port, and network.",
+    "connectFailed": "Could not connect to the provider{{hint}}. Check the baseUrl, port, and network.",
+    "authFailed": "Authentication failed. Check the API key.",
+    "notFound": "The model or endpoint was not found (check whether the baseUrl needs a /v1 path).",
+    "providerStatus": "A provider error ({{status}}) occurred. Try again shortly.",
+    "noVision": "The model does not appear to support image input. Send text only, or switch to a vision-capable model in the settings.",
+    "rejected": "The request was rejected. Check the model and settings.",
+    "requestFailed": "The request failed{{detail}}"
+  },
+  "containersSlice": {
+    "lifecycleLogFailed": "Could not start the containers connection log.",
+    "pageOpenFailed": "Could not open the containers page.",
+    "ecsShellPreparing": "Preparing the ECS shell for {{label}}."
+  },
+  "trustAuth": {
+    "profileNotFoundSelect": "The linked AWS profile could not be found. Choose a profile in the host settings.",
+    "browserLogin": "Signing in to AWS as {{profile}} in the browser.",
+    "checkingLoginResult": "Checking the sign-in result for profile {{profile}}.",
+    "cliCredentialsNeeded": "Profile {{profile}} needs AWS CLI credentials."
+  },
+  "sftpStore": {
+    "hostKeyTrustNeeded": "Continuing the terminal upload requires trusting the host key.",
+    "listFailed": "Could not read the SFTP listing.",
+    "entryReadFailed": "Could not read {{name}}.",
+    "connectFailed": "The SFTP connection failed.",
+    "checkingHostKey": "Checking the SSH host key.",
+    "dropPathFailed": "Could not read the dropped item paths."
+  },
+  "transferFmt": {
+    "etaSeconds": "{{seconds}}s left",
+    "etaMinutesSeconds": "{{minutes}}m {{seconds}}s left",
+    "etaMinutes": "{{minutes}}m left",
+    "etaHoursMinutes": "{{hours}}h {{minutes}}m left",
+    "etaHours": "{{hours}}h left",
+    "andMore": "{{name}} and {{count}} more",
+    "failedItems": "{{count}} items failed to transfer."
+  },
+  "tmuxBar": {
+    "aria": "tmux windows",
+    "windowTitle": "{{label}} — click: switch · double-click: rename",
+    "closeWindow": "Close window (kill-window)",
+    "newWindow": "New tmux window (Ctrl-b c)",
+    "splitHorizontalTitle": "Split the active pane left/right (Ctrl-b %)",
+    "splitHorizontal": "Split ⇢",
+    "splitVerticalTitle": "Split the active pane top/bottom (Ctrl-b \")",
+    "splitVertical": "Split ⇣"
+  },
+  "mosh": {
+    "connected": "Connected",
+    "reconnecting": "Reconnecting",
+    "disconnected": "Disconnected",
+    "justNow": "just now",
+    "seconds": "{{count}}s ago",
+    "minutes": "{{count}}m ago",
+    "hours": "{{count}}h ago",
+    "reply": "replied {{ago}}"
+  },
+  "logFind": {
+    "placeholder": "Find in the current logs",
+    "prevAria": "Previous log match",
+    "prev": "Previous",
+    "nextAria": "Next log match",
+    "next": "Next",
+    "closeAria": "Close log search"
+  },
+  "offlineLease": {
+    "badFormat": "The offline lease format is not valid.",
+    "badAlgorithm": "The offline lease signature algorithm could not be determined.",
+    "badSignature": "The offline lease signature check failed.",
+    "serverMismatch": "The offline lease was issued by a different server than the current one.",
+    "userMismatch": "The offline lease user does not match the current session.",
+    "audienceMismatch": "The offline lease is not addressed to this desktop app.",
+    "expired": "The offline lease has expired.",
+    "verifyFailed": "Could not verify the offline lease."
+  },
+  "mainApp": {
+    "keychainTitle": "Cannot access the OS keychain",
+    "keychainMessage": "The OS keychain (secure storage) is unavailable, so saved hosts and sign-in data cannot be loaded.",
+    "keychainDetail": "On Linux auto-login sessions the keyring (GNOME Keyring/KWallet) may start locked. Sign out and sign in with your password, or unlock the keyring, then restart the app.",
+    "ok": "OK",
+    "newWindow": "New window",
+    "newWindowDescription": "Open a new Dolgate window"
+  },
+  "runtimeCoord": {
+    "preparing": "Preparing the container runtime connection for {{label}}.",
+    "preparingProxy": "Preparing the container runtime connection through the server proxy.",
+    "openingTunnel": "Opening an internal tunnel to check the container runtime.",
+    "notRunning": "Container {{name}} is not running. Current status: {{status}}",
+    "tunnelStartFailed": "Could not start the container tunnel."
+  },
+  "ssoLogin": {
+    "badClientResponse": "The AWS SSO client registration response is not valid.",
+    "badTokenResponse": "The AWS SSO token response is not valid.",
+    "timeout": "Waiting for the AWS SSO sign-in timed out. Try again.",
+    "loginFailedTitle": "Sign-in failed",
+    "retryInApp": "Return to the app and try again.",
+    "verifyFailedBody": "Verifying the authentication response failed. Try again.",
+    "verifyFailed": "Verifying the AWS SSO authentication response failed.",
+    "loginDoneTitle": "Sign-in complete",
+    "closeWindow": "Close this window and return to the app.",
+    "startUrlRequired": "An SSO start URL and SSO region are required."
+  },
+  "tmuxControl": {
+    "title": "tmux control mode",
+    "keptOnServer": "Kept on the server",
+    "killConfirm": "End the session? This cannot be undone.",
+    "kill": "End",
+    "detachTitle": "Detaches only this client and leaves the server tmux session running. Re-attaching restores it.",
+    "killTitle": "Ends the tmux session on the server (kills the processes — not recoverable)."
+  },
+  "hostBrowserEmpty": {
+    "noHostsHint": "Add your first SSH host with New Host. Serial connections start from Import Serial.",
+    "searchHint": "Clear the search or look for a different host name.",
+    "addHint": "Add an SSH host with New Host, or use Import Serial if you need a serial connection.",
+    "noHosts": "No hosts registered yet.",
+    "noResults": "No search results.",
+    "noHostsHere": "No hosts here yet.",
+    "selectedHosts": "{{count}} selected hosts"
+  },
+  "hostListPanel": {
+    "sortName": "By name",
+    "sortLastConnected": "By last connected",
+    "sortRecent": "By last modified",
+    "favoriteFor": "Favorite {{label}}",
+    "gridView": "Grid view",
+    "listView": "List view",
+    "sort": "Sort"
+  },
+  "transferToast": {
+    "completed": "Done",
+    "failed": "Failed",
+    "cancelled": "Cancelled",
+    "cancelling": "Cancelling…",
+    "openFolder": "Open folder"
+  },
+  "knownHostPrompt": {
+    "mismatchTitle": "The host key changed.",
+    "newTitle": "Check the new host key.",
+    "savedFingerprint": "Saved fingerprint",
+    "currentFingerprint": "Current server fingerprint",
+    "mismatchHint": "The saved host key differs from the current server key. Confirm this really is the replaced server before continuing.",
+    "newHint": "This is the first connection to this server. Check the fingerprint and save it to the trust list — after that it is verified strictly.",
+    "replaceContinue": "Replace and continue",
+    "saveContinue": "Save and continue"
+  },
+  "awsSftpRetry": {
+    "title": "Check the SSH settings for {{label}}.",
+    "hideAdvanced": "Hide advanced options",
+    "advanced": "Advanced options",
+    "usernameRequired": "Enter the SSH username.",
+    "portRequired": "Enter a valid SSH port.",
+    "retryFailed": "The retry failed.",
+    "retry": "Try again"
+  },
+  "sftpIpc": {
+    "generatingTempKey": "Generating a temporary SSH key.",
+    "proxyOpening": "Opening the SFTP session through the server proxy.",
+    "pushingKey": "Sending the public key over EC2 Instance Connect.",
+    "openingTunnel": "Opening the internal tunnel for the SFTP connection.",
+    "startingSession": "Starting the SFTP session."
+  },
+  "sshKeyIpc": {
+    "nameRequired": "A key name is required.",
+    "publicKeyParseFailed": "Could not parse the SSH public key.",
+    "saveFailed": "Could not save the SSH key.",
+    "noPrivateKey": "This credential has no SSH private key.",
+    "selectHost": "Choose the host to install on.",
+    "notSshHost": "This is not an SSH host.",
+    "installFailed": "Could not install the SSH public key."
+  },
+  "secretIpc": {
+    "hostSecretSaved": "Saved a host-only credential.",
+    "certNotFound": "The SSH certificate was not found. Import a new one and try again.",
+    "certExpired": "The SSH certificate expired. Import a new one and try again.",
+    "certNotYetValidWith": "The SSH certificate is not valid yet. Valid after {{validAfter}}",
+    "certNotYetValid": "The SSH certificate is not valid yet.",
+    "certParseFailed": "The SSH certificate could not be parsed. Check its contents.",
+    "certCheckFailed": "Could not verify the SSH certificate."
+  },
+  "codex": {
+    "loginRequired": "Codex sign-in is required. Press the 'Codex sign-in' button in the settings.",
+    "signedIn": "Signed in{{detail}}.",
+    "webSearch": "🔍 Web search: {{query}}",
+    "localRun": "💻 Local run: {{command}}",
+    "unsupportedModel": "Codex does not support that model. Save the Codex model back to the default in the settings.",
+    "authExpired": "Codex authentication expired or a sign-in is needed. Run 'Codex sign-in' again from the settings.",
+    "requestFailed": "The Codex request failed."
+  },
+  "sessionSvc": {
+    "connectFailed": "Could not start the host connection.",
+    "localFailed": "Could not start the local terminal.",
+    "ssmRetrying": "Retrying the SSM connection for {{label}}.",
+    "connectFailedSsm": "Could not start the host connection. AWS SSM connections may require session-manager-plugin."
+  },
+  "blockOverlay": {
+    "copyOutput": "Copy output",
+    "copyCommand": "Copy command",
+    "rerun": "Re-run",
+    "commandRunning": "A command is running",
+    "sessionDisconnected": "The session is not connected",
+    "rerunBlocked": "The command read from the screen may differ from what was typed, so it cannot be re-run (too long or multi-line)."
+  },
+  "updateConfirm": {
+    "title": "Applying the update requires a restart",
+    "body": "Every open SSH session, in-flight transfer, and active port forward is closed. Continuing lets Dolgate clean up, restart, and apply the new version.",
+    "confirm": "Restart and update"
+  },
+  "updateSvc": {
+    "unsignedMac": "This mac release is not code-signed, so the auto-update cannot be applied. Once a signed build ships you can update from inside the app.",
+    "unknownError": "An unknown error occurred while checking for updates.",
+    "noDownload": "No update has been downloaded.",
+    "notificationTitle": "Dolgate update",
+    "notificationBody": "Installing the update. Reopen Dolgate once it finishes."
+  },
+  "cmdNotify": {
+    "seconds": "{{seconds}}s",
+    "minutesSeconds": "{{minutes}}m {{seconds}}s",
+    "minutes": "{{minutes}}m",
+    "hoursMinutes": "{{hours}}h {{minutes}}m",
+    "hours": "{{hours}}h",
+    "failed": "Failed (exit {{code}})",
+    "completed": "Done",
+    "fallbackTitle": "Terminal"
+  },
+  "paneHeader": {
+    "closeSession": "End the {{title}} session",
+    "splitHorizontalAria": "Split left/right",
+    "splitHorizontalTitle": "Split left/right (Ctrl-b %)",
+    "splitVerticalAria": "Split top/bottom",
+    "splitVerticalTitle": "Split top/bottom (Ctrl-b \")"
+  },
+  "termiusImport": {
+    "loadFailed": "Could not load the Termius data.",
+    "loading": "Reading the local Termius data.",
+    "noGroups": "No group matches the search.",
+    "noHosts": "No host matches the search.",
+    "importFailed": "Could not import the Termius data."
+  },
+  "envEditor": {
+    "nameAria": "Environment variable name",
+    "valueAria": "Environment variable value",
+    "deleteAria": "Delete environment variable",
+    "addVariable": "+ Add variable"
+  },
+  "staticProfile": {
+    "profileName": "Profile name",
+    "defaultRegion": "Default region",
+    "none": "Not set",
+    "profileNameLabel": "Profile name"
+  },
+  "termiusSvc": {
+    "readFailed": "Could not read the Termius data.",
+    "platformUnsupported": "Termius import is currently supported on macOS and Windows only.",
+    "notInstalled": "No local Termius installation was found.",
+    "noDataDir": "The local Termius data directory was not found.",
+    "nothingToImport": "No group or host to import was found in the local Termius data.",
+    "missingAddress": "{{label}}: skipped because it has no address or port.",
+    "missingUsername": "{{label}}: imported without a username — enter one before the first connection.",
+    "noCredential": "{{label}}: no storable credential, so only the host was imported without a password.",
+    "imported": "Imported the local Termius data."
+  },
+  "opensshExport": {
+    "jumpCycle": "{{label}}: skipped because the jump host chain has a circular reference.",
+    "jumpMissing": "{{label}}: skipped because the linked jump host was not found.",
+    "jumpUnsupported": "{{label}}: skipped because it uses a jump host that OpenSSH cannot represent.",
+    "hostMissing": "ID {{id}}: skipped because the host was not found.",
+    "kindUnsupported": "{{label}}: {{kind}} hosts cannot be exported in OpenSSH format."
+  },
+  "authorizedKey": {
+    "notEc2": "This is not an EC2 host.",
+    "installFailed": "Could not install the SSH public key."
+  },
+  "containersShell": {
+    "closeTab": "Close {{title}}",
+    "emptyInline": "No container screen is open.",
+    "emptyTitle": "No container screen is open.",
+    "emptyDescription": "Right-click a host card and open its containers."
+  },
+  "tmuxPrompt": {
+    "raw": "tmux command",
+    "renameWindow": "Window name",
+    "renameSession": "Session name",
+    "rawPlaceholder": "e.g. resize-pane -Z",
+    "namePlaceholder": "Enter a name"
+  },
+  "hostDisplay": {
+    "justNow": "just now",
+    "minutes": "{{count}}m ago",
+    "hours": "{{count}}h ago",
+    "days": "{{count}}d ago"
+  },
+  "windowControls": {
+    "minimize": "Minimize",
+    "restore": "Restore",
+    "maximize": "Maximize",
+    "close": "Close",
+    "aria": "Window controls"
+  },
+  "sshKeyMaterial": {
+    "parseFailed": "Could not parse the SSH public key.",
+    "generateFailed": "Could not generate the SSH public key."
+  },
+  "runCommand": {
+    "empty": "error: the command to run is empty.",
+    "header": "Ran in the user's terminal: {{command}}",
+    "noOutput": "(no output)",
+    "stillRunning": "(the command is still running — streaming/long-lived. The above is the first few seconds of output; the user can keep watching or stop it in the terminal. Do not run it again.)",
+    "truncated": "…(truncated)"
+  },
+  "readTerminal": {
+    "lines": ", {{count}} lines",
+    "header": "Terminal output ({{label}}{{lines}})",
+    "noOutput": "(no output in that range)",
+    "snapshotStart": "(reached the start of the snapshot.)",
+    "rangeLabel": "lines {{from}}–{{to}} back"
+  },
+  "fetchUrl": {
+    "badUrl": "error: invalid URL.",
+    "schemeOnly": "error: only http/https URLs are allowed.",
+    "networkFailed": "error: could not fetch the page (network).",
+    "emptyResponse": "(empty response)"
+  },
+  "codexServer": {
+    "exited": "The Codex app-server exited ({{code}})",
+    "notRunning": "The Codex app-server is not running.",
+    "nonJson": "Codex app-server non-JSON output: {{line}}",
+    "noLoginUrl": "Codex did not return a browser sign-in URL."
+  },
+  "replayCommands": {
+    "aria": "Command list",
+    "analyzing": "Analyzing commands…",
+    "noCommands": "No commands recorded.",
+    "noShellIntegration": "This recording has no shell integration data, so commands cannot be shown.",
+    "unreadable": "(the command could not be read)"
+  },
+  "hostDelete": {
+    "alsoDeleteSecrets": "Also delete {{count}} saved credentials that become unused",
+    "unusedSecrets": "Some saved credentials become unused after deleting the host.",
+    "secretsKept": "Linked saved credentials are kept."
+  },
+  "select": {
+    "search": "Search",
+    "noResults": "No search results.",
+    "searchAria": "Search {{label}}"
+  },
+  "sftpSlice": {
+    "hostKeyCheckFailed": "Could not verify the host key."
+  },
+  "appShell": {
+    "xshellImported": "Imported {{hosts}} hosts and {{groups}} groups from Xshell.",
+    "xshellSecrets": " {{count}} saved passwords were imported as well.",
+    "xshellSkipped": " {{count}} hosts were skipped.",
+    "selectTargetHost": "Choose a target host.",
+    "retry": "Try again"
+  },
+  "offlineBanner": {
+    "body": "No internet connection — running in offline mode.",
+    "until": " Usable until {{expiry}}.",
+    "retrying": "Reconnecting…",
+    "retry": "Reconnect"
+  },
+  "hostMetrics": {
+    "daysHours": "{{days}}d {{hours}}h",
+    "hoursMinutes": "{{hours}}h {{minutes}}m",
+    "minutes": "{{minutes}}m"
+  },
+  "sessionHelpers": {
+    "waitingFirstOutput": "Waiting for the remote shell's first output…",
+    "connectFailed": "The session connection failed.",
+    "connecting": "Connecting the session…"
+  },
+  "snippetVars": {
+    "title": "Enter snippet variables",
+    "confirm": "Insert"
+  },
+  "knownHosts": {
+    "intro": "The trusted host keys. A new connection proceeds only when it matches this list exactly.",
+    "emptyTitle": "No known hosts saved yet.",
+    "emptyDescription": "Approving the fingerprint of a first-time server adds it to this list automatically."
+  },
+  "hopSteps": {
+    "connected": "Connected",
+    "failed": "Failed",
+    "connecting": "Connecting…"
+  },
+  "replaySvc": {
+    "ownerOnly": "Only replays for the signed-in account can be opened.",
+    "titleWith": "Session replay · {{title}}",
+    "title": "Session replay"
+  },
+  "networkSlice": {
+    "hostKeyCancelled": "Host key verification for {{label}} was cancelled."
+  },
+  "appModals": {
+    "startupVarsTitle": "Enter startup command variables",
+    "startupVarsConfirm": "Connect"
+  },
+  "zmodem": {
+    "tooLarge": "The file is too large (over 512MB). Use SFTP instead.",
+    "downloadFailed": "The download failed."
+  },
+  "aiContext": {
+    "hostInfo": "Host information:",
+    "recentOutput": "Recent terminal output (last {{lines}} lines):"
+  },
+  "tmuxStatus": {
+    "sessionCount": "{{count}} sessions",
+    "noSessions": "No sessions",
+    "open": "Open"
+  },
+  "stickyHeader": {
+    "jumpToCommand": "Jump to this command line",
+    "unreadable": "(the command could not be read)"
+  },
+  "hostCard": {
+    "favorite": "Favorite",
+    "menuFor": "Actions for {{label}}"
+  },
+  "containerTarget": {
+    "portNotFound": "TCP port {{port}} was not found on container {{name}}.",
+    "networkIpNotFound": "Could not determine the {{network}} network IP of container {{name}}."
+  },
+  "authErrorMessage": {
+    "sessionInvalid": "Your session expired or the sign-in data is not valid. Sign in again."
+  },
+  "tagInput": {
+    "removeTag": "Remove tag {{tag}}"
+  },
+  "misc": {
+    "tmuxPrefixDefault": "Ctrl-B (default)",
+    "secretSummary": "{{label}} · {{type}} ({{count}} hosts)",
+    "snapshotRange": "lines {{from}}–{{to}} back",
+    "updateActionFailed": "An error occurred during the update action.",
+    "detachTitle": "detach — leaves the session running and detaches (Ctrl-b d). Re-attach to restore it.",
+    "serialActionFailed": "Could not run the serial control action.",
+    "generating": "Generating…",
+    "commandUnreadable": "(the command could not be read)",
+    "save": "Save",
+    "favorite": "Favorite",
+    "cancelReconnect": "Cancel reconnect",
+    "workspaceLoadFailed": "Could not load the initial workspace.",
+    "secureStorageUnavailable": "Secure storage is unavailable in this environment, so secrets cannot be saved.",
+    "portForwardLog": "{{label}} port forwarding",
+    "noUserIdForHistory": "There is no user ID to store local history under.",
+    "serialOnlyHost": "This feature is available only for serial hosts.",
+    "windowNotFound": "The calling browser window was not found.",
+    "skippedEntries": "{{count}} locked or inaccessible items are not shown.",
+    "ssmTunnelUnsupported": "The AWS SSM tunnel cannot start. This configuration supports the in-process SSM tunnel only.",
+    "connectSuccess": "Connected successfully.",
+    "noTerminalSession": "No terminal session is connected, so the command cannot be sent.",
+    "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again."
+  }
+}

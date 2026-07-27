@@ -1,5 +1,6 @@
 import type { TmuxSessionInfo } from '../../store/types';
 import { TmuxSessionMenu } from './TmuxSessionMenu';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalTmuxStatusBarProps {
   version: string;
@@ -25,7 +26,11 @@ export function TerminalTmuxStatusBar({
   onCreateSession,
   onKillSession,
 }: TerminalTmuxStatusBarProps) {
-  const summary = sessions.length > 0 ? `세션 ${sessions.length}개` : '세션 없음';
+  const { t: translate } = useTranslation();
+  const summary =
+    sessions.length > 0
+      ? translate('tmuxStatus.sessionCount', { count: sessions.length })
+      : translate('tmuxStatus.noSessions');
 
   return (
     <div
@@ -55,7 +60,7 @@ export function TerminalTmuxStatusBar({
         onClick={onOpen}
         className="ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
       >
-        열기
+        {translate('tmuxStatus.open')}
       </button>
     </div>
   );

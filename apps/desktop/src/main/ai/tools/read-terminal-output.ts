@@ -1,5 +1,6 @@
 import type { AiTerminalOutputResponse, AiToolDef } from "../../../shared/ai";
 import { redactSecrets } from "../redact";
+import { t } from '../../i18n';
 
 export interface TerminalOutputReadInput {
   beforeRecentLines: number;
@@ -69,16 +70,25 @@ export async function readTerminalOutputTool(
 
   const body = clip(redactSecrets(response.text ?? ""));
   const lines =
-    typeof response.returnedLines === "number" ? `, ${response.returnedLines}줄` : "";
-  const parts = [`터미널 출력 (${label}${lines})`, "", body || "(해당 범위에 출력 없음)"];
+    typeof response.returnedLines === "number"
+      ? t('readTerminal.lines', { count: response.returnedLines })
+      : "";
+  const parts = [
+    t('readTerminal.header', { label, lines }),
+    "",
+    body || t('readTerminal.noOutput'),
+  ];
   if (response.reachedStart) {
-    parts.push("", "(스냅샷 시작에 도달했습니다.)");
+    parts.push("", t('readTerminal.snapshotStart'));
   }
   return parts.join("\n");
 }
 
 export function rangeLabel(input: TerminalOutputReadInput): string {
-  return `${input.beforeRecentLines + 1}~${input.beforeRecentLines + input.lines}줄 전`;
+  return t('readTerminal.rangeLabel', {
+    from: input.beforeRecentLines + 1,
+    to: input.beforeRecentLines + input.lines,
+  });
 }
 
 function clampInteger(value: unknown, fallback: number, min: number, max: number): number {

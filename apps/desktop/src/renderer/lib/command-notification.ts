@@ -1,4 +1,5 @@
 import type { CommandNotificationSettings } from '@shared';
+import { t } from '../i18n';
 
 /** OSC 133 C→D 경계에서 관측한, 방금 끝난 명령의 정보. */
 export interface CommandFinishedInfo {
@@ -58,16 +59,20 @@ export function formatCommandDuration(durationMs: number | null): string {
   }
   const totalSeconds = Math.round(durationMs / 1000);
   if (totalSeconds < 60) {
-    return `${totalSeconds}초`;
+    return t('cmdNotify.seconds', { seconds: totalSeconds });
   }
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   if (minutes < 60) {
-    return seconds > 0 ? `${minutes}분 ${seconds}초` : `${minutes}분`;
+    return seconds > 0
+      ? t('cmdNotify.minutesSeconds', { minutes, seconds })
+      : t('cmdNotify.minutes', { minutes });
   }
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}시간 ${remainingMinutes}분` : `${hours}시간`;
+  return remainingMinutes > 0
+    ? t('cmdNotify.hoursMinutes', { hours, minutes: remainingMinutes })
+    : t('cmdNotify.hours', { hours });
 }
 
 export interface CommandNotificationContent {
@@ -87,7 +92,9 @@ export function formatCommandNotification(
   input: CommandNotificationFormatInput
 ): CommandNotificationContent {
   const failed = isFailure(input.exitCode);
-  const statusText = failed ? `실패 (exit ${input.exitCode})` : '완료';
+  const statusText = failed
+    ? t('cmdNotify.failed', { code: input.exitCode })
+    : t('cmdNotify.completed');
   const durationPart = formatCommandDuration(input.durationMs);
   const commandText = input.command?.trim() ?? '';
 
@@ -104,6 +111,6 @@ export function formatCommandNotification(
     ? `${headline} · ${detailSegments.join(' · ')}`
     : headline;
 
-  const title = input.hostLabel.trim() || '터미널';
+  const title = input.hostLabel.trim() || t('cmdNotify.fallbackTitle');
   return { title, body };
 }

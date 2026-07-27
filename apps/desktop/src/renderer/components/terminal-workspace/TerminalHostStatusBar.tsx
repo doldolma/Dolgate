@@ -16,6 +16,8 @@ import {
   type HostMetrics,
 } from '../../lib/host-metrics';
 import type { HostMetricsStatus } from '../../controllers/useHostMetrics';
+import { useTranslation } from 'react-i18next';
+import { t } from '../../i18n';
 
 interface TerminalHostStatusBarProps {
   status: HostMetricsStatus;
@@ -64,7 +66,7 @@ function formatRatio(usedKb: number | null, totalKb: number | null): string {
 }
 
 function formatCpuCount(cpuCount: number | null): string {
-  return cpuCount ? `${cpuCount}개` : '—';
+  return cpuCount ? t('hostStatus.cpuCount', { count: cpuCount }) : t('hostStatus.none');
 }
 
 export function TerminalHostStatusBar({
@@ -72,6 +74,7 @@ export function TerminalHostStatusBar({
   metrics,
   onRetry,
 }: TerminalHostStatusBarProps) {
+  const { t: translate } = useTranslation();
   const [tooltipOpen, setTooltipOpen] = useState(false);
 
   // 이 연결에서 못 읽는 경우엔 바 자체를 그리지 않는다. 빈 값이 계속 떠 있으면 고장으로 보인다.
@@ -99,7 +102,7 @@ export function TerminalHostStatusBar({
         aria-live="off"
       >
         {status === 'loading' || !metrics ? (
-          <span className="text-[var(--text-soft)]">호스트 상태를 읽는 중…</span>
+          <span className="text-[var(--text-soft)]">{translate('hostStatus.loading')}</span>
         ) : (
           <>
             <Metric
@@ -134,7 +137,7 @@ export function TerminalHostStatusBar({
             onClick={onRetry}
           >
             <RefreshCw className="h-3 w-3" aria-hidden />
-            연결이 불안정해 멈췄습니다 · 다시 시도
+            {translate('hostStatus.unstable')}
           </button>
         ) : null}
       </div>
@@ -148,19 +151,19 @@ export function TerminalHostStatusBar({
             {/* load average 는 넣지 않는다. 바의 CPU% 와 창(10초 vs 1분)도 측정 대상(사용
                 시간 vs 실행 대기 큐)도 달라 값이 어긋나는데, 나란히 두면 사용자는 둘 중
                 무엇이 맞는지부터 고민하게 된다. "지금 바쁜가"는 CPU% 하나로 충분하다. */}
-            <TooltipRow label="CPU 코어" value={formatCpuCount(metrics.cpuCount)} />
-            <TooltipRow label="가동 시간" value={formatUptime(metrics.uptimeSeconds)} />
+            <TooltipRow label={translate('hostStatus.cpuCores')} value={formatCpuCount(metrics.cpuCount)} />
+            <TooltipRow label={translate('hostStatus.uptime')} value={formatUptime(metrics.uptimeSeconds)} />
             {metrics.disks.map((disk) => (
               <TooltipRow
                 key={disk.mount}
-                label={`디스크 ${disk.mount}`}
+                label={translate('hostStatus.disk', { mount: disk.mount })}
                 value={formatRatio(disk.usedKb, disk.totalKb)}
               />
             ))}
           </div>
           {/* 컨테이너 안에서는 /proc 이 호스트 전체를 가리켜 값이 세션과 어긋날 수 있다. */}
           <p className="m-0 mt-[0.45rem] border-t border-[var(--border)] pt-[0.4rem] text-[0.68rem] leading-[1.4] text-[var(--text-soft)]">
-            컨테이너 안에서는 호스트 전체 값이 표시됩니다.
+            {translate('hostStatus.containerNote')}
           </p>
         </div>
       ) : null}

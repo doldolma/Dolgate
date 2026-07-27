@@ -140,6 +140,7 @@ import {
   toTrustInput,
 } from "../utils";
 import { createContainersServices } from "../services/containers";
+import { t } from '../../i18n';
 
 export function createContainersSlice(deps: SliceDeps): ContainersSlice {
   const { api, set, get } = deps;
@@ -217,7 +218,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             connectionProgress: null,
             errorMessage: normalizeErrorMessage(
               error,
-              "Containers 연결 기록을 시작하지 못했습니다.",
+              t('containersSlice.lifecycleLogFailed'),
             ),
           }),
         };
@@ -234,7 +235,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
           hostId,
           buildContainersEndpointId(hostId),
           "probing-host-key",
-          `${host.label} 호스트 키를 확인하는 중입니다.`,
+          t('connectProgress.hostKeyChecking', { label: host.label }),
         ),
         errorMessage: undefined,
       };
@@ -263,11 +264,11 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
       const message =
         error instanceof Error
           ? normalizeRemoteInvokeErrorMessage(error.message)
-          : "컨테이너 페이지를 열지 못했습니다.";
+          : t('containersSlice.pageOpenFailed');
       await reportContainerLifecycleError(
         lifecycleId,
         error,
-        "컨테이너 페이지를 열지 못했습니다.",
+        t('containersSlice.pageOpenFailed'),
       );
       set((state) => {
         const currentTab = findContainersTab(state, hostId);
@@ -415,7 +416,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             }
             if (!host.awsProfileId) {
               throw new Error(
-                `연결된 AWS 프로필 "${host.awsProfileName}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`,
+                t('aws.profile.linkedNotFoundNamed', { label: host.awsProfileName }),
               );
             }
             await api.aws.loginById(host.awsProfileId);
@@ -696,7 +697,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
             const initialProgress = isAwsEc2HostRecord(host)
               ? createConnectionProgress(
                   "checking-profile",
-                  `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                  t('containersStore.checkingProfile', { profile: host.awsProfileName }),
                 )
               : resolveHostKeyCheckProgress(host);
             const sessionId = createPendingSessionTabForContainerShell(
@@ -726,7 +727,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               const message =
                 error instanceof Error
                   ? error.message
-                  : "컨테이너 셸을 열지 못했습니다.";
+                  : t('containersStore.shellFailed');
               clearContainerTabConnectionOverlay(set, hostId);
               markSessionError(set, sessionId, message);
               return;
@@ -767,7 +768,7 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
               rows: 32,
               progress: createConnectionProgress(
                 "retrying-session",
-                `${host.label} ECS 셸을 준비하는 중입니다.`,
+                t('containersSlice.ecsShellPreparing', { label: host.label }),
               ),
             });
             await startPendingEcsExecShellConnect(set, get, sessionId);

@@ -1,6 +1,7 @@
 import type { AiChatMessage, AiChatRequest } from "@shared";
 import { releaseAiTerminalSnapshot } from "../../lib/ai-terminal-snapshot";
 import type { AiChatSlice, AiConversation, AiToolRun, SliceDeps } from "../types";
+import { t } from '../../i18n';
 
 // tool 이벤트를 현재 턴의 실행 목록에 반영한다(같은 id 는 상태 갱신, 없으면 추가).
 function upsertToolRun(
@@ -174,7 +175,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
           ...conv,
           error: {
             reason: "disabled",
-            message: "AI 어시스턴트가 꺼져 있습니다. 설정 → AI에서 켜세요.",
+            message: t('aiChat.disabledHint'),
           },
         }));
         return;
@@ -184,7 +185,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
         releaseAiTerminalSnapshot(terminalSnapshot?.snapshotId);
         patch(sessionId, (conv) => ({
           ...conv,
-          error: { reason: "model-not-found", message: "설정 → AI에서 모델을 지정하세요." },
+          error: { reason: "model-not-found", message: t('aiChat.modelMissing') },
         }));
         return;
       }
@@ -224,7 +225,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
 
       const contextMessages: AiChatMessage[] =
         context && context.trim()
-          ? [{ role: "user", content: `현재 세션 컨텍스트:\n${context}` }]
+          ? [{ role: "user", content: `${t('aiChat.sessionContext')}\n${context}` }]
           : [];
       const request: AiChatRequest = {
         model: ai.model,
@@ -255,7 +256,7 @@ export function createAiChatSlice(deps: SliceDeps): AiChatSlice {
                 terminalSnapshotId: null,
                 error: {
                   reason: "network",
-                  message: error instanceof Error ? error.message : "요청에 실패했습니다.",
+                  message: error instanceof Error ? error.message : t('aiChat.requestFailed'),
                 },
               }
             : current,

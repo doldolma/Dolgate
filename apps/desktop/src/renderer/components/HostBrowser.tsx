@@ -45,6 +45,7 @@ export {
   normalizeGroupPath,
   rebaseGroupPath,
 } from '@shared';
+import { useTranslation } from 'react-i18next';
 
 export type HostBrowserProps = UseHostBrowserParams & {
   /** 편집/생성 중일 때 우측 상세 영역에 detail 대신 표시할 에디터(HostDrawer). */
@@ -61,6 +62,7 @@ const CTX_DANGER =
 const CTX_ICON = 'h-[1.05rem] w-[1.05rem] shrink-0 text-[var(--text-soft)]';
 
 export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowserProps) {
+  const { t: translate } = useTranslation();
   const hb = useHostBrowser(props);
   const { contextMenu, contextMenuStyle, groupModalState, groupDeleteTarget, hostDeleteTarget } =
     hb;
@@ -121,8 +123,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                   >
                     <SquareTerminal className={CTX_ICON} aria-hidden />
                     {contextMenu.hostIds.length === 1
-                      ? '연결'
-                      : `연결 (${contextMenu.hostIds.length}개)`}
+                      ? translate('hostBrowser.menu.connect')
+                      : translate('hostBrowser.menu.connectMany', {
+                          count: contextMenu.hostIds.length,
+                        })}
                   </button>
                   {contextMenu.hostIds.length === 1 && hb.onOpenHostInNewWindow ? (
                     <button
@@ -137,7 +141,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       }}
                     >
                       <AppWindow className={CTX_ICON} aria-hidden />
-                      새 창에서 연결
+                      {translate('hostBrowser.menu.connectNewWindow')}
                     </button>
                   ) : null}
                   {!contextMenuIsEcs && hb.onOpenSftp ? (
@@ -155,7 +159,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       }}
                     >
                       <Folder className={CTX_ICON} aria-hidden />
-                      SFTP 연결
+                      {translate('hostBrowser.menu.sftp')}
                     </button>
                   ) : null}
                   {!contextMenuIsEcs && hb.onConnectHostTmux ? (
@@ -168,8 +172,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                     >
                       <Columns2 className={CTX_ICON} aria-hidden />
                       {contextMenu.hostIds.length === 1
-                        ? 'tmux로 연결'
-                        : `tmux로 연결 (${contextMenu.hostIds.length}개)`}
+                        ? translate('hostBrowser.menu.tmux')
+                        : translate('hostBrowser.menu.tmuxMany', {
+                            count: contextMenu.hostIds.length,
+                          })}
                     </button>
                   ) : null}
                   {!contextMenuIsEcs ? (
@@ -182,8 +188,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                     >
                       <Container className={CTX_ICON} aria-hidden />
                       {contextMenu.hostIds.length === 1
-                        ? '컨테이너'
-                        : `컨테이너 (${contextMenu.hostIds.length}개)`}
+                        ? translate('hostBrowser.menu.containers')
+                        : translate('hostBrowser.menu.containersMany', {
+                            count: contextMenu.hostIds.length,
+                          })}
                     </button>
                   ) : null}
 
@@ -204,7 +212,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                     }}
                   >
                     <Pencil className={CTX_ICON} aria-hidden />
-                    수정
+                    {translate('hostBrowser.menu.edit')}
                   </button>
                   <button
                     type="button"
@@ -216,8 +224,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                   >
                     <Copy className={CTX_ICON} aria-hidden />
                     {contextMenu.hostIds.length === 1
-                      ? '복사'
-                      : `복사 (${contextMenu.hostIds.length}개)`}
+                      ? translate('hostBrowser.menu.copy')
+                      : translate('hostBrowser.menu.copyMany', {
+                          count: contextMenu.hostIds.length,
+                        })}
                   </button>
                   <button
                     type="button"
@@ -230,8 +240,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                   >
                     <Download className={CTX_ICON} aria-hidden />
                     {contextMenu.hostIds.length === 1
-                      ? '내보내기...'
-                      : `내보내기... (${contextMenu.hostIds.length}개)`}
+                      ? translate('hostBrowser.menu.export')
+                      : translate('hostBrowser.menu.exportMany', {
+                          count: contextMenu.hostIds.length,
+                        })}
                   </button>
 
                   <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
@@ -251,7 +263,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                     }}
                   >
                     <Trash2 className="h-[1.05rem] w-[1.05rem] shrink-0" aria-hidden />
-                    삭제
+                    {translate('common.delete')}
                   </button>
                 </>
               ) : (
@@ -269,7 +281,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       hb.openCreateSubgroupModal(targetGroupPath);
                     }}
                   >
-                    하위 그룹 생성
+                    {translate('hostBrowser.menu.newSubgroup')}
                   </button>
                   <button
                     type="button"
@@ -284,7 +296,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       hb.openRenameGroupModal(targetGroupPath);
                     }}
                   >
-                    이름 변경
+                    {translate('hostBrowser.menu.rename')}
                   </button>
                   <button
                     type="button"
@@ -298,7 +310,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                     }}
                   >
                     <Download className={CTX_ICON} aria-hidden />
-                    내보내기... ({groupExportHostIds.length}개 호스트)
+                    {translate('hostBrowser.menu.exportGroup', { count: groupExportHostIds.length })}
                   </button>
 
                   <div role="separator" className="my-[0.35rem] h-px bg-[var(--border)]" />
@@ -312,7 +324,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       hb.setContextMenu(null);
                     }}
                   >
-                    삭제
+                    {translate('common.delete')}
                   </button>
                 </>
               )}
@@ -380,8 +392,8 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       error instanceof Error
                         ? error.message
                         : groupModalState.mode === 'create'
-                          ? '그룹을 만들지 못했습니다.'
-                          : '그룹 이름을 변경하지 못했습니다.',
+                          ? translate('hostBrowser.error.groupCreateFailed')
+                          : translate('hostBrowser.error.groupRenameFailed'),
                     );
                   }
                 }}
@@ -399,8 +411,10 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
           backdropTestId="host-browser-modal-backdrop"
           title={
             hostDeleteTarget.hostCount === 1
-              ? `${hostDeleteTarget.title} 호스트를 삭제할까요?`
-              : `선택한 ${hostDeleteTarget.hostCount}개 호스트를 삭제할까요?`
+              ? translate('hostBrowser.delete.hostSingle', { title: hostDeleteTarget.title })
+              : translate('hostBrowser.delete.hostMany', {
+                  count: hostDeleteTarget.hostCount,
+                })
           }
           unusedLocalSecretCount={hb.hostDeleteUnusedLocalSecretRefs.length}
           removeUnusedSecrets={hb.removeUnusedSecretsOnHostDelete}
@@ -422,7 +436,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
               }
             } catch (error) {
               hb.setHostDeleteError(
-                error instanceof Error ? error.message : '호스트를 삭제하지 못했습니다.',
+                error instanceof Error ? error.message : translate('hostBrowser.error.hostDeleteFailed'),
               );
               return;
             }
@@ -440,7 +454,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
               hb.setHostDeleteError(
                 error instanceof Error
                   ? error.message
-                  : '사용하지 않는 secret을 삭제하지 못했습니다.',
+                  : translate('hostBrowser.error.unusedSecretDeleteFailed'),
               );
             } finally {
               hb.setIsRemovingHost(false);
@@ -461,19 +475,23 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
               <SectionLabel>Delete</SectionLabel>
               <h3 id="delete-group-title">
                 {groupDeleteTarget.groupCount === 1
-                  ? `${groupDeleteTarget.title} 그룹을 삭제할까요?`
-                  : `선택한 ${groupDeleteTarget.groupCount}개 그룹을 삭제할까요?`}
+                  ? translate('hostBrowser.delete.groupSingle', { title: groupDeleteTarget.title })
+                  : translate('hostBrowser.delete.groupMany', {
+                      count: groupDeleteTarget.groupCount,
+                    })}
               </h3>
             </ModalHeader>
             <ModalBody className="grid gap-4">
               {hb.groupDeleteDialogVariant === 'with-descendants' ? (
                 <p className="text-sm leading-6 text-[var(--text-soft)]">
-                  하위 그룹 {groupDeleteTarget.childGroupCount}개와 호스트{' '}
-                  {groupDeleteTarget.hostCount}개가 함께 영향을 받습니다.
+                  {translate('hostBrowser.delete.groupImpact', {
+                    groups: groupDeleteTarget.childGroupCount,
+                    hosts: groupDeleteTarget.hostCount,
+                  })}
                 </p>
               ) : (
                 <p className="text-sm leading-6 text-[var(--text-soft)]">
-                  이 그룹은 비어 있습니다. 삭제하면 바로 사라집니다.
+                  {translate('hostBrowser.delete.groupEmpty')}
                 </p>
               )}
               {hb.groupDeleteError ? (
@@ -500,7 +518,7 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                 }}
                 disabled={hb.isRemovingGroup}
               >
-                취소
+                {translate('common.cancel')}
               </Button>
               {hb.groupDeleteDialogVariant === 'with-descendants' ? (
                 <>
@@ -521,14 +539,14 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                         hb.setGroupDeleteError(null);
                       } catch (error) {
                         hb.setGroupDeleteError(
-                          error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                          error instanceof Error ? error.message : translate('hostBrowser.error.groupDeleteFailed'),
                         );
                       } finally {
                         hb.setIsRemovingGroup(false);
                       }
                     }}
                   >
-                    하위 항목 유지
+                    {translate('hostBrowser.delete.keepChildren')}
                   </Button>
                   <Button
                     variant="danger"
@@ -548,14 +566,14 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                         hb.setGroupDeleteError(null);
                       } catch (error) {
                         hb.setGroupDeleteError(
-                          error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                          error instanceof Error ? error.message : translate('hostBrowser.error.groupDeleteFailed'),
                         );
                       } finally {
                         hb.setIsRemovingGroup(false);
                       }
                     }}
                   >
-                    하위 항목까지 삭제
+                    {translate('hostBrowser.delete.deleteChildren')}
                   </Button>
                 </>
               ) : (
@@ -576,14 +594,14 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       hb.setGroupDeleteError(null);
                     } catch (error) {
                       hb.setGroupDeleteError(
-                        error instanceof Error ? error.message : '그룹을 삭제하지 못했습니다.',
+                        error instanceof Error ? error.message : translate('hostBrowser.error.groupDeleteFailed'),
                       );
                     } finally {
                       hb.setIsRemovingGroup(false);
                     }
                   }}
                 >
-                  삭제
+                  {translate('common.delete')}
                 </Button>
               )}
             </ModalFooter>

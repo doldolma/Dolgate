@@ -35,13 +35,14 @@ import {
   updatePaneState,
   upsertTransferJob,
 } from "../utils";
+import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
 
 class TerminalUploadAwaitingHostTrustError extends Error {
   constructor() {
-    super("터미널 업로드를 계속하려면 호스트 키 신뢰가 필요합니다.");
+    super(t('sftpStore.hostKeyTrustNeeded'));
   }
 }
 
@@ -225,7 +226,7 @@ export function createSftpServices(deps: SliceDeps) {
           errorMessage:
             error instanceof Error
               ? error.message
-              : "SFTP 목록을 읽지 못했습니다.",
+              : t('sftpStore.listFailed'),
           warningMessages: [],
         }),
       }));
@@ -383,7 +384,7 @@ export function createSftpServices(deps: SliceDeps) {
         pathsReferToSameDroppedItem(entry.path, targetPath),
       );
       if (!matched) {
-        warnings.push(`${basenameFromPath(targetPath)} 항목을 읽지 못했습니다.`);
+        warnings.push(t('sftpStore.entryReadFailed', { name: basenameFromPath(targetPath) }));
         continue;
       }
       items.push(matched);
@@ -457,7 +458,7 @@ export function createSftpServices(deps: SliceDeps) {
     } catch (error) {
       const host = get().hosts.find((item) => item.id === input.hostId);
       const message =
-        error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.";
+        error instanceof Error ? error.message : t('sftpStore.connectFailed');
       const shouldPromptCredentialRetry = resolveCredentialRetryKind(host, message);
       const shouldPromptAwsConfig = shouldPromptAwsSftpConfigRetry(host, message);
       if (shouldPromptCredentialRetry && host && isSshHostRecord(host)) {
@@ -577,7 +578,7 @@ export function createSftpServices(deps: SliceDeps) {
       : null;
     try {
       if (!options.skipHostTrustPrompt && options.trustAction) {
-        onProgress?.("SSH 호스트 키를 확인하는 중입니다.");
+        onProgress?.(t('sftpStore.checkingHostKey'));
         const trusted = await ensureTrustedHost(set, {
           hostId,
           endpointId,
@@ -701,14 +702,14 @@ export function createSftpServices(deps: SliceDeps) {
         return {
           ok: false,
           reason: "awaiting-host-trust",
-          message: "호스트 키를 저장하면 업로드를 계속합니다.",
+          message: t('sessionPane.hostKeyPrompt'),
         };
       }
       return {
         ok: false,
         reason: "connect-failed",
         message:
-          error instanceof Error ? error.message : "SFTP 연결에 실패했습니다.",
+          error instanceof Error ? error.message : t('sftpStore.connectFailed'),
       };
     }
 
@@ -724,7 +725,7 @@ export function createSftpServices(deps: SliceDeps) {
       return {
         ok: false,
         reason: "no-items",
-        message: warnings[0] ?? "드롭한 항목 경로를 읽지 못했습니다.",
+        message: warnings[0] ?? t('sftpStore.dropPathFailed'),
       };
     }
 

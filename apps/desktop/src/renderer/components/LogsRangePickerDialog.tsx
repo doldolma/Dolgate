@@ -7,7 +7,7 @@ import {
   createDefaultLogsRelativeRange,
   formatRangeDayValue,
   formatRangeMonthLabel,
-  LOGS_RANGE_WEEKDAY_LABELS,
+  LOGS_RANGE_WEEKDAY_KEYS,
   LOGS_RELATIVE_RANGE_PRESET_OPTIONS,
   LOGS_RELATIVE_RANGE_UNIT_OPTIONS,
   normalizeLogsAbsoluteRange,
@@ -35,6 +35,7 @@ import {
   TabButton,
   Tabs,
 } from "../ui";
+import { useTranslation } from "react-i18next";
 
 export function LogsRangePickerDialog({
   open,
@@ -55,6 +56,7 @@ export function LogsRangePickerDialog({
     nextRelativeValue: LogsRelativeRangeValue | null,
   ) => void;
 }) {
+  const { t: translate } = useTranslation();
   const [draftMode, setDraftMode] = useState<LogsRangeMode>(mode);
   const [draftAbsoluteValue, setDraftAbsoluteValue] = useState<LogsAbsoluteRangeValue>(
     absoluteValue ?? createDefaultLogsAbsoluteRange(),
@@ -138,13 +140,13 @@ export function LogsRangePickerDialog({
         size="lg"
         role="dialog"
         aria-modal="true"
-        aria-label="로그 범위 선택"
+        aria-label={translate('logRange.dialog.aria')}
         onClick={(event) => {
           event.stopPropagation();
         }}
       >
         <ModalHeader>
-          <Tabs role="tablist" aria-label="로그 범위 모드">
+          <Tabs role="tablist" aria-label={translate('logRange.dialog.modeAria')}>
             <TabButton
               role="tab"
               active={draftMode === "recent"}
@@ -154,7 +156,7 @@ export function LogsRangePickerDialog({
                 setError(null);
               }}
             >
-              상대 범위
+              {translate('logRange.dialog.relative')}
             </TabButton>
             <TabButton
               role="tab"
@@ -165,7 +167,7 @@ export function LogsRangePickerDialog({
                 setError(null);
               }}
             >
-              절대 범위
+              {translate('logRange.dialog.absolute')}
             </TabButton>
           </Tabs>
         </ModalHeader>
@@ -175,7 +177,7 @@ export function LogsRangePickerDialog({
             <div className="grid items-start gap-[0.9rem] lg:grid-cols-[auto_minmax(0,1fr)_auto]">
               <IconButton
                 size="sm"
-                aria-label="이전 달"
+                aria-label={translate('logRange.dialog.prevMonth')}
                 onClick={() => {
                   setAnchorMonth((previous) => addRangeMonths(previous, -1));
                 }}
@@ -195,8 +197,8 @@ export function LogsRangePickerDialog({
                         <strong>{formatRangeMonthLabel(month)}</strong>
                       </header>
                       <div className="grid grid-cols-7 gap-[0.4rem] text-center text-[0.82rem] font-semibold text-[var(--text-soft)]">
-                        {LOGS_RANGE_WEEKDAY_LABELS.map((label) => (
-                          <span key={`${monthKey}:${label}`}>{label}</span>
+                        {LOGS_RANGE_WEEKDAY_KEYS.map((weekdayKey) => (
+                          <span key={`${monthKey}:${weekdayKey}`}>{translate(weekdayKey)}</span>
                         ))}
                       </div>
                       <div className="grid grid-cols-7 gap-[0.25rem]">
@@ -238,7 +240,7 @@ export function LogsRangePickerDialog({
               </div>
               <IconButton
                 size="sm"
-                aria-label="다음 달"
+                aria-label={translate('logRange.dialog.nextMonth')}
                 onClick={() => {
                   setAnchorMonth((previous) => addRangeMonths(previous, 1));
                 }}
@@ -248,7 +250,7 @@ export function LogsRangePickerDialog({
             </div>
 
             <div className="mt-4 grid gap-[0.85rem_0.9rem] md:grid-cols-2 xl:grid-cols-4">
-              <FieldGroup label="시작 날짜">
+              <FieldGroup label={translate('logRange.dialog.startDate')}>
                 <Input
                   type="date"
                   value={draftAbsoluteValue.startDate}
@@ -260,7 +262,7 @@ export function LogsRangePickerDialog({
                   }}
                 />
               </FieldGroup>
-              <FieldGroup label="시작 시간">
+              <FieldGroup label={translate('logRange.dialog.startTime')}>
                 <Input
                   type="time"
                   step="1"
@@ -273,7 +275,7 @@ export function LogsRangePickerDialog({
                   }}
                 />
               </FieldGroup>
-              <FieldGroup label="종료 날짜">
+              <FieldGroup label={translate('logRange.dialog.endDate')}>
                 <Input
                   type="date"
                   value={draftAbsoluteValue.endDate}
@@ -285,7 +287,7 @@ export function LogsRangePickerDialog({
                   }}
                 />
               </FieldGroup>
-              <FieldGroup label="종료 시간">
+              <FieldGroup label={translate('logRange.dialog.endTime')}>
                 <Input
                   type="time"
                   step="1"
@@ -300,7 +302,7 @@ export function LogsRangePickerDialog({
               </FieldGroup>
             </div>
             <p className="mt-3 text-[0.82rem] leading-[1.6] text-[var(--text-soft)]">
-              날짜는 로컬 시간대로 적용됩니다. 절대 범위를 적용하면 Follow는 자동으로 꺼집니다.
+              {translate('logRange.dialog.absoluteHint')}
             </p>
           </ModalBody>
         ) : (
@@ -324,7 +326,7 @@ export function LogsRangePickerDialog({
                       });
                     }}
                   />
-                  <span className="whitespace-nowrap leading-none">{option.label}</span>
+                  <span className="whitespace-nowrap leading-none">{translate(option.labelKey)}</span>
                 </label>
               ))}
               <label className="mt-1 grid min-h-[2.25rem] grid-cols-[1rem_minmax(0,1fr)] items-center gap-[0.9rem] text-[1rem] font-semibold text-[var(--text)]">
@@ -340,11 +342,11 @@ export function LogsRangePickerDialog({
                     }));
                   }}
                 />
-                <span className="whitespace-nowrap leading-none">사용자 지정 범위</span>
+                <span className="whitespace-nowrap leading-none">{translate('logRange.dialog.customRange')}</span>
               </label>
             </div>
             <div className="grid max-w-[24rem] items-end gap-[0.9rem] lg:grid-cols-[minmax(0,1fr)_11.25rem]">
-              <FieldGroup label="기간">
+              <FieldGroup label={translate('logRange.dialog.amount')}>
                 <Input
                   type="number"
                   min="1"
@@ -359,7 +361,7 @@ export function LogsRangePickerDialog({
                   }}
                 />
               </FieldGroup>
-              <FieldGroup label="단위">
+              <FieldGroup label={translate('logRange.dialog.unit')}>
                 <SelectField
                   value={draftRelativeValue.unit}
                   disabled={draftRelativeValue.presetKey !== "custom"}
@@ -373,14 +375,14 @@ export function LogsRangePickerDialog({
                 >
                   {LOGS_RELATIVE_RANGE_UNIT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {translate(option.labelKey)}
                     </option>
                   ))}
                 </SelectField>
               </FieldGroup>
             </div>
             <p className="text-[0.82rem] leading-[1.6] text-[var(--text-soft)] lg:col-span-2">
-              상대 범위를 적용하면 현재 시점을 기준으로 범위를 계산해 다시 조회합니다.
+              {translate('logRange.dialog.relativeHint')}
             </p>
           </ModalBody>
         )}
@@ -400,20 +402,20 @@ export function LogsRangePickerDialog({
               onClose();
             }}
           >
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
             onClick={() => {
               if (draftMode === "absolute" && !normalizedDraftAbsolute) {
-                setError("시작 시간과 종료 시간을 확인해 주세요.");
+                setError(translate('logRange.dialog.absoluteError'));
                 return;
               }
               if (
                 draftMode === "recent" &&
                 !normalizeLogsRelativeRange(draftRelativeValue)
               ) {
-                setError("상대 범위 값을 확인해 주세요.");
+                setError(translate('logRange.dialog.relativeError'));
                 return;
               }
               onApply(
@@ -423,7 +425,7 @@ export function LogsRangePickerDialog({
               );
             }}
           >
-            적용
+            {translate('common.apply')}
           </Button>
         </ModalFooter>
       </ModalShell>

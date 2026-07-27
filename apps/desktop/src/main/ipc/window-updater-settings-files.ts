@@ -3,6 +3,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { app, dialog, ipcMain, shell } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
+import { applyMainLanguage } from "../i18n";
 import type { MainIpcContext } from "./context";
 
 export interface DesktopWindowIpcRuntime {
@@ -85,6 +86,9 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
     async (event, input: Partial<AppSettings>) => {
       const previousServerUrl = ctx.settings.get().serverUrl;
       const nextSettings = ctx.settings.update(input);
+      if (Object.prototype.hasOwnProperty.call(input, "language")) {
+        applyMainLanguage(nextSettings.language);
+      }
       if (nextSettings.serverUrl !== previousServerUrl) {
         ctx.authService.resetServerVaultSupport();
         ctx.authService.resetServerWebauthnSupport();

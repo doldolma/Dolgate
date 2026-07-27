@@ -11,6 +11,7 @@ import {
   ToggleSwitch,
 } from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
+import { useTranslation } from 'react-i18next';
 
 type SshKeyAlgorithm = NonNullable<SshKeyGenerateInput['algorithm']>;
 type SshKeyCurve = NonNullable<SshKeyGenerateInput['curve']>;
@@ -104,6 +105,7 @@ export function SshKeyGenerateDialog({
   onDismiss,
   onSubmit,
 }: SshKeyGenerateDialogProps) {
+  const { t: translate } = useTranslation();
   const [label, setLabel] = useState(initialLabel);
   const [comment, setComment] = useState(initialComment);
   const [algorithm, setAlgorithm] = useState<SshKeyAlgorithm>('ed25519');
@@ -242,7 +244,7 @@ export function SshKeyGenerateDialog({
               })
             }
           >
-            {busy ? '생성 중...' : submitLabel}
+            {busy ? translate('misc.generating') : submitLabel}
           </Button>
         </ModalFooter>
       </ModalShell>

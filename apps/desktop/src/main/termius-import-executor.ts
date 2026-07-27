@@ -12,6 +12,7 @@ import {
   resolveTermiusHostUsername,
   type TermiusSnapshot,
 } from './termius-import-service';
+import { t } from './i18n';
 
 export interface TermiusImportExecutorContext {
   groups: GroupRepository;
@@ -72,7 +73,7 @@ export async function importTermiusSelection(
     if (!hostname || !port) {
       warnings.push({
         code: 'missing-required-fields',
-        message: `${label}: address 또는 port가 없어 건너뛰었습니다.`,
+        message: t('termiusSvc.missingAddress', { label }),
       });
       skippedHostCount += 1;
       continue;
@@ -81,7 +82,7 @@ export async function importTermiusSelection(
     if (!username) {
       warnings.push({
         code: 'missing-username',
-        message: `${label}: 사용자명이 없어 가져왔지만, 첫 연결 전에 입력이 필요합니다.`,
+        message: t('termiusSvc.missingUsername', { label }),
       });
     }
 
@@ -119,7 +120,7 @@ export async function importTermiusSelection(
     } else {
       warnings.push({
         code: 'missing-credentials',
-        message: `${label}: 저장 가능한 credential이 없어 비밀번호 없이 호스트만 가져왔습니다.`,
+        message: t('termiusSvc.noCredential', { label }),
       });
     }
 
@@ -143,7 +144,7 @@ export async function importTermiusSelection(
   }
 
   if (createdGroupCount > 0 || createdHostCount > 0 || createdSecretCount > 0) {
-    context.activityLogs.append('info', 'audit', 'Termius 로컬 데이터를 가져왔습니다.', {
+    context.activityLogs.append('info', 'audit', t('termiusSvc.imported'), {
       createdGroupCount,
       createdHostCount,
       createdSecretCount,

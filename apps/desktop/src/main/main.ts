@@ -31,7 +31,9 @@ import { AuthService } from './auth-service';
 import { AwsService } from './aws-service';
 import { AwsSsmTunnelService } from './aws-ssm-tunnel-service';
 import { ipcChannels } from '../common/ipc-channels';
+import { APP_LOCALE_QUERY_PARAM } from '../common/i18n/locale';
 import { CoreManager } from './core-manager';
+import { getMainLocale, initMainI18n, onMainLocaleChanged, t } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
@@ -84,10 +86,10 @@ function installApplicationMenu(openNewWindow: () => void): void {
   const template: MenuItemConstructorOptions[] = [
     ...(isMac ? [{ role: 'appMenu' as const }] : []),
     {
-      label: '파일',
+      label: t('menu.file'),
       submenu: [
         {
-          label: '새 창',
+          label: t('menu.newWindow'),
           accelerator: 'CmdOrCtrl+N',
           click: openNewWindow,
         },
@@ -99,45 +101,45 @@ function installApplicationMenu(openNewWindow: () => void): void {
     { role: 'editMenu' },
     { role: 'viewMenu' },
     {
-      label: '탭',
+      label: t('menu.tabs'),
       submenu: [
         {
-          label: '다음 탭',
+          label: t('menu.nextTab'),
           accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab',
           click: () => sendTabCommand({ kind: 'next' }),
         },
         {
-          label: '이전 탭',
+          label: t('menu.prevTab'),
           accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab',
           click: () => sendTabCommand({ kind: 'prev' }),
         },
         { type: 'separator' as const },
         ...Array.from({ length: 8 }, (_unused, i) => ({
-          label: `${i + 1}번째 탭`,
+          label: t('menu.nthTab', { index: i + 1 }),
           accelerator: `CmdOrCtrl+${i + 1}`,
           click: () => sendTabCommand({ kind: 'index' as const, index: i + 1 }),
         })),
         {
-          label: '마지막 탭',
+          label: t('menu.lastTab'),
           accelerator: 'CmdOrCtrl+9',
           click: () => sendTabCommand({ kind: 'last' }),
         },
         { type: 'separator' as const },
         {
-          label: '닫은 탭 다시 열기',
+          label: t('menu.reopenClosedTab'),
           accelerator: 'CmdOrCtrl+Shift+T',
           click: () => sendTabCommand({ kind: 'reopen' }),
         },
       ],
     },
     {
-      label: '윈도우',
+      label: t('menu.window'),
       submenu: [
         { role: 'minimize' },
         ...(isMac ? [{ role: 'zoom' as const }] : []),
         { type: 'separator' as const },
         {
-          label: '탭 닫기',
+          label: t('menu.closeTab'),
           accelerator: 'CmdOrCtrl+W',
           click: () => {
             const focused = BrowserWindow.getFocusedWindow();
@@ -151,7 +153,7 @@ function installApplicationMenu(openNewWindow: () => void): void {
             focused.webContents.send(ipcChannels.window.closeActiveTab);
           },
         },
-        { label: '창 닫기', accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
+        { label: t('menu.closeWindow'), accelerator: 'CmdOrCtrl+Shift+W', role: 'close' },
         ...(isMac
           ? [{ type: 'separator' as const }, { role: 'front' as const }]
           : []),
@@ -402,7 +404,7 @@ if (termiusHelperArgIndex >= 0) {
     try {
       await authService.handleCallbackUrl(rawUrl);
     } catch (error) {
-      await authService.forceUnauthenticated(error instanceof Error ? error.message : '브라우저 로그인 교환에 실패했습니다.');
+      await authService.forceUnauthenticated(error instanceof Error ? error.message : t('auth.browserExchangeFailed'));
     }
   }
 
@@ -520,12 +522,17 @@ if (termiusHelperArgIndex >= 0) {
       app.focus();
     });
 
+    // 첫 프레임부터 올바른 언어로 그리도록 메인이 정한 로케일을 URL 로 넘긴다.
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
       // 개발 모드에서는 Vite dev server를 로드한다.
-      await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+      const devUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+      devUrl.searchParams.set(APP_LOCALE_QUERY_PARAM, getMainLocale());
+      await window.loadURL(devUrl.toString());
     } else {
       // 패키징 이후에는 번들된 정적 파일을 로드한다.
-      await window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+      await window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`), {
+        query: { [APP_LOCALE_QUERY_PARAM]: getMainLocale() },
+      });
     }
 
     if (!window.isVisible()) {
@@ -618,6 +625,7 @@ if (termiusHelperArgIndex >= 0) {
   });
 
   app.whenReady().then(async () => {
+    initMainI18n(settingsRepository.get().language, app.getLocale());
     // OS 키체인(보안 저장소)을 못 쓰면 저장된 시크릿 복호화가 전부 실패해 호스트/로그인이
     // 빈 상태로 뜬다(대표: 우분투 자동 로그인 → 키링 잠김 → basic_text 폴백). 조용히 빈
     // 화면을 보여주는 대신 원인을 안내하고 종료한다. (mac 의 isEncryptionAvailable 은
@@ -625,12 +633,12 @@ if (termiusHelperArgIndex >= 0) {
     if (!isSecureStorageUsable()) {
       dialog.showMessageBoxSync({
         type: 'error',
-        title: 'OS 키체인에 접근할 수 없습니다',
+        title: t('mainApp.keychainTitle'),
         message:
-          'OS 키체인(보안 저장소)에 접근할 수 없어 저장된 호스트와 로그인 정보를 불러올 수 없습니다.',
+          t('mainApp.keychainMessage'),
         detail:
-          'Linux 자동 로그인 세션에서는 키링(GNOME Keyring/KWallet)이 잠긴 채 시작되어 발생할 수 있습니다. 로그아웃 후 비밀번호로 다시 로그인하거나 키링 잠금을 해제한 뒤 앱을 다시 실행해 주세요.',
-        buttons: ['확인'],
+          t('mainApp.keychainDetail'),
+        buttons: [t('mainApp.ok')],
       });
       app.exit(1);
       return;
@@ -685,6 +693,8 @@ if (termiusHelperArgIndex >= 0) {
       void createWindow();
     };
     installApplicationMenu(openNewWindow);
+    // 설정에서 언어를 바꾸면 메뉴 문구도 새 언어로 다시 만든다(라벨은 빌드 시점에 굽는다).
+    onMainLocaleChanged(() => installApplicationMenu(openNewWindow));
     if (process.platform === 'win32') {
       // 작업 표시줄 아이콘 우클릭(점프리스트)에서 새 창을 열 수 있게 한다. 실행 중이면
       // --new-window 인자가 second-instance 로 전달돼 새 창이 열리고, 꺼져 있으면 앱이
@@ -693,8 +703,8 @@ if (termiusHelperArgIndex >= 0) {
         {
           program: process.execPath,
           arguments: '--new-window',
-          title: '새 창',
-          description: '새 Dolgate 창 열기',
+          title: t('mainApp.newWindow'),
+          description: t('mainApp.newWindowDescription'),
           iconPath: process.execPath,
           iconIndex: 0,
         },
@@ -704,7 +714,7 @@ if (termiusHelperArgIndex >= 0) {
       app.dock?.setMenu(
         Menu.buildFromTemplate([
           {
-            label: '새 창',
+            label: t('mainApp.newWindow'),
             click: openNewWindow,
           },
         ]),

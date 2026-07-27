@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { cn } from '../../lib/cn';
 import { Circle, RefreshCw, type LucideIcon } from '../../ui/icons';
+import { useTranslation } from 'react-i18next';
+import { t } from '../../i18n';
 
 type MoshConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
@@ -11,16 +13,16 @@ interface TerminalMoshStatusBarProps {
 
 const STATE_META: Record<
   MoshConnectionState,
-  { Icon: LucideIcon; label: string; color: string; spin?: boolean; fill?: boolean }
+  { Icon: LucideIcon; labelKey: string; color: string; spin?: boolean; fill?: boolean }
 > = {
-  connected: { Icon: Circle, label: '연결됨', color: 'var(--success-text)', fill: true },
+  connected: { Icon: Circle, labelKey: 'mosh.connected', color: 'var(--success-text)', fill: true },
   reconnecting: {
     Icon: RefreshCw,
-    label: '재연결 중',
+    labelKey: 'mosh.reconnecting',
     color: 'var(--warning-text)',
     spin: true,
   },
-  disconnected: { Icon: Circle, label: '끊김', color: 'var(--danger-text)', fill: true },
+  disconnected: { Icon: Circle, labelKey: 'mosh.disconnected', color: 'var(--danger-text)', fill: true },
 };
 
 function formatAgo(lastResponseAt: string | null, now: number): string | null {
@@ -33,17 +35,17 @@ function formatAgo(lastResponseAt: string | null, now: number): string | null {
   }
   const seconds = Math.max(0, Math.round((now - parsed) / 1000));
   if (seconds < 1) {
-    return '방금';
+    return t('mosh.justNow');
   }
   if (seconds < 60) {
-    return `${seconds}초 전`;
+    return t('mosh.seconds', { count: seconds });
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
-    return `${minutes}분 전`;
+    return t('mosh.minutes', { count: minutes });
   }
   const hours = Math.floor(minutes / 60);
-  return `${hours}시간 전`;
+  return t('mosh.hours', { count: hours });
 }
 
 // mosh 세션의 연결 상태를 보여주는 터미널 하단 1줄 바. mosh는 UDP라 끊겨도 세션이
@@ -52,6 +54,7 @@ export function TerminalMoshStatusBar({
   state,
   lastResponseAt,
 }: TerminalMoshStatusBarProps) {
+  const { t: translate } = useTranslation();
   // "N초 전 응답"을 흐르게 하려고 비정상 상태에서만 1초마다 리렌더한다(연결됨이면 불필요).
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -80,11 +83,11 @@ export function TerminalMoshStatusBar({
       </span>
       <span className="font-medium text-[var(--text)]">Mosh</span>
       <span aria-hidden>·</span>
-      <span>{meta.label}</span>
+      <span>{translate(meta.labelKey)}</span>
       {ago ? (
         <>
           <span aria-hidden>·</span>
-          <span>{ago} 응답</span>
+          <span>{translate('mosh.reply', { ago })}</span>
         </>
       ) : null}
     </div>

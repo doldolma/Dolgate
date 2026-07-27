@@ -1,5 +1,6 @@
 import type { HostEnvVar } from "@shared";
 import { Button, Input } from "../ui";
+import { useTranslation } from 'react-i18next';
 
 interface EnvironmentVariablesEditorProps {
   variables: HostEnvVar[];
@@ -14,6 +15,7 @@ export function EnvironmentVariablesEditor({
   onChange,
   disabled = false,
 }: EnvironmentVariablesEditorProps) {
+  const { t: translate } = useTranslation();
   function updateAt(index: number, patch: Partial<HostEnvVar>): void {
     onChange(
       variables.map((variable, current) =>
@@ -38,14 +40,14 @@ export function EnvironmentVariablesEditor({
           className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] items-center gap-[0.55rem]"
         >
           <Input
-            aria-label="환경변수 이름"
+            aria-label={translate('envEditor.nameAria')}
             placeholder="KEY"
             value={variable.key}
             disabled={disabled}
             onChange={(event) => updateAt(index, { key: event.target.value })}
           />
           <Input
-            aria-label="환경변수 값"
+            aria-label={translate('envEditor.valueAria')}
             placeholder="VALUE"
             value={variable.value}
             disabled={disabled}
@@ -56,9 +58,9 @@ export function EnvironmentVariablesEditor({
             variant="secondary"
             disabled={disabled}
             onClick={() => removeAt(index)}
-            aria-label="환경변수 삭제"
+            aria-label={translate('envEditor.deleteAria')}
           >
-            삭제
+            {translate('common.delete')}
           </Button>
         </div>
       ))}
@@ -69,7 +71,7 @@ export function EnvironmentVariablesEditor({
           disabled={disabled}
           onClick={addRow}
         >
-          + 변수 추가
+          {translate('envEditor.addVariable')}
         </Button>
       </div>
     </div>

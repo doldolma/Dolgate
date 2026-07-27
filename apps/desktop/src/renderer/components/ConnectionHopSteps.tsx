@@ -1,5 +1,6 @@
 import { cn } from '../lib/cn';
 import type { TerminalConnectionHop } from '@shared';
+import { useTranslation } from 'react-i18next';
 
 // 다단 ProxyJump 연결의 홉 타임라인(공통). 터미널·SFTP·컨테이너 오버레이가 재사용한다.
 // 각 홉: 상태 점(연결됨/실패/진행) + 이름(선택)·계정 주소 + 상태 텍스트. 비었으면 미표시.
@@ -8,6 +9,7 @@ export function ConnectionHopSteps({
 }: {
   steps?: readonly (TerminalConnectionHop & { name?: string | null })[] | null;
 }) {
+  const { t: translate } = useTranslation();
   if (!steps || steps.length === 0) {
     return null;
   }
@@ -45,10 +47,10 @@ export function ConnectionHopSteps({
           </span>
           <span className="shrink-0 text-[0.72rem] text-[var(--text-muted)]">
             {step.stage === 'connected'
-              ? '연결됨'
+              ? translate('hopSteps.connected')
               : step.stage === 'failed'
-                ? '실패'
-                : '연결 중…'}
+                ? translate('hopSteps.failed')
+                : translate('hopSteps.connecting')}
           </span>
         </li>
       ))}

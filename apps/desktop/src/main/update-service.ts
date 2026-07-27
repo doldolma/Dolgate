@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { UpdateEvent, UpdateReleaseInfo, UpdateState } from '@shared';
 import { ipcChannels } from '../common/ipc-channels';
 import { SettingsRepository } from './database';
+import { t } from './i18n';
 
 // deb/rpm 설치본에서 설치 직후 app.relaunch()로 자동 재시작하면 Ubuntu 24.04+의
 // AppArmor/샌드박스 초기화와 충돌해 SIGTRAP 크래시 다이얼로그가 뜬다(수동 재실행은 정상).
@@ -86,12 +87,13 @@ function normalizeUpdaterError(error: unknown): string {
     lowered.includes('code signature at url') ||
     lowered.includes('did not pass validation') ||
     lowered.includes('code object is not signed at all') ||
+    // macOS 가 직접 내는 한국어 오류 문구다(우리 카탈로그 문구가 아니다) — 번역 대상 아님.
     message.includes('코드 객체가 전혀 서명되지')
   ) {
-    return '이 mac 릴리즈는 코드 서명되지 않은 앱이라 자동 업데이트를 적용할 수 없습니다. 나중에 서명된 버전이 배포되면 앱 안에서 바로 업데이트할 수 있습니다.';
+    return t('updateSvc.unsignedMac');
   }
 
-  return message || '업데이트 확인 중 알 수 없는 오류가 발생했습니다.';
+  return message || t('updateSvc.unknownError');
 }
 
 function ensureRuntimeUpdateConfig(): void {
@@ -290,7 +292,7 @@ export class UpdateService {
 
   async installAndRestart(): Promise<void> {
     if (!this.state.enabled || this.state.status !== 'downloaded') {
-      throw new Error('다운로드된 업데이트가 없습니다.');
+      throw new Error(t('updateSvc.noDownload'));
     }
 
     this.pendingInstall = true;
@@ -307,8 +309,8 @@ export class UpdateService {
     if (requiresManualRelaunchAfterInstall && Notification.isSupported()) {
       // 자동 재시작을 껐으므로 설치 후 앱이 종료된 채로 남는다 — 사용자가 다시 열도록 안내.
       new Notification({
-        title: 'Dolgate 업데이트',
-        body: '업데이트를 설치합니다. 설치가 끝나면 Dolgate를 다시 열어 주세요.'
+        title: t('updateSvc.notificationTitle'),
+        body: t('updateSvc.notificationBody')
       }).show();
     }
     autoUpdater.quitAndInstall(false, true);

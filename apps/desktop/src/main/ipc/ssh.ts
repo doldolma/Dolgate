@@ -14,6 +14,7 @@ import type { AwsEc2HostRecord, MainIpcContext, SshHostRecord } from "./context"
 import { probeLocalAgent, resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { t } from '../i18n';
 
 // 로컬 agent 엔드포인트 해석은 agent-endpoint 모듈로 이전(포워딩+인증 공용 + 셸 환경 해석).
 // 기존 import 경로(테스트 포함) 호환을 위해 재노출한다.
@@ -34,21 +35,21 @@ async function assertAwsSsmServerProxySupported(
     const message =
       error instanceof Error ? error.message : "unknown error";
     throw new Error(
-      `서버 AWS SSM 지원 여부를 확인하지 못했습니다. ${message}`,
+      t('sshIpc.ssmSupportFailed', { message }),
     );
   }
 
   if (!response.ok) {
     throw new Error(
       response.status === 401 || response.status === 403
-        ? "서버 인증이 필요합니다."
-        : `서버 AWS SSM 지원 여부를 확인하지 못했습니다. (${response.status})`,
+        ? t('sshIpc.serverAuthRequired')
+        : t('sshIpc.ssmSupportStatus', { status: response.status }),
     );
   }
 
   const info = (await response.json()) as Partial<ServerInfoResponse>;
   if (info.capabilities?.sessions?.awsSsm !== true) {
-    throw new Error("서버에서 AWS SSM 세션을 지원하지 않습니다.");
+    throw new Error(t('sshIpc.ssmUnsupported'));
   }
 }
 
@@ -93,9 +94,10 @@ function combineAwsSshFallbackFailure(
   fallbackError: unknown,
 ): Error {
   return new Error(
-    `SSH-over-SSM 연결 실패 후 SSM 셸 폴백도 실패했습니다. SSH-over-SSM: ${errorMessageOf(
-      sshError,
-    )} / SSM 셸: ${errorMessageOf(fallbackError)}`,
+    t('sshIpc.fallbackFailed', {
+      primary: errorMessageOf(sshError),
+      fallback: errorMessageOf(fallbackError),
+    }),
   );
 }
 
@@ -157,7 +159,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("Host not found");
       }
       if (isAwsEcsHostRecord(host)) {
-        throw new Error("ECS 호스트는 세션 연결 대신 Containers 화면에서 엽니다.");
+        throw new Error(t('sshIpc.ecsUseContainers'));
       }
 
       if (isAwsEc2HostRecord(host)) {
@@ -269,7 +271,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               ctx.activityLogs.append(
                 "warn",
                 "session",
-                "SSH-over-SSM 연결에 실패해 SSM 셸로 폴백합니다.",
+                t('sshIpc.fallbackNotice'),
                 { hostId: host.id, host: host.label, reason },
               );
             }
@@ -574,7 +576,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     async (_event, url: string) => {
       const target = new URL(url);
       if (target.protocol !== "https:" && target.protocol !== "http:") {
-        throw new Error("외부 링크는 http 또는 https만 열 수 있습니다.");
+        throw new Error(t('sshIpc.externalLinkScheme'));
       }
       await electronShell.openExternal(target.toString());
     },

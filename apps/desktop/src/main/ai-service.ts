@@ -46,6 +46,7 @@ import { registerCodexMcpTools, type CodexMcpRegistration } from "./ai/codex-mcp
 import { randomUUID } from "node:crypto";
 import { OpenAiAdapter } from "./ai/provider-openai";
 import { AiRequestError, normalizeAiError } from "./ai/provider-errors";
+import { t } from "./i18n";
 
 // AiService 에 주입하는 host 도구 능력(run_command). 모두 옵셔널 — 없으면 run_command 미노출.
 // 구현은 ai/host-exec-helpers.ts(coreManager 기반)가 제공한다.
@@ -115,7 +116,7 @@ export class AiService {
   async setApiKey(providerId: AiProviderId, key: string): Promise<AiApiKeyStatus> {
     const trimmed = key.trim();
     if (!trimmed) {
-      throw new AiRequestError("auth", "API 키가 비어 있습니다.");
+      throw new AiRequestError("auth", t("aiService.apiKeyEmpty"));
     }
     await this.secretStore.save(apiKeyAccount(providerId), trimmed);
     return { hasKey: true };
@@ -135,7 +136,7 @@ export class AiService {
   async setSearchKey(backend: AiSearchBackend, key: string): Promise<AiApiKeyStatus> {
     const trimmed = key.trim();
     if (!trimmed) {
-      throw new AiRequestError("auth", "검색 API 키가 비어 있습니다.");
+      throw new AiRequestError("auth", t("aiService.searchKeyEmpty"));
     }
     await this.secretStore.save(searchKeyAccount(backend), trimmed);
     return { hasKey: true };
@@ -189,7 +190,7 @@ export class AiService {
       emit({
         requestId,
         type: "error",
-        error: { reason: "invalid-response", message: "이미 진행 중인 요청입니다." },
+        error: { reason: "invalid-response", message: t("aiService.requestInFlight") },
       });
       return;
     }
@@ -283,7 +284,7 @@ export class AiService {
         error: {
           reason: "server",
           message:
-            "도구를 너무 여러 번 연속 호출해 중단했어요(무한 반복 방지 안전장치). 질문을 더 구체적으로 다시 시도해 주세요.",
+            t("aiService.toolLoopGuard"),
         },
       });
     } catch (error) {
@@ -335,7 +336,7 @@ export class AiService {
       const gate = await this.gateRunCommand(call, requestId, sessionId, emit, controller.signal);
       if (gate === "rejected") {
         emit({ requestId, type: "tool", tool: { id: call.id, name: call.name, status: "error", label } });
-        return { toolCallId: call.id, content: "사용자가 명령 실행을 거부했습니다.", isError: true };
+        return { toolCallId: call.id, content: t("aiService.commandRejected"), isError: true };
       }
     }
     // inspect_command: 파괴적 명령(숨은 변경 금지) + 스트리밍/대화형(채널 물림)은 거부하고 run_in_terminal 로 유도.
@@ -346,7 +347,7 @@ export class AiService {
         return {
           toolCallId: call.id,
           content:
-            "변경·스트리밍·대화형 명령은 inspect_command 로 실행할 수 없습니다. 사용자가 볼 수 있도록 run_in_terminal 을 사용하세요.",
+            t("aiService.inspectCommandOnly"),
           isError: true,
         };
       }
@@ -397,7 +398,7 @@ export class AiService {
     emit({
       requestId,
       type: "approval-required",
-      approval: { toolCallId: call.id, command, reason: "변경 가능성이 있는 명령" },
+      approval: { toolCallId: call.id, command, reason: t("aiService.mutatingCommand") },
     });
     const approved = await approvalPromise;
     if (approved) {
@@ -476,7 +477,7 @@ export class AiService {
   private async resolveChatConfig(requestModel?: string): Promise<ProviderConfig> {
     const ai = this.settings.get().ai;
     if (!ai || !ai.enabled) {
-      throw new AiRequestError("disabled", "AI 어시스턴트가 비활성화되어 있습니다.");
+      throw new AiRequestError("disabled", t("aiService.disabled"));
     }
     if (ai.providerId === "codex") {
       await this.assertCodexAuthenticated();
@@ -485,7 +486,7 @@ export class AiService {
     // openai-compat 로컬 서버는 키가 없을 수 있으나, anthropic 은 키 필수.
     // codex 는 API 키 대신 CODEX_HOME 로그인 세션을 쓴다(키 불필요).
     if (!apiKey && ai.providerId === "anthropic") {
-      throw new AiRequestError("auth", "API 키가 설정되지 않았습니다.");
+      throw new AiRequestError("auth", t("aiService.apiKeyMissing"));
     }
     const model =
       ai.providerId === "codex"
@@ -493,7 +494,7 @@ export class AiService {
         : requestModel || ai.model;
     // codex 는 모델 미지정 시 codex 기본 모델을 쓰므로 빈 값을 허용한다.
     if (!model && ai.providerId !== "codex") {
-      throw new AiRequestError("model-not-found", "사용할 모델이 설정되지 않았습니다.");
+      throw new AiRequestError("model-not-found", t("aiService.modelMissing"));
     }
     return {
       providerId: ai.providerId,
@@ -512,13 +513,13 @@ export class AiService {
     } catch {
       throw new AiRequestError(
         "auth",
-        "Codex 로그인 상태를 확인하지 못했습니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
+        t("aiService.codexStatusFailed"),
       );
     }
     if (!status.authenticated) {
       throw new AiRequestError(
         "auth",
-        "Codex 로그인이 필요합니다. 설정에서 'Codex 로그인' 버튼을 눌러 주세요.",
+        t("aiService.codexLoginRequired"),
       );
     }
   }
@@ -643,24 +644,24 @@ function toolLabel(call: AiToolCall): string {
   try {
     const args = JSON.parse(call.argsJson) as Record<string, unknown>;
     if (call.name === "web_search" && typeof args.query === "string") {
-      return `🔍 웹 검색: ${args.query}`;
+      return t("aiService.tool.webSearch", { query: args.query });
     }
     if (call.name === "fetch_url" && typeof args.url === "string") {
-      return `🌐 URL 읽기: ${args.url}`;
+      return t("aiService.tool.fetchUrl", { url: args.url });
     }
     if (call.name === "run_in_terminal" && typeof args.command === "string") {
-      return `⚡ 실행: ${args.command}`;
+      return t("aiService.tool.run", { command: args.command });
     }
     if (call.name === "inspect_command" && typeof args.command === "string") {
-      return `🔎 조회: ${args.command}`;
+      return t("aiService.tool.inspect", { command: args.command });
     }
     if (call.name === READ_TERMINAL_OUTPUT_TOOL.name) {
-      return `터미널 출력 읽기: ${terminalOutputRangeLabel(
-        normalizeTerminalOutputReadArgs(args),
-      )}`;
+      return t("aiService.tool.readTerminal", {
+        range: terminalOutputRangeLabel(normalizeTerminalOutputReadArgs(args)),
+      });
     }
   } catch {
     // 무시하고 기본 라벨.
   }
-  return `도구 실행: ${call.name}`;
+  return t("aiService.tool.generic", { name: call.name });
 }

@@ -5,6 +5,7 @@
 import type { TerminalBlockStickyState } from '../../controllers/useTerminalBlockOverlay';
 import { cn } from '../../lib/cn';
 import { formatBlockDuration } from './blockFormat';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalBlockStickyHeaderProps {
   sticky: TerminalBlockStickyState;
@@ -15,6 +16,7 @@ export function TerminalBlockStickyHeader({
   sticky,
   onJumpToCommand,
 }: TerminalBlockStickyHeaderProps) {
+  const { t: translate } = useTranslation();
   const failed = sticky.state === 'failed';
   const running = sticky.state === 'running';
   const duration = formatBlockDuration(sticky.durationMs);
@@ -27,7 +29,7 @@ export function TerminalBlockStickyHeader({
       onClick={onJumpToCommand}
       // 터미널이 포커스를 잃지 않도록 mousedown 기본동작을 막는다.
       onMouseDown={(event) => event.preventDefault()}
-      title="이 명령 줄로 이동"
+      title={translate('stickyHeader.jumpToCommand')}
     >
       <span
         className={cn(
@@ -41,7 +43,7 @@ export function TerminalBlockStickyHeader({
         aria-hidden="true"
       />
       <span className="min-w-0 flex-1 truncate font-mono text-[0.72rem] text-[rgba(232,239,255,0.92)]">
-        {sticky.command ?? '(명령을 읽지 못했습니다)'}
+        {sticky.command ?? translate('stickyHeader.unreadable')}
       </span>
       {failed && sticky.exitCode !== null ? (
         <span className="shrink-0 text-[0.68rem] font-semibold text-[#ffb1b1]">

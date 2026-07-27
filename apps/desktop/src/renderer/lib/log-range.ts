@@ -5,34 +5,44 @@ import type {
   LogsRelativeRangeValue,
   LogsRelativeUnit,
 } from "../store/createAppStore";
+import { t } from "../i18n";
 
-export const LOGS_RANGE_WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+// 요일·프리셋 라벨은 렌더 시점에 번역한다(모듈 상수는 i18n 초기화보다 먼저 평가된다).
+export const LOGS_RANGE_WEEKDAY_KEYS: string[] = [
+  "logRange.weekday.sun",
+  "logRange.weekday.mon",
+  "logRange.weekday.tue",
+  "logRange.weekday.wed",
+  "logRange.weekday.thu",
+  "logRange.weekday.fri",
+  "logRange.weekday.sat",
+];
 
 export const LOGS_RELATIVE_RANGE_PRESET_OPTIONS: Array<{
   key: LogsRelativePresetKey;
-  label: string;
+  labelKey: string;
   amount: number;
   unit: LogsRelativeUnit;
 }> = [
-  { key: "30m", label: "30분 전부터", amount: 30, unit: "minute" },
-  { key: "1h", label: "1시간 전부터", amount: 1, unit: "hour" },
-  { key: "6h", label: "6시간 전부터", amount: 6, unit: "hour" },
-  { key: "1d", label: "1일 전부터", amount: 1, unit: "day" },
-  { key: "3d", label: "3일 전부터", amount: 3, unit: "day" },
-  { key: "1w", label: "1주 전부터", amount: 1, unit: "week" },
+  { key: "30m", labelKey: "logRange.preset.30m", amount: 30, unit: "minute" },
+  { key: "1h", labelKey: "logRange.preset.1h", amount: 1, unit: "hour" },
+  { key: "6h", labelKey: "logRange.preset.6h", amount: 6, unit: "hour" },
+  { key: "1d", labelKey: "logRange.preset.1d", amount: 1, unit: "day" },
+  { key: "3d", labelKey: "logRange.preset.3d", amount: 3, unit: "day" },
+  { key: "1w", labelKey: "logRange.preset.1w", amount: 1, unit: "week" },
 ];
 
 export const LOGS_RELATIVE_RANGE_UNIT_OPTIONS: Array<{
   value: LogsRelativeUnit;
-  label: string;
+  labelKey: string;
 }> = [
-  { value: "second", label: "초" },
-  { value: "minute", label: "분" },
-  { value: "hour", label: "시간" },
-  { value: "day", label: "일" },
-  { value: "week", label: "주" },
-  { value: "month", label: "월" },
-  { value: "year", label: "년" },
+  { value: "second", labelKey: "logRange.unit.second" },
+  { value: "minute", labelKey: "logRange.unit.minute" },
+  { value: "hour", labelKey: "logRange.unit.hour" },
+  { value: "day", labelKey: "logRange.unit.day" },
+  { value: "week", labelKey: "logRange.unit.week" },
+  { value: "month", labelKey: "logRange.unit.month" },
+  { value: "year", labelKey: "logRange.unit.year" },
 ];
 
 function padRangeValue(value: number): string {
@@ -171,9 +181,17 @@ export function formatLogsRangeLabel(
     (option) => option.key === relativeValue?.presetKey,
   );
   if (relativeValue?.presetKey === "custom") {
-    return `최근 ${relativeValue.amount || "0"}${LOGS_RELATIVE_RANGE_UNIT_OPTIONS.find((option) => option.value === relativeValue.unit)?.label ?? ""}`;
+    const unitKey = LOGS_RELATIVE_RANGE_UNIT_OPTIONS.find(
+      (option) => option.value === relativeValue.unit,
+    )?.labelKey;
+    return t("logRange.recentAmount", {
+      amount: relativeValue.amount || "0",
+      unit: unitKey ? t(unitKey) : "",
+    });
   }
-  return preset ? `최근 ${preset.label.replace(" 전부터", "")}` : "최근 30분";
+  return preset
+    ? t("logRange.recentPreset", { preset: t(`logRange.presetShort.${preset.key}`) })
+    : t("logRange.recentDefault");
 }
 
 export function startOfRangeMonth(date: Date): Date {
@@ -196,7 +214,7 @@ export function buildRangeCalendarDays(month: Date): Date[] {
 }
 
 export function formatRangeMonthLabel(date: Date): string {
-  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`;
+  return t("logRange.monthLabel", { year: date.getFullYear(), month: date.getMonth() + 1 });
 }
 
 export function formatRangeDayValue(date: Date): string {

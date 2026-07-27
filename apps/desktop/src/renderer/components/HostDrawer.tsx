@@ -6,6 +6,7 @@ import { cn } from '../lib/cn';
 import { Button } from '../ui';
 import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface HostDrawerProps {
   open: boolean;
@@ -42,6 +43,7 @@ export function HostDrawer({
   onEditExistingSecret,
   onOpenSecrets
 }: HostDrawerProps) {
+  const { t: translate } = useTranslation();
   const drawerRef = useRef<HTMLElement | null>(null);
   const hostFormRef = useRef<HostFormHandle | null>(null);
   const [isActionInFlight, setIsActionInFlight] = useState(false);
@@ -166,7 +168,7 @@ export function HostDrawer({
               await handlePrimaryAction();
             }}
           >
-            {mode === 'create' ? 'Create Host' : '저장'}
+            {mode === 'create' ? 'Create Host' : translate('common.save')}
           </Button>
         </div>
         {mode === 'edit' && formActionState.saveStatusText ? (

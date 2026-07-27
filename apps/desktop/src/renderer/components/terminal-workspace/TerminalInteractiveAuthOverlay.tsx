@@ -1,5 +1,6 @@
 import type { PendingInteractiveAuth } from '../../store/createAppStore';
 import { Button, Input, SectionLabel } from '../../ui';
+import { Trans, useTranslation } from 'react-i18next';
 
 interface TerminalInteractiveAuthOverlayProps {
   interactiveAuth: PendingInteractiveAuth;
@@ -20,27 +21,30 @@ export function TerminalInteractiveAuthOverlay({
   onReopenApprovalUrl,
   onClose,
 }: TerminalInteractiveAuthOverlayProps) {
+  const { t: translate } = useTranslation();
   if (interactiveAuth.provider === 'warpgate') {
     return (
       <div className="grid max-w-[28rem] gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--accent-strong)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--surface-raised)_84%,var(--accent-strong)_16%)] px-5 py-5 text-[var(--text)] shadow-[var(--shadow-soft)]">
         <SectionLabel>
           Warpgate Approval
         </SectionLabel>
-        <strong>Warpgate 승인을 기다리는 중입니다.</strong>
+        <strong>{translate('authOverlay.warpgateTitle')}</strong>
         <p>
-          브라우저에서 Warpgate 로그인 후 <code>Authorize</code>를 눌러
-          주세요. 가능한 입력은 앱이 자동으로 처리합니다.
+          <Trans i18nKey="authOverlay.warpgateHint" components={{ code: <code /> }} />
         </p>
         {interactiveAuth.authCode ? (
           <p className="text-sm text-[var(--text-soft)]">
-            인증 코드 <code>{interactiveAuth.authCode}</code> 는 자동으로
-            입력됩니다.
+            <Trans
+              i18nKey="authOverlay.authCodeNote"
+              values={{ code: interactiveAuth.authCode }}
+              components={{ code: <code /> }}
+            />
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-3">
           {interactiveAuth.approvalUrl ? (
             <Button variant="secondary" size="sm" onClick={onReopenApprovalUrl}>
-              브라우저 다시 열기
+              {translate('authOverlay.reopenBrowser')}
             </Button>
           ) : null}
           {interactiveAuth.approvalUrl ? (
@@ -51,11 +55,11 @@ export function TerminalInteractiveAuthOverlay({
                 void onCopyApprovalUrl();
               }}
             >
-              링크 복사
+              {translate('authOverlay.copyLink')}
             </Button>
           ) : null}
           <Button variant="secondary" size="sm" onClick={onClose}>
-            닫기
+            {translate('common.close')}
           </Button>
         </div>
         <pre className="rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-3 py-2 text-[0.82rem] text-[var(--text-soft)] whitespace-pre-wrap break-words">
@@ -77,7 +81,7 @@ export function TerminalInteractiveAuthOverlay({
         <SectionLabel>
           Additional Authentication
         </SectionLabel>
-        <strong>추가 인증 입력이 필요합니다.</strong>
+        <strong>{translate('authOverlay.extraAuthTitle')}</strong>
         {interactiveAuth.instruction ? <p>{interactiveAuth.instruction}</p> : null}
         {interactiveAuth.prompts.map((prompt, index) => (
           <label
@@ -98,10 +102,10 @@ export function TerminalInteractiveAuthOverlay({
         ))}
         <div className="flex items-center justify-end gap-3">
           <Button type="submit" variant="primary">
-            응답 보내기
+            {translate('authOverlay.sendResponse')}
           </Button>
           <Button type="button" variant="secondary" onClick={onClose}>
-            닫기
+            {translate('common.close')}
           </Button>
         </div>
       </form>

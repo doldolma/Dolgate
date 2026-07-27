@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { tmuxCommand } from '../../services/desktop/terminal';
 import { focusTerminalSession } from '../../lib/terminal-focus-registry';
+import { useTranslation } from 'react-i18next';
 
 // POSIX single-quote escaping(이름에 공백/특수문자 허용).
 function quotePosix(value: string): string {
@@ -9,14 +10,15 @@ function quotePosix(value: string): string {
 }
 
 const PROMPT_LABEL: Record<string, string> = {
-  raw: 'tmux 명령',
-  'rename-window': '윈도우 이름',
-  'rename-session': '세션 이름',
+  raw: 'tmuxPrompt.raw',
+  'rename-window': 'tmuxPrompt.renameWindow',
+  'rename-session': 'tmuxPrompt.renameSession',
 };
 
 // tmux 명령 프롬프트(Ctrl-b : / $ / ,). 텍스트 입력이 필요한 명령을 활성 pane 의
 // control 채널로 보낸다. tmux 의 status-line 프롬프트와 비슷하게 하단에 입력창을 띄운다.
 export function TmuxCommandPrompt() {
+  const { t: translate } = useTranslation();
   const prompt = useAppStore((s) => s.tmuxCommandPrompt);
   const close = useAppStore((s) => s.closeTmuxCommandPrompt);
   const [value, setValue] = useState('');
@@ -82,7 +84,7 @@ export function TmuxCommandPrompt() {
           }
         }}
         onBlur={close}
-        placeholder={prompt.mode === 'raw' ? '예: resize-pane -Z' : '이름 입력'}
+        placeholder={translate(prompt.mode === 'raw' ? 'tmuxPrompt.rawPlaceholder' : 'tmuxPrompt.namePlaceholder')}
         className="min-w-0 flex-1 bg-transparent text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]"
         spellCheck={false}
         autoComplete="off"

@@ -10,6 +10,7 @@ import {
 } from "../services/desktop/auth-window-updater";
 import { normalizeErrorMessage } from "../store/utils/errors-and-prompts";
 import { Button, Input } from "../ui";
+import { useTranslation } from "react-i18next";
 
 interface VaultGateShellProps {
   mode: "setup-required" | "locked" | "migrate" | "error";
@@ -40,6 +41,7 @@ export function VaultGateShell({
   onRestoreWindow,
   onCloseWindow,
 }: VaultGateShellProps) {
+  const { t: translate } = useTranslation();
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,7 +61,7 @@ export function VaultGateShell({
       return passphraseMessage;
     }
     if (confirmPassphrase && passphrase !== confirmPassphrase) {
-      return "두 입력이 일치하지 않습니다.";
+      return translate("vaultGate.mismatch");
     }
     return null;
   })();
@@ -88,10 +90,10 @@ export function VaultGateShell({
       // 성공하면 auth 이벤트로 vault 상태가 바뀌며 App 이 게이트를 걷어낸다.
     } catch (error) {
       const fallback = isMigrate
-        ? "종단간 암호화 전환에 실패했습니다."
+        ? translate("vaultGate.error.migrateFailed")
         : isSetup
-          ? "동기화 암호 설정에 실패했습니다."
-          : "동기화 잠금 해제에 실패했습니다.";
+          ? translate("vaultGate.error.setupFailed")
+          : translate("vaultGate.error.unlockFailed");
       const normalized = normalizeErrorMessage(error, fallback);
       setErrorMessage(normalized || fallback);
     } finally {
@@ -108,7 +110,7 @@ export function VaultGateShell({
       setPassphrase("");
       setConfirmPassphrase("");
     } catch (error) {
-      const fallback = "볼트 초기화에 실패했습니다.";
+      const fallback = translate("vaultGate.error.resetFailed");
       setErrorMessage(normalizeErrorMessage(error, fallback) || fallback);
     } finally {
       setIsSubmitting(false);
@@ -132,10 +134,10 @@ export function VaultGateShell({
         <div className="w-[min(34rem,100%)] rounded-[12px] border border-[var(--border)] bg-[var(--surface-elevated)] px-[2.4rem] pb-[2.4rem] pt-[2.4rem] shadow-[var(--shadow)]">
           <h2 className="m-0 mb-1 text-[1.3rem] font-bold text-[var(--text)]">
             {isError
-              ? "동기화 볼트 오류"
+              ? translate("vaultGate.title.error")
               : isSetup
-                ? "동기화 암호 설정"
-                : "동기화 잠금 해제"}
+                ? translate("vaultGate.title.setup")
+                : translate("vaultGate.title.unlock")}
           </h2>
           {authState.session?.user.email ? (
             <div className="mb-3 text-[0.85rem] text-[var(--text-soft)]">
@@ -144,12 +146,12 @@ export function VaultGateShell({
           ) : null}
           <p className="m-0 mb-5 text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
             {isError
-              ? "볼트 정보를 안전하게 확인하지 못해 동기화를 중단했습니다."
+              ? translate("vaultGate.description.error")
               : isMigrate
-                ? "종단간 암호화를 위한 동기화 암호를 설정해 주세요. 기존 데이터는 그대로 유지됩니다."
+                ? translate("vaultGate.description.migrate")
                 : isSetup
-                  ? "종단간 암호화를 위한 동기화 암호를 설정해 주세요. 새 기기에서 로그인할 때 필요합니다."
-                  : "이 계정의 동기화 암호를 입력해 주세요."}
+                  ? translate("vaultGate.description.setup")
+                  : translate("vaultGate.description.unlock")}
           </p>
 
           {errorMessage ? (
@@ -161,14 +163,14 @@ export function VaultGateShell({
           {isError ? (
             <div className="rounded-[8px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border))] bg-[var(--danger-bg)] px-4 py-3.5 text-[0.88rem] leading-[1.6] text-[var(--danger-text)]">
               {authState.vault?.errorMessage ??
-                "동기화 볼트 상태를 복원할 수 없습니다. 로그아웃한 뒤 다시 로그인해 주세요."}
+                translate("vaultGate.restoreFailed")}
             </div>
           ) : (
             <div className="grid gap-3">
               <Input
                 type="password"
                 value={passphrase}
-                placeholder="동기화 암호"
+                placeholder={translate("vaultGate.field.passphrase")}
                 autoFocus
                 onChange={(event) => setPassphrase(event.target.value)}
                 onKeyDown={(event) => {
@@ -181,7 +183,7 @@ export function VaultGateShell({
                 <Input
                   type="password"
                   value={confirmPassphrase}
-                  placeholder="동기화 암호 확인"
+                  placeholder={translate("vaultGate.field.confirm")}
                   onChange={(event) => setConfirmPassphrase(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -197,8 +199,7 @@ export function VaultGateShell({
               ) : null}
               {isSetup ? (
                 <p className="m-0 text-[0.8rem] leading-[1.55] text-[var(--text-soft)]">
-                  암호를 잊으면 동기화된 데이터를 복구할 수 없습니다. 로그인된
-                  다른 기기가 있으면 설정에서 변경할 수 있습니다.
+                  {translate("vaultGate.warning")}
                 </p>
               ) : null}
               <Button
@@ -208,15 +209,15 @@ export function VaultGateShell({
               >
                 {isSubmitting
                   ? isMigrate
-                    ? "전환 중..."
+                    ? translate("vaultGate.submit.migrating")
                     : isSetup
-                      ? "설정 중..."
-                      : "확인 중..."
+                      ? translate("vaultGate.submit.settingUp")
+                      : translate("vaultGate.submit.checking")
                   : isMigrate
-                    ? "종단간 암호화 켜기"
+                    ? translate("vaultGate.submit.enableE2ee")
                     : isSetup
-                      ? "동기화 시작"
-                      : "잠금 해제"}
+                      ? translate("vaultGate.submit.startSync")
+                      : translate("vaultGate.submit.unlock")}
               </Button>
               {isMigrate && onDefer ? (
                 <Button
@@ -224,7 +225,7 @@ export function VaultGateShell({
                   disabled={isSubmitting}
                   onClick={async () => onDefer()}
                 >
-                  나중에
+                  {translate("vaultGate.submit.later")}
                 </Button>
               ) : null}
             </div>
@@ -235,9 +236,7 @@ export function VaultGateShell({
               {isResetConfirmOpen ? (
                 <div className="grid gap-3">
                   <p className="m-0 text-[0.85rem] leading-[1.6] text-[var(--danger-text)]">
-                    동기화 암호 없이는 서버에 저장된 데이터를 복구할 수
-                    없습니다. 초기화하면 서버의 동기화 데이터가 모두 삭제되고
-                    새로 시작합니다. 이 작업은 되돌릴 수 없습니다.
+                    {translate("vaultGate.reset.warning")}
                   </p>
                   <div className="flex gap-2">
                     <Button
@@ -245,14 +244,14 @@ export function VaultGateShell({
                       disabled={isSubmitting}
                       onClick={async () => setIsResetConfirmOpen(false)}
                     >
-                      취소
+                      {translate("common.cancel")}
                     </Button>
                     <Button
                       variant="danger"
                       disabled={isSubmitting}
                       onClick={async () => handleReset()}
                     >
-                      모두 삭제하고 새로 시작
+                      {translate("vaultGate.reset.confirm")}
                     </Button>
                   </div>
                 </div>
@@ -262,7 +261,7 @@ export function VaultGateShell({
                   className="cursor-pointer border-none bg-transparent p-0 text-[0.82rem] font-semibold text-[var(--danger-text)]"
                   onClick={() => setIsResetConfirmOpen(true)}
                 >
-                  동기화 암호를 잊으셨나요? 데이터 초기화
+                  {translate("vaultGate.reset.open")}
                 </button>
               )}
             </div>
@@ -275,7 +274,7 @@ export function VaultGateShell({
               className="cursor-pointer border-none bg-transparent p-0 text-[0.82rem] text-[var(--text-soft)] disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void onLogout()}
             >
-              다른 계정으로 로그인 (로그아웃)
+              {translate("vaultGate.switchAccount")}
             </button>
           </div>
         </div>

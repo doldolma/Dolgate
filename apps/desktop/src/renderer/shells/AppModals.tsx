@@ -11,6 +11,7 @@ import {
 import { UpdateInstallConfirmDialog } from '../components/UpdateInstallConfirmDialog';
 import type { useAppModalViewModel, useAppSettingsViewModel } from '../view-models/appViewModels';
 import { findHost } from './appShellUtils';
+import { useTranslation } from 'react-i18next';
 
 interface AppModalsProps {
   hosts: HostRecord[];
@@ -45,6 +46,7 @@ export function AppModals({
   onCloseUpdateInstallConfirm,
   onConfirmInstallUpdate,
 }: AppModalsProps) {
+  const { t: translate } = useTranslation();
   return (
     <>
       <KnownHostPromptDialog
@@ -112,8 +114,8 @@ export function AppModals({
 
       <SnippetVariablesDialog
         pending={modalViewModel.pendingStartupCommandPrompt}
-        title="Startup Command 변수 입력"
-        confirmLabel="연결"
+        title={translate('appModals.startupVarsTitle')}
+        confirmLabel={translate('appModals.startupVarsConfirm')}
         onConfirm={(values) => {
           void modalViewModel.confirmStartupCommandPrompt(values);
         }}

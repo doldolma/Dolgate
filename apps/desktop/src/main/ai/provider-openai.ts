@@ -12,6 +12,7 @@ import type {
 import { mergeTextAttachments } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
 import { normalizeAiError } from "./provider-errors";
+import { t } from '../i18n';
 
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
@@ -41,7 +42,7 @@ export class OpenAiAdapter implements ProviderAdapter {
         .map((entry) => entry.id)
         .filter((id): id is string => typeof id === "string")
         .sort();
-      return { ok: true, message: "연결에 성공했습니다.", detectedModels };
+      return { ok: true, message: t('misc.connectSuccess'), detectedModels };
     } catch (error) {
       const normalized = normalizeAiError(error);
       return { ok: false, reason: normalized.reason, message: normalized.message };

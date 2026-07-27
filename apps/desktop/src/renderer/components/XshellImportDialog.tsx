@@ -28,6 +28,8 @@ import {
   StatusBadge,
 } from '../ui';
 import { cn } from '../lib/cn';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface XshellImportDialogProps {
   open: boolean;
@@ -421,16 +423,16 @@ function buildXshellNoticeSummary(
   additionalSourceCount: number
 ) {
   if (warnings.length > 0 && hasSavedPasswordHosts) {
-    return `주의 사항 ${warnings.length}건, 저장된 비밀번호 포함`;
+    return t('xshellImport.notice.warningsWithPassword', { count: warnings.length });
   }
   if (warnings.length > 0) {
-    return `주의 사항 ${warnings.length}건`;
+    return t('xshellImport.notice.warnings', { count: warnings.length });
   }
   if (hasSavedPasswordHosts) {
-    return '저장된 비밀번호 포함';
+    return t('xshellImport.notice.passwordIncluded');
   }
   if (additionalSourceCount > 0) {
-    return `추가 세션 소스 ${additionalSourceCount}개`;
+    return t('xshellImport.notice.additionalSources', { count: additionalSourceCount });
   }
   return null;
 }
@@ -462,11 +464,11 @@ function renderProbeSummary(
               : 'grid-cols-[auto_minmax(0,1fr)]'
           )}
         >
-          <strong className="text-[var(--text)]">세션 소스 {sources.length}개</strong>
+          <strong className="text-[var(--text)]">{t('xshellImport.sources.count', { count: sources.length })}</strong>
           <code className="min-w-0 truncate text-[0.82rem]" title={primarySource.folderPath}>
             {primarySource.folderPath}
           </code>
-          {additionalSources.length > 0 ? <span className="shrink-0">외 {additionalSources.length}개</span> : null}
+          {additionalSources.length > 0 ? <span className="shrink-0">{t('xshellImport.sources.more', { count: additionalSources.length })}</span> : null}
         </div>
       </div>
 
@@ -491,7 +493,7 @@ function renderProbeSummary(
 
             {hasSavedPasswordHosts ? (
               <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-                암호화된 비밀번호는 복호화를 시도합니다. 실패하면 호스트만 추가됩니다.
+                {t('xshellImport.sources.decryptHint')}
               </p>
             ) : null}
 
@@ -499,7 +501,7 @@ function renderProbeSummary(
               <div className="grid gap-2">
                 {additionalSources.map((source) => (
                   <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-                    <strong>{source.origin === 'default-session-dir' ? '기본 경로' : '추가 폴더'}</strong>{' '}
+                    <strong>{t(source.origin === 'default-session-dir' ? 'xshellImport.sources.defaultDir' : 'xshellImport.sources.additionalDir')}</strong>{' '}
                     <code className="break-all text-[0.82rem]">{source.folderPath}</code>
                   </p>
                 ))}
@@ -531,6 +533,7 @@ function XshellTreeRenderer({
   onToggleGroup,
   onToggleHost
 }: XshellTreeRendererProps) {
+  const { t: translate } = useTranslation();
   const selectedGroupPaths = useMemo(() => new Set(selection.selectedGroupPaths), [selection.selectedGroupPaths]);
   const selectedHostKeys = useMemo(() => new Set(selection.selectedHostKeys), [selection.selectedHostKeys]);
 
@@ -553,22 +556,22 @@ function XshellTreeRenderer({
                 checked={checked}
                 disabled={disabled}
                 onChange={(event) => onToggleHost(node.host, event.target.checked)}
-                aria-label={`${node.host.label} 호스트 선택`}
+                aria-label={translate('xshellImport.tree.selectHost', { label: node.host.label })}
               />
               <div className="min-w-0">
                 <strong>{node.host.label}</strong>
                 <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                   {node.host.username}@{node.host.hostname}:{node.host.port}
                 </span>
-                <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.groupPath ? node.host.groupPath : '루트 세션'}</small>
+                <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.groupPath ? node.host.groupPath : translate('xshellImport.tree.rootSession')}</small>
                 <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.sourceFilePath}</small>
                 {node.host.privateKeyPath ? <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.host.privateKeyPath}</small> : null}
               </div>
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge>{node.host.authType === 'privateKey' ? '개인 키' : '비밀번호'}</StatusBadge>
-              {node.host.hasPasswordHint ? <StatusBadge>저장된 비밀번호</StatusBadge> : null}
-              {node.host.hasAuthProfile ? <StatusBadge>인증 프로필</StatusBadge> : null}
+              <StatusBadge>{translate(node.host.authType === 'privateKey' ? 'xshellImport.tree.privateKey' : 'xshellImport.tree.password')}</StatusBadge>
+              {node.host.hasPasswordHint ? <StatusBadge>{translate('xshellImport.tree.savedPassword')}</StatusBadge> : null}
+              {node.host.hasAuthProfile ? <StatusBadge>{translate('xshellImport.tree.authProfile')}</StatusBadge> : null}
             </div>
           </div>
         </div>
@@ -601,7 +604,10 @@ function XshellTreeRenderer({
             type="button"
             className={`inline-grid h-[1.8rem] w-[1.8rem] min-w-[1.8rem] place-items-center rounded-[10px] border border-[var(--border)] bg-[var(--dialog-surface)] text-[0.82rem] transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
             onClick={() => onToggleExpanded(node.path)}
-            aria-label={`${node.name} 그룹 ${isExpanded ? '접기' : '펼치기'}`}
+            aria-label={translate('xshellImport.tree.groupToggle', {
+              name: node.name,
+              action: translate(isExpanded ? 'xshellImport.tree.collapse' : 'xshellImport.tree.expand'),
+            })}
           >
             &gt;
           </button>
@@ -616,12 +622,12 @@ function XshellTreeRenderer({
                 }
               }}
               onChange={(event) => onToggleGroup(node, event.target.checked)}
-              aria-label={`${node.name} 그룹 선택`}
+              aria-label={translate('xshellImport.tree.selectGroup', { name: node.name })}
             />
             <div className="min-w-0">
               <strong>{node.name}</strong>
               <span className="block truncate text-[0.82rem] text-[var(--text-soft)]">{node.path}</span>
-              <small className="block text-[0.82rem] text-[var(--text-soft)]">{node.hostCount > 0 ? `하위 호스트 ${node.hostCount}개` : '빈 그룹'}</small>
+              <small className="block text-[0.82rem] text-[var(--text-soft)]">{node.hostCount > 0 ? translate('xshellImport.tree.childHosts', { count: node.hostCount }) : translate('xshellImport.tree.emptyGroup')}</small>
             </div>
           </label>
         </div>
@@ -631,7 +637,7 @@ function XshellTreeRenderer({
               node.children.map((child) => renderNode(child, depth + 1, checked))
             ) : (
               <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]" style={{ marginLeft: `${(depth + 1) * 1.1}rem` }}>
-                이 그룹에는 가져올 호스트가 없습니다.
+                {translate('xshellImport.tree.noImportableHosts')}
               </div>
             )}
           </div>
@@ -644,6 +650,7 @@ function XshellTreeRenderer({
 }
 
 export function XshellImportDialog({ open, onClose, onImported }: XshellImportDialogProps) {
+  const { t: translate } = useTranslation();
   const {
     addXshellFolderToSnapshot,
     discardXshellSnapshot,
@@ -691,7 +698,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
         if (cancelled) {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : '로컬 Xshell 세션을 불러오지 못했습니다.');
+        setError(loadError instanceof Error ? loadError.message : translate('xshellImport.error.loadFailed'));
       })
       .finally(() => {
         if (!cancelled) {
@@ -751,16 +758,16 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
         <ModalHeader>
           <div>
             <SectionLabel>Xshell</SectionLabel>
-            <h3 id="xshell-import-title">Xshell 가져오기</h3>
+            <h3 id="xshell-import-title">{translate('xshellImport.dialog.title')}</h3>
           </div>
-          <IconButton onClick={onClose} aria-label="Xshell 가져오기 대화상자 닫기">
+          <IconButton onClick={onClose} aria-label={translate('xshellImport.dialog.close')}>
             <CloseIcon />
           </IconButton>
         </ModalHeader>
 
         <ModalBody className="grid gap-4">
           {isLoading ? (
-            <NoticeCard tone="info">로컬 Xshell 세션을 읽는 중입니다.</NoticeCard>
+            <NoticeCard tone="info">{translate('xshellImport.dialog.loading')}</NoticeCard>
           ) : null}
           {error ? (
             <NoticeCard tone="danger" role="alert">
@@ -773,11 +780,11 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
           {probe ? (
             <>
               <FilterRow>
-                <FieldGroup label="검색" className="flex-1">
+                <FieldGroup label={translate('xshellImport.dialog.searchLabel')} className="flex-1">
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="그룹, 호스트, 사용자명, 경로 검색"
+                    placeholder={translate('xshellImport.dialog.searchPlaceholder')}
                     disabled={isLoading || isAddingFolder}
                   />
                 </FieldGroup>
@@ -801,13 +808,13 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                         });
                         setProbe(nextProbe);
                       } catch (loadError) {
-                        setError(loadError instanceof Error ? loadError.message : '선택한 Xshell 세션 폴더를 추가하지 못했습니다.');
+                        setError(loadError instanceof Error ? loadError.message : translate('xshellImport.error.addFolderFailed'));
                       } finally {
                         setIsAddingFolder(false);
                       }
                     }}
                   >
-                    {isAddingFolder ? '폴더를 불러오는 중...' : '세션 폴더 선택'}
+                    {translate(isAddingFolder ? 'xshellImport.dialog.addingFolder' : 'xshellImport.dialog.pickFolder')}
                   </Button>
                   <Button
                     variant="secondary"
@@ -824,7 +831,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     }}
                     disabled={visibleSelectionTargets.groupPaths.length === 0 && visibleSelectionTargets.hostKeys.length === 0}
                   >
-                    보이는 항목 선택
+                    {translate('xshellImport.dialog.selectVisible')}
                   </Button>
                   <Button
                     variant="secondary"
@@ -845,7 +852,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     }}
                     disabled={selectedItemCount === 0}
                   >
-                    보이는 항목 해제
+                    {translate('xshellImport.dialog.deselectVisible')}
                   </Button>
                   <Button
                     variant="secondary"
@@ -857,37 +864,49 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                     }
                     disabled={selectedItemCount === 0}
                   >
-                    전체 선택 해제
+                    {translate('xshellImport.dialog.deselectAll')}
                   </Button>
                 </div>
               </FilterRow>
 
               <div className="flex flex-wrap items-center gap-3 text-[0.82rem] font-medium text-[var(--text-soft)]">
-                <span>소스 {probe.sources.length}</span>
-                <span>트리 항목 {probe.groups.length + probe.hosts.length}</span>
-                <span>선택 항목 {selectedItemCount}</span>
-                <span>가져올 호스트 {effectiveSelectedHostCount}</span>
-                <span>생성될 그룹 {effectiveSelectedGroupCount}</span>
-                {probe.skippedExistingHostCount > 0 ? <span>기존 중복 제외 {probe.skippedExistingHostCount}</span> : null}
-                {probe.skippedDuplicateHostCount > 0 ? <span>세션 중복 제외 {probe.skippedDuplicateHostCount}</span> : null}
+                <span>{translate('xshellImport.dialog.statSources', { count: probe.sources.length })}</span>
+                <span>
+                  {translate('xshellImport.dialog.statTreeItems', {
+                    count: probe.groups.length + probe.hosts.length,
+                  })}
+                </span>
+                <span>{translate('xshellImport.dialog.statSelected', { count: selectedItemCount })}</span>
+                <span>{translate('xshellImport.dialog.statHosts', { count: effectiveSelectedHostCount })}</span>
+                <span>{translate('xshellImport.dialog.statGroups', { count: effectiveSelectedGroupCount })}</span>
+                {probe.skippedExistingHostCount > 0 ? <span>
+                    {translate('xshellImport.dialog.statSkippedExisting', {
+                      count: probe.skippedExistingHostCount,
+                    })}
+                  </span> : null}
+                {probe.skippedDuplicateHostCount > 0 ? <span>
+                    {translate('xshellImport.dialog.statSkippedDuplicate', {
+                      count: probe.skippedDuplicateHostCount,
+                    })}
+                  </span> : null}
               </div>
 
               <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-                호스트 선택 시 상위 그룹은 자동 생성되고, 그룹 선택 시 하위 그룹과 호스트를 함께 가져옵니다.
+                {translate('xshellImport.dialog.selectionHint')}
               </div>
 
               <section className="grid gap-3">
-                <h4>가져올 항목</h4>
+                <h4>{translate('xshellImport.dialog.itemsHeading')}</h4>
                 {treeNodes.length === 0 ? (
                   <EmptyState
-                    title="현재 조건과 일치하는 Xshell 그룹이나 호스트가 없습니다."
-                    description="다른 세션 폴더를 선택하거나 검색어를 바꿔보세요."
+                    title={translate('xshellImport.dialog.emptyTitle')}
+                    description={translate('xshellImport.dialog.emptyDescription')}
                   />
                 ) : (
                   <div
                     className="grid gap-2 rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-[0.4rem]"
                     role="tree"
-                    aria-label="Xshell 가져오기 항목"
+                    aria-label={translate('xshellImport.dialog.treeLabel')}
                   >
                     <XshellTreeRenderer
                       nodes={treeNodes}
@@ -940,7 +959,7 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
 
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isImporting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -960,13 +979,13 @@ export function XshellImportDialog({ open, onClose, onImported }: XshellImportDi
                 await onImported(result);
                 onClose();
               } catch (importError) {
-                setError(importError instanceof Error ? importError.message : 'Xshell 데이터를 가져오지 못했습니다.');
+                setError(importError instanceof Error ? importError.message : translate('xshellImport.error.importFailed'));
               } finally {
                 setIsImporting(false);
               }
             }}
           >
-            {isImporting ? '가져오는 중...' : '가져오기'}
+            {translate(isImporting ? 'xshellImport.dialog.importing' : 'xshellImport.dialog.import')}
           </Button>
         </ModalFooter>
       </ModalShell>

@@ -14,6 +14,7 @@ import {
   type XshellSourceOrigin,
   type XshellSourceSummary
 } from '@shared';
+import { t } from './i18n';
 
 const SUPPORTED_PROTOCOLS = new Set(['SSH', 'SFTP']);
 
@@ -71,7 +72,9 @@ function buildSshDuplicateKey(hostname: string, port: number, username: string):
 }
 
 function buildSourceLabel(origin: XshellSourceOrigin, folderPath: string): string {
-  return origin === 'default-session-dir' ? '기본 Xshell 세션' : path.basename(folderPath) || folderPath;
+  return origin === 'default-session-dir'
+    ? t('xshellSvc.defaultSessionDir')
+    : path.basename(folderPath) || folderPath;
 }
 
 function buildHostKey(sourceFilePath: string): string {
@@ -306,7 +309,7 @@ async function parseSessionFile(
   if (!SUPPORTED_PROTOCOLS.has(protocol)) {
     warnings.push(
       toWarning(
-        `${label}: ${protocol} 프로토콜은 가져오기를 지원하지 않아 건너뛰었습니다.`,
+        t('xshellSvc.protocolUnsupported', { label, protocol }),
         'unsupported-protocol',
         sourceFilePath
       )
@@ -318,7 +321,7 @@ async function parseSessionFile(
   if (!hostname) {
     warnings.push(
       toWarning(
-        `${label}: Host 값이 없어 세션을 건너뛰었습니다.`,
+        t('xshellSvc.noHost', { label }),
         'missing-host',
         sourceFilePath
       )
@@ -330,7 +333,7 @@ async function parseSessionFile(
   if (!username) {
     warnings.push(
       toWarning(
-        `${label}: UserName 값이 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
+        t('xshellSvc.noUserName', { label }),
         'missing-username',
         sourceFilePath
       )
@@ -346,7 +349,7 @@ async function parseSessionFile(
     } else {
       warnings.push(
         toWarning(
-          `${label}: Port 값 "${portValue}"가 잘못되어 22번 포트를 사용합니다.`,
+          t('xshellSvc.badPort', { label, port: portValue }),
           'invalid-port',
           sourceFilePath
         )
@@ -370,7 +373,7 @@ async function parseSessionFile(
     if (!privateKeyPath) {
       warnings.push(
         toWarning(
-          `${label}: UserKey "${userKey}" 경로를 찾지 못해 키 경로 없이 가져옵니다.`,
+          t('xshellSvc.userKeyMissing', { label, userKey }),
           'unresolved-user-key',
           sourceFilePath
         )
@@ -381,7 +384,7 @@ async function parseSessionFile(
   if (hasPasswordHint && masterPasswordEnabled) {
     warnings.push(
       toWarning(
-        `${label}: 저장된 Xshell 비밀번호는 현재 버전에서 가져오지 않습니다.`,
+        t('xshellSvc.passwordUnsupported', { label }),
         'master-password-enabled',
         sourceFilePath
       )
@@ -391,7 +394,7 @@ async function parseSessionFile(
   if (hasAuthProfile) {
     warnings.push(
       toWarning(
-        `${label}: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.`,
+        t('xshellSvc.authProfileUnsupported', { label }),
         'auth-profile-not-imported',
         sourceFilePath
       )
@@ -437,7 +440,7 @@ async function parseSessionFileForImport(
   if (!SUPPORTED_PROTOCOLS.has(protocol)) {
     warnings.push(
       toWarning(
-        `${label}: ${protocol} 프로토콜은 가져오기를 지원하지 않아 건너뛰었습니다.`,
+        t('xshellSvc.protocolUnsupported', { label, protocol }),
         'unsupported-protocol',
         sourceFilePath
       )
@@ -449,7 +452,7 @@ async function parseSessionFileForImport(
   if (!hostname) {
     warnings.push(
       toWarning(
-        `${label}: Host 값이 없어 세션을 건너뛰었습니다.`,
+        t('xshellSvc.noHost', { label }),
         'missing-host',
         sourceFilePath
       )
@@ -461,7 +464,7 @@ async function parseSessionFileForImport(
   if (!username) {
     warnings.push(
       toWarning(
-        `${label}: UserName 값이 없어 가져왔지만, 첫 연결 전에 사용자명 입력이 필요합니다.`,
+        t('xshellSvc.noUserName', { label }),
         'missing-username',
         sourceFilePath
       )
@@ -477,7 +480,7 @@ async function parseSessionFileForImport(
     } else {
       warnings.push(
         toWarning(
-          `${label}: Port 값 "${portValue}"가 잘못되어 22번 포트를 사용합니다.`,
+          t('xshellSvc.badPort', { label, port: portValue }),
           'invalid-port',
           sourceFilePath
         )
@@ -501,7 +504,7 @@ async function parseSessionFileForImport(
     if (!privateKeyPath) {
       warnings.push(
         toWarning(
-          `${label}: UserKey "${userKey}" 경로를 찾지 못해 키 경로 없이 가져옵니다.`,
+          t('xshellSvc.userKeyMissing', { label, userKey }),
           'unresolved-user-key',
           sourceFilePath
         )
@@ -512,7 +515,7 @@ async function parseSessionFileForImport(
   if (hasPasswordHint && masterPasswordEnabled) {
     warnings.push(
       toWarning(
-        `${label}: Xshell 마스터 비밀번호가 활성화되어 있어 저장된 비밀번호는 자동으로 가져오지 않습니다.`,
+        t('xshellSvc.masterPassword', { label }),
         'master-password-enabled',
         sourceFilePath
       )
@@ -522,7 +525,7 @@ async function parseSessionFileForImport(
   if (hasAuthProfile) {
     warnings.push(
       toWarning(
-        `${label}: Xshell 인증 프로필은 현재 버전에서 가져오지 않습니다.`,
+        t('xshellSvc.authProfileUnsupported', { label }),
         'auth-profile-not-imported',
         sourceFilePath
       )
@@ -824,7 +827,7 @@ export class XshellImportService {
   ): Promise<XshellProbeResult> {
     const snapshot = this.snapshots.get(input.snapshotId)
     if (!snapshot) {
-      throw new Error('Xshell 가져오기 상태를 찾지 못했습니다. 대화상자를 다시 열어주세요.')
+      throw new Error(t('xshellSvc.stateMissing'))
     }
 
     const parsedSource = await buildParsedSource(input.folderPath, 'manual-folder')

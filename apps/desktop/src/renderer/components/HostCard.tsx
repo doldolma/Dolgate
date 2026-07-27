@@ -1,6 +1,7 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 import { cn } from '../lib/cn';
 import { Star } from '../ui/icons';
+import { useTranslation } from 'react-i18next';
 
 interface HostCardProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   badgeLabel: ReactNode;
@@ -39,13 +40,14 @@ export function HostCard({
   expanded = false,
   favorite = false,
   onToggleFavorite,
-  favoriteLabel = '즐겨찾기',
+  favoriteLabel,
   actions,
   footer,
   className,
   children,
   ...props
 }: HostCardProps) {
+  const { t: translate } = useTranslation();
   return (
     <article
       data-host-card="true"

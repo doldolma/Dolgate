@@ -51,6 +51,7 @@ export {
   shouldOpenTerminalSearch,
   shouldShowSessionOverlay,
 } from './terminal-workspace/terminalSessionHelpers';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalWorkspaceProps {
   tabs: TerminalTab[];
@@ -164,6 +165,7 @@ export function TerminalWorkspace({
   onToggleWorkspaceBroadcast,
   onResizeWorkspaceSplit,
 }: TerminalWorkspaceProps) {
+  const { t: translate } = useTranslation();
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
   const [resizingHandle, setResizingHandle] =
@@ -344,13 +346,13 @@ export function TerminalWorkspace({
   const isBroadcastToggleDisabled =
     !isWorkspaceBroadcastEnabled && connectedWorkspaceHostSessionIds.length < 2;
   const broadcastButtonLabel = isWorkspaceBroadcastEnabled
-    ? '브로드캐스트 끄기'
-    : '브로드캐스트 켜기';
+    ? translate('workspace.broadcastOff')
+    : translate('workspace.broadcastOn');
   const broadcastTooltipText = isWorkspaceBroadcastEnabled
-    ? '브로드캐스트 활성 상태'
+    ? translate('workspace.broadcastActive')
     : isBroadcastToggleDisabled
-      ? '원격 pane 2개 이상 연결 시 사용 가능'
-      : '브로드캐스트 켜기';
+      ? translate('workspace.broadcastNeedsPanes')
+      : translate('workspace.broadcastOn');
   const broadcastTooltipId = activeWorkspace
     ? `workspace-broadcast-tooltip-${activeWorkspace.id}`
     : undefined;
@@ -457,11 +459,10 @@ export function TerminalWorkspace({
     return (
       <div className="grid h-full min-h-0 place-items-center rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-soft)]">
         <div className="grid w-full max-w-[46rem] gap-4 rounded-[12px] border border-[var(--border)] bg-[var(--surface)] px-9 py-8 shadow-[var(--shadow)]">
-          <SectionLabel>연결 준비 완료</SectionLabel>
-          <h3>첫 SSH 세션을 시작해보세요</h3>
+          <SectionLabel>{translate('workspace.readySection')}</SectionLabel>
+          <h3>{translate('workspace.readyTitle')}</h3>
           <p className="text-[var(--text-soft)] leading-[1.7]">
-            호스트 카드를 더블클릭하면 새 세션이 탭으로 열리고, 탭을 아래로
-            끌어내리면 여러 세션을 나란히 볼 수 있습니다.
+            {translate('workspace.readyHint')}
           </p>
         </div>
       </div>

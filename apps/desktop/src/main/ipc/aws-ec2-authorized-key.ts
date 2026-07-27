@@ -17,6 +17,7 @@ import {
 } from "../aws-ws-proxy";
 import type { AwsEc2HostRecord, MainIpcContext } from "./context";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import { t } from '../i18n';
 
 /**
  * Installs a persistent public key into an EC2 instance's authorized_keys over
@@ -57,12 +58,12 @@ export async function installAwsEc2AuthorizedKeyOverSsm(
   if (!sshUsername) {
     throw new Error(
       hydratedHost.awsSshMetadataError ||
-        "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+        t('pfIpc.sshUsernameUnknown'),
     );
   }
   const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
   if (!availabilityZone) {
-    throw new Error("Availability Zone을 확인하지 못했습니다.");
+    throw new Error(t('pfIpc.azUnknown'));
   }
   const { privateKeyPem, publicKey: ephemeralPublicKey } =
     ctx.createEphemeralAwsSftpKeyPair();
@@ -188,7 +189,7 @@ export async function installSshPublicKeyWithAwsSupport(
         hostId,
         hostLabel: host?.label ?? hostId,
         status: "failed",
-        message: "EC2 host가 아닙니다.",
+        message: t('authorizedKey.notEc2'),
       });
       continue;
     }
@@ -214,7 +215,7 @@ export async function installSshPublicKeyWithAwsSupport(
         message:
           error instanceof Error && error.message.trim()
             ? error.message
-            : "SSH 공개 키를 설치하지 못했습니다.",
+            : t('authorizedKey.installFailed'),
       });
     }
   }
@@ -228,7 +229,7 @@ export async function installSshPublicKeyWithAwsSupport(
           hostId: id,
           hostLabel: id,
           status: "failed" as const,
-          message: "SSH 공개 키를 설치하지 못했습니다.",
+          message: t('authorizedKey.installFailed'),
         },
     ),
   };

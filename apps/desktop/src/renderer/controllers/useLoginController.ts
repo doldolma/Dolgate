@@ -21,6 +21,7 @@ import {
   restoreWindow,
   retryOnline,
 } from '../services/desktop/auth-window-updater';
+import { t } from '../i18n';
 
 interface UseLoginControllerOptions {
   onAuthState: (state: AuthState) => void;
@@ -32,7 +33,7 @@ interface UseLoginControllerOptions {
 }
 
 function toUpdaterErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '업데이트 작업 중 오류가 발생했습니다.';
+  return error instanceof Error ? error.message : t('misc.updateActionFailed');
 }
 
 export function useLoginController({

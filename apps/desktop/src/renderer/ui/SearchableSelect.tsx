@@ -3,6 +3,7 @@ import { cn } from '../lib/cn';
 import { Badge } from './Badge';
 import { ChevronDown } from './icons';
 import { Input } from './Input';
+import { useTranslation } from 'react-i18next';
 
 export interface SearchableSelectOption {
   value: string;
@@ -51,14 +52,15 @@ export function SearchableSelect({
   ariaLabel,
   searchAriaLabel,
   placeholder,
-  searchPlaceholder = '검색',
-  emptyText = '검색 결과가 없습니다.',
+  searchPlaceholder,
+  emptyText,
   value,
   options,
   onChange,
   disabled = false,
   className,
 }: SearchableSelectProps) {
+  const { t: translate } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -160,8 +162,8 @@ export function SearchableSelect({
         >
           <Input
             ref={searchInputRef}
-            aria-label={searchAriaLabel ?? `${ariaLabel} 검색`}
-            placeholder={searchPlaceholder}
+            aria-label={searchAriaLabel ?? translate('select.searchAria', { label: ariaLabel })}
+            placeholder={searchPlaceholder ?? translate('select.search')}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="min-h-9 rounded-[10px] px-[0.7rem] py-[0.55rem] text-[0.9rem]"
@@ -200,7 +202,7 @@ export function SearchableSelect({
               role="status"
               className="rounded-[10px] border border-dashed border-[var(--border)] px-[0.9rem] py-[0.55rem] text-[0.9rem] text-[var(--text-soft)]"
             >
-              {emptyText}
+              {emptyText ?? translate('select.noResults')}
             </div>
           )}
         </div>

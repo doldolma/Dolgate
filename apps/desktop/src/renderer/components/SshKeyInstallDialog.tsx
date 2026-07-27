@@ -11,6 +11,7 @@ import type {
 import { DialogBackdrop } from './DialogBackdrop';
 import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
 import { Button, Input, ModalBody, ModalHeader, ModalShell, SectionLabel, SelectField } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface SshKeyInstallDialogProps {
   host: SshHostRecord | AwsEc2HostRecord;
@@ -33,6 +34,7 @@ export function SshKeyInstallDialog({
   onInstallSshPublicKey,
   onClose,
 }: SshKeyInstallDialogProps) {
+  const { t: translate } = useTranslation();
   const installableKeys = useMemo(
     () => keychainEntries.filter((entry) => entry.hasManagedPrivateKey),
     [keychainEntries],
@@ -67,12 +69,12 @@ export function SshKeyInstallDialog({
   if (mode === 'generate') {
     return (
       <SshKeyGenerateDialog
-        title="새 SSH 키 생성·설치"
+        title={translate('sshKeyInstall.generateTitle')}
         initialLabel={`${hostDisplayName} SSH Key`}
         initialComment={
           sshHost ? `${sshHost.username}@${sshHost.hostname}` : hostDisplayName
         }
-        submitLabel="생성 후 설치"
+        submitLabel={translate('sshKeyInstall.generateSubmit')}
         busy={busy}
         error={generateError}
         onDismiss={() => {
@@ -92,7 +94,7 @@ export function SshKeyInstallDialog({
             setGenerateError(
               error instanceof Error && error.message.trim()
                 ? error.message
-                : 'SSH 키를 설치하지 못했습니다.',
+                : translate('sshKeyInstall.installFailed'),
             );
           } finally {
             setBusy(false);
@@ -117,13 +119,13 @@ export function SshKeyInstallDialog({
       });
       const failed = result?.results.find((entry) => entry.status === 'failed');
       if (failed) {
-        throw new Error(failed.message ?? 'SSH 공개 키를 설치하지 못했습니다.');
+        throw new Error(failed.message ?? translate('sshKeyInstall.publicKeyInstallFailed'));
       }
       setMessage({
         tone: 'success',
         text: ec2Host
-          ? 'EC2 인스턴스의 authorized_keys에 공개 키를 설치했습니다.'
-          : '호스트에 공개 키를 설치하고 이 키로 접속하도록 전환했습니다.',
+          ? translate('sshKeyInstall.installedEc2')
+          : translate('sshKeyInstall.installedHost'),
       });
     } catch (error) {
       setMessage({
@@ -131,7 +133,7 @@ export function SshKeyInstallDialog({
         text:
           error instanceof Error && error.message.trim()
             ? error.message
-            : 'SSH 키를 설치하지 못했습니다.',
+            : translate('sshKeyInstall.installFailed'),
       });
     } finally {
       setBusy(false);
@@ -149,21 +151,21 @@ export function SshKeyInstallDialog({
       <ModalShell role="dialog" aria-modal="true" aria-labelledby="ssh-key-install-title">
         <ModalHeader className="block">
           <SectionLabel>SSH Key</SectionLabel>
-          <h3 id="ssh-key-install-title">공개 키 설치</h3>
+          <h3 id="ssh-key-install-title">{translate('sshKeyInstall.title')}</h3>
         </ModalHeader>
         <ModalBody className="grid gap-[0.9rem]">
           <p className="m-0 text-[0.85rem] leading-[1.5] text-[var(--text-soft)]">
             {ec2Host
-              ? 'SSH-over-SSM(EC2 Instance Connect)으로 접속해 authorized_keys에 공개 키를 등록합니다. 기존 키를 올리거나 새 키를 생성해 설치할 수 있습니다.'
-              : '호스트의 현재 로그인 방식(예: 비밀번호)으로 접속해 공개 키를 등록하고, 이후 그 키로 접속하도록 전환합니다. 기존 키를 올리거나 새 키를 생성해 설치할 수 있습니다.'}
+              ? translate('sshKeyInstall.descriptionAws')
+              : translate('sshKeyInstall.description')}
           </p>
 
           {/* ① 기존 키 설치 — 키체인의 관리형 키 중 선택 */}
           <div className="grid gap-[0.55rem] rounded-[10px] border border-[var(--border)] p-3">
-            <span className="text-[0.85rem] font-medium text-[var(--text)]">기존 키 설치</span>
+            <span className="text-[0.85rem] font-medium text-[var(--text)]">{translate('sshKeyInstall.existingHeading')}</span>
             {installableKeys.length === 0 ? (
               <p className="m-0 text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
-                등록된 관리형 SSH 키가 없습니다. 아래에서 새 키를 생성·설치하세요.
+                {translate('sshKeyInstall.noManagedKeys')}
               </p>
             ) : (
               <>
@@ -174,14 +176,14 @@ export function SshKeyInstallDialog({
                     setPassphrase('');
                     setMessage(null);
                   }}
-                  aria-label="설치할 SSH 키"
+                  aria-label={translate('sshKeyInstall.selectKeyAria')}
                   disabled={busy}
                 >
                   {installableKeys.map((key) => (
                     <option key={key.secretRef} value={key.secretRef}>
                       {key.label}
                       {key.keyAlgorithm ? ` · ${key.keyAlgorithm}` : ''}
-                      {key.secretRef === hostSecretRef ? ' (현재 사용 중)' : ''}
+                      {key.secretRef === hostSecretRef ? translate('sshKeyInstall.currentlyUsed') : ''}
                     </option>
                   ))}
                 </SelectField>
@@ -190,7 +192,7 @@ export function SshKeyInstallDialog({
                     type="password"
                     value={passphrase}
                     onChange={(event) => setPassphrase(event.target.value)}
-                    placeholder="암호화된 개인키의 패스프레이즈"
+                    placeholder={translate('sshKeyInstall.passphrasePlaceholder')}
                     aria-label="Key passphrase"
                   />
                 ) : null}
@@ -203,7 +205,7 @@ export function SshKeyInstallDialog({
                     }
                     onClick={installExistingKey}
                   >
-                    {busy ? '설치 중...' : '설치'}
+                    {translate(busy ? 'sshKeyInstall.installing' : 'sshKeyInstall.install')}
                   </Button>
                 </div>
               </>
@@ -213,7 +215,7 @@ export function SshKeyInstallDialog({
           {/* ② 새 키 생성·설치 */}
           <div className="grid gap-[0.55rem] rounded-[10px] border border-[var(--border)] p-3">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[0.85rem] font-medium text-[var(--text)]">새 키 생성·설치</span>
+              <span className="text-[0.85rem] font-medium text-[var(--text)]">{translate('sshKeyInstall.newKeyHeading')}</span>
               <Button
                 variant="secondary"
                 size="sm"
@@ -223,7 +225,7 @@ export function SshKeyInstallDialog({
                   setMode('generate');
                 }}
               >
-                생성
+                {translate('sshKeyInstall.generate')}
               </Button>
             </div>
           </div>

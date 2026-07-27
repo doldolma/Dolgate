@@ -2,6 +2,7 @@ import type { MutableRefObject, ReactNode } from 'react';
 import type { TerminalTab } from '@shared';
 import { cn } from '../../lib/cn';
 import { Button, SectionLabel } from '../../ui';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalSharePopoverProps {
   anchorRef: MutableRefObject<HTMLDivElement | null>;
@@ -39,6 +40,7 @@ export function TerminalSharePopover({
   onStopShare,
   canOpenChatWindow,
 }: TerminalSharePopoverProps) {
+  const { t: translate } = useTranslation();
   return (
     <div
       ref={anchorRef}
@@ -62,15 +64,15 @@ export function TerminalSharePopover({
           {shareState?.status === 'inactive' || !shareState ? (
             <>
               <SectionLabel className="mb-2">Session Share</SectionLabel>
-              <strong>현재 세션을 브라우저로 공유합니다.</strong>
-              <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">링크를 아는 사용자는 로그인 없이 접속할 수 있습니다.</p>
+              <strong>{translate('sharePopover.title')}</strong>
+              <p className="mt-2 text-sm leading-[1.55] text-[var(--text-soft)]">{translate('sharePopover.hint')}</p>
               <Button
                 variant="primary"
                 className="mt-4 w-full"
                 onClick={onStartShare}
                 disabled={!canStartShare}
               >
-                공유 시작
+                {translate('sharePopover.start')}
               </Button>
             </>
           ) : (
@@ -78,10 +80,10 @@ export function TerminalSharePopover({
               <SectionLabel className="mb-2">Session Share</SectionLabel>
               <strong>
                 {shareState.status === 'error'
-                  ? '세션 공유에 실패했습니다.'
+                  ? translate('sharePopover.failed')
                   : shareState.status === 'starting'
-                    ? '공유를 준비하는 중입니다.'
-                    : '공유 링크가 준비되었습니다.'}
+                    ? translate('sharePopover.preparing')
+                    : translate('sharePopover.ready')}
               </strong>
               {shareState.errorMessage ? (
                 <p className="mt-2 text-sm text-[var(--danger-text)]">
@@ -93,8 +95,8 @@ export function TerminalSharePopover({
                   type="button"
                   className="mt-3 flex min-w-0 w-full items-center justify-between gap-3 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-4 py-3 text-left transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--surface-muted)_94%,transparent_6%)]"
                   onClick={onCopyShareUrl}
-                  aria-label="공유 링크 복사"
-                  title="클릭하여 링크 복사"
+                  aria-label={translate('sharePopover.copyLink')}
+                  title={translate('sharePopover.copyLinkTitle')}
                 >
                   <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">
                     {shareState.shareUrl}
@@ -112,14 +114,16 @@ export function TerminalSharePopover({
                   </span>
                 </button>
               ) : shareState.status !== 'error' ? (
-                <p className="mt-3 text-sm text-[var(--text-soft)]">공유 링크를 생성하는 중입니다.</p>
+                <p className="mt-3 text-sm text-[var(--text-soft)]">{translate('sharePopover.creatingLink')}</p>
               ) : null}
               <div className="mt-3 space-y-3">
-                <span className="block text-sm text-[var(--text-soft)]">시청자 {shareState.viewerCount}명</span>
+                <span className="block text-sm text-[var(--text-soft)]">
+                  {translate('sharePopover.viewers', { count: shareState.viewerCount })}
+                </span>
                 <div
                   className="inline-flex rounded-full border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] p-1"
                   role="group"
-                  aria-label="세션 공유 입력 모드"
+                  aria-label={translate('sharePopover.inputModeAria')}
                 >
                   <Button
                     variant="ghost"
@@ -135,7 +139,7 @@ export function TerminalSharePopover({
                     }
                     aria-pressed={!shareState.inputEnabled}
                   >
-                    읽기 전용
+                    {translate('sharePopover.readOnly')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -151,7 +155,7 @@ export function TerminalSharePopover({
                     }
                     aria-pressed={shareState.inputEnabled}
                   >
-                    입력 허용
+                    {translate('sharePopover.allowInput')}
                   </Button>
                 </div>
               </div>
@@ -166,13 +170,13 @@ export function TerminalSharePopover({
                   onClick={onOpenChatWindow}
                   disabled={shareState.status !== 'active' || !canOpenChatWindow}
                 >
-                  채팅 기록
+                  {translate('sharePopover.chatHistory')}
                 </Button>
                 <Button
                   variant="danger"
                   onClick={onStopShare}
                 >
-                  공유 종료
+                  {translate('sharePopover.stop')}
                 </Button>
               </div>
             </>

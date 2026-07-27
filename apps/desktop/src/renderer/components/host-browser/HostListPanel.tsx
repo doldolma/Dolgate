@@ -21,18 +21,20 @@ import {
   HOSTS_DRAG_MIME_TYPE,
   type HostBrowserModel,
 } from './useHostBrowser';
+import { useTranslation } from 'react-i18next';
 
 interface HostListPanelProps {
   hb: HostBrowserModel;
 }
 
-const SORT_OPTIONS: Array<{ value: HostBrowserModel['sortKey']; label: string }> = [
-  { value: 'name', label: '이름순' },
-  { value: 'lastConnected', label: '최근 연결순' },
-  { value: 'recent', label: '최근 수정순' },
+const SORT_OPTIONS: Array<{ value: HostBrowserModel['sortKey']; labelKey: string }> = [
+  { value: 'name', labelKey: 'hostListPanel.sortName' },
+  { value: 'lastConnected', labelKey: 'hostListPanel.sortLastConnected' },
+  { value: 'recent', labelKey: 'hostListPanel.sortRecent' },
 ];
 
 export function HostListPanel({ hb }: HostListPanelProps) {
+  const { t: translate } = useTranslation();
   const {
     desktopPlatform,
     hosts,
@@ -159,7 +161,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
           selectedHostId === host.id
         }
         favorite={favoriteHostIdSet.has(host.id)}
-        favoriteLabel={`${host.label} 즐겨찾기`}
+        favoriteLabel={translate('hostListPanel.favoriteFor', { label: host.label })}
         lastUsedAt={hb.lastConnectedByHostId.get(host.id)}
         onToggleFavorite={() => hb.toggleFavorite(host.id)}
         onOpenMenu={({ x, y }) => openHostMenu(host, x, y)}
@@ -352,7 +354,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
           <div className="inline-flex items-center gap-[0.25rem] rounded-[10px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-muted)_92%,transparent_8%)] p-[0.25rem]">
             <button
               type="button"
-              aria-label="격자 보기"
+              aria-label={translate('hostListPanel.gridView')}
               aria-pressed={viewMode === 'grid'}
               className={cn(
                 'inline-grid h-[1.6rem] w-[1.85rem] place-items-center rounded-[8px] text-[0.82rem] transition-colors duration-140',
@@ -368,7 +370,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
             </button>
             <button
               type="button"
-              aria-label="목록 보기"
+              aria-label={translate('hostListPanel.listView')}
               aria-pressed={viewMode === 'list'}
               className={cn(
                 'inline-grid h-[1.6rem] w-[1.85rem] place-items-center rounded-[8px] text-[0.82rem] transition-colors duration-140',
@@ -387,7 +389,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
           {viewMode === 'list' ? null : (
             <>
               <label className="sr-only" htmlFor="host-sort">
-                정렬
+                {translate('hostListPanel.sort')}
               </label>
               <div className="relative shrink-0">
                 <select
@@ -400,7 +402,7 @@ export function HostListPanel({ hb }: HostListPanelProps) {
                 >
                   {SORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {translate(option.labelKey)}
                     </option>
                   ))}
                 </select>

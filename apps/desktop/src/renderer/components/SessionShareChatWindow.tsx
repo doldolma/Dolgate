@@ -8,6 +8,7 @@ import type {
 import { SESSION_SHARE_CHAT_HISTORY_LIMIT } from '@shared';
 import { useSessionShareChatController } from '../controllers/useSessionShareChatController';
 import { Button, NoticeCard, SectionLabel, Textarea } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 function createInactiveSnapshot(sessionId: string): SessionShareOwnerChatSnapshot {
   return {
@@ -126,6 +127,7 @@ export function SessionShareChatWindow({
 }: {
   sessionId: string;
 }) {
+  const { t: translate } = useTranslation();
   const {
     closeWindow: requestWindowClose,
     getDesktopSettings,
@@ -168,8 +170,8 @@ export function SessionShareChatWindow({
 
   useEffect(() => {
     document.title = snapshot.title
-      ? `채팅 기록 · ${snapshot.title}`
-      : '채팅 기록';
+      ? translate('shareChat.titleWith', { title: snapshot.title })
+      : translate('shareChat.title');
   }, [snapshot.title]);
 
   useEffect(() => {
@@ -256,7 +258,7 @@ export function SessionShareChatWindow({
         setErrorMessage(
           error instanceof Error
             ? error.message
-            : '채팅 기록을 불러오지 못했습니다.',
+            : translate('shareChat.loadFailed'),
         );
       })
       .finally(() => {
@@ -313,7 +315,7 @@ export function SessionShareChatWindow({
       setSendErrorMessage(
         error instanceof Error
           ? error.message
-          : '채팅 메시지를 보내지 못했습니다.',
+          : translate('shareChat.sendFailed'),
       );
     } finally {
       setIsSubmitting(false);
@@ -325,14 +327,14 @@ export function SessionShareChatWindow({
       <header className="flex items-start justify-between gap-[0.9rem]">
         <div>
           <SectionLabel>Session Share</SectionLabel>
-          <strong className="block text-[1rem]">{snapshot.title || '채팅 기록'}</strong>
+          <strong className="block text-[1rem]">{snapshot.title || translate('shareChat.title')}</strong>
         </div>
         <span className="whitespace-nowrap text-[0.82rem] text-[var(--text-soft)]">
           {loading
-            ? '불러오는 중'
+            ? translate('shareChat.loading')
             : isSubmitting
-              ? '전송 중'
-              : '실시간 채팅'}
+              ? translate('shareChat.sending')
+              : translate('shareChat.live')}
         </span>
       </header>
 
@@ -353,7 +355,7 @@ export function SessionShareChatWindow({
         aria-live="polite"
       >
         {!loading && snapshot.messages.length === 0 ? (
-          <NoticeCard tone="neutral">아직 채팅이 없습니다.</NoticeCard>
+          <NoticeCard tone="neutral">{translate('shareChat.empty')}</NoticeCard>
         ) : null}
 
         {snapshot.messages.map((message) => {
@@ -397,13 +399,13 @@ export function SessionShareChatWindow({
         }}
       >
         <label className="grid min-w-0 gap-[0.4rem]">
-          <span className="text-[0.76rem] text-[var(--text-soft)]">메시지</span>
+          <span className="text-[0.76rem] text-[var(--text-soft)]">{translate('shareChat.messageLabel')}</span>
           <Textarea
             ref={textareaRef}
             value={draftMessage}
             rows={3}
             maxLength={300}
-            placeholder="메시지를 입력해 주세요"
+            placeholder={translate('shareChat.messagePlaceholder')}
             disabled={!isChatActive || loading || isSubmitting}
             onChange={(event) => {
               setDraftMessage(event.target.value);
@@ -432,7 +434,7 @@ export function SessionShareChatWindow({
           className="min-w-[4.8rem]"
           disabled={!isChatActive || loading || isSubmitting}
         >
-          전송
+          {translate('shareChat.send')}
         </Button>
       </form>
     </div>

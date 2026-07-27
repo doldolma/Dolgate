@@ -1,6 +1,7 @@
 import type { CoreManager } from "../core-manager";
 import type { ActivityLogRepository, HostRepository } from "../database";
 import type { AiToolExecutorHelpers } from "../ai-service";
+import { t } from '../i18n';
 
 // inspect_command(숨은 exec 채널)은 sshsession(= Go runtime.ssh)이 실제 ssh.Client 를 쥐는 전송만 가능.
 // run_in_terminal(PTY 입력)은 연결된 세션이면 어디든 가능(SSH/tmux/local/serial/aws-ssm…).
@@ -24,7 +25,7 @@ export function buildAiToolHelpers(deps: {
     canRunInTerminal: (sessionId) => connectedTab(sessionId) !== undefined,
     runInTerminal: async (sessionId, command) => {
       if (!connectedTab(sessionId)) {
-        throw new Error("연결된 터미널 세션이 없어 명령을 입력할 수 없습니다.");
+        throw new Error(t('misc.noTerminalSession'));
       }
       // 사용자의 활성 PTY 에 명령을 입력하고(사용자가 실행/출력을 직접 봄) 결과 출력을 캡처해 돌려준다.
       return coreManager.runInTerminalCapture(sessionId, command);

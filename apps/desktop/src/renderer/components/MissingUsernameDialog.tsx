@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { DialogBackdrop } from "./DialogBackdrop";
 import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { useTranslation } from "react-i18next";
+import { t } from '../i18n';
 
 export interface MissingUsernameDialogRequest {
   hostLabel: string;
@@ -16,15 +18,15 @@ interface MissingUsernameDialogProps {
 function resolveMessage(source: MissingUsernameDialogRequest["source"]): string {
   switch (source) {
     case "sftp":
-      return "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SFTP 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.";
+      return t('missingUsername.sftp');
     case "containers":
-      return "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.";
+      return t('missingUsername.containers');
     case "containerShell":
-      return "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 컨테이너 셸 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.";
+      return t('missingUsername.containerShell');
     case "portForward":
-      return "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. 포트 포워딩을 시작하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.";
+      return t('missingUsername.portForward');
     default:
-      return "이 호스트에는 아직 저장된 SSH 사용자명이 없습니다. SSH 연결을 계속하려면 사용자명을 입력해 주세요. 지금 입력한 값은 이 호스트에 저장되며, 다음 연결부터 자동으로 재사용합니다.";
+      return t('missingUsername.ssh');
   }
 }
 
@@ -33,6 +35,7 @@ export function MissingUsernameDialog({
   onClose,
   onSubmit,
 }: MissingUsernameDialogProps) {
+  const { t: translate } = useTranslation();
   const [username, setUsername] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +61,7 @@ export function MissingUsernameDialog({
           <div>
             <SectionLabel>SSH Username</SectionLabel>
             <h3 id="missing-username-title">
-              {request.hostLabel} 사용자명을 입력해 주세요.
+              {translate('missingUsername.prompt', { label: request.hostLabel })}
             </h3>
           </div>
         </ModalHeader>
@@ -84,14 +87,14 @@ export function MissingUsernameDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
             disabled={submitting}
             onClick={async () => {
               if (!username.trim()) {
-                setError("사용자명을 입력해 주세요.");
+                setError(translate('sessionStore.usernameRequired'));
                 return;
               }
               setSubmitting(true);
@@ -101,13 +104,13 @@ export function MissingUsernameDialog({
                 setError(
                   submitError instanceof Error
                     ? submitError.message
-                    : "사용자명을 저장하지 못했습니다.",
+                    : translate('missingUsername.saveFailed'),
                 );
                 setSubmitting(false);
               }
             }}
           >
-            저장 후 계속
+            {translate('missingUsername.submit')}
           </Button>
         </ModalFooter>
       </ModalShell>

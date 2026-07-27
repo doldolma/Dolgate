@@ -1,4 +1,5 @@
 import type {
+  AppLanguage,
   AppSettings,
   AppTheme,
   AccountPasswordState,
@@ -21,6 +22,8 @@ import {
   validateNewVaultPassphrase,
 } from '@shared';
 import type { ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
+import { APP_LANGUAGE_OPTIONS } from '../../common/i18n/locale';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
@@ -98,25 +101,33 @@ interface SettingsPanelProps {
   onResetVault?: () => Promise<void>;
 }
 
-const themeOptions: Array<{ value: AppTheme; title: string; description: string }> = [
+// 모듈 최상위 상수는 i18n 초기화보다 먼저 평가되므로 문구가 아니라 키를 담고,
+// 렌더 시점에 번역한다.
+const themeOptions: Array<{ value: AppTheme; title: string; descriptionKey: string }> = [
   {
     value: 'system',
     title: 'System',
-    description: '기기 라이트/다크 설정을 따라갑니다.'
+    descriptionKey: 'settings.theme.system.description'
   },
   {
     value: 'light',
     title: 'Light',
-    description: '밝은 배경과 또렷한 대비를 사용합니다.'
+    descriptionKey: 'settings.theme.light.description'
   },
   {
     value: 'dark',
     title: 'Dark',
-    description: '어두운 배경으로 눈부심을 줄입니다.'
+    descriptionKey: 'settings.theme.dark.description'
   }
 ];
 
 const fontSizeOptions = Array.from({ length: 8 }, (_, index) => index + 11);
+
+// 언어 이름은 그 언어로 적는다(자기 언어를 못 읽는 사용자가 없게).
+const LANGUAGE_LABELS: Record<Exclude<AppLanguage, 'system'>, string> = {
+  ko: '한국어',
+  en: 'English'
+};
 
 function formatStorageBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
@@ -256,6 +267,7 @@ export function SettingsPanel({
   onListPasskeys,
   onDeletePasskey
 }: SettingsPanelProps) {
+  const { t: translate } = useTranslation();
   // 회원 탈퇴 확인 다이얼로그 상태.
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false);
   const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
@@ -283,7 +295,7 @@ export function SettingsPanel({
       setPasskeys(await onListPasskeys());
     } catch (error) {
       setPasskeyError(
-        error instanceof Error ? error.message : '패스키 목록을 불러오지 못했습니다.',
+        error instanceof Error ? error.message : translate('settings.passkey.loadFailed'),
       );
     } finally {
       setPasskeysLoading(false);
@@ -314,7 +326,7 @@ export function SettingsPanel({
       await onAddPasskey();
     } catch (error) {
       setPasskeyError(
-        error instanceof Error ? error.message : '패스키 추가를 시작하지 못했습니다.',
+        error instanceof Error ? error.message : translate('settings.passkey.addFailed'),
       );
     } finally {
       setPasskeyBusy(false);
@@ -332,7 +344,7 @@ export function SettingsPanel({
       await loadPasskeys();
     } catch (error) {
       setPasskeyError(
-        error instanceof Error ? error.message : '패스키 삭제에 실패했습니다.',
+        error instanceof Error ? error.message : translate('settings.passkey.deleteFailed'),
       );
     } finally {
       setPasskeyBusy(false);
@@ -541,11 +553,11 @@ export function SettingsPanel({
       setAccountPasswordOpen(false);
       setAccountPasswordNotice(
         passwordState === 'set'
-          ? '로그인 비밀번호를 변경했습니다.'
-          : '로그인 비밀번호를 설정했습니다.',
+          ? translate('settings.accountPassword.changed')
+          : translate('settings.accountPassword.set'),
       );
     } catch (error) {
-      const fallback = '로그인 비밀번호를 저장하지 못했습니다.';
+      const fallback = translate('settings.accountPassword.saveFailed');
       setAccountPasswordError(
         normalizeErrorMessage(error, fallback) || fallback,
       );
@@ -588,9 +600,9 @@ export function SettingsPanel({
       );
       resetVaultPassphraseForm();
       setVaultPassphraseOpen(false);
-      setVaultPassphraseNotice('동기화 암호를 변경했습니다.');
+      setVaultPassphraseNotice(translate('settings.vault.passphraseChanged'));
     } catch (error) {
-      const fallback = '동기화 암호 변경에 실패했습니다.';
+      const fallback = translate('settings.vault.passphraseChangeFailed');
       setVaultPassphraseError(
         normalizeErrorMessage(error, fallback) || fallback,
       );
@@ -611,7 +623,7 @@ export function SettingsPanel({
       // 전환된다(이 패널은 언마운트). 다이얼로그 닫기는 위 vaultStatus effect 가 겸한다.
       setVaultResetOpen(false);
     } catch (error) {
-      const fallback = '동기화 볼트 초기화에 실패했습니다.';
+      const fallback = translate('settings.vault.resetFailed');
       setVaultResetError(normalizeErrorMessage(error, fallback) || fallback);
     } finally {
       setVaultResetBusy(false);
@@ -686,7 +698,7 @@ export function SettingsPanel({
                   }
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  보관할 터미널 히스토리 줄 수입니다.
+                  {translate('settings.preferences.scrollbackHint')}
                 </p>
               </FieldGroup>
 
@@ -703,7 +715,7 @@ export function SettingsPanel({
                   }
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  문자 줄 간격을 조절합니다.
+                  {translate('settings.preferences.lineHeightHint')}
                 </p>
               </FieldGroup>
 
@@ -720,7 +732,7 @@ export function SettingsPanel({
                   }
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  문자 사이 간격을 조금 더 넓힐 수 있습니다.
+                  {translate('settings.preferences.letterSpacingHint')}
                 </p>
               </FieldGroup>
 
@@ -737,7 +749,7 @@ export function SettingsPanel({
                   }
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  가독성이 낮은 색 조합을 자동으로 보정합니다.
+                  {translate('settings.preferences.contrastHint')}
                 </p>
               </FieldGroup>
 
@@ -756,9 +768,12 @@ export function SettingsPanel({
                   }}
                 />
                 <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                  로컬에 보관할 종료된 세션 replay 개수입니다.
+                  {translate('settings.preferences.replayRetentionHint')}
                   {replayStorageUsage
-                    ? ` 현재 ${replayStorageUsage.recordingCount}개 · ${formatStorageBytes(replayStorageUsage.totalBytes)} 사용 중.`
+                    ? translate('settings.preferences.replayUsage', {
+                        count: replayStorageUsage.recordingCount,
+                        size: formatStorageBytes(replayStorageUsage.totalBytes)
+                      })
                     : ''}
                 </p>
               </FieldGroup>
@@ -770,7 +785,7 @@ export function SettingsPanel({
               <ToggleSwitch
                 checked={settings.terminalWebglEnabled}
                 label="WebGL Renderer"
-                description="지원되지 않는 환경에서는 자동으로 기본 렌더러로 전환합니다."
+                description={translate('settings.preferences.webglDescription')}
                 onClick={() => {
                   void handleChangeTerminalWebglEnabled(!settings.terminalWebglEnabled);
                 }}
@@ -779,7 +794,7 @@ export function SettingsPanel({
               <ToggleSwitch
                 checked={settings.terminalAutocompleteEnabled}
                 label="Command autocomplete"
-                description="PATH·history에 더해 Fig 스펙·generator로 자동완성합니다. (SSM 에서는 일부 기능 제한)"
+                description={translate('settings.preferences.completionDescription')}
                 onClick={() => {
                   void handleChangeTerminalAutocompleteEnabled(
                     !settings.terminalAutocompleteEnabled,
@@ -791,14 +806,14 @@ export function SettingsPanel({
                 <ToggleSwitch
                   checked={settings.terminalAltIsMeta}
                   label="Use Option/Alt as Meta"
-                  description="macOS에서 Option 키를 터미널 메타 키로 사용합니다."
+                  description={translate('settings.preferences.optionAsMetaDescription')}
                   onClick={() => {
                     void handleChangeTerminalAltIsMeta(!settings.terminalAltIsMeta);
                   }}
                 />
               ) : null}
 
-              <FieldGroup label="Tmux Prefix 키">
+              <FieldGroup label={translate('settings.preferences.tmuxPrefixLabel')}>
                 <SelectField
                   value={settings.tmuxPrefixKey ?? 'C-b'}
                   onChange={async (event) =>
@@ -812,13 +827,13 @@ export function SettingsPanel({
                   ))}
                 </SelectField>
                 <p className="mt-1.5 text-[0.76rem] leading-relaxed text-[var(--text-muted)]">
-                  tmux 제어 모드에서 prefix 다음 키를 네이티브 tmux 동작으로 매핑합니다.
+                  {translate('settings.preferences.tmuxPrefixHint')}
                 </p>
               </FieldGroup>
               <ToggleSwitch
                 checked={settings.subshellReinjectEnabled !== false}
-                label="서브셸 셸 통합 자동 복구"
-                description="중첩 ssh·sudo su·docker exec 등 서브셸에 들어가면 셸 통합(명령 상태·현재 경로)을 자동으로 다시 설정합니다."
+                label={translate('settings.preferences.shellIntegrationRecoveryLabel')}
+                description={translate('settings.preferences.shellIntegrationRecoveryDescription')}
                 onClick={() =>
                   void onUpdateSettings({
                     subshellReinjectEnabled:
@@ -828,8 +843,8 @@ export function SettingsPanel({
               />
               <ToggleSwitch
                 checked={settings.hostMetricsEnabled}
-                label="호스트 상태 표시"
-                description="접속한 서버의 CPU·메모리·디스크·네트워크를 터미널 하단에 표시합니다. (SSM 셸·mosh 미지원)"
+                label={translate('settings.preferences.hostMetricsLabel')}
+                description={translate('settings.preferences.hostMetricsDescription')}
                 onClick={() => {
                   void onUpdateSettings({
                     hostMetricsEnabled: !settings.hostMetricsEnabled,
@@ -843,8 +858,8 @@ export function SettingsPanel({
               <SectionLabel>Notifications</SectionLabel>
               <ToggleSwitch
                 checked={settings.commandNotificationsEnabled}
-                label="명령 완료 알림"
-                description="오래 걸리거나 실패한 명령이 끝나면 OS 알림으로 알려줍니다."
+                label={translate('settings.preferences.commandNotifyLabel')}
+                description={translate('settings.preferences.commandNotifyDescription')}
                 onClick={() => {
                   const next = !settings.commandNotificationsEnabled;
                   // 알림을 켤 때 OS 권한이 미결정이면 권한 요청 프롬프트를 유도한다.
@@ -863,9 +878,9 @@ export function SettingsPanel({
 
               {settings.commandNotificationsEnabled ? (
                 <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.9rem] max-[760px]:grid-cols-1">
-                  <FieldGroup label="알림 기준 시간(초)">
+                  <FieldGroup label={translate('settings.preferences.notifyThresholdLabel')}>
                     <Input
-                      aria-label="알림 기준 시간(초)"
+                      aria-label={translate('settings.preferences.notifyThresholdLabel')}
                       type="number"
                       min={COMMAND_NOTIFICATION_THRESHOLD_MIN_SECONDS}
                       max={COMMAND_NOTIFICATION_THRESHOLD_MAX_SECONDS}
@@ -880,14 +895,14 @@ export function SettingsPanel({
                       }
                     />
                     <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                      이 시간 이상 걸린 명령이 끝나면 알립니다.
+                      {translate('settings.preferences.notifyThresholdHint')}
                     </p>
                   </FieldGroup>
 
                   <ToggleSwitch
                     checked={settings.commandNotificationOnlyWhenUnfocused}
-                    label="비활성 상태일 때만 알림"
-                    description="앱을 보고 있고 해당 탭이 활성일 때는 알리지 않습니다."
+                    label={translate('settings.preferences.notifyOnlyInactiveLabel')}
+                    description={translate('settings.preferences.notifyOnlyInactiveDescription')}
                     onClick={() => {
                       void onUpdateSettings({
                         commandNotificationOnlyWhenUnfocused:
@@ -898,8 +913,8 @@ export function SettingsPanel({
 
                   <ToggleSwitch
                     checked={settings.commandNotificationOnFailure}
-                    label="실패한 명령은 항상 알림"
-                    description="0이 아닌 종료 코드는 시간과 무관하게 알립니다."
+                    label={translate('settings.preferences.notifyFailuresLabel')}
+                    description={translate('settings.preferences.notifyFailuresDescription')}
                     onClick={() => {
                       void onUpdateSettings({
                         commandNotificationOnFailure:
@@ -910,8 +925,8 @@ export function SettingsPanel({
 
                   <ToggleSwitch
                     checked={settings.commandNotificationSound}
-                    label="알림 소리"
-                    description="알림이 표시될 때 소리를 함께 재생합니다."
+                    label={translate('settings.preferences.notifySoundLabel')}
+                    description={translate('settings.preferences.notifySoundDescription')}
                     onClick={() => {
                       void onUpdateSettings({
                         commandNotificationSound:
@@ -929,8 +944,8 @@ export function SettingsPanel({
               <SectionLabel>Auto-Reconnect</SectionLabel>
               <ToggleSwitch
                 checked={settings.autoReconnectEnabled}
-                label="자동 재연결"
-                description="연결이 예기치 않게 끊기면 자동으로 다시 연결합니다 (SSH/Warpgate 터미널, SFTP, 포트포워딩)."
+                label={translate('settings.preferences.autoReconnectLabel')}
+                description={translate('settings.preferences.autoReconnectDescription')}
                 onClick={() => {
                   void onUpdateSettings({
                     autoReconnectEnabled: !settings.autoReconnectEnabled,
@@ -940,9 +955,9 @@ export function SettingsPanel({
 
               {settings.autoReconnectEnabled ? (
                 <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] items-start gap-[0.9rem] border-t border-[color-mix(in_srgb,var(--border)_60%,transparent_40%)] pt-[0.9rem] max-[760px]:grid-cols-1">
-                  <FieldGroup label="최대 재시도 횟수">
+                  <FieldGroup label={translate('settings.preferences.maxRetriesLabel')}>
                     <Input
-                      aria-label="최대 재시도 횟수"
+                      aria-label={translate('settings.preferences.maxRetriesLabel')}
                       type="number"
                       min={1}
                       max={100}
@@ -955,13 +970,13 @@ export function SettingsPanel({
                       }
                     />
                     <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                      이 횟수만큼 실패하면 수동 재연결로 전환합니다.
+                      {translate('settings.preferences.maxRetriesHint')}
                     </p>
                   </FieldGroup>
 
-                  <FieldGroup label="최대 재시도 간격(초)">
+                  <FieldGroup label={translate('settings.preferences.maxRetryDelayLabel')}>
                     <Input
-                      aria-label="최대 재시도 간격(초)"
+                      aria-label={translate('settings.preferences.maxRetryDelayLabel')}
                       type="number"
                       min={1}
                       max={300}
@@ -975,7 +990,7 @@ export function SettingsPanel({
                       }
                     />
                     <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                      지수 백오프가 늘어날 수 있는 최대 간격입니다.
+                      {translate('settings.preferences.maxRetryDelayHint')}
                     </p>
                   </FieldGroup>
                 </div>
@@ -994,11 +1009,43 @@ export function SettingsPanel({
                   key={option.value}
                   active={settings.theme === option.value}
                   title={option.title}
-                  description={option.description}
+                  description={translate(option.descriptionKey)}
                   preview={renderAppearanceThemePreview(option.value)}
                   onClick={async () => onUpdateSettings({ theme: option.value })}
                 />
               ))}
+            </div>
+
+            <div className="mb-4 mt-6">
+              <div>
+                <h3>{translate('settings.language.title')}</h3>
+              </div>
+            </div>
+            <div className="grid items-start grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.9rem] max-[760px]:grid-cols-1">
+              <FieldGroup label={translate('settings.language.title')}>
+                <SelectField
+                  aria-label={translate('settings.language.title')}
+                  value={settings.language ?? 'system'}
+                  onChange={async (event) =>
+                    onUpdateSettings({
+                      language: event.target.value as AppLanguage,
+                    })
+                  }
+                >
+                  {APP_LANGUAGE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option === 'system'
+                        ? translate('settings.language.system')
+                        : LANGUAGE_LABELS[option]}
+                    </option>
+                  ))}
+                </SelectField>
+                <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
+                  {(settings.language ?? 'system') === 'system'
+                    ? translate('settings.language.systemDescription')
+                    : translate('settings.language.reopenNote')}
+                </p>
+              </FieldGroup>
             </div>
           </section>
 
@@ -1066,11 +1113,11 @@ export function SettingsPanel({
               {onChangeAccountPassword &&
               (passwordState === 'unset' || passwordState === 'set') ? (
                 <Button variant="secondary" onClick={openAccountPasswordDialog}>
-                  {passwordState === 'set' ? '비밀번호 변경' : '비밀번호 설정'}
+                  {translate(passwordState === 'set' ? 'settings.account.changePassword' : 'settings.account.setPassword')}
                 </Button>
               ) : null}
               <Button variant="danger" onClick={async () => onLogout()}>
-                로그아웃
+                {translate('settings.account.logout')}
               </Button>
               {onDeleteAccount ? (
                 <Button
@@ -1080,7 +1127,7 @@ export function SettingsPanel({
                     setDeleteAccountOpen(true);
                   }}
                 >
-                  회원 탈퇴
+                  {translate('settings.account.deleteAccount')}
                 </Button>
               ) : null}
             </div>
@@ -1089,11 +1136,10 @@ export function SettingsPanel({
           {webauthnSupported && onAddPasskey ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
               <div className="mb-4">
-                <h3>패스키</h3>
+                <h3>{translate('settings.passkey.title')}</h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
-                생체 인증이나 보안 키로 비밀번호 없이 로그인합니다. “패스키 추가”를 누르면 브라우저에서
-                등록을 마친 뒤 이 목록에 표시됩니다.
+                {translate('settings.passkey.intro')}
               </p>
               {passkeyError ? (
                 <p role="alert" className="m-0 mb-3 text-sm text-[var(--danger-text)]">
@@ -1109,10 +1155,10 @@ export function SettingsPanel({
                     >
                       <div className="grid gap-[0.15rem]">
                         <span className="break-all text-[var(--text)]">
-                          {passkey.name || '패스키'}
+                          {passkey.name || translate('settings.passkey.unnamed')}
                         </span>
                         <span className="text-[0.78rem] text-[var(--text-soft)]">
-                          등록 {passkey.createdAt.slice(0, 10)}
+                          {translate('settings.passkey.registeredAt', { date: passkey.createdAt.slice(0, 10) })}
                         </span>
                       </div>
                       <Button
@@ -1120,26 +1166,26 @@ export function SettingsPanel({
                         disabled={passkeyBusy}
                         onClick={() => handleDeletePasskey(passkey.id)}
                       >
-                        삭제
+                        {translate('settings.passkey.delete')}
                       </Button>
                     </li>
                   ))}
                 </ul>
               ) : (
                 <p className="m-0 mb-4 text-[0.88rem] text-[var(--text-soft)]">
-                  {passkeysLoading ? '불러오는 중…' : '등록된 패스키가 없습니다.'}
+                  {translate(passkeysLoading ? 'settings.passkey.loading' : 'settings.passkey.empty')}
                 </p>
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="secondary" disabled={passkeyBusy} onClick={handleAddPasskey}>
-                  패스키 추가
+                  {translate('settings.passkey.add')}
                 </Button>
                 <Button
                   variant="ghost"
                   disabled={passkeysLoading}
                   onClick={() => void loadPasskeys()}
                 >
-                  새로고침
+                  {translate('settings.passkey.refresh')}
                 </Button>
               </div>
             </section>
@@ -1148,10 +1194,10 @@ export function SettingsPanel({
           {vaultStatus === 'unlocked' && onChangeVaultPassphrase ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
               <div className="mb-4">
-                <h3>동기화 암호</h3>
+                <h3>{translate('settings.vault.title')}</h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
-                동기화 암호가 설정되어 있습니다. 잊지 않도록 안전하게 보관해 주세요.
+                {translate('settings.vault.isSet')}
               </p>
               {vaultPassphraseNotice ? (
                 <p className="m-0 mb-3 text-sm text-[var(--text-soft)]">
@@ -1159,7 +1205,7 @@ export function SettingsPanel({
                 </p>
               ) : null}
               <Button variant="secondary" onClick={openVaultPassphraseDialog}>
-                암호 변경
+                {translate('settings.vault.changePassphrase')}
               </Button>
               {onResetVault ? (
                 <div className="mt-4 border-t border-[var(--border)] pt-3">
@@ -1171,7 +1217,7 @@ export function SettingsPanel({
                       setVaultResetOpen(true);
                     }}
                   >
-                    동기화 암호를 잊으셨나요? 초기화
+                    {translate('settings.vault.forgot')}
                   </button>
                 </div>
               ) : null}
@@ -1193,31 +1239,31 @@ export function SettingsPanel({
               >
                 <ModalHeader className="block">
                   <SectionLabel>Security</SectionLabel>
-                  <h3 id="change-vault-passphrase-title">동기화 암호 변경</h3>
+                  <h3 id="change-vault-passphrase-title">{translate('settings.vault.changeDialog.title')}</h3>
                 </ModalHeader>
                 <ModalBody className="grid gap-3">
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
-                    현재 암호를 확인한 후 새 암호로 변경합니다.
+                    {translate('settings.vault.changeDialog.description')}
                   </p>
                   <Input
                     type="password"
                     value={currentVaultPassphrase}
-                    placeholder="현재 동기화 암호"
-                    aria-label="현재 동기화 암호"
+                    placeholder={translate('settings.vault.changeDialog.current')}
+                    aria-label={translate('settings.vault.changeDialog.current')}
                     onChange={(event) => setCurrentVaultPassphrase(event.target.value)}
                   />
                   <Input
                     type="password"
                     value={nextVaultPassphrase}
-                    placeholder="새 동기화 암호"
-                    aria-label="새 동기화 암호"
+                    placeholder={translate('settings.vault.changeDialog.new')}
+                    aria-label={translate('settings.vault.changeDialog.new')}
                     onChange={(event) => setNextVaultPassphrase(event.target.value)}
                   />
                   <Input
                     type="password"
                     value={confirmVaultPassphrase}
-                    placeholder="새 동기화 암호 확인"
-                    aria-label="새 동기화 암호 확인"
+                    placeholder={translate('settings.vault.changeDialog.confirm')}
+                    aria-label={translate('settings.vault.changeDialog.confirm')}
                     onChange={(event) => setConfirmVaultPassphrase(event.target.value)}
                   />
                   {newVaultPassphraseValidationMessage ? (
@@ -1237,7 +1283,7 @@ export function SettingsPanel({
                     disabled={vaultPassphraseBusy}
                     onClick={closeVaultPassphraseDialog}
                   >
-                    취소
+                    {translate('common.cancel')}
                   </Button>
                   <Button
                     variant="primary"
@@ -1249,7 +1295,7 @@ export function SettingsPanel({
                     }
                     onClick={() => void handleChangeVaultPassphrase()}
                   >
-                    {vaultPassphraseBusy ? '변경 중...' : '암호 변경'}
+                    {translate(vaultPassphraseBusy ? 'settings.vault.changeDialog.submitting' : 'settings.vault.changeDialog.submit')}
                   </Button>
                 </ModalFooter>
               </ModalShell>
@@ -1273,24 +1319,24 @@ export function SettingsPanel({
                   <SectionLabel>Account</SectionLabel>
                   <h3 id="change-account-password-title">
                     {passwordState === 'set'
-                      ? '계정 비밀번호 변경'
-                      : '계정 비밀번호 설정'}
+                      ? translate('settings.accountPassword.changeTitle')
+                      : translate('settings.accountPassword.setTitle')}
                   </h3>
                 </ModalHeader>
                 <ModalBody className="grid gap-3">
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
                     {passwordState === 'set'
-                      ? '현재 비밀번호를 확인한 후 새 비밀번호로 변경합니다.'
-                      : '설정하면 현재 이메일로 비밀번호 로그인을 사용할 수 있습니다.'}{' '}
-                    동기화 암호와는 별개입니다.
+                      ? translate('settings.accountPassword.changeDescription')
+                      : translate('settings.accountPassword.setDescription')}{' '}
+                    {translate('settings.accountPassword.separateNote')}
                   </p>
                   {passwordState === 'set' ? (
                     <Input
                       type="password"
                       autoComplete="current-password"
                       value={currentAccountPassword}
-                      placeholder="현재 비밀번호"
-                      aria-label="현재 계정 비밀번호"
+                      placeholder={translate('settings.accountPassword.current')}
+                      aria-label={translate('settings.accountPassword.currentAria')}
                       onChange={(event) => setCurrentAccountPassword(event.target.value)}
                     />
                   ) : null}
@@ -1298,16 +1344,16 @@ export function SettingsPanel({
                     type="password"
                     autoComplete="new-password"
                     value={nextAccountPassword}
-                    placeholder="새 비밀번호"
-                    aria-label="새 계정 비밀번호"
+                    placeholder={translate('settings.accountPassword.new')}
+                    aria-label={translate('settings.accountPassword.newAria')}
                     onChange={(event) => setNextAccountPassword(event.target.value)}
                   />
                   <Input
                     type="password"
                     autoComplete="new-password"
                     value={confirmAccountPassword}
-                    placeholder="새 비밀번호 확인"
-                    aria-label="새 계정 비밀번호 확인"
+                    placeholder={translate('settings.accountPassword.confirm')}
+                    aria-label={translate('settings.accountPassword.confirmAria')}
                     onChange={(event) => setConfirmAccountPassword(event.target.value)}
                   />
                   {accountPasswordValidationMessage ? (
@@ -1327,7 +1373,7 @@ export function SettingsPanel({
                     disabled={accountPasswordBusy}
                     onClick={closeAccountPasswordDialog}
                   >
-                    취소
+                    {translate('common.cancel')}
                   </Button>
                   <Button
                     variant="primary"
@@ -1340,10 +1386,10 @@ export function SettingsPanel({
                     onClick={() => void handleChangeAccountPassword()}
                   >
                     {accountPasswordBusy
-                      ? '저장 중...'
+                      ? translate('settings.accountPassword.saving')
                       : passwordState === 'set'
-                        ? '비밀번호 변경'
-                        : '비밀번호 설정'}
+                        ? translate('settings.accountPassword.change')
+                        : translate('settings.accountPassword.set')}
                   </Button>
                 </ModalFooter>
               </ModalShell>
@@ -1367,17 +1413,14 @@ export function SettingsPanel({
               >
                 <ModalHeader className="block">
                   <SectionLabel>Security</SectionLabel>
-                  <h3 id="reset-vault-title">동기화 초기화</h3>
+                  <h3 id="reset-vault-title">{translate('settings.vault.resetDialog.title')}</h3>
                 </ModalHeader>
                 <ModalBody className="grid gap-3">
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
-                    서버의 동기화 데이터가 <strong>모두 삭제</strong>되고, 새 동기화 암호
-                    설정 화면으로 이동합니다. 이 작업은 되돌릴 수 없습니다.
+                    <Trans i18nKey="settings.vault.resetDialog.warning" components={{ strong: <strong /> }} />
                   </p>
                   <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
-                    이 기기의 로컬 데이터(호스트·시크릿·스니펫)는 유지되며, 새 암호를
-                    설정하면 다시 암호화되어 업로드됩니다. 다른 기기는 다음 동기화 때 새
-                    암호 입력이 필요하고, 서버에만 있던 데이터는 복구할 수 없습니다.
+                    {translate('settings.vault.resetDialog.localNote')}
                   </p>
                   {vaultResetError ? (
                     <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
@@ -1391,14 +1434,14 @@ export function SettingsPanel({
                     disabled={vaultResetBusy}
                     onClick={() => setVaultResetOpen(false)}
                   >
-                    취소
+                    {translate('common.cancel')}
                   </Button>
                   <Button
                     variant="danger"
                     disabled={vaultResetBusy}
                     onClick={() => void handleResetVault()}
                   >
-                    {vaultResetBusy ? '초기화 중...' : '서버 데이터 삭제하고 새로 시작'}
+                    {translate(vaultResetBusy ? 'settings.vault.resetDialog.submitting' : 'settings.vault.resetDialog.submit')}
                   </Button>
                 </ModalFooter>
               </ModalShell>
@@ -1416,17 +1459,14 @@ export function SettingsPanel({
               <ModalShell role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
                 <ModalHeader className="block">
                   <SectionLabel>Account</SectionLabel>
-                  <h3 id="delete-account-title">회원 탈퇴</h3>
+                  <h3 id="delete-account-title">{translate('settings.deleteAccount.title')}</h3>
                 </ModalHeader>
                 <ModalBody className="grid gap-3">
                   <p className="m-0 text-[0.88rem] leading-[1.6] text-[var(--text)]">
-                    서버에 저장된 모든 데이터(동기화된 호스트·시크릿·스니펫·계정 정보)가{' '}
-                    <strong>즉시 영구 삭제</strong>됩니다. 복구할 수 없으며, 로그인된 다른
-                    기기도 곧 로그아웃됩니다.
+                    <Trans i18nKey="settings.deleteAccount.warning" components={{ strong: <strong /> }} />
                   </p>
                   <p className="m-0 text-[0.82rem] leading-[1.55] text-[var(--text-soft)]">
-                    이 기기의 로컬 데이터(호스트·시크릿·세션 리플레이·활동 로그·AI 키)도 함께
-                    삭제됩니다.
+                    {translate('settings.deleteAccount.localNote')}
                   </p>
                   {deleteAccountError ? (
                     <p role="alert" className="m-0 text-sm text-[var(--danger-text)]">
@@ -1440,7 +1480,7 @@ export function SettingsPanel({
                     disabled={deleteAccountBusy}
                     onClick={() => setDeleteAccountOpen(false)}
                   >
-                    취소
+                    {translate('common.cancel')}
                   </Button>
                   <Button
                     variant="danger"
@@ -1453,7 +1493,7 @@ export function SettingsPanel({
                         // 성공하면 세션이 정리되며 로그인 화면으로 전환된다(auth 이벤트).
                         setDeleteAccountOpen(false);
                       } catch (error) {
-                        const fallback = '회원 탈퇴에 실패했습니다.';
+                        const fallback = translate('settings.deleteAccount.failed');
                         setDeleteAccountError(
                           normalizeErrorMessage(error, fallback) || fallback,
                         );
@@ -1462,7 +1502,7 @@ export function SettingsPanel({
                       }
                     }}
                   >
-                    {deleteAccountBusy ? '탈퇴 중...' : '탈퇴'}
+                    {translate(deleteAccountBusy ? 'settings.deleteAccount.submitting' : 'settings.deleteAccount.submit')}
                   </Button>
                 </ModalFooter>
               </ModalShell>
@@ -1514,7 +1554,7 @@ export function SettingsPanel({
                 }}
               />
               <p className="m-0 text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-                이 크기 이하의 텍스트 파일만 내장 편집기로 열 수 있습니다.
+                {translate('settings.transfer.editorMaxSizeHint')}
               </p>
             </FieldGroup>
 
@@ -1522,7 +1562,7 @@ export function SettingsPanel({
               checked={settings.sftpPreserveMtime ?? true}
               aria-label="Preserve modified time"
               label="Preserve modified time"
-              description="전송 완료 후 원본 수정 시간을 대상 파일에 적용합니다."
+              description={translate('settings.transfer.preserveMtimeDescription')}
               onClick={() => {
                 void onUpdateSettings({
                   sftpPreserveMtime: !(settings.sftpPreserveMtime ?? true),
@@ -1534,7 +1574,7 @@ export function SettingsPanel({
               checked={settings.sftpPreservePermissions ?? false}
               aria-label="Preserve permissions"
               label="Preserve permissions"
-              description="가능한 경우 원본 권한 비트를 대상 파일에 적용합니다."
+              description={translate('settings.transfer.preserveModeDescription')}
               onClick={() => {
                 void onUpdateSettings({
                   sftpPreservePermissions: !(settings.sftpPreservePermissions ?? false),

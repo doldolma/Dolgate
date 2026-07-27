@@ -18,6 +18,7 @@ import {
   randomBytes,
 } from "node:crypto";
 import { desktopArgon2idDerive } from "./vault-crypto";
+import { t } from './i18n';
 
 const MAGIC = Buffer.from("DOLGATE\0", "ascii");
 const CONTAINER_VERSION = 1;
@@ -58,19 +59,19 @@ interface DolgateFileHeaderV1 {
 function assertExportPassword(password: string): void {
   const normalized = password.normalize("NFC");
   if (normalized.trim().length === 0) {
-    throw new Error("내보내기 암호를 입력해 주세요.");
+    throw new Error(t('transferFormat.passwordRequired'));
   }
   if (Array.from(normalized).length < 4) {
-    throw new Error("내보내기 암호는 4자 이상이어야 합니다.");
+    throw new Error(t('transferFormat.passwordTooShort'));
   }
   if (normalized.length > 1024) {
-    throw new Error("내보내기 암호가 너무 깁니다.");
+    throw new Error(t('transferFormat.passwordTooLong'));
   }
 }
 
 function parseHeader(value: unknown): DolgateFileHeaderV1 {
   if (!value || typeof value !== "object") {
-    throw new Error("올바른 Dolgate 내보내기 파일이 아닙니다.");
+    throw new Error(t('transferFormat.notDolgateFile'));
   }
   const header = value as Partial<DolgateFileHeaderV1>;
   if (
@@ -83,11 +84,11 @@ function parseHeader(value: unknown): DolgateFileHeaderV1 {
     typeof header.cipher.nonceBase64 !== "string" ||
     header.cipher.tagLength !== TAG_LENGTH
   ) {
-    throw new Error("지원하지 않거나 손상된 Dolgate 내보내기 파일입니다.");
+    throw new Error(t('transferFormat.unsupportedOrCorrupt'));
   }
   const nonce = Buffer.from(header.cipher.nonceBase64, "base64");
   if (nonce.length !== NONCE_LENGTH) {
-    throw new Error("지원하지 않거나 손상된 Dolgate 내보내기 파일입니다.");
+    throw new Error(t('transferFormat.unsupportedOrCorrupt'));
   }
   return header as DolgateFileHeaderV1;
 }
@@ -113,11 +114,11 @@ export async function encryptDolgateHostBundle(
   };
   const headerBytes = Buffer.from(JSON.stringify(header), "utf8");
   if (headerBytes.length > MAX_HEADER_BYTES) {
-    throw new Error("Dolgate 내보내기 헤더가 너무 큽니다.");
+    throw new Error(t('transferFormat.headerTooLarge'));
   }
   const plaintext = Buffer.from(JSON.stringify(bundle), "utf8");
   if (plaintext.length > MAX_DOLGATE_FILE_BYTES) {
-    throw new Error("선택한 항목이 너무 커서 하나의 파일로 내보낼 수 없습니다.");
+    throw new Error(t('transferFormat.payloadTooLarge'));
   }
 
   const key = Buffer.from(await deriveVaultKek(desktopArgon2idDerive, password, kdf));
@@ -134,7 +135,7 @@ export async function encryptDolgateHostBundle(
     prefix.writeUInt32BE(headerBytes.length, MAGIC.length + 2);
     const file = Buffer.concat([prefix, headerBytes, ciphertext, tag]);
     if (file.length > MAX_DOLGATE_FILE_BYTES) {
-      throw new Error("선택한 항목이 너무 커서 하나의 파일로 내보낼 수 없습니다.");
+      throw new Error(t('transferFormat.payloadTooLarge'));
     }
     return file;
   } finally {
@@ -148,13 +149,13 @@ export async function decryptDolgateHostBundle(
   password: string,
 ): Promise<unknown> {
   if (file.length > MAX_DOLGATE_FILE_BYTES || file.length < PREFIX_LENGTH + TAG_LENGTH) {
-    throw new Error("올바른 Dolgate 내보내기 파일이 아닙니다.");
+    throw new Error(t('transferFormat.notDolgateFile'));
   }
   if (!file.subarray(0, MAGIC.length).equals(MAGIC)) {
-    throw new Error("올바른 Dolgate 내보내기 파일이 아닙니다.");
+    throw new Error(t('transferFormat.notDolgateFile'));
   }
   if (file.readUInt16BE(MAGIC.length) !== CONTAINER_VERSION) {
-    throw new Error("이 버전의 앱에서 지원하지 않는 Dolgate 파일입니다.");
+    throw new Error(t('transferFormat.unsupportedVersion'));
   }
   const headerLength = file.readUInt32BE(MAGIC.length + 2);
   const ciphertextOffset = PREFIX_LENGTH + headerLength;
@@ -163,7 +164,7 @@ export async function decryptDolgateHostBundle(
     headerLength > MAX_HEADER_BYTES ||
     ciphertextOffset + TAG_LENGTH >= file.length
   ) {
-    throw new Error("지원하지 않거나 손상된 Dolgate 내보내기 파일입니다.");
+    throw new Error(t('transferFormat.unsupportedOrCorrupt'));
   }
 
   const headerBytes = file.subarray(PREFIX_LENGTH, ciphertextOffset);
@@ -171,7 +172,7 @@ export async function decryptDolgateHostBundle(
   try {
     headerValue = JSON.parse(headerBytes.toString("utf8"));
   } catch {
-    throw new Error("지원하지 않거나 손상된 Dolgate 내보내기 파일입니다.");
+    throw new Error(t('transferFormat.unsupportedOrCorrupt'));
   }
   const header = parseHeader(headerValue);
   const nonce = Buffer.from(header.cipher.nonceBase64, "base64");
@@ -191,7 +192,7 @@ export async function decryptDolgateHostBundle(
     plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     return JSON.parse(plaintext.toString("utf8")) as unknown;
   } catch {
-    throw new Error("암호가 올바르지 않거나 파일이 손상되었습니다.");
+    throw new Error(t('transferFormat.wrongPassword'));
   } finally {
     key?.fill(0);
     plaintext?.fill(0);

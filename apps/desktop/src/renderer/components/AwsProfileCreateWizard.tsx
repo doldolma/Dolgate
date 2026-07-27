@@ -19,6 +19,8 @@ import {
   TabButton,
   Tabs,
 } from '../ui'
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 type AwsProfileCreateKind = 'static' | 'sso' | 'role'
 
@@ -76,10 +78,10 @@ function getSsoRoleOptions(
 function validateRoleArnInput(roleArn: string): string | null {
   const normalized = roleArn.trim()
   if (!normalized) {
-    return 'Role ARN을 입력해 주세요.'
+    return t('awsWizard.error.roleArnRequired')
   }
   if (normalized.length < 20 || !normalized.startsWith('arn:')) {
-    return '입력한 Role ARN이 올바르지 않습니다. Role ARN 형식을 다시 확인해 주세요.'
+    return t('awsWizard.error.roleArnInvalid')
   }
   return null
 }
@@ -95,6 +97,7 @@ export function AwsProfileCreateWizard({
   createProfile,
   prepareSsoProfile,
 }: AwsProfileCreateWizardProps) {
+  const { t: translate } = useTranslation();
   const [activeKind, setActiveKind] = useState<AwsProfileCreateKind>('static')
   const [staticDraft, setStaticDraft] = useState<AwsStaticProfileDraft>(
     createEmptyStaticDraft(),
@@ -173,7 +176,7 @@ export function AwsProfileCreateWizard({
       })
       await onSuccess?.(staticDraft.profileName)
     } catch (submitError) {
-      setError(normalizeErrorMessage(submitError, 'AWS 프로필을 생성하지 못했습니다.'))
+      setError(normalizeErrorMessage(submitError, translate('awsWizard.error.createFailed')))
     } finally {
       setIsSubmitting(false)
     }
@@ -190,7 +193,7 @@ export function AwsProfileCreateWizard({
       }
 
       if (!selectedSsoAccountId || !selectedSsoRoleName) {
-        setError('SSO 계정과 Role을 모두 선택해 주세요.')
+        setError(translate('awsWizard.error.ssoSelectionRequired'))
         return
       }
 
@@ -207,7 +210,7 @@ export function AwsProfileCreateWizard({
       })
       await onSuccess?.(ssoPreparation.profileName)
     } catch (submitError) {
-      setError(normalizeErrorMessage(submitError, 'AWS SSO 프로필을 생성하지 못했습니다.'))
+      setError(normalizeErrorMessage(submitError, translate('awsWizard.error.ssoCreateFailed')))
     } finally {
       setIsSubmitting(false)
     }
@@ -232,7 +235,7 @@ export function AwsProfileCreateWizard({
       })
       await onSuccess?.(roleDraft.profileName)
     } catch (submitError) {
-      setError(normalizeErrorMessage(submitError, 'Role profile을 생성하지 못했습니다.'))
+      setError(normalizeErrorMessage(submitError, translate('awsWizard.error.roleCreateFailed')))
     } finally {
       setIsSubmitting(false)
     }
@@ -282,9 +285,9 @@ export function AwsProfileCreateWizard({
           draft={staticDraft}
           error={error}
           isSubmitting={isSubmitting}
-          submitLabel="프로필 저장"
-          submittingLabel="생성 중..."
-          profileNameLabel="새 프로필명"
+          submitLabel={translate('awsWizard.static.submit')}
+          submittingLabel={translate('awsWizard.static.submitting')}
+          profileNameLabel={translate('awsWizard.static.profileName')}
           onChange={setStaticDraft}
           onCancel={onCancel}
           onSubmit={() => {
@@ -302,9 +305,9 @@ export function AwsProfileCreateWizard({
           }}
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <FieldGroup label="새 프로필명">
+            <FieldGroup label={translate('awsWizard.field.newProfileName')}>
               <Input
-                aria-label="SSO 프로필명"
+                aria-label={translate('awsWizard.field.ssoProfileName')}
                 value={ssoDraft.profileName}
                 onChange={(event) => {
                   resetSsoPreparation()
@@ -318,9 +321,9 @@ export function AwsProfileCreateWizard({
               />
             </FieldGroup>
 
-            <FieldGroup label="기본 Region">
+            <FieldGroup label={translate('awsWizard.field.defaultRegion')}>
               <SelectField
-                aria-label="SSO 기본 Region"
+                aria-label={translate('awsWizard.field.ssoDefaultRegion')}
                 value={ssoDraft.region ?? ''}
                 onChange={(event) => {
                   resetSsoPreparation()
@@ -331,7 +334,7 @@ export function AwsProfileCreateWizard({
                 }}
                 disabled={isSubmitting || Boolean(ssoPreparation)}
               >
-                <option value="">선택 안 함</option>
+                <option value="">{translate('awsWizard.field.none')}</option>
                 {AWS_PROFILE_REGION_OPTIONS.map((region) => (
                   <option key={region} value={region}>
                     {region}
@@ -371,7 +374,7 @@ export function AwsProfileCreateWizard({
                 }}
                 disabled={isSubmitting || Boolean(ssoPreparation)}
               >
-                <option value="">SSO Region 선택</option>
+                <option value="">{translate('awsWizard.field.ssoRegionSelect')}</option>
                 {AWS_PROFILE_REGION_OPTIONS.map((region) => (
                   <option key={region} value={region}>
                     {region}
@@ -384,7 +387,7 @@ export function AwsProfileCreateWizard({
           {ssoPreparation ? (
             <>
               <NoticeCard tone="info">
-                SSO 로그인에 성공했습니다. 사용할 account와 role을 선택한 뒤 저장하세요.
+                {translate('awsWizard.sso.loggedIn')}
               </NoticeCard>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -401,7 +404,7 @@ export function AwsProfileCreateWizard({
                     }}
                     disabled={isSubmitting}
                   >
-                    <option value="">계정 선택</option>
+                    <option value="">{translate('awsWizard.field.accountSelect')}</option>
                     {ssoPreparation.accounts.map((account) => (
                       <option key={account.accountId} value={account.accountId}>
                         {account.accountName} ({account.accountId})
@@ -417,7 +420,7 @@ export function AwsProfileCreateWizard({
                     onChange={(event) => setSelectedSsoRoleName(event.target.value)}
                     disabled={isSubmitting || !selectedSsoAccountId}
                   >
-                    <option value="">Role 선택</option>
+                    <option value="">{translate('awsWizard.field.roleSelect')}</option>
                     {ssoRoleOptions.map((role) => (
                       <option key={role.roleName} value={role.roleName}>
                         {role.roleName}
@@ -444,22 +447,22 @@ export function AwsProfileCreateWizard({
                   resetSsoPreparation()
                 }}
               >
-                다시 입력
+                {translate('awsWizard.sso.reenter')}
               </Button>
             ) : null}
             {onCancel ? (
               <Button variant="secondary" disabled={isSubmitting} onClick={onCancel}>
-                취소
+                {translate('common.cancel')}
               </Button>
             ) : null}
             <Button variant="primary" disabled={isSubmitting} type="submit">
               {isSubmitting
                 ? ssoPreparation
-                  ? '저장 중...'
-                  : '로그인 중...'
+                  ? translate('awsWizard.sso.saving')
+                  : translate('awsWizard.sso.signingIn')
                 : ssoPreparation
-                  ? '프로필 저장'
-                  : '로그인 후 계정 불러오기'}
+                  ? translate('awsWizard.sso.save')
+                  : translate('awsWizard.sso.signInAndLoad')}
             </Button>
           </div>
         </form>
@@ -474,9 +477,9 @@ export function AwsProfileCreateWizard({
           }}
         >
           <div className="grid gap-4 md:grid-cols-2">
-            <FieldGroup label="새 프로필명">
+            <FieldGroup label={translate('awsWizard.field.newProfileName')}>
               <Input
-                aria-label="Role 프로필명"
+                aria-label={translate('awsWizard.field.roleProfileName')}
                 value={roleDraft.profileName}
                 onChange={(event) =>
                   setRoleDraft({
@@ -489,9 +492,9 @@ export function AwsProfileCreateWizard({
               />
             </FieldGroup>
 
-            <FieldGroup label="기본 Region">
+            <FieldGroup label={translate('awsWizard.field.defaultRegion')}>
               <SelectField
-                aria-label="Role 기본 Region"
+                aria-label={translate('awsWizard.field.roleDefaultRegion')}
                 value={roleDraft.region ?? ''}
                 onChange={(event) =>
                   setRoleDraft({
@@ -501,7 +504,7 @@ export function AwsProfileCreateWizard({
                 }
                 disabled={isSubmitting}
               >
-                <option value="">선택 안 함</option>
+                <option value="">{translate('awsWizard.field.none')}</option>
                 {AWS_PROFILE_REGION_OPTIONS.map((region) => (
                   <option key={region} value={region}>
                     {region}
@@ -524,7 +527,7 @@ export function AwsProfileCreateWizard({
                 }
                 disabled={isSubmitting}
               >
-                <option value="">source profile 선택</option>
+                <option value="">{translate('awsWizard.field.sourceProfileSelect')}</option>
                 {profiles.map((profile) => (
                   <option key={profile.name} value={profile.name}>
                     {profile.name}
@@ -551,7 +554,7 @@ export function AwsProfileCreateWizard({
 
           {profiles.length === 0 ? (
             <NoticeCard tone="warning">
-              Role profile 생성에는 먼저 사용할 source profile이 필요합니다.
+              {translate('awsWizard.role.sourceProfileRequired')}
             </NoticeCard>
           ) : null}
 
@@ -564,11 +567,11 @@ export function AwsProfileCreateWizard({
           <div className="flex flex-wrap items-center justify-end gap-3">
             {onCancel ? (
               <Button variant="secondary" disabled={isSubmitting} onClick={onCancel}>
-                취소
+                {translate('common.cancel')}
               </Button>
             ) : null}
             <Button variant="primary" disabled={isSubmitting || profiles.length === 0} type="submit">
-              {isSubmitting ? '생성 중...' : '프로필 저장'}
+              {translate(isSubmitting ? 'awsWizard.role.submitting' : 'awsWizard.role.submit')}
             </Button>
           </div>
         </form>

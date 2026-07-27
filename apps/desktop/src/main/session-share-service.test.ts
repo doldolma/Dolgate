@@ -319,7 +319,7 @@ describe("SessionShareService viewer input relay", () => {
 
     expect(browserWindowInstances).toHaveLength(1);
     expect(browserWindowInstances[0]?.loadURL).toHaveBeenCalledWith(
-      "https://app.example.com/index.html?window=session-share-chat&sessionId=session-1",
+      "https://app.example.com/index.html?window=session-share-chat&locale=ko&sessionId=session-1",
     );
 
     browserWindowInstances[0]!.minimized = true;

@@ -69,6 +69,8 @@ import {
   normalizeLogsAbsoluteRange,
   normalizeLogsRelativeRange,
 } from "../lib/log-range";
+import { Trans, useTranslation } from "react-i18next";
+import { t } from "../i18n";
 
 interface ContainersWorkspaceProps {
   host: HostRecord;
@@ -814,7 +816,7 @@ export class ContainerTunnelErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <NoticeCard tone="danger" title="컨테이너 Tunnel을 표시하지 못했습니다.">
+        <NoticeCard tone="danger" title={t("containers.tunnel.errorTitle")}>
           <Button
             type="button"
             variant="secondary"
@@ -823,7 +825,7 @@ export class ContainerTunnelErrorBoundary extends Component<
               this.setState({ hasError: false });
             }}
           >
-            다시 시도
+            {t("containers.tunnel.retry")}
           </Button>
         </NoticeCard>
       );
@@ -853,6 +855,7 @@ function ContainerTunnelPanel({
   onStartTunnel,
   onStopTunnel,
 }: ContainerTunnelPanelProps) {
+  const { t: translate } = useTranslation();
   const tunnelNetworks = useMemo(
     () => getTunnelEligibleNetworks(selectedContainerDetails),
     [selectedContainerDetails],
@@ -890,15 +893,15 @@ function ContainerTunnelPanel({
   if (!selectedContainer) {
     return (
       <EmptyState
-        title="컨테이너를 선택하면 터널을 열 수 있습니다."
-        description="실행 중인 컨테이너를 선택한 뒤 네트워크와 포트를 고르세요."
+        title={translate("containers.tunnel.emptyTitle")}
+        description={translate("containers.tunnel.emptyDescription")}
       />
     );
   }
 
   if (detailsLoading && !selectedContainerDetails) {
     return (
-      <div className={emptyDetailClass}>터널 정보를 준비하는 중입니다...</div>
+      <div className={emptyDetailClass}>{translate("containers.tunnel.preparing")}</div>
     );
   }
 
@@ -917,7 +920,7 @@ function ContainerTunnelPanel({
             }}
           >
             {tunnelNetworks.length === 0 ? (
-              <option value="">선택 가능한 네트워크 없음</option>
+              <option value="">{translate("containers.tunnel.noNetwork")}</option>
             ) : null}
             {tunnelNetworks.map((network) => (
               <option key={network.name} value={network.name}>
@@ -938,7 +941,7 @@ function ContainerTunnelPanel({
             }}
           >
             {tunnelPorts.length === 0 ? (
-              <option value="">포트 없음</option>
+              <option value="">{translate("containers.tunnel.noPort")}</option>
             ) : null}
             {tunnelPorts.map((port) => (
               <option
@@ -956,7 +959,7 @@ function ContainerTunnelPanel({
               checked={tunnelState.autoLocalPort}
               aria-label="Auto (random)"
               label="Auto (random)"
-              description="사용 가능한 로컬 포트를 자동으로 할당합니다."
+              description={translate("containers.tunnel.autoPortDescription")}
               disabled={isTunnelFormDisabled}
               onClick={() => {
                 onUpdateTunnelState((previous) => ({
@@ -988,7 +991,7 @@ function ContainerTunnelPanel({
       {tunnelState.runtime ? (
         <div className="grid gap-[0.9rem] rounded-[12px] border border-[var(--selection-border)] bg-[var(--selection-tint)] px-4 py-[0.9rem] shadow-none">
           <div className="flex items-center justify-between gap-3">
-            <strong>터널 상태</strong>
+            <strong>{translate("containers.tunnel.statusTitle")}</strong>
             <StatusBadge tone={tunnelState.runtime.status === "running" ? "running" : "stopped"}>
               {tunnelState.runtime.status === "running"
                 ? "Running"
@@ -1025,11 +1028,11 @@ function ContainerTunnelPanel({
       <div className="flex justify-end gap-[0.55rem]">
         {tunnelState.runtime ? (
           <Button type="button" variant="secondary" disabled={tunnelState.loading} onClick={onStopTunnel}>
-            {tunnelState.loading ? "정지 중..." : "Stop"}
+            {tunnelState.loading ? translate("containers.tunnel.stopping") : "Stop"}
           </Button>
         ) : (
           <Button type="button" variant="primary" disabled={!canStartTunnel} onClick={onStartTunnel}>
-            {tunnelState.loading ? "시작 중..." : "Start tunnel"}
+            {tunnelState.loading ? translate("containers.tunnel.starting") : "Start tunnel"}
           </Button>
         )}
       </div>
@@ -1044,11 +1047,12 @@ function OverviewSection({
   details: HostContainerDetails | null;
   statusSummary?: string | null;
 }) {
+  const { t: translate } = useTranslation();
   if (!details) {
     return (
       <EmptyState
-        title="컨테이너를 선택하면 상세 정보를 볼 수 있습니다."
-        description="목록에서 컨테이너를 선택하면 실행 정보와 메타데이터를 보여줍니다."
+        title={translate("containers.overview.emptyTitle")}
+        description={translate("containers.overview.emptyDescription")}
       />
     );
   }
@@ -1072,7 +1076,7 @@ function OverviewSection({
           </strong>
         </div>
         <div className={summaryCardClass}>
-          <span className="text-[0.82rem] text-[var(--text-soft)]">이미지</span>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">{translate("containers.overview.image")}</span>
           <strong
             title={details.image}
             data-testid="containers-overview-summary-image"
@@ -1082,7 +1086,7 @@ function OverviewSection({
           </strong>
         </div>
         <div className={summaryCardClass}>
-          <span className="text-[0.82rem] text-[var(--text-soft)]">상태</span>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">{translate("containers.overview.status")}</span>
           <strong className="min-w-0 leading-[1.35]">{details.status}</strong>
         </div>
         <div className={summaryCardClass}>
@@ -1092,7 +1096,7 @@ function OverviewSection({
           </strong>
         </div>
         <div className={summaryCardClass}>
-          <span className="text-[0.82rem] text-[var(--text-soft)]">생성 시간</span>
+          <span className="text-[0.82rem] text-[var(--text-soft)]">{translate("containers.overview.createdAt")}</span>
           <strong className="min-w-0 leading-[1.35] [overflow-wrap:anywhere]">
             {formatCreatedAt(details.createdAt)}
           </strong>
@@ -1101,7 +1105,7 @@ function OverviewSection({
 
       <div className={detailCardClass}>
         <div className="flex items-center justify-between gap-3">
-          <h3>실행 정보</h3>
+          <h3>{translate("containers.overview.runtimeInfo")}</h3>
         </div>
         <dl className="grid gap-[0.9rem]">
           <div className="grid gap-[0.25rem]">
@@ -1117,10 +1121,10 @@ function OverviewSection({
 
       <div className={detailCardClass}>
         <div className="flex items-center justify-between gap-3">
-          <h3>마운트</h3>
+          <h3>{translate("containers.overview.mounts")}</h3>
         </div>
         {details.mounts.length === 0 ? (
-          <div className={emptyDetailClass}>마운트 정보가 없습니다.</div>
+          <div className={emptyDetailClass}>{translate("containers.overview.noMounts")}</div>
         ) : (
           <div className="grid gap-[0.7rem]">
             {details.mounts.map((mount) => (
@@ -1143,10 +1147,10 @@ function OverviewSection({
 
       <div className={detailCardClass}>
         <div className="flex items-center justify-between gap-3">
-          <h3>네트워크</h3>
+          <h3>{translate("containers.overview.networks")}</h3>
         </div>
         {details.networks.length === 0 ? (
-          <div className={emptyDetailClass}>네트워크 정보가 없습니다.</div>
+          <div className={emptyDetailClass}>{translate("containers.overview.noNetworks")}</div>
         ) : (
           <div className="grid gap-[0.7rem]">
             {details.networks.map((network) => (
@@ -1155,7 +1159,7 @@ function OverviewSection({
                 className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]"
               >
                 <strong className="break-words">{network.name}</strong>
-                <span className="text-[var(--text-soft)]">{network.ipAddress || "IP 없음"}</span>
+                <span className="text-[var(--text-soft)]">{network.ipAddress || translate("containers.overview.noIp")}</span>
                 {network.aliases.length > 0 ? (
                   <small className="text-[var(--text-soft)]">{network.aliases.join(", ")}</small>
                 ) : null}
@@ -1167,22 +1171,23 @@ function OverviewSection({
 
       <div className={detailCardClass}>
         <div className="flex items-center justify-between gap-3">
-          <h3>환경 변수</h3>
+          <h3>{translate("containers.overview.environment")}</h3>
         </div>
-        {formatKeyValuePairs(details.environment, "환경 변수가 없습니다.")}
+        {formatKeyValuePairs(details.environment, translate("containers.overview.noEnvironment"))}
       </div>
 
       <div className={detailCardClass}>
         <div className="flex items-center justify-between gap-3">
-          <h3>라벨</h3>
+          <h3>{translate("containers.overview.labels")}</h3>
         </div>
-        {formatKeyValuePairs(details.labels, "라벨이 없습니다.")}
+        {formatKeyValuePairs(details.labels, translate("containers.overview.noLabels"))}
       </div>
     </PanelSection>
   );
 }
 
 function MetricsSection({ tab }: { tab: HostContainersTabState }) {
+  const { t: translate } = useTranslation();
   const points = useMemo(
     () => deriveContainerMetricsPoints(tab.metricsSamples),
     [tab.metricsSamples],
@@ -1263,15 +1268,15 @@ function MetricsSection({ tab }: { tab: HostContainersTabState }) {
 
   if (tab.metricsLoading && points.length === 0) {
     return (
-      <div className={emptyDetailClass}>메트릭을 불러오는 중입니다...</div>
+      <div className={emptyDetailClass}>{translate("containers.metrics.loading")}</div>
     );
   }
 
   if (!latest) {
     return (
       <EmptyState
-        title="표시할 메트릭이 없습니다."
-        description="컨테이너가 실행 중인지 확인한 뒤 잠시 후 다시 새로고침해 주세요."
+        title={translate("containers.metrics.emptyTitle")}
+        description={translate("containers.metrics.emptyDescription")}
       />
     );
   }
@@ -1370,6 +1375,7 @@ export function ContainersWorkspace({
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth,
 }: ContainersWorkspaceProps) {
+  const { t: translate } = useTranslation();
   const { startContainerTunnel, stopContainerTunnel } =
     useContainersWorkspaceController();
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
@@ -2032,7 +2038,7 @@ export function ContainersWorkspace({
     if (!isSelectedContainerRunning) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "실행 중인 컨테이너에서만 터널을 시작할 수 있습니다.",
+        error: translate("containers.tunnel.runningOnly"),
       }));
       return;
     }
@@ -2044,21 +2050,21 @@ export function ContainersWorkspace({
     if (!currentTunnelState.networkName) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "네트워크를 선택해 주세요.",
+        error: translate("containers.tunnel.networkRequired"),
       }));
       return;
     }
     if (!Number.isFinite(targetPort) || targetPort <= 0) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "포트를 선택해 주세요.",
+        error: translate("containers.tunnel.portRequired"),
       }));
       return;
     }
     if (!tunnelState.autoLocalPort && (!Number.isFinite(bindPort) || bindPort <= 0)) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "로컬 포트를 확인해 주세요.",
+        error: translate("containers.tunnel.localPortInvalid"),
       }));
       return;
     }
@@ -2100,7 +2106,7 @@ export function ContainersWorkspace({
               error:
                 error instanceof Error
                   ? error.message
-                  : "컨테이너 터널을 시작하지 못했습니다.",
+                  : translate("containers.tunnel.startFailed"),
             }
           : previous,
       );
@@ -2151,7 +2157,7 @@ export function ContainersWorkspace({
               error:
                 error instanceof Error
                   ? error.message
-                  : "컨테이너 터널을 중지하지 못했습니다.",
+                  : translate("containers.tunnel.stopFailed"),
             }
           : previous,
       );
@@ -2200,14 +2206,14 @@ export function ContainersWorkspace({
               className={cn("h-[0.95rem] w-[0.95rem]", tab.isLoading && "animate-spin")}
               aria-hidden="true"
             />
-            {tab.isLoading ? "새로고침 중..." : "새로고침"}
+            {translate(tab.isLoading ? "containers.list.refreshing" : "containers.list.refresh")}
           </Button>
         </Toolbar>
       ) : null}
 
       {tab.unsupportedReason ? (
         <NoticeCard
-          title="이 호스트에서는 컨테이너 런타임을 찾지 못했습니다."
+          title={translate("containers.list.noRuntimeTitle")}
           className="grid h-full content-center gap-2"
         >
           <SectionLabel className="mb-1">Runtime Unavailable</SectionLabel>
@@ -2229,7 +2235,7 @@ export function ContainersWorkspace({
               data-testid="containers-sidebar"
             >
               <div className="flex items-center justify-between gap-3">
-                <span className="text-[0.82rem] font-bold text-[var(--text)]">컨테이너</span>
+                <span className="text-[0.82rem] font-bold text-[var(--text)]">{translate("containers.list.heading")}</span>
                 <span className="inline-flex min-w-[1.6rem] items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_80%,transparent_20%)] px-[0.45rem] py-[0.1rem] text-[0.72rem] font-semibold tabular-nums text-[var(--text-soft)]">
                   {tab.items.length}
                 </span>
@@ -2241,7 +2247,7 @@ export function ContainersWorkspace({
               ) : null}
               <div className="flex min-h-0 flex-col gap-[0.7rem] overflow-y-auto pr-px">
                 {tab.items.length === 0 && !tab.isLoading ? (
-                  <div className={emptyDetailClass}>감지된 컨테이너가 없습니다.</div>
+                  <div className={emptyDetailClass}>{translate("containers.list.empty")}</div>
                 ) : null}
                 {tab.items.map((item) => (
                   <ContainerListItem
@@ -2285,7 +2291,7 @@ export function ContainersWorkspace({
                 )}
               >
                 <h3 className="text-[1rem] font-bold text-[var(--text)]">
-                  {selectedContainer?.name ?? "컨테이너를 선택하세요"}
+                  {selectedContainer?.name ?? translate("containers.list.selectPrompt")}
                 </h3>
                 {selectedContainer && !logsFocusModeActive ? (
                   <p className="mt-[0.15rem] text-[0.8rem] text-[var(--text-soft)]">
@@ -2315,7 +2321,7 @@ export function ContainersWorkspace({
                       }}
                       disabled={!tab.selectedContainerId}
                     >
-                      셸 접속
+                      {translate("containers.action.shell")}
                     </Button>
                     <Button
                       type="button"
@@ -2326,7 +2332,7 @@ export function ContainersWorkspace({
                       }}
                       disabled={!tab.selectedContainerId}
                     >
-                      일반 보기
+                      {translate("containers.action.plainView")}
                     </Button>
                   </>
                 ) : (
@@ -2347,7 +2353,7 @@ export function ContainersWorkspace({
                         }}
                         disabled={!tab.selectedContainerId}
                       >
-                        셸 접속
+                        {translate("containers.action.shell")}
                       </Button>
                       <Button
                         type="button"
@@ -2392,7 +2398,7 @@ export function ContainersWorkspace({
                     >
                       <Tabs
                         role="tablist"
-                        aria-label="컨테이너 상세 패널"
+                        aria-label={translate("containers.action.detailPanel")}
                         className={detailPanelTabsClass}
                       >
                         <TabButton
@@ -2469,7 +2475,7 @@ export function ContainersWorkspace({
                           }}
                           disabled={!tab.selectedContainerId}
                         >
-                          로그 크게 보기
+                          {translate("containers.action.expandLogs")}
                         </Button>
                       ) : null}
                     </div>
@@ -2491,7 +2497,7 @@ export function ContainersWorkspace({
                   </NoticeCard>
                 ) : null}
                 {tab.detailsLoading ? (
-                  <div className={emptyDetailClass}>상세 정보를 불러오는 중입니다...</div>
+                  <div className={emptyDetailClass}>{translate("containers.action.detailLoading")}</div>
                 ) : (
                   <OverviewSection
                     details={tab.details}
@@ -2540,7 +2546,7 @@ export function ContainersWorkspace({
                   <ToggleSwitch
                     checked={logsTimestampsVisible}
                     className="w-auto max-w-max"
-                    label="시간 표시"
+                    label={translate("containers.logs.showTime")}
                     onClick={() => {
                       setLogsTimestampsVisible((current) => !current);
                     }}
@@ -2550,7 +2556,7 @@ export function ContainersWorkspace({
                     variant="secondary"
                     size="sm"
                     active={tab.logsRangeMode === "absolute"}
-                    aria-label="로그 범위"
+                    aria-label={translate("containers.logs.rangeLabel")}
                     className="max-w-[min(360px,100%)] overflow-hidden text-ellipsis whitespace-nowrap"
                     onClick={() => {
                       setLogsRangePickerOpen(true);
@@ -2564,7 +2570,7 @@ export function ContainersWorkspace({
                       type="search"
                       className="min-w-[14rem] flex-1"
                       value={tab.logsSearchQuery}
-                      placeholder="로그 검색"
+                      placeholder={translate("containers.logs.searchPlaceholder")}
                       onChange={(event) =>
                         onSetLogsSearchQuery(host.id, event.target.value)
                       }
@@ -2578,7 +2584,7 @@ export function ContainersWorkspace({
                       }}
                       disabled={!canSearchRemoteLogs}
                     >
-                      {tab.logsSearchLoading ? "검색 중..." : "원격 검색"}
+                      {translate(tab.logsSearchLoading ? "containers.logs.searching" : "containers.logs.remoteSearch")}
                     </Button>
                     {(tab.logsSearchMode || tab.logsSearchQuery) ? (
                       <Button
@@ -2587,7 +2593,7 @@ export function ContainersWorkspace({
                         size="sm"
                         onClick={() => onClearLogsSearch(host.id)}
                       >
-                        검색 지우기
+                        {translate("containers.logs.clearSearch")}
                       </Button>
                     ) : null}
                   </div>
@@ -2600,7 +2606,7 @@ export function ContainersWorkspace({
                     }}
                     disabled={!canLoadMoreLogs}
                   >
-                    더 보기
+                    {translate("containers.logs.loadMore")}
                   </Button>
                   <Button
                     type="button"
@@ -2614,14 +2620,14 @@ export function ContainersWorkspace({
                     }}
                     disabled={!tab.selectedContainerId || tab.logsLoading}
                   >
-                    {tab.logsLoading ? "불러오는 중..." : "다시 불러오기"}
+                    {translate(tab.logsLoading ? "containers.logs.loading" : "containers.logs.reload")}
                   </Button>
                 </FilterRow>
                 {trimmedLogsSearchQuery ? (
                   <div className="text-[0.82rem] text-[var(--text-soft)]">
                     {tab.logsSearchMode === "remote"
-                      ? `원격 검색 결과 ${logMatchCount}건`
-                      : `현재 버퍼에서 ${logMatchCount}건 일치`}
+                      ? translate("containers.logs.remoteMatches", { count: logMatchCount })
+                      : translate("containers.logs.bufferMatches", { count: logMatchCount })}
                   </div>
                 ) : null}
                 {tab.logsSearchError ? (
@@ -2668,15 +2674,15 @@ export function ContainersWorkspace({
                   }}
                 >
                   {tab.logsState === "loading" || tab.logsState === "idle" ? (
-                    <div className={emptyDetailClass}>로그를 불러오는 중입니다...</div>
+                    <div className={emptyDetailClass}>{translate("containers.logs.loadingBody")}</div>
                   ) : tab.logsState === "empty" ? (
                     <div className={emptyDetailClass}>
-                      {logsRangeLabel} 기준 로그가 없습니다.
+                      {translate("containers.logs.emptyForRange", { range: logsRangeLabel })}
                     </div>
                   ) : tab.logsState === "error" ||
                     tab.logsState === "malformed" ? (
                     <div className={emptyDetailClass}>
-                      다시 불러오기를 시도해 주세요.
+                      {translate("containers.logs.retryHint")}
                     </div>
                   ) : containerLocalFind.rows.length ? (
                     containerLocalFind.rows.map((row) => {
@@ -2761,7 +2767,7 @@ export function ContainersWorkspace({
                       );
                     })
                   ) : trimmedLogsSearchQuery ? (
-                    <div className={emptyDetailClass}>검색 결과가 없습니다.</div>
+                    <div className={emptyDetailClass}>{translate("containers.logs.noSearchResults")}</div>
                   ) : null}
                   <div
                     ref={logsBottomRef}
@@ -2844,13 +2850,13 @@ export function ContainersWorkspace({
               aria-hidden="true"
               className="h-5 w-5 animate-[sftp-spinner_0.8s_linear_infinite] rounded-full border-2 border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] border-t-[var(--accent-strong)]"
             />
-            <strong>{`${host.label} 연결 중...`}</strong>
+            <strong>{translate("containers.connecting.withHost", { label: host.label })}</strong>
             <span className="font-semibold text-[var(--text)]">
               {formatConnectionProgressStageLabel(tab.connectionProgress?.stage)}
             </span>
             <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
               {tab.connectionProgress?.message ??
-                "컨테이너 런타임과 연결 상태를 준비하고 있습니다."}
+                translate("containers.connecting.preparing")}
             </span>
             <ConnectionHopSteps steps={tab.connectionHops} />
           </Card>
@@ -2867,19 +2873,27 @@ export function ContainersWorkspace({
             <ModalHeader>
               <h3 id="container-action-confirm-title">
                 {pendingConfirmAction === "remove"
-                  ? "컨테이너를 삭제할까요?"
-                  : `컨테이너를 ${pendingConfirmAction}할까요?`}
+                  ? translate("containers.confirm.removeTitle")
+                  : translate("containers.confirm.actionTitle", {
+                      action: pendingConfirmAction,
+                    })}
               </h3>
             </ModalHeader>
             <ModalBody>
               <p>
-                <strong>{selectedContainer.name}</strong> 컨테이너에{" "}
-                <code>{pendingConfirmAction}</code> 작업을 실행합니다.
+                <Trans
+                  i18nKey="containers.confirm.body"
+                  values={{
+                    name: selectedContainer.name,
+                    action: pendingConfirmAction,
+                  }}
+                  components={{ name: <strong />, action: <code /> }}
+                />
               </p>
             </ModalBody>
             <ModalFooter>
               <Button type="button" variant="secondary" onClick={() => setPendingConfirmAction(null)}>
-                취소
+                {translate("common.cancel")}
               </Button>
               <Button
                 type="button"
@@ -2891,7 +2905,7 @@ export function ContainersWorkspace({
                 }}
                 disabled={!!tab.pendingAction}
               >
-                {tab.pendingAction ? "실행 중..." : "확인"}
+                {translate(tab.pendingAction ? "containers.confirm.running" : "containers.confirm.confirm")}
               </Button>
             </ModalFooter>
           </ModalShell>

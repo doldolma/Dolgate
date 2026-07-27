@@ -22,6 +22,8 @@ import {
   Toolbar,
 } from '../ui';
 import { Play } from '../ui/icons';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface LogsPanelProps {
   logs: ActivityLogRecord[];
@@ -286,7 +288,7 @@ function formatBytes(value?: number | null): string | null {
 
 export function formatSessionLifecycleDuration(durationMs?: number | null): string {
   if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return '0초';
+    return t('logs.duration.zero');
   }
 
   const totalSeconds = Math.floor(durationMs / 1000);
@@ -295,12 +297,12 @@ export function formatSessionLifecycleDuration(durationMs?: number | null): stri
   const seconds = totalSeconds % 60;
 
   if (hours > 0) {
-    return `${hours}시간 ${minutes}분`;
+    return t('logs.duration.hoursMinutes', { hours, minutes });
   }
   if (minutes > 0) {
-    return `${minutes}분 ${seconds}초`;
+    return t('logs.duration.minutesSeconds', { minutes, seconds });
   }
-  return `${seconds}초`;
+  return t('logs.duration.seconds', { seconds });
 }
 
 function getSessionLifecycleSubtitle(metadata: SessionLifecycleLogMetadata): string | null {
@@ -321,25 +323,28 @@ function formatSftpCountWithBytes(label: string, count: number, bytes: number): 
     return null;
   }
   const formattedBytes = formatBytes(bytes);
-  return formattedBytes ? `${label} ${count}개 · ${formattedBytes}` : `${label} ${count}개`;
+  return formattedBytes
+    ? t('logs.sftp.countWithBytes', { label, count, bytes: formattedBytes })
+    : t('logs.sftp.count', { label, count });
 }
 
 function getSftpSummaryItems(metadata: SftpLifecycleLogMetadata): string[] {
   return [
-    formatSftpCountWithBytes('다운로드', metadata.downloadedCount, metadata.downloadedBytes),
-    formatSftpCountWithBytes('업로드', metadata.uploadedCount, metadata.uploadedBytes),
-    formatSftpCountWithBytes('원격 복사', metadata.remoteCopyCount ?? 0, metadata.remoteCopyBytes ?? 0),
-    metadata.deleteCount > 0 ? `삭제 ${metadata.deleteCount}개` : null,
-    metadata.mkdirCount > 0 ? `폴더 생성 ${metadata.mkdirCount}개` : null,
-    metadata.renameCount > 0 ? `이름 변경 ${metadata.renameCount}개` : null,
-    metadata.chmodCount > 0 ? `권한 변경 ${metadata.chmodCount}개` : null,
-    metadata.chownCount > 0 ? `소유권 변경 ${metadata.chownCount}개` : null,
-    metadata.visitedPathCount > 1 ? `경로 탐색 ${metadata.visitedPathCount}개` : null,
-    metadata.errorCount > 0 ? `오류 ${metadata.errorCount}개` : null,
+    formatSftpCountWithBytes(t('logs.sftp.download'), metadata.downloadedCount, metadata.downloadedBytes),
+    formatSftpCountWithBytes(t('logs.sftp.upload'), metadata.uploadedCount, metadata.uploadedBytes),
+    formatSftpCountWithBytes(t('logs.sftp.remoteCopy'), metadata.remoteCopyCount ?? 0, metadata.remoteCopyBytes ?? 0),
+    metadata.deleteCount > 0 ? t('logs.sftp.delete', { count: metadata.deleteCount }) : null,
+    metadata.mkdirCount > 0 ? t('logs.sftp.mkdir', { count: metadata.mkdirCount }) : null,
+    metadata.renameCount > 0 ? t('logs.sftp.rename', { count: metadata.renameCount }) : null,
+    metadata.chmodCount > 0 ? t('logs.sftp.chmod', { count: metadata.chmodCount }) : null,
+    metadata.chownCount > 0 ? t('logs.sftp.chown', { count: metadata.chownCount }) : null,
+    metadata.visitedPathCount > 1 ? t('logs.sftp.visitedPaths', { count: metadata.visitedPathCount }) : null,
+    metadata.errorCount > 0 ? t('logs.sftp.errors', { count: metadata.errorCount }) : null,
   ].filter((item): item is string => Boolean(item));
 }
 
 export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
+  const { t: translate } = useTranslation();
   const [category, setCategory] = useState<'all' | ActivityLogCategory>('all');
   const [level, setLevel] = useState<'all' | ActivityLogLevel>('all');
 
@@ -399,8 +404,8 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
       <PanelSection>
         {visibleLogs.length === 0 ? (
           <EmptyState
-            title="조건에 맞는 로그가 없습니다."
-            description="세션 연결 기록과 보안·설정 변경 기록만 여기에 남습니다."
+            title={translate('logs.empty.title')}
+            description={translate('logs.empty.description')}
           />
         ) : (
           visibleLogs.map((log) => {
@@ -459,32 +464,39 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>탐색 시작</span>
+                      <span>{translate('logs.field.browseStarted')}</span>
                       <strong>{formatLogTimestamp(containerLifecycleMetadata.startedAt)}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>탐색 종료</span>
-                      <strong>{containerLifecycleMetadata.endedAt ? formatLogTimestamp(containerLifecycleMetadata.endedAt) : '연결 중'}</strong>
+                      <span>{translate('logs.field.browseEnded')}</span>
+                      <strong>{containerLifecycleMetadata.endedAt ? formatLogTimestamp(containerLifecycleMetadata.endedAt) : translate('logs.field.connecting')}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>유지 시간</span>
+                      <span>{translate('logs.field.heldFor')}</span>
                       <strong>{formatSessionLifecycleDuration(containerLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
                   <div className="mt-[0.7rem] flex flex-wrap gap-[0.4rem]">
                     {typeof containerLifecycleMetadata.resourceCount === 'number' ? (
                       <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
-                        {containerLifecycleMetadata.workspaceKind === 'ecs-cluster' ? '서비스' : '컨테이너'} {containerLifecycleMetadata.resourceCount}개
+                        {translate('logs.field.resourceCount', {
+                          kind: translate(
+                            containerLifecycleMetadata.workspaceKind === 'ecs-cluster'
+                              ? 'logs.field.service'
+                              : 'logs.field.container',
+                          ),
+                          count: containerLifecycleMetadata.resourceCount,
+                        })}
                       </span>
                     ) : null}
                     {containerLifecycleMetadata.refreshCount > 0 ? (
                       <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
-                        새로고침 {containerLifecycleMetadata.refreshCount}회
+                        {translate('logs.field.refreshCount', { count: containerLifecycleMetadata.refreshCount })}
                       </span>
                     ) : null}
                     {containerLifecycleMetadata.errorCount > 0 ? (
                       <span className="rounded-full bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.9rem] text-[var(--text-soft)]">
-                        오류 {containerLifecycleMetadata.errorCount}회
+                        {translate('logs.field.errorCount', { count: containerLifecycleMetadata.errorCount })}
                       </span>
                     ) : null}
                   </div>
@@ -518,11 +530,11 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-2">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>실행 시각</span>
+                      <span>{translate('logs.field.ranAt')}</span>
                       <strong>{formatLogTimestamp(containerActionMetadata.startedAt)}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>실행 시간</span>
+                      <span>{translate('logs.field.runDuration')}</span>
                       <strong>{formatSessionLifecycleDuration(containerActionMetadata.durationMs)}</strong>
                     </div>
                   </div>
@@ -567,15 +579,15 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 시작</span>
+                      <span>{translate('logs.field.connectStarted')}</span>
                       <strong>{formatLogTimestamp(sessionLifecycleMetadata.connectedAt)}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 종료</span>
-                      <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : '연결 중'}</strong>
+                      <span>{translate('logs.field.connectEnded')}</span>
+                      <strong>{sessionLifecycleMetadata.disconnectedAt ? formatLogTimestamp(sessionLifecycleMetadata.disconnectedAt) : translate('logs.field.connecting')}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 시간</span>
+                      <span>{translate('logs.field.connectDuration')}</span>
                       <strong>{formatSessionLifecycleDuration(sessionLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
@@ -603,15 +615,15 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 시작</span>
+                      <span>{translate('logs.field.connectStarted')}</span>
                       <strong>{formatLogTimestamp(sftpLifecycleMetadata.connectedAt ?? sftpLifecycleMetadata.startedAt)}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 종료</span>
-                      <strong>{sftpLifecycleMetadata.endedAt ? formatLogTimestamp(sftpLifecycleMetadata.endedAt) : '연결 중'}</strong>
+                      <span>{translate('logs.field.connectEnded')}</span>
+                      <strong>{sftpLifecycleMetadata.endedAt ? formatLogTimestamp(sftpLifecycleMetadata.endedAt) : translate('logs.field.connecting')}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>연결 시간</span>
+                      <span>{translate('logs.field.connectDuration')}</span>
                       <strong>{formatSessionLifecycleDuration(sftpLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>
@@ -626,7 +638,7 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   ) : null}
                   {sftpLifecycleMetadata.lastPath ? (
                     <div className="mt-[0.7rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] px-[0.9rem] py-[0.7rem] text-[0.9rem] text-[var(--text-soft)]">
-                      마지막 경로: {sftpLifecycleMetadata.lastPath}
+                      {translate('logs.sftp.lastPath', { path: sftpLifecycleMetadata.lastPath })}
                     </div>
                   ) : null}
                   {sftpLifecycleMetadata.endReason ? (
@@ -660,15 +672,15 @@ export function LogsPanel({ logs, onClear, onOpenReplay }: LogsPanelProps) {
                   </div>
                   <div className="mt-[0.9rem] grid gap-[0.7rem] md:grid-cols-3">
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>포워딩 시작</span>
+                      <span>{translate('logs.field.forwardStarted')}</span>
                       <strong>{formatLogTimestamp(portForwardLifecycleMetadata.startedAt)}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>포워딩 종료</span>
-                      <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : '포워딩 중'}</strong>
+                      <span>{translate('logs.field.forwardEnded')}</span>
+                      <strong>{portForwardLifecycleMetadata.stoppedAt ? formatLogTimestamp(portForwardLifecycleMetadata.stoppedAt) : translate('logs.field.forwarding')}</strong>
                     </div>
                     <div className="grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem]">
-                      <span>유지 시간</span>
+                      <span>{translate('logs.field.heldFor')}</span>
                       <strong>{formatSessionLifecycleDuration(portForwardLifecycleMetadata.durationMs)}</strong>
                     </div>
                   </div>

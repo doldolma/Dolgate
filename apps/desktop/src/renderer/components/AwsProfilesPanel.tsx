@@ -30,13 +30,15 @@ import {
   SelectField,
   StatusBadge,
 } from '../ui'
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface AwsProfilesPanelProps {
   hosts: HostRecord[]
 }
 
 const AWS_PROFILE_DETAILS_CONCURRENCY = 3
-const AWS_PROFILE_DETAIL_ERROR_MESSAGE = 'AWS 프로필 상세 정보를 불러오지 못했습니다.'
+const AWS_PROFILE_DETAIL_ERROR_KEY = 'awsProfiles.error.detailLoadFailed'
 
 type AwsProfilesPanelCacheState = {
   profiles: AwsProfileSummary[]
@@ -180,12 +182,12 @@ function getAwsProfileStatusLabel(
   hasError = false,
 ): string {
   if (hasError) {
-    return '조회 실패'
+    return t('awsProfiles.status.lookupFailed')
   }
   if (!details) {
-    return '확인 중'
+    return t('awsProfiles.status.checking')
   }
-  return details.isAuthenticated ? '인증됨' : '인증 필요'
+  return t(details.isAuthenticated ? 'awsProfiles.status.authenticated' : 'awsProfiles.status.authRequired')
 }
 
 function formatExternalImportSummary(input: {
@@ -194,12 +196,12 @@ function formatExternalImportSummary(input: {
 }): string {
   const parts: string[] = []
   if (input.importedProfileNames.length > 0) {
-    parts.push(`가져온 프로필 ${input.importedProfileNames.length}개`)
+    parts.push(t('awsProfiles.import.imported', { count: input.importedProfileNames.length }))
   }
   if (input.skippedProfileNames.length > 0) {
-    parts.push(`건너뜀 ${input.skippedProfileNames.length}개`)
+    parts.push(t('awsProfiles.import.skipped', { count: input.skippedProfileNames.length }))
   }
-  return parts.length > 0 ? `${parts.join(', ')}.` : '가져온 프로필이 없습니다.'
+  return parts.length > 0 ? `${parts.join(', ')}.` : t('awsProfiles.import.none')
 }
 
 function renderReferenceList(items: string[]) {
@@ -246,6 +248,7 @@ function canEditAwsProfileRegion(kind: AwsProfileDetails['kind']): boolean {
 }
 
 export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
+  const { t: translate } = useTranslation();
   const {
     getSyncStatus,
     listAwsProfiles,
@@ -375,7 +378,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               [profile.name]:
                 error instanceof Error
                   ? error.message
-                  : AWS_PROFILE_DETAIL_ERROR_MESSAGE,
+                  : translate(AWS_PROFILE_DETAIL_ERROR_KEY),
             }))
           } finally {
             if (requestIdRef.current === requestId) {
@@ -436,7 +439,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       setLoadError(
         error instanceof Error
           ? error.message
-          : 'AWS 프로필 목록을 불러오지 못했습니다.',
+          : translate('awsProfiles.error.listLoadFailed'),
       )
     } finally {
       if (requestIdRef.current === requestId) {
@@ -513,7 +516,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       await refreshProfiles(profileDraft.profileName)
     } catch (error) {
       setProfileFormError(
-        normalizeErrorMessage(error, 'AWS 프로필을 저장하지 못했습니다.'),
+        normalizeErrorMessage(error, translate('awsProfiles.error.saveFailed')),
       )
     } finally {
       setIsSavingProfile(false)
@@ -547,7 +550,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       await refreshProfiles(profileName)
     } catch (error) {
       setRegionError(
-        normalizeErrorMessage(error, 'AWS 프로필 기본 Region을 저장하지 못했습니다.'),
+        normalizeErrorMessage(error, translate('awsProfiles.error.regionSaveFailed')),
       )
     } finally {
       setIsSavingRegion(false)
@@ -585,7 +588,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       await refreshProfiles(renameDraft)
     } catch (error) {
       setRenameError(
-        normalizeErrorMessage(error, 'AWS 프로필명을 변경하지 못했습니다.'),
+        normalizeErrorMessage(error, translate('awsProfiles.error.renameFailed')),
       )
     } finally {
       setIsRenaming(false)
@@ -611,7 +614,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       await refreshProfiles(nextSelection)
     } catch (error) {
       setDeleteError(
-        normalizeErrorMessage(error, 'AWS 프로필을 삭제하지 못했습니다.'),
+        normalizeErrorMessage(error, translate('awsProfiles.error.deleteFailed')),
       )
     } finally {
       setIsDeleting(false)
@@ -631,7 +634,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
       await refreshProfiles(selectedProfileName)
     } catch (error) {
       setLoadError(
-        normalizeErrorMessage(error, 'AWS SSO 로그인을 시작하지 못했습니다.'),
+        normalizeErrorMessage(error, translate('awsProfiles.error.ssoLoginFailed')),
       )
     } finally {
       setIsLoggingIn(false)
@@ -645,7 +648,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <SectionLabel>AWS</SectionLabel>
           <h3 className="m-0">Profiles</h3>
           <p className="mb-0 mt-2 text-[0.9rem] text-[var(--text-soft)]">
-            앱 전용 AWS CLI 프로필을 확인하고 생성, 수정, 이름 변경, 삭제할 수 있습니다. 기존 로컬 AWS CLI 프로필은 가져오기 후 사용할 수 있습니다.
+            {translate('awsProfiles.intro')}
           </p>
         </div>
 
@@ -665,7 +668,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               void refreshProfiles(selectedProfileName)
             }}
           >
-            새로고침
+            {translate('awsProfiles.action.refresh')}
           </Button>
           <Button
             variant="secondary"
@@ -679,7 +682,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             }
             onClick={() => setIsExternalImportOpen(true)}
           >
-            로컬 AWS CLI에서 가져오기
+            {translate('awsProfiles.action.importFromCli')}
           </Button>
           <Button
             variant="primary"
@@ -693,7 +696,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             }
             onClick={openCreateDialog}
           >
-            새 프로필
+            {translate('awsProfiles.action.newProfile')}
           </Button>
         </div>
       </div>
@@ -710,7 +713,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
 
       {awsProfilesServerSupport === 'unsupported' ? (
         <NoticeCard tone="warning">
-          현재 서버는 AWS 프로필 동기화를 아직 지원하지 않습니다. 서버를 업데이트하기 전까지 이 기기에서만 저장됩니다.
+          {translate('awsProfiles.syncUnsupported')}
         </NoticeCard>
       ) : null}
 
@@ -722,13 +725,13 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           </div>
 
           {isLoadingProfileList && profiles.length === 0 ? (
-            <NoticeCard tone="info">AWS 프로필 목록을 불러오는 중입니다.</NoticeCard>
+            <NoticeCard tone="info">{translate('awsProfiles.loadingList')}</NoticeCard>
           ) : null}
 
           {!isLoadingProfileList && profiles.length === 0 ? (
             <EmptyState
-              title="등록된 AWS 프로필이 없습니다."
-              description="새 프로필을 생성하면 기존 AWS import와 SSM 연결 흐름에서 바로 사용할 수 있습니다."
+              title={translate('awsProfiles.empty.title')}
+              description={translate('awsProfiles.empty.description')}
             />
           ) : null}
 
@@ -769,7 +772,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                     </StatusBadge>
 
                     <span className="rounded-full border border-[color-mix(in_srgb,var(--border)_78%,white_22%)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-[0.7rem] py-[0.4rem] text-[0.82rem] font-medium text-[var(--text-soft)]">
-                      {detailError ? '조회 실패' : details?.configuredRegion ?? 'Region 없음'}
+                      {detailError ? translate('awsProfiles.status.lookupFailed') : details?.configuredRegion ?? translate('awsProfiles.detail.noRegion')}
                     </span>
                   </div>
 
@@ -778,7 +781,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       Account
                     </span>
                     <span className="break-all text-[0.9rem] font-medium text-[var(--text-soft)]">
-                      {detailError ? '조회 실패' : details?.accountId ?? '인증 후 확인 가능'}
+                      {detailError ? translate('awsProfiles.status.lookupFailed') : details?.accountId ?? translate('awsProfiles.detail.accountAfterAuth')}
                     </span>
                   </div>
                 </button>
@@ -790,13 +793,13 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
         <section className="grid content-start gap-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.3rem] shadow-[var(--shadow-soft)]">
           {!selectedProfileName ? (
             <EmptyState
-              title="선택된 프로필이 없습니다."
-              description="왼쪽 목록에서 AWS 프로필을 선택하면 상세 정보와 관리 액션이 표시됩니다."
+              title={translate('awsProfiles.empty.noSelectionTitle')}
+              description={translate('awsProfiles.empty.noSelectionDescription')}
             />
           ) : null}
 
           {selectedProfileName && !selectedDetails && !selectedDetailError ? (
-            <NoticeCard tone="info">AWS 프로필 상세 정보를 불러오는 중입니다.</NoticeCard>
+            <NoticeCard tone="info">{translate('awsProfiles.loadingDetails')}</NoticeCard>
           ) : null}
 
           {selectedDetailError ? (
@@ -820,8 +823,8 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   </div>
                   <p className="m-0 text-[0.9rem] text-[var(--text-soft)]">
                     {selectedDetails.isAuthenticated
-                      ? '현재 인증 가능한 상태입니다.'
-                      : selectedDetails.errorMessage ?? '추가 로그인이 필요하거나 자격 증명을 다시 확인해야 합니다.'}
+                      ? translate('awsProfiles.detail.authOk')
+                      : selectedDetails.errorMessage ?? translate('awsProfiles.detail.authNeeded')}
                   </p>
                 </div>
 
@@ -843,7 +846,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       setIsRenameOpen(true)
                     }}
                   >
-                    이름 변경
+                    {translate('awsProfiles.action.rename')}
                   </Button>
 
                   {canEditAwsProfileRegion(selectedDetails.kind) ? (
@@ -860,7 +863,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       }
                       onClick={openRegionDialog}
                     >
-                      기본 Region 변경
+                      {translate('awsProfiles.action.changeRegion')}
                     </Button>
                   ) : null}
 
@@ -878,7 +881,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       }
                       onClick={openEditDialog}
                     >
-                      수정
+                      {translate('awsProfiles.action.edit')}
                     </Button>
                   ) : null}
 
@@ -898,7 +901,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                         void handleLogin()
                       }}
                     >
-                      {isLoggingIn ? '로그인 시작 중...' : 'AWS SSO 로그인'}
+                      {translate(isLoggingIn ? 'awsProfiles.action.ssoLoggingIn' : 'awsProfiles.action.ssoLogin')}
                     </Button>
                   ) : null}
 
@@ -918,31 +921,37 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                       setIsDeleteOpen(true)
                     }}
                   >
-                    삭제
+                    {translate('common.delete')}
                   </Button>
                 </div>
               </div>
 
               {selectedDetails.missingTools && selectedDetails.missingTools.length > 0 ? (
                 <NoticeCard tone="warning">
-                  누락된 도구: {selectedDetails.missingTools.join(', ')}
+                  {translate('awsProfiles.detail.missingTools', { tools: selectedDetails.missingTools.join(', ') })}
                 </NoticeCard>
               ) : null}
 
               {selectedHostReferences.length > 0 ? (
-                <NoticeCard title="이 프로필을 참조하는 host" tone="warning">
+                <NoticeCard title={translate('awsProfiles.detail.hostReferences')} tone="warning">
                   {renderHostReferenceList(selectedHostReferences)}
                 </NoticeCard>
               ) : null}
 
               {selectedDetails.referencedByProfileNames.length > 0 ? (
-                <NoticeCard title="이 프로필을 source_profile로 참조하는 로컬 프로필" tone="warning">
+                <NoticeCard
+                  title={translate('awsProfiles.detail.sourceProfileReferences')}
+                  tone="warning"
+                >
                   {renderReferenceList(selectedDetails.referencedByProfileNames)}
                 </NoticeCard>
               ) : null}
 
               <dl className="grid gap-3 md:grid-cols-2">
-                <ProfileField label="기본 Region" value={selectedDetails.configuredRegion ?? null} />
+                <ProfileField
+                  label={translate('awsProfiles.detail.defaultRegion')}
+                  value={selectedDetails.configuredRegion ?? null}
+                />
                 <ProfileField label="Account" value={selectedDetails.accountId ?? null} />
                 <ProfileField label="ARN" value={selectedDetails.arn ?? null} />
                 <ProfileField label="Access Key" value={selectedDetails.maskedAccessKeyId ?? null} />
@@ -956,7 +965,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 <ProfileField label="credential_process" value={selectedDetails.credentialProcess ?? null} />
                 <ProfileField
                   label="Session Token"
-                  value={selectedDetails.hasSessionToken ? '설정됨' : null}
+                  value={selectedDetails.hasSessionToken ? translate('awsProfiles.detail.sessionTokenSet') : null}
                 />
               </dl>
             </>
@@ -970,12 +979,12 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             <ModalHeader>
               <div className="grid gap-1">
                 <strong>
-                  {profileFormMode === 'create' ? 'AWS 프로필 생성' : 'AWS 프로필 수정'}
+                  {translate(profileFormMode === 'create' ? 'awsProfiles.form.createTitle' : 'awsProfiles.form.editTitle')}
                 </strong>
                 <span className="text-[0.9rem] text-[var(--text-soft)]">
                   {profileFormMode === 'create'
-                    ? '앱 전용 AWS CLI 프로필로 저장합니다.'
-                    : 'Static access key 기반 프로필만 수정할 수 있습니다.'}
+                    ? translate('awsProfiles.form.createDescription')
+                    : translate('awsProfiles.form.editDescription')}
                 </span>
               </div>
             </ModalHeader>
@@ -983,11 +992,11 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               {profileFormMode === 'create' ? (
                 <AwsProfileCreateWizard
                   testId="aws-profiles-create-form"
-                  title="새 AWS 프로필 생성"
+                  title={translate('awsProfiles.form.wizardTitle')}
                   showTitle={false}
                   descriptions={[
                     ...(awsProfilesServerSupport === 'unsupported'
-                      ? ['현재 서버는 AWS 프로필 동기화를 지원하지 않아 이 기기에서만 저장됩니다.']
+                      ? [translate('awsProfiles.form.wizardSyncUnsupported')]
                       : []),
                   ]}
                   profiles={profiles}
@@ -999,18 +1008,18 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               ) : (
                 <AwsStaticProfileForm
                   testId="aws-profiles-edit-form"
-                  title="Static AWS 프로필 수정"
-                  descriptions={['수정 전 STS 호출로 자격 증명을 다시 검증합니다.']}
+                  title={translate('awsProfiles.form.staticEditTitle')}
+                  descriptions={[translate('awsProfiles.form.staticEditDescription')]}
                   draft={profileDraft}
                   error={profileFormError}
                   isSubmitting={isSavingProfile}
-                  submitLabel="프로필 업데이트"
-                  submittingLabel="업데이트 중..."
-                  profileNameLabel="프로필명"
+                  submitLabel={translate('awsProfiles.form.updateSubmit')}
+                  submittingLabel={translate('awsProfiles.form.updateSubmitting')}
+                  profileNameLabel={translate('awsProfiles.form.profileName')}
                   profileNameEditable={false}
                   accessKeyHelpText={
                     selectedDetails?.maskedAccessKeyId
-                      ? `현재 저장된 access key: ${selectedDetails.maskedAccessKeyId}`
+                      ? translate('awsProfiles.form.currentAccessKey', { key: selectedDetails.maskedAccessKeyId })
                       : null
                   }
                   onChange={setProfileDraft}
@@ -1030,21 +1039,21 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <ModalShell size="md">
             <ModalHeader>
               <div className="grid gap-1">
-                <strong>기본 Region 변경</strong>
+                <strong>{translate('awsProfiles.region.title')}</strong>
                 <span className="text-[0.9rem] text-[var(--text-soft)]">
-                  앱 전용 AWS 프로필의 기본 Region만 저장합니다.
+                  {translate('awsProfiles.region.description')}
                 </span>
               </div>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-              <FieldGroup label="기본 Region">
+              <FieldGroup label={translate('awsProfiles.region.label')}>
                 <SelectField
-                  aria-label="기본 Region"
+                  aria-label={translate('awsProfiles.region.label')}
                   value={regionDraft}
                   onChange={(event) => setRegionDraft(event.target.value)}
                   disabled={isSavingRegion}
                 >
-                  <option value="">Region 없음</option>
+                  <option value="">{translate('awsProfiles.region.none')}</option>
                   {AWS_PROFILE_REGION_OPTIONS.map((region) => (
                     <option key={region} value={region}>
                       {region}
@@ -1065,7 +1074,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 disabled={isSavingRegion}
                 onClick={() => setIsRegionOpen(false)}
               >
-                취소
+                {translate('common.cancel')}
               </Button>
               <Button
                 variant="primary"
@@ -1074,7 +1083,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   void handleSaveRegion()
                 }}
               >
-                {isSavingRegion ? '저장 중...' : 'Region 저장'}
+                {translate(isSavingRegion ? 'awsProfiles.region.saving' : 'awsProfiles.region.save')}
               </Button>
             </ModalFooter>
           </ModalShell>
@@ -1086,16 +1095,16 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <ModalShell size="md">
             <ModalHeader>
               <div className="grid gap-1">
-                <strong>프로필명 변경</strong>
+                <strong>{translate('awsProfiles.rename.title')}</strong>
                 <span className="text-[0.9rem] text-[var(--text-soft)]">
-                  로컬 AWS CLI 설정 파일의 프로필명만 변경합니다.
+                  {translate('awsProfiles.rename.description')}
                 </span>
               </div>
             </ModalHeader>
             <ModalBody className="grid gap-4">
-              <FieldGroup label="새 프로필명">
+              <FieldGroup label={translate('awsProfiles.rename.newNameLabel')}>
                 <Input
-                  aria-label="새 프로필명"
+                  aria-label={translate('awsProfiles.rename.newNameLabel')}
                   value={renameDraft}
                   onChange={(event) => setRenameDraft(event.target.value)}
                   disabled={isRenaming}
@@ -1103,15 +1112,15 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
               </FieldGroup>
 
               {selectedHostReferences.length > 0 ? (
-                <NoticeCard title="주의" tone="warning">
-                  현재 앱의 host가 이 프로필을 참조하고 있습니다. 이름을 바꾸면 연결된 host의 표시용 프로필명도 함께 갱신됩니다.
+                <NoticeCard title={translate('awsProfiles.rename.warningTitle')} tone="warning">
+                  {translate('awsProfiles.rename.warningBody')}
                   {renderHostReferenceList(selectedHostReferences)}
                 </NoticeCard>
               ) : null}
 
               {selectedDetails.referencedByProfileNames.length > 0 ? (
-                <NoticeCard title="참고" tone="warning">
-                  다음 로컬 프로필의 `source_profile` 참조는 새 이름으로 자동 갱신됩니다.
+                <NoticeCard title={translate('awsProfiles.rename.noteTitle')} tone="warning">
+                  {translate('awsProfiles.rename.noteBody')}
                   {renderReferenceList(selectedDetails.referencedByProfileNames)}
                 </NoticeCard>
               ) : null}
@@ -1124,7 +1133,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             </ModalBody>
             <ModalFooter>
               <Button variant="secondary" disabled={isRenaming} onClick={() => setIsRenameOpen(false)}>
-                취소
+                {translate('common.cancel')}
               </Button>
               <Button
                 variant="primary"
@@ -1133,7 +1142,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   void handleRenameProfile()
                 }}
               >
-                {isRenaming ? '변경 중...' : '프로필명 변경'}
+                {translate(isRenaming ? 'awsProfiles.rename.submitting' : 'awsProfiles.rename.submit')}
               </Button>
             </ModalFooter>
           </ModalShell>
@@ -1145,31 +1154,34 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
           <ModalShell size="md">
             <ModalHeader>
               <div className="grid gap-1">
-                <strong>프로필 삭제</strong>
+                <strong>{translate('awsProfiles.delete.title')}</strong>
                 <span className="text-[0.9rem] text-[var(--text-soft)]">
-                  로컬 AWS CLI 설정 파일에서 이 프로필을 제거합니다.
+                  {translate('awsProfiles.delete.description')}
                 </span>
               </div>
             </ModalHeader>
             <ModalBody className="grid gap-4">
               <NoticeCard title={selectedDetails.profileName} tone="warning">
-                삭제 후에는 이 프로필을 참조하던 host가 프로필 없음 상태가 될 수 있습니다.
+                {translate('awsProfiles.delete.warning')}
               </NoticeCard>
 
               {selectedHostReferences.length > 0 ? (
-                <NoticeCard title="이 프로필을 쓰는 host" tone="warning">
+                <NoticeCard title={translate('awsProfiles.delete.hostReferences')} tone="warning">
                   {renderHostReferenceList(selectedHostReferences)}
                 </NoticeCard>
               ) : null}
 
               {selectedDetails.referencedByProfileNames.length > 0 ? (
-                <NoticeCard title="이 프로필을 source_profile로 참조하는 로컬 프로필" tone="warning">
+                <NoticeCard
+                  title={translate('awsProfiles.detail.sourceProfileReferences')}
+                  tone="warning"
+                >
                   {renderReferenceList(selectedDetails.referencedByProfileNames)}
                 </NoticeCard>
               ) : null}
 
               {selectedDetails.orphanedSsoSessionName ? (
-                <NoticeCard title="함께 삭제될 sso-session" tone="warning">
+                <NoticeCard title={translate('awsProfiles.delete.ssoSessions')} tone="warning">
                   <span>{selectedDetails.orphanedSsoSessionName}</span>
                 </NoticeCard>
               ) : null}
@@ -1182,7 +1194,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
             </ModalBody>
             <ModalFooter>
               <Button variant="secondary" disabled={isDeleting} onClick={() => setIsDeleteOpen(false)}>
-                취소
+                {translate('common.cancel')}
               </Button>
               <Button
                 variant="danger"
@@ -1191,7 +1203,7 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                   void handleDeleteProfile()
                 }}
               >
-                {isDeleting ? '삭제 중...' : '프로필 삭제'}
+                {translate(isDeleting ? 'awsProfiles.delete.submitting' : 'awsProfiles.delete.submit')}
               </Button>
             </ModalFooter>
           </ModalShell>

@@ -12,6 +12,7 @@ import type {
 } from "./context";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import { retryAwsSsmSshOperation } from "./coordinators/aws-ssm-ssh-retry";
+import { t } from '../i18n';
 
 const AWS_EC2_SSH_PROGRESS_ENDPOINT_PREFIX = "aws-ec2-ssh:";
 
@@ -73,7 +74,7 @@ export async function connectAwsEc2OverSsm(
   const sshPort = getAwsEc2HostSshPort(hydratedHost);
   emitProgress(
     "probing-host-key",
-    `${hydratedHost.label} 호스트 키 신뢰 정보를 확인하는 중입니다.`,
+    t('ssmSsh.checkingHostKeyTrust', { label: hydratedHost.label }),
     hydratedHost.id,
   );
   const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
@@ -88,16 +89,16 @@ export async function connectAwsEc2OverSsm(
   if (!sshUsername) {
     throw new Error(
       hydratedHost.awsSshMetadataError ||
-        "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+        t('pfIpc.sshUsernameUnknown'),
     );
   }
   const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
   if (!availabilityZone) {
-    throw new Error("Availability Zone을 확인하지 못했습니다.");
+    throw new Error(t('pfIpc.azUnknown'));
   }
   emitProgress(
     "generating-key",
-    "임시 SSH 키를 생성하는 중입니다.",
+    t('ssmSsh.generatingTempKey'),
     hydratedHost.id,
   );
   const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
@@ -138,7 +139,7 @@ export async function connectAwsEc2OverSsm(
     // ephemeral public key in the start message; ssh-core keeps the private key.
     emitProgress(
       "opening-tunnel",
-      "서버 프록시로 EC2 공개 키 주입과 SSM 터널 생성을 준비하는 중입니다.",
+      t('ssmSsh.preparingProxy'),
       hydratedHost.id,
     );
     const startMessage = await buildAwsServerProxyStartMessage(ctx.awsService, {
@@ -153,7 +154,7 @@ export async function connectAwsEc2OverSsm(
     return runWithAwsServerProxyAuthRetry(ctx.authService, (accessToken) => {
       emitProgress(
         "connecting-sftp",
-        `${hydratedHost.label} SSH 세션을 시작하는 중입니다.`,
+        t('ssmSsh.startingSession', { label: hydratedHost.label }),
         hydratedHost.id,
       );
       const payload = {
@@ -175,7 +176,7 @@ export async function connectAwsEc2OverSsm(
   // Direct: push the EIC key ourselves and open a local SSM tunnel to ride SSH over.
   emitProgress(
     "sending-public-key",
-    "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+    t('ssmSsh.pushingKey'),
     hydratedHost.id,
   );
   await ctx.awsService.sendSshPublicKey({
@@ -188,7 +189,7 @@ export async function connectAwsEc2OverSsm(
   });
   emitProgress(
     "opening-tunnel",
-    "SSH 연결용 내부 SSM 터널을 여는 중입니다.",
+    t('ssmSsh.openingTunnel'),
     hydratedHost.id,
   );
   const bindPort = await ctx.reserveLoopbackPort();
@@ -204,7 +205,7 @@ export async function connectAwsEc2OverSsm(
   try {
     emitProgress(
       "connecting-sftp",
-      `${hydratedHost.label} SSH 세션을 시작하는 중입니다.`,
+      t('ssmSsh.startingSession', { label: hydratedHost.label }),
       hydratedHost.id,
     );
     const connection = await retryAwsSsmSshOperation(() => {

@@ -17,6 +17,7 @@ import type {
   TermiusProbeStatus
 } from '@shared';
 import { normalizeGroupPath } from '@shared';
+import { t } from './i18n';
 
 const require = createRequire(import.meta.url);
 
@@ -347,27 +348,27 @@ export function collectSelectedTermiusGroupPaths(snapshot: TermiusSnapshot, inpu
 }
 
 function normalizeProbeStatus(error: unknown): { status: TermiusProbeStatus; message: string } {
-  const message = error instanceof Error ? error.message : 'Termius 데이터를 읽지 못했습니다.';
+  const message = error instanceof Error ? error.message : t('termiusSvc.readFailed');
   const normalized = message.toLowerCase();
 
   if (normalized.includes('unsupported platform')) {
     return {
       status: 'unsupported',
-      message: 'Termius import는 현재 macOS와 Windows에서만 지원합니다.'
+      message: t('termiusSvc.platformUnsupported')
     };
   }
 
   if (normalized.includes('termius installation was not found') || normalized.includes('native module paths were not found')) {
     return {
       status: 'not-installed',
-      message: '로컬 Termius 설치를 찾지 못했습니다.'
+      message: t('termiusSvc.notInstalled')
     };
   }
 
   if (normalized.includes('termius data directory was not found')) {
     return {
       status: 'no-data',
-      message: '로컬 Termius 데이터 디렉터리를 찾지 못했습니다.'
+      message: t('termiusSvc.noDataDir')
     };
   }
 
@@ -602,7 +603,7 @@ export class TermiusImportService {
         return {
           status: 'no-data',
           snapshotId: null,
-          message: '로컬 Termius 데이터에서 가져올 그룹이나 호스트를 찾지 못했습니다.',
+          message: t('termiusSvc.nothingToImport'),
           meta: {
             counts,
             warnings,

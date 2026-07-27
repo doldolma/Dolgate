@@ -29,6 +29,7 @@ import { getKeyboardLayoutSearchQueries } from '../../lib/keyboard-layout-search
 import { useResponsiveCardGrid } from '../../lib/useResponsiveCardGrid';
 import type { ParsedQuickSshCommand } from '../../lib/quick-connect';
 import type { DesktopPlatform } from '../DesktopWindowControls';
+import { t } from '../../i18n';
 
 export const HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX = 235;
 export const HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX = 460;
@@ -60,10 +61,10 @@ export function getHostBrowserEmptyCalloutMessage(
   searchQuery: string,
 ): string {
   return hostCount === 0
-    ? 'New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.'
+    ? t('hostBrowserEmpty.noHostsHint')
     : searchQuery
-      ? '검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.'
-      : 'New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.';
+      ? t('hostBrowserEmpty.searchHint')
+      : t('hostBrowserEmpty.addHint');
 }
 
 export type HostSortKey = 'name' | 'recent' | 'group' | 'lastConnected';
@@ -644,10 +645,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     : 'Search hosts or instances';
   const emptyMessage =
     hosts.length === 0
-      ? '아직 등록된 호스트가 없습니다.'
+      ? t('hostBrowserEmpty.noHosts')
       : searchQuery
-        ? '검색 결과가 없습니다.'
-        : '이 위치에는 아직 호스트가 없습니다.';
+        ? t('hostBrowserEmpty.noResults')
+        : t('hostBrowserEmpty.noHostsHere');
   const groupDeleteDialogVariant = groupDeleteTarget
     ? getGroupDeleteDialogVariant(groupDeleteTarget.childGroupCount, groupDeleteTarget.hostCount)
     : null;
@@ -826,7 +827,7 @@ export function useHostBrowser(params: UseHostBrowserParams) {
       title:
         targetHosts.length === 1
           ? targetHosts[0].label
-          : `선택한 ${targetHosts.length}개 호스트`,
+          : t('hostBrowserEmpty.selectedHosts', { count: targetHosts.length }),
     };
   }
 

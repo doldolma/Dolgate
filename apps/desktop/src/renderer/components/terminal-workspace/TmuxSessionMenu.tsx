@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { TmuxSessionInfo } from '../../store/types';
 import { cn } from '../../lib/cn';
 import { ChevronDown, ChevronUp } from '../../ui/icons';
+import { useTranslation } from 'react-i18next';
 
 interface TmuxSessionMenuProps {
   /** 원격 tmux 세션 목록. */
@@ -31,6 +32,7 @@ export function TmuxSessionMenu({
   onKillSession,
   onRefresh,
 }: TmuxSessionMenuProps) {
+  const { t: translate } = useTranslation();
   const [open, setOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -115,17 +117,17 @@ export function TmuxSessionMenu({
                   setOpen(false);
                 }
               }}
-              placeholder="새 세션 이름 입력 후 Enter"
-              aria-label="새 tmux 세션 이름"
+              placeholder={translate('tmuxMenu.newSessionPlaceholder')}
+              aria-label={translate('tmuxMenu.newSessionAria')}
               className="w-full rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.4rem] py-[0.25rem] text-[0.7rem] text-[var(--text)] outline-none focus:border-[var(--accent,#6aa84f)]"
             />
           </div>
           <div className="border-b border-[var(--border)] px-[0.7rem] py-[0.25rem] text-[0.7rem] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-            원격 tmux 세션
+            {translate('tmuxMenu.remoteSessions')}
           </div>
           {sessions.length === 0 ? (
             <div className="px-[0.7rem] py-[0.4rem] text-[0.7rem] text-[var(--text-muted)]">
-              감지된 세션이 없습니다
+              {translate('tmuxMenu.noSessions')}
             </div>
           ) : (
             <ul className="max-h-[14rem] overflow-y-auto py-[0.25rem]">
@@ -158,16 +160,16 @@ export function TmuxSessionMenu({
                         {session.name}
                       </span>
                       <span className="shrink-0 text-[0.7rem] text-[var(--text-muted)]">
-                        창 {session.windows}
+                        {translate('tmuxMenu.windows', { count: session.windows })}
                       </span>
                       {isActive ? (
                         <span className="shrink-0 text-[0.7rem] font-medium text-[var(--accent)]">
-                          현재
+                          {translate('tmuxMenu.current')}
                         </span>
                       ) : session.attached ? (
                         <span
                           className="shrink-0 rounded-[3px] border border-[var(--border)] px-[0.25rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
-                          title="다른 클라이언트가 attach 중"
+                          title={translate('tmuxMenu.attachedElsewhere')}
                         >
                           attached
                         </span>
@@ -176,8 +178,8 @@ export function TmuxSessionMenu({
                     {onKillSession ? (
                       <button
                         type="button"
-                        title="세션 종료 (kill-session)"
-                        aria-label={`${session.name} 세션 종료`}
+                        title={translate('tmuxMenu.killTitle')}
+                        aria-label={translate('tmuxMenu.killAria', { name: session.name })}
                         onClick={() => onKillSession(session.name)}
                         className="mr-[0.4rem] shrink-0 rounded-[3px] px-[0.25rem] py-[0.25rem] text-[0.76rem] leading-none text-[var(--text-muted)] opacity-0 transition-opacity hover:text-[var(--danger,#d9534f)] group-hover/sess:opacity-100"
                       >

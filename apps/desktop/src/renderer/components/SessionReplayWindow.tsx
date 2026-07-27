@@ -31,6 +31,8 @@ import {
 } from "../lib/terminal-presets";
 import { Badge, Button, EmptyState } from '../ui';
 import { ChevronDown, ChevronLeft, ChevronRight } from '../ui/icons';
+import { useTranslation } from "react-i18next";
+import { t } from "../i18n";
 
 /** 스캔 전에도 자식 memo 가 깨지지 않도록 빈 목록은 고정 참조를 쓴다. */
 const NO_COMMAND_BLOCKS: readonly ReplayCommandBlock[] = [];
@@ -157,6 +159,7 @@ export function SessionReplayWindow({
 }: {
   recordingId: string;
 }) {
+  const { t: translate } = useTranslation();
   const { getDesktopSettings, getSessionReplay } = useSessionReplayController();
   const [recording, setRecording] = useState<SessionReplayRecording | null>(null);
   // 명령 목록은 녹화 로드 직후 한 번의 사전 스캔으로 채운다(재생을 기다리지 않는다).
@@ -338,7 +341,7 @@ export function SessionReplayWindow({
         }
       })
       .catch((error: unknown) => {
-        console.error('[replay] 명령 스캔 실패', error);
+        console.error('[replay]', t('replay.scanFailed'), error);
         if (!disposed) {
           setCommandScan({ blocks: [], shellIntegrationDetected: false });
         }
@@ -366,7 +369,7 @@ export function SessionReplayWindow({
         setErrorMessage(
           error instanceof Error
             ? error.message
-            : "세션 replay를 불러오지 못했습니다.",
+            : translate('replay.loadFailed'),
         );
       })
       .finally(() => {
@@ -415,8 +418,8 @@ export function SessionReplayWindow({
       setRuntime(null);
       setRuntimeErrorMessage(
         error instanceof Error
-          ? `세션 replay 터미널을 초기화하지 못했습니다. ${error.message}`
-          : "세션 replay 터미널을 초기화하지 못했습니다.",
+          ? translate('replay.terminalInitFailedWith', { message: error.message })
+          : translate('replay.terminalInitFailed'),
       );
       return undefined;
     }
@@ -557,12 +560,12 @@ export function SessionReplayWindow({
 
   useEffect(() => {
     if (!recording) {
-      document.title = "세션 Replay";
+      document.title = translate('replay.windowTitle');
       return;
     }
     document.title = recording.title
-      ? `세션 Replay · ${recording.title}`
-      : "세션 Replay";
+      ? translate('replay.windowTitleWith', { title: recording.title })
+      : translate('replay.windowTitle');
   }, [recording]);
 
   useEffect(() => {
@@ -672,7 +675,7 @@ export function SessionReplayWindow({
       </header>
 
       {loading ? (
-        <EmptyState title="세션 replay를 불러오는 중입니다." />
+        <EmptyState title={translate('replay.loading')} />
       ) : null}
 
       {errorMessage ? (
@@ -689,8 +692,8 @@ export function SessionReplayWindow({
               "00:01 / 03:36" 과 중복이라 카드로 두지 않는다. */}
           <section className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-[0.6rem]">
             {[
-              { label: "연결 시작", value: formatTimestamp(recording.connectedAt) },
-              { label: "연결 종료", value: formatTimestamp(recording.disconnectedAt) },
+              { label: translate('replay.connectStarted'), value: formatTimestamp(recording.connectedAt) },
+              { label: translate('replay.connectEnded'), value: formatTimestamp(recording.disconnectedAt) },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -770,7 +773,7 @@ export function SessionReplayWindow({
               </button>
             </div>
             <label className="inline-flex shrink-0 items-center gap-[0.55rem] text-[0.82rem] text-[var(--text-soft)]">
-              <span className="whitespace-nowrap text-[0.82rem] font-semibold tracking-[0.01em]">속도</span>
+              <span className="whitespace-nowrap text-[0.82rem] font-semibold tracking-[0.01em]">{translate('replay.speed')}</span>
               <span className="relative inline-flex focus-within:rounded-full focus-within:ring-4 focus-within:ring-[color-mix(in_srgb,var(--accent-strong)_16%,transparent)] focus-within:ring-offset-2 focus-within:ring-offset-[var(--app-bg)]">
                 <select
                   aria-label="Replay speed"
@@ -818,8 +821,8 @@ export function SessionReplayWindow({
               type="button"
               onClick={() => setCommandPanelOpen((current) => !current)}
               aria-expanded={commandPanelOpen}
-              aria-label={commandPanelOpen ? "명령 목록 접기" : "명령 목록 펼치기"}
-              title={commandPanelOpen ? "명령 목록 접기" : "명령 목록 펼치기"}
+              aria-label={translate(commandPanelOpen ? 'replay.collapseCommands' : 'replay.expandCommands')}
+              title={translate(commandPanelOpen ? 'replay.collapseCommands' : 'replay.expandCommands')}
               className="flex h-12 w-[16px] shrink-0 items-center justify-center self-center rounded-[6px] border border-transparent text-[var(--text-soft)] transition-colors duration-150 hover:border-[var(--border)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]"
             >
               {commandPanelOpen ? (

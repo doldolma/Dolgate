@@ -90,6 +90,7 @@ import {
   useTerminalAutocomplete,
 } from './useTerminalAutocomplete';
 import type { CommandFinishedInfo } from '../lib/command-notification';
+import { t } from '../i18n';
 
 // tmux 윈도우 전환(Ctrl-b n/p/숫자/l): 로컬 뷰를 즉시 전환(selectTmuxWindow)하고
 // select-window 도 함께 보낸다. 'last'(l)는 직전 윈도우를 로컬에서 추적하지 않으므로
@@ -968,7 +969,7 @@ export function useTerminalSessionViewController({
     } catch (error) {
       console.error('Failed to initialize terminal runtime.', error);
       setTerminalInitError(
-        '터미널을 초기화하지 못했습니다. 설정을 확인하거나 앱을 다시 열어주세요.',
+        t('termView.initFailed'),
       );
       return;
     }
@@ -1304,19 +1305,19 @@ export function useTerminalSessionViewController({
     const output = readBlockOutput(liveSessionIdRef.current, terminal, block);
     // 요청이 비대해지지 않도록 출력은 뒤쪽만 싣는다(에러는 대개 끝에 나온다).
     const trimmedOutput =
-      output.length > 4000 ? `…(생략)\n${output.slice(-4000)}` : output;
+      output.length > 4000 ? `${t('termView.truncated')}\n${output.slice(-4000)}` : output;
     const contextLines = [
-      `명령: ${block.command ?? '(알 수 없음)'}`,
-      block.cwd ? `작업 디렉터리: ${block.cwd}` : null,
-      block.exitCode !== null ? `종료 코드: ${block.exitCode}` : null,
+      t('termView.command', { command: block.command ?? t('termView.commandUnknown') }),
+      block.cwd ? t('termView.cwd', { cwd: block.cwd }) : null,
+      block.exitCode !== null ? t('termView.exitCode', { code: block.exitCode }) : null,
       '',
-      '출력:',
+      t('termView.output'),
       trimmedOutput,
     ].filter((line) => line !== null);
     const question =
       block.state === 'failed'
-        ? '이 명령이 왜 실패했는지 설명하고 해결 방법을 알려줘.'
-        : '이 명령의 출력을 설명해줘.';
+        ? t('termView.askFailed')
+        : t('termView.askExplain');
     const store = appStore.getState();
     if (!store.aiConversations?.[liveSessionIdRef.current]?.open) {
       store.toggleAiPanel(liveSessionIdRef.current);
@@ -1571,9 +1572,9 @@ export function useTerminalSessionViewController({
 
     try {
       await navigator.clipboard.writeText(shareState.shareUrl);
-      setShareCopyStatus('링크를 복사했습니다.');
+      setShareCopyStatus(t('termView.linkCopied'));
     } catch {
-      setShareCopyStatus('링크를 복사하지 못했습니다.');
+      setShareCopyStatus(t('termView.linkCopyFailed'));
     }
   }, [shareState?.shareUrl]);
 

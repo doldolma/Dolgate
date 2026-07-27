@@ -20,6 +20,8 @@ import {
 import { ipcChannels } from "../common/ipc-channels";
 import { AuthService } from "./auth-service";
 import { CoreManager } from "./core-manager";
+import { getMainLocale, t } from "./i18n";
+import { APP_LOCALE_QUERY_PARAM } from "../common/i18n/locale";
 
 const MAX_PENDING_OWNER_MESSAGES = 512;
 const MAX_CHAT_NICKNAME_RUNES = 24;
@@ -108,7 +110,7 @@ function toSessionShareTimeoutError(error: unknown): unknown {
   const name = (error as { name?: unknown } | null)?.name;
   if (name === "TimeoutError" || name === "AbortError") {
     return new Error(
-      "세션 공유 서버 응답이 지연되어 요청을 취소했습니다. 잠시 후 다시 시도해 주세요.",
+      t("share.timeout"),
     );
   }
   return error;
@@ -146,7 +148,7 @@ export function toApiErrorMessage(
           `[session-share] non-JSON error response (status ${response.status}):`,
           trimmed.slice(0, 1000),
         );
-        return `${fallback} (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 ${response.status})`;
+        return t("share.badResponse", { fallback, status: response.status });
       }
       return trimmed;
     })
@@ -165,7 +167,9 @@ function isLikelyAuthError(response: Response, message: string): boolean {
     return true;
   }
 
-  return /token is expired|invalid claims|unauthorized|forbidden|jwt|로그인이 필요합니다|세션이 만료/i.test(
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
+  return /token is expired|invalid claims|unauthorized|forbidden|jwt|로그인이 필요합니다|sign-in is required|세션이 만료|session has expired/i.test(
     message,
   );
 }
@@ -355,7 +359,7 @@ export class SessionShareService {
       return provisional.state;
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "세션 공유를 시작하지 못했습니다.";
+        error instanceof Error ? error.message : t("share.startFailed");
       provisional.state = {
         status: "error",
         shareUrl: null,
@@ -456,12 +460,12 @@ export class SessionShareService {
   async sendOwnerChatMessage(sessionId: string, text: string): Promise<void> {
     const share = this.shares.get(sessionId);
     if (!share || share.state.status !== "active") {
-      throw new Error("세션 공유가 활성 상태가 아닙니다.");
+      throw new Error(t("share.notActive"));
     }
 
     const normalizedText = normalizeOwnerChatText(text);
     if (!normalizedText) {
-      throw new Error("메시지를 입력해 주세요.");
+      throw new Error(t("share.messageRequired"));
     }
 
     if (share.isE2EFake) {
@@ -478,7 +482,7 @@ export class SessionShareService {
     }
 
     if (!share.ownerSocketOpen || !share.socket || share.socket.readyState !== WebSocket.OPEN) {
-      throw new Error("채팅 연결이 아직 준비되지 않았습니다.");
+      throw new Error(t("share.chatNotReady"));
     }
 
     share.socket.send(
@@ -531,7 +535,7 @@ export class SessionShareService {
             inputEnabled: input.inputEnabled,
           }),
         },
-        "공유 입력 허용 상태를 저장하지 못했습니다.",
+        t("share.inputToggleFailed"),
       );
     }
 
@@ -561,7 +565,7 @@ export class SessionShareService {
           {
             method: "DELETE",
           },
-          "세션 공유를 종료하지 못했습니다.",
+          t("share.stopFailed"),
         );
       }
     } finally {
@@ -634,7 +638,7 @@ export class SessionShareService {
           viewportPx: input.viewportPx,
         }),
       },
-      "세션 공유 링크를 만들지 못했습니다.",
+      t("share.linkFailed"),
     );
 
     // 2xx 라도 JSON이 아니면(프록시가 200 + HTML 에러 페이지를 주는 경우 등) 실패로 처리한다.
@@ -646,7 +650,10 @@ export class SessionShareService {
         body.slice(0, 1000),
       );
       throw new Error(
-        `세션 공유 링크를 만들지 못했습니다. (서버가 올바른 응답을 반환하지 않았습니다. 상태 코드 ${response.status})`,
+        t("share.badResponse", {
+          fallback: t("share.linkFailed"),
+          status: response.status,
+        }),
       );
     }
 
@@ -676,7 +683,7 @@ export class SessionShareService {
 
     const refreshed = await this.authService.refreshSession();
     if (refreshed.status !== "authenticated") {
-      throw new Error(firstFailureMessage || "로그인이 필요합니다.");
+      throw new Error(firstFailureMessage || t("auth.signInRequired"));
     }
 
     response = await this.fetchWithTimeout(url, this.withAccessToken(init, this.authService.getAccessToken()));
@@ -777,7 +784,7 @@ export class SessionShareService {
           errorMessage:
             error instanceof Error
               ? error.message
-              : "세션 공유 메시지를 처리하지 못했습니다.",
+              : t("share.messageHandleFailed"),
         };
         this.broadcastState(share.sessionId, share.state);
       }
@@ -793,7 +800,7 @@ export class SessionShareService {
       share.state = {
         ...share.state,
         status: "error",
-        errorMessage: "세션 공유 연결이 종료되었습니다.",
+        errorMessage: t("share.connectionClosed"),
       };
       this.broadcastState(share.sessionId, share.state);
     });
@@ -805,7 +812,7 @@ export class SessionShareService {
       share.state = {
         ...share.state,
         status: "error",
-        errorMessage: "세션 공유 연결을 열지 못했습니다.",
+        errorMessage: t("share.connectionOpenFailed"),
       };
       this.broadcastState(share.sessionId, share.state);
     });
@@ -839,7 +846,7 @@ export class SessionShareService {
       share.state = {
         ...share.state,
         status: "error",
-        errorMessage: message.message ?? "세션 공유가 종료되었습니다.",
+        errorMessage: message.message ?? t("share.ended"),
       };
       this.broadcastState(share.sessionId, share.state);
       this.shares.delete(share.sessionId);
@@ -970,7 +977,7 @@ export class SessionShareService {
 
   private buildOwnerChatWindowTitle(title: string): string {
     const normalized = title.trim();
-    return normalized ? `채팅 기록 · ${normalized}` : "채팅 기록";
+    return normalized ? t("share.chatHistoryWith", { title: normalized }) : t("share.chatHistory");
   }
 
   private buildOwnerChatWindowURL(
@@ -979,11 +986,12 @@ export class SessionShareService {
   ): string {
     const sourceUrl = sourceWindow.webContents.getURL();
     if (!sourceUrl) {
-      throw new Error("채팅 기록 창을 열 기준 URL을 찾지 못했습니다.");
+      throw new Error(t("share.chatWindowBaseUrlMissing"));
     }
 
     const targetUrl = new URL(sourceUrl);
     targetUrl.searchParams.set("window", "session-share-chat");
+    targetUrl.searchParams.set(APP_LOCALE_QUERY_PARAM, getMainLocale());
     targetUrl.searchParams.set("sessionId", sessionId);
     return targetUrl.toString();
   }

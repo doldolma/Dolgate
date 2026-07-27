@@ -1,6 +1,11 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup, configure } from '@testing-library/react';
+import { initRendererI18n } from './src/renderer/i18n';
+
+// 테스트는 한국어로 고정한다. 원문이 한국어이고 기존 단언들이 한국어 UI 문구를 그대로
+// 찾으므로, jsdom 기본 navigator.language(en-US)를 따르면 전부 깨진다.
+initRendererI18n('ko');
 
 // waitFor/findBy 의 기본 대기 시간은 1초인데, 이 단언들은 "언젠가 이 상태가 된다"를 확인하는
 // 것이지 1초 안에 되는지를 재는 게 아니다. 전체 스위트는 파일을 여러 프로세스로 병렬 실행해

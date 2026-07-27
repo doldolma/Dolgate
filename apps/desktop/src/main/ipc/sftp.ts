@@ -31,6 +31,7 @@ import {
   runWithAwsServerProxyAuthRetry,
 } from "../aws-ws-proxy";
 import { runWithIpcSessionOwner } from "./session-owner";
+import { t } from '../i18n';
 
 function resolveOwnerWebContentsId(
   event: IpcMainInvokeEvent | null,
@@ -150,7 +151,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             stage: "loading-instance-metadata",
             error: new Error(
               hydratedHost.awsSshMetadataError ||
-                "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+                t('pfIpc.sshUsernameUnknown'),
             ),
             reasonCode: "missing-username",
           });
@@ -161,7 +162,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             endpointId,
             host: hydratedHost,
             stage: "checking-ssm",
-            error: new Error("Availability Zone을 확인하지 못했습니다."),
+            error: new Error(t('pfIpc.azUnknown')),
             reasonCode: "missing-availability-zone",
           });
         }
@@ -170,7 +171,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           endpointId,
           hostId: hydratedHost.id,
           stage: "generating-key",
-          message: "임시 SSH 키를 생성하는 중입니다.",
+          message: t('sftpIpc.generatingTempKey'),
         });
         const { privateKeyPem, publicKey } = ctx.createEphemeralAwsSftpKeyPair();
 
@@ -183,7 +184,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             endpointId,
             hostId: hydratedHost.id,
             stage: "connecting-sftp",
-            message: "서버 프록시로 SFTP 세션을 여는 중입니다.",
+            message: t('sftpIpc.proxyOpening'),
           });
           const startMessage = await buildAwsServerProxyStartMessage(
             ctx.awsService,
@@ -236,7 +237,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           endpointId,
           hostId: hydratedHost.id,
           stage: "sending-public-key",
-          message: "EC2 Instance Connect로 공개 키를 전송하는 중입니다.",
+          message: t('sftpIpc.pushingKey'),
         });
         try {
           await ctx.awsService.sendSshPublicKey({
@@ -260,7 +261,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
           endpointId,
           hostId: hydratedHost.id,
           stage: "opening-tunnel",
-          message: "SFTP 연결용 내부 터널을 여는 중입니다.",
+          message: t('sftpIpc.openingTunnel'),
         });
         const bindPort = await ctx.reserveLoopbackPort();
         let tunnelRuntimeId = "";
@@ -280,7 +281,7 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
             endpointId,
             hostId: hydratedHost.id,
             stage: "connecting-sftp",
-            message: "SFTP 세션을 시작하는 중입니다.",
+            message: t('sftpIpc.startingSession'),
           });
           const endpoint = await retryAwsSsmSshOperation(() =>
             ctx.coreManager.sftpConnect({

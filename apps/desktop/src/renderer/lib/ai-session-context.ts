@@ -8,6 +8,7 @@ import {
   type TerminalTab,
 } from "@shared";
 import { redactAiContext } from "./ai-context-redact";
+import { t } from '../i18n';
 
 export const AI_RECENT_OUTPUT_LINES = 100;
 
@@ -135,12 +136,14 @@ export function buildAiSessionContext({
   const sections: string[] = [];
   const hostContext = buildHostContext(tab, host).trim();
   if (hostContext) {
-    sections.push(`호스트 정보:\n${hostContext}`);
+    sections.push(`${t('aiContext.hostInfo')}\n${hostContext}`);
   }
 
   const terminalText = redactAiContext(recentTerminalText).trim();
   if (terminalText) {
-    sections.push(`최근 터미널 출력 (최근 ${recentOutputLines}줄):\n\`\`\`\n${terminalText}\n\`\`\``);
+    sections.push(
+      `${t('aiContext.recentOutput', { lines: recentOutputLines })}\n\`\`\`\n${terminalText}\n\`\`\``,
+    );
   }
 
   return sections.length > 0 ? sections.join("\n\n") : undefined;

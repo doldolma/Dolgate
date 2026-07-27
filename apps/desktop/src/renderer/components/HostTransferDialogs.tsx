@@ -30,6 +30,8 @@ import {
   SectionLabel,
 } from '../ui';
 import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface HostExportDialogProps {
   open: boolean;
@@ -39,12 +41,12 @@ interface HostExportDialogProps {
 }
 
 const importCountLabels = {
-  hosts: '호스트',
-  groups: '그룹',
-  secrets: '자격증명',
-  awsProfiles: 'AWS 프로필',
+  hosts: 'hostTransfer.kind.hosts',
+  groups: 'hostTransfer.kind.groups',
+  secrets: 'hostTransfer.kind.secrets',
+  awsProfiles: 'hostTransfer.kind.awsProfiles',
   snippets: 'snippet',
-  portForwards: '포트 포워딩',
+  portForwards: 'hostTransfer.kind.portForwards',
   dnsOverrides: 'DNS override',
   knownHosts: 'known host',
 } as const;
@@ -54,7 +56,7 @@ function formatImportCounts(
 ): string {
   return (Object.keys(importCountLabels) as Array<keyof typeof importCountLabels>)
     .filter((kind) => counts[kind] > 0)
-    .map((kind) => `${importCountLabels[kind]} ${counts[kind]}개`)
+    .map((kind) => t('hostTransfer.counts', { label: t(importCountLabels[kind]), count: counts[kind] }))
     .join(', ');
 }
 
@@ -77,6 +79,7 @@ export function HostExportDialog({
   onClose,
   onExported,
 }: HostExportDialogProps) {
+  const { t: translate } = useTranslation();
   const [format, setFormat] = useState<HostExportFormat>('dolgate');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
@@ -106,7 +109,7 @@ export function HostExportDialog({
       })
       .catch((loadError) => {
         if (!cancelled) {
-          setError(normalizeErrorMessage(loadError, '내보내기 항목을 확인하지 못했습니다.'));
+          setError(normalizeErrorMessage(loadError, translate('hostTransfer.export.previewFailed')));
         }
       })
       .finally(() => {
@@ -126,18 +129,18 @@ export function HostExportDialog({
   const normalizedPasswordLength = Array.from(password.normalize('NFC')).length;
   const passwordValidationMessage = (() => {
     if (password.length === 0 && passwordConfirm.length === 0) {
-      return { message: '4자 이상 입력해 주세요.', invalid: false };
+      return { message: translate('hostTransfer.export.passphraseShort'), invalid: false };
     }
     if (normalizedPasswordLength < 4) {
-      return { message: '암호는 4자 이상이어야 합니다.', invalid: true };
+      return { message: translate('hostTransfer.export.passphraseTooShort'), invalid: true };
     }
     if (passwordConfirm.length === 0) {
-      return { message: '암호 확인을 입력해 주세요.', invalid: true };
+      return { message: translate('hostTransfer.export.confirmRequired'), invalid: true };
     }
     if (password !== passwordConfirm) {
-      return { message: '암호와 암호 확인이 일치하지 않습니다.', invalid: true };
+      return { message: translate('hostTransfer.export.confirmMismatch'), invalid: true };
     }
-    return { message: '암호가 일치합니다.', invalid: false };
+    return { message: translate('hostTransfer.export.passphraseMatch'), invalid: false };
   })();
   const canExport =
     !isLoading &&
@@ -153,15 +156,15 @@ export function HostExportDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Export</SectionLabel>
-            <h3 id="host-export-title">선택한 호스트 내보내기</h3>
+            <h3 id="host-export-title">{translate('hostTransfer.export.title')}</h3>
           </div>
-          <IconButton onClick={onClose} aria-label="내보내기 닫기" disabled={isExporting}>
+          <IconButton onClick={onClose} aria-label={translate('hostTransfer.export.close')} disabled={isExporting}>
             <CloseIcon />
           </IconButton>
         </ModalHeader>
 
         <ModalBody className="grid gap-4">
-          {isLoading ? <NoticeCard tone="info">연결된 항목을 확인하는 중입니다.</NoticeCard> : null}
+          {isLoading ? <NoticeCard tone="info">{translate('hostTransfer.export.loading')}</NoticeCard> : null}
           {error ? <NoticeCard tone="danger" role="alert">{error}</NoticeCard> : null}
 
           <div className="grid gap-2">
@@ -175,10 +178,14 @@ export function HostExportDialog({
                 className="mt-1 h-4 w-4 accent-[var(--accent-strong)]"
               />
               <span>
-                <strong className="block text-[0.95rem] text-[var(--text)]">Dolgate 파일</strong>
+                <strong className="block text-[0.95rem] text-[var(--text)]">{translate('hostTransfer.export.dolgateTitle')}</strong>
                 <span className="mt-1 block text-[0.82rem] leading-5 text-[var(--text-soft)]">
-                  선택한 호스트와 연결에 필요한 자격증명 및 설정을 암호화해 저장합니다.
-                  {preview ? ` 총 ${preview.dolgateHostCount}개 호스트가 포함됩니다.` : ''}
+                  {translate('hostTransfer.export.dolgateDescription')}
+                  {preview
+                    ? translate('hostTransfer.export.dolgateHostCount', {
+                        count: preview.dolgateHostCount,
+                      })
+                    : ''}
                 </span>
               </span>
             </label>
@@ -194,9 +201,17 @@ export function HostExportDialog({
               <span>
                 <strong className="block text-[0.95rem] text-[var(--text)]">OpenSSH config</strong>
                 <span className="mt-1 block text-[0.82rem] leading-5 text-[var(--text-soft)]">
-                  자격증명은 제외됩니다.
+                  {translate('hostTransfer.export.opensshNoSecrets')}
                   {preview
-                    ? ` ${preview.opensshHostCount}개 호스트${preview.opensshDependencyCount > 0 ? `와 점프 호스트 ${preview.opensshDependencyCount}개` : ''}를 내보낼 수 있습니다.`
+                    ? translate('hostTransfer.export.opensshCount', {
+                        count: preview.opensshHostCount,
+                        jump:
+                          preview.opensshDependencyCount > 0
+                            ? translate('hostTransfer.export.opensshJump', {
+                                count: preview.opensshDependencyCount,
+                              })
+                            : '',
+                      })
                     : ''}
                 </span>
               </span>
@@ -205,7 +220,7 @@ export function HostExportDialog({
 
           {format === 'dolgate' ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <FieldGroup label="암호">
+              <FieldGroup label={translate('hostTransfer.export.passphraseLabel')}>
                 <Input
                   type="password"
                   value={password}
@@ -217,7 +232,7 @@ export function HostExportDialog({
                   autoFocus
                 />
               </FieldGroup>
-              <FieldGroup label="암호 확인">
+              <FieldGroup label={translate('hostTransfer.export.confirmLabel')}>
                 <Input
                   type="password"
                   value={passwordConfirm}
@@ -238,7 +253,7 @@ export function HostExportDialog({
                   {passwordValidationMessage.message}
                 </p>
                 <p className="text-[var(--text-soft)]">
-                  이 암호는 복구할 수 없으며 가져올 때 동일한 암호가 필요합니다.
+                  {translate('hostTransfer.export.passphraseWarning')}
                 </p>
               </div>
             </div>
@@ -246,21 +261,21 @@ export function HostExportDialog({
 
           {format === 'openssh' && preview && preview.opensshSkippedCount > 0 ? (
             <NoticeCard tone="info">
-              OpenSSH로 표현할 수 없는 호스트 {preview.opensshSkippedCount}개는 제외됩니다.
+              {translate('hostTransfer.export.opensshSkipped', { count: preview.opensshSkippedCount })}
               {preview.opensshWarnings[0] ? ` ${preview.opensshWarnings[0]}` : ''}
             </NoticeCard>
           ) : null}
         </ModalBody>
 
         <ModalFooter>
-          <Button variant="secondary" onClick={onClose} disabled={isExporting}>취소</Button>
+          <Button variant="secondary" onClick={onClose} disabled={isExporting}>{translate('common.cancel')}</Button>
           <Button
             variant="primary"
             disabled={!canExport}
             onClick={async () => {
               setError(null);
               if (format === 'dolgate' && password !== passwordConfirm) {
-                setError('암호 확인이 일치하지 않습니다.');
+                setError(translate('hostTransfer.export.confirmMismatchError'));
                 return;
               }
               setIsExporting(true);
@@ -275,13 +290,13 @@ export function HostExportDialog({
                   onClose();
                 }
               } catch (exportError) {
-                setError(normalizeErrorMessage(exportError, '호스트를 내보내지 못했습니다.'));
+                setError(normalizeErrorMessage(exportError, translate('hostTransfer.export.exportFailed')));
               } finally {
                 setIsExporting(false);
               }
             }}
           >
-            {isExporting ? '내보내는 중..' : '내보내기'}
+            {translate(isExporting ? 'hostTransfer.export.exporting' : 'hostTransfer.export.submit')}
           </Button>
         </ModalFooter>
       </ModalShell>
@@ -296,6 +311,7 @@ interface DolgateImportDialogProps {
 }
 
 export function DolgateImportDialog({ open, onClose, onImported }: DolgateImportDialogProps) {
+  const { t: translate } = useTranslation();
   const [file, setFile] = useState<DolgateImportFileSelection | null>(null);
   const [password, setPassword] = useState('');
   const [preview, setPreview] = useState<DolgateImportPreview | null>(null);
@@ -338,9 +354,9 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
         <ModalHeader>
           <div>
             <SectionLabel>Import</SectionLabel>
-            <h3 id="dolgate-import-title">Dolgate 파일 가져오기</h3>
+            <h3 id="dolgate-import-title">{translate('hostTransfer.import.title')}</h3>
           </div>
-          <IconButton onClick={close} aria-label="Dolgate 가져오기 닫기" disabled={isWorking}>
+          <IconButton onClick={close} aria-label={translate('hostTransfer.import.close')} disabled={isWorking}>
             <CloseIcon />
           </IconButton>
         </ModalHeader>
@@ -365,15 +381,15 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                 setPreview(null);
               }}
             >
-              파일 선택
+              {translate('hostTransfer.import.pickFile')}
             </Button>
             <span className="min-w-0 truncate text-[0.88rem] text-[var(--text-soft)]">
-              {file?.fileName ?? '선택된 파일 없음'}
+              {file?.fileName ?? translate('hostTransfer.import.noFile')}
             </span>
           </div>
 
           {file && !preview ? (
-            <FieldGroup label="내보내기 암호">
+            <FieldGroup label={translate('hostTransfer.import.passphraseLabel')}>
               <Input
                 type="password"
                 value={password}
@@ -393,12 +409,16 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                 <div className="grid gap-1">
                   <p>
                     {formatImportCounts(getReadyImportCounts(preview))
-                      ? `${formatImportCounts(getReadyImportCounts(preview))}를 가져올 준비가 됐습니다.`
-                      : '가져올 새 항목이 없습니다.'}
+                      ? translate('hostTransfer.import.ready', {
+                          summary: formatImportCounts(getReadyImportCounts(preview)),
+                        })
+                      : translate('hostTransfer.import.nothingNew')}
                   </p>
                   {preview.skippedCount > 0 ? (
                     <p>
-                      이미 존재하여 제외: {formatImportCounts(preview.skippedCounts)}.
+                      {translate('hostTransfer.import.skipped', {
+                        summary: formatImportCounts(preview.skippedCounts),
+                      })}
                     </p>
                   ) : null}
                 </div>
@@ -413,7 +433,7 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
         </ModalBody>
 
         <ModalFooter>
-          <Button variant="secondary" onClick={close} disabled={isWorking}>취소</Button>
+          <Button variant="secondary" onClick={close} disabled={isWorking}>{translate('common.cancel')}</Button>
           {!preview ? (
             <Button
               variant="primary"
@@ -427,13 +447,13 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                 try {
                   setPreview(await probeDolgateImport(file.filePath, password));
                 } catch (probeError) {
-                  setError(normalizeErrorMessage(probeError, 'Dolgate 파일을 열지 못했습니다.'));
+                  setError(normalizeErrorMessage(probeError, translate('hostTransfer.import.probeFailed')));
                 } finally {
                   setIsWorking(false);
                 }
               }}
             >
-              {isWorking ? '확인하는 중..' : '내용 확인'}
+              {translate(isWorking ? 'hostTransfer.import.probing' : 'hostTransfer.import.probe')}
             </Button>
           ) : (
             <Button
@@ -447,13 +467,13 @@ export function DolgateImportDialog({ open, onClose, onImported }: DolgateImport
                   await onImported(result);
                   onClose();
                 } catch (importError) {
-                  setError(normalizeErrorMessage(importError, 'Dolgate 파일을 가져오지 못했습니다.'));
+                  setError(normalizeErrorMessage(importError, translate('hostTransfer.import.importFailed')));
                 } finally {
                   setIsWorking(false);
                 }
               }}
             >
-              {isWorking ? '가져오는 중..' : '가져오기'}
+              {translate(isWorking ? 'hostTransfer.import.importing' : 'hostTransfer.import.submit')}
             </Button>
           )}
         </ModalFooter>

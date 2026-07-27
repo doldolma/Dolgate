@@ -1,4 +1,5 @@
 import type { HostContainerDetails } from "@shared";
+import { t } from './i18n';
 
 export interface ResolvedContainerTunnelTarget {
   host: string;
@@ -16,7 +17,7 @@ export function resolveContainerTunnelTarget(
   );
   if (!portOption) {
     throw new Error(
-      `${details.name} 컨테이너에서 TCP ${targetPort} 포트를 찾지 못했습니다.`,
+      t('containerTarget.portNotFound', { name: details.name, port: targetPort }),
     );
   }
 
@@ -24,7 +25,7 @@ export function resolveContainerTunnelTarget(
   const targetHost = network?.ipAddress?.trim() ?? "";
   if (!targetHost) {
     throw new Error(
-      `${details.name} 컨테이너의 ${networkName} 네트워크 IP를 확인하지 못했습니다.`,
+      t('containerTarget.networkIpNotFound', { name: details.name, network: networkName }),
     );
   }
 

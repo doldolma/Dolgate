@@ -11,6 +11,8 @@ import {
   formatSize,
   formatTransferSpeed,
 } from "../lib/transfer-format";
+import { useTranslation } from "react-i18next";
+import { t } from '../i18n';
 
 type TransferKind = "zmodem" | "sftp";
 interface TransferRow {
@@ -34,16 +36,16 @@ function computePercent(job: TransferJob): number {
 
 function statusLine(job: TransferJob): string {
   if (job.status === "completed") {
-    return "완료";
+    return t('transferToast.completed');
   }
   if (job.status === "failed") {
-    return job.errorMessage?.trim() || "실패";
+    return job.errorMessage?.trim() || t('transferToast.failed');
   }
   if (job.status === "cancelled") {
-    return "취소됨";
+    return t('transferToast.cancelled');
   }
   if (job.status === "cancelling") {
-    return "취소 중…";
+    return t('transferToast.cancelling');
   }
   const speed = formatTransferSpeed(job.speedBytesPerSecond);
   const eta = formatEta(job.etaSeconds);
@@ -58,6 +60,7 @@ function statusLine(job: TransferJob): string {
 // 업로드(전역 transfers 중 표식된 것)를 한곳에 보여준다. 완료/실패/취소 토스트는
 // 잠시 후 자동으로 숨긴다(전역 상태는 그대로 두어 SFTP 탭 기록은 유지).
 export function TerminalTransferToastRegion() {
+  const { t: translate } = useTranslation();
   const zmodemTransfers =
     useAppStore((state) => state.zmodemTransfers) ?? [];
   const sftpTransfers = useAppStore((state) => state.sftp?.transfers) ?? [];
@@ -171,7 +174,7 @@ export function TerminalTransferToastRegion() {
                     }
                   }}
                 >
-                  취소
+                  {translate('common.cancel')}
                 </button>
               ) : null}
               {isFinished ? (
@@ -179,7 +182,7 @@ export function TerminalTransferToastRegion() {
                   type="button"
                   className="rounded px-1.5 py-0.5 text-xs text-[var(--text-soft)] hover:text-[var(--text)]"
                   onClick={() => hideRow(job.id)}
-                  aria-label="닫기"
+                  aria-label={translate('common.close')}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -208,7 +211,7 @@ export function TerminalTransferToastRegion() {
                     void revealPath(savedPath);
                   }}
                 >
-                  폴더 열기
+                  {translate('transferToast.openFolder')}
                 </button>
               ) : null}
             </div>

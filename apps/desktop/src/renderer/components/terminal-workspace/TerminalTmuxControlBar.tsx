@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalTmuxControlBarProps {
   /** 이 pane 이 속한 tmux window id (예: "@1"). 표시용. */
@@ -23,6 +24,7 @@ export function TerminalTmuxControlBar({
   onDetach,
   onKill,
 }: TerminalTmuxControlBarProps) {
+  const { t: translate } = useTranslation();
   const [confirmingKill, setConfirmingKill] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,16 +64,16 @@ export function TerminalTmuxControlBar({
       >
         ▤
       </span>
-      <span className="font-medium text-[var(--text)]">tmux 제어 모드</span>
+      <span className="font-medium text-[var(--text)]">{translate('tmuxControl.title')}</span>
       <span aria-hidden>·</span>
       <span>{windowId}</span>
       <span aria-hidden>·</span>
-      <span className="text-[0.7rem]">서버에서 유지 중</span>
+      <span className="text-[0.7rem]">{translate('tmuxControl.keptOnServer')}</span>
 
       {confirmingKill ? (
         <div className="ml-auto flex items-center gap-1.5">
           <span className="text-[0.7rem] text-[var(--danger,#e5484d)]">
-            세션을 종료할까요? 되돌릴 수 없습니다.
+            {translate('tmuxControl.killConfirm')}
           </span>
           <button
             type="button"
@@ -81,14 +83,14 @@ export function TerminalTmuxControlBar({
             }}
             className="rounded-[4px] border border-[color-mix(in_srgb,var(--danger,#e5484d)_55%,var(--border))] bg-[color-mix(in_srgb,var(--danger,#e5484d)_18%,var(--surface))] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--danger,#e5484d)] hover:bg-[color-mix(in_srgb,var(--danger,#e5484d)_28%,var(--surface))]"
           >
-            종료
+            {translate('tmuxControl.kill')}
           </button>
           <button
             type="button"
             onClick={() => setConfirmingKill(false)}
             className="rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
           >
-            취소
+            {translate('common.cancel')}
           </button>
         </div>
       ) : (
@@ -96,7 +98,7 @@ export function TerminalTmuxControlBar({
           <button
             type="button"
             onClick={onDetach}
-            title="서버 tmux 세션은 살린 채 이 클라이언트만 분리합니다. 다시 attach 하면 복원됩니다."
+            title={translate('tmuxControl.detachTitle')}
             className="rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
           >
             Detach
@@ -104,7 +106,7 @@ export function TerminalTmuxControlBar({
           <button
             type="button"
             onClick={() => setConfirmingKill(true)}
-            title="서버의 tmux 세션을 종료합니다(프로세스째 종료, 복원 불가)."
+            title={translate('tmuxControl.killTitle')}
             className="rounded-[4px] border border-[color-mix(in_srgb,var(--danger,#e5484d)_45%,var(--border))] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--danger,#e5484d)] hover:bg-[color-mix(in_srgb,var(--danger,#e5484d)_14%,var(--surface))]"
           >
             Kill

@@ -3,6 +3,7 @@ import { isSerialHostRecord, type HostRecord, type SerialControlAction } from '@
 import { sendSerialControl } from '../../services/desktop/serial';
 import { Button } from '../../ui';
 import { cn } from '../../lib/cn';
+import { useTranslation } from 'react-i18next';
 
 interface SerialSessionActionsProps {
   sessionId: string;
@@ -32,6 +33,7 @@ export function SerialSessionActions({
   connected,
   onNotice,
 }: SerialSessionActionsProps) {
+  const { t: translate } = useTranslation();
   const [open, setOpen] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -87,7 +89,7 @@ export function SerialSessionActions({
       onNotice?.(
         error instanceof Error
           ? error.message
-          : '시리얼 제어 액션을 실행하지 못했습니다.',
+          : translate('misc.serialActionFailed'),
       );
     } finally {
       setPendingKey(null);

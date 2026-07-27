@@ -8,6 +8,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { ReplayCommandBlock } from '../lib/replay-command-scan';
+import { useTranslation } from 'react-i18next';
 
 interface SessionReplayScrubberMarkersProps {
   blocks: readonly ReplayCommandBlock[];
@@ -111,6 +112,7 @@ function SessionReplayScrubberMarkersImpl({
   durationMs,
   hoverTargetRef,
 }: SessionReplayScrubberMarkersProps) {
+  const { t: translate } = useTranslation();
   const trackRef = useRef<HTMLDivElement>(null);
   const [trackWidthPx, setTrackWidthPx] = useState(0);
   // 렌더 중 getComputedStyle 을 부르면 프레임마다 스타일 재계산을 강제한다 → 측정 시점에 한 번만.
@@ -207,7 +209,7 @@ function SessionReplayScrubberMarkersImpl({
               {formatOffset(hover.block.atMs)}
             </span>{' '}
             <span className="font-mono">
-              {hover.block.command ?? '(명령을 읽지 못했습니다)'}
+              {hover.block.command ?? translate('misc.commandUnreadable')}
             </span>
             {hover.block.state === 'failed' && hover.block.exitCode !== null ? (
               <span className="ml-1 font-semibold text-[var(--danger-text)]">

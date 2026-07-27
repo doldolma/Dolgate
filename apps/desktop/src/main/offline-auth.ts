@@ -1,6 +1,7 @@
 import { createPublicKey, createVerify } from 'node:crypto';
 import type { OfflineLease, SessionUser, VaultBootstrap } from '@shared';
 import { resolveVaultDescriptorState } from '@dolssh/shared-core';
+import { t } from './i18n';
 
 export interface OfflineSessionCache {
   serverUrl: string;
@@ -80,7 +81,7 @@ export function verifyOfflineLease(
     if (!encodedHeader || !encodedPayload || !encodedSignature) {
       return {
         ok: false,
-        reason: 'offline lease 형식이 올바르지 않습니다.'
+        reason: t('offlineLease.badFormat')
       };
     }
 
@@ -88,7 +89,7 @@ export function verifyOfflineLease(
     if (header.alg !== 'RS256') {
       return {
         ok: false,
-        reason: 'offline lease 서명 알고리즘을 확인할 수 없습니다.'
+        reason: t('offlineLease.badAlgorithm')
       };
     }
 
@@ -99,7 +100,7 @@ export function verifyOfflineLease(
     if (!verifier.verify(publicKey, base64urlToBuffer(encodedSignature))) {
       return {
         ok: false,
-        reason: 'offline lease 서명 검증에 실패했습니다.'
+        reason: t('offlineLease.badSignature')
       };
     }
 
@@ -113,25 +114,25 @@ export function verifyOfflineLease(
     if (!issuer || issuer !== normalizeServerOrigin(currentServerUrl)) {
       return {
         ok: false,
-        reason: 'offline lease 발급 서버가 현재 로그인 서버와 다릅니다.'
+        reason: t('offlineLease.serverMismatch')
       };
     }
     if (!subject || subject !== cache.user.id) {
       return {
         ok: false,
-        reason: 'offline lease 사용자 정보가 현재 세션과 다릅니다.'
+        reason: t('offlineLease.userMismatch')
       };
     }
     if (!audience.includes('dolgate-desktop')) {
       return {
         ok: false,
-        reason: 'offline lease 대상이 이 데스크톱 앱이 아닙니다.'
+        reason: t('offlineLease.audienceMismatch')
       };
     }
     if (!expiresAtSeconds || now.getTime() >= expiresAtSeconds * 1000) {
       return {
         ok: false,
-        reason: 'offline lease 유효기간이 지났습니다.'
+        reason: t('offlineLease.expired')
       };
     }
 
@@ -143,7 +144,7 @@ export function verifyOfflineLease(
   } catch {
     return {
       ok: false,
-      reason: 'offline lease를 검증하지 못했습니다.'
+      reason: t('offlineLease.verifyFailed')
     };
   }
 }

@@ -86,6 +86,7 @@ import {
   encodeStreamFrame,
 } from "./core-framing";
 import { resolveDesktopRepoRoot } from "./repo-root";
+import { t } from "./i18n";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
 // AI run_command 기본 타임아웃(모델이 지정 안 하면). Go 코어가 최대 120s 로 상한을 건다.
@@ -291,12 +292,10 @@ const packagedUnixCorePathEntries = [
   "/usr/sbin",
   "/sbin",
 ];
-const SHUTDOWN_SESSION_DISCONNECT_REASON =
-  "앱 종료로 세션이 정리되었습니다.";
-const SHUTDOWN_SFTP_DISCONNECT_REASON =
-  "앱 종료로 SFTP 연결이 정리되었습니다.";
-const SHUTDOWN_CONTAINERS_DISCONNECT_REASON =
-  "앱 종료로 Containers 연결이 정리되었습니다.";
+// 모듈 상수로 두면 i18n 초기화 전에 평가되므로 호출 시점에 번역한다.
+const shutdownSessionDisconnectReason = () => t("core.shutdownSession");
+const shutdownSftpDisconnectReason = () => t("core.shutdownSftp");
+const shutdownContainersDisconnectReason = () => t("core.shutdownContainers");
 // connected 직후엔 셸이 아직 프롬프트(PS1)를 안 찍었을 수 있다. 이때 startup command를
 // 보내면 커널 tty(cooked, echo on)와 readline(raw)이 입력을 두 번 echo 한다.
 // 그래서 "출력이 잠잠해졌고 + 꼬리가 프롬프트처럼 보일 때"에만 보낸다.
@@ -879,7 +878,7 @@ function normalizeTransferFailedItem(value: unknown): TransferFailedItem | null 
     errorMessage:
       typeof record.errorMessage === "string"
         ? record.errorMessage
-        : "전송에 실패했습니다.",
+        : t("core.transferFailed"),
     errorCode: normalizeTransferErrorCode(record.errorCode),
     errorOperation:
       typeof record.errorOperation === "string"
@@ -912,21 +911,21 @@ function getTransferFailureSummary(input: {
 }): string {
   if (input.errorCode === "permission_denied") {
     if (input.errorOperation?.startsWith("source")) {
-      return "원본 파일을 읽을 권한이 없습니다.";
+      return t("core.noReadPermission");
     }
     if (
       input.errorOperation?.includes("remove") ||
       input.errorOperation?.includes("overwrite")
     ) {
-      return "기존 항목을 덮어쓰거나 삭제할 권한이 없습니다.";
+      return t("core.noOverwritePermission");
     }
     if (input.errorOperation?.startsWith("target")) {
-      return "대상 폴더에 쓸 권한이 없습니다.";
+      return t("core.noWritePermission");
     }
-    return "파일을 전송할 권한이 없습니다.";
+    return t("core.noTransferPermission");
   }
 
-  return input.fallbackMessage ?? "전송에 실패했습니다.";
+  return input.fallbackMessage ?? t("core.transferFailed");
 }
 
 function toErrorMessage(error: unknown): string {
@@ -1181,7 +1180,7 @@ export class CoreManager {
       this.log({
         level: "warn",
         category: "session",
-        message: "이전 SFTP partial 파일 정리에 실패했습니다.",
+        message: t("core.partialCleanupFailed"),
         metadata: {
           endpointId,
           hostId,
@@ -1256,7 +1255,7 @@ export class CoreManager {
       existingOwner !== undefined &&
       existingOwner !== ownerWebContentsId
     ) {
-      throw new Error("다른 창에서 사용 중인 SFTP 연결입니다.");
+      throw new Error(t("core.sftpOwnedByOtherWindow"));
     }
     this.sftpEndpointOwnerById.set(endpointId, ownerWebContentsId);
   }
@@ -1279,7 +1278,7 @@ export class CoreManager {
     ownerWebContentsId: number,
   ): void {
     if (this.sftpEndpointOwnerById.get(endpointId) !== ownerWebContentsId) {
-      throw new Error("이 창에 속한 SFTP 연결이 아닙니다.");
+      throw new Error(t("core.sftpNotInThisWindow"));
     }
   }
 
@@ -1288,7 +1287,7 @@ export class CoreManager {
     ownerWebContentsId: number,
   ): void {
     if (this.transferOwnerById.get(jobId) !== ownerWebContentsId) {
-      throw new Error("이 창에 속한 파일 전송이 아닙니다.");
+      throw new Error(t("core.transferNotInThisWindow"));
     }
   }
 
@@ -1354,7 +1353,7 @@ export class CoreManager {
         .get(endpointId)
         ?.has(ownerWebContentsId)
     ) {
-      throw new Error("이 창에서 연 Container 탭이 아닙니다.");
+      throw new Error(t("core.containerTabNotInThisWindow"));
     }
   }
 
@@ -1432,7 +1431,9 @@ export class CoreManager {
       level: metadata.status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",
-      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      message: t("core.sessionLog", {
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+      }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.connectedAt,
       updatedAt: new Date().toISOString(),
@@ -1506,7 +1507,7 @@ export class CoreManager {
       this.finalizeSessionLifecycle(
         sessionId,
         "closed",
-        SHUTDOWN_SESSION_DISCONNECT_REASON,
+        shutdownSessionDisconnectReason(),
       );
     }
   }
@@ -1519,7 +1520,7 @@ export class CoreManager {
       this.finalizeSftpLifecycle(
         endpointId,
         "closed",
-        SHUTDOWN_SFTP_DISCONNECT_REASON,
+        shutdownSftpDisconnectReason(),
       );
     }
   }
@@ -1533,7 +1534,7 @@ export class CoreManager {
         lifecycle.scopeId,
         lifecycle.lifecycleId,
         "closed",
-        SHUTDOWN_CONTAINERS_DISCONNECT_REASON,
+        shutdownContainersDisconnectReason(),
       );
     }
   }
@@ -1956,7 +1957,7 @@ export class CoreManager {
     const subscribers = this.containerSubscriberIdsByEndpoint.get(endpointId);
     if (subscribers && subscribers.size === 0) {
       await this.containersDisconnect(endpointId).catch(() => undefined);
-      throw new Error("Container 탭을 연 창이 모두 닫혔습니다.");
+      throw new Error(t("core.containerWindowsClosed"));
     }
     return { runtime, runtimeCommand, unsupportedReason };
   }
@@ -2428,7 +2429,7 @@ export class CoreManager {
         } catch {
           // ignore close failures during startup timeout
         }
-        reject(new Error("서버 AWS SSM 프록시 연결 시간이 초과되었습니다."));
+        reject(new Error(t("core.ssmProxyTimeout")));
       }, 8_000);
 
       socket.onopen = () => {
@@ -2443,7 +2444,7 @@ export class CoreManager {
           clearTimeout(openTimeout);
           this.clearPendingStartupCommand(sessionId);
           socket.close();
-          reject(new Error("연결을 요청한 창이 닫혔습니다."));
+          reject(new Error(t("core.requestWindowClosed")));
           return;
         }
         settled = true;
@@ -2503,13 +2504,13 @@ export class CoreManager {
           settled = true;
           clearTimeout(openTimeout);
           this.clearPendingStartupCommand(sessionId);
-          reject(new Error("서버 AWS SSM 프록시 연결에 실패했습니다."));
+          reject(new Error(t("core.ssmProxyConnectFailed")));
           return;
         }
         this.emitAwsServerProxyEvent(
           sessionId,
           "error",
-          "서버 AWS SSM 프록시 연결에 실패했습니다.",
+          t("core.ssmProxyConnectFailed"),
         );
       };
 
@@ -2522,7 +2523,7 @@ export class CoreManager {
           settled = true;
           clearTimeout(openTimeout);
           this.clearPendingStartupCommand(sessionId);
-          reject(new Error("서버 AWS SSM 프록시 연결이 종료되었습니다."));
+          reject(new Error(t("core.ssmProxyClosed")));
           return;
         }
         this.handleAwsServerProxySocketClosed(sessionId);
@@ -2557,7 +2558,7 @@ export class CoreManager {
       this.emitAwsServerProxyEvent(
         sessionId,
         "error",
-        "서버 AWS SSM 프록시 응답을 해석하지 못했습니다.",
+        t("core.ssmProxyParseFailed"),
       );
       return;
     }
@@ -2596,7 +2597,7 @@ export class CoreManager {
         this.emitAwsServerProxyEvent(
           sessionId,
           "error",
-          "서버 AWS SSM 프록시 출력 데이터를 해석하지 못했습니다.",
+          t("core.ssmProxyOutputParseFailed"),
         );
       }
       return;
@@ -2646,7 +2647,7 @@ export class CoreManager {
         "error",
         typeof message.message === "string"
           ? message.message
-          : "서버 AWS SSM 프록시 오류가 발생했습니다.",
+          : t("core.ssmProxyError"),
       );
       return;
     }
@@ -2660,7 +2661,7 @@ export class CoreManager {
       this.emitAwsServerProxyEvent(
         sessionId,
         "closed",
-        typeof message.message === "string" ? message.message : "AWS SSM 세션이 종료되었습니다.",
+        typeof message.message === "string" ? message.message : t("core.ssmSessionClosed"),
       );
     }
   }
@@ -2681,7 +2682,7 @@ export class CoreManager {
     this.emitAwsServerProxyEvent(
       sessionId,
       "closed",
-      "서버 AWS SSM 프록시 연결이 종료되었습니다.",
+      t("core.ssmProxyClosed"),
       "transport",
     );
   }
@@ -2892,7 +2893,7 @@ export class CoreManager {
       throw new Error("Serial session not found");
     }
     if (this.sessionTransportById.get(sessionId) !== "serial") {
-      throw new Error("이 기능은 Serial 세션에서만 사용할 수 있습니다.");
+      throw new Error(t("core.serialOnly"));
     }
 
     const response = await this.requestResponse<Record<string, unknown>>(
@@ -4158,7 +4159,7 @@ export class CoreManager {
         this.finalizeContainerLifecycleForScope(
           endpointId,
           lifecycleId,
-          "Container 탭을 연 창이 모두 닫혔습니다.",
+          t("core.containerWindowsClosed"),
         );
       }
     }
@@ -4539,7 +4540,7 @@ export class CoreManager {
               this.failContainerLifecycleForScope(
                 event.endpointId,
                 String(
-                  event.payload.message ?? "Containers 연결 오류가 발생했습니다.",
+                  event.payload.message ?? t("core.containersConnectionError"),
                 ),
               );
             } else {
@@ -4597,12 +4598,12 @@ export class CoreManager {
               level: "info",
               category: "session",
               message: isLocalSession
-                ? "로컬 터미널 세션이 종료되었습니다."
+                ? t("core.localSessionClosed")
                 : isAwsSession
-                  ? "AWS SSM 세션이 종료되었습니다."
+                  ? t("core.ssmSessionClosed")
                   : isWarpgateSession
-                    ? "Warpgate 세션이 종료되었습니다."
-                    : "SSH 세션이 종료되었습니다.",
+                    ? t("core.warpgateSessionClosed")
+                    : t("core.sshSessionClosed"),
               metadata: {
                 sessionId: event.sessionId,
                 message: event.payload.message ?? null,
@@ -4647,12 +4648,12 @@ export class CoreManager {
               level: "info",
               category: "session",
               message: isLocalSession
-                ? "로컬 터미널 세션이 연결되었습니다."
+                ? t("core.localSessionConnected")
                 : isAwsSession
-                  ? "AWS SSM 세션이 연결되었습니다."
+                  ? t("core.ssmSessionConnected")
                   : isWarpgateSession
-                    ? "Warpgate 세션이 연결되었습니다."
-                    : "SSH 세션이 연결되었습니다.",
+                    ? t("core.warpgateSessionConnected")
+                    : t("core.sshSessionConnected"),
               metadata: {
                 sessionId: event.sessionId,
                 hostId: existing.hostId,
@@ -4672,12 +4673,12 @@ export class CoreManager {
               level: "error",
               category: "session",
               message: isLocalSession
-                ? "로컬 터미널 세션 오류가 발생했습니다."
+                ? t("core.localSessionError")
                 : isAwsSession
-                  ? "AWS SSM 세션 오류가 발생했습니다."
+                  ? t("core.ssmSessionError")
                   : isWarpgateSession
-                    ? "Warpgate 세션 오류가 발생했습니다."
-                    : "SSH 세션 오류가 발생했습니다.",
+                    ? t("core.warpgateSessionError")
+                    : t("core.sshSessionError"),
               metadata: {
                 sessionId: event.sessionId,
                 message: event.payload.message ?? null,
@@ -4699,7 +4700,9 @@ export class CoreManager {
               this.log({
                 level: "error",
                 category: "session",
-                message: `${this.getConnectionKindLabel(sessionLifecycle.connectionKind)} 세션 오류가 발생했습니다.`,
+                message: t("core.sessionErrorLog", {
+                  kind: this.getConnectionKindLabel(sessionLifecycle.connectionKind),
+                }),
                 metadata: {
                   sessionId: event.sessionId,
                   hostId: sessionLifecycle.hostId,
@@ -4807,7 +4810,7 @@ export class CoreManager {
       this.log({
         level: "warn",
         category: "session",
-        message: "Startup command를 터미널에 전송하지 못했습니다.",
+        message: t("core.startupCommandFailed"),
         metadata: {
           sessionId,
         },
@@ -5163,7 +5166,7 @@ export class CoreManager {
       return;
     }
     if (!this.windowsByWebContentsId.has(ownerWebContentsId)) {
-      throw new Error("연결을 요청한 창이 닫혔습니다.");
+      throw new Error(t("core.requestWindowClosed"));
     }
     this.registerSftpEndpointOwner(endpointId, ownerWebContentsId);
   }
@@ -5174,7 +5177,7 @@ export class CoreManager {
       return;
     }
     if (!this.windowsByWebContentsId.has(ownerWebContentsId)) {
-      throw new Error("파일 전송을 요청한 창이 닫혔습니다.");
+      throw new Error(t("core.transferWindowClosed"));
     }
     this.transferOwnerById.set(jobId, ownerWebContentsId);
   }
@@ -5418,7 +5421,7 @@ export class CoreManager {
           { errorCount: 1 },
           {
             endReason:
-              job.errorMessage ?? job.detailMessage ?? "전송에 실패했습니다.",
+              job.errorMessage ?? job.detailMessage ?? t("core.transferFailed"),
           },
         );
       }
@@ -5474,7 +5477,7 @@ export class CoreManager {
           : "info",
       category: "session",
       kind: "sftp-lifecycle",
-      message: "SFTP 세션",
+      message: t("core.sftpSession"),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.startedAt,
       updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
@@ -5604,8 +5607,8 @@ export class CoreManager {
       kind: "container-lifecycle",
       message:
         lifecycle.workspaceKind === "ecs-cluster"
-          ? "ECS Containers 탐색"
-          : "Containers 연결",
+          ? t("core.ecsContainersBrowse")
+          : t("core.containersConnect"),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: lifecycle.startedAt,
       updatedAt: lifecycle.endedAt ?? new Date().toISOString(),
@@ -5665,12 +5668,12 @@ export class CoreManager {
     };
     const actionLabel =
       input.action === "start"
-        ? "시작"
+        ? t("core.action.start")
         : input.action === "stop"
-          ? "중지"
+          ? t("core.action.stop")
           : input.action === "restart"
-            ? "재시작"
-            : "삭제";
+            ? t("core.action.restart")
+            : t("core.action.remove");
     this.upsertLog({
       id: `container-action:${input.actionId}`,
       level:
@@ -5681,7 +5684,7 @@ export class CoreManager {
             : "info",
       category: "audit",
       kind: "container-action",
-      message: `컨테이너 ${actionLabel}`,
+      message: t("core.containerActionLog", { action: actionLabel }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: input.startedAt,
       updatedAt: completedAt,
@@ -5750,7 +5753,9 @@ export class CoreManager {
       level: "info",
       category: "session",
       kind: "session-lifecycle",
-      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      message: t("core.sessionLog", {
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+      }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: connectedAt,
       updatedAt: connectedAt,
@@ -5808,7 +5813,9 @@ export class CoreManager {
       level: status === "error" ? "error" : "info",
       category: "session",
       kind: "session-lifecycle",
-      message: `${this.getConnectionKindLabel(lifecycle.connectionKind)} 세션`,
+      message: t("core.sessionLog", {
+        kind: this.getConnectionKindLabel(lifecycle.connectionKind),
+      }),
       metadata: metadata as unknown as Record<string, unknown>,
       createdAt: referenceAt,
       updatedAt: disconnectedAt,

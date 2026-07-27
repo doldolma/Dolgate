@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import { isSyncAuthenticationError } from "../sync-service";
 import type { MainIpcContext } from "./context";
+import { t } from '../i18n';
 
 export function registerSyncIpcHandlers(ctx: MainIpcContext): void {
   ipcMain.handle(ipcChannels.sync.bootstrap, async () => {
@@ -13,7 +14,7 @@ export function registerSyncIpcHandlers(ctx: MainIpcContext): void {
         ctx.authService.getState().status === "authenticated"
       ) {
         await ctx.authService.forceUnauthenticated(
-          "세션이 만료되었습니다. 다시 로그인해 주세요.",
+          t('auth.sessionExpired'),
         );
       }
       throw error;
@@ -29,7 +30,7 @@ export function registerSyncIpcHandlers(ctx: MainIpcContext): void {
         ctx.authService.getState().status === "authenticated"
       ) {
         await ctx.authService.forceUnauthenticated(
-          "세션이 만료되었습니다. 다시 로그인해 주세요.",
+          t('auth.sessionExpired'),
         );
       }
       throw error;

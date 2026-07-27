@@ -24,6 +24,8 @@ import {
   SectionLabel,
   StatusBadge,
 } from '../ui';
+import { Trans, useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface OpenSshImportDialogProps {
   open: boolean;
@@ -87,7 +89,7 @@ function renderSourceList(sources: OpenSshSourceSummary[]) {
     <div className="grid gap-2">
       {sources.map((source) => (
         <p key={source.id} className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-          <strong>{source.origin === 'default-ssh-dir' ? '기본' : '파일'}</strong>{' '}
+          <strong>{t(source.origin === 'default-ssh-dir' ? 'opensshImport.source.default' : 'opensshImport.source.file')}</strong>{' '}
           <code>{source.label}</code>
         </p>
       ))}
@@ -101,6 +103,7 @@ export function OpenSshImportDialog({
   onClose,
   onImported,
 }: OpenSshImportDialogProps) {
+  const { t: translate } = useTranslation();
   const {
     addOpenSshFileToSnapshot,
     discardOpenSshSnapshot,
@@ -143,7 +146,7 @@ export function OpenSshImportDialog({
         setError(
           loadError instanceof Error
             ? loadError.message
-            : '기본 OpenSSH 설정을 읽지 못했습니다.',
+            : translate('opensshImport.error.defaultReadFailed'),
         );
       })
       .finally(() => {
@@ -192,7 +195,7 @@ export function OpenSshImportDialog({
             <SectionLabel>OpenSSH</SectionLabel>
             <h3 id="openssh-import-title">Import OpenSSH</h3>
           </div>
-          <IconButton onClick={onClose} aria-label="Import OpenSSH 닫기">
+          <IconButton onClick={onClose} aria-label={translate('opensshImport.dialog.close')}>
             <CloseIcon />
           </IconButton>
         </ModalHeader>
@@ -200,7 +203,7 @@ export function OpenSshImportDialog({
         <ModalBody className="grid gap-4">
           {isLoading ? (
             <NoticeCard tone="info">
-              기본 OpenSSH 설정에서 호스트를 찾는 중입니다.
+              {translate('opensshImport.dialog.scanning')}
             </NoticeCard>
           ) : null}
           {error ? (
@@ -210,8 +213,8 @@ export function OpenSshImportDialog({
           ) : null}
 
           <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-            <strong>대상 그룹</strong>{' '}
-            <span>{currentGroupPath ?? '미분류'}</span>
+            <strong>{translate('opensshImport.dialog.targetGroup')}</strong>{' '}
+            <span>{currentGroupPath ?? translate('opensshImport.dialog.ungrouped')}</span>
           </div>
 
           {probe ? renderSourceList(probe.sources) : null}
@@ -220,11 +223,11 @@ export function OpenSshImportDialog({
           {probe ? (
             <>
               <FilterRow>
-                <FieldGroup label="검색" className="flex-1">
+                <FieldGroup label={translate('opensshImport.dialog.searchLabel')} className="flex-1">
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="별칭, 호스트, 사용자 또는 키 경로 검색"
+                    placeholder={translate('opensshImport.dialog.searchPlaceholder')}
                     disabled={isLoading || isAddingFile}
                   />
                 </FieldGroup>
@@ -252,14 +255,14 @@ export function OpenSshImportDialog({
                         setError(
                           loadError instanceof Error
                             ? loadError.message
-                            : '선택한 OpenSSH 파일을 추가하지 못했습니다.',
+                            : translate('opensshImport.error.addFileFailed'),
                         );
                       } finally {
                         setIsAddingFile(false);
                       }
                     }}
                   >
-                    {isAddingFile ? '파일 불러오는 중...' : '파일 불러오기'}
+                    {translate(isAddingFile ? 'opensshImport.dialog.addingFile' : 'opensshImport.dialog.addFile')}
                   </Button>
                   <Button
                     variant="secondary"
@@ -275,39 +278,49 @@ export function OpenSshImportDialog({
                     }}
                     disabled={visibleHosts.length === 0 || isLoading || isAddingFile}
                   >
-                    보이는 항목 모두 선택
+                    {translate('opensshImport.dialog.selectVisible')}
                   </Button>
                   <Button
                     variant="secondary"
                     onClick={() => setSelectedHostKeys([])}
                     disabled={selectedHostKeys.length === 0}
                   >
-                    선택 해제
+                    {translate('opensshImport.dialog.deselectAll')}
                   </Button>
                 </div>
               </FilterRow>
 
               <div className="flex flex-wrap items-center gap-3 text-[0.82rem] font-medium text-[var(--text-soft)]">
-                <span>소스 {probe.sources.length}</span>
-                <span>가져올 호스트 {probe.hosts.length}</span>
-                <span>선택한 호스트 {selectedHostKeys.length}</span>
+                <span>{translate('opensshImport.dialog.statSources', { count: probe.sources.length })}</span>
+                <span>{translate('opensshImport.dialog.statHosts', { count: probe.hosts.length })}</span>
+                <span>{translate('opensshImport.dialog.statSelected', { count: selectedHostKeys.length })}</span>
                 {probe.skippedExistingHostCount > 0 ? (
-                  <span>기존 호스트 생략 {probe.skippedExistingHostCount}</span>
+                  <span>
+                    {translate('opensshImport.dialog.statSkippedExisting', {
+                      count: probe.skippedExistingHostCount,
+                    })}
+                  </span>
                 ) : null}
                 {probe.skippedDuplicateHostCount > 0 ? (
-                  <span>중복 호스트 생략 {probe.skippedDuplicateHostCount}</span>
+                  <span>
+                    {translate('opensshImport.dialog.statSkippedDuplicate', {
+                      count: probe.skippedDuplicateHostCount,
+                    })}
+                  </span>
                 ) : null}
               </div>
 
               <section className="grid min-h-0 gap-3">
-                <h4>호스트</h4>
+                <h4>{translate('opensshImport.dialog.hostsHeading')}</h4>
                 {visibleHosts.length === 0 ? (
                   <EmptyState
-                    title="가져올 수 있는 OpenSSH 호스트가 없습니다."
+                    title={translate('opensshImport.dialog.emptyTitle')}
                     description={
                       <>
-                        기본 설정에서 자동 감지된 호스트가 여기에 표시됩니다. 다른
-                        설정 파일은 <strong>파일 불러오기</strong>로 추가할 수 있습니다.
+                        <Trans
+                          i18nKey="opensshImport.dialog.emptyDescription"
+                          components={{ strong: <strong /> }}
+                        />
                       </>
                     }
                   />
@@ -339,7 +352,7 @@ export function OpenSshImportDialog({
                             {host.identityFilePath ? (
                               <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">{host.identityFilePath}</small>
                             ) : (
-                              <small className="block text-[0.82rem] text-[var(--text-soft)]">비밀번호 인증</small>
+                              <small className="block text-[0.82rem] text-[var(--text-soft)]">{translate('opensshImport.dialog.passwordAuth')}</small>
                             )}
                             <small className="block truncate text-[0.82rem] text-[var(--text-soft)]">
                               {host.sourceFilePath}:{host.sourceLine}
@@ -347,7 +360,7 @@ export function OpenSshImportDialog({
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             <StatusBadge>
-                              {host.authType === 'privateKey' ? '키' : '비밀번호'}
+                              {translate(host.authType === 'privateKey' ? 'opensshImport.dialog.key' : 'opensshImport.dialog.password')}
                             </StatusBadge>
                           </div>
                         </label>
@@ -362,7 +375,7 @@ export function OpenSshImportDialog({
 
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isImporting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -385,14 +398,14 @@ export function OpenSshImportDialog({
                 setError(
                   importError instanceof Error
                     ? importError.message
-                    : '선택한 OpenSSH 호스트를 가져오지 못했습니다.',
+                    : translate('opensshImport.error.importFailed'),
                 );
               } finally {
                 setIsImporting(false);
               }
             }}
           >
-            {isImporting ? '가져오는 중...' : '가져오기'}
+            {translate(isImporting ? 'opensshImport.dialog.importing' : 'opensshImport.dialog.import')}
           </Button>
         </ModalFooter>
       </ModalShell>

@@ -20,6 +20,7 @@ import type {
 } from '../view-models/appViewModels';
 import { findHost } from './appShellUtils';
 import { OfflineModeBanner } from './OfflineModeBanner';
+import { useTranslation } from 'react-i18next';
 
 interface ContainersShellProps {
   active: boolean;
@@ -40,6 +41,7 @@ export function ContainersShell({
   modalViewModel,
   loginController,
 }: ContainersShellProps) {
+  const { t: translate } = useTranslation();
   const [draggedContainerHostId, setDraggedContainerHostId] = useState<string | null>(
     null,
   );
@@ -365,7 +367,7 @@ export function ContainersShell({
                       ? hostTabCloseButtonActiveClass
                       : hostTabCloseButtonInactiveClass,
                   )}
-                  aria-label={`${title} 닫기`}
+                  aria-label={translate('containersShell.closeTab', { title })}
                   onClick={async (event) => {
                     event.stopPropagation();
                     await containersViewModel.closeHostContainersTab(tab.hostId);
@@ -378,7 +380,7 @@ export function ContainersShell({
             })
           ) : (
             <div className="inline-flex min-h-12 items-center px-[0.25rem] text-[0.9rem] text-[var(--text-soft)]">
-              열린 컨테이너 화면이 없습니다.
+              {translate('containersShell.emptyInline')}
             </div>
           )}
         </div>
@@ -464,8 +466,8 @@ export function ContainersShell({
         ) : (
           <EmptyState
             className="max-w-[620px]"
-            title="열린 컨테이너 화면이 없습니다."
-            description="Host 카드에서 우클릭한 뒤 컨테이너를 열어 주세요."
+            title={translate('containersShell.emptyTitle')}
+            description={translate('containersShell.emptyDescription')}
           />
         )}
       </div>

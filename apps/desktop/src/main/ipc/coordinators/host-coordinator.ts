@@ -42,6 +42,7 @@ import type {
   SftpCompatibleHostRecord,
   SshHostRecord,
 } from "../context";
+import { t } from "../../i18n";
 
 export interface HostCoordinator {
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
@@ -112,7 +113,7 @@ export function createHostCoordinator(deps: {
   const requireConfiguredSshUsername = (host: SshHostRecord): string => {
     const username = host.username.trim();
     if (!username) {
-      throw new Error("사용자명이 필요합니다.");
+      throw new Error(t("hostIpc.usernameRequired"));
     }
     return username;
   };
@@ -124,7 +125,7 @@ export function createHostCoordinator(deps: {
       throw new Error("Host not found");
     }
     if (!isSshHostRecord(host)) {
-      throw new Error("이 기능은 SSH host에서만 사용할 수 있습니다.");
+      throw new Error(t("hostIpc.sshOnly"));
     }
   };
 
@@ -140,7 +141,7 @@ export function createHostCoordinator(deps: {
       !isAwsEc2HostRecord(host)
     ) {
       throw new Error(
-        "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+        t("hostIpc.sshAwsWarpgateOnly"),
       );
     }
   };
@@ -152,7 +153,7 @@ export function createHostCoordinator(deps: {
       throw new Error("Host not found");
     }
     if (!isAwsEc2HostRecord(host)) {
-      throw new Error("이 기능은 AWS host에서만 사용할 수 있습니다.");
+      throw new Error(t("hostIpc.awsOnly"));
     }
   };
 
@@ -163,7 +164,7 @@ export function createHostCoordinator(deps: {
       throw new Error("Host not found");
     }
     if (!isAwsEcsHostRecord(host)) {
-      throw new Error("이 기능은 AWS ECS host에서만 사용할 수 있습니다.");
+      throw new Error(t("hostIpc.awsEcsOnly"));
     }
   };
 
@@ -243,7 +244,7 @@ export function createHostCoordinator(deps: {
       throw new Error("Host not found");
     }
     if (isAwsEcsHostRecord(host)) {
-      throw new Error("ECS 호스트는 SSH 호스트 키 확인을 지원하지 않습니다.");
+      throw new Error(t("hostIpc.ecsNoHostKey"));
     }
 
     if (isAwsEc2HostRecord(host)) {
@@ -293,12 +294,12 @@ export function createHostCoordinator(deps: {
           if (!sshUsername) {
             throw new Error(
               hydratedHost.awsSshMetadataError ||
-                "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+                t("pfIpc.sshUsernameUnknown"),
             );
           }
           const availabilityZone = hydratedHost.awsAvailabilityZone?.trim();
           if (!availabilityZone) {
-            throw new Error("Availability Zone을 확인하지 못했습니다.");
+            throw new Error(t("pfIpc.azUnknown"));
           }
           const { publicKey } = awsSftpCoordinator.createEphemeralAwsSftpKeyPair();
           const startMessage = await buildAwsServerProxyStartMessage(awsService, {
@@ -313,7 +314,7 @@ export function createHostCoordinator(deps: {
           currentStage = "probing-host-key";
           emitStage(
             "probing-host-key",
-            "서버 프록시로 SSH 호스트 키를 확인하는 중입니다.",
+            t("hostIpc.probingViaProxy"),
             hydratedHost.id,
           );
           probed = await retryAwsSsmSshOperation(() =>
@@ -333,7 +334,7 @@ export function createHostCoordinator(deps: {
           currentStage = "opening-tunnel";
           emitStage(
             "opening-tunnel",
-            "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
+            t("hostIpc.openingTunnel"),
             hydratedHost.id,
           );
           const bindPort = await awsSftpCoordinator.reserveLoopbackPort();
@@ -350,7 +351,7 @@ export function createHostCoordinator(deps: {
             currentStage = "probing-host-key";
             emitStage(
               "probing-host-key",
-              "SSH 호스트 키를 확인하는 중입니다.",
+              t("hostIpc.probingHostKey"),
               hydratedHost.id,
             );
             probed = await retryAwsSsmSshOperation(() =>
@@ -445,7 +446,7 @@ export function createHostCoordinator(deps: {
         ? host.hostname
         : (() => {
             throw new Error(
-              "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+              t("hostIpc.sshAwsWarpgateOnly"),
             );
           })();
     const probePort = isWarpgateSshHostRecord(host)
@@ -454,7 +455,7 @@ export function createHostCoordinator(deps: {
         ? host.port
         : (() => {
             throw new Error(
-              "이 기능은 SSH, AWS, Warpgate host에서만 사용할 수 있습니다.",
+              t("hostIpc.sshAwsWarpgateOnly"),
             );
           })();
 
@@ -518,10 +519,10 @@ export function createHostCoordinator(deps: {
     }
     const maxChain = 8; // ProxyJump 다단 깊이 상한(안전장치)
     if (chain.length > maxChain) {
-      throw new Error(`점프 호스트는 최대 ${maxChain}단까지 설정할 수 있습니다.`);
+      throw new Error(t("hostIpc.jumpChainTooDeep", { max: maxChain }));
     }
     if (chain.includes(host.id)) {
-      throw new Error("점프 호스트 체인에 자기 자신을 포함할 수 없습니다.");
+      throw new Error(t("hostIpc.jumpChainSelf"));
     }
 
     let resolved: ResolvedJumpHost | undefined;
@@ -529,11 +530,11 @@ export function createHostCoordinator(deps: {
       const jumpHost = hosts.getById(jumpHostId);
       if (!jumpHost) {
         throw new Error(
-          "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
+          t("hostIpc.jumpHostMissing"),
         );
       }
       if (!isSshHostRecord(jumpHost)) {
-        throw new Error("점프 호스트는 일반 SSH 호스트여야 합니다.");
+        throw new Error(t("hostIpc.jumpHostMustBeSsh"));
       }
       const trustedHostKeysBase64 = requireTrustedHostKeys(jumpHost);
       const username = requireConfiguredSshUsername(jumpHost);

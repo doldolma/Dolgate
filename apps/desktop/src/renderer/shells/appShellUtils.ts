@@ -1,5 +1,6 @@
 import type { HostRecord, LinkedHostSummary } from '@shared';
 import type { DynamicTabStripItem, WorkspaceTab } from '../store/createAppStore';
+import { t } from '../i18n';
 
 export interface DraggedSessionPayload {
   sessionId: string;
@@ -28,10 +29,17 @@ export function buildXshellImportStatusMessage(result: {
   createdSecretCount: number;
   skippedHostCount: number;
 }): string {
-  return `Xshell에서 호스트 ${result.createdHostCount}개와 그룹 ${result.createdGroupCount}개를 가져왔습니다.${
-    result.createdSecretCount > 0 ? ` 저장된 비밀번호 ${result.createdSecretCount}개를 함께 가져왔습니다.` : ''
+  return `${t('appShell.xshellImported', {
+    hosts: result.createdHostCount,
+    groups: result.createdGroupCount,
+  })}${
+    result.createdSecretCount > 0
+      ? t('appShell.xshellSecrets', { count: result.createdSecretCount })
+      : ''
   }${
-    result.skippedHostCount > 0 ? ` 호스트 ${result.skippedHostCount}개는 건너뛰었습니다.` : ''
+    result.skippedHostCount > 0
+      ? t('appShell.xshellSkipped', { count: result.skippedHostCount })
+      : ''
   }`;
 }
 

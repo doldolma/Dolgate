@@ -211,7 +211,7 @@ export async function scanReplayCommands(
     // 남은 pendingPrompt 마커는 아래 finally 의 terminal.dispose() 가 함께 정리한다.
     await writeAsync(activeTerminal, new Uint8Array());
   } catch (error) {
-    console.error('[replay-scan] 명령 스캔 실패 — 목록 없이 재생만 가능합니다', error);
+    console.error('[replay-scan] command scan failed — playback works without the list', error);
     return { blocks: [], shellIntegrationDetected: false };
   } finally {
     terminal?.dispose();

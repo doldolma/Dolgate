@@ -164,6 +164,7 @@ import {
 } from "../../lib/terminal-upload-registry";
 import { resolveHopHostNames } from "../../lib/connection-hops";
 import type { CoreEvent, HostRecord } from "@shared";
+import { t } from "../../i18n";
 
 // AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
 const AWS_SSM_SESSION_EXIT_PATTERN = /AWS SSM session exited with code\s+(-?\d+)/i;
@@ -271,7 +272,7 @@ function applySessionReconnecting(
             errorMessage: undefined,
             connectionProgress: createConnectionProgress(
               "reconnecting",
-              "연결이 끊겨 재연결 중입니다…",
+              t("runtime.reconnecting"),
             ),
             lastEventAt: new Date().toISOString(),
           }
@@ -291,9 +292,9 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
   } = services;
   const { refreshHostAndKeychainState } = bootstrapServices;
   const missingContainerShellMessage =
-    "컨테이너 셸을 시작하지 못했습니다. /bin/sh 또는 /bin/bash가 없거나 셸이 바로 종료되었습니다.";
+    t("runtime.containerShellFailed");
   const missingEcsShellMessage =
-    "ECS 컨테이너 셸을 시작하지 못했습니다. /bin/sh가 없거나 셸 프로세스가 바로 종료되었을 수 있습니다.";
+    t("runtime.ecsShellFailed");
   const IMMEDIATE_ECS_CLOSE_WINDOW_MS = 5_000;
   const isLikelyMissingShellErrorMessage = (message: string): boolean =>
     /status 127|command not found|not found|no such file|cannot execute|exec format|executable file not found/i.test(
@@ -777,7 +778,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                                     containerHostId,
                                     endpointId,
                                     "connecting-containers",
-                                    `${currentHost.label} 컨테이너 연결을 진행하는 중입니다.`,
+                                    t("runtime.containerConnecting", { label: currentHost.label }),
                                   ),
                           })
                         : state.containerTabs,
@@ -1192,8 +1193,12 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 const progress = createConnectionProgress(
                   "waiting-interactive-auth",
                   interactiveState.provider === "warpgate"
-                    ? `${currentHost?.label ?? "세션"} Warpgate 승인을 기다리는 중입니다.`
-                    : `${currentHost?.label ?? "세션"} 추가 인증 응답이 필요합니다.`,
+                    ? t("runtime.warpgateApproval", {
+                        label: currentHost?.label ?? t("runtime.session"),
+                      })
+                    : t("runtime.extraAuth", {
+                        label: currentHost?.label ?? t("runtime.session"),
+                      }),
                   {
                     blockingKind: "panel",
                   },
@@ -1310,7 +1315,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   // 자동 재연결 off / 호스트 불명 → 패인을 끊김(수동 재시도) 상태로.
                   get().applyTmuxGroupReconnectGaveUp(
                     tmuxGroup.id,
-                    "연결이 끊어졌습니다. 다시 연결해 주세요.",
+                    t("runtime.disconnected"),
                   );
                 } else {
                   // 정상 종료(client/remote-exit): %exit 는 Go 가 stream 을 즉시 닫아
@@ -1529,7 +1534,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                   const message =
                     currentTab.errorMessage?.trim() ||
                     closedEventMessage.trim() ||
-                    "ECS Exec 세션이 종료되었습니다.";
+                    t("runtime.ecsExecClosed");
                   return {
                     tabs: state.tabs.map((tab): TerminalTab =>
                       tab.sessionId === sessionId
@@ -1581,7 +1586,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 if (eligibleAbnormalDrop) {
                   const message =
                     closedEventMessage.trim() ||
-                    "연결이 끊어졌습니다. 다시 연결하려면 Retry를 누르세요.";
+                    t("runtime.disconnectedRetry");
                   return {
                     tabs: state.tabs.map((tab): TerminalTab =>
                       tab.sessionId === sessionId
@@ -1639,7 +1644,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                       ? resolveWaitingShellProgress(currentHost)
                       : createConnectionProgress(
                           "waiting-shell",
-                          "원격 셸이 첫 출력을 보내는 중입니다.",
+                          t("runtime.waitingFirstOutput"),
                         )
                   : event.type === "error"
                     ? shouldPromptCredentialRetry && currentHost

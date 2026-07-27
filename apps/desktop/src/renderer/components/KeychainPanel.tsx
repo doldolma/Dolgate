@@ -35,6 +35,8 @@ import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
 import { describeSecretType } from '../lib/secret-display';
 import { matchesKeyboardLayoutQuery } from '../lib/keyboard-layout-search';
 import { copySavedCredentialPassword } from '../services/desktop/settings';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 interface KeychainPanelProps {
   entries: SecretMetadataRecord[];
@@ -52,7 +54,7 @@ function getCopyErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return '비밀번호를 복사하지 못했습니다.';
+  return t('keychain.copyFailed');
 }
 
 function buildKeychainEntrySearchText(
@@ -78,6 +80,7 @@ export function KeychainPanel({
   onCopySshPublicKey,
   onInstallSshPublicKey,
 }: KeychainPanelProps) {
+  const { t: translate } = useTranslation();
   const [copyingSecretRef, setCopyingSecretRef] = useState<string | null>(null);
   const [copyingPublicKeyRef, setCopyingPublicKeyRef] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<{
@@ -103,7 +106,7 @@ export function KeychainPanel({
       await copySavedCredentialPassword(secretRef);
       setCopyStatus({
         tone: 'success',
-        message: '비밀번호를 클립보드에 복사했습니다.',
+        message: translate('keychain.copied'),
       });
     } catch (error) {
       setCopyStatus({
@@ -122,7 +125,7 @@ export function KeychainPanel({
       await onCopySshPublicKey(secretRef);
       setCopyStatus({
         tone: 'success',
-        message: 'SSH 공개 키를 클립보드에 복사했습니다.',
+        message: translate('keychain.publicKeyCopied'),
       });
     } catch (error) {
       setCopyStatus({
@@ -130,7 +133,7 @@ export function KeychainPanel({
         message:
           error instanceof Error && error.message.trim()
             ? error.message
-            : 'SSH 공개 키를 복사하지 못했습니다.',
+            : translate('keychain.publicKeyCopyFailed'),
       });
     } finally {
       setCopyingPublicKeyRef(null);
@@ -227,7 +230,7 @@ export function KeychainPanel({
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
           <p className="m-0 max-w-[48rem] text-[var(--text-soft)]">
-            호스트가 사용하는 비밀번호, 패스프레이즈, 개인키, SSH 인증서를 안전하게 저장하고 연결 상태를 관리합니다.
+            {translate('keychain.intro')}
           </p>
         </div>
         <Button variant="secondary" onClick={() => setGenerateOpen(true)}>
@@ -261,13 +264,13 @@ export function KeychainPanel({
       <PanelSection>
         {entries.length === 0 ? (
           <EmptyState
-            title="저장된 인증 정보가 없습니다."
-            description="호스트를 저장할 때 인증 정보를 저장하면 이 목록에 표시됩니다."
+            title={translate('keychain.empty.title')}
+            description={translate('keychain.empty.description')}
           />
         ) : visibleEntries.length === 0 ? (
           <EmptyState
-            title="검색 결과가 없습니다."
-            description="검색어를 지우거나 다른 인증 정보로 다시 찾아보세요."
+            title={translate('keychain.empty.searchTitle')}
+            description={translate('keychain.empty.searchDescription')}
           />
         ) : (
           visibleEntries.map((entry) => (
@@ -292,7 +295,7 @@ export function KeychainPanel({
                         : ''}
                     </span>
                   ) : null}
-                  <span>{entry.linkedHostCount}개 호스트에서 사용 중</span>
+                  <span>{translate('keychain.linkedHosts', { count: entry.linkedHostCount })}</span>
                   <span>{new Date(entry.updatedAt).toLocaleString('ko-KR')}</span>
                 </CardMeta>
               </CardMain>
@@ -303,11 +306,11 @@ export function KeychainPanel({
                     disabled={copyingSecretRef === entry.secretRef}
                     onClick={() => void handleCopyPassword(entry.secretRef)}
                   >
-                    {copyingSecretRef === entry.secretRef ? '복사 중...' : '비밀번호 복사'}
+                    {translate(copyingSecretRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPassword')}
                   </Button>
                 ) : null}
                 <Button variant="secondary" onClick={() => onEditSecret(entry.secretRef)}>
-                  편집
+                  {translate('keychain.action.edit')}
                 </Button>
                 {entry.hasManagedPrivateKey ? (
                   <>
@@ -316,15 +319,15 @@ export function KeychainPanel({
                       disabled={copyingPublicKeyRef === entry.secretRef}
                       onClick={() => void handleCopyPublicKey(entry.secretRef)}
                     >
-                      {copyingPublicKeyRef === entry.secretRef ? '복사 중...' : '공개 키 복사'}
+                      {translate(copyingPublicKeyRef === entry.secretRef ? 'keychain.action.copying' : 'keychain.action.copyPublicKey')}
                     </Button>
                     <Button variant="secondary" onClick={() => openInstallDialog(entry.secretRef)}>
-                      호스트에 설치
+                      {translate('keychain.action.installOnHost')}
                     </Button>
                   </>
                 ) : null}
                 <Button variant="danger" onClick={() => void onRemoveSecret(entry.secretRef)}>
-                  삭제
+                  {translate('common.delete')}
                 </Button>
               </CardActions>
             </Card>
@@ -345,14 +348,14 @@ export function KeychainPanel({
               const result = await onGenerateSshKey(input);
               setCopyStatus({
                 tone: 'success',
-                message: `${result.label} SSH 키를 생성했습니다.`,
+                message: translate('keychain.keyCreated', { label: result.label }),
               });
               setGenerateOpen(false);
             } catch (error) {
               setGenerateError(
                 error instanceof Error && error.message.trim()
                   ? error.message
-                  : 'SSH 키를 생성하지 못했습니다.',
+                  : translate('keychain.keyCreateFailed'),
               );
             } finally {
               setGenerateBusy(false);
@@ -432,11 +435,11 @@ export function KeychainPanel({
                 <div className="grid max-h-[18rem] gap-2 overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] p-2">
                   {installableHosts.length === 0 ? (
                     <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
-                      설치 가능한 호스트가 없습니다.
+                      {translate('keychain.install.noHosts')}
                     </p>
                   ) : visibleInstallHosts.length === 0 ? (
                     <p className="m-0 rounded-[10px] border border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-soft)]">
-                      검색 결과가 없습니다.
+                      {translate('keychain.install.noResults')}
                     </p>
                   ) : (
                     visibleInstallHosts.map((host) => {
@@ -542,14 +545,14 @@ export function KeychainPanel({
                     setInstallError(
                       error instanceof Error && error.message.trim()
                         ? error.message
-                        : 'SSH 공개 키를 설치하지 못했습니다.',
+                        : translate('keychain.install.failed'),
                     );
                   } finally {
                     setInstallBusy(false);
                   }
                 }}
               >
-                {installBusy ? '설치 중...' : 'Install'}
+                {installBusy ? translate('keychain.install.busy') : 'Install'}
               </Button>
             </ModalFooter>
           </ModalShell>

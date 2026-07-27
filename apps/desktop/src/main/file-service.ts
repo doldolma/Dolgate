@@ -7,6 +7,7 @@ import type {
   FileEntryKind,
   FileSystemRoot,
 } from '@shared';
+import { t } from './i18n';
 
 function toIsoTime(valueMs: number): string {
   return new Date(valueMs).toISOString();
@@ -147,7 +148,7 @@ export class LocalFileService {
       entries: entries.sort(compareEntries),
       warnings:
         skippedEntryCount > 0
-          ? [`잠겨 있거나 접근할 수 없는 항목 ${skippedEntryCount}개는 표시되지 않았습니다.`]
+          ? [t('misc.skippedEntries', { count: skippedEntryCount })]
           : undefined
     };
   }

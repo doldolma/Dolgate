@@ -41,6 +41,8 @@ import { loadSavedCredential } from '../../services/desktop/settings';
 import { terminalThemePresets } from '../../lib/terminal-presets';
 import { getHostAddress, getHostRegion, getHostTypeLabel } from './hostDisplay';
 import type { HostBrowserModel } from './useHostBrowser';
+import { useTranslation } from 'react-i18next';
+import { t } from '../../i18n';
 
 interface HostDetailPanelProps {
   hb: HostBrowserModel;
@@ -58,18 +60,18 @@ function formatRelativeTime(value: string): string {
   const diffMs = Date.now() - timestamp;
   const diffMin = Math.round(diffMs / 60000);
   if (diffMin < 1) {
-    return '방금 전';
+    return t('hostDetail.ago.justNow');
   }
   if (diffMin < 60) {
-    return `${diffMin}분 전`;
+    return t('hostDetail.ago.minutes', { count: diffMin });
   }
   const diffHour = Math.round(diffMin / 60);
   if (diffHour < 24) {
-    return `${diffHour}시간 전`;
+    return t('hostDetail.ago.hours', { count: diffHour });
   }
   const diffDay = Math.round(diffHour / 24);
   if (diffDay < 7) {
-    return `${diffDay}일 전`;
+    return t('hostDetail.ago.days', { count: diffDay });
   }
   // 7일 넘은 과거는 절대 일시로 표시한다(날짜만이 아니라 시각까지 포함).
   return new Date(timestamp).toLocaleString(undefined, {
@@ -199,7 +201,7 @@ function ActivityRow({
       {replayRecordingId && onOpenReplay ? (
         <button
           type="button"
-          aria-label="세션 리플레이 보기"
+          aria-label={t('hostDetail.replay')}
           className="inline-flex shrink-0 items-center gap-[0.3rem] rounded-[8px] border border-[var(--border)] px-[0.5rem] py-[0.3rem] text-[0.72rem] font-semibold text-[var(--text-soft)] transition-colors duration-140 hover:border-[color-mix(in_srgb,var(--accent-strong)_30%,var(--border)_70%)] hover:text-[var(--accent-strong)]"
           onClick={() => onOpenReplay(replayRecordingId)}
         >
@@ -238,12 +240,12 @@ function describeStartupCommand(
     );
   }
   const label = snippets?.find((snippet) => snippet.id === command.snippetId)?.label;
-  return label ? `스니펫 · ${label}` : '스니펫';
+  return label ? t('hostDetail.startup.snippetWithLabel', { label }) : t('hostDetail.startup.snippet');
 }
 
 function describeSerialTransport(transport: string): string {
   if (transport === 'local') {
-    return '로컬';
+    return t('hostDetail.serial.local');
   }
   if (transport === 'raw-tcp') {
     return 'Raw TCP';
@@ -264,16 +266,18 @@ function buildCredentialValue(
   keychainEntries: SecretMetadataRecord[],
 ): React.ReactNode {
   if (!host.secretRef) {
-    return '저장 안 함 (연결 시 입력)';
+    return t('hostDetail.credential.none');
   }
   const entry = keychainEntries.find((item) => item.secretRef === host.secretRef);
-  const label = entry?.label ?? '저장된 자격증명';
+  const label = entry?.label ?? t('hostDetail.credential.saved');
   const sharedCount = entry?.linkedHostCount ?? 0;
   if (sharedCount > 1) {
     return (
       <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
         <span>{label}</span>
-        <span className="text-[0.78rem] text-[var(--text-muted)]">· {sharedCount}개 호스트 공유</span>
+        <span className="text-[0.78rem] text-[var(--text-muted)]">
+          {t('hostDetail.credential.sharedCount', { count: sharedCount })}
+        </span>
       </span>
     );
   }
@@ -319,7 +323,7 @@ function buildConnectionRows(
   }
 
   if (isSshHostRecord(host)) {
-    rows.push({ label: 'Username', value: host.username || '미설정' });
+    rows.push({ label: 'Username', value: host.username || t('hostDetail.row.usernameUnset') });
     rows.push({ label: 'Port', value: host.port });
     rows.push({
       label: 'Auth',
@@ -353,10 +357,10 @@ function buildConnectionRows(
       });
     }
     if (host.useMosh) {
-      rows.push({ label: 'Mosh', value: '사용' });
+      rows.push({ label: 'Mosh', value: t('hostDetail.row.enabled') });
     }
     if (host.agentForwarding) {
-      rows.push({ label: 'Agent Forwarding', value: '사용' });
+      rows.push({ label: 'Agent Forwarding', value: t('hostDetail.row.enabled') });
     }
   } else if (host.kind === 'aws-ec2') {
     rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
@@ -377,7 +381,7 @@ function buildConnectionRows(
       rows.push({ label: 'SSH Port', value: host.awsSshPort });
     }
     if (host.awsSsmServerProxyEnabled) {
-      rows.push({ label: '서버 프록시', value: '사용' });
+      rows.push({ label: t('hostDetail.row.serverProxy'), value: t('hostDetail.row.enabled') });
     }
   } else if (host.kind === 'aws-ecs') {
     rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
@@ -400,14 +404,17 @@ function buildConnectionRows(
   }
 
   if ('startupCommand' in host && host.startupCommand) {
-    rows.push({ label: '시작 명령', value: describeStartupCommand(host.startupCommand, snippets) });
+    rows.push({
+      label: t('hostDetail.row.startupCommand'),
+      value: describeStartupCommand(host.startupCommand, snippets),
+    });
   }
 
   const themeTitle = host.terminalThemeId
     ? terminalThemePresets.find((preset) => preset.id === host.terminalThemeId)?.title
     : undefined;
   if (themeTitle) {
-    rows.push({ label: '터미널 테마', value: themeTitle });
+    rows.push({ label: t('hostDetail.row.terminalTheme'), value: themeTitle });
   }
 
   return rows;
@@ -419,6 +426,7 @@ function buildConnectionRows(
  * 값에는 토큰/비밀번호가 들어갈 수 있어 기본 마스킹하고, 눈 아이콘으로 펼친다.
  */
 function EnvVarsSection({ host }: { host: SshHostRecord }) {
+  const { t: translate } = useTranslation();
   const directEnv = host.env ?? [];
   const secretRef = host.secretRef ?? null;
   const [fallbackEnv, setFallbackEnv] = useState<HostEnvVar[]>([]);
@@ -456,10 +464,12 @@ function EnvVarsSection({ host }: { host: SshHostRecord }) {
   return (
     <div className="mt-[0.7rem] border-t border-[var(--border)] pt-[0.7rem]">
       <div className="mb-[0.4rem] flex items-center justify-between gap-3">
-        <span className="text-[0.82rem] text-[var(--text-soft)]">환경 변수 ({envVars.length})</span>
+        <span className="text-[0.82rem] text-[var(--text-soft)]">
+          {translate('hostDetail.env.heading', { count: envVars.length })}
+        </span>
         <button
           type="button"
-          aria-label={revealed ? '값 숨기기' : '값 표시'}
+          aria-label={translate(revealed ? 'hostDetail.env.hide' : 'hostDetail.env.show')}
           aria-pressed={revealed}
           className="flex h-[1.5rem] w-[1.5rem] items-center justify-center rounded-[8px] text-[var(--text-muted)] transition-colors duration-150 hover:bg-[var(--surface-muted)] hover:text-[var(--text)]"
           onClick={() => setRevealed((current) => !current)}
@@ -577,6 +587,7 @@ function EmptyDetail({
   hb: HostBrowserModel;
   tmuxPrefixKey?: string;
 }) {
+  const { t: translate } = useTranslation();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // 시간순 최근 로그. 예전에는 hostId 로 중복을 걸러 "호스트당 한 줄"만 보여 줬는데,
   // 그러면 같은 호스트의 리플레이가 있는 세션 로그가 그보다 최근의 다른 로그(전송·감사)에
@@ -635,40 +646,40 @@ function EmptyDetail({
     <div className="flex h-full flex-col divide-y divide-[var(--border)] overflow-y-auto px-[0.9rem] pb-[1.3rem]">
       <div className="flex flex-col items-center gap-[0.7rem] pb-[2rem] pt-[3.2rem] text-center">
         <HostStackArt className="mb-[0.55rem] w-[8.5rem]" />
-        <strong className="text-[1rem] text-[var(--text)]">호스트를 선택하세요</strong>
+        <strong className="text-[1rem] text-[var(--text)]">{translate('hostDetail.empty.title')}</strong>
         <p className="max-w-[16rem] text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
-          왼쪽의 호스트 카드 또는 그룹에서 하나를 선택하면 상세 정보가 표시됩니다.
+          {translate('hostDetail.empty.description')}
         </p>
       </div>
 
       <div className="flex flex-col gap-[0.55rem] py-[1.3rem]">
         <span className="text-[0.76rem] font-bold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-          빠른 시작
+          {translate('hostDetail.empty.quickStart')}
         </span>
         <div className="grid grid-cols-3 gap-[0.55rem]">
           <Button variant="secondary" size="sm" onClick={hb.onCreateHost}>
             <Plus className="h-[0.95rem] w-[0.95rem]" />
-            새 호스트
+            {translate('hostDetail.empty.newHost')}
           </Button>
           <Button variant="secondary" size="sm" onClick={hb.onOpenOpenSshImport}>
             <Download className="h-[0.95rem] w-[0.95rem]" />
-            가져오기
+            {translate('hostDetail.empty.import')}
           </Button>
           <Button variant="secondary" size="sm" onClick={hb.onOpenLocalTerminal}>
             <SquareTerminal className="h-[0.95rem] w-[0.95rem]" />
-            로컬 터미널
+            {translate('hostDetail.empty.localTerminal')}
           </Button>
           <Button variant="secondary" size="sm" onClick={hb.openCreateGroupModal}>
             <FolderPlus className="h-[0.95rem] w-[0.95rem]" />
-            새 그룹
+            {translate('hostDetail.empty.newGroup')}
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setShortcutsOpen(true)}>
             <Keyboard className="h-[0.95rem] w-[0.95rem]" />
-            단축키
+            {translate('hostDetail.empty.shortcuts')}
           </Button>
           <Button variant="secondary" size="sm" onClick={() => hb.onSelectSection?.('logs')}>
             <List className="h-[0.95rem] w-[0.95rem]" />
-            로그
+            {translate('hostDetail.empty.logs')}
           </Button>
         </div>
       </div>
@@ -677,7 +688,7 @@ function EmptyDetail({
         <div className="flex flex-col gap-[0.55rem] pt-[1.3rem]">
           <div className="flex items-center justify-between">
             <span className="text-[0.76rem] font-bold uppercase tracking-[0.1em] text-[var(--text-soft)]">
-              최근 로그
+              {translate('hostDetail.empty.recentLogs')}
             </span>
             <button
               type="button"
@@ -713,6 +724,7 @@ function EmptyDetail({
 }
 
 export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
+  const { t: translate } = useTranslation();
   const { selectedHostId, hosts, favoriteHostIdSet } = hb;
   const host = useMemo(
     () => hosts.find((entry) => entry.id === selectedHostId) ?? null,
@@ -759,7 +771,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
         <div className="flex shrink-0 items-center gap-[0.25rem]">
           <button
             type="button"
-            aria-label={`${host.label} 즐겨찾기`}
+            aria-label={translate('hostDetail.favorite', { label: host.label })}
             aria-pressed={isFavorite}
             className={cn(
               'inline-grid h-[1.9rem] w-[1.9rem] place-items-center rounded-[10px] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)]',
@@ -771,7 +783,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
           </button>
           <button
             type="button"
-            aria-label="상세 닫기"
+            aria-label={translate('hostDetail.close')}
             className="inline-grid h-[1.9rem] w-[1.9rem] place-items-center rounded-[10px] text-[var(--text-muted)] transition-colors duration-140 hover:bg-[color-mix(in_srgb,var(--surface-muted)_88%,transparent_12%)] hover:text-[var(--text)]"
             onClick={() => hb.clearSelections()}
           >
@@ -944,6 +956,7 @@ function ActivityList({
   logs: ActivityLogRecord[];
   onOpenReplay?: (recordingId: string) => void;
 }) {
+  const { t: translate } = useTranslation();
   return (
     <div className="flex flex-col">
       {logs.map((log) => {
@@ -959,7 +972,9 @@ function ActivityList({
         // (정상적으로 닫힌 세션을 "종료"로 표기하면 모든 기록이 종료로 보여 혼란스러움.)
         const primary = isSession
           ? isError
-            ? `${getConnectionKindLabel(metadata?.connectionKind)} · 연결 실패`
+            ? translate('hostDetail.activity.connectFailed', {
+                kind: getConnectionKindLabel(metadata?.connectionKind),
+              })
             : getConnectionKindLabel(metadata?.connectionKind)
           : log.message;
         // 실패 사유만 부제로 노출(정상 종료의 기술적 사유는 노이즈라 숨김).

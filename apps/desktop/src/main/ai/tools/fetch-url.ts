@@ -1,6 +1,7 @@
 import { convert } from "html-to-text";
 
 import type { AiToolDef } from "../../../shared/ai";
+import { t } from '../../i18n';
 
 export const FETCH_URL_TOOL: AiToolDef = {
   name: "fetch_url",
@@ -28,10 +29,10 @@ export async function runFetchUrl(
   try {
     parsed = new URL(rawUrl);
   } catch {
-    return "error: 잘못된 URL 입니다.";
+    return t('fetchUrl.badUrl');
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    return "error: http/https URL 만 허용됩니다.";
+    return t('fetchUrl.schemeOnly');
   }
 
   let response: Response;
@@ -41,7 +42,7 @@ export async function runFetchUrl(
       headers: { "user-agent": "Dolgate/1.0 (AI assistant)" },
     });
   } catch {
-    return "error: 페이지를 가져오지 못했습니다(네트워크).";
+    return t('fetchUrl.networkFailed');
   }
   if (!response.ok) {
     return `error: HTTP ${response.status}.`;
@@ -52,5 +53,5 @@ export async function runFetchUrl(
   const text = contentType.includes("html")
     ? convert(body, { wordwrap: false })
     : body;
-  return text.trim().slice(0, MAX_OUTPUT_CHARS) || "(빈 응답)";
+  return text.trim().slice(0, MAX_OUTPUT_CHARS) || t('fetchUrl.emptyResponse');
 }

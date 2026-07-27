@@ -12,6 +12,7 @@ import type {
 import { mergeTextAttachments } from "../../shared/ai";
 import type { ProviderAdapter, ProviderChatOptions, ProviderConfig } from "./provider";
 import { normalizeAiError } from "./provider-errors";
+import { t } from '../i18n';
 
 // Anthropic 은 max_tokens 가 필수라 기본 상한을 둔다(요청이 값을 주면 그걸 우선).
 // 4096 = 현재 Claude 계열이 공통으로 허용하는 안전한 출력 상한(1024 는 답이 잘렸음).
@@ -79,7 +80,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       const detectedModels = entries
         .map((entry) => entry.id)
         .filter((id): id is string => typeof id === "string");
-      return { ok: true, message: "연결에 성공했습니다.", detectedModels };
+      return { ok: true, message: t('misc.connectSuccess'), detectedModels };
     } catch (error) {
       const normalized = normalizeAiError(error);
       return { ok: false, reason: normalized.reason, message: normalized.message };

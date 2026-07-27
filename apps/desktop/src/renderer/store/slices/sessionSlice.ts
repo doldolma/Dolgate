@@ -163,6 +163,7 @@ import { createSftpServices } from "../services/sftp";
 import { createTrustAuthServices } from "../services/trust-auth";
 import { parseSnippetVariables, resolveSnippetCommand } from "../../lib/snippet";
 import { popClosedHost, pushClosedHost } from "../../lib/recently-closed-tabs";
+import { t } from '../../i18n';
 
 // 사용자가 닫은 tmux control 세션. 닫는 순간 control 채널 stdout 에 이미 버퍼돼 있던
 // 늦은 %layout-change 가 도착해 워크스페이스를 되살리는(부활) 것을 막기 위한 단기 가드.
@@ -721,7 +722,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                       title: tab.title,
                       progress: createConnectionProgress(
                         "retrying-session",
-                        `${host.label} ECS 셸을 다시 여는 중입니다.`,
+                        t('sessionStore.ecsShellReopening', { label: host.label }),
                       ),
                     }),
                 ),
@@ -776,7 +777,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                       progress: isAwsEc2HostRecord(host)
                         ? createConnectionProgress(
                             "checking-profile",
-                            `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                            t('containersStore.checkingProfile', { profile: host.awsProfileName }),
                           )
                         : resolveHostKeyCheckProgress(host),
                     }),
@@ -850,7 +851,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                       title: tab.title,
                       progress: createConnectionProgress(
                         "retrying-session",
-                        "로컬 터미널을 다시 시작하는 중입니다.",
+                        t('sessionStore.localRestarting'),
                       ),
                     }),
                 ),
@@ -921,7 +922,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                     progress: isAwsEc2HostRecord(host)
                       ? createConnectionProgress(
                           "checking-profile",
-                          `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                          t('containersStore.checkingProfile', { profile: host.awsProfileName }),
                         )
                       : resolveHostKeyCheckProgress(host),
                   }),
@@ -1089,13 +1090,13 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 cancelReconnect(group.id, "user-cancel");
                 get().applyTmuxGroupReconnectGaveUp(
                   group.id,
-                  "자동 재연결을 취소했습니다.",
+                  t('sessionStore.autoReconnectCancelled'),
                 );
                 return;
               }
             }
             cancelReconnect(tab.stableId, "user-cancel");
-            const message = "자동 재연결을 취소했습니다.";
+            const message = t('sessionStore.autoReconnectCancelled');
             set((state) => ({
               tabs: state.tabs.map((item) =>
                 item.sessionId === sessionId
@@ -2042,7 +2043,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             const pending = get().pendingCredentialRetry;
             if (pending?.sessionId) {
               const host = get().hosts.find((item) => item.id === pending.hostId);
-              const message = `${host?.label ?? "세션"} 인증 입력이 취소되었습니다.`;
+              const message = t('sessionStore.authInputCancelled', {
+                label: host?.label ?? t('runtime.session'),
+              });
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });
@@ -2064,7 +2067,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
 
             const username = input.username.trim();
             if (!username) {
-              throw new Error("사용자명을 입력해 주세요.");
+              throw new Error(t('sessionStore.usernameRequired'));
             }
 
             const secrets = {
@@ -2096,7 +2099,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 username,
               );
               if (!nextHost || !isSshHostRecord(nextHost)) {
-                throw new Error("사용자명을 업데이트하지 못했습니다.");
+                throw new Error(t('sessionStore.usernameUpdateFailed'));
               }
             }
 
@@ -2185,7 +2188,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     
             const trimmedUsername = username.trim();
             if (!trimmedUsername) {
-              throw new Error("사용자명을 입력해 주세요.");
+              throw new Error(t('sessionStore.usernameRequired'));
             }
     
             const currentHost = get().hosts.find((item) => item.id === pending.hostId);

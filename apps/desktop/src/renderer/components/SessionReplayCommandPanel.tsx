@@ -4,6 +4,7 @@
 import { memo } from 'react';
 import type { ReplayCommandBlock } from '../lib/replay-command-scan';
 import { cn } from '../lib/cn';
+import { useTranslation } from "react-i18next";
 
 interface SessionReplayCommandPanelProps {
   blocks: readonly ReplayCommandBlock[];
@@ -64,6 +65,7 @@ function SessionReplayCommandPanelImpl({
   onSeek,
   className,
 }: SessionReplayCommandPanelProps) {
+  const { t: translate } = useTranslation();
   const activeId = activeBlockId;
 
   return (
@@ -72,7 +74,7 @@ function SessionReplayCommandPanelImpl({
         'flex min-h-0 flex-col overflow-hidden rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[color-mix(in_srgb,var(--surface-strong)_94%,transparent_6%)]',
         className,
       )}
-      aria-label="명령 목록"
+      aria-label={translate('replayCommands.aria')}
     >
       <div className="flex items-baseline justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
         <span className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-[var(--text-soft)]">
@@ -88,13 +90,13 @@ function SessionReplayCommandPanelImpl({
       <div className="min-h-0 flex-1 overflow-auto py-1">
         {scanning ? (
           <p className="m-0 px-3 py-4 text-[0.8rem] text-[var(--text-soft)]">
-            명령을 분석하는 중…
+            {translate('replayCommands.analyzing')}
           </p>
         ) : blocks.length === 0 ? (
           <p className="m-0 px-3 py-4 text-[0.8rem] leading-[1.5] text-[var(--text-soft)]">
             {shellIntegrationDetected
-              ? '기록된 명령이 없습니다.'
-              : '이 녹화에는 셸 통합 정보가 없어 명령을 표시할 수 없습니다.'}
+              ? translate('replayCommands.noCommands')
+              : translate('replayCommands.noShellIntegration')}
           </p>
         ) : (
           blocks.map((block) => {
@@ -128,7 +130,7 @@ function SessionReplayCommandPanelImpl({
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1 truncate font-mono text-[0.78rem] text-[var(--text)]">
-                  {block.command ?? '(명령을 읽지 못했습니다)'}
+                  {block.command ?? translate('replayCommands.unreadable')}
                 </span>
                 {block.state === 'failed' && block.exitCode !== null ? (
                   <span className="shrink-0 text-[0.68rem] font-semibold text-[var(--danger-text)]">

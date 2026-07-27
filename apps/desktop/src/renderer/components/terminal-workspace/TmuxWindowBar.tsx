@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { WorkspaceTab } from '../../store/types';
 import { cn } from '../../lib/cn';
 import { Columns2, Plus, Rows2, X } from '../../ui/icons';
+import { useTranslation } from 'react-i18next';
 
 interface TmuxWindowBarProps {
   /** 같은 tmux 세션(control)의 window WorkspaceTab 들. index 순 정렬되어 들어온다. */
@@ -30,6 +31,7 @@ export function TmuxWindowBar({
   onSplitHorizontal,
   onSplitVertical,
 }: TmuxWindowBarProps) {
+  const { t: translate } = useTranslation();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -57,7 +59,7 @@ export function TmuxWindowBar({
     <div
       className="flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-2 py-1"
       role="tablist"
-      aria-label="tmux 윈도우"
+      aria-label={translate('tmuxBar.aria')}
     >
       {windows.map((workspace) => {
         const active = workspace.id === activeWorkspaceId;
@@ -106,13 +108,13 @@ export function TmuxWindowBar({
                 onSelect(workspace.id);
               }
             }}
-            title={`${label} — 클릭: 전환 · 더블클릭: 이름변경`}
+            title={translate('tmuxBar.windowTitle', { label })}
           >
             <span className="max-w-[12rem] truncate">{label}</span>
             <button
               type="button"
               className="rounded px-0.5 text-[var(--text-muted)] opacity-0 transition-opacity hover:text-[var(--danger-text)] group-hover:opacity-100"
-              title="윈도우 닫기 (kill-window)"
+              title={translate('tmuxBar.closeWindow')}
               onClick={(event) => {
                 event.stopPropagation();
                 onClose(workspace.id);
@@ -126,7 +128,7 @@ export function TmuxWindowBar({
       <button
         type="button"
         className="shrink-0 rounded-[4px] px-1.5 py-0.5 text-[0.82rem] leading-none text-[var(--text-muted)] transition-colors hover:bg-[var(--surface)] hover:text-[var(--text)]"
-        title="새 tmux 윈도우 (Ctrl-b c)"
+        title={translate('tmuxBar.newWindow')}
         onClick={onNewWindow}
       >
         <Plus className="h-3.5 w-3.5" />
@@ -137,23 +139,23 @@ export function TmuxWindowBar({
       <button
         type="button"
         className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.7rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-        title="활성 pane 좌우 분할 (Ctrl-b %)"
+        title={translate('tmuxBar.splitHorizontalTitle')}
         onClick={onSplitHorizontal}
       >
         <span className="inline-flex items-center gap-1">
           <Columns2 className="h-3.5 w-3.5" />
-          좌우 분할
+          {translate('tmuxBar.splitHorizontal')}
         </span>
       </button>
       <button
         type="button"
         className="shrink-0 rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[0.7rem] text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-        title='활성 pane 상하 분할 (Ctrl-b ")'
+        title={translate('tmuxBar.splitVerticalTitle')}
         onClick={onSplitVertical}
       >
         <span className="inline-flex items-center gap-1">
           <Rows2 className="h-3.5 w-3.5" />
-          상하 분할
+          {translate('tmuxBar.splitVertical')}
         </span>
       </button>
     </div>

@@ -79,6 +79,8 @@ import {
   isAwsSsoAuthenticationErrorMessage,
   normalizeErrorMessage,
 } from "../store/utils";
+import { useTranslation } from "react-i18next";
+import { t } from "../i18n";
 
 interface AwsEcsWorkspaceProps {
   host: HostRecord;
@@ -564,7 +566,7 @@ function buildShellPickerStateFromContext(
       open: true,
       serviceName,
       loading: false,
-      error: "ECS Exec 컨텍스트를 불러오지 못했습니다.",
+      error: t("ecs.error.execContextFailed"),
       taskArn: null,
       containerName: null,
     };
@@ -594,9 +596,9 @@ function buildShellPickerStateFromContext(
     loading: false,
     error:
       context.runningTasks.length === 0
-        ? "이 서비스에 실행 중인 task가 없습니다."
+        ? t("ecs.error.noRunningTask")
         : containerOptions.length === 0
-          ? "ECS Exec로 연결할 수 있는 컨테이너가 없습니다."
+          ? t("ecs.error.noExecContainer")
           : null,
     taskArn: nextTaskArn,
     containerName: nextContainerName,
@@ -613,6 +615,7 @@ function MetricsPanel({
     memoryHistory: AwsMetricHistoryPoint[];
   };
 }) {
+  const { t: translate } = useTranslation();
   const cpuChart = useMemo(
     () => buildPercentMetricSeries(history.cpuHistory, "CPU"),
     [history.cpuHistory],
@@ -653,7 +656,7 @@ function MetricsPanel({
               </span>
             </div>
             <div className={ecsEmptyDetailClass}>
-              최근 10분 CPU 추세 데이터가 없습니다.
+              {translate("ecs.metrics.noCpuTrend")}
             </div>
           </div>
         )}
@@ -676,7 +679,7 @@ function MetricsPanel({
               </span>
             </div>
             <div className={ecsEmptyDetailClass}>
-              최근 10분 Memory 추세 데이터가 없습니다.
+              {translate("ecs.metrics.noMemoryTrend")}
             </div>
           </div>
         )}
@@ -698,6 +701,7 @@ export function AwsEcsWorkspace({
   onSetLogsState,
   onOpenEcsExecShell,
 }: AwsEcsWorkspaceProps) {
+  const { t: translate } = useTranslation();
   const {
     loadEcsServiceActionContext,
     loadEcsServiceLogs,
@@ -708,10 +712,10 @@ export function AwsEcsWorkspace({
   const snapshot = tab.ecsSnapshot;
   const progressTitle = tab.connectionProgress
     ? formatConnectionProgressStageLabel(tab.connectionProgress.stage)
-    : "ECS 클러스터 조회";
+    : translate("ecs.connecting.clusterLookup");
   const progressMessage =
     tab.connectionProgress?.message ??
-    "AWS ECS 서비스 스냅샷과 현재 사용량 지표를 가져오고 있습니다.";
+    translate("ecs.connecting.snapshotHint");
   const canOpenSsoLoginFromProgress =
     tab.connectionProgress?.stage === "browser-login" &&
     Boolean(onOpenAwsSsoLogin);
@@ -798,7 +802,7 @@ export function AwsEcsWorkspace({
           loading: false,
           error: normalizeErrorMessage(
             error,
-            "AWS SSO 로그인 창을 열지 못했습니다.",
+            translate("ecs.error.ssoWindowFailed"),
           ),
         });
       }
@@ -1113,7 +1117,7 @@ export function AwsEcsWorkspace({
           const message =
             error instanceof Error
               ? error.message
-              : "서비스 액션 정보를 불러오지 못했습니다.";
+              : translate("ecs.error.actionContextFailed");
           setServiceContexts((previous) => ({
             ...previous,
             [serviceName]: {
@@ -1199,7 +1203,7 @@ export function AwsEcsWorkspace({
           error:
             error instanceof Error
               ? error.message
-              : "ECS 서비스 로그를 불러오지 못했습니다.",
+              : translate("ecs.error.logsFailed"),
           taskArn: requestedTaskArn,
           containerName: requestedContainerName,
         }));
@@ -1728,14 +1732,14 @@ export function AwsEcsWorkspace({
     if (!Number.isFinite(targetPort) || targetPort <= 0) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "포트를 선택해 주세요.",
+        error: translate("ecs.error.portRequired"),
       }));
       return;
     }
     if (!tunnelState.autoLocalPort && (!Number.isFinite(bindPort) || bindPort <= 0)) {
       setTunnelState((previous) => ({
         ...previous,
-        error: "로컬 포트를 확인해 주세요.",
+        error: translate("ecs.error.localPortInvalid"),
       }));
       return;
     }
@@ -1768,7 +1772,7 @@ export function AwsEcsWorkspace({
         error:
           error instanceof Error
             ? error.message
-            : "ECS 터널을 시작하지 못했습니다.",
+            : translate("ecs.error.tunnelStartFailed"),
       }));
     }
   }, [host.id, selectedService, tunnelState]);
@@ -1797,7 +1801,7 @@ export function AwsEcsWorkspace({
         error:
           error instanceof Error
             ? error.message
-            : "ECS 터널을 중지하지 못했습니다.",
+            : translate("ecs.error.tunnelStopFailed"),
       }));
     }
   }, [tunnelState.runtime?.ruleId]);
@@ -1830,7 +1834,7 @@ export function AwsEcsWorkspace({
         error:
           error instanceof Error
             ? error.message
-            : "ECS 셸 연결을 시작하지 못했습니다.",
+            : translate("ecs.error.shellStartFailed"),
       }));
     }
   }, [
@@ -1865,7 +1869,7 @@ export function AwsEcsWorkspace({
   const tunnelRuntimeLocalEndpoint = tunnelState.runtime
     ? tunnelState.runtime.bindPort > 0
       ? `${tunnelState.runtime.bindAddress}:${tunnelState.runtime.bindPort}`
-      : "자동 할당 중..."
+      : translate("ecs.action.autoAssigning")
     : null;
   const tunnelRuntimeRemoteEndpoint = tunnelState.runtime
     ? `127.0.0.1:${tunnelState.targetPort || "-"}`
@@ -1896,7 +1900,7 @@ export function AwsEcsWorkspace({
           void openAwsSsoLogin();
         }}
       >
-        {ssoLoginActionState.loading ? "브라우저 여는 중..." : "브라우저 다시 열기"}
+        {translate(ssoLoginActionState.loading ? "ecs.action.openingBrowser" : "ecs.action.reopenBrowser")}
       </Button>
       {ssoActionError}
     </div>
@@ -1921,7 +1925,7 @@ export function AwsEcsWorkspace({
                 void handleRefresh();
               }}
             >
-              {tab.isLoading ? "불러오는 중..." : "Refresh"}
+              {tab.isLoading ? translate("ecs.action.loading") : "Refresh"}
             </Button>
           </div>
         </Toolbar>
@@ -1942,8 +1946,8 @@ export function AwsEcsWorkspace({
                 }}
               >
                 {ssoLoginActionState.loading
-                  ? "브라우저 여는 중..."
-                  : "브라우저에서 로그인"}
+                  ? translate("ecs.action.openingBrowser")
+                  : translate("ecs.action.signInBrowser")}
               </Button>
               <Button
                 type="button"
@@ -1954,7 +1958,7 @@ export function AwsEcsWorkspace({
                   void handleRefresh();
                 }}
               >
-                다시 시도
+                {translate("ecs.action.retry")}
               </Button>
               {ssoActionError}
             </div>
@@ -2005,7 +2009,7 @@ export function AwsEcsWorkspace({
                   <CardMeta>
                     <span>{snapshot.profileName}</span>
                     <span>{snapshot.region}</span>
-                    <span>마지막 갱신 {formatLoadedAt(snapshot.loadedAt)}</span>
+                    <span>{translate("ecs.list.lastUpdated", { at: formatLoadedAt(snapshot.loadedAt) })}</span>
                   </CardMeta>
                 </CardMain>
               </Card>
@@ -2045,7 +2049,7 @@ export function AwsEcsWorkspace({
                 </div>
 
                 {services.length === 0 ? (
-                  <EmptyState title="이 클러스터에는 표시할 서비스가 없습니다." />
+                  <EmptyState title={translate("ecs.list.noServices")} />
                 ) : (
                   <div className="flex min-h-0 flex-col gap-[0.55rem] overflow-y-auto pr-px">
                     {services.map((service) => {
@@ -2183,7 +2187,7 @@ export function AwsEcsWorkspace({
                               void handleOpenShell(selectedService.serviceName);
                             }}
                           >
-                            쉘 접속
+                            {translate("ecs.action.shell")}
                           </Button>
                           {isLogsPanel ? (
                             <Button
@@ -2193,7 +2197,7 @@ export function AwsEcsWorkspace({
                                 setLogsFocusMode((current) => !current);
                               }}
                             >
-                              일반 보기
+                              {translate("ecs.action.plainView")}
                             </Button>
                           ) : null}
                         </>
@@ -2210,7 +2214,7 @@ export function AwsEcsWorkspace({
                                 void handleOpenShell(selectedService.serviceName);
                               }}
                             >
-                              쉘 접속
+                              {translate("ecs.action.shell")}
                             </Button>
                           </div>
                           <div
@@ -2219,7 +2223,7 @@ export function AwsEcsWorkspace({
                           >
                             <Tabs
                               role="tablist"
-                              aria-label="ECS 서비스 상세 패널"
+                              aria-label={translate("ecs.action.detailPanel")}
                               className={cn(
                                 ecsDetailTabsClass,
                                 "min-w-0 max-[980px]:overflow-x-auto",
@@ -2264,7 +2268,7 @@ export function AwsEcsWorkspace({
                                   setLogsFocusMode((current) => !current);
                                 }}
                               >
-                                로그 크게 보기
+                                {translate("ecs.action.expandLogs")}
                               </Button>
                             ) : null}
                           </div>
@@ -2285,7 +2289,7 @@ export function AwsEcsWorkspace({
                           <section className={ecsSectionCardClass}>
                             <div className="flex items-center justify-between gap-3">
                               <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
-                                서비스 요약
+                                {translate("ecs.detail.summary")}
                               </h3>
                             </div>
                             <dl className={ecsFactsGridClass}>
@@ -2319,7 +2323,7 @@ export function AwsEcsWorkspace({
                           <section className={ecsSectionCardClass}>
                             <div className="flex items-center justify-between gap-3">
                               <h3 className="m-0 text-[1rem] font-semibold text-[var(--text)]">
-                                배포 정보
+                                {translate("ecs.detail.deployment")}
                               </h3>
                             </div>
                             <dl className={ecsFactsGridClass}>
@@ -2397,7 +2401,7 @@ export function AwsEcsWorkspace({
                             </div>
                           ) : (
                             <div className={ecsEmptyDetailClass}>
-                              표시할 deployment 정보가 없습니다.
+                              {translate("ecs.detail.noDeployments")}
                             </div>
                           )}
                         </section>
@@ -2423,7 +2427,7 @@ export function AwsEcsWorkspace({
                             </div>
                           ) : (
                             <div className={ecsEmptyDetailClass}>
-                              표시할 최근 이벤트가 없습니다.
+                              {translate("ecs.detail.noEvents")}
                             </div>
                           )}
                         </section>
@@ -2455,7 +2459,7 @@ export function AwsEcsWorkspace({
                           />
                           <ToggleSwitch
                             checked={logsTimestampsVisible}
-                            label="시간 표시"
+                            label={translate("ecs.logs.showTime")}
                             className="w-auto max-w-max"
                             onClick={() => {
                               setLogsTimestampsVisible((current) => !current);
@@ -2465,7 +2469,7 @@ export function AwsEcsWorkspace({
                             variant="secondary"
                             size="sm"
                             active={logsRangeMode === "absolute"}
-                            aria-label="로그 범위"
+                            aria-label={translate("ecs.logs.rangeLabel")}
                             className="max-w-[min(360px,100%)] overflow-hidden text-ellipsis whitespace-nowrap"
                             onClick={() => {
                               setLogsRangePickerOpen(true);
@@ -2528,9 +2532,9 @@ export function AwsEcsWorkspace({
                             <Input
                               type="search"
                               className="min-w-[14rem] flex-1"
-                              aria-label="로그 검색"
+                              aria-label={translate("ecs.logs.searchLabel")}
                               value={logsState.query}
-                              placeholder="로그 검색"
+                              placeholder={translate("ecs.logs.searchLabel")}
                               onChange={(event) => {
                                 setLogsState((previous) => ({
                                   ...previous,
@@ -2555,18 +2559,18 @@ export function AwsEcsWorkspace({
                               });
                             }}
                           >
-                            {logsState.loading ? "불러오는 중..." : "다시 불러오기"}
+                            {translate(logsState.loading ? "ecs.action.loading" : "ecs.logs.reload")}
                           </Button>
                         </FilterRow>
 
                         {trimmedLogsSearchQuery ? (
                           <div className="text-[0.82rem] text-[var(--text-soft)]">
-                            현재 버퍼에서 {logMatchCount}건 일치
+                            {translate("ecs.logs.bufferMatches", { count: logMatchCount })}
                           </div>
                         ) : null}
 
                         {logsState.loading && !logsState.snapshot ? (
-                          <NoticeCard title="서비스 로그를 불러오는 중입니다." />
+                          <NoticeCard title={translate("ecs.logs.loadingCard")} />
                         ) : null}
 
                         {logsState.error ? (
@@ -2582,7 +2586,11 @@ export function AwsEcsWorkspace({
                         {logsState.snapshot && !logsState.snapshot.unsupportedReason ? (
                           <>
                             <CardMeta className={ecsLogsMetaClass}>
-                              <span>마지막 갱신 {formatLoadedAt(logsState.snapshot.loadedAt)}</span>
+                              <span>
+                                {translate("ecs.list.lastUpdated", {
+                                  at: formatLoadedAt(logsState.snapshot.loadedAt),
+                                })}
+                              </span>
                               <span>{logsRangeLabel}</span>
                               <span>{filteredLogs.length} lines</span>
                             </CardMeta>
@@ -2608,7 +2616,7 @@ export function AwsEcsWorkspace({
                                   data-testid="ecs-logs-loading-chip"
                                 >
                                   <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent-strong)]" />
-                                  갱신 중...
+                                  {translate("ecs.logs.refreshing")}
                                 </div>
                               ) : null}
                               <div
@@ -2620,8 +2628,8 @@ export function AwsEcsWorkspace({
                                 {filteredLogs.length === 0 ? (
                                   <div className={ecsEmptyDetailClass}>
                                     {trimmedLogsSearchQuery
-                                      ? "검색 결과가 없습니다."
-                                      : "표시할 로그가 없습니다."}
+                                      ? translate("ecs.logs.noSearchResults")
+                                      : translate("ecs.logs.noLogs")}
                                   </div>
                                 ) : (
                                   ecsLocalFind.rows.map((row) => (
@@ -2720,7 +2728,7 @@ export function AwsEcsWorkspace({
                     {activePanel === "tunnel" ? (
                       <div className="flex min-h-0 flex-1 flex-col gap-[0.9rem] overflow-y-auto pr-[0.25rem]">
                         {serviceContextState?.loading && !selectedContext ? (
-                          <NoticeCard title="터널 대상을 준비하는 중입니다." />
+                          <NoticeCard title={translate("ecs.tunnel.preparing")} />
                         ) : null}
 
                         {serviceContextState?.error ? (
@@ -2734,7 +2742,7 @@ export function AwsEcsWorkspace({
                                   void handleRetryTunnelContext();
                                 }}
                               >
-                                다시 시도
+                                {translate("ecs.action.retry")}
                               </Button>
                             </div>
                           </NoticeCard>
@@ -2767,7 +2775,7 @@ export function AwsEcsWorkspace({
                               }}
                             >
                               {tunnelTaskOptions.length === 0 ? (
-                                <option value="">실행 중인 task 없음</option>
+                                <option value="">{translate("ecs.tunnel.noRunningTask")}</option>
                               ) : null}
                               {tunnelTaskOptions.map((task) => (
                                 <option key={task.taskArn} value={task.taskArn}>
@@ -2797,7 +2805,7 @@ export function AwsEcsWorkspace({
                               }}
                             >
                               {tunnelContainerOptions.length === 0 ? (
-                                <option value="">선택 가능한 컨테이너 없음</option>
+                                <option value="">{translate("ecs.tunnel.noContainer")}</option>
                               ) : null}
                               {tunnelContainerOptions.map((container) => (
                                 <option
@@ -2823,7 +2831,7 @@ export function AwsEcsWorkspace({
                               }}
                             >
                               {tunnelPortOptions.length === 0 ? (
-                                <option value="">포트 없음</option>
+                                <option value="">{translate("ecs.tunnel.noPort")}</option>
                               ) : null}
                               {tunnelPortOptions.map((port) => (
                                 <option
@@ -2840,7 +2848,7 @@ export function AwsEcsWorkspace({
                               <ToggleSwitch
                                 checked={tunnelState.autoLocalPort}
                                 label="Auto (random)"
-                                description="사용 가능한 로컬 포트를 자동으로 할당합니다."
+                                description={translate("ecs.tunnel.autoPortDescription")}
                                 disabled={isTunnelFormDisabled}
                                 onClick={() => {
                                   setTunnelState((previous) => ({
@@ -2874,7 +2882,7 @@ export function AwsEcsWorkspace({
                         {tunnelState.runtime ? (
                           <div className={ecsTunnelRuntimeCardClass}>
                             <div className="flex items-center justify-between gap-3">
-                              <strong>터널 상태</strong>
+                              <strong>{translate("ecs.tunnel.statusTitle")}</strong>
                               <StatusBadge tone={tunnelState.runtime.status}>
                                 {tunnelState.runtime.status === "running"
                                   ? "Running"
@@ -2917,7 +2925,7 @@ export function AwsEcsWorkspace({
                                 void handleStopTunnel();
                               }}
                             >
-                              {tunnelState.loading ? "정지 중..." : "Stop"}
+                              {tunnelState.loading ? translate("ecs.tunnel.stopping") : "Stop"}
                             </Button>
                           ) : (
                             <Button
@@ -2927,7 +2935,7 @@ export function AwsEcsWorkspace({
                                 void handleStartTunnel();
                               }}
                             >
-                              {tunnelState.loading ? "시작 중..." : "Start tunnel"}
+                              {tunnelState.loading ? translate("ecs.tunnel.starting") : "Start tunnel"}
                             </Button>
                           )}
                         </div>
@@ -2936,7 +2944,7 @@ export function AwsEcsWorkspace({
                   </div>
                 </>
               ) : (
-                <EmptyState title="선택된 서비스가 없습니다." />
+                <EmptyState title={translate("ecs.list.noSelection")} />
               )}
             </section>
           </div>
@@ -2965,9 +2973,9 @@ export function AwsEcsWorkspace({
               >
                 <ModalHeader>
                   <div>
-                    <h3 className="m-0">쉘 접속</h3>
+                    <h3 className="m-0">{translate("ecs.shell.title")}</h3>
                     <p className="mt-2 text-[var(--text-soft)]">
-                      실행 중인 task와 컨테이너를 고른 뒤 ECS Exec 세션을 엽니다.
+                      {translate("ecs.shell.description")}
                     </p>
                   </div>
                 </ModalHeader>
@@ -3002,7 +3010,7 @@ export function AwsEcsWorkspace({
                       }}
                     >
                       {shellTaskOptions.length === 0 ? (
-                        <option value="">실행 중인 task 없음</option>
+                        <option value="">{translate("ecs.tunnel.noRunningTask")}</option>
                       ) : null}
                       {shellTaskOptions.map((task) => (
                         <option key={task.taskArn} value={task.taskArn}>
@@ -3023,7 +3031,7 @@ export function AwsEcsWorkspace({
                       }}
                     >
                       {shellContainerOptions.length === 0 ? (
-                        <option value="">선택 가능한 컨테이너 없음</option>
+                        <option value="">{translate("ecs.tunnel.noContainer")}</option>
                       ) : null}
                       {shellContainerOptions.map((container) => (
                         <option
@@ -3044,7 +3052,7 @@ export function AwsEcsWorkspace({
                       setShellPickerState(createEmptyShellPickerState());
                     }}
                   >
-                    취소
+                    {translate("common.cancel")}
                   </Button>
                   <Button
                     variant="primary"
@@ -3058,7 +3066,7 @@ export function AwsEcsWorkspace({
                       void handleSubmitShell();
                     }}
                   >
-                    {shellPickerState.submitting ? "연결 중..." : "쉘 접속"}
+                    {translate(shellPickerState.submitting ? "ecs.action.connecting" : "ecs.action.shell")}
                   </Button>
                 </ModalFooter>
               </ModalShell>

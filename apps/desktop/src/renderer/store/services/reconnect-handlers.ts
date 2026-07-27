@@ -12,6 +12,7 @@ import {
   registerReconnectHandler,
   type ReconnectAttemptInfo,
 } from "./reconnect-orchestrator";
+import { t } from '../../i18n';
 
 function reconnectSummary(info: ReconnectAttemptInfo): TerminalReconnectState {
   return {
@@ -24,9 +25,9 @@ function reconnectSummary(info: ReconnectAttemptInfo): TerminalReconnectState {
 
 function reconnectMessage(info: ReconnectAttemptInfo): string {
   if (info.waitingForNetwork) {
-    return "네트워크 대기 중입니다. 연결이 복구되면 재연결합니다.";
+    return t('reconnect.waitingNetwork');
   }
-  return `연결이 끊겨 재연결 중입니다… (시도 ${info.attempt}/${info.maxAttempts})`;
+  return t('reconnect.reconnecting', { attempt: info.attempt, max: info.maxAttempts });
 }
 
 let registered = false;
@@ -71,7 +72,7 @@ export function registerReconnectHandlers(): void {
       await appStore.getState().retrySessionConnection(tab.sessionId);
     },
     renderGaveUp(stableId, info) {
-      const message = `재연결에 실패했습니다 (${info.attempts}회 시도). 수동으로 다시 연결해 주세요.`;
+      const message = t('reconnect.failed', { attempts: info.attempts });
       appStore.setState((state) => ({
         tabs: state.tabs.map((tab) =>
           tab.stableId === stableId
@@ -111,8 +112,8 @@ export function registerReconnectHandlers(): void {
           sftp: updatePaneState(state, id, {
             ...pane,
             errorMessage: info.waitingForNetwork
-              ? "네트워크 대기 중입니다. 복구되면 재연결합니다."
-              : `연결이 끊겨 재연결 중입니다… (시도 ${info.attempt}/${info.maxAttempts})`,
+              ? t('reconnect.waitingNetworkShort')
+              : t('reconnect.reconnecting', { attempt: info.attempt, max: info.maxAttempts }),
           }),
         };
       });
@@ -126,7 +127,7 @@ export function registerReconnectHandlers(): void {
     },
     renderGaveUp(paneId, info) {
       const id = paneId as SftpPaneId;
-      const message = `SFTP 재연결에 실패했습니다 (${info.attempts}회 시도). 다시 연결해 주세요.`;
+      const message = t('reconnect.sftpFailed', { attempts: info.attempts });
       appStore.setState((state) => {
         const pane = getPane(state, id);
         if (!pane) {
@@ -163,8 +164,8 @@ export function registerReconnectHandlers(): void {
                   ...item,
                   status: "starting" as const,
                   message: info.waitingForNetwork
-                    ? "네트워크 대기 중"
-                    : `재연결 중… (${info.attempt}/${info.maxAttempts})`,
+                    ? t('reconnect.waitingNetworkBadge')
+                    : t('reconnect.reconnectingShort', { attempt: info.attempt, max: info.maxAttempts }),
                   updatedAt: new Date().toISOString(),
                 }
               : item,
@@ -182,7 +183,7 @@ export function registerReconnectHandlers(): void {
             ? {
                 ...item,
                 status: "error" as const,
-                message: `재연결 실패 (${info.attempts}회 시도)`,
+                message: t('reconnect.failedBadge', { attempts: info.attempts }),
                 updatedAt: new Date().toISOString(),
               }
             : item,
@@ -266,7 +267,7 @@ export function registerReconnectHandlers(): void {
       }));
     },
     renderGaveUp(groupId, info) {
-      const message = `tmux 재연결에 실패했습니다 (${info.attempts}회 시도). 다시 연결해 주세요.`;
+      const message = t('reconnect.tmuxFailed', { attempts: info.attempts });
       appStore.getState().applyTmuxGroupReconnectGaveUp(groupId, message);
     },
     isStillPresent(groupId) {

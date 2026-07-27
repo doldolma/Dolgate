@@ -16,6 +16,7 @@ import type {
   ZmodemSession,
 } from "nora-zmodemjs";
 import type { TransferJob } from "@shared";
+import { t } from '../../i18n';
 
 // 호출 시점에 해석한다: 테스트가 window.Zmodem으로 모의 객체를 주입하면 그것을 쓰고,
 // 아니면 정적 import한 실제 라이브러리를 쓴다.
@@ -154,7 +155,7 @@ export function createZmodemController(
       deps.upsertJob({
         ...baseJob(),
         status: "failed",
-        errorMessage: "파일이 너무 큽니다(512MB 초과). SFTP를 사용하세요.",
+        errorMessage: t('zmodem.tooLarge'),
         updatedAt: nowIso(),
       });
       return;
@@ -214,7 +215,7 @@ export function createZmodemController(
           ? undefined
           : error instanceof Error
             ? error.message
-            : "다운로드에 실패했습니다.",
+            : t('zmodem.downloadFailed'),
         updatedAt: nowIso(),
       });
     } finally {

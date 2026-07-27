@@ -9,6 +9,7 @@ import { AuthBootstrapBridge } from './bridges/AuthBootstrapBridge';
 import { DesktopEventBridge } from './bridges/DesktopEventBridge';
 import { NetworkBridge } from './bridges/NetworkBridge';
 import { DesktopStateBridge } from './bridges/DesktopStateBridge';
+import { LanguageBridge } from './bridges/LanguageBridge';
 import { ThemeBridge } from './bridges/ThemeBridge';
 import { useLoginController } from './controllers/useLoginController';
 import { LoginShell } from './shells/LoginShell';
@@ -28,6 +29,7 @@ import {
   useSessionWorkspaceViewModel,
   useSftpViewModel,
 } from './view-models/appViewModels';
+import { t } from './i18n';
 
 function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   if (theme === 'light' || theme === 'dark') {
@@ -223,7 +225,7 @@ export function App() {
       setWorkspaceBootstrapError(
         error instanceof Error
           ? error.message
-          : '초기 워크스페이스를 불러오지 못했습니다.',
+          : t('misc.workspaceLoadFailed'),
       );
     } finally {
       activeHydrationUserIdRef.current = null;
@@ -394,6 +396,7 @@ export function App() {
         theme={settingsViewModel.settings.theme}
         onPrefersDarkChange={setPrefersDark}
       />
+      <LanguageBridge language={settingsViewModel.settings.language} />
     </>
   );
 

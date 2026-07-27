@@ -4,6 +4,7 @@ import type {
   TerminalTab,
 } from '@shared';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
+import { t } from '../../i18n';
 
 export const SESSION_SHARE_CHAT_TOAST_LIMIT = 3;
 export const SESSION_SHARE_CHAT_TOAST_TTL_MS = 8000;
@@ -146,14 +147,14 @@ export function resolveConnectionOverlayMessage(
   }
 
   if (tab?.status === 'connected') {
-    return '원격 셸이 첫 출력을 보내는 중입니다...';
+    return t('sessionHelpers.waitingFirstOutput');
   }
 
   if (tab?.status === 'error') {
-    return tab.errorMessage ?? '세션 연결에 실패했습니다.';
+    return tab.errorMessage ?? t('sessionHelpers.connectFailed');
   }
 
-  return '세션을 연결하는 중입니다...';
+  return t('sessionHelpers.connecting');
 }
 
 export function formatSessionShareChatTimestamp(sentAt: string): string {

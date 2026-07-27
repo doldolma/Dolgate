@@ -263,6 +263,30 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('어두운 배경으로 눈부심을 줄입니다.')).toBeInTheDocument();
   });
 
+  it('언어를 고르면 설정에 저장한다', () => {
+    const { onUpdateSettings } = renderSettingsPanel();
+
+    const select = screen.getByRole('combobox', { name: '언어' });
+    // 기본값은 시스템 언어 따르기.
+    expect(select).toHaveValue('system');
+    expect(screen.getByText('OS 언어를 따릅니다. 한국어면 한국어, 그 외에는 영어.')).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: 'en' } });
+
+    expect(onUpdateSettings).toHaveBeenCalledWith({ language: 'en' });
+  });
+
+  it('언어 이름은 그 언어로 보여 준다', () => {
+    renderSettingsPanel({ settings: { ...settings, language: 'en' } });
+
+    const select = screen.getByRole('combobox', { name: '언어' });
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['시스템 설정', '한국어', 'English']);
+  });
+
   it('shows Appearance before Terminal Theme in the general settings flow', () => {
     renderSettingsPanel();
 

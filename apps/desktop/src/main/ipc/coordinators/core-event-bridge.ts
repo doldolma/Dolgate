@@ -9,6 +9,7 @@ import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import type { SecretCoordinator } from "./secret-coordinator";
 import type { TunnelRegistry } from "./tunnel-registry";
 import type { AwsConnectionProgressEmitter } from "../context";
+import { t } from '../../i18n';
 
 export interface CoreEventBridge {
   pendingSessionSecrets: Map<
@@ -93,7 +94,7 @@ export function createCoreEventBridge(deps: {
   ): BrowserWindow => {
     const window = BrowserWindow.fromWebContents(sender);
     if (!window) {
-      throw new Error("호출한 브라우저 윈도우를 찾을 수 없습니다.");
+      throw new Error(t('misc.windowNotFound'));
     }
     return window;
   };

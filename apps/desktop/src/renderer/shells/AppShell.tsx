@@ -21,6 +21,7 @@ import {
   type DraggedSessionPayload,
   workspaceContainsSession,
 } from './appShellUtils';
+import { t } from '../i18n';
 
 interface AppShellProps {
   authState: AuthState & { session: NonNullable<AuthState['session']> };
@@ -315,7 +316,7 @@ export function AppShell({
             return;
           }
           if (!input.hostId) {
-            throw new Error('대상 호스트를 선택해 주세요.');
+            throw new Error(t('appShell.selectTargetHost'));
           }
           await settingsViewModel.cloneKeychainSecretForHost(
             input.hostId,

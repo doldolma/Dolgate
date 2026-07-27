@@ -7,6 +7,8 @@
 // 동작은 의도적으로 "최소 안전 집합"만 매핑한다. 미지원 키(z=zoom 등)는 tmux 의
 // 평소 동작을 보존하기 위해 Ctrl-b + 키를 그대로 흘려보낸다(passthrough).
 
+import { t } from '../i18n';
+
 export const TMUX_PREFIX_BYTE = '\x02'; // Ctrl-b (기본)
 
 // 설정에서 고를 수 있는 prefix 키 목록. value 는 저장 토큰("C-<letter>"/"C-Space").
@@ -14,7 +16,7 @@ export const TMUX_PREFIX_KEY_OPTIONS: ReadonlyArray<{
   value: string;
   label: string;
 }> = [
-  { value: 'C-b', label: 'Ctrl-B (기본)' },
+  { value: 'C-b', label: t('misc.tmuxPrefixDefault') },
   { value: 'C-a', label: 'Ctrl-A' },
   { value: 'C-Space', label: 'Ctrl-Space' },
   { value: 'C-g', label: 'Ctrl-G' },

@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, type InputHTMLAttributes, type MouseEvent } from 'react';
 import { cn } from '../lib/cn';
+import { useTranslation } from 'react-i18next';
 
 interface TagInputFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   tags: string[];
@@ -20,6 +21,7 @@ export const TagInputField = forwardRef<HTMLInputElement, TagInputFieldProps>(
     },
     ref,
   ) {
+    const { t: translate } = useTranslation();
     const inputRef = useRef<HTMLInputElement | null>(null);
 
     useImperativeHandle(ref, () => inputRef.current as HTMLInputElement, []);
@@ -62,7 +64,7 @@ export const TagInputField = forwardRef<HTMLInputElement, TagInputFieldProps>(
             <button
               type="button"
               className="inline-grid h-[1.15rem] w-[1.15rem] place-items-center rounded-full text-[var(--text-soft)] transition-colors duration-150 hover:text-[var(--text)] focus-visible:outline-none"
-              aria-label={`${tag} 태그 제거`}
+              aria-label={translate('tagInput.removeTag', { tag })}
               onMouseDown={(event) => {
                 event.preventDefault();
               }}

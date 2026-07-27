@@ -15,6 +15,7 @@ import {
   ModalShell,
   SectionLabel,
 } from "../ui";
+import { useTranslation } from "react-i18next";
 
 function normalizeRetryMessage(message: string): string {
   return message
@@ -32,6 +33,8 @@ function shouldHideRetryMessageForCertificate(
   }
 
   const normalized = normalizeRetryMessage(message).toLowerCase();
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
   return normalized.includes("인증서") || normalized.includes("certificate");
 }
 
@@ -62,6 +65,7 @@ export function CredentialRetryDialog({
   onClose,
   onSubmit,
 }: CredentialRetryDialogProps) {
+  const { t: translate } = useTranslation();
   const { pickPrivateKey, pickSshCertificate } = useHostFormController();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -151,7 +155,7 @@ export function CredentialRetryDialog({
               {request.source === "sftp" ? "SFTP Retry" : "SSH Retry"}
             </SectionLabel>
             <h3 id="credential-retry-title">
-              {request.hostLabel} 인증 정보를 다시 확인해 주세요.
+              {translate('credentialRetry.prompt', { label: request.hostLabel })}
             </h3>
           </div>
         </ModalHeader>
@@ -280,14 +284,14 @@ export function CredentialRetryDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
             disabled={submitting}
             onClick={async () => {
               if (!username.trim()) {
-                setError("사용자명을 입력해 주세요.");
+                setError(translate('credentialRetry.usernameRequired'));
                 return;
               }
               if (
@@ -295,7 +299,7 @@ export function CredentialRetryDialog({
                 !request.hasStoredSecret &&
                 !password
               ) {
-                setError("비밀번호를 입력해 주세요.");
+                setError(translate('credentialRetry.passwordRequired'));
                 return;
               }
               if (
@@ -303,7 +307,7 @@ export function CredentialRetryDialog({
                 !request.hasStoredSecret &&
                 !privateKeyFile?.content
               ) {
-                setError("개인키를 가져오거나 기존 저장된 인증 정보를 사용해 주세요.");
+                setError(translate('credentialRetry.keyRequired'));
                 return;
               }
               if (
@@ -311,7 +315,7 @@ export function CredentialRetryDialog({
                 !request.hasStoredSecret &&
                 !privateKeyFile?.content
               ) {
-                setError("개인키를 가져와 주세요.");
+                setError(translate('credentialRetry.keyImportRequired'));
                 return;
               }
               if (
@@ -319,7 +323,7 @@ export function CredentialRetryDialog({
                 !request.hasStoredSecret &&
                 !certificateFile?.content
               ) {
-                setError("SSH 인증서를 가져와 주세요.");
+                setError(translate('credentialRetry.certificateRequired'));
                 return;
               }
 
@@ -336,13 +340,13 @@ export function CredentialRetryDialog({
                 setError(
                   submitError instanceof Error
                     ? submitError.message
-                    : "다시 시도하지 못했습니다.",
+                    : translate('credentialRetry.retryFailed'),
                 );
                 setSubmitting(false);
               }
             }}
           >
-            다시 시도
+            {translate('credentialRetry.retry')}
           </Button>
         </ModalFooter>
       </ModalShell>

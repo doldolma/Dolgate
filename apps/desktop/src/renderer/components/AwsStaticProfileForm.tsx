@@ -6,6 +6,7 @@ import {
   NoticeCard,
   SelectField,
 } from '../ui'
+import { useTranslation } from 'react-i18next';
 
 interface AwsStaticProfileFormProps {
   title?: string
@@ -32,7 +33,7 @@ export function AwsStaticProfileForm({
   isSubmitting,
   submitLabel,
   submittingLabel,
-  profileNameLabel = '프로필명',
+  profileNameLabel,
   profileNameEditable = true,
   testId,
   accessKeyHelpText = null,
@@ -40,6 +41,7 @@ export function AwsStaticProfileForm({
   onCancel,
   onSubmit,
 }: AwsStaticProfileFormProps) {
+  const { t: translate } = useTranslation();
   return (
     <form
       data-testid={testId}
@@ -63,9 +65,9 @@ export function AwsStaticProfileForm({
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
-        <FieldGroup label={profileNameLabel}>
+        <FieldGroup label={profileNameLabel ?? translate('staticProfile.profileNameLabel')}>
           <Input
-            aria-label={profileNameLabel}
+            aria-label={profileNameLabel ?? translate('staticProfile.profileNameLabel')}
             value={draft.profileName}
             onChange={(event) =>
               onChange({
@@ -79,9 +81,9 @@ export function AwsStaticProfileForm({
           />
         </FieldGroup>
 
-        <FieldGroup label="기본 Region">
+        <FieldGroup label={translate('staticProfile.defaultRegion')}>
           <SelectField
-            aria-label="기본 Region"
+            aria-label={translate('staticProfile.defaultRegion')}
             value={draft.region ?? ''}
             onChange={(event) =>
               onChange({
@@ -91,7 +93,7 @@ export function AwsStaticProfileForm({
             }
             disabled={isSubmitting}
           >
-            <option value="">선택 안 함</option>
+            <option value="">{translate('staticProfile.none')}</option>
             {AWS_PROFILE_REGION_OPTIONS.map((region) => (
               <option key={region} value={region}>
                 {region}
@@ -150,7 +152,7 @@ export function AwsStaticProfileForm({
       <div className="flex flex-wrap items-center justify-end gap-3">
         {onCancel ? (
           <Button variant="secondary" disabled={isSubmitting} onClick={onCancel}>
-            취소
+            {translate('common.cancel')}
           </Button>
         ) : null}
         <Button variant="primary" disabled={isSubmitting} type="submit">

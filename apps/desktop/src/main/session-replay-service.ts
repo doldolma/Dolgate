@@ -32,6 +32,8 @@ import {
   type LocalHistoryOwner,
   type LocalHistoryScope,
 } from "./local-history-scope";
+import { getMainLocale, t } from './i18n';
+import { APP_LOCALE_QUERY_PARAM } from "../common/i18n/locale";
 
 const META_SUFFIX = ".meta.json";
 const EVENTS_SUFFIX = ".events.jsonl";
@@ -222,7 +224,7 @@ export class SessionReplayService {
     for (const sessionId of Array.from(this.activeRecordings.keys())) {
       this.finalizeRecording(
         sessionId,
-        "앱 종료로 세션이 정리되었습니다.",
+        t('core.shutdownSession'),
       );
     }
   }
@@ -515,7 +517,7 @@ export class SessionReplayService {
 
   private requireActiveScope(): LocalHistoryScope {
     if (!this.activeScope) {
-      throw new Error("로그인된 계정의 Replay만 열 수 있습니다.");
+      throw new Error(t('replaySvc.ownerOnly'));
     }
     return this.activeScope;
   }
@@ -572,7 +574,7 @@ export class SessionReplayService {
 
   private buildReplayWindowTitle(title: string): string {
     const normalized = title.trim();
-    return normalized ? `세션 Replay · ${normalized}` : "세션 Replay";
+    return normalized ? t('replaySvc.titleWith', { title: normalized }) : t('replaySvc.title');
   }
 
   private async loadReplayWindow(
@@ -582,6 +584,7 @@ export class SessionReplayService {
     if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
       const targetUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
       targetUrl.searchParams.set("window", "session-replay");
+      targetUrl.searchParams.set(APP_LOCALE_QUERY_PARAM, getMainLocale());
       targetUrl.searchParams.set("recordingId", recordingId);
       await replayWindow.loadURL(targetUrl.toString());
       return;
@@ -593,6 +596,7 @@ export class SessionReplayService {
         query: {
           window: "session-replay",
           recordingId,
+          [APP_LOCALE_QUERY_PARAM]: getMainLocale(),
         },
       },
     );

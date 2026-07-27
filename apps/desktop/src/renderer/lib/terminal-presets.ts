@@ -1,7 +1,7 @@
 import type { GlobalTerminalThemeId, TerminalFontFamilyId, TerminalThemeId, TerminalThemePreset } from '@shared';
 
 export interface TerminalThemeDefinition extends TerminalThemePreset {
-  description: string;
+  descriptionKey: string;
   preview: {
     background: string;
     foreground: string;
@@ -64,7 +64,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'dolssh-light',
     title: 'Dolgate Light',
-    description: '기본 라이트',
+    descriptionKey: 'termTheme.lightDefault',
     preview: { background: '#f5f7fb', foreground: '#243041', accent: '#2468ff' },
     theme: {
       background: '#f5f7fb',
@@ -93,7 +93,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'dolssh-dark',
     title: 'Dolgate Dark',
-    description: '기본 다크',
+    descriptionKey: 'termTheme.darkDefault',
     preview: { background: '#0b1220', foreground: '#d9e4ee', accent: '#8ed1c2' },
     theme: {
       background: '#0b1220',
@@ -122,7 +122,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-wave',
     title: 'Kanagawa Wave',
-    description: '깊은 잉크 블루',
+    descriptionKey: 'termTheme.inkBlue',
     preview: { background: '#1f1f28', foreground: '#dcd7ba', accent: '#7e9cd8' },
     theme: {
       background: '#1f1f28',
@@ -150,7 +150,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-dragon',
     title: 'Kanagawa Dragon',
-    description: '따뜻한 잿빛',
+    descriptionKey: 'termTheme.warmAsh',
     preview: { background: '#181616', foreground: '#c5c9c5', accent: '#8ba4b0' },
     theme: {
       background: '#181616',
@@ -178,7 +178,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'kanagawa-lotus',
     title: 'Kanagawa Lotus',
-    description: '부드러운 종이 톤',
+    descriptionKey: 'termTheme.softPaper',
     preview: { background: '#f2ecbc', foreground: '#545464', accent: '#4d699b' },
     theme: {
       background: '#f2ecbc',
@@ -207,7 +207,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'everforest-dark',
     title: 'Everforest Dark',
-    description: '숲빛 다크',
+    descriptionKey: 'termTheme.forestDark',
     preview: { background: '#2d353b', foreground: '#d3c6aa', accent: '#a7c080' },
     theme: {
       background: '#2d353b',
@@ -235,7 +235,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'everforest-light',
     title: 'Everforest Light',
-    description: '숲빛 라이트',
+    descriptionKey: 'termTheme.forestLight',
     preview: { background: '#fdf6e3', foreground: '#5c6a72', accent: '#8da101' },
     theme: {
       background: '#fdf6e3',
@@ -264,7 +264,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'night-owl',
     title: 'Night Owl',
-    description: '선명한 야간 대비',
+    descriptionKey: 'termTheme.nightContrast',
     preview: { background: '#011627', foreground: '#d6deeb', accent: '#82aaff' },
     theme: {
       background: '#011627',
@@ -292,7 +292,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'light-owl',
     title: 'Light Owl',
-    description: '밝은 종이와 선명한 청색',
+    descriptionKey: 'termTheme.brightPaperBlue',
     preview: { background: '#fbfbfb', foreground: '#403f53', accent: '#2c5dff' },
     theme: {
       background: '#fbfbfb',
@@ -321,7 +321,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'rose-pine',
     title: 'Rosé Pine',
-    description: '은은한 로즈 톤',
+    descriptionKey: 'termTheme.roseSubtle',
     preview: { background: '#191724', foreground: '#e0def4', accent: '#c4a7e7' },
     theme: {
       background: '#191724',
@@ -349,7 +349,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'hacker-green',
     title: 'Hacker Green',
-    description: '형광 녹색 콘솔',
+    descriptionKey: 'termTheme.neonGreen',
     preview: { background: '#041607', foreground: '#57ff6a', accent: '#1be24d' },
     theme: {
       background: '#041607',
@@ -377,7 +377,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'hacker-blue',
     title: 'Hacker Blue',
-    description: '냉한 청색 콘솔',
+    descriptionKey: 'termTheme.coolBlue',
     preview: { background: '#07101f', foreground: '#55c7ff', accent: '#20a4ff' },
     theme: {
       background: '#07101f',
@@ -405,7 +405,7 @@ export const terminalThemePresets: TerminalThemeDefinition[] = [
   {
     id: 'hacker-red',
     title: 'Hacker Red',
-    description: '강한 적색 콘솔',
+    descriptionKey: 'termTheme.strongRed',
     preview: { background: '#180607', foreground: '#ff7272', accent: '#ff3b3b' },
     theme: {
       background: '#180607',

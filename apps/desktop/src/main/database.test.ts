@@ -899,6 +899,28 @@ describe('SettingsRepository', () => {
     expect(settings.get().hostMetricsEnabled).toBe(true);
   });
 
+  it('UI 언어 선택을 저장한다', async () => {
+    const { SettingsRepository } = await loadRepositories();
+    const settings = new SettingsRepository({
+      getConfig: () => ({
+        sync: {
+          serverUrl: 'https://bundled.example.com',
+          desktopClientId: 'dolgate-desktop',
+          redirectUri: 'dolgate://auth/callback'
+        }
+      })
+    } as never);
+
+    // 기본값은 시스템 언어 따르기.
+    expect(settings.get().language).toBe('system');
+
+    expect(settings.update({ language: 'en' }).language).toBe('en');
+    expect(settings.get().language).toBe('en');
+
+    expect(settings.update({ language: 'system' }).language).toBe('system');
+    expect(settings.get().language).toBe('system');
+  });
+
   it('persists a login server override and resolves the effective server URL', async () => {
     const { SettingsRepository } = await loadRepositories();
     const settings = new SettingsRepository({

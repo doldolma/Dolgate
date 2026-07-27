@@ -21,6 +21,7 @@ import type {
   AwsEc2HostRecord,
   AwsSftpProgressStage,
 } from "../context";
+import { t } from "../../i18n";
 
 type AwsSftpStageErrorOptions = {
   reasonCode?: AwsSftpDiagnosticReasonCode;
@@ -129,27 +130,27 @@ export function createAwsSftpCoordinator(deps: {
         ? error.message
         : typeof error === "string"
           ? error
-          : "ECS Exec 셸을 열지 못했습니다.";
+          : t("awsSftp.ecsShellFailed");
     const normalized = message.trim();
 
     if (normalized.includes("cloudshell:ApproveCommand")) {
       return new Error(
-        "AWS Console에서 CloudShell로 ECS Exec를 테스트하려면 `cloudshell:ApproveCommand` 권한이 필요합니다. Dolgate 앱 자체에는 필수 권한이 아니며, 앱에서 계속 실패하면 `ecs:ExecuteCommand`와 `ecs:DescribeTasks` 권한도 함께 확인해 주세요.",
+        t("awsSftp.cloudShellHint"),
       );
     }
     if (normalized.includes("ecs:ExecuteCommand")) {
       return new Error(
-        `ECS Exec 권한이 없습니다. 사용자/역할에 \`ecs:ExecuteCommand\`와 보통 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`,
+        t("awsSftp.ecsExecDenied", { error: normalized }),
       );
     }
     if (normalized.includes("ecs:DescribeTasks")) {
       return new Error(
-        `ECS task 조회 권한이 없습니다. 사용자/역할에 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`,
+        t("awsSftp.ecsDescribeDenied", { error: normalized }),
       );
     }
     if (normalized.includes("ssm:StartSession")) {
       return new Error(
-        `Session Manager 권한이 없습니다. 사용자/역할에 \`ssm:StartSession\` 권한이 필요한지 확인해 주세요. 원본 오류: ${normalized}`,
+        t("awsSftp.ssmDenied", { error: normalized }),
       );
     }
     return new Error(normalized);
@@ -171,7 +172,7 @@ export function createAwsSftpCoordinator(deps: {
         const address = server.address();
         if (!address || typeof address === "string") {
           server.close(() =>
-            reject(new Error("로컬 포트를 예약하지 못했습니다.")),
+            reject(new Error(t("awsSftp.localPortFailed"))),
           );
           return;
         }
@@ -189,23 +190,23 @@ export function createAwsSftpCoordinator(deps: {
   const getSftpStageLabel = (stage: AwsSftpProgressStage): string => {
     switch (stage) {
       case "loading-instance-metadata":
-        return "SSH 설정 확인";
+        return t("awsSftp.stage.sshConfig");
       case "checking-profile":
-        return "프로필 확인";
+        return t("awsSftp.stage.profile");
       case "browser-login":
-        return "AWS 로그인";
+        return t("awsSftp.stage.awsLogin");
       case "checking-ssm":
-        return "SSM 확인";
+        return t("awsSftp.stage.ssm");
       case "probing-host-key":
-        return "호스트 키 확인";
+        return t("awsSftp.stage.hostKey");
       case "generating-key":
-        return "임시 키 생성";
+        return t("awsSftp.stage.tempKey");
       case "sending-public-key":
-        return "공개 키 전송";
+        return t("awsSftp.stage.pushKey");
       case "opening-tunnel":
-        return "터널 연결";
+        return t("awsSftp.stage.tunnel");
       case "connecting-sftp":
-        return "SFTP 연결";
+        return t("awsSftp.stage.sftp");
       default:
         return "AWS SFTP";
     }
@@ -231,7 +232,7 @@ export function createAwsSftpCoordinator(deps: {
   };
 
   const errorMessageOf = (error: unknown): string =>
-    error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
+    error instanceof Error ? error.message : t("aws.error.unknown");
 
   const formatSftpStageError = (
     stage: AwsSftpProgressStage,
@@ -383,7 +384,7 @@ export function createAwsSftpCoordinator(deps: {
       const nextStatus = nextUsername ? "ready" : "error";
       const nextError = nextUsername
         ? null
-        : "SSH 로그인 사용자 후보를 찾지 못했습니다.";
+        : t("aws.ssh.noUserCandidates");
       const nextHost = hosts.update(
         hydratedHost.id,
         toAwsHostDraft(hydratedHost, {
@@ -407,7 +408,7 @@ export function createAwsSftpCoordinator(deps: {
           awsSshMetadataError:
             error instanceof Error
               ? error.message
-              : "SSH 설정을 자동으로 확인하지 못했습니다.",
+              : t("aws.ssh.configCheckFailed"),
         }),
       ) as AwsEc2HostRecord;
       queueSync();
@@ -489,14 +490,14 @@ export function createAwsSftpCoordinator(deps: {
         endpointId,
         hostId: host.id,
         stage: "checking-profile",
-        message: `${resolvedProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+        message: t("awsSftp.progress.checkingProfile", { profile: resolvedProfileName }),
       });
       let status = await awsService.getProfileStatus(resolvedProfileName);
       if (!status.isAuthenticated) {
         if (!status.isSsoProfile || !allowBrowserLogin) {
           throw new Error(
             status.errorMessage ||
-              `${resolvedProfileName} 프로필에 AWS CLI 인증이 필요합니다.`,
+              t("awsSftp.progress.cliAuthNeeded", { profile: resolvedProfileName }),
           );
         }
 
@@ -505,7 +506,7 @@ export function createAwsSftpCoordinator(deps: {
           endpointId,
           hostId: host.id,
           stage: "browser-login",
-          message: `브라우저에서 ${resolvedProfileName} AWS 로그인을 진행하는 중입니다.`,
+          message: t("awsSftp.progress.browserLogin", { profile: resolvedProfileName }),
         });
         await awsService.login(resolvedProfileName);
 
@@ -514,13 +515,13 @@ export function createAwsSftpCoordinator(deps: {
           endpointId,
           hostId: host.id,
           stage: "checking-profile",
-          message: `${resolvedProfileName} 프로필 로그인 결과를 확인하는 중입니다.`,
+          message: t("awsSftp.progress.checkingLoginResult", { profile: resolvedProfileName }),
         });
         status = await awsService.getProfileStatus(resolvedProfileName);
         if (!status.isAuthenticated) {
           throw new Error(
             status.errorMessage ||
-              "AWS SSO 로그인 후에도 인증이 확인되지 않았습니다.",
+              t("awsSftp.progress.ssoNotVerified"),
           );
         }
       }
@@ -530,7 +531,7 @@ export function createAwsSftpCoordinator(deps: {
         endpointId,
         hostId: host.id,
         stage: "checking-ssm",
-        message: `${host.label} 인스턴스의 SSM 연결 상태를 확인하는 중입니다.`,
+        message: t("awsSftp.progress.checkingSsm", { label: host.label }),
       });
       const refreshedHost = await hydrateHostForSftp(host);
       const isManaged = await awsService.isManagedInstance(
@@ -542,7 +543,7 @@ export function createAwsSftpCoordinator(deps: {
         refreshedHost.awsInstanceId,
       );
       if (!isManaged) {
-        throw new Error("이 인스턴스는 현재 SSM managed instance가 아닙니다.");
+        throw new Error(t("awsSftp.progress.notManaged"));
       }
 
       currentStage = "loading-instance-metadata";
@@ -550,7 +551,7 @@ export function createAwsSftpCoordinator(deps: {
         endpointId,
         hostId: refreshedHost.id,
         stage: "loading-instance-metadata",
-        message: "SSH 설정을 자동으로 확인하는 중입니다.",
+        message: t("awsSftp.progress.checkingSshConfig"),
       });
       const hydratedHost = await loadHostSshMetadataRecord(refreshedHost);
       const disabledReason = getAwsEc2HostSftpDisabledReason(hydratedHost);

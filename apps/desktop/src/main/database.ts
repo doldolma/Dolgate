@@ -88,6 +88,7 @@ import type {
   WarpgateSshHostDraft,
   WarpgateSshHostRecord
 } from '@shared';
+import { normalizeAppLanguage } from '../common/i18n/locale';
 import { DesktopConfigService } from './app-config';
 import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
 import type { LocalHistoryOwner } from './local-history-scope';
@@ -1233,6 +1234,7 @@ export class SettingsRepository {
     const serverUrlOverride = state.settings.serverUrlOverride ?? null;
     return {
       theme: state.settings.theme,
+      language: normalizeAppLanguage(state.settings.language),
       homeHostViewMode: normalizeHomeHostViewMode(state.settings.homeHostViewMode),
       globalTerminalThemeId: state.terminal.globalThemeId,
       terminalFontFamily: state.terminal.fontFamily,
@@ -1326,6 +1328,11 @@ export class SettingsRepository {
 
       if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
         state.settings.theme = input.theme;
+        state.settings.updatedAt = nowIso();
+      }
+
+      if (input.language === 'ko' || input.language === 'en' || input.language === 'system') {
+        state.settings.language = input.language;
         state.settings.updatedAt = nowIso();
       }
 

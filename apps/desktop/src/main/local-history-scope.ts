@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { normalizeServerUrl } from '@shared';
+import { t } from './i18n';
 
 const STORAGE_DIRNAME = 'storage';
 const ACCOUNTS_DIRNAME = 'accounts';
@@ -39,7 +40,7 @@ export function resolveLocalHistoryScope(
   const normalizedServerUrl = normalizeServerUrl(owner.serverUrl);
   const normalizedUserId = owner.userId.trim();
   if (!normalizedUserId) {
-    throw new Error('로컬 기록을 저장할 사용자 ID가 없습니다.');
+    throw new Error(t('misc.noUserIdForHistory'));
   }
 
   const scopeId = createHash('sha256')

@@ -3,6 +3,7 @@ import { DesktopWindowControls } from '../components/DesktopWindowControls';
 import { LoginGate } from '../components/LoginGate';
 import type { useLoginController } from '../controllers/useLoginController';
 import type { useAppSettingsViewModel } from '../view-models/appViewModels';
+import { useTranslation } from 'react-i18next';
 
 interface LoginShellProps {
   authState: AuthState;
@@ -29,6 +30,7 @@ export function LoginShell({
   loginController,
   onRetryWorkspaceBootstrap,
 }: LoginShellProps) {
+  const { t: translate } = useTranslation();
   async function saveLoginServerUrl(nextServerUrl: string): Promise<void> {
     await settingsViewModel.updateSettings({
       serverUrlOverride: nextServerUrl,
@@ -72,7 +74,7 @@ export function LoginShell({
         onCancelBrowserLogin={loginController.cancelBrowserLogin}
         onSaveServerUrl={saveLoginServerUrl}
         onResetServerUrl={resetLoginServerUrl}
-        actionLabel={needsWorkspaceRetry ? '다시 시도' : undefined}
+        actionLabel={needsWorkspaceRetry ? translate('appShell.retry') : undefined}
         onAction={needsWorkspaceRetry ? onRetryWorkspaceBootstrap : undefined}
       />
     </div>

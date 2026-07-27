@@ -3,6 +3,7 @@ import {
   generateKeyPairSync,
   type KeyObject,
 } from "node:crypto";
+import { t } from './i18n';
 
 export type SshKeyAlgorithm = "ed25519" | "ecdsa" | "rsa";
 export type SshKeyCurve = "nistp256" | "nistp384" | "nistp521";
@@ -61,7 +62,7 @@ function withComment(publicKey: string, comment?: string | null): string {
 export function fingerprintSha256FromPublicKey(publicKey: string): string {
   const [, publicKeyBase64] = publicKey.trim().split(/\s+/, 3);
   if (!publicKeyBase64) {
-    throw new Error("SSH 공개 키를 해석하지 못했습니다.");
+    throw new Error(t('sshKeyMaterial.parseFailed'));
   }
   const digest = createHash("sha256")
     .update(Buffer.from(publicKeyBase64, "base64"))
@@ -77,7 +78,7 @@ export function formatEd25519PublicKey(
   const jwk = publicKey.export({ format: "jwk" }) as { x?: string };
   const x = typeof jwk.x === "string" ? jwk.x : "";
   if (!x) {
-    throw new Error("SSH 공개 키를 생성하지 못했습니다.");
+    throw new Error(t('sshKeyMaterial.generateFailed'));
   }
   const encodedPublicKey = Buffer.concat([
     encodeSshWireValue("ssh-ed25519"),
@@ -95,7 +96,7 @@ function formatEcdsaPublicKey(
   const x = typeof jwk.x === "string" ? base64UrlToBuffer(jwk.x) : null;
   const y = typeof jwk.y === "string" ? base64UrlToBuffer(jwk.y) : null;
   if (!x || !y) {
-    throw new Error("SSH 공개 키를 생성하지 못했습니다.");
+    throw new Error(t('sshKeyMaterial.generateFailed'));
   }
   const algorithm = `ecdsa-sha2-${curve}`;
   const q = Buffer.concat([Buffer.from([0x04]), x, y]);
@@ -115,7 +116,7 @@ function formatRsaPublicKey(
   const e = typeof jwk.e === "string" ? base64UrlToBuffer(jwk.e) : null;
   const n = typeof jwk.n === "string" ? base64UrlToBuffer(jwk.n) : null;
   if (!e || !n) {
-    throw new Error("SSH 공개 키를 생성하지 못했습니다.");
+    throw new Error(t('sshKeyMaterial.generateFailed'));
   }
   const encodedPublicKey = Buffer.concat([
     encodeSshWireValue("ssh-rsa"),

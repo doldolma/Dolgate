@@ -106,6 +106,7 @@ import {
   setAwsSsoSessionKeyValueInDocuments,
   writeAwsProfileDocuments,
 } from "./aws-profile-files";
+import { t } from "./i18n";
 
 const REGION_DISCOVERY_REGION = "us-east-1";
 const ECS_LOG_INITIAL_LOOKBACK_MS = 30 * 60 * 1000;
@@ -184,20 +185,22 @@ interface SsmManagedInstanceLookupResult {
 
 function resolveSsmLookupUnknownReason(error: unknown): string {
   const message = error instanceof Error ? error.message.trim() : "";
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
   if (/제한 시간을 초과|timed?\s*out|timeout/i.test(message)) {
-    return "SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.";
+    return t('aws.ssm.statusTimeout');
   }
   if (/ssm:DescribeInstanceInformation|AccessDenied|UnauthorizedOperation/i.test(message)) {
-    return "SSM 상태를 조회할 권한이 없어 가져오기를 차단했습니다. 사용자/역할에 `ssm:DescribeInstanceInformation` 권한이 포함되어 있는지 확인해 주세요.";
+    return t('aws.ssm.statusForbidden');
   }
   if (
     /Unable to locate credentials|The security token included in the request is invalid|ExpiredToken|SSO login/i.test(
       message,
     )
   ) {
-    return "AWS 자격 증명을 확인하지 못해 가져오기를 차단했습니다. 선택한 프로필의 로그인 상태와 자격 증명을 먼저 확인해 주세요.";
+    return t('aws.credentials.checkFailed');
   }
-  return "SSM 상태를 확인하지 못해 가져오기를 차단했습니다. 사용자/역할 권한 또는 SSM 설정을 먼저 확인해 주세요.";
+  return t('aws.ssm.statusUnknown');
 }
 
 function isDescribeRegionsPermissionDenied(stderr: string): boolean {
@@ -218,18 +221,18 @@ function resolveUnavailableSsmReason(input: {
   const pingStatus = input.pingStatus?.trim() ?? "";
   const normalizedPingStatus = pingStatus.toLowerCase();
   if (normalizedState && normalizedState !== "running") {
-    return `이 인스턴스는 현재 ${normalizedState} 상태라 SSM import를 사용할 수 없습니다. 인스턴스를 실행한 뒤 다시 시도해 주세요.`;
+    return t('aws.instanceState', { state: normalizedState });
   }
   if (normalizedPingStatus === "connectionlost") {
-    return "이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 오프라인(ConnectionLost)입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.";
+    return t('aws.ssm.connectionLost');
   }
   if (normalizedPingStatus === "inactive") {
-    return "이 인스턴스는 SSM managed instance로 등록되어 있지만 현재 연결이 비활성 상태입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.";
+    return t('aws.ssm.connectionInactive');
   }
   if (pingStatus) {
-    return `이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 ${pingStatus}입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.`;
+    return t('aws.ssm.pingStatus', { status: pingStatus });
   }
-  return "이 인스턴스는 Systems Manager managed instance 목록에 나타나지 않습니다. SSM Agent 설치와 인스턴스 프로파일(AmazonSSMManagedInstanceCore)을 확인해 주세요.";
+  return t('aws.ssm.notManaged');
 }
 
 function isSsmPingStatusOnline(status?: string | null): boolean {
@@ -282,7 +285,7 @@ function parseJson<T>(raw: string, fallbackMessage: string): T {
 // latency used to hide this race; with the SDK the first poll hits it reliably.
 class SsmInvocationNotReadyError extends Error {
   constructor() {
-    super("SSM 명령 실행 결과가 아직 등록되지 않았습니다.");
+    super(t('aws.ssm.invocationPending'));
     this.name = "SsmInvocationNotReadyError";
   }
 }
@@ -308,11 +311,11 @@ function normalizeAwsSdkError(error: unknown, fallback: string): Error {
     /The SSO session associated with this profile has expired/i.test(message) ||
     /The SSO session associated with this profile is invalid/i.test(message)
   ) {
-    return new Error("AWS SSO 로그인이 만료되었습니다. 다시 로그인해 주세요.");
+    return new Error(t('aws.sso.expired'));
   }
   if (/Profile .+ was not found\./i.test(message)) {
     return new Error(
-      "앱 전용 AWS 프로필을 찾지 못했습니다. 먼저 프로필을 가져오거나 생성해 주세요.",
+      t('aws.profile.noneManaged'),
     );
   }
   return new Error(message);
@@ -383,7 +386,7 @@ function normalizeAwsProfileFlowSdkError(
     error instanceof Error &&
     (error.name === "TimeoutError" || error.name === "AbortError")
   ) {
-    return new Error(`${fallback} (요청 시간 초과)`);
+    return new Error(t('aws.error.requestTimeout', { message: fallback }));
   }
   const name =
     error instanceof Error && error.name.trim() && error.name.trim() !== "Error"
@@ -415,7 +418,7 @@ function normalizeAwsProfileFlowError(
       /signature does not match the signature you provided/i.test(message)
     ) {
       return new Error(
-        "입력한 Access Key 또는 Secret이 올바르지 않습니다. Secret이 다르거나 잘못된 키 조합일 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+        t('aws.credentials.badSecret'),
       );
     }
     if (
@@ -424,7 +427,7 @@ function normalizeAwsProfileFlowError(
       /The security token included in the request is invalid/i.test(message)
     ) {
       return new Error(
-        "입력한 Access Key 또는 Secret이 올바르지 않습니다. Access Key가 잘못되었거나 비활성화되었을 수 있습니다. AWS 자격 증명을 다시 확인해 주세요.",
+        t('aws.credentials.badAccessKey'),
       );
     }
   }
@@ -435,7 +438,7 @@ function normalizeAwsProfileFlowError(
       /retrieving token from sso|refresh failed/i.test(message)
     ) {
       return new Error(
-        "선택한 source profile의 AWS SSO 로그인 세션이 유효하지 않습니다. 먼저 해당 source profile로 다시 로그인해 주세요.",
+        t('aws.sso.sourceProfileInvalid'),
       );
     }
     if (
@@ -443,7 +446,7 @@ function normalizeAwsProfileFlowError(
       /(AssumeRole|assume role|sts:AssumeRole)/i.test(message)
     ) {
       return new Error(
-        "선택한 source profile로 이 Role을 Assume할 수 없습니다. IAM 권한과 대상 role trust policy를 확인해 주세요.",
+        t('aws.role.assumeDenied'),
       );
     }
     if (
@@ -453,7 +456,7 @@ function normalizeAwsProfileFlowError(
       /invalid arn/i.test(message)
     ) {
       return new Error(
-        "입력한 Role ARN이 올바르지 않거나 대상 Role을 찾을 수 없습니다. Role ARN 형식과 대상 Role을 다시 확인해 주세요.",
+        t('aws.role.arnInvalid'),
       );
     }
   }
@@ -466,7 +469,7 @@ function normalizeAwsProfileFlowError(
       )
     ) {
       return new Error(
-        "AWS SSO 로그인에 실패했습니다. SSO Start URL, SSO Region, 브라우저 로그인 상태를 확인해 주세요.",
+        t('aws.sso.loginFailedDetail'),
       );
     }
   }
@@ -479,7 +482,7 @@ function normalizeAwsProfileFlowError(
       )
     ) {
       return new Error(
-        "SSO 로그인 후 account 또는 role 목록을 불러오지 못했습니다. 권한과 SSO 설정을 확인해 주세요.",
+        t('aws.sso.listFailed'),
       );
     }
   }
@@ -492,7 +495,7 @@ function normalizeAwsProfileFlowError(
       )
     ) {
       return new Error(
-        "선택한 account/role로 인증을 완료하지 못했습니다. 다시 로그인하거나 다른 role을 선택해 주세요.",
+        t('aws.sso.authIncomplete'),
       );
     }
   }
@@ -511,13 +514,16 @@ function maskAwsAccessKeyId(value?: string | null): string | null {
   return `${trimmed.slice(0, 4)}${"*".repeat(trimmed.length - 8)}${trimmed.slice(-4)}`;
 }
 
-function normalizeAwsProfileName(input: string, fieldLabel = "프로필명"): string {
+function normalizeAwsProfileName(
+  input: string,
+  fieldLabelKey = 'aws.field.profileName',
+): string {
   const trimmed = input.trim();
   if (!trimmed) {
-    throw new Error(`${fieldLabel}을 입력해 주세요.`);
+    throw new Error(t('aws.field.required', { field: t(fieldLabelKey) }));
   }
   if (/[\r\n\]]/.test(trimmed)) {
-    throw new Error(`${fieldLabel}에 사용할 수 없는 문자가 포함되어 있습니다.`);
+    throw new Error(t('aws.field.invalidChars', { field: t(fieldLabelKey) }));
   }
   return trimmed;
 }
@@ -955,13 +961,13 @@ function normalizeAwsLogsConfig(containerDefinition?: EcsContainerDefinition): {
   if (!logDriver) {
     return {
       supported: false,
-      reason: "이 컨테이너에는 CloudWatch Logs 설정이 없습니다.",
+      reason: t('aws.logs.noCloudWatch'),
     };
   }
   if (logDriver !== "awslogs") {
     return {
       supported: false,
-      reason: "v2 로그는 awslogs 드라이버만 지원합니다.",
+      reason: t('aws.logs.awslogsOnly'),
     };
   }
   const options = containerDefinition?.logConfiguration?.options ?? {};
@@ -971,7 +977,7 @@ function normalizeAwsLogsConfig(containerDefinition?: EcsContainerDefinition): {
   if (!logGroupName || !logStreamPrefix) {
     return {
       supported: false,
-      reason: "CloudWatch Logs 그룹 또는 stream prefix가 설정되지 않았습니다.",
+      reason: t('aws.logs.noGroupOrPrefix'),
     };
   }
   return {
@@ -1142,10 +1148,17 @@ export interface AwsHostSshMetadataResult {
   usernameCandidates: string[];
 }
 
+// 단계 식별자는 코드용이고, 사용자에게 보이는 문구는 prefixInspectionError 에서 번역한다.
 type AwsHostSshInspectionStage =
-  | "SSM 명령 전송"
-  | "SSH 설정 조회"
-  | "사용자 후보 분석";
+  | "send-command"
+  | "read-ssh-config"
+  | "analyze-users";
+
+const AWS_SSH_INSPECTION_STAGE_KEY: Record<AwsHostSshInspectionStage, string> = {
+  "send-command": "aws.stage.sendCommand",
+  "read-ssh-config": "aws.stage.readSshConfig",
+  "analyze-users": "aws.stage.analyzeUsers",
+};
 
 const AWS_SSH_METADATA_SYSTEM_USERS = new Set([
   "",
@@ -1249,8 +1262,8 @@ function prefixInspectionError(
   error: unknown,
 ): Error {
   const message =
-    error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-  return new Error(`[${stage}] ${message}`);
+    error instanceof Error ? error.message : t('aws.error.unknown');
+  return new Error(`[${t(AWS_SSH_INSPECTION_STAGE_KEY[stage])}] ${message}`);
 }
 
 export function buildSshMetadataProbeCommands(): string[] {
@@ -1735,8 +1748,8 @@ export class AwsService {
     const label = displayName?.trim();
     throw new Error(
       label
-        ? `연결된 AWS 프로필 "${label}"을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.`
-        : "연결된 AWS 프로필을 찾을 수 없습니다. 호스트 설정에서 프로필을 다시 선택해 주세요.",
+        ? t('aws.profile.linkedNotFoundNamed', { label })
+        : t('aws.profile.linkedNotFound'),
     );
   }
 
@@ -2006,7 +2019,7 @@ export class AwsService {
       .catch(() => false);
     if (!sourceCacheExists) {
       if (options.requireSourceCache) {
-        throw new Error("AWS SSO access token cache를 찾지 못했습니다. 다시 로그인해 주세요.");
+        throw new Error(t('aws.sso.noTokenCache'));
       }
       return;
     }
@@ -2104,12 +2117,12 @@ export class AwsService {
     this.pruneExpiredSsoPreparations();
     const preparation = this.pendingSsoPreparations.get(preparationToken);
     if (!preparation) {
-      throw new Error("SSO 준비 정보가 만료되었거나 존재하지 않습니다. 다시 로그인해 주세요.");
+      throw new Error(t('aws.sso.prepMissing'));
     }
     if (preparation.expiresAt <= Date.now()) {
       this.pendingSsoPreparations.delete(preparationToken);
       await this.destroyTempAwsRoot(preparation.homeDir);
-      throw new Error("SSO 준비 정보가 만료되었습니다. 다시 로그인해 주세요.");
+      throw new Error(t('aws.sso.prepExpired'));
     }
     this.pendingSsoPreparations.delete(preparationToken);
     return preparation;
@@ -2147,7 +2160,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsProfileFlowSdkError(
         error,
-        "AWS SSO 계정 목록을 불러오지 못했습니다.",
+        t('aws.sso.accountListFailed'),
         "sso-account-list",
       );
     }
@@ -2189,7 +2202,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsProfileFlowSdkError(
         error,
-        "AWS SSO role 목록을 불러오지 못했습니다.",
+        t('aws.sso.roleListFailed'),
         "sso-role-list",
       );
     }
@@ -2201,7 +2214,7 @@ export class AwsService {
 
   private async assertProfileNameAvailable(profileName: string): Promise<void> {
     if (this.profileRepository.getMetadataByName(profileName)) {
-      throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
+      throw new Error(t('aws.profile.duplicateName'));
     }
   }
 
@@ -2647,7 +2660,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsProfileFlowSdkError(
         error,
-        "입력한 AWS 자격 증명이 유효하지 않습니다.",
+        t('aws.credentials.invalid'),
         "static-validation",
       );
     }
@@ -2735,10 +2748,10 @@ export class AwsService {
       const region = input.region?.trim() || null;
 
       if (!accessKeyId) {
-        throw new Error("Access key를 입력해 주세요.");
+        throw new Error(t('aws.field.accessKeyRequired'));
       }
       if (!secretAccessKey) {
-        throw new Error("Secret을 입력해 주세요.");
+        throw new Error(t('aws.field.secretRequired'));
       }
 
       await this.assertProfileNameAvailable(profileName);
@@ -2769,12 +2782,12 @@ export class AwsService {
         );
 
       if (!roleArn) {
-        throw new Error("Role ARN을 입력해 주세요.");
+        throw new Error(t('aws.field.roleArnRequired'));
       }
 
       await this.assertProfileNameAvailable(profileName);
       if (!sourceProfile) {
-        throw new Error("선택한 source profile을 찾지 못했습니다.");
+        throw new Error(t('aws.profile.sourceNotFound'));
       }
 
       await this.validateAssumeRoleWithSourceProfile({
@@ -2782,7 +2795,7 @@ export class AwsService {
         roleArn,
         errorContext: "role-validation",
         fallbackMessage:
-          "선택한 source profile로 이 Role을 검증하지 못했습니다.",
+          t('aws.role.verifyFailed'),
       });
 
       await this.saveRoleProfileValues({
@@ -2798,17 +2811,17 @@ export class AwsService {
     const ssoAccountId = input.ssoAccountId.trim();
     const ssoRoleName = input.ssoRoleName.trim();
     if (!ssoAccountId) {
-      throw new Error("SSO 계정을 선택해 주세요.");
+      throw new Error(t('aws.field.ssoAccountRequired'));
     }
     if (!ssoRoleName) {
-      throw new Error("SSO Role을 선택해 주세요.");
+      throw new Error(t('aws.field.ssoRoleRequired'));
     }
 
     await this.assertProfileNameAvailable(profileName);
     const preparation = await this.consumeSsoPreparation(input.preparationToken);
     if (preparation.profileName !== profileName) {
       await this.destroyTempAwsRoot(preparation.homeDir);
-      throw new Error("SSO 준비 정보와 선택한 프로필명이 일치하지 않습니다.");
+      throw new Error(t('aws.sso.prepProfileMismatch'));
     }
     if (
       preparation.ssoSessionName !== input.ssoSessionName ||
@@ -2817,7 +2830,7 @@ export class AwsService {
       preparation.region !== (input.region?.trim() || null)
     ) {
       await this.destroyTempAwsRoot(preparation.homeDir);
-      throw new Error("SSO 준비 정보가 현재 입력값과 일치하지 않습니다. 다시 로그인해 주세요.");
+      throw new Error(t('aws.sso.prepInputMismatch'));
     }
 
     try {
@@ -2843,7 +2856,7 @@ export class AwsService {
         profileName,
         errorContext: "sso-final-validation",
         fallbackMessage:
-          "선택한 account/role로 인증을 완료하지 못했습니다.",
+          t('aws.sso.authIncompleteShort'),
       });
 
       await this.syncSsoCacheIntoManagedRoot(preparation.awsRootDir, {
@@ -2893,7 +2906,7 @@ export class AwsService {
     const preparationGeneration = this.managedProfileArtifactsGeneration;
     await this.ensureManagedProfilesReady();
     if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
-      throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+      throw new Error(t('aws.sso.cancelledAccountChanged'));
     }
     this.pruneExpiredSsoPreparations();
 
@@ -2903,10 +2916,10 @@ export class AwsService {
     const region = input.region?.trim() || null;
 
     if (!ssoStartUrl) {
-      throw new Error("SSO Start URL을 입력해 주세요.");
+      throw new Error(t('aws.field.ssoStartUrlRequired'));
     }
     if (!ssoRegion) {
-      throw new Error("SSO Region을 선택해 주세요.");
+      throw new Error(t('aws.field.ssoRegionRequired'));
     }
 
     await this.assertProfileNameAvailable(profileName);
@@ -2916,7 +2929,7 @@ export class AwsService {
     this.inFlightSsoPreparationRoots.add(tempRoot.homeDir);
     try {
       if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
-        throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+        throw new Error(t('aws.sso.cancelledAccountChanged'));
       }
       const documents = await loadAwsProfileDocuments(tempRoot.awsRootDir);
       setAwsProfileKeyValueInDocuments(
@@ -2967,7 +2980,7 @@ export class AwsService {
       } catch (error) {
         throw normalizeAwsProfileFlowSdkError(
           error,
-          "AWS SSO 로그인에 실패했습니다.",
+          t('aws.sso.loginFailed'),
           "sso-login",
         );
       }
@@ -2977,7 +2990,7 @@ export class AwsService {
         ssoRegion,
       });
       if (accounts.length === 0) {
-        throw new Error("선택 가능한 AWS SSO 계정을 찾지 못했습니다.");
+        throw new Error(t('aws.sso.noAccounts'));
       }
 
       const rolesByAccountId: Record<string, AwsSsoProfileRoleOption[]> = {};
@@ -3000,10 +3013,10 @@ export class AwsService {
         : null;
 
       if (!defaultAccountId || !defaultRoleName) {
-        throw new Error("선택 가능한 AWS SSO account/role 조합을 찾지 못했습니다.");
+        throw new Error(t('aws.sso.noAccountRolePairs'));
       }
       if (preparationGeneration !== this.managedProfileArtifactsGeneration) {
-        throw new Error("계정이 변경되어 AWS SSO 로그인을 취소했습니다.");
+        throw new Error(t('aws.sso.cancelledAccountChanged'));
       }
 
       const preparationToken = randomUUID();
@@ -3076,7 +3089,7 @@ export class AwsService {
         isSsoProfile: false,
         isAuthenticated: false,
         configuredRegion: null,
-        errorMessage: "앱 전용 AWS 프로필을 찾지 못했습니다. 먼저 프로필을 가져오거나 생성해 주세요.",
+        errorMessage: t('aws.profile.noneManaged'),
         missingTools: [],
       };
     }
@@ -3128,8 +3141,8 @@ export class AwsService {
         isAuthenticated: false,
         configuredRegion: configuredRegion || null,
         errorMessage: isSsoProfile
-          ? "브라우저 로그인이 필요합니다."
-          : "이 프로필은 저장된 AWS 자격 증명으로 인증하지 못했습니다.",
+          ? t('aws.auth.browserLoginRequired')
+          : t('aws.auth.storedCredentialsFailed'),
         missingTools: [],
       };
     }
@@ -3267,15 +3280,15 @@ export class AwsService {
     const region = input.region?.trim() || null;
 
     if (!accessKeyId) {
-      throw new Error("Access key를 입력해 주세요.");
+      throw new Error(t('aws.field.accessKeyRequired'));
     }
     if (!secretAccessKey) {
-      throw new Error("Secret을 입력해 주세요.");
+      throw new Error(t('aws.field.secretRequired'));
     }
 
     const currentProfile = this.getManagedProfileByName(profileName);
     if (!currentProfile || currentProfile.kind !== "static") {
-      throw new Error("이 프로필은 access key 기반 프로필만 수정할 수 있습니다.");
+      throw new Error(t('aws.profile.accessKeyOnly'));
     }
 
     await this.validateStaticCredentials({
@@ -3301,12 +3314,12 @@ export class AwsService {
     const profileName = normalizeAwsProfileName(input.profileName);
     const region = input.region?.trim() || null;
     if (region && !(AWS_PROFILE_REGION_OPTIONS as readonly string[]).includes(region)) {
-      throw new Error("지원하지 않는 AWS Region입니다.");
+      throw new Error(t('aws.region.unsupported'));
     }
 
     const currentProfile = this.getManagedProfileByName(profileName);
     if (!currentProfile) {
-      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+      throw new Error(t('aws.profile.notFound'));
     }
 
     this.profileRepository.upsert({
@@ -3327,18 +3340,18 @@ export class AwsService {
     const profileName = normalizeAwsProfileName(input.profileName);
     const nextProfileName = normalizeAwsProfileName(
       input.nextProfileName,
-      "새 프로필명",
+      'aws.field.newProfileName',
     );
     if (profileName === nextProfileName) {
-      throw new Error("새 프로필명이 기존 프로필명과 같습니다.");
+      throw new Error(t('aws.profile.sameName'));
     }
 
     const currentProfile = this.getManagedProfileByName(profileName);
     if (!currentProfile) {
-      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+      throw new Error(t('aws.profile.notFound'));
     }
     if (this.getManagedProfileByName(nextProfileName)) {
-      throw new Error("같은 이름의 AWS 프로필이 이미 존재합니다.");
+      throw new Error(t('aws.profile.duplicateName'));
     }
     this.profileRepository.upsert({
       ...currentProfile,
@@ -3358,7 +3371,7 @@ export class AwsService {
     const normalizedProfileName = normalizeAwsProfileName(profileName);
     const existingProfile = this.getManagedProfileByName(normalizedProfileName);
     if (!existingProfile) {
-      throw new Error("선택한 AWS 프로필을 찾지 못했습니다.");
+      throw new Error(t('aws.profile.notFound'));
     }
     this.profileRepository.remove(existingProfile.id);
     await this.materializeManagedProfiles();
@@ -3372,7 +3385,7 @@ export class AwsService {
     const status = await this.getProfileStatus(profileName);
     if (!status.isSsoProfile) {
       throw new Error(
-        "이 프로필은 브라우저 로그인 대신 저장된 AWS 자격 증명을 사용합니다.",
+        t('aws.auth.usesStoredCredentials'),
       );
     }
 
@@ -3387,7 +3400,7 @@ export class AwsService {
     const ssoRegion =
       values.sso_region?.trim() || sessionValues.sso_region?.trim() || "";
     if (!startUrl || !ssoRegion) {
-      throw new Error("프로필의 SSO 설정(sso_start_url/sso_region)을 찾지 못했습니다.");
+      throw new Error(t('aws.sso.configMissing'));
     }
 
     try {
@@ -3400,7 +3413,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsProfileFlowSdkError(
         error,
-        "AWS SSO 로그인에 실패했습니다.",
+        t('aws.sso.loginFailed'),
         "sso-login",
       );
     }
@@ -3429,7 +3442,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsSdkError(
         error,
-        "SSM managed instance 상태를 확인하지 못했습니다.",
+        t('aws.ssm.statusFailed'),
       );
     }
   }
@@ -3453,7 +3466,7 @@ export class AwsService {
       if (isDescribeRegionsPermissionDenied(detail)) {
         return [...DEFAULT_AWS_EC2_REGIONS];
       }
-      throw normalizeAwsSdkError(error, "AWS 리전 목록을 읽지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.region.listFailed'));
     }
   }
 
@@ -3480,7 +3493,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsSdkError(
         error,
-        "EC2 인스턴스 목록을 읽지 못했습니다.",
+        t('aws.ec2.listFailed'),
       );
     }
 
@@ -3545,7 +3558,7 @@ export class AwsService {
         );
       const buildTimeoutError = () =>
         new Error(
-          "SSM 상태 조회가 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.",
+          t('aws.ssm.statusTimeout'),
         );
       const readyInstanceIds = new Set<string>();
       const unavailableInstanceStatuses = new Map<string, string | null>();
@@ -3651,7 +3664,7 @@ export class AwsService {
             left.clusterArn.localeCompare(right.clusterArn),
         );
     } catch (error) {
-      throw normalizeAwsSdkError(error, "ECS 클러스터 목록을 읽지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.ecs.clusterListFailed'));
     }
   }
 
@@ -3772,7 +3785,7 @@ export class AwsService {
       return {
         metricsByServiceName,
         warning:
-          "현재 사용량 지표를 읽지 못해 일부 서비스는 사용률이 표시되지 않을 수 있습니다.",
+          t('aws.ecs.metricsPartial'),
       };
     }
   }
@@ -4022,7 +4035,7 @@ export class AwsService {
         input.serviceName,
     );
     if (!service) {
-      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+      throw new Error(t('aws.ecs.serviceNotFound'));
     }
 
     const taskDefinitionArn = service.taskDefinition?.trim() || "";
@@ -4099,7 +4112,7 @@ export class AwsService {
         (item.serviceName?.trim() || parseServiceNameFromArn(item.serviceArn?.trim() || "")) === serviceName,
     );
     if (!service) {
-      throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+      throw new Error(t('aws.ecs.serviceNotFound'));
     }
 
     const taskDefinitionArn = service.taskDefinition?.trim();
@@ -4167,7 +4180,7 @@ export class AwsService {
       .then(({ service, taskDefinition, runningTasks }) => {
         const serviceArn = service.serviceArn?.trim() || "";
         if (!serviceArn) {
-          throw new Error("선택한 ECS 서비스를 찾지 못했습니다.");
+          throw new Error(t('aws.ecs.serviceNotFound'));
         }
         const context = {
           serviceName,
@@ -4211,7 +4224,7 @@ export class AwsService {
       })
     ).find(Boolean);
     if (!taskArn) {
-      throw new Error("이 서비스에 실행 중인 task가 없습니다.");
+      throw new Error(t('aws.ecs.noRunningTask'));
     }
 
     const tasks = await this.describeEcsTasks({
@@ -4224,11 +4237,11 @@ export class AwsService {
       (item) => item.taskArn === taskArn,
     );
     if (!task) {
-      throw new Error("실행 중인 ECS task 상세 정보를 찾지 못했습니다.");
+      throw new Error(t('aws.ecs.runningTaskDetailsMissing'));
     }
     if (!task.enableExecuteCommand) {
       throw new Error(
-        "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+        t('aws.ecs.execDisabled'),
       );
     }
 
@@ -4236,17 +4249,17 @@ export class AwsService {
       (item) => item.containerName === input.containerName,
     );
     if (!container) {
-      throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+      throw new Error(t('aws.ecs.containerNotInTask'));
     }
     const runtimeId = container.runtimeId?.trim() || "";
     if (!runtimeId) {
-      throw new Error("선택한 컨테이너의 runtime ID를 확인하지 못했습니다.");
+      throw new Error(t('aws.ecs.runtimeIdMissing'));
     }
 
     const clusterName = parseClusterNameFromArn(input.clusterArn);
     const taskId = parseTaskIdFromArn(taskArn);
     if (!clusterName || !taskId) {
-      throw new Error("ECS task target을 구성하지 못했습니다.");
+      throw new Error(t('aws.ecs.targetBuildFailed'));
     }
     return `ecs:${clusterName}_${taskId}_${runtimeId}`;
   }
@@ -4261,7 +4274,7 @@ export class AwsService {
     const cachedContainerContext = this.getCachedEcsTaskContainerContext(input);
     if (cachedContainerContext && !cachedContainerContext.enableExecuteCommand) {
       throw new Error(
-        "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+        t('aws.ecs.execDisabled'),
       );
     }
 
@@ -4275,29 +4288,29 @@ export class AwsService {
       });
       const task = tasks.find((item) => item.taskArn === input.taskArn);
       if (!task) {
-        throw new Error("선택한 ECS task 상세 정보를 찾지 못했습니다.");
+        throw new Error(t('aws.ecs.taskDetailsMissing'));
       }
       if (!task.enableExecuteCommand) {
         throw new Error(
-          "이 task는 ECS Exec가 활성화되어 있지 않아 터널을 열 수 없습니다.",
+          t('aws.ecs.execDisabled'),
         );
       }
       const container = task.containers.find(
         (item) => item.containerName === input.containerName,
       );
       if (!container) {
-        throw new Error("선택한 컨테이너를 실행 중인 task에서 찾지 못했습니다.");
+        throw new Error(t('aws.ecs.containerNotInTask'));
       }
       resolvedRuntimeId = container.runtimeId?.trim() || "";
     }
     if (!resolvedRuntimeId) {
-      throw new Error("선택한 컨테이너의 runtime ID를 확인하지 못했습니다.");
+      throw new Error(t('aws.ecs.runtimeIdMissing'));
     }
 
     const clusterName = parseClusterNameFromArn(input.clusterArn);
     const taskId = parseTaskIdFromArn(input.taskArn);
     if (!clusterName || !taskId) {
-      throw new Error("ECS task target을 구성하지 못했습니다.");
+      throw new Error(t('aws.ecs.targetBuildFailed'));
     }
     return `ecs:${clusterName}_${taskId}_${resolvedRuntimeId}`;
   }
@@ -4351,7 +4364,7 @@ export class AwsService {
         containerOptions,
         followCursor: input.followCursor ?? null,
         loadedAt: new Date().toISOString(),
-        unsupportedReason: "선택한 컨테이너 로그 대상을 찾지 못했습니다.",
+        unsupportedReason: t('aws.logs.targetNotFound'),
       };
     }
 
@@ -4365,7 +4378,7 @@ export class AwsService {
         loadedAt: new Date().toISOString(),
         unsupportedReason:
           matchingContainers[0]?.logSupport.reason ??
-          "v2 로그는 awslogs 드라이버만 지원합니다.",
+          t('aws.logs.awslogsOnly'),
       };
     }
 
@@ -4396,7 +4409,7 @@ export class AwsService {
       Number.isFinite(absoluteStartTimestamp) &&
       Number.isFinite(absoluteEndTimestamp);
     if (useAbsoluteRange && absoluteEndTimestamp < absoluteStartTimestamp) {
-      throw new Error("종료 시간이 시작 시간보다 빠를 수 없습니다.");
+      throw new Error(t('aws.time.endBeforeStart'));
     }
     const startTimeMs = useAbsoluteRange
       ? absoluteStartTimestamp
@@ -4484,7 +4497,7 @@ export class AwsService {
       (item) => item.clusterArn?.trim() === clusterArn,
     );
     if (!cluster?.clusterArn?.trim()) {
-      throw new Error("선택한 ECS 클러스터를 찾지 못했습니다.");
+      throw new Error(t('aws.ecs.clusterNotFound'));
     }
 
     const serviceNames = await this.listEcsServiceNames(
@@ -4647,7 +4660,7 @@ export class AwsService {
     } catch (error) {
       throw normalizeAwsSdkError(
         error,
-        "EC2 인스턴스 정보를 읽지 못했습니다.",
+        t('aws.ec2.detailsFailed'),
       );
     }
     for (const reservation of payload.Reservations ?? []) {
@@ -4680,13 +4693,13 @@ export class AwsService {
       );
       if (!output.Success) {
         throw new Error(
-          "EC2 Instance Connect 공개 키 전송이 거부되었습니다.",
+          t('aws.eic.pushDenied'),
         );
       }
     } catch (error) {
       throw normalizeAwsSdkError(
         error,
-        "EC2 Instance Connect 공개 키 전송에 실패했습니다.",
+        t('aws.eic.pushFailed'),
       );
     }
   }
@@ -4712,11 +4725,11 @@ export class AwsService {
       const streamUrl = output.StreamUrl?.trim();
       const tokenValue = output.TokenValue?.trim();
       if (!sessionId || !streamUrl || !tokenValue) {
-        throw new Error("SSM 세션 응답에 스트림 정보가 없습니다.");
+        throw new Error(t('aws.ssm.sessionNoStream'));
       }
       return { sessionId, streamUrl, tokenValue };
     } catch (error) {
-      throw normalizeAwsSdkError(error, "SSM 세션을 시작하지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.ssm.sessionStartFailed'));
     }
   }
 
@@ -4774,11 +4787,11 @@ export class AwsService {
       const streamUrl = output.StreamUrl?.trim();
       const tokenValue = output.TokenValue?.trim();
       if (!sessionId || !streamUrl || !tokenValue) {
-        throw new Error("SSM 포트 포워딩 세션 응답에 스트림 정보가 없습니다.");
+        throw new Error(t('aws.ssm.forwardNoStream'));
       }
       return { sessionId, streamUrl, tokenValue };
     } catch (error) {
-      throw normalizeAwsSdkError(error, "SSM 포트 포워딩 세션을 시작하지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.ssm.forwardStartFailed'));
     }
   }
 
@@ -4806,11 +4819,11 @@ export class AwsService {
       const streamUrl = session?.streamUrl?.trim();
       const tokenValue = session?.tokenValue?.trim();
       if (!sessionId || !streamUrl || !tokenValue) {
-        throw new Error("ECS Exec 세션 응답에 스트림 정보가 없습니다.");
+        throw new Error(t('aws.ecs.execNoStream'));
       }
       return { sessionId, streamUrl, tokenValue };
     } catch (error) {
-      throw normalizeAwsSdkError(error, "ECS Exec 세션을 시작하지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.ecs.execStartFailed'));
     }
   }
 
@@ -4832,11 +4845,11 @@ export class AwsService {
         { abortSignal: AbortSignal.timeout(input.timeoutMs ?? 30_000) },
       );
     } catch (error) {
-      throw normalizeAwsSdkError(error, "SSM 명령을 전송하지 못했습니다.");
+      throw normalizeAwsSdkError(error, t('aws.ssm.sendCommandFailed'));
     }
     const commandId = payload.Command?.CommandId?.trim();
     if (!commandId) {
-      throw new Error("SSM 명령 ID를 확인하지 못했습니다.");
+      throw new Error(t('aws.ssm.commandIdMissing'));
     }
     return commandId;
   }
@@ -4862,7 +4875,7 @@ export class AwsService {
       }
       throw normalizeAwsSdkError(
         error,
-        "SSM 명령 실행 결과를 읽지 못했습니다.",
+        t('aws.ssm.invocationReadFailed'),
       );
     }
   }
@@ -4879,7 +4892,7 @@ export class AwsService {
         status: metadata.recommendedUsername ? "ready" : "error",
         errorMessage: metadata.recommendedUsername
           ? null
-          : "SSH 로그인 사용자 후보를 찾지 못했습니다.",
+          : t('aws.ssh.noUserCandidates'),
       };
     } catch (error) {
       return {
@@ -4890,7 +4903,7 @@ export class AwsService {
         errorMessage:
           error instanceof Error
             ? error.message
-            : "SSH 설정을 자동으로 확인하지 못했습니다.",
+            : t('aws.ssh.configCheckFailed'),
       };
     }
   }
@@ -4917,7 +4930,7 @@ export class AwsService {
       );
     const buildTimeoutError = () =>
       new Error(
-        "SSH 설정 확인이 제한 시간을 초과했습니다. SSM 연결 상태와 권한을 확인한 뒤 다시 시도해 주세요.",
+        t('aws.ssh.configCheckTimeout'),
       );
 
     let commandId = "";
@@ -4933,7 +4946,7 @@ export class AwsService {
         timeoutMs: getCommandTimeoutMs(),
       });
     } catch (error) {
-      throw prefixInspectionError("SSM 명령 전송", error);
+      throw prefixInspectionError("send-command", error);
     }
 
     while (getRemainingTimeoutMs() > 0) {
@@ -4958,7 +4971,7 @@ export class AwsService {
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
-        throw prefixInspectionError("SSH 설정 조회", error);
+        throw prefixInspectionError("read-ssh-config", error);
       }
       const status = (invocation.Status ?? "").trim();
       if (status === "Pending" || status === "InProgress" || status === "Delayed") {
@@ -4974,10 +4987,10 @@ export class AwsService {
       }
       if (status !== "Success") {
         throw prefixInspectionError(
-          "SSH 설정 조회",
+          "read-ssh-config",
           new Error(
             invocation.StandardErrorContent?.trim() ||
-              `SSM 명령이 ${status || "Unknown"} 상태로 종료되었습니다.`,
+              t('aws.ssm.commandExitStatus', { status: status || 'Unknown' }),
           ),
         );
       }
@@ -4986,7 +4999,7 @@ export class AwsService {
       try {
         parsed = parseMetadataProbeOutput(invocation.StandardOutputContent ?? "");
       } catch (error) {
-        throw prefixInspectionError("사용자 후보 분석", error);
+        throw prefixInspectionError("analyze-users", error);
       }
       const candidates = [
         ...new Set([...parsed.homeUsers, ...parsed.passwdUsers]),

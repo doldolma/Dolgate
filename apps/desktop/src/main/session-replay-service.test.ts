@@ -430,9 +430,11 @@ describe("SessionReplayService", () => {
     expect(browserWindowInstances[0]?.loadedFile).toContain(
       path.join("renderer", "main_window", "index.html"),
     );
+    // 로케일은 메인이 정해 URL 로 넘긴다 — 렌더러가 첫 프레임부터 같은 언어로 그린다.
     expect(browserWindowInstances[0]?.loadedFileQuery).toEqual({
       window: "session-replay",
       recordingId,
+      locale: "ko",
     });
   });
 

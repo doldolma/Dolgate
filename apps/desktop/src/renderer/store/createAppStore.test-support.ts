@@ -73,7 +73,7 @@ export function createContainerTab(
     kind: "host-containers",
     hostId,
     lifecycleId: null,
-    title: `${hostId} 쨌 Containers`,
+    title: `${hostId} · Containers`,
     runtime: null,
     unsupportedReason: null,
     connectionProgress: null,

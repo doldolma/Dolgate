@@ -1,5 +1,6 @@
 import type { LucideIcon } from '../ui/icons';
 import { cn } from '../lib/cn';
+import { useTranslation } from 'react-i18next';
 
 export type CommandPaletteItemGroup =
   | 'navigation'
@@ -20,11 +21,11 @@ export interface CommandPaletteItem {
 }
 
 const GROUP_LABELS: Record<CommandPaletteItemGroup, string> = {
-  navigation: '이동',
-  settings: '설정',
-  host: '호스트',
-  'quick-connect': '빠른 연결',
-  'local-terminal': '터미널',
+  navigation: 'palette.group.navigation',
+  settings: 'palette.group.settings',
+  host: 'palette.group.host',
+  'quick-connect': 'palette.group.quickConnect',
+  'local-terminal': 'palette.group.localTerminal',
 };
 
 interface CommandPaletteProps {
@@ -40,6 +41,7 @@ export function CommandPalette({
   onActiveIndexChange,
   onRunItem,
 }: CommandPaletteProps) {
+  const { t: translate } = useTranslation();
   const groupedItems = items.reduce<Array<{ group: CommandPaletteItemGroup; items: CommandPaletteItem[] }>>(
     (groups, item) => {
       const existing = groups.find((group) => group.group === item.group);
@@ -62,7 +64,7 @@ export function CommandPalette({
     >
       {items.length === 0 ? (
         <div className="px-[0.75rem] py-[0.8rem] text-[0.85rem] text-[var(--text-muted)]">
-          검색 결과가 없습니다.
+          {translate('palette.noResults')}
         </div>
       ) : (
         groupedItems.map((group) => (

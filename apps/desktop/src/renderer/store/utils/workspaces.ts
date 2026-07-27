@@ -20,6 +20,7 @@ import {
   clearSessionShareChatNotifications,
   createInactiveSessionShareState,
 } from "./session-share";
+import { t } from '../../i18n';
 
 export function asSessionTabId(sessionId: string): SessionWorkspaceTabId {
   return `session:${sessionId}`;
@@ -472,16 +473,16 @@ export function normalizeEcsExecShellPermissionMessage(
     return null;
   }
   if (normalized.includes("cloudshell:ApproveCommand")) {
-    return "AWS Console에서 CloudShell로 ECS Exec를 테스트하려면 `cloudshell:ApproveCommand` 권한이 필요합니다. Dolgate 앱 자체에는 필수 권한이 아닙니다.";
+    return t('awsSftp.cloudShellHint');
   }
   if (normalized.includes("ecs:ExecuteCommand")) {
-    return `ECS Exec 권한이 없습니다. 사용자/역할에 \`ecs:ExecuteCommand\`와 보통 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`;
+    return t('awsSftp.ecsExecDenied', { error: normalized });
   }
   if (normalized.includes("ecs:DescribeTasks")) {
-    return `ECS task 조회 권한이 없습니다. 사용자/역할에 \`ecs:DescribeTasks\` 권한이 필요합니다. 원본 오류: ${normalized}`;
+    return t('awsSftp.ecsDescribeDenied', { error: normalized });
   }
   if (normalized.includes("ssm:StartSession")) {
-    return `Session Manager 권한이 없습니다. 사용자/역할에 \`ssm:StartSession\` 권한이 필요한지 확인해 주세요. 원본 오류: ${normalized}`;
+    return t('awsSftp.ssmDenied', { error: normalized });
   }
   return normalized;
 }

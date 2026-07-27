@@ -33,6 +33,7 @@ import {
   resolveHostKeyCheckProgress,
   resolveLocalStartingProgress,
 } from "../utils";
+import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
@@ -593,7 +594,7 @@ export function createSessionServices(deps: SliceDeps) {
       const message =
         error instanceof Error
           ? error.message
-          : "호스트 연결을 시작하지 못했습니다.";
+          : t('sessionSvc.connectFailed');
       const shouldPromptCredentialRetry =
         !isSerialHostRecord(host) && resolveCredentialRetryKind(host, message);
       if (shouldPromptCredentialRetry && isSshHostRecord(host)) {
@@ -672,7 +673,7 @@ export function createSessionServices(deps: SliceDeps) {
       const message =
         error instanceof Error
           ? error.message
-          : "로컬 터미널을 시작하지 못했습니다.";
+          : t('sessionSvc.localFailed');
       markSessionError(set, sessionId, message);
     }
   };
@@ -700,7 +701,7 @@ export function createSessionServices(deps: SliceDeps) {
     const initialProgress = isAwsEc2HostRecord(host)
       ? createConnectionProgress(
           "checking-profile",
-          `${host.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+          t('containersStore.checkingProfile', { profile: host.awsProfileName }),
         )
       : isSerialHostRecord(host)
         ? resolveConnectingProgress(host)
@@ -782,7 +783,7 @@ export function createSessionServices(deps: SliceDeps) {
           sessionId,
           createConnectionProgress(
             "retrying-session",
-            `${host.label} SSM 연결을 다시 시도하는 중입니다.`,
+            t('sessionSvc.ssmRetrying', { label: host.label }),
           ),
         );
         await startPendingSessionConnect(set, get, sessionId, host.id, secrets);
@@ -825,7 +826,7 @@ export function createSessionServices(deps: SliceDeps) {
       const message =
         error instanceof Error
           ? error.message
-          : "호스트 연결을 시작하지 못했습니다. AWS SSM 연결에는 session-manager-plugin이 필요할 수 있습니다.";
+          : t('sessionSvc.connectFailedSsm');
       markSessionError(set, sessionId, message);
     }
   };
@@ -865,7 +866,7 @@ export function createSessionServices(deps: SliceDeps) {
       const message =
         error instanceof Error
           ? error.message
-          : "로컬 터미널을 시작하지 못했습니다.";
+          : t('sessionSvc.localFailed');
       markSessionError(set, sessionId, message);
     }
   };

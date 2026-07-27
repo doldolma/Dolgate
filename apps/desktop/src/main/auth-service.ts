@@ -38,6 +38,7 @@ import {
   normalizeAuthInvalidErrorMessage,
 } from "./auth-error-message";
 import { desktopArgon2idDerive } from "./vault-crypto";
+import { t } from "./i18n";
 
 const REFRESH_TOKEN_ACCOUNT = "auth:refresh-token";
 const OFFLINE_SESSION_CACHE_ACCOUNT = "auth:offline-session-cache";
@@ -51,11 +52,9 @@ const LOOPBACK_CALLBACK_HOST = "127.0.0.1";
 const OFFLINE_RETRY_INITIAL_DELAY_MS = 30_000;
 const OFFLINE_RETRY_MAX_DELAY_MS = 15 * 60_000;
 const VAULT_API_REQUEST_TIMEOUT_MS = 30_000;
-const VAULT_API_REQUEST_TIMEOUT_MESSAGE =
-  "동기화 암호 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+
 const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MS = 10_000;
-const ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE =
-  "비밀번호 변경 요청 시간이 초과되었습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.";
+
 const CLIENT_HEADER_NAME = "X-Dolgate-Client";
 const CLIENT_VERSION_HEADER_NAME = "X-Dolgate-Client-Version";
 const CLIENT_PLATFORM_HEADER_NAME = "X-Dolgate-Platform";
@@ -284,7 +283,7 @@ async function toApiErrorMessage(
     text.includes("<body>");
 
   if (looksLikeHtml) {
-    return `${fallback} 서버가 API 응답 대신 HTML 페이지를 반환했습니다. 배포 주소 또는 리버스 프록시 설정을 확인해 주세요. (${response.status})`;
+    return t("auth.htmlResponse", { fallback, status: response.status });
   }
 
   const extracted = extractApiErrorMessage(text);
@@ -472,7 +471,7 @@ function readE2EAuthSessionFromEnv(): AuthSession | null {
   const session = normalizeAuthSession(parsed);
   if (!session) {
     throw new Error(
-      "DOLSSH_E2E_AUTH_SESSION_JSON 값이 올바른 AuthSession 형식이 아닙니다.",
+      t("auth.e2eSessionInvalid"),
     );
   }
 
@@ -626,7 +625,7 @@ export class AuthService {
       errorMessage: null,
     });
 
-    return this.restoreSessionFromRefreshToken("세션을 복구하지 못했습니다.");
+    return this.restoreSessionFromRefreshToken(t("auth.sessionRestoreFailed"));
   }
 
   async refreshSession(): Promise<AuthState> {
@@ -645,7 +644,7 @@ export class AuthService {
     }
 
     this.refreshPromise = this.restoreSessionFromRefreshToken(
-      "세션이 만료되었습니다. 다시 로그인해 주세요.",
+      t("auth.sessionExpired"),
     );
     try {
       return await this.refreshPromise;
@@ -729,7 +728,7 @@ export class AuthService {
     // "비어 있지 않은 문자열" 검사만 받아서, file:/smb: 같은 스킴이 들어오면 파인더가 열리거나
     // 원격 공유가 마운트될 수 있다(패스키 등록 경로엔 이미 같은 가드가 있다).
     if (loginUrl.protocol !== "https:" && loginUrl.protocol !== "http:") {
-      throw new Error("로그인 서버 주소가 올바르지 않습니다.");
+      throw new Error(t("auth.loginServerInvalid"));
     }
 
     this.pendingBrowserLoginState = browserState;
@@ -788,7 +787,7 @@ export class AuthService {
     const code = callbackUrl.searchParams.get("code");
     const state = callbackUrl.searchParams.get("state");
     if (!code) {
-      throw new Error("로그인 콜백에 code가 없습니다.");
+      throw new Error(t("auth.callbackMissingCode"));
     }
     if (
       this.processedExchangeCodes.has(code) ||
@@ -801,7 +800,7 @@ export class AuthService {
       state &&
       this.pendingBrowserLoginState !== state
     ) {
-      throw new Error("로그인 상태 값이 일치하지 않습니다.");
+      throw new Error(t("auth.callbackStateMismatch"));
     }
     this.pendingBrowserLoginState = null;
     this.pendingBrowserLoginUrl = null;
@@ -819,7 +818,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: "로그인되었습니다.",
+        message: t("auth.signedIn"),
         metadata: {
           userId: session.user.id,
           email: session.user.email,
@@ -853,7 +852,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: "로그아웃되었습니다.",
+        message: t("auth.signedOut"),
         metadata: {
           userId: this.state.session.user.id,
           email: this.state.session.user.email,
@@ -893,13 +892,13 @@ export class AuthService {
       const refreshed = await this.refreshSession();
       if (refreshed.status !== "authenticated") {
         throw new Error(
-          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+          t("auth.sessionExpiredRetry"),
         );
       }
       response = await requestDelete();
     }
     if (!response.ok) {
-      const fallback = `회원 탈퇴에 실패했습니다. (${response.status})`;
+      const fallback = t("auth.accountDeleteFailed", { status: response.status });
       const message = await response
         .json()
         .then((body: { error?: unknown }) =>
@@ -915,7 +914,7 @@ export class AuthService {
       this.log({
         level: "info",
         category: "audit",
-        message: "회원 탈퇴로 서버 계정과 데이터가 삭제되었습니다.",
+        message: t("auth.accountDeleted"),
         metadata: {
           userId: sessionUser.id,
           email: sessionUser.email,
@@ -944,13 +943,13 @@ export class AuthService {
   ): Promise<void> {
     if (this.state.status !== "authenticated" || !this.state.session) {
       throw new Error(
-        "온라인 로그인 상태에서만 비밀번호를 설정할 수 있습니다.",
+        t("auth.passwordOnlineOnly"),
       );
     }
 
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | null = null;
-    const timeoutError = new Error(ACCOUNT_PASSWORD_REQUEST_TIMEOUT_MESSAGE);
+    const timeoutError = new Error(t("auth.passwordChangeTimeout"));
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         controller.abort();
@@ -960,7 +959,7 @@ export class AuthService {
     const requestChange = async (): Promise<Response> => {
       const refreshToken = await this.secretStore.load(REFRESH_TOKEN_ACCOUNT);
       if (!refreshToken) {
-        throw new Error("세션이 만료되었습니다. 다시 로그인해 주세요.");
+        throw new Error(t("auth.sessionExpired"));
       }
       return fetch(new URL("/auth/account/password", this.getServerUrl()), {
         method: "PUT",
@@ -981,7 +980,7 @@ export class AuthService {
             const refreshed = await this.refreshSession();
             if (refreshed.status !== "authenticated") {
               throw new Error(
-                "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+                t("auth.sessionExpiredRetry"),
               );
             }
             response = await requestChange();
@@ -990,7 +989,7 @@ export class AuthService {
             throw new Error(
               await toApiErrorMessage(
                 response,
-                "로그인 비밀번호를 변경하지 못했습니다.",
+                t("auth.passwordChangeFailed"),
               ),
             );
           }
@@ -1006,7 +1005,7 @@ export class AuthService {
     const session =
       this.state.status === "authenticated" ? this.state.session : null;
     if (!session) {
-      throw new Error("세션이 만료되었습니다. 다시 로그인해 주세요.");
+      throw new Error(t("auth.sessionExpired"));
     }
     await this.persistSession({
       ...session,
@@ -1015,7 +1014,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: "로그인 비밀번호가 설정되었습니다.",
+      message: t("auth.passwordSet"),
       metadata: { userId: session.user.id, email: session.user.email },
     });
   }
@@ -1023,14 +1022,16 @@ export class AuthService {
   async forceUnauthenticated(errorMessage?: string): Promise<void> {
     if (
       errorMessage &&
-      /세션이 만료|token is expired|invalid claims|로그인이 필요/i.test(
+      // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+      // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
+      /세션이 만료|session has expired|token is expired|invalid claims|로그인이 필요|sign-in is required/i.test(
         errorMessage,
       )
     ) {
       this.log({
         level: "warn",
         category: "audit",
-        message: "세션이 만료되어 로그아웃되었습니다.",
+        message: t("auth.signedOutExpired"),
         metadata: {
           errorMessage,
         },
@@ -1053,14 +1054,14 @@ export class AuthService {
   getAccessToken(): string {
     if (this.state.status === "offline-authenticated") {
       throw new Error(
-        "오프라인 모드에서는 서버 연결이 필요한 기능을 사용할 수 없습니다.",
+        t("auth.offlineUnavailable"),
       );
     }
     if (
       this.state.status !== "authenticated" ||
       !this.state.session?.tokens.accessToken
     ) {
-      throw new Error("로그인이 필요합니다.");
+      throw new Error(t("auth.signInRequired"));
     }
     return this.state.session.tokens.accessToken;
   }
@@ -1070,7 +1071,7 @@ export class AuthService {
       this.state.status !== "authenticated" &&
       this.state.status !== "offline-authenticated"
     ) {
-      throw new Error("세션 vault key가 없습니다.");
+      throw new Error(t("auth.noVaultKey"));
     }
     if (this.vaultState.status === "unlocked") {
       return this.vaultState.dekBase64;
@@ -1082,10 +1083,10 @@ export class AuthService {
       this.vaultState.status !== "legacy" ||
       this.vaultState.migrationRequired
     ) {
-      throw new Error("동기화 잠금 해제가 필요합니다.");
+      throw new Error(t("auth.vaultUnlockRequired"));
     }
     if (!this.state.session?.vaultBootstrap.keyBase64) {
-      throw new Error("세션 vault key가 없습니다.");
+      throw new Error(t("auth.noVaultKey"));
     }
     return this.state.session.vaultBootstrap.keyBase64;
   }
@@ -1096,7 +1097,7 @@ export class AuthService {
   captureSyncContext(): AuthSyncContext {
     const session = this.state.session;
     if (this.state.status !== "authenticated" || !session) {
-      throw new Error("온라인 로그인 상태에서만 동기화할 수 있습니다.");
+      throw new Error(t("auth.syncOnlineOnly"));
     }
     return {
       userId: session.user.id,
@@ -1141,7 +1142,7 @@ export class AuthService {
   ): Promise<VaultMutationResponse | null> {
     const controller = new AbortController();
     let timeout: NodeJS.Timeout | null = null;
-    const timeoutError = new Error(VAULT_API_REQUEST_TIMEOUT_MESSAGE);
+    const timeoutError = new Error(t("auth.vaultRequestTimeout"));
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
         controller.abort();
@@ -1179,7 +1180,7 @@ export class AuthService {
         }
         if (refreshed.status !== "authenticated") {
           throw new VaultApiError(
-            "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+            t("auth.sessionExpiredRetry"),
           );
         }
         response = await requestOnce();
@@ -1190,7 +1191,7 @@ export class AuthService {
       if (!response.ok) {
         const message = await toApiErrorMessage(
           response,
-          `요청이 실패했습니다. (${response.status})`,
+          t("auth.requestFailed", { status: response.status }),
         );
         if (operationContext) {
           this.assertVaultOperationContext(operationContext);
@@ -1229,7 +1230,7 @@ export class AuthService {
   private getCurrentVaultCacheOwner(): VaultCacheOwner {
     const session = this.state.session;
     if (!session) {
-      throw new Error("로그인이 필요합니다.");
+      throw new Error(t("auth.signInRequired"));
     }
     return createVaultCacheOwner(session, this.getServerUrl());
   }
@@ -1237,7 +1238,7 @@ export class AuthService {
   private captureVaultOperationContext(): VaultOperationContext {
     const session = this.state.session;
     if (this.state.status !== "authenticated" || !session) {
-      throw new Error("온라인 로그인 상태에서만 사용할 수 있습니다.");
+      throw new Error(t("auth.onlineOnly"));
     }
     return {
       userId: session.user.id,
@@ -1254,7 +1255,7 @@ export class AuthService {
       normalizeServerUrl(this.getServerUrl()) !== context.serverUrl
     ) {
       throw new Error(
-        "로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.",
+        t("auth.vaultCancelledAccountChanged"),
       );
     }
   }
@@ -1263,7 +1264,7 @@ export class AuthService {
   // 올린다. 서버는 감싼 DEK 만 보관하므로 어떤 시점에도 복호화할 수 없다.
   async setupVault(passphrase: string): Promise<void> {
     if (this.vaultState.status !== "setup-required") {
-      throw new Error("이미 동기화 암호가 설정되어 있습니다.");
+      throw new Error(t("auth.vaultAlreadySet"));
     }
     const setupState = this.vaultState;
     const operationContext = this.captureVaultOperationContext();
@@ -1321,7 +1322,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: "동기화 암호를 설정했습니다(종단간 암호화 활성).",
+      message: t("auth.vaultConfigured"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1351,7 +1352,7 @@ export class AuthService {
       );
       dek = unwrapVaultDek(this.vaultState.wrappedDekBase64, kek);
     } catch {
-      throw new Error("동기화 암호가 올바르지 않습니다.");
+      throw new Error(t("auth.vaultPassphraseWrong"));
     }
     this.assertVaultOperationContext(operationContext);
 
@@ -1364,7 +1365,7 @@ export class AuthService {
     ) {
       await this.refreshSession().catch(() => undefined);
       throw new Error(
-        "동기화 볼트의 키 검증에 실패했습니다. 세션을 새로고침한 뒤 다시 시도해 주세요.",
+        t("auth.vaultKeyVerifyFailed"),
       );
     }
     const owner = this.getCurrentVaultCacheOwner();
@@ -1457,7 +1458,7 @@ export class AuthService {
     this.log({
       level: "warn",
       category: "audit",
-      message: "동기화 볼트를 초기화했습니다(서버 동기화 데이터 삭제).",
+      message: t("auth.vaultReset"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1468,14 +1469,14 @@ export class AuthService {
   // 재암호화가 없고, pre-seeding 된 다른 기기들도 재입력 없이 이어진다.
   async migrateVault(passphrase: string): Promise<void> {
     if (this.vaultState.status !== "legacy") {
-      throw new Error("전환할 수 있는 상태가 아닙니다.");
+      throw new Error(t("auth.migrationNotAvailable"));
     }
     const legacyState = this.vaultState;
     const operationContext = this.captureVaultOperationContext();
     assertValidNewVaultPassphrase(passphrase);
     const keyBase64 = this.state.session?.vaultBootstrap.keyBase64;
     if (!keyBase64) {
-      throw new Error("세션 vault key가 없습니다.");
+      throw new Error(t("auth.noVaultKey"));
     }
 
     const kdf = createVaultKdfDescriptor();
@@ -1502,7 +1503,7 @@ export class AuthService {
         // pre-seeding 된 DEK 캐시가 verifier 검증을 통과해 곧바로 unlocked 로 이어진다.
         await this.refreshSession().catch(() => undefined);
         throw new VaultApiError(
-          "다른 기기에서 이미 동기화 암호를 설정했습니다. 잠시 후 자동으로 이어집니다.",
+          t("auth.vaultSetElsewhere"),
           error.status,
         );
       }
@@ -1533,7 +1534,7 @@ export class AuthService {
     this.log({
       level: "info",
       category: "audit",
-      message: "기존 계정을 종단간 암호화로 전환했습니다.",
+      message: t("auth.migratedToE2ee"),
       metadata: { userId: this.state.session?.user.id ?? null },
     });
     this.patchState({});
@@ -1552,7 +1553,7 @@ export class AuthService {
     nextPassphrase: string,
   ): Promise<void> {
     if (!hasCoherentVaultDescriptor(this.vaultState)) {
-      throw new Error("동기화 잠금을 해제한 뒤 변경할 수 있습니다.");
+      throw new Error(t("auth.unlockBeforeChange"));
     }
     const operationContext = this.captureVaultOperationContext();
     assertValidNewVaultPassphrase(nextPassphrase);
@@ -1569,12 +1570,12 @@ export class AuthService {
         currentKek,
       );
     } catch {
-      throw new Error("현재 동기화 암호가 올바르지 않습니다.");
+      throw new Error(t("auth.currentPassphraseWrong"));
     }
     this.assertVaultOperationContext(operationContext);
     if (fromByteArray(unwrappedDek) !== this.vaultState.dekBase64) {
       throw new Error(
-        "로컬 볼트 캐시와 서버 키가 일치하지 않습니다. 세션을 새로고침한 뒤 다시 시도해 주세요.",
+        t("auth.vaultCacheMismatch"),
       );
     }
 
@@ -1717,7 +1718,7 @@ export class AuthService {
         level: "warn",
         category: "audit",
         message:
-          "동기화 키를 보안 저장소에 저장하지 못했습니다. 이번 실행에서는 잠금 해제 상태를 유지합니다.",
+          t("auth.vaultKeyStoreFailed"),
         metadata: {
           error: error instanceof Error ? error.message : String(error),
         },
@@ -1752,7 +1753,7 @@ export class AuthService {
         level: "warn",
         category: "audit",
         message:
-          "다른 기기에서 동기화 암호가 초기화되어 이 기기의 잠금을 해제해야 합니다.",
+          t("auth.vaultResetElsewhere"),
         metadata: { userId: this.state.session?.user.id ?? null },
       });
     }
@@ -1772,20 +1773,20 @@ export class AuthService {
       });
     } catch (error) {
       throw new SessionRequestError(
-        toErrorMessage(error, "서버에 연결하지 못했습니다."),
+        toErrorMessage(error, t("auth.serverUnreachable")),
         "network",
       );
     }
 
     if (!response.ok) {
       throw new Error(
-        await toApiErrorMessage(response, "인증 요청에 실패했습니다."),
+        await toApiErrorMessage(response, t("auth.authRequestFailed")),
       );
     }
 
     const json = (await response.json()) as unknown;
     if (!isAuthSession(json)) {
-      throw new Error("인증 응답 형식이 올바르지 않습니다.");
+      throw new Error(t("auth.authResponseInvalid"));
     }
     return json;
   }
@@ -1803,7 +1804,7 @@ export class AuthService {
       });
     } catch (error) {
       throw new SessionRequestError(
-        toErrorMessage(error, "서버에 연결하지 못했습니다."),
+        toErrorMessage(error, t("auth.serverUnreachable")),
         "network",
       );
     }
@@ -1811,7 +1812,7 @@ export class AuthService {
     if (!response.ok) {
       const message = await toApiErrorMessage(
         response,
-        "인증 요청에 실패했습니다.",
+        t("auth.authRequestFailed"),
       );
       const normalizedAuthMessage = normalizeAuthInvalidErrorMessage({
         status: response.status,
@@ -1838,7 +1839,7 @@ export class AuthService {
     const session = normalizeAuthSession(json);
     if (!session) {
       throw new SessionRequestError(
-        "인증 응답 형식이 올바르지 않습니다.",
+        t("auth.authResponseInvalid"),
         "invalid-response",
       );
     }
@@ -2138,7 +2139,7 @@ export class AuthService {
         errorMessage:
           error instanceof Error && error.message.trim()
             ? error.message
-            : "동기화 볼트 상태를 복원할 수 없습니다.",
+            : t("auth.vaultStateRestoreFailed"),
       };
     }
   }
@@ -2237,7 +2238,7 @@ export class AuthService {
         {
           status: "unauthenticated",
           errorMessage:
-            "오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.",
+            t("auth.offlineLeaseExpired"),
         },
         {
           reason: "offline-expired",
@@ -2390,7 +2391,7 @@ export class AuthService {
         {
           status: "unauthenticated",
           errorMessage:
-            "오프라인 사용 가능 시간이 만료되어 다시 로그인이 필요합니다.",
+            t("auth.offlineLeaseExpired"),
         },
         {
           reason: "offline-expired",
@@ -2493,13 +2494,13 @@ export class AuthService {
       const refreshed = await this.refreshSession();
       if (refreshed.status !== "authenticated") {
         throw new Error(
-          "세션이 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.",
+          t("auth.sessionExpiredRetry"),
         );
       }
       response = await requestOnce();
     }
     if (!response.ok) {
-      const fallback = `요청이 실패했습니다. (${response.status})`;
+      const fallback = t("auth.requestFailed", { status: response.status });
       const message = await response
         .json()
         .then((body: { error?: unknown }) =>
@@ -2525,7 +2526,7 @@ export class AuthService {
     )) as { ticket?: unknown } | null;
     const ticket = result?.ticket;
     if (typeof ticket !== "string" || !ticket) {
-      throw new Error("패스키 등록을 시작할 수 없습니다.");
+      throw new Error(t("auth.passkeyRegisterUnavailable"));
     }
     // 서버가 준 URL 을 그대로 열지 않고 설정된 serverUrl 로 직접 조립한다 — 침해/오설정 서버가
     // file:// 같은 임의 URL 을 shell.openExternal 로 열게 하는 것을 차단한다. 티켓은 fragment 로
@@ -2533,7 +2534,7 @@ export class AuthService {
     const registerUrl = new URL("/auth/webauthn/register", this.getServerUrl());
     registerUrl.hash = "ticket=" + encodeURIComponent(ticket);
     if (registerUrl.protocol !== "https:" && registerUrl.protocol !== "http:") {
-      throw new Error("등록 링크가 올바르지 않습니다.");
+      throw new Error(t("auth.registrationLinkInvalid"));
     }
     await shell.openExternal(registerUrl.toString());
   }
@@ -2640,7 +2641,7 @@ export class AuthService {
     this.loopbackCallbackServer = server;
     const address = server.address();
     if (!address || typeof address === "string") {
-      throw new Error("로컬 로그인 콜백 포트를 열지 못했습니다.");
+      throw new Error(t("auth.callbackPortFailed"));
     }
     return `http://${LOOPBACK_CALLBACK_HOST}:${(address as AddressInfo).port}/auth/callback`;
   }
@@ -2666,21 +2667,21 @@ export class AuthService {
       });
       response.end(
         renderLoopbackCallbackPage(
-          "로그인이 완료되었습니다.",
-          "Dolgate 앱으로 돌아갑니다. 이 탭은 닫아도 됩니다.",
+          t("auth.loginComplete"),
+          t("auth.returnToApp"),
           true,
         ),
       );
     } catch (error) {
       const message = toErrorMessage(
         error,
-        "브라우저 로그인 교환에 실패했습니다.",
+        t("auth.browserExchangeFailed"),
       );
       response.writeHead(500, {
         "Content-Type": "text/html; charset=utf-8",
       });
       response.end(
-        renderLoopbackCallbackPage("로그인에 실패했습니다.", message),
+        renderLoopbackCallbackPage(t("auth.loginFailed"), message),
       );
       await this.forceUnauthenticated(message);
     } finally {

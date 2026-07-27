@@ -11,6 +11,7 @@ import type {
   CodexRateWindow,
   CodexUsage,
 } from "../../shared/ai";
+import { t } from '../i18n';
 
 // Codex(ChatGPT 계정) 연동의 main 프로세스 배관.
 // - 인증: `codex app-server` 자식 프로세스와 stdio JSON-RPC 로 통신(login/status/logout).
@@ -284,7 +285,7 @@ export class CodexAppServerClient extends EventEmitter {
       this.failAll(error instanceof Error ? error : new Error(String(error)));
     });
     child.once("exit", (code, signal) => {
-      this.failAll(new Error(`Codex app-server 가 종료되었습니다 (${code ?? signal ?? "unknown"})`));
+      this.failAll(new Error(t('codexServer.exited', { code: code ?? signal ?? "unknown" })));
     });
     child.stderr.on("data", (chunk: Buffer) => {
       this.emit("stderr", chunk.toString("utf8"));
@@ -312,7 +313,7 @@ export class CodexAppServerClient extends EventEmitter {
   private send<T>(method: string, params?: unknown): Promise<T> {
     const child = this.child;
     if (!child) {
-      return Promise.reject(new Error("Codex app-server 가 실행 중이 아닙니다."));
+      return Promise.reject(new Error(t('codexServer.notRunning')));
     }
     const id = this.nextId++;
     const payload = params === undefined ? { method, id } : { method, id, params };
@@ -331,7 +332,7 @@ export class CodexAppServerClient extends EventEmitter {
     try {
       message = JSON.parse(line) as JsonRpcResponse | JsonRpcNotification;
     } catch {
-      this.emit("stderr", `Codex app-server 비-JSON 출력: ${line}`);
+      this.emit("stderr", t('codexServer.nonJson', { line }));
       return;
     }
     if ("id" in message) {
@@ -355,7 +356,7 @@ export class CodexAppServerClient extends EventEmitter {
 export async function codexLoginStart(client: CodexAppServerClient): Promise<CodexLoginStart> {
   const response = await client.request<LoginStartResponse>("account/login/start", { type: "chatgpt" });
   if (response.type !== "chatgpt" || !("authUrl" in response)) {
-    throw new Error("Codex 가 브라우저 로그인 URL을 반환하지 않았습니다.");
+    throw new Error(t('codexServer.noLoginUrl'));
   }
   return { loginId: response.loginId, authUrl: response.authUrl };
 }

@@ -8,6 +8,7 @@ import { BLOCK_TOOLBAR_ATTRIBUTE } from '../../controllers/useTerminalBlockOverl
 import type { TerminalBlockOverlayState } from '../../controllers/useTerminalBlockOverlay';
 import { cn } from '../../lib/cn';
 import { formatBlockDuration } from './blockFormat';
+import { useTranslation } from 'react-i18next';
 
 interface TerminalBlockOverlayProps {
   overlay: TerminalBlockOverlayState;
@@ -36,6 +37,7 @@ export function TerminalBlockOverlay({
   aiEnabled,
   toolbarTopOffset,
 }: TerminalBlockOverlayProps) {
+  const { t: translate } = useTranslation();
   const running = overlay.state === 'running';
   const failed = overlay.state === 'failed';
   const duration = formatBlockDuration(overlay.durationMs);
@@ -92,21 +94,25 @@ export function TerminalBlockOverlay({
           </span>
         ) : null}
 
-        <BlockAction label="출력 복사" onClick={onCopyOutput} />
-        <BlockAction label="명령 복사" onClick={onCopyCommand} disabled={!overlay.command} />
+        <BlockAction label={translate('blockOverlay.copyOutput')} onClick={onCopyOutput} />
         <BlockAction
-          label="재실행"
+          label={translate('blockOverlay.copyCommand')}
+          onClick={onCopyCommand}
+          disabled={!overlay.command}
+        />
+        <BlockAction
+          label={translate('blockOverlay.rerun')}
           onClick={onRerun}
           disabled={
             running || !rerunEnabled || !overlay.command || overlay.commandUnreliable
           }
           title={
             running
-              ? '명령이 실행 중입니다'
+              ? translate('blockOverlay.commandRunning')
               : !rerunEnabled
-                ? '세션이 연결되어 있지 않습니다'
+                ? translate('blockOverlay.sessionDisconnected')
                 : overlay.commandUnreliable
-                  ? '화면에서 읽은 명령이 실제 입력과 다를 수 있어 재실행할 수 없습니다(너무 길거나 여러 줄).'
+                  ? translate('blockOverlay.rerunBlocked')
                   : undefined
           }
         />

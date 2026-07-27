@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import { cn } from "../lib/cn";
 import { Button, Input } from "../ui";
+import { useTranslation } from "react-i18next";
 
 interface LocalFindShortcutInput {
   active: boolean;
@@ -142,6 +143,7 @@ export function LogLocalFindBar({
   onClose,
   className,
 }: LogLocalFindBarProps) {
+  const { t: translate } = useTranslation();
   const hasQuery = query.trim().length > 0;
   const matchLabel =
     hasQuery && matchCount > 0 ? `${activeMatchIndex + 1}/${matchCount}` : "0/0";
@@ -176,10 +178,10 @@ export function LogLocalFindBar({
       <Input
         ref={inputRef}
         type="search"
-        aria-label="현재 로그에서 찾기"
+        aria-label={translate('logFind.placeholder')}
         className="min-h-9 min-w-[12rem] flex-1 rounded-[10px] px-3 py-2 text-[0.9rem]"
         value={query}
-        placeholder="현재 로그에서 찾기"
+        placeholder={translate('logFind.placeholder')}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
@@ -195,9 +197,9 @@ export function LogLocalFindBar({
         size="sm"
         onClick={onPrevious}
         disabled={!hasQuery || matchCount === 0}
-        aria-label="이전 로그 찾기 결과"
+        aria-label={translate('logFind.prevAria')}
       >
-        이전
+        {translate('logFind.prev')}
       </Button>
       <Button
         type="button"
@@ -205,18 +207,18 @@ export function LogLocalFindBar({
         size="sm"
         onClick={onNext}
         disabled={!hasQuery || matchCount === 0}
-        aria-label="다음 로그 찾기 결과"
+        aria-label={translate('logFind.nextAria')}
       >
-        다음
+        {translate('logFind.next')}
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={onClose}
-        aria-label="로그 찾기 닫기"
+        aria-label={translate('logFind.closeAria')}
       >
-        닫기
+        {translate('common.close')}
       </Button>
     </div>
   );

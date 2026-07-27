@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { SnippetDraft, SnippetRecord } from '@shared';
 import { parseSnippetVariables } from '../lib/snippet';
 import { Badge, Button, EmptyState, FieldGroup, Input, Textarea } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface SnippetsPanelProps {
   snippets: SnippetRecord[];
@@ -26,6 +27,7 @@ function matchesQuery(snippet: SnippetRecord, query: string): boolean {
 }
 
 export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: SnippetsPanelProps) {
+  const { t: translate } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -61,7 +63,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
 
   const submit = async () => {
     if (!label.trim() || !command.trim()) {
-      setError('이름과 명령을 모두 입력해 주세요.');
+      setError(translate('snippets.validationRequired'));
       return;
     }
     setIsSubmitting(true);
@@ -74,7 +76,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
       });
       setIsFormOpen(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '저장에 실패했습니다.');
+      setError(caught instanceof Error ? caught.message : translate('snippets.saveFailed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -91,7 +93,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
             aria-label="Snippet search"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="이름, 키워드, 명령 검색"
+            placeholder={translate('snippets.searchPlaceholder')}
             className="w-full max-w-[360px]"
           />
           <Button variant="primary" className="ml-auto shrink-0" onClick={openCreate}>
@@ -111,7 +113,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
                 placeholder="Restart web"
               />
             </FieldGroup>
-            <FieldGroup label="Keyword (선택)">
+            <FieldGroup label={translate('snippets.keywordLabel')}>
               <Input
                 aria-label="Snippet keyword"
                 value={keyword}
@@ -133,7 +135,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
           </label>
           {formVariables.length > 0 ? (
             <div className="flex flex-wrap items-center gap-[0.4rem] text-[0.82rem] text-[var(--text-soft)]">
-              <span>변수:</span>
+              <span>{translate('snippets.variablesLabel')}</span>
               {formVariables.map((variable) => (
                 <Badge key={variable.name}>
                   {variable.name}
@@ -147,10 +149,10 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
           ) : null}
           <div className="flex justify-end gap-[0.55rem]">
             <Button variant="secondary" onClick={() => setIsFormOpen(false)} disabled={isSubmitting}>
-              취소
+              {translate('common.cancel')}
             </Button>
             <Button variant="primary" onClick={() => void submit()} disabled={isSubmitting}>
-              {editingId ? '저장' : '추가'}
+              {translate(editingId ? 'snippets.save' : 'snippets.add')}
             </Button>
           </div>
         </div>
@@ -158,8 +160,8 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
 
       {snippets.length === 0 && !isFormOpen ? (
         <EmptyState
-          title="아직 저장된 snippet이 없습니다."
-          description="자주 쓰는 명령을 추가하면 터미널 자동완성에서 바로 꺼내 쓸 수 있습니다."
+          title={translate('snippets.emptyTitle')}
+          description={translate('snippets.emptyDescription')}
         >
           <Button variant="primary" onClick={openCreate}>
             New Snippet
@@ -180,21 +182,21 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
                     {snippet.keyword ? <Badge>{snippet.keyword}</Badge> : null}
                     {variables.length > 0 ? (
                       <span className="text-[0.76rem] text-[var(--text-soft)]">
-                        {variables.length}개 변수
+                        {translate('snippets.variableCount', { count: variables.length })}
                       </span>
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-[0.4rem]">
                     {onInsert ? (
                       <Button variant="secondary" onClick={() => onInsert(snippet)}>
-                        삽입
+                        {translate('snippets.insert')}
                       </Button>
                     ) : null}
                     <Button variant="secondary" onClick={() => openEdit(snippet)}>
-                      편집
+                      {translate('snippets.edit')}
                     </Button>
                     <Button variant="ghost" onClick={() => void onRemove(snippet.id)}>
-                      삭제
+                      {translate('common.delete')}
                     </Button>
                   </div>
                 </div>
@@ -205,7 +207,7 @@ export function SnippetsPanel({ snippets, onSave, onRemove, onInsert }: Snippets
             );
           })}
           {snippets.length > 0 && visibleSnippets.length === 0 ? (
-            <p className="text-[0.9rem] text-[var(--text-soft)]">검색 결과가 없습니다.</p>
+            <p className="text-[0.9rem] text-[var(--text-soft)]">{translate('snippets.noResults')}</p>
           ) : null}
         </div>
       )}

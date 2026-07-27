@@ -1,4 +1,5 @@
 import type { SecretMetadataRecord } from '@shared';
+import { t } from '../i18n';
 
 export function describeSecretType(entry: SecretMetadataRecord): string {
   const labels: string[] = [];
@@ -38,5 +39,9 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
 export function formatSavedSecretOptionLabel(
   entry: SecretMetadataRecord,
 ): string {
-  return `${entry.label} · ${describeSecretType(entry)} (${entry.linkedHostCount}개 호스트)`;
+  return t('misc.secretSummary', {
+    label: entry.label,
+    type: describeSecretType(entry),
+    count: entry.linkedHostCount,
+  });
 }

@@ -2,6 +2,7 @@ import { cn } from '../../lib/cn';
 import { Columns2 } from '../../ui/icons';
 import type { TmuxSessionInfo } from '../../store/types';
 import { TmuxSessionMenu } from './TmuxSessionMenu';
+import { useTranslation } from 'react-i18next';
 
 interface TmuxSessionFooterProps {
   sessionName: string;
@@ -30,6 +31,7 @@ export function TmuxSessionFooter({
   onKillSession,
   onRefresh,
 }: TmuxSessionFooterProps) {
+  const { t: translate } = useTranslation();
   return (
     <div className="mx-[0.55rem] mb-[0.55rem] mt-1 flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]">
       <span className="leading-none text-[var(--accent)]" aria-hidden>
@@ -52,7 +54,7 @@ export function TmuxSessionFooter({
           'ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[var(--text)] transition-colors',
           'hover:border-[var(--accent)] hover:text-[var(--accent)]',
         )}
-        title="detach — 세션은 유지하고 분리(Ctrl-b d). 재접속으로 복원."
+        title={translate('misc.detachTitle')}
         onClick={onDetach}
       >
         detach

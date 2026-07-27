@@ -31,6 +31,7 @@ import type {
   AwsEc2HostRecord,
   SftpCompatibleHostRecord,
 } from "../context";
+import { t } from '../../i18n';
 
 interface ResolvedContainersEndpoint {
   endpointId: string;
@@ -137,7 +138,7 @@ export function createContainerRuntimeCoordinator(deps: {
       endpointId,
       hostId: host.id,
       stage: "connecting-containers",
-      message: `${host.label} 컨테이너 런타임 연결을 준비하는 중입니다.`,
+      message: t('runtimeCoord.preparing', { label: host.label }),
     });
 
     if (isAwsEc2HostRecord(host)) {
@@ -166,11 +167,11 @@ export function createContainerRuntimeCoordinator(deps: {
       if (!sshUsername) {
         throw new Error(
           hydratedHost.awsSshMetadataError ||
-            "자동으로 SSH 사용자명을 확인하지 못했습니다.",
+            t('pfIpc.sshUsernameUnknown'),
         );
       }
       if (!availabilityZone) {
-        throw new Error("Availability Zone을 확인하지 못했습니다.");
+        throw new Error(t('pfIpc.azUnknown'));
       }
 
       const { privateKeyPem, publicKey } =
@@ -188,7 +189,7 @@ export function createContainerRuntimeCoordinator(deps: {
           endpointId,
           hostId: hydratedHost.id,
           stage: "connecting-containers",
-          message: "서버 프록시로 컨테이너 런타임 연결을 준비하는 중입니다.",
+          message: t('runtimeCoord.preparingProxy'),
         });
         const startMessage = await buildAwsServerProxyStartMessage(awsService, {
           region: hydratedHost.awsRegion,
@@ -267,7 +268,7 @@ export function createContainerRuntimeCoordinator(deps: {
           endpointId,
           hostId: hydratedHost.id,
           stage: "opening-tunnel",
-          message: "컨테이너 런타임 확인을 위한 내부 터널을 여는 중입니다.",
+          message: t('runtimeCoord.openingTunnel'),
         });
         const result = await retryAwsSsmSshOperation(() =>
           coreManager.containersConnect({
@@ -441,7 +442,7 @@ export function createContainerRuntimeCoordinator(deps: {
       if (!runtimeInfo.runtime) {
         throw new Error(
           runtimeInfo.unsupportedReason ||
-            "docker/podman 런타임을 확인하지 못했습니다.",
+            t('containersIpc.runtimeCheckFailed'),
         );
       }
 
@@ -453,7 +454,7 @@ export function createContainerRuntimeCoordinator(deps: {
       const normalizedStatus = details.status.trim().toLowerCase();
       if (normalizedStatus !== "running") {
         throw new Error(
-          `${details.name} 컨테이너가 실행 중이 아닙니다. 현재 상태: ${details.status}`,
+          t('runtimeCoord.notRunning', { name: details.name, status: details.status }),
         );
       }
 
@@ -530,7 +531,7 @@ export function createContainerRuntimeCoordinator(deps: {
         "error",
         error instanceof Error
           ? error.message
-          : "Container tunnel을 시작하지 못했습니다.",
+          : t('runtimeCoord.tunnelStartFailed'),
       );
       throw error;
     } finally {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DialogBackdrop } from './DialogBackdrop';
 import { Button, FieldGroup, Input, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 export interface AwsSftpConfigRetryDialogRequest {
   hostLabel: string;
@@ -16,6 +17,7 @@ interface AwsSftpConfigRetryDialogProps {
 }
 
 export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftpConfigRetryDialogProps) {
+  const { t: translate } = useTranslation();
   const [username, setUsername] = useState('');
   const [port, setPort] = useState(22);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -40,7 +42,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
         <ModalHeader>
           <div>
             <SectionLabel>AWS SFTP</SectionLabel>
-            <h3 id="aws-sftp-config-retry-title">{request.hostLabel} SSH 설정을 확인해 주세요.</h3>
+            <h3 id="aws-sftp-config-retry-title">{translate('awsSftpRetry.title', { label: request.hostLabel })}</h3>
           </div>
         </ModalHeader>
         <ModalBody className="grid gap-4">
@@ -62,7 +64,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
             className="self-start border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
             onClick={() => setShowAdvanced((current) => !current)}
           >
-            {showAdvanced ? '고급 옵션 숨기기' : '고급 옵션'}
+            {translate(showAdvanced ? 'awsSftpRetry.hideAdvanced' : 'awsSftpRetry.advanced')}
           </button>
           {showAdvanced ? (
             <FieldGroup label="SSH Port">
@@ -82,7 +84,7 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -90,23 +92,23 @@ export function AwsSftpConfigRetryDialog({ request, onClose, onSubmit }: AwsSftp
             onClick={async () => {
               const trimmedUsername = username.trim();
               if (!trimmedUsername) {
-                setError('SSH Username을 입력해 주세요.');
+                setError(translate('awsSftpRetry.usernameRequired'));
                 return;
               }
               if (!Number.isInteger(port) || port < 1 || port > 65535) {
-                setError('올바른 SSH Port를 입력해 주세요.');
+                setError(translate('awsSftpRetry.portRequired'));
                 return;
               }
               setSubmitting(true);
               try {
                 await onSubmit({ username: trimmedUsername, port });
               } catch (submitError) {
-                setError(submitError instanceof Error ? submitError.message : '다시 시도하지 못했습니다.');
+                setError(submitError instanceof Error ? submitError.message : translate('awsSftpRetry.retryFailed'));
                 setSubmitting(false);
               }
             }}
           >
-            다시 시도
+            {translate('awsSftpRetry.retry')}
           </Button>
         </ModalFooter>
       </ModalShell>

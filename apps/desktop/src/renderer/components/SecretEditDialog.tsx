@@ -19,6 +19,7 @@ import {
   SelectField,
   Textarea,
 } from '../ui';
+import { Trans, useTranslation } from 'react-i18next';
 
 export type SecretEditMode = 'update-shared' | 'clone-for-host';
 
@@ -66,6 +67,7 @@ export function SecretEditDialog({
   onClose,
   onSubmit,
 }: SecretEditDialogProps) {
+  const { t: translate } = useTranslation();
   const { pickPrivateKey, pickSshCertificate } = useHostFormController();
   const [mode, setMode] = useState<SecretEditMode>('update-shared');
   const [targetHostId, setTargetHostId] = useState<string>('');
@@ -121,7 +123,7 @@ export function SecretEditDialog({
           return;
         }
         if (!loaded) {
-          throw new Error('저장된 인증 정보를 불러오지 못했습니다.');
+          throw new Error(translate('secretEdit.loadFailed'));
         }
 
         const nextPassword = loaded.password ?? '';
@@ -148,7 +150,7 @@ export function SecretEditDialog({
         setLoadError(
           error instanceof Error
             ? error.message
-            : '저장된 인증 정보를 불러오지 못했습니다.',
+            : translate('secretEdit.loadFailed'),
         );
       } finally {
         if (!cancelled) {
@@ -197,16 +199,16 @@ export function SecretEditDialog({
 
   function validateSecrets(): string | null {
     if (authType === 'password' && !password) {
-      return '비밀번호를 입력해 주세요.';
+      return translate('secretEdit.validation.password');
     }
     if ((authType === 'privateKey' || authType === 'certificate') && !hasNonWhitespaceText(privateKey)) {
-      return '개인키 내용을 입력하거나 파일을 가져와 주세요.';
+      return translate('secretEdit.validation.privateKey');
     }
     if (authType === 'certificate' && !hasNonWhitespaceText(certificate)) {
-      return 'SSH 인증서 내용을 입력하거나 파일을 가져와 주세요.';
+      return translate('secretEdit.validation.certificate');
     }
     if (mode === 'clone-for-host' && activeRequest.source === 'keychain' && !targetHostId) {
-      return '분리할 호스트를 선택해 주세요.';
+      return translate('secretEdit.validation.detachHost');
     }
     return null;
   }
@@ -240,7 +242,7 @@ export function SecretEditDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Saved Credentials</SectionLabel>
-            <h3 id="secret-edit-title">저장된 인증 정보 편집</h3>
+            <h3 id="secret-edit-title">{translate('secretEdit.title')}</h3>
           </div>
           <IconButton type="button" onClick={onClose} aria-label="Close saved credentials editor">
             <CloseIcon />
@@ -248,32 +250,36 @@ export function SecretEditDialog({
         </ModalHeader>
         <ModalBody>
           <p className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">
-            <strong>{activeRequest.label}</strong> 저장된 인증 정보 전체를 수정합니다.
+            <Trans
+              i18nKey="secretEdit.intro"
+              values={{ label: activeRequest.label }}
+              components={{ label: <strong /> }}
+            />
           </p>
 
           <div className="flex flex-wrap gap-3">
             <Button variant="secondary" active={mode === 'clone-for-host'} onClick={() => setMode('clone-for-host')}>
-              이 호스트만 새 인증 정보로 분리
+              {translate('secretEdit.mode.detach')}
             </Button>
             <Button variant="secondary" active={mode === 'update-shared'} onClick={() => setMode('update-shared')}>
-              연결된 호스트 전체 변경
+              {translate('secretEdit.mode.shared')}
             </Button>
           </div>
 
           {mode === 'update-shared' ? (
             <p className="text-[var(--text-soft)] leading-[1.5]">
-              이 저장된 인증 정보를 쓰는 {linkedHostCount}개 호스트가 모두 같은 변경 내용을 사용합니다.
+              {translate('secretEdit.mode.sharedHint', { count: linkedHostCount })}
             </p>
           ) : null}
 
           {mode === 'clone-for-host' && activeRequest.source === 'host' && activeRequest.initialHostId ? (
             <p className="text-[var(--text-soft)] leading-[1.5]">
-              현재 편집 중인 호스트만 새 인증 정보로 분리하고, 다른 호스트들은 기존 인증 정보를 유지합니다.
+              {translate('secretEdit.mode.detachHint')}
             </p>
           ) : null}
 
           {needsHostPicker ? (
-            <FieldGroup label="분리할 호스트">
+            <FieldGroup label={translate('secretEdit.detachHostLabel')}>
               <SelectField value={targetHostId} onChange={(event) => setTargetHostId(event.target.value)}>
                 {activeRequest.linkedHosts.map((host) => (
                   <option key={host.id} value={host.id}>
@@ -284,7 +290,7 @@ export function SecretEditDialog({
             </FieldGroup>
           ) : null}
 
-          {loading ? <p className="text-[var(--text-soft)]">저장된 인증 정보를 불러오는 중입니다.</p> : null}
+          {loading ? <p className="text-[var(--text-soft)]">{translate('secretEdit.loading')}</p> : null}
           {loadError ? <p className="text-[0.9rem] text-[var(--danger-text)]">{loadError}</p> : null}
 
           {!loading && !loadError ? (
@@ -340,7 +346,7 @@ export function SecretEditDialog({
                       setPassword(event.target.value);
                       setSubmitError(null);
                     }}
-                    placeholder="비밀번호를 입력하세요"
+                    placeholder={translate('secretEdit.passwordPlaceholder')}
                   />
                 </label>
               ) : null}
@@ -352,7 +358,11 @@ export function SecretEditDialog({
                       Private key
                     </span>
                     <div className="flex gap-[0.7rem]">
-                      <Input readOnly value={privateKeyFileName} placeholder="파일을 가져오면 이름이 표시됩니다" />
+                      <Input
+                        readOnly
+                        value={privateKeyFileName}
+                        placeholder={translate('secretEdit.filePlaceholder')}
+                      />
                       <Button variant="secondary" onClick={() => void importPrivateKey()}>
                         Import
                       </Button>
@@ -375,7 +385,11 @@ export function SecretEditDialog({
                         SSH certificate
                       </span>
                       <div className="flex gap-[0.7rem]">
-                        <Input readOnly value={certificateFileName} placeholder="파일을 가져오면 이름이 표시됩니다" />
+                        <Input
+                          readOnly
+                          value={certificateFileName}
+                          placeholder={translate('secretEdit.filePlaceholder')}
+                        />
                         <Button variant="secondary" onClick={() => void importCertificate()}>
                           Import
                         </Button>
@@ -405,7 +419,7 @@ export function SecretEditDialog({
                         setPassphrase(event.target.value);
                         setSubmitError(null);
                       }}
-                      placeholder="패스프레이즈를 입력하세요"
+                      placeholder={translate('secretEdit.passphrasePlaceholder')}
                     />
                   </label>
                 </>
@@ -414,14 +428,14 @@ export function SecretEditDialog({
           ) : null}
 
           {!loading && !loadError ? (
-            <FieldGroup label="환경 변수">
+            <FieldGroup label={translate('secretEdit.envLabel')}>
               <EnvironmentVariablesEditor
                 variables={envVars}
                 onChange={setEnvVars}
                 disabled={isSubmitting}
               />
               <p className="text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
-                연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.
+                {translate('secretEdit.envHint')}
               </p>
             </FieldGroup>
           ) : null}
@@ -430,7 +444,7 @@ export function SecretEditDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -456,14 +470,14 @@ export function SecretEditDialog({
                 setSubmitError(
                   error instanceof Error
                     ? error.message
-                    : '저장된 인증 정보를 수정하는 중 오류가 발생했습니다.',
+                    : translate('secretEdit.saveFailed'),
                 );
               } finally {
                 setIsSubmitting(false);
               }
             }}
           >
-            {mode === 'update-shared' ? '공유 인증 정보 저장' : '호스트 전용 인증 정보 생성'}
+            {translate(mode === 'update-shared' ? 'secretEdit.submitShared' : 'secretEdit.submitDetach')}
           </Button>
         </ModalFooter>
       </ModalShell>

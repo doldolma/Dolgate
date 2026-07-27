@@ -25,6 +25,7 @@ import {
   SectionLabel,
   StatusBadge,
 } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface TermiusImportDialogProps {
   open: boolean;
@@ -96,6 +97,7 @@ function renderWarningList(warnings: TermiusImportWarning[]) {
 }
 
 export function TermiusImportDialog({ open, onClose, onImported }: TermiusImportDialogProps) {
+  const { t: translate } = useTranslation();
   const { discardTermiusSnapshot, importTermiusSelection, probeTermiusLocal } =
     useTermiusImportController();
   const [probe, setProbe] = useState<TermiusProbeResult | null>(null);
@@ -133,7 +135,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
         if (cancelled) {
           return;
         }
-        setError(loadError instanceof Error ? loadError.message : 'Termius 데이터를 불러오지 못했습니다.');
+        setError(loadError instanceof Error ? loadError.message : translate('termiusImport.loadFailed'));
       })
       .finally(() => {
         if (!cancelled) {
@@ -182,7 +184,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
 
         <ModalBody className="grid gap-4">
           {isLoading ? (
-            <NoticeCard tone="info">로컬 Termius 데이터를 읽는 중입니다.</NoticeCard>
+            <NoticeCard tone="info">{translate('termiusImport.loading')}</NoticeCard>
           ) : null}
           {error ? (
             <NoticeCard tone="danger" role="alert">
@@ -257,7 +259,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 <section className="grid min-h-0 gap-3">
                   <h4>Groups</h4>
                   {visibleGroups.length === 0 ? (
-                    <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">검색에 맞는 그룹이 없습니다.</div>
+                    <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">{translate('termiusImport.noGroups')}</div>
                   ) : (
                     <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                       {visibleGroups.map((group) => {
@@ -291,7 +293,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 <section className="grid min-h-0 gap-3">
                   <h4>Hosts</h4>
                   {visibleHosts.length === 0 ? (
-                    <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">검색에 맞는 호스트가 없습니다.</div>
+                    <div className="text-[0.9rem] leading-[1.6] text-[var(--text-soft)]">{translate('termiusImport.noHosts')}</div>
                   ) : (
                     <div className="grid min-h-0 gap-2 overflow-y-auto rounded-[12px] border border-[var(--border)] bg-[var(--dialog-surface-muted)] p-2">
                       {visibleHosts.map((host) => {
@@ -356,7 +358,7 @@ export function TermiusImportDialog({ open, onClose, onImported }: TermiusImport
                 await onImported(result);
                 onClose();
               } catch (importError) {
-                setError(importError instanceof Error ? importError.message : 'Termius 데이터를 가져오지 못했습니다.');
+                setError(importError instanceof Error ? importError.message : translate('termiusImport.importFailed'));
               } finally {
                 setIsImporting(false);
               }

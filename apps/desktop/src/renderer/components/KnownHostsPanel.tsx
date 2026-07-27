@@ -10,6 +10,7 @@ import {
   EmptyState,
   PanelSection,
 } from '../ui';
+import { useTranslation } from 'react-i18next';
 
 interface KnownHostsPanelProps {
   records: KnownHostRecord[];
@@ -17,13 +18,14 @@ interface KnownHostsPanelProps {
 }
 
 export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
+  const { t: translate } = useTranslation();
   return (
     <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
           <h2 className="m-0">Known Hosts</h2>
           <p className="mt-2 max-w-[48rem] text-[var(--text-soft)]">
-            신뢰한 호스트 키 목록입니다. 새 연결은 이 목록과 정확히 일치해야만 진행됩니다.
+            {translate('knownHosts.intro')}
           </p>
         </div>
       </div>
@@ -31,8 +33,8 @@ export function KnownHostsPanel({ records, onRemove }: KnownHostsPanelProps) {
       <PanelSection>
         {records.length === 0 ? (
           <EmptyState
-            title="아직 저장된 known host가 없습니다."
-            description="처음 연결하는 서버의 지문을 승인하면 이 목록에 자동으로 추가됩니다."
+            title={translate('knownHosts.emptyTitle')}
+            description={translate('knownHosts.emptyDescription')}
           />
         ) : (
           records.map((record) => (

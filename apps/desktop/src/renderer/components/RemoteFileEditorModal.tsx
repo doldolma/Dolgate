@@ -15,11 +15,13 @@ import {
   ModalShell,
   SectionLabel,
 } from "../ui";
+import { useTranslation } from "react-i18next";
 
 // Code-split: CodeMirror (and its dependencies) load only when a file opens.
 const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor"));
 
 export function RemoteFileEditorModal() {
+  const { t: translate } = useTranslation();
   const target = useEditorStore((state) => state.target);
   const session = useEditorStore((state) => state.session);
   const isLoading = useEditorStore((state) => state.isLoading);
@@ -55,7 +57,7 @@ export function RemoteFileEditorModal() {
   function requestClose() {
     if (
       isDirty &&
-      !window.confirm("저장하지 않은 변경사항이 있습니다. 편집기를 닫을까요?")
+      !window.confirm(translate('fileEditor.confirmClose'))
     ) {
       return;
     }
@@ -82,7 +84,7 @@ export function RemoteFileEditorModal() {
       >
         <ModalHeader>
           <div className="min-w-0">
-            <SectionLabel>원격 파일 편집</SectionLabel>
+            <SectionLabel>{translate('fileEditor.section')}</SectionLabel>
             <h3 className="truncate" title={session?.remotePath ?? fileName}>
               {fileName}
               {isDirty ? (
@@ -104,7 +106,7 @@ export function RemoteFileEditorModal() {
 
         <ModalBody>
           {isLoading ? (
-            <p className="text-[var(--text-soft)]">파일을 불러오는 중입니다…</p>
+            <p className="text-[var(--text-soft)]">{translate('fileEditor.loading')}</p>
           ) : null}
 
           {!isLoading && !session && error ? (
@@ -116,11 +118,10 @@ export function RemoteFileEditorModal() {
               {conflict ? (
                 <div className="rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--selection-soft)] px-4 py-3 text-[0.9rem] leading-[1.5] text-[var(--text)]">
                   <p className="font-semibold">
-                    편집하는 동안 원격 파일이 변경되었습니다.
+                    {translate('fileEditor.changedRemotely')}
                   </p>
                   <p className="text-[var(--text-soft)]">
-                    다시 불러와 변경 내용을 확인하거나, 현재 내용으로 덮어쓸 수
-                    있습니다.
+                    {translate('fileEditor.changedHint')}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Button
@@ -128,14 +129,14 @@ export function RemoteFileEditorModal() {
                       onClick={() => void reloadEditor()}
                       disabled={isSaving}
                     >
-                      다시 불러오기
+                      {translate('fileEditor.reload')}
                     </Button>
                     <Button
                       variant="primary"
                       onClick={() => void saveEditor({ force: true })}
                       disabled={isSaving}
                     >
-                      덮어쓰기
+                      {translate('fileEditor.overwrite')}
                     </Button>
                   </div>
                 </div>
@@ -144,14 +145,14 @@ export function RemoteFileEditorModal() {
               {sudoRequired ? (
                 <div className="rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_30%,var(--border))] bg-[var(--surface-secondary)] px-4 py-3">
                   <p className="text-[0.9rem] font-semibold text-[var(--text)]">
-                    이 파일을 저장하려면 sudo 권한이 필요합니다.
+                    {translate('fileEditor.sudoRequired')}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Input
                       type="password"
                       value={sudoPassword}
                       onChange={(event) => setSudoPassword(event.target.value)}
-                      placeholder="sudo 비밀번호"
+                      placeholder={translate('fileEditor.sudoPlaceholder')}
                       autoFocus
                       onKeyDown={(event) => {
                         if (event.key === "Enter" && sudoPassword) {
@@ -164,14 +165,14 @@ export function RemoteFileEditorModal() {
                       onClick={() => void saveEditor({ sudoPassword })}
                       disabled={isSaving || !sudoPassword}
                     >
-                      sudo로 저장
+                      {translate('fileEditor.saveWithSudo')}
                     </Button>
                     <Button
                       variant="secondary"
                       onClick={dismissSudoPrompt}
                       disabled={isSaving}
                     >
-                      취소
+                      {translate('common.cancel')}
                     </Button>
                   </div>
                 </div>
@@ -185,7 +186,7 @@ export function RemoteFileEditorModal() {
                 <Suspense
                   fallback={
                     <div className="p-4 text-[var(--text-soft)]">
-                      편집기를 불러오는 중…
+                      {translate('fileEditor.editorLoading')}
                     </div>
                   }
                 >
@@ -211,17 +212,17 @@ export function RemoteFileEditorModal() {
             onClick={revertEditor}
             disabled={!isDirty || isSaving}
           >
-            되돌리기
+            {translate('fileEditor.revert')}
           </Button>
           <Button variant="secondary" onClick={requestClose} disabled={isSaving}>
-            닫기
+            {translate('common.close')}
           </Button>
           <Button
             variant="primary"
             onClick={() => void saveEditor()}
             disabled={!session || !isDirty || isSaving || sudoRequired}
           >
-            {isSaving ? "저장 중…" : "저장"}
+            {translate(isSaving ? 'fileEditor.saving' : 'common.save')}
           </Button>
         </ModalFooter>
       </ModalShell>

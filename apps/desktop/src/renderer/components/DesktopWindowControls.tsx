@@ -1,5 +1,7 @@
 import type { DesktopWindowState } from '@shared';
 import { cn } from '../lib/cn';
+import { useTranslation } from 'react-i18next';
+import { t } from '../i18n';
 
 export type DesktopPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 export type WindowControlIcon = 'minimize' | 'maximize' | 'restore' | 'close';
@@ -36,19 +38,19 @@ export function getWindowControlDescriptors(
   return [
     {
       key: 'minimize',
-      ariaLabel: '최소화',
+      ariaLabel: t('windowControls.minimize'),
       icon: 'minimize',
       onClick: actions.onMinimizeWindow
     },
     {
       key: 'toggle-maximize',
-      ariaLabel: windowState.isMaximized ? '복원' : '최대화',
+      ariaLabel: t(windowState.isMaximized ? 'windowControls.restore' : 'windowControls.maximize'),
       icon: windowState.isMaximized ? 'restore' : 'maximize',
       onClick: windowState.isMaximized ? actions.onRestoreWindow : actions.onMaximizeWindow
     },
     {
       key: 'close',
-      ariaLabel: '닫기',
+      ariaLabel: t('windowControls.close'),
       icon: 'close',
       danger: true,
       onClick: actions.onCloseWindow
@@ -94,6 +96,7 @@ export function DesktopWindowControls({
   onRestoreWindow,
   onCloseWindow
 }: DesktopWindowControlsProps) {
+  const { t: translate } = useTranslation();
   const controls = getWindowControlDescriptors(desktopPlatform, windowState, {
     onMinimizeWindow,
     onMaximizeWindow,
@@ -106,7 +109,7 @@ export function DesktopWindowControls({
   }
 
   return (
-    <div className="ml-[0.25rem] flex items-center gap-[0.25rem] [-webkit-app-region:no-drag]" aria-label="윈도우 창 제어">
+    <div className="ml-[0.25rem] flex items-center gap-[0.25rem] [-webkit-app-region:no-drag]" aria-label={translate('windowControls.aria')}>
       {controls.map((control) => (
         <button
           key={control.key}

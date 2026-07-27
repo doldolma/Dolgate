@@ -1,6 +1,7 @@
 import type { AiAttachment } from "@shared";
 import { redactAiContext } from "./ai-context-redact";
 import { hasBinaryExtension } from "./file-detection";
+import { t } from '../i18n';
 
 // AI 채팅 첨부 처리. 순수 로직(검증·base64·텍스트 파이프라인)은 canvas 없이 단위테스트
 // 가능하게 분리하고, 이미지 재인코딩(canvas/createImageBitmap)만 주입 가능한 경계로 둔다.
@@ -79,7 +80,7 @@ export async function readBlobBytes(blob: Blob): Promise<Uint8Array> {
 export function buildTextAttachment(name: string, raw: string): TextAttachment {
   let text = redactAiContext(raw);
   if (text.length > MAX_TEXT_ATTACHMENT_CHARS) {
-    text = `${text.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n…(파일이 잘렸습니다)`;
+    text = `${text.slice(0, MAX_TEXT_ATTACHMENT_CHARS)}\n${t('attachment.truncated')}`;
   }
   return { kind: "text", name, text };
 }
@@ -88,10 +89,10 @@ export function buildTextAttachment(name: string, raw: string): TextAttachment {
 export function attachmentCapacityError(current: AiAttachment[], kind: AiAttachment["kind"]): string | null {
   const count = current.filter((attachment) => attachment.kind === kind).length;
   if (kind === "image" && count >= MAX_IMAGE_ATTACHMENTS) {
-    return `이미지는 한 번에 최대 ${MAX_IMAGE_ATTACHMENTS}장까지 첨부할 수 있습니다.`;
+    return t('attachment.imageLimit', { max: MAX_IMAGE_ATTACHMENTS });
   }
   if (kind === "text" && count >= MAX_TEXT_ATTACHMENTS) {
-    return `텍스트 파일은 한 번에 최대 ${MAX_TEXT_ATTACHMENTS}개까지 첨부할 수 있습니다.`;
+    return t('attachment.textLimit', { max: MAX_TEXT_ATTACHMENTS });
   }
   return null;
 }
@@ -179,12 +180,12 @@ export async function processAttachmentFiles(
       try {
         const image = await encode(file, file.type);
         if (!image) {
-          rejected.push({ name, reason: "이미지가 너무 큽니다(다운스케일 후에도 4MB 초과)." });
+          rejected.push({ name, reason: t('attachment.imageTooLarge') });
           continue;
         }
         accepted.push(image);
       } catch {
-        rejected.push({ name, reason: "이미지를 읽을 수 없습니다." });
+        rejected.push({ name, reason: t('attachment.imageUnreadable') });
       }
       continue;
     }
@@ -195,22 +196,22 @@ export async function processAttachmentFiles(
       continue;
     }
     if (file.size > MAX_TEXT_FILE_BYTES) {
-      rejected.push({ name, reason: "파일이 너무 큽니다(최대 2MB)." });
+      rejected.push({ name, reason: t('attachment.fileTooLarge') });
       continue;
     }
     if (hasBinaryExtension(name)) {
-      rejected.push({ name, reason: "바이너리 파일은 첨부할 수 없습니다." });
+      rejected.push({ name, reason: t('attachment.binaryNotAllowed') });
       continue;
     }
     try {
       const bytes = await readBlobBytes(file);
       if (isProbablyBinary(bytes)) {
-        rejected.push({ name, reason: "바이너리 파일은 첨부할 수 없습니다." });
+        rejected.push({ name, reason: t('attachment.binaryNotAllowed') });
         continue;
       }
       accepted.push(buildTextAttachment(name, new TextDecoder().decode(bytes)));
     } catch {
-      rejected.push({ name, reason: "파일을 읽을 수 없습니다." });
+      rejected.push({ name, reason: t('attachment.fileUnreadable') });
     }
   }
 

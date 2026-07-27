@@ -5,6 +5,7 @@ import {
 } from "@shared";
 import type { HostRecord, TerminalConnectionProgress } from "@shared";
 import { createConnectionProgress } from "./errors-and-prompts";
+import { t } from '../../i18n';
 
 export function resolveCredentialRetryKind(
   host: HostRecord | undefined,
@@ -38,6 +39,8 @@ export function resolveCredentialRetryKind(
       : null;
   }
 
+  // 들어오는 오류 메시지를 판정하는 패턴이라 한국어 문구를 지우면 안 된다 — 예전
+  // 메시지와 서버가 보내는 문구까지 잡아야 하므로 두 언어를 모두 유지한다.
   return /passphrase|private key|certificate|인증서|valid after|expired on|not valid before|unable to authenticate|authentication failed|ssh handshake failed|unexpected message type 51|parse private key/i.test(
     message,
   )
@@ -65,7 +68,7 @@ export function resolveHostKeyCheckProgress(
 ): TerminalConnectionProgress {
   return createConnectionProgress(
     "host-key-check",
-    `${host.label} 호스트 키를 확인하는 중입니다.`,
+    t('connectProgress.hostKeyChecking', { label: host.label }),
   );
 }
 
@@ -74,7 +77,7 @@ export function resolveAwaitingHostTrustProgress(
 ): TerminalConnectionProgress {
   return createConnectionProgress(
     "awaiting-host-trust",
-    `${host.label} 호스트 키 확인이 필요합니다.`,
+    t('connectProgress.hostKeyNeeded', { label: host.label }),
     {
       blockingKind: "dialog",
     },
@@ -87,31 +90,31 @@ export function resolveConnectingProgress(
   if (isAwsEc2HostRecord(host)) {
     return createConnectionProgress(
       "connecting",
-      `${host.label} SSM 세션을 시작하는 중입니다.`,
+      t('connectProgress.ssmStarting', { label: host.label }),
     );
   }
   if (isWarpgateSshHostRecord(host)) {
     return createConnectionProgress(
       "connecting",
-      `${host.label} Warpgate SSH 세션을 연결하는 중입니다.`,
+      t('connectProgress.warpgateConnecting', { label: host.label }),
     );
   }
   if (host.kind === "serial") {
     return createConnectionProgress(
       "connecting",
-      `${host.label} Serial 세션을 연결하는 중입니다.`,
+      t('connectProgress.serialConnecting', { label: host.label }),
     );
   }
   return createConnectionProgress(
     "connecting",
-    `${host.label} SSH 세션을 연결하는 중입니다.`,
+    t('connectProgress.sshConnecting', { label: host.label }),
   );
 }
 
 export function resolveLocalStartingProgress(): TerminalConnectionProgress {
   return createConnectionProgress(
     "connecting",
-    "로컬 터미널을 시작하는 중입니다.",
+    t('connectProgress.localStarting'),
   );
 }
 
@@ -120,12 +123,12 @@ export function resolveWaitingShellProgress(
 ): TerminalConnectionProgress {
   return createConnectionProgress(
     "waiting-shell",
-    `${host.label} 원격 셸이 첫 출력을 보내는 중입니다.`,
+    t('connectProgress.waitingFirstOutput', { label: host.label }),
   );
 }
 
 export function resolveLocalWaitingShellProgress(): TerminalConnectionProgress {
-  return createConnectionProgress("waiting-shell", "셸이 준비되는 중입니다.");
+  return createConnectionProgress("waiting-shell", t('connectProgress.waitingShell'));
 }
 
 export function resolveCredentialRetryProgress(
@@ -134,7 +137,7 @@ export function resolveCredentialRetryProgress(
 ): TerminalConnectionProgress {
   return createConnectionProgress(
     "awaiting-credentials",
-    `${host.label} 인증 정보를 다시 확인해 주세요.`,
+    t('connectProgress.credentialRetry', { label: host.label }),
     {
       blockingKind: "dialog",
       retryable: true,

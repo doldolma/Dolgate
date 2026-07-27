@@ -11,6 +11,8 @@ import type {
 } from '@shared';
 import { useAppStore } from '../store/appStore';
 import { Button, FieldGroup, Input, SectionLabel, SelectField, ToggleSwitch } from '../ui';
+import { useTranslation } from 'react-i18next';
+import { t } from "../i18n";
 
 // @shared의 DEFAULT_AI_SETTINGS를 값으로 import하지 않고 인라인한다(vite dev export* 값-누락 회피).
 // settings.ai가 아직 없을 때의 폴백.
@@ -26,54 +28,64 @@ const AI_DEFAULTS: AiSettings = {
 
 const TAVILY_KEYS_URL = 'https://app.tavily.com/';
 
-const PROVIDER_OPTIONS: Array<{ value: AiProviderId; label: string }> = [
-  { value: 'codex', label: 'Codex (ChatGPT 계정)' },
-  { value: 'openai-compat', label: 'OpenAI 호환 (OpenAI · Ollama · LM Studio · vLLM 등)' },
+// 모듈 최상위 상수는 i18n 초기화보다 먼저 평가되므로 문구가 아니라 키를 담는다.
+const PROVIDER_OPTIONS: Array<{ value: AiProviderId; labelKey?: string; label?: string }> = [
+  { value: 'codex', labelKey: 'ai.provider.codex' },
+  { value: 'openai-compat', labelKey: 'ai.provider.openaiCompat' },
   { value: 'anthropic', label: 'Anthropic (Claude)' },
 ];
 
 const DEFAULT_CODEX_MODEL = 'auto';
 
 // 모델 미지정 센티널 — codex 가 권장 모델을 자동 선택한다(항상 목록 맨 위 고정).
-const CODEX_AUTO_OPTION = {
+// 정적 목록은 키를, 서버에서 받은 목록은 원문을 담는다 — 렌더 시점에 골라 쓴다.
+interface CodexModelOption {
+  id: string;
+  label?: string;
+  labelKey?: string;
+  description?: string;
+  descriptionKey?: string;
+}
+
+const CODEX_AUTO_OPTION: CodexModelOption = {
   id: 'auto',
-  label: 'Auto (권장)',
-  description: 'Codex 권장 모델을 자동 선택 · 업데이트를 자동으로 따라감',
+  labelKey: 'ai.model.autoLabel',
+  descriptionKey: 'ai.model.autoDescription',
 };
 
 // model/list 조회 실패(미로그인 등) 시의 폴백 목록. 평소에는 codex 의 model/list 를
 // 실시간으로 가져와 대체한다(설명은 당시 응답의 description 원문을 한국어로 옮긴 것).
-const CODEX_FALLBACK_MODEL_OPTIONS = [
+const CODEX_FALLBACK_MODEL_OPTIONS: CodexModelOption[] = [
   CODEX_AUTO_OPTION,
   {
     id: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
-    description: '최신 프론티어 에이전틱 코딩 모델',
+    descriptionKey: 'ai.model.gpt56sol',
   },
   {
     id: 'gpt-5.6-terra',
     label: 'GPT-5.6 Terra',
-    description: '일상 작업용 균형형 에이전틱 코딩 모델',
+    descriptionKey: 'ai.model.gpt56terra',
   },
   {
     id: 'gpt-5.6-luna',
     label: 'GPT-5.6 Luna',
-    description: '빠르고 저렴한 에이전틱 코딩 모델',
+    descriptionKey: 'ai.model.gpt56luna',
   },
   {
     id: 'gpt-5.5',
     label: 'GPT-5.5',
-    description: '복잡한 코딩·리서치·실무용 프론티어 모델 (이전 세대)',
+    descriptionKey: 'ai.model.gpt55',
   },
   {
     id: 'gpt-5.4',
     label: 'GPT-5.4',
-    description: '일상 코딩용 강력한 모델 (이전 세대)',
+    descriptionKey: 'ai.model.gpt54',
   },
   {
     id: 'gpt-5.4-mini',
     label: 'GPT-5.4 Mini',
-    description: '작고 빠르고 저렴 · 단순한 코딩 작업',
+    descriptionKey: 'ai.model.gpt54mini',
   },
 ];
 
@@ -90,15 +102,15 @@ const CODEX_LOGIN_POLL_MAX_ATTEMPTS = 60;
 // rate limit 창 길이(분) → 사람이 읽는 라벨. 300=5시간, 10080=주간.
 function codexWindowLabel(windowMinutes: number): string {
   if (windowMinutes >= 10080) {
-    return '주간';
+    return t('ai.usage.weekly');
   }
   if (windowMinutes >= 1440) {
-    return `${Math.round(windowMinutes / 1440)}일`;
+    return t('ai.usage.days', { count: Math.round(windowMinutes / 1440) });
   }
   if (windowMinutes >= 60) {
-    return `${Math.round(windowMinutes / 60)}시간`;
+    return t('ai.usage.hours', { count: Math.round(windowMinutes / 60) });
   }
-  return `${windowMinutes}분`;
+  return t('ai.usage.minutes', { count: windowMinutes });
 }
 
 // resetsAt(Unix seconds) → "약 3시간 후 리셋" 같은 상대 문구. 과거/누락이면 빈 문자열.
@@ -112,24 +124,30 @@ function codexResetLabel(resetsAt: number | null): string {
   }
   const minutes = Math.round(diffMs / 60000);
   if (minutes < 60) {
-    return `약 ${minutes}분 후 리셋`;
+    return t('ai.usage.resetInMinutes', { count: minutes });
   }
   const hours = Math.round(minutes / 60);
   if (hours < 48) {
-    return `약 ${hours}시간 후 리셋`;
+    return t('ai.usage.resetInHours', { count: hours });
   }
-  return `약 ${Math.round(hours / 24)}일 후 리셋`;
+  return t('ai.usage.resetInDays', { count: Math.round(hours / 24) });
 }
 
 function CodexUsageRow({ window }: { window: CodexRateWindow }) {
+  const { t: translate } = useTranslation();
   const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
   const reset = codexResetLabel(window.resetsAt);
   return (
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center justify-between text-[0.8rem] text-[var(--text)]">
-        <span>{codexWindowLabel(window.windowMinutes)} 한도</span>
+        <span>
+          {translate('ai.usage.windowLimit', {
+            window: codexWindowLabel(window.windowMinutes),
+          })}
+        </span>
         <span className="text-[var(--text-soft)]">
-          {remaining}% 남음{reset ? ` · ${reset}` : ''}
+          {translate('ai.usage.remaining', { percent: remaining })}
+          {reset ? ` · ${reset}` : ''}
         </span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-muted)]">
@@ -148,6 +166,7 @@ interface AiSettingsPanelProps {
 }
 
 export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelProps) {
+  const { t: translate } = useTranslation();
   const ai = settings ?? AI_DEFAULTS;
   const aiKey = JSON.stringify(ai);
 
@@ -198,7 +217,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
   const codexModelValue = draft.model.trim() || DEFAULT_CODEX_MODEL;
   // 모델 select 옵션: Auto 고정 + model/list 실시간 목록(알려진 id 는 한국어 설명 유지,
   // 새 id 는 서버 displayName/description 원문). 조회 전/실패 시엔 폴백 정적 목록.
-  const codexModelOptions = useMemo(() => {
+  const codexModelOptions = useMemo<CodexModelOption[]>(() => {
     if (!codexModels || codexModels.length === 0) {
       return CODEX_FALLBACK_MODEL_OPTIONS;
     }
@@ -209,7 +228,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     const autoOption = defaultModel
       ? {
           ...CODEX_AUTO_OPTION,
-          description: `Codex 권장 모델 자동 선택 (현재: ${defaultModel.displayName})`,
+          descriptionKey: undefined,
+          description: translate('ai.model.autoDescriptionWithDefault', {
+            model: defaultModel.displayName,
+          }),
         }
       : CODEX_AUTO_OPTION;
     return [
@@ -303,7 +325,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
       setCodexUsage(null);
       setCodexModels(null);
       setCodexError(
-        error instanceof Error ? error.message : 'Codex 상태를 확인하지 못했습니다.',
+        error instanceof Error ? error.message : translate('ai.error.statusFailed'),
       );
     }
   }, [getCodexAuthStatus, getCodexUsage, listCodexModels]);
@@ -364,10 +386,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
           // 일시적 조회 실패(app-server 재기동 등)는 무시하고 폴링을 계속한다.
         }
       }
-      setCodexError('로그인 확인 시간이 초과되었습니다. 로그인을 완료했다면 상태 새로고침을 눌러 주세요.');
+      setCodexError(translate('ai.error.loginTimeout'));
     } catch (error) {
       setCodexError(
-        error instanceof Error ? error.message : 'Codex 로그인을 시작하지 못했습니다.',
+        error instanceof Error ? error.message : translate('ai.error.loginFailed'),
       );
     } finally {
       if (codexPollGeneration.current === generation) {
@@ -384,7 +406,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
       setCodexError(null);
       await openExternalUrl(codexLoginUrl);
     } catch (error) {
-      setCodexError(error instanceof Error ? error.message : '브라우저를 다시 열지 못했습니다.');
+      setCodexError(error instanceof Error ? error.message : translate('ai.error.reopenBrowserFailed'));
     }
   }
 
@@ -399,7 +421,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     try {
       await codexLogout();
     } catch (error) {
-      setCodexError(error instanceof Error ? error.message : 'Codex 로그아웃에 실패했습니다.');
+      setCodexError(error instanceof Error ? error.message : translate('ai.error.logoutFailed'));
     }
     await refreshCodexStatus();
   }
@@ -431,7 +453,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
     } catch (error) {
       setResult({
         ok: false,
-        message: error instanceof Error ? error.message : '연결 테스트에 실패했습니다.',
+        message: error instanceof Error ? error.message : translate('ai.error.testFailed'),
       });
     } finally {
       setTesting(false);
@@ -474,8 +496,8 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
       <div className="grid grid-cols-1 gap-[0.9rem]">
         <ToggleSwitch
           checked={draft.enabled}
-          label="AI 어시스턴트 사용"
-          description="세션에서 AI 도우미를 사용할 수 있게 합니다. API 키는 이 기기의 키체인에만 저장되며 동기화되지 않습니다."
+          label={translate('ai.enable.label')}
+          description={translate('ai.enable.description')}
           onClick={() => {
             setField({ enabled: !draft.enabled });
           }}
@@ -492,7 +514,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
               >
                 {PROVIDER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {option.labelKey ? translate(option.labelKey) : option.label}
                   </option>
                 ))}
               </SelectField>
@@ -515,8 +537,8 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   }
                 >
                   {baseUrlMissing
-                    ? '서버 주소를 입력하세요 — 예: https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)'
-                    : '서버 주소 (필수). 예: https://api.openai.com/v1 (OpenAI) · http://localhost:11434/v1 (Ollama)'}
+                    ? translate('ai.baseUrl.placeholder')
+                    : translate('ai.baseUrl.hint')}
                 </span>
               </FieldGroup>
             ) : null}
@@ -529,11 +551,16 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   onChange={(event) => setField({ model: event.target.value })}
                 >
                   {hasKnownCodexModel ? null : (
-                    <option value={codexModelValue}>현재 설정값 - {codexModelValue}</option>
+                    <option value={codexModelValue}>
+                      {translate('ai.model.currentValue', { model: codexModelValue })}
+                    </option>
                   )}
                   {codexModelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
-                      {model.label} - {model.description}
+                      {model.labelKey ? translate(model.labelKey) : model.label} -{' '}
+                      {model.descriptionKey
+                        ? translate(model.descriptionKey)
+                        : model.description}
                     </option>
                   ))}
                 </SelectField>
@@ -541,7 +568,11 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                 <Input
                   type="text"
                   aria-label="AI Model"
-                  placeholder={providerId === 'anthropic' ? 'claude-… (모델 id)' : 'gpt-4o-mini · llama3.1 …'}
+                  placeholder={
+                    providerId === 'anthropic'
+                      ? translate('ai.model.placeholderAnthropic')
+                      : translate('ai.model.placeholderCompat')
+                  }
                   value={draft.model}
                   onChange={(event) => setField({ model: event.target.value })}
                 />
@@ -549,9 +580,9 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
               {providerId === 'codex' ? (
                 <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
                   {codexModels
-                    ? '내 계정에서 사용 가능한 모델 목록입니다(Codex에서 실시간 조회).'
-                    : 'Codex 로그인 후 계정에서 사용 가능한 모델 목록을 실시간으로 가져옵니다. 아래는 기본 목록입니다.'}{' '}
-                  기본값 Auto는 Codex 권장 모델을 자동으로 따라갑니다.
+                    ? translate('ai.model.listFromAccount')
+                    : translate('ai.model.listAfterLogin')}{' '}
+                  {translate('ai.model.autoFollowsRecommended')}
                 </span>
               ) : null}
             </FieldGroup>
@@ -559,28 +590,28 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             {providerId === 'anthropic' ? (
               <div className="rounded-[10px] border border-[color-mix(in_srgb,#f59e0b_48%,var(--border))] bg-[color-mix(in_srgb,#f59e0b_13%,var(--surface-elevated))] px-4 py-3 text-[0.86rem] leading-[1.55] text-[color-mix(in_srgb,#92400e_72%,var(--text))]">
                 <div className="mb-1 text-[0.72rem] font-semibold uppercase tracking-[0.08em] text-[color-mix(in_srgb,#b45309_78%,var(--text-soft))]">
-                  Claude 계정 로그인 예정
+                  {translate('ai.anthropic.accountLoginPlanned')}
                 </div>
-                현재는 API 키 기반 Claude API로 연결합니다. 추후 Anthropic이 서드파티 앱용 Claude 계정
-                로그인을 공식 지원하면 Claude Agent SDK 기반 연결로 변경될 예정입니다.
+                {translate('ai.anthropic.accountLoginNote')}
               </div>
             ) : null}
 
             {providerId === 'codex' ? (
-              <FieldGroup label="Codex 계정">
+              <FieldGroup label={translate('ai.codex.accountLabel')}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[0.85rem] text-[var(--text)]">
                     {codexStatus === null
-                      ? '상태 확인 중…'
+                      ? translate('ai.codex.checkingStatus')
                       : codexStatus.authenticated
-                        ? `로그인됨${codexStatus.email ? ` — ${codexStatus.email}` : ''}${codexStatus.planType ? ` (${codexStatus.planType})` : ''}`
-                        : '로그인이 필요합니다.'}
+                        ? `${translate('ai.codex.signedIn')}${codexStatus.email ? ` — ${codexStatus.email}` : ''}${codexStatus.planType ? ` (${codexStatus.planType})` : ''}`
+                        : translate('ai.codex.signInRequired')}
                   </span>
                 </div>
                 {codexStatus?.authenticated && codexUsage && (codexUsage.primary || codexUsage.secondary) ? (
                   <div className="flex flex-col gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] px-3 py-2.5">
                     <span className="text-[0.78rem] font-medium text-[var(--text-soft)]">
-                      플랜 남은 용량{codexUsage.planType ? ` (${codexUsage.planType})` : ''}
+                      {translate('ai.usage.planRemaining')}
+                      {codexUsage.planType ? ` (${codexUsage.planType})` : ''}
                     </span>
                     {codexUsage.primary ? <CodexUsageRow window={codexUsage.primary} /> : null}
                     {codexUsage.secondary ? <CodexUsageRow window={codexUsage.secondary} /> : null}
@@ -593,10 +624,10 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     disabled={codexLoggingIn}
                   >
                     {codexLoggingIn
-                      ? '브라우저에서 로그인 대기 중…'
+                      ? translate('ai.codex.waitingBrowser')
                       : codexStatus?.authenticated
-                        ? '다시 로그인'
-                        : 'Codex 로그인'}
+                        ? translate('ai.codex.signInAgain')
+                        : translate('ai.codex.signIn')}
                   </Button>
                   {codexLoggingIn ? (
                     <>
@@ -605,25 +636,24 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                         onClick={() => void handleReopenCodexLogin()}
                         disabled={!codexLoginUrl}
                       >
-                        브라우저 다시 열기
+                        {translate('ai.codex.reopenBrowser')}
                       </Button>
                       <Button variant="secondary" onClick={handleCancelCodexLogin}>
-                        취소
+                        {translate('common.cancel')}
                       </Button>
                     </>
                   ) : null}
                   {codexStatus?.authenticated ? (
                     <Button variant="danger" onClick={() => void handleCodexLogout()}>
-                      로그아웃
+                      {translate('ai.codex.logout')}
                     </Button>
                   ) : null}
                   <Button variant="secondary" onClick={() => void refreshCodexStatus()}>
-                    상태 새로고침
+                    {translate('ai.codex.refreshStatus')}
                   </Button>
                 </div>
                 <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
-                  버튼을 누르면 브라우저에서 ChatGPT 계정으로 로그인합니다. 로그인 정보는 이 앱 전용
-                  공간(codex)에 저장되며 API 키가 필요 없습니다.
+                  {translate('ai.codex.loginNote')}
                 </span>
                 {codexError ? (
                   <span className="text-[0.8rem] font-normal text-[var(--danger-text)]">{codexError}</span>
@@ -634,7 +664,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             {/* Anthropic 은 모델의 컨텍스트 창을 Models API 로 자동 감지하므로 설정을 받지 않는다.
                 openai-compat 은 서버에 로드된 창(예: Ollama num_ctx)을 클라이언트가 알 수 없어 입력 유지. */}
             {providerId === 'openai-compat' ? (
-              <FieldGroup label="컨텍스트 창 (토큰)">
+              <FieldGroup label={translate('ai.context.label')}>
                 <Input
                   type="number"
                   aria-label="AI Context Window Tokens"
@@ -650,8 +680,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   }}
                 />
                 <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
-                  서버에 로드된 컨텍스트 길이(예: Ollama num_ctx). 대화·도구 출력이 이 예산을 넘으면 오래된
-                  대화부터 잘라 보냅니다.
+                  {translate('ai.context.hint')}
                 </span>
               </FieldGroup>
             ) : null}
@@ -664,14 +693,14 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     type="password"
                     aria-label="AI API Key"
                     autoComplete="off"
-                    placeholder={hasKey ? '•••••••• (저장됨 — 새 키 입력 시 교체)' : 'sk-…'}
+                    placeholder={hasKey ? translate('ai.apiKey.placeholderSaved') : 'sk-…'}
                     value={keyInput}
                     onChange={(event) => setKeyInput(event.target.value)}
                   />
                   <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
                     {hasKey
-                      ? '키가 이 기기 키체인에 저장되어 있습니다(설정 저장과 별도로 즉시 저장).'
-                      : 'openai-호환 로컬 서버는 키가 필요 없을 수 있습니다.'}
+                      ? translate('ai.apiKey.hintSaved')
+                      : translate('ai.apiKey.hintOptional')}
                   </span>
                 </FieldGroup>
 
@@ -681,18 +710,18 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     onClick={() => void handleTest()}
                     disabled={testing || baseUrlMissing}
                   >
-                    {testing ? '테스트 중…' : '연결 테스트'}
+                    {translate(testing ? 'ai.apiKey.testing' : 'ai.apiKey.test')}
                   </Button>
                   <Button
                     variant="secondary"
                     onClick={() => void handleSaveKey()}
                     disabled={testing || !keyInput.trim()}
                   >
-                    키 저장
+                    {translate('ai.apiKey.saveKey')}
                   </Button>
                   {hasKey ? (
                     <Button variant="danger" onClick={() => void handleClearKey()} disabled={testing}>
-                      키 삭제
+                      {translate('ai.apiKey.deleteKey')}
                     </Button>
                   ) : null}
                   <button
@@ -702,7 +731,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                       void openExternalUrl(API_KEY_HELP_URL[providerId]);
                     }}
                   >
-                    API 키 발급 ↗
+                    {translate('ai.apiKey.issueKey')}
                   </button>
                 </div>
               </>
@@ -717,13 +746,17 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     : 'select-text rounded-[10px] border border-[color-mix(in_srgb,var(--danger,#dc2626)_45%,transparent)] bg-[color-mix(in_srgb,var(--danger,#dc2626)_12%,transparent)] px-3.5 py-2.5 text-[0.85rem] text-[var(--text)]'
                 }
               >
-                <div className="font-semibold">{result.ok ? '연결 성공' : '연결 실패'}</div>
+                <div className="font-semibold">{translate(result.ok ? 'ai.test.success' : 'ai.test.failure')}</div>
                 <div className="text-[var(--text-soft)]">{result.message}</div>
                 {result.ok && result.detectedModels && result.detectedModels.length > 0 ? (
                   <div className="mt-1 text-[0.8rem] text-[var(--text-soft)]">
-                    감지된 모델: {result.detectedModels.slice(0, 8).join(', ')}
+                    {translate('ai.test.detectedModels', {
+                      models: result.detectedModels.slice(0, 8).join(', '),
+                    })}
                     {result.detectedModels.length > 8
-                      ? ` 외 ${result.detectedModels.length - 8}개`
+                      ? translate('ai.test.detectedMore', {
+                          count: result.detectedModels.length - 8,
+                        })
                       : ''}
                   </div>
                 ) : null}
@@ -731,20 +764,24 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             ) : null}
 
             <div className="mt-1 border-t border-[var(--border)] pt-3">
-              <SectionLabel>웹 검색</SectionLabel>
+              <SectionLabel>{translate('ai.search.section')}</SectionLabel>
             </div>
 
-            <FieldGroup label="Tavily 검색 API 키 (선택)">
+            <FieldGroup label={translate('ai.search.tavilyLabel')}>
               <Input
                 type="password"
                 aria-label="Tavily Search API Key"
                 autoComplete="off"
-                placeholder={hasSearchKey ? '•••••••• (저장됨)' : 'tvly-… (선택)'}
+                placeholder={
+                  hasSearchKey
+                    ? translate('ai.search.tavilyPlaceholderSaved')
+                    : translate('ai.search.tavilyPlaceholder')
+                }
                 value={searchKeyInput}
                 onChange={(event) => setSearchKeyInput(event.target.value)}
               />
               <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
-                웹 검색·URL 읽기는 기본으로 켜져 있고 키 없이 DuckDuckGo 로 검색합니다. Tavily 키를 넣으면 더 안정적·고품질 검색으로 업그레이드됩니다.
+                {translate('ai.search.hint')}
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -752,11 +789,11 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                   onClick={() => void handleSaveSearchKey()}
                   disabled={!searchKeyInput.trim()}
                 >
-                  키 저장
+                  {translate('ai.apiKey.saveKey')}
                 </Button>
                 {hasSearchKey ? (
                   <Button variant="danger" onClick={() => void handleClearSearchKey()}>
-                    키 삭제
+                    {translate('ai.apiKey.deleteKey')}
                   </Button>
                 ) : null}
                 <button
@@ -766,7 +803,7 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
                     void openExternalUrl(TAVILY_KEYS_URL);
                   }}
                 >
-                  Tavily 키 발급 ↗
+                  {translate('ai.search.issueKey')}
                 </button>
               </div>
             </FieldGroup>
@@ -780,16 +817,16 @@ export function AiSettingsPanel({ settings, onUpdateSettings }: AiSettingsPanelP
             onClick={() => void handleSaveSettings()}
             disabled={!dirty || baseUrlMissing}
           >
-            설정 저장
+            {translate('ai.save.button')}
           </Button>
           <span className="text-[0.8rem] font-normal text-[var(--text-soft)]">
             {baseUrlMissing
-              ? 'Base URL을 입력해야 저장할 수 있습니다.'
+              ? translate('ai.save.baseUrlRequired')
               : dirty
-                ? '저장하지 않은 변경사항이 있습니다. (키는 위에서 개별 저장)'
+                ? translate('ai.save.unsaved')
                 : saved
-                  ? '저장되었습니다.'
-                  : '변경사항 없음'}
+                  ? translate('ai.save.saved')
+                  : translate('ai.save.noChanges')}
           </span>
         </div>
       </div>

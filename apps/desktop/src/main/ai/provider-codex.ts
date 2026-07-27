@@ -22,6 +22,7 @@ import {
   resolveCodexHome,
 } from "./codex-app-server";
 import { CODEX_AUTO_MODEL, normalizeCodexModel } from "./codex-models";
+import { t } from '../i18n';
 
 // codex 프로세스 env 에서 bearer 토큰을 읽게 할 변수 이름(mcp_servers.<name>.bearer_token_env_var).
 const MCP_TOKEN_ENV = "DOLGATE_MCP_TOKEN";
@@ -56,11 +57,14 @@ export class CodexAdapter implements ProviderAdapter {
         return {
           ok: false,
           reason: "auth",
-          message: "Codex 로그인이 필요합니다. 설정에서 'Codex 로그인' 버튼을 눌러 주세요.",
+          message: t('codex.loginRequired'),
         };
       }
       const detail = [status.email, status.planType].filter(Boolean).join(" · ");
-      return { ok: true, message: `로그인되어 있습니다${detail ? ` — ${detail}` : ""}.` };
+      return {
+        ok: true,
+        message: t('codex.signedIn', { detail: detail ? ` — ${detail}` : "" }),
+      };
     } catch (error) {
       const normalized = normalizeAiError(error);
       return { ok: false, reason: normalized.reason, message: normalized.message };
@@ -221,7 +225,7 @@ function builtinToolEvent(
       id: item.id,
       name: "web_search",
       status: eventType === "item.completed" ? "done" : "running",
-      label: `🔍 웹 검색: ${item.query || "…"}`,
+      label: t('codex.webSearch', { query: item.query || "…" }),
     };
   }
   const failed = item.status === "failed" || (item.exit_code !== undefined && item.exit_code !== 0);
@@ -229,7 +233,7 @@ function builtinToolEvent(
     id: item.id,
     name: "command_execution",
     status: eventType !== "item.completed" ? "running" : failed ? "error" : "done",
-    label: `💻 로컬 실행: ${item.command}`,
+    label: t('codex.localRun', { command: item.command }),
   };
 }
 
@@ -268,13 +272,13 @@ function mapCodexFailure(message: string): Error {
   if (/not supported when using Codex with a ChatGPT account|model metadata|unknown model/i.test(normalized)) {
     return new AiRequestError(
       "model-not-found",
-      "Codex에서 지원하지 않는 모델입니다. 설정에서 Codex 모델을 기본값으로 다시 저장해 주세요.",
+      t('codex.unsupportedModel'),
     );
   }
   if (/unauthorized|401|not\s*logged\s*in|login|auth/i.test(normalized)) {
     return new AiRequestError(
       "auth",
-      "Codex 인증이 만료되었거나 로그인이 필요합니다. 설정에서 'Codex 로그인'을 다시 진행해 주세요.",
+      t('codex.authExpired'),
     );
   }
   return new Error(normalized);
@@ -290,7 +294,7 @@ function normalizeCodexFailureMessage(message: string): string {
     .replace(/Codex Exec exited with (?:code \d+|signal [^:]+):/gi, "")
     .replace(/Reading prompt from stdin\.\.\./gi, "")
     .trim();
-  return stripped || "Codex 요청에 실패했습니다.";
+  return stripped || t('codex.requestFailed');
 }
 
 function extractCodexJsonMessage(message: string): string {

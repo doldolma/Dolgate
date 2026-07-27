@@ -81,7 +81,7 @@ function safely<T>(sessionId: string, fallback: T, run: () => T): T {
   } catch (error) {
     disabledSessions.set(sessionId, error);
     console.error(
-      `[command-blocks] 세션 ${sessionId} 비활성화 — 명령 블록 추적 중 오류`,
+      `[command-blocks] session ${sessionId} disabled — error while tracking command blocks`,
       error,
     );
     return fallback;

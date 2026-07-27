@@ -1,5 +1,7 @@
 import { DialogBackdrop } from './DialogBackdrop';
 import { Button, ModalBody, ModalFooter, ModalHeader, ModalShell, SectionLabel } from '../ui';
+import { useTranslation } from 'react-i18next';
+import { t } from '../i18n';
 
 interface HostDeleteConfirmDialogProps {
   open: boolean;
@@ -15,7 +17,7 @@ interface HostDeleteConfirmDialogProps {
 }
 
 function formatUnusedSecretLabel(count: number): string {
-  return `더 이상 사용되지 않는 저장된 인증 정보 ${count}개도 함께 삭제`;
+  return t('hostDelete.alsoDeleteSecrets', { count });
 }
 
 export function HostDeleteConfirmDialog({
@@ -30,6 +32,7 @@ export function HostDeleteConfirmDialog({
   onConfirm,
   backdropTestId,
 }: HostDeleteConfirmDialogProps) {
+  const { t: translate } = useTranslation();
   if (!open) {
     return null;
   }
@@ -48,8 +51,8 @@ export function HostDeleteConfirmDialog({
         <ModalBody className="grid gap-4">
           <p className="text-sm leading-6 text-[var(--text-soft)]">
             {unusedLocalSecretCount > 0
-              ? '호스트를 삭제한 뒤 더 이상 사용되지 않는 저장된 인증 정보가 있습니다.'
-              : '연결된 저장된 인증 정보는 유지됩니다.'}
+              ? translate('hostDelete.unusedSecrets')
+              : translate('hostDelete.secretsKept')}
           </p>
           {unusedLocalSecretCount > 0 ? (
             <label className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 rounded-[10px] border border-[var(--border)] bg-[var(--surface-muted)] px-[0.9rem] py-[0.9rem] text-[0.9rem] text-[var(--text)]">
@@ -67,10 +70,10 @@ export function HostDeleteConfirmDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={isDeleting}>
-            취소
+            {translate('common.cancel')}
           </Button>
           <Button variant="danger" disabled={isDeleting} onClick={() => void onConfirm()}>
-            삭제
+            {translate('common.delete')}
           </Button>
         </ModalFooter>
       </ModalShell>

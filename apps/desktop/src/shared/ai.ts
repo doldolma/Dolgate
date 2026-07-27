@@ -1,4 +1,6 @@
 import type { AiProviderId, AiSearchBackend } from "@dolssh/shared-core";
+// src/shared 는 메인·렌더러 공용이라 프로세스별 i18n 모듈 대신 i18next 싱글턴을 직접 쓴다.
+import i18next from "i18next";
 
 // AI 어시스턴트의 provider-agnostic wire 타입. 데스크톱 전용(main 어댑터 + preload + 렌더러 공유).
 // shared-core 배럴의 export* 값-누락 footgun을 피하려고 shared-core가 아니라 여기에 둔다.
@@ -54,7 +56,10 @@ export function mergeTextAttachments(content: string, attachments?: AiAttachment
   if (texts.length === 0) {
     return content;
   }
-  const parts = texts.map((attachment) => `[첨부 파일: ${attachment.name}]\n\`\`\`\n${attachment.text}\n\`\`\``);
+  const parts = texts.map(
+    (attachment) =>
+      `${i18next.t("aiService.attachedFile", { name: attachment.name })}\n\`\`\`\n${attachment.text}\n\`\`\``,
+  );
   return [content, ...parts].filter(Boolean).join("\n\n");
 }
 

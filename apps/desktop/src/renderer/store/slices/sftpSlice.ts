@@ -143,6 +143,7 @@ import {
 } from "../utils";
 import { cancelReconnect } from "../services/reconnect-orchestrator";
 import { createSftpServices } from "../services/sftp";
+import { t } from '../../i18n';
 
 export function createSftpSlice(deps: SliceDeps): SftpSlice {
   const { api, set, get } = deps;
@@ -349,7 +350,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                   endpointId,
                   hostId: awsHost.id,
                   stage: "checking-profile" as const,
-                  message: `${awsHost.awsProfileName} 프로필 인증 상태를 확인하는 중입니다.`,
+                  message: t('containersStore.checkingProfile', { profile: awsHost.awsProfileName }),
                 }
               : null;
             set((state) => ({
@@ -407,7 +408,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               const message =
                 error instanceof Error
                   ? error.message
-                  : "호스트 키를 확인하지 못했습니다.";
+                  : t('sftpSlice.hostKeyCheckFailed');
               if (shouldPromptAwsSftpConfigRetry(host, message)) {
                 set({
                   pendingAwsSftpConfigRetry: {
@@ -713,7 +714,7 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             if (items.length === 0) {
               if (warnings.length === 0) {
                 setSftpPaneWarnings(set, targetPaneId, [
-                  "드롭한 항목 경로를 읽지 못했습니다.",
+                  t('sftpStore.dropPathFailed'),
                 ]);
               }
               return;

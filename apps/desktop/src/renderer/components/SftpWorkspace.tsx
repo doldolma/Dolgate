@@ -13,6 +13,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   buildVisibleGroups,
   filterHostsInGroupTree,
@@ -101,6 +102,7 @@ import {
   Toolbar,
 } from "../ui";
 import { cn } from "../lib/cn";
+import { t } from "../i18n";
 
 const SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX = 220;
 const SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX = 460;
@@ -904,20 +906,20 @@ export function buildTransferFailureDetailLines(job: TransferJob): string[] {
       );
     }
     if (job.failedItems.length > 5) {
-      lines.push(`외 ${job.failedItems.length - 5}개`);
+      lines.push(t('sftp.failureDetail.more', { count: job.failedItems.length - 5 }));
     }
     return lines;
   }
   if (job.errorItemName?.trim()) {
-    lines.push(`항목: ${job.errorItemName.trim()}`);
+    lines.push(t('sftp.failureDetail.item', { name: job.errorItemName.trim() }));
   }
   if (job.errorPath?.trim()) {
-    lines.push(`경로: ${job.errorPath.trim()}`);
+    lines.push(t('sftp.failureDetail.path', { path: job.errorPath.trim() }));
   }
   if (job.detailMessage?.trim()) {
-    lines.push(`원본 오류: ${job.detailMessage.trim()}`);
+    lines.push(t('sftp.failureDetail.originalError', { message: job.detailMessage.trim() }));
   } else if (job.errorMessage?.trim()) {
-    lines.push(`오류: ${job.errorMessage.trim()}`);
+    lines.push(t('sftp.failureDetail.error', { message: job.errorMessage.trim() }));
   }
   return lines;
 }
@@ -1085,6 +1087,7 @@ function PaneBrowser({
   onPrepareTransfer,
   onPrepareExternalTransfer,
 }: PaneBrowserProps) {
+  const { t: translate } = useTranslation();
   const entries = useMemo(() => visibleEntries(pane), [pane]);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [isDropTargetActive, setIsDropTargetActive] = useState(false);
@@ -1267,7 +1270,7 @@ function PaneBrowser({
       setLocalRootsErrorMessage(
         error instanceof Error
           ? error.message
-          : "드라이브 목록을 불러오지 못했습니다.",
+          : translate("sftp.drives.loadFailed"),
       );
     } finally {
       setIsLoadingLocalRoots(false);
@@ -1320,7 +1323,7 @@ function PaneBrowser({
             onClick={onOpenCreateDirectoryDialog}
             disabled={pane.isLoading}
           >
-            새 폴더
+            {translate("sftp.toolbar.newFolder")}
           </Button>
           <Button
             variant="secondary"
@@ -1329,7 +1332,7 @@ function PaneBrowser({
             onClick={() => void onRefresh()}
             disabled={pane.isLoading}
           >
-            {pane.isLoading ? "새로고침 중..." : "새로고침"}
+            {translate(pane.isLoading ? "sftp.toolbar.refreshing" : "sftp.toolbar.refresh")}
           </Button>
         </div>
       </Toolbar>
@@ -1403,7 +1406,7 @@ function PaneBrowser({
           >
             {isLoadingLocalRoots ? (
               <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
-                드라이브 불러오는 중...
+                {translate("sftp.drives.loading")}
               </div>
             ) : localRootsErrorMessage ? (
               <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--danger)]">
@@ -1439,7 +1442,7 @@ function PaneBrowser({
               </div>
             ) : (
               <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
-                사용할 수 있는 드라이브가 없습니다.
+                {translate("sftp.drives.empty")}
               </div>
             )}
           </div>
@@ -1703,7 +1706,7 @@ function PaneBrowser({
         </table>
         {pane.isLoading ? (
           <div className="pointer-events-none absolute bottom-4 right-4 rounded-full bg-[color-mix(in_srgb,var(--accent-strong)_12%,var(--surface-strong))] px-[0.7rem] py-[0.4rem] text-[0.82rem] font-semibold text-[var(--accent-strong)]">
-            목록을 새로 읽는 중...
+            {translate("sftp.toolbar.reloading")}
           </div>
         ) : null}
       </div>
@@ -1729,7 +1732,7 @@ function PaneBrowser({
                   onOpenRenameDialog();
                 }}
               >
-                이름 변경
+                {translate("sftp.entryMenu.rename")}
               </button>
               <button
                 type="button"
@@ -1740,7 +1743,7 @@ function PaneBrowser({
                   onOpenPermissionsDialog();
                 }}
               >
-                권한 수정
+                {translate("sftp.entryMenu.permissions")}
               </button>
               <button
                 type="button"
@@ -1751,7 +1754,7 @@ function PaneBrowser({
                   onOpenOwnerDialog();
                 }}
               >
-                소유권 변경
+                {translate("sftp.entryMenu.ownership")}
               </button>
               {canEditContextEntry ? (
                 <button
@@ -1763,7 +1766,7 @@ function PaneBrowser({
                     void onOpenEntry(target);
                   }}
                 >
-                  편집
+                  {translate("sftp.entryMenu.edit")}
                 </button>
               ) : null}
               <button
@@ -1775,7 +1778,7 @@ function PaneBrowser({
                   void onDownloadSelection();
                 }}
               >
-                다운로드
+                {translate("sftp.entryMenu.download")}
               </button>
               <button
                 type="button"
@@ -1786,7 +1789,7 @@ function PaneBrowser({
                   onDeleteSelection();
                 }}
               >
-                삭제
+                {translate("sftp.entryMenu.delete")}
               </button>
             </div>,
             document.body,
@@ -1826,6 +1829,7 @@ function AwsSftpFailureDiagnosticCard({
   onRetry: () => Promise<void>;
   onOpenHostSettings?: () => void;
 }) {
+  const { t: translate } = useTranslation();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
     "idle",
   );
@@ -1868,7 +1872,7 @@ function AwsSftpFailureDiagnosticCard({
           size="sm"
           onClick={() => void onRetry()}
         >
-          다시 시도
+          {translate("sftp.failure.retry")}
         </Button>
         {canOpenSettings && onOpenHostSettings ? (
           <Button
@@ -1877,7 +1881,7 @@ function AwsSftpFailureDiagnosticCard({
             size="sm"
             onClick={onOpenHostSettings}
           >
-            SSH 설정 수정
+            {translate("sftp.failure.editSshConfig")}
           </Button>
         ) : null}
         <Button
@@ -1895,16 +1899,16 @@ function AwsSftpFailureDiagnosticCard({
             }
           }}
         >
-          진단 정보 복사
+          {translate("sftp.failure.copyDiagnostics")}
         </Button>
       </div>
       {copyState === "copied" ? (
         <span className="text-[0.82rem] text-[var(--text-soft)]">
-          진단 정보를 클립보드에 복사했습니다.
+          {translate("sftp.failure.diagnosticsCopied")}
         </span>
       ) : copyState === "error" ? (
         <span className="text-[0.82rem] text-[var(--danger-text)]">
-          진단 정보를 복사하지 못했습니다.
+          {translate("sftp.failure.diagnosticsCopyFailed")}
         </span>
       ) : null}
     </NoticeCard>
@@ -1926,6 +1930,7 @@ function HostPicker({
   onReopenInteractiveAuthUrl,
   onClearInteractiveAuth,
 }: HostPickerProps) {
+  const { t: translate } = useTranslation();
   const scopedHosts = useMemo(
     () => filterHostsInGroupTree(hosts, pane.hostGroupPath),
     [hosts, pane.hostGroupPath],
@@ -2169,17 +2174,17 @@ function HostPicker({
               <EmptyState
                 title={
                   hosts.length === 0
-                    ? "표시할 host가 없습니다."
+                    ? translate("sftp.hostPicker.emptyNoHosts")
                     : pane.hostSearchQuery
-                      ? "검색 결과가 없습니다."
-                      : "이 위치에는 아직 host가 없습니다."
+                      ? translate("sftp.hostPicker.emptySearch")
+                      : translate("sftp.hostPicker.emptyGroup")
                 }
                 description={
                   hosts.length === 0
-                    ? "Home에서 원격 host를 추가한 뒤 다시 확인해보세요."
+                    ? translate("sftp.hostPicker.hintNoHosts")
                     : pane.hostSearchQuery
-                      ? "검색어를 지우거나 다른 이름으로 다시 찾아보세요."
-                      : "다른 그룹으로 이동하거나 Home에서 호스트 구성을 확인해보세요."
+                      ? translate("sftp.hostPicker.hintSearch")
+                      : translate("sftp.hostPicker.hintGroup")
                 }
               />
             ) : (
@@ -2224,7 +2229,7 @@ function HostPicker({
                           tone="starting"
                           aria-label="Connecting selected host"
                         >
-                          연결 중
+                          {translate("sftp.hostPicker.connecting")}
                         </StatusBadge>
                       ) : canOpenHostSettings && onOpenHostSettings ? (
                         <Button
@@ -2236,7 +2241,7 @@ function HostPicker({
                             onOpenHostSettings(host.id);
                           }}
                         >
-                          설정 열기
+                          {translate("sftp.hostPicker.openSettings")}
                         </Button>
                       ) : null
                     }
@@ -2299,8 +2304,10 @@ function HostPicker({
             />
             <strong>
               {selectedHost
-                ? `${selectedHost.label} 연결 중...`
-                : "SFTP 연결 중..."}
+                ? translate("sftp.connecting.withHost", {
+                    label: selectedHost.label,
+                  })
+                : translate("sftp.connecting.generic")}
             </strong>
             <span className="font-semibold text-[var(--text)]">
               {formatConnectionProgressStageLabel(
@@ -2309,7 +2316,7 @@ function HostPicker({
             </span>
             <span className="text-[0.9rem] leading-[1.5] text-[var(--text-soft)]">
               {pane.connectionProgress?.message ??
-                "원격 파일 목록을 준비하고 있습니다."}
+                translate("sftp.connecting.preparing")}
             </span>
             <ConnectionHopSteps steps={pane.connectionHops} />
           </Card>
@@ -2334,6 +2341,7 @@ function TransferBar({
   onRetryTransfer: (jobId: string) => Promise<void>;
   onDismissTransfer: (jobId: string) => void;
 }) {
+  const { t: translate } = useTranslation();
   const [expandedFailureDetails, setExpandedFailureDetails] = useState<
     Record<string, boolean>
   >({});
@@ -2345,19 +2353,19 @@ function TransferBar({
   const getTransferStatusLabel = (status: TransferJob["status"]): string => {
     switch (status) {
       case "queued":
-        return "대기 중";
+        return translate("sftp.jobStatus.queued");
       case "running":
-        return "전송 중";
+        return translate("sftp.jobStatus.running");
       case "paused":
-        return "일시정지";
+        return translate("sftp.jobStatus.paused");
       case "cancelling":
-        return "취소 중";
+        return translate("sftp.jobStatus.cancelling");
       case "completed":
-        return "완료";
+        return translate("sftp.jobStatus.completed");
       case "failed":
-        return "실패";
+        return translate("sftp.jobStatus.failed");
       case "cancelled":
-        return "취소됨";
+        return translate("sftp.jobStatus.cancelled");
       default:
         return status;
     }
@@ -2447,7 +2455,7 @@ function TransferBar({
                         }))
                       }
                     >
-                      {isFailureDetailOpen ? "Details 숨기기" : "Details"}
+                      {translate(isFailureDetailOpen ? "sftp.transfer.hideDetails" : "sftp.transfer.details")}
                     </button>
                     {isFailureDetailOpen ? (
                       <div className="mt-[0.4rem] grid gap-[0.25rem] rounded-[10px] bg-[color-mix(in_srgb,var(--surface-muted)_72%,transparent_28%)] px-[0.55rem] py-[0.4rem] text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
@@ -2473,7 +2481,7 @@ function TransferBar({
               {job.status === "running" ? (
                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
                   {formatTransferSpeed(job.speedBytesPerSecond) ??
-                    "속도 계산 중"}
+                    translate("sftp.transfer.calculatingSpeed")}
                   {formatEta(job.etaSeconds)
                     ? ` · ${formatEta(job.etaSeconds)}`
                     : ""}
@@ -2481,12 +2489,12 @@ function TransferBar({
               ) : null}
               {job.status === "cancelling" ? (
                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                  취소 요청을 처리하는 중입니다.
+                  {translate("sftp.transfer.cancelPending")}
                 </span>
               ) : null}
               {job.status === "paused" ? (
                 <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-                  전송이 일시정지되었습니다.
+                  {translate("sftp.transfer.pausedNotice")}
                 </span>
               ) : null}
               {job.status === "running" ? (
@@ -2497,7 +2505,7 @@ function TransferBar({
                     className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onPauseTransfer(job.id)}
                   >
-                    일시정지
+                    {translate("sftp.transfer.pause")}
                   </Button>
                   <Button
                     variant="secondary"
@@ -2505,7 +2513,7 @@ function TransferBar({
                     className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onCancelTransfer(job.id)}
                   >
-                    취소
+                    {translate("common.cancel")}
                   </Button>
                 </div>
               ) : null}
@@ -2517,7 +2525,7 @@ function TransferBar({
                     className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onResumeTransfer(job.id)}
                   >
-                    재개
+                    {translate("sftp.transfer.resume")}
                   </Button>
                   <Button
                     variant="secondary"
@@ -2525,7 +2533,7 @@ function TransferBar({
                     className="rounded-[10px] whitespace-nowrap"
                     onClick={() => void onCancelTransfer(job.id)}
                   >
-                    취소
+                    {translate("common.cancel")}
                   </Button>
                 </div>
               ) : null}
@@ -2536,7 +2544,7 @@ function TransferBar({
                   className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[10px] whitespace-nowrap"
                   disabled
                 >
-                  취소 중
+                  {translate("sftp.jobStatus.cancelling")}
                 </Button>
               ) : null}
               {job.status === "failed" ? (
@@ -2547,8 +2555,8 @@ function TransferBar({
                   onClick={() => void onRetryTransfer(job.id)}
                 >
                   {job.failedItems && job.failedItems.length > 0
-                    ? "실패 항목 재시도"
-                    : "재시도"}
+                    ? translate("sftp.transfer.retryFailedItems")
+                    : translate("sftp.transfer.retry")}
                 </Button>
               ) : null}
               {job.status !== "running" &&
@@ -2561,7 +2569,7 @@ function TransferBar({
                   className="col-start-2 row-span-2 row-start-1 justify-self-end rounded-[10px] whitespace-nowrap"
                   onClick={() => onDismissTransfer(job.id)}
                 >
-                  닫기
+                  {translate("common.close")}
                 </Button>
               ) : null}
             </div>
@@ -2584,6 +2592,7 @@ function ConflictDialog({
   ) => Promise<void>;
   onDismissConflict: () => void;
 }) {
+  const { t: translate } = useTranslation();
   const [rememberChoice, setRememberChoice] = useState(false);
 
   if (!pendingConflictDialog) {
@@ -2596,7 +2605,7 @@ function ConflictDialog({
         <ModalHeader>
           <div>
             <SectionLabel>Conflict</SectionLabel>
-            <h3 className="m-0">같은 이름의 파일이 이미 존재합니다</h3>
+            <h3 className="m-0">{translate("sftp.conflict.title")}</h3>
           </div>
         </ModalHeader>
         <ModalBody>
@@ -2607,21 +2616,21 @@ function ConflictDialog({
               checked={rememberChoice}
               onChange={(event) => setRememberChoice(event.target.checked)}
             />
-            이 선택 기억
+            {translate("sftp.conflict.remember")}
           </label>
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onDismissConflict}>
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button variant="secondary" onClick={() => void onResolveConflict("skip", rememberChoice)}>
-            건너뛰기
+            {translate("sftp.conflict.skip")}
           </Button>
           <Button variant="secondary" onClick={() => void onResolveConflict("keepBoth", rememberChoice)}>
-            이름 바꿔 저장
+            {translate("sftp.conflict.rename")}
           </Button>
           <Button variant="primary" onClick={() => void onResolveConflict("overwrite", rememberChoice)}>
-            덮어쓰기
+            {translate("sftp.conflict.overwrite")}
           </Button>
         </ModalFooter>
       </ModalShell>
@@ -2640,6 +2649,7 @@ function ActionDialog({
   onClose: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const { t: translate } = useTranslation();
   if (!dialog) {
     return null;
   }
@@ -2666,7 +2676,7 @@ function ActionDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -2692,6 +2702,7 @@ function PermissionDialog({
   onClose: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const { t: translate } = useTranslation();
   if (!dialog) {
     return null;
   }
@@ -2709,8 +2720,10 @@ function PermissionDialog({
   ];
   const title =
     dialog.selectedCount > 1
-      ? `선택한 ${dialog.selectedCount}개 항목 권한 수정`
-      : `${dialog.name} 권한 수정`;
+      ? translate("sftp.permissions.titleMultiple", {
+          count: dialog.selectedCount,
+        })
+      : translate("sftp.permissions.titleSingle", { name: dialog.name });
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
@@ -2755,14 +2768,14 @@ function PermissionDialog({
         </ModalBody>
         <ModalFooter>
           <Button variant="secondary" onClick={onClose} disabled={dialog.isSubmitting}>
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button
             variant="primary"
             onClick={() => void onSubmit()}
             disabled={dialog.isSubmitting}
           >
-            적용
+            {translate("common.apply")}
           </Button>
         </ModalFooter>
       </ModalShell>
@@ -2794,6 +2807,7 @@ function PrincipalPicker({
   onQueryChange: (value: string) => void;
   onValueChange: (value: string) => void;
 }) {
+  const { t: translate } = useTranslation();
   return (
     <div className="grid gap-[0.55rem]">
       <label className="text-[0.82rem] font-medium text-[var(--text-soft)]">
@@ -2802,19 +2816,19 @@ function PrincipalPicker({
       <Input
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
-        placeholder={`${label} 검색`}
+        placeholder={translate("sftp.principal.searchPlaceholder", { label })}
       />
       {allowManualEntry ? (
         <Input
           value={value}
           onChange={(event) => onValueChange(event.target.value)}
-          placeholder={`${label} 직접 입력`}
+          placeholder={translate("sftp.principal.manualPlaceholder", { label })}
         />
       ) : null}
       <div className="max-h-[9.5rem] overflow-auto rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.25rem]">
         {isLoading ? (
           <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
-            불러오는 중...
+            {translate("sftp.principal.loading")}
           </div>
         ) : principals.length > 0 ? (
           <div className="grid gap-[0.25rem]">
@@ -2836,7 +2850,7 @@ function PrincipalPicker({
           </div>
         ) : (
           <div className="px-[0.55rem] py-[0.4rem] text-[0.82rem] text-[var(--text-muted)]">
-            결과가 없습니다.
+            {translate("sftp.principal.empty")}
           </div>
         )}
       </div>
@@ -2855,13 +2869,16 @@ function OwnerDialog({
   onClose: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const { t: translate } = useTranslation();
   if (!dialog) {
     return null;
   }
   const title =
     dialog.selectedCount > 1
-      ? `선택한 ${dialog.selectedCount}개 항목 소유권 변경`
-      : `${dialog.name} 소유권 변경`;
+      ? translate("sftp.ownership.titleMultiple", {
+          count: dialog.selectedCount,
+        })
+      : translate("sftp.ownership.titleSingle", { name: dialog.name });
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
@@ -2875,7 +2892,7 @@ function OwnerDialog({
         <ModalBody>
           <div className="grid gap-[0.9rem]">
             <PrincipalPicker
-              label="사용자"
+              label={translate("sftp.ownership.user")}
               value={dialog.owner}
               query={dialog.userQuery}
               principals={dialog.users}
@@ -2885,7 +2902,7 @@ function OwnerDialog({
               onValueChange={(owner) => onChange({ owner })}
             />
             <PrincipalPicker
-              label="그룹"
+              label={translate("sftp.ownership.group")}
               value={dialog.group}
               query={dialog.groupQuery}
               principals={dialog.groups}
@@ -2916,9 +2933,9 @@ function OwnerDialog({
                 disabled={dialog.isSubmitting}
               />
               <span>
-                하위 항목까지 적용
+                {translate("sftp.ownership.recursive")}
                 <span className="mt-[0.25rem] block text-[0.82rem] text-[var(--text-muted)]">
-                  폴더를 선택한 경우 내부 파일과 하위 폴더의 소유권도 함께 변경합니다.
+                  {translate("sftp.ownership.recursiveHint")}
                 </span>
               </span>
             </label>
@@ -2935,7 +2952,7 @@ function OwnerDialog({
             onClick={onClose}
             disabled={dialog.isSubmitting}
           >
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button
             variant="primary"
@@ -2946,7 +2963,7 @@ function OwnerDialog({
               (dialog.requiresPassword && !dialog.sudoPassword)
             }
           >
-            적용
+            {translate("common.apply")}
           </Button>
         </ModalFooter>
       </ModalShell>
@@ -2963,13 +2980,14 @@ function DeleteDialog({
   onClose: () => void;
   onSubmit: () => Promise<void>;
 }) {
+  const { t: translate } = useTranslation();
   if (!dialog) {
     return null;
   }
 
   const title = dialog.primaryLabel
-    ? `"${dialog.primaryLabel}"을 삭제할까요?`
-    : `선택한 ${dialog.itemCount}개 항목을 삭제할까요?`;
+    ? translate("sftp.delete.confirmSingle", { name: dialog.primaryLabel })
+    : translate("sftp.delete.confirmMultiple", { count: dialog.itemCount });
 
   return (
     <DialogBackdrop onDismiss={onClose} dismissDisabled={dialog.isSubmitting}>
@@ -2989,7 +3007,7 @@ function DeleteDialog({
         <ModalBody>
           {dialog.includesDirectory ? (
             <p className="rounded-[10px] border border-[color-mix(in_srgb,var(--danger-text)_22%,var(--border)_78%)] bg-[color-mix(in_srgb,var(--danger-bg)_72%,transparent_28%)] px-[0.9rem] py-[0.9rem] leading-[1.6]">
-              폴더를 삭제하면 하위 항목도 함께 삭제됩니다.
+              {translate("sftp.delete.folderWarning")}
             </p>
           ) : null}
           {dialog.errorMessage ? (
@@ -3002,14 +3020,14 @@ function DeleteDialog({
             onClick={onClose}
             disabled={dialog.isSubmitting}
           >
-            취소
+            {translate("common.cancel")}
           </Button>
           <Button
             variant="danger"
             onClick={() => void onSubmit()}
             disabled={dialog.isSubmitting}
           >
-            삭제
+            {translate("common.delete")}
           </Button>
         </ModalFooter>
       </ModalShell>
@@ -3059,6 +3077,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   SftpWorkspaceProps,
   "transfers" | "onResolveConflict" | "onDismissConflict" | "onCancelTransfer" | "onPauseTransfer" | "onResumeTransfer" | "onRetryTransfer" | "onDismissTransfer"
 >) {
+  const { t: translate } = useTranslation();
+
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(
     null,
   );
@@ -3142,7 +3162,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                 errorMessage:
                   error instanceof Error
                     ? error.message
-                    : "사용자/그룹 목록을 불러오지 못했습니다.",
+                    : translate("sftp.principal.loadFailed"),
               }
             : current,
         );
@@ -3279,7 +3299,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : "선택한 항목을 삭제하지 못했습니다.",
+                  : translate("sftp.delete.failed"),
             }
           : current,
       );
@@ -3319,7 +3339,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : "소유권을 변경하지 못했습니다.",
+                  : translate("sftp.ownership.failed"),
             }
           : current,
       );
@@ -3346,8 +3366,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                 </div>
                 {pane.sourceKind === "host" && pane.endpoint ? (
                   <IconButton
-                    aria-label="연결 종료"
-                    title="연결 종료"
+                    aria-label={translate("sftp.toolbar.disconnect")}
+                    title={translate("sftp.toolbar.disconnect")}
                     size="sm"
                     className="h-[2.35rem] w-[2.35rem] rounded-[10px] p-0"
                     onClick={() => void onDisconnectPane(pane.id)}
@@ -3418,9 +3438,9 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     setActionDialog({
                       paneId: pane.id,
                       mode: "mkdir",
-                      title: "새 폴더 이름",
-                      placeholder: "예: uploads",
-                      submitLabel: "생성",
+                      title: translate("sftp.prompt.newFolderTitle"),
+                      placeholder: translate("sftp.prompt.newFolderPlaceholder"),
+                      submitLabel: translate("sftp.prompt.newFolderSubmit"),
                       value: "",
                       isSubmitting: false,
                     });
@@ -3435,9 +3455,9 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     setActionDialog({
                       paneId: pane.id,
                       mode: "rename",
-                      title: "이름 변경",
-                      placeholder: "새 이름",
-                      submitLabel: "변경",
+                      title: translate("sftp.prompt.renameTitle"),
+                      placeholder: translate("sftp.prompt.renamePlaceholder"),
+                      submitLabel: translate("sftp.prompt.renameSubmit"),
                       value: selected.name,
                       isSubmitting: false,
                     });
@@ -3510,8 +3530,12 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     );
                     const message =
                       selectedEntries.length === 1 && selectedEntries[0]
-                        ? `"${selectedEntries[0].name}" 항목을 삭제할까요?`
-                        : `선택한 ${pane.selectedPaths.length}개 항목을 삭제할까요?`;
+                        ? translate("sftp.delete.confirmSingle", {
+                            name: selectedEntries[0].name,
+                          })
+                        : translate("sftp.delete.confirmMultiple", {
+                            count: pane.selectedPaths.length,
+                          });
                     if (!window.confirm(message)) {
                       return;
                     }
@@ -3553,8 +3577,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     disabled={isSftpTransferArrowDisabled(leftPane, rightPane)}
                     title={
                       canTransferBetweenPanes
-                        ? "왼쪽 선택 항목을 오른쪽 현재 폴더로 전송"
-                        : "양쪽 pane이 모두 파일 브라우저일 때 사용할 수 있습니다."
+                        ? translate("sftp.transfer.toRight")
+                        : translate("sftp.transfer.bothPanesRequired")
                     }
                   >
                     →
@@ -3570,8 +3594,8 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                     disabled={isSftpTransferArrowDisabled(rightPane, leftPane)}
                     title={
                       canTransferBetweenPanes
-                        ? "오른쪽 선택 항목을 왼쪽 현재 폴더로 전송"
-                        : "양쪽 pane이 모두 파일 브라우저일 때 사용할 수 있습니다."
+                        ? translate("sftp.transfer.toLeft")
+                        : translate("sftp.transfer.bothPanesRequired")
                     }
                   >
                     ←

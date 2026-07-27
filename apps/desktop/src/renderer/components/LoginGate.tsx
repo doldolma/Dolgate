@@ -1,6 +1,8 @@
 import type { AuthState } from '@shared';
 import { getServerUrlValidationMessage } from '@shared';
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { t } from '../i18n';
 import { Button, IconButton, Input, SectionLabel } from '../ui';
 
 interface LoginGateProps {
@@ -59,13 +61,13 @@ export function resolveLoginGateActionLabel(
   status: AuthState['status'],
   actionLabel?: string
 ): string {
-  return actionLabel ?? (status === 'authenticating' ? '브라우저 다시 열기' : '브라우저로 로그인하기');
+  return actionLabel ?? t(status === 'authenticating' ? 'login.reopenBrowser' : 'login.openBrowser');
 }
 
 export function resolveLoginGateStatusMessage(
   isSyncBootstrapping: boolean
 ): string | null {
-  return isSyncBootstrapping ? '최신 데이터 동기화 중...' : null;
+  return isSyncBootstrapping ? t('login.syncingLatestData') : null;
 }
 
 export function shouldDisableLoginGatePrimaryAction(input: {
@@ -97,6 +99,7 @@ export function LoginGate({
   actionLabel,
   onAction
 }: LoginGateProps) {
+  const { t: translate } = useTranslation();
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [draftServerUrl, setDraftServerUrl] = useState(serverUrl);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -142,7 +145,7 @@ export function LoginGate({
       }
     } catch (error) {
       setLocalErrorMessage(
-        error instanceof Error ? error.message : '작업을 시작하지 못했습니다.'
+        error instanceof Error ? error.message : translate('login.startFailed')
       );
     } finally {
       setIsSubmitting(false);
@@ -160,7 +163,7 @@ export function LoginGate({
       await onCancelBrowserLogin();
     } catch (error) {
       setLocalErrorMessage(
-        error instanceof Error ? error.message : '로그인 대기를 취소하지 못했습니다.'
+        error instanceof Error ? error.message : translate('login.cancelFailed')
       );
     } finally {
       setIsSubmitting(false);
@@ -176,7 +179,7 @@ export function LoginGate({
       setLocalErrorMessage(
         error instanceof Error
           ? error.message
-          : '기본 로그인 서버를 복원하지 못했습니다.'
+          : translate('login.server.resetFailed')
       );
     } finally {
       setIsSubmitting(false);
@@ -196,7 +199,7 @@ export function LoginGate({
       setLocalErrorMessage(
         error instanceof Error
           ? error.message
-          : '로그인 서버 주소를 저장하지 못했습니다.'
+          : translate('login.server.saveFailed')
       );
     } finally {
       setIsSubmitting(false);
@@ -214,7 +217,7 @@ export function LoginGate({
             <IconButton
               type="button"
               size="md"
-              aria-label="로그인 서버 설정 열기"
+              aria-label={translate('login.server.openSettings')}
               onClick={() => {
                 setLocalErrorMessage(null);
                 setDraftServerUrl(serverUrl);
@@ -249,7 +252,7 @@ export function LoginGate({
               />
             </label>
             <div className="mt-[0.55rem] text-[0.82rem] leading-[1.5] text-[var(--text-soft)]">
-              경로 없이 서버 루트 주소만 입력해 주세요.
+              {translate('login.server.rootUrlHint')}
             </div>
             {effectiveValidationMessage ? (
               <div className="mt-[0.7rem] text-[0.82rem] text-[var(--danger-text)]">
@@ -264,7 +267,7 @@ export function LoginGate({
                     onClick={handleReset}
                     disabled={isSubmitting}
                   >
-                    기본 서버로 복원
+                    {translate('login.server.reset')}
                   </Button>
                 ) : null}
               </div>
@@ -277,7 +280,7 @@ export function LoginGate({
                     setIsAdvancedOpen(false);
                   }}
                 >
-                  닫기
+                  {translate('common.close')}
                 </Button>
                 <Button
                   variant="primary"
@@ -288,7 +291,7 @@ export function LoginGate({
                     draftServerUrl.trim() === serverUrl.trim()
                   }
                 >
-                  저장
+                  {translate('common.save')}
                 </Button>
               </div>
             </div>
@@ -324,7 +327,7 @@ export function LoginGate({
             disabled={isSubmitting}
             onClick={handleCancelBrowserLogin}
           >
-            취소
+            {translate('common.cancel')}
           </Button>
         ) : null}
       </div>
