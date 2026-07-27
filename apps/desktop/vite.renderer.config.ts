@@ -37,6 +37,16 @@ export default mergeConfig(baseConfig, {
   },
   test: {
     environment: 'jsdom',
-    setupFiles: '../../vitest.setup.ts'
+    setupFiles: '../../vitest.setup.ts',
+    server: {
+      // react-i18next 는 반드시 인라인해야 한다. 기본값이면 vitest 가 node_modules 의존성을
+      // 외부화해 Node 해석으로 로드하는데, 그러면 위의 react alias 가 적용되지 않아
+      // apps/desktop/node_modules 에 중첩 복사본이 생긴 환경에서 react-i18next 가 중첩 react
+      // 를 끌어온다. useTranslation 이 다른 React 인스턴스의 useContext(null) 를 불러 렌더러
+      // 테스트가 대량으로 깨진다(로컬은 중첩 복사본 유무에 따라 통과해서 CI 에서만 터졌다).
+      // 인라인하면 Vite 파이프라인을 타면서 alias 가 걸려 React 가 하나로 유지된다.
+      // 프로덕션 빌드는 렌더러를 통째로 번들해 alias 가 이미 적용되므로 테스트 한정 문제다.
+      deps: { inline: ['react-i18next'] }
+    }
   }
 });
