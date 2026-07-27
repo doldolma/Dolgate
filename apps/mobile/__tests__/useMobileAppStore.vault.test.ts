@@ -39,18 +39,23 @@ function mockFakeArgon2(passphrase: Uint8Array, salt: Uint8Array): Uint8Array {
   return kek;
 }
 
-jest.mock('@fressh/react-native-uniffi-russh', () => ({
-  RnRussh: {
-    uniffiInitAsync: jest.fn(async () => undefined),
-    connect: jest.fn(),
-    connectSftp: jest.fn(),
-    validatePrivateKey: jest.fn(() => ({ valid: true })),
-    validateCertificate: jest.fn(() => ({ valid: true })),
-    deriveArgon2idKey: jest.fn((passphrase: Uint8Array, salt: Uint8Array) =>
-      mockFakeArgon2(passphrase, salt),
+// 이 파일의 픽스처는 위 가짜 Argon2 로 DEK 을 감싼다. 스토어도 같은 가짜를 써야
+// unwrap 이 성립하므로, 엔진 네이티브 모듈의 KDF 를 여기에 맞춰 덮어쓴다.
+// (예전에는 삭제된 russh 모킹이 이 역할을 했다. 엔진 표면은 base64 문자열을
+// 주고받으므로 경계에서 인코딩만 맞춰준다.)
+import { NativeModules } from 'react-native';
+
+(
+  NativeModules.GoSshEngineModule as {
+    deriveArgon2idKey: jest.Mock;
+  }
+).deriveArgon2idKey = jest.fn(
+  async (passphraseBase64: string, saltBase64: string) =>
+    fromByteArray(
+      mockFakeArgon2(toByteArray(passphraseBase64), toByteArray(saltBase64)),
     ),
-  },
-}));
+);
+
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),

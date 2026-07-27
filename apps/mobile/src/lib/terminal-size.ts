@@ -36,16 +36,6 @@ export function getCurrentWindowTerminalGridSize(): TerminalGridSize {
   return estimateTerminalGridSizeFromWindow(width, height);
 }
 
-export function toRusshTerminalSize(size: TerminalGridSize): {
-  colWidth: number;
-  rowHeight: number;
-} {
-  return {
-    colWidth: size.cols,
-    rowHeight: size.rows,
-  };
-}
-
 // 위 추정값은 창 크기 ÷ 고정 셀 메트릭이라, WebView 안 xterm 이 FitAddon 으로 실제
 // 잡는 그리드와 어긋난다. 원격 PTY 에 실제와 다른 cols 를 알려주면 셸(readline)이
 // 줄바꿈 위치를 잘못 계산해 프롬프트 입력이 다음 줄이 아니라 같은 줄 처음에 겹쳐

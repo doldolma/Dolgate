@@ -79,9 +79,12 @@ export function HomeScreen(): React.JSX.Element {
   useScrollToTop(scrollToTopRef);
 
   const recentActivityByHostId = useMemo(() => {
+    // 호스트별 "가장 최근" 활동. sessions 는 탭 순서(추가된 순서)라 최근순이
+    // 아니므로, 첫 항목을 취하지 않고 더 큰 타임스탬프를 고른다.
     const map = new Map<string, string>();
     for (const session of sessions) {
-      if (!map.has(session.hostId)) {
+      const known = map.get(session.hostId);
+      if (!known || session.lastEventAt > known) {
         map.set(session.hostId, session.lastEventAt);
       }
     }

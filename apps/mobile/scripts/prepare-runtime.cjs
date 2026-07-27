@@ -6,31 +6,7 @@ const { spawnSync } = require("child_process");
 const repoRoot = path.resolve(__dirname, "../../..");
 const nodeCommand = process.execPath;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const russhEnsureScriptPath = path.join(
-  repoRoot,
-  "packages",
-  "fressh-react-native-uniffi-russh",
-  "scripts",
-  "ensure-native.cjs",
-);
 
-const uniffiRoot = path.join(
-  repoRoot,
-  "packages",
-  "uniffi-bindgen-react-native",
-);
-const uniffiDistJsPath = path.join(
-  uniffiRoot,
-  "typescript",
-  "dist",
-  "index.js",
-);
-const uniffiDistTypesPath = path.join(
-  uniffiRoot,
-  "typescript",
-  "dist",
-  "index.d.ts",
-);
 
 const xtermRoot = path.join(
   repoRoot,
@@ -183,27 +159,6 @@ function hydrateXtermInternalHtml() {
   }
 }
 
-function ensureUniffiRuntime() {
-  if (hasFile(uniffiDistJsPath) && hasFile(uniffiDistTypesPath)) {
-    return;
-  }
-
-  console.log("Preparing uniffi-bindgen-react-native runtime...");
-  const tscScript = path.join(resolvePackageRoot("typescript"), "bin", "tsc");
-  runNodeScript(tscScript, ["-p", "tsconfig.json"], uniffiRoot);
-
-  if (!hasFile(uniffiDistJsPath) || !hasFile(uniffiDistTypesPath)) {
-    throw new Error("uniffi-bindgen-react-native runtime build did not produce dist/index.js and dist/index.d.ts.");
-  }
-}
-
-function checkUniffiRuntime() {
-  assertFiles("uniffi-bindgen-react-native runtime", [
-    uniffiDistJsPath,
-    uniffiDistTypesPath,
-  ]);
-}
-
 function ensureXtermRuntime() {
   if (hasFile(xtermDistJsPath) && hasFile(xtermDistTypesPath)) {
     return;
@@ -240,31 +195,13 @@ function checkXtermRuntime() {
   ]);
 }
 
-function ensureRusshRuntime() {
-  const { ensureRusshNative } = require(russhEnsureScriptPath);
-  ensureRusshNative({ jsOnly: true });
-}
-
-function checkRusshRuntime() {
-  const { ensureRusshNative } = require(russhEnsureScriptPath);
-  ensureRusshNative({ jsOnly: true, check: true });
-}
-
 function ensureMobileWorkspaceRuntime(options = {}) {
   if (options.check) {
-    checkUniffiRuntime();
     checkXtermRuntime();
-    if (!options.skipRussh) {
-      checkRusshRuntime();
-    }
     return;
   }
 
-  ensureUniffiRuntime();
   ensureXtermRuntime();
-  if (!options.skipRussh) {
-    ensureRusshRuntime();
-  }
 }
 
 function parseArgs(argv) {
@@ -272,10 +209,6 @@ function parseArgs(argv) {
   for (const arg of argv) {
     if (arg === "--check") {
       options.check = true;
-      continue;
-    }
-    if (arg === "--skip-russh") {
-      options.skipRussh = true;
       continue;
     }
     throw new Error(`Unknown option: ${arg}`);
@@ -293,8 +226,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  checkRusshRuntime,
-  checkUniffiRuntime,
   checkXtermRuntime,
   ensureMobileWorkspaceRuntime,
 };

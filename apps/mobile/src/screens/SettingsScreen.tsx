@@ -528,53 +528,6 @@ function SettingsContent({
           ]}
         >
           <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            Theme
-          </Text>
-          <View style={styles.row}>
-            {(["system", "dark", "light"] as const).map((theme) => {
-              const active = settings.theme === theme;
-              return (
-                <Pressable
-                  key={theme}
-                  onPress={() => void updateSettings({ theme })}
-                  style={[
-                    styles.themeChip,
-                    {
-                      backgroundColor: active
-                        ? palette.accentSoft
-                        : palette.surfaceAlt,
-                      borderColor: active ? palette.accent : palette.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.themeChipText,
-                      {
-                        color: active ? palette.accent : palette.text,
-                      },
-                    ]}
-                  >
-                    {theme}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
-
-      {showFullSettings ? (
-        <View
-          style={[
-            styles.section,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.border,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>
             Known hosts ({knownHosts.length})
           </Text>
           {knownHosts.length === 0 ? (

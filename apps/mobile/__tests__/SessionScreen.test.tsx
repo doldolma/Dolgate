@@ -33,15 +33,6 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 jest.mock('react-native-vector-icons/Ionicons', () => 'Ionicons');
-jest.mock('@fressh/react-native-uniffi-russh', () => ({
-  RnRussh: {
-    uniffiInitAsync: jest.fn(async () => undefined),
-    connect: jest.fn(),
-    connectSftp: jest.fn(),
-    validatePrivateKey: jest.fn(() => ({ valid: true })),
-    validateCertificate: jest.fn(() => ({ valid: true })),
-  },
-}));
 jest.mock('react-native-document-picker', () => ({
   __esModule: true,
   default: {

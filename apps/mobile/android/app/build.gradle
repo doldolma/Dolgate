@@ -171,11 +171,25 @@ android {
     }
 }
 
+// The Go SSH engine, built from services/ssh-core/mobile by
+// `npm run mobile:engine:build`. It is a build output rather than a checked-in
+// artifact, so a missing AAR means "not built yet" and has to be reported
+// clearly: without this check the failure surfaces much later as an unresolved
+// `mobile.Mobile` symbol during Kotlin compilation.
+def goEngineAar = file("$rootDir/../../../services/ssh-core/build/mobile/ssh-core-engine.aar")
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("androidx.browser:browser:1.8.0")
     testImplementation("junit:junit:4.13.2")
+
+    if (!goEngineAar.exists()) {
+        throw new GradleException(
+            "Go SSH engine AAR is missing at ${goEngineAar}. Build it first: npm run mobile:engine:build -- android",
+        )
+    }
+    implementation files(goEngineAar)
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

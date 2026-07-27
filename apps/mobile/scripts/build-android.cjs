@@ -2,7 +2,7 @@ const path = require("path");
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 const { ensureMobileWorkspaceRuntime } = require("./prepare-runtime.cjs");
-const { ensureRusshNative } = require("../../../packages/fressh-react-native-uniffi-russh/scripts/ensure-native.cjs");
+const { buildGoEngine } = require("./build-engine-lib.cjs");
 
 const { androidRoot, buildEnvForAndroid } = (() => {
   const env = require("./android-env.cjs");
@@ -85,12 +85,12 @@ function verifySignedApk(androidEnv) {
 }
 
 function main() {
-  ensureMobileWorkspaceRuntime({ skipRussh: true });
+  ensureMobileWorkspaceRuntime();
 
   const androidEnv = buildEnvForAndroid(process.env);
   const gradlew = process.platform === "win32" ? "gradlew.bat" : "./gradlew";
   const releaseArchitectures = resolveReleaseArchitectures();
-  ensureRusshNative({ platform: "android", androidAbis: releaseArchitectures });
+  buildGoEngine("android", releaseArchitectures);
 
   try {
     require("fs").rmSync(cmakeBuildPath, { recursive: true, force: true });

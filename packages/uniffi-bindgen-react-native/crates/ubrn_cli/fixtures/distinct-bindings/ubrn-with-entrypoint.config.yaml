@@ -1,6 +1,0 @@
-rust:
-  directory: rust/shim
-  manifestPath: Cargo.toml
-web:
-  tsBindings: ./bindings/wasm
-  entrypoint: ./entrypoints/web.ts

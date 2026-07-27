@@ -17,6 +17,11 @@ end
 target 'Dolgate' do
   config = use_native_modules!
 
+  # The Go SSH engine bridge. It is not in node_modules, so use_native_modules!
+  # cannot discover it and it has to be declared here. Build the framework first
+  # with `npm run mobile:engine:build -- ios`.
+  pod 'GoSshEngine', :path => './GoSshEngine'
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.

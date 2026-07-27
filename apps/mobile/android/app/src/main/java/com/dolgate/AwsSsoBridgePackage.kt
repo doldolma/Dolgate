@@ -10,6 +10,7 @@ class AwsSsoBridgePackage : ReactPackage {
     listOf(
       AwsSsoBridgeModule(reactContext),
       DolsshFileTransferModule(reactContext),
+      GoSshEngineModule(reactContext),
     )
 
   override fun createViewManagers(

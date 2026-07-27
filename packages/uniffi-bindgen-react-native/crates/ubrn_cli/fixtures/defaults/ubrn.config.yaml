@@ -1,3 +1,0 @@
-rust:
-  directory: rust/shim
-  manifestPath: Cargo.toml

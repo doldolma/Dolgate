@@ -2,10 +2,6 @@ import { Buffer } from 'buffer';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { AppState, Linking } from 'react-native';
-import {
-  RnRussh,
-  type ConnectionDetails as RusshConnectionDetails,
-} from '@fressh/react-native-uniffi-russh';
 import type {
   AwsProfilesServerSupport,
   AwsSftpCreateSessionRequest,
@@ -120,7 +116,6 @@ import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import {
   resolvePtyTerminalGridSize,
   setReportedTerminalGrid,
-  toRusshTerminalSize,
   type TerminalGridSize,
 } from '../lib/terminal-size';
 import {
@@ -134,6 +129,13 @@ import {
   readLocalFileChunk,
   writeDownloadChunk,
 } from '../lib/mobile-file-transfer';
+import {
+  getEngine,
+  type EngineConnection,
+  type EngineCredential,
+  type EngineSftpConnection,
+  type EngineShell,
+} from '../engine';
 
 const MAX_TERMINAL_SNAPSHOT_CHARS = 8_000;
 const MAX_PERSISTED_SESSIONS = 24;
@@ -223,19 +225,13 @@ interface MobileSftpConnection {
   close: () => Promise<void>;
 }
 
-type NativeSftpConnectionHandle = Awaited<
-  ReturnType<typeof RnRussh.connectSftp>
->;
-
 interface SshRuntimeSession {
   kind: 'ssh';
   recordId: string;
   hostId: string;
-  connection: Awaited<ReturnType<typeof RnRussh.connect>>;
-  shell: Awaited<
-    ReturnType<Awaited<ReturnType<typeof RnRussh.connect>>['startShell']>
-  >;
-  backgroundListenerId: bigint | null;
+  connection: EngineConnection;
+  shell: EngineShell;
+  backgroundListenerId: number | null;
 }
 
 interface AwsRuntimeSession {
@@ -249,7 +245,7 @@ interface AwsRuntimeSession {
 
 type RuntimeSession = SshRuntimeSession | AwsRuntimeSession;
 
-type RusshSecurity = RusshConnectionDetails['security'];
+type EngineCredentialInput = EngineCredential;
 
 function hasCredentialText(value?: string | null): value is string {
   return typeof value === 'string' && value.trim().length > 0;
@@ -271,10 +267,10 @@ function getMobileCredentialPromptAuthType(
   return 'password';
 }
 
-function buildRusshSecurity(
+function buildEngineCredential(
   host: SshHostRecord,
   credentials: HostSecretInput,
-): RusshSecurity | null {
+): EngineCredentialInput | null {
   if (host.authType === 'password') {
     const password = optionalCredentialText(credentials.password);
     return password ? { type: 'password', password } : null;
@@ -317,20 +313,26 @@ function getMissingCredentialMessage(host: SshHostRecord): string {
   return '개인키 PEM이 필요합니다.';
 }
 
-function validateRusshSecurity(security: RusshSecurity): string | null {
+// 자격증명 사전 검증. 엔진이 네이티브로 파싱하므로 비동기이고, 반환값은
+// 사용자에게 보여줄 문제 설명(문제 없으면 null)이다.
+async function validateEngineCredential(
+  security: EngineCredentialInput,
+): Promise<string | null> {
+  const engine = getEngine();
+
   if (security.type === 'key' || security.type === 'certificate') {
-    const validation = RnRussh.validatePrivateKey(
+    const problem = await engine.validatePrivateKey(
       security.privateKey,
       security.passphrase,
     );
-    if (!validation.valid) {
+    if (problem) {
       return '개인키 형식 또는 passphrase를 확인해 주세요.';
     }
   }
 
   if (security.type === 'certificate') {
-    const validation = RnRussh.validateCertificate(security.certificate);
-    if (!validation.valid) {
+    const problem = await engine.validateCertificate(security.certificate);
+    if (problem) {
       return 'SSH 인증서 형식을 확인해 주세요.';
     }
   }
@@ -558,6 +560,9 @@ interface MobileAppState {
 
 const runtimeSessions = new Map<string, RuntimeSession>();
 const runtimeSftpSessions = new Map<string, SftpRuntimeSession>();
+// 세션별 터미널 구독 세대. 재구독이 잦아 낡은 리스너가 겹치는데, 이 값으로
+// 배달 시점에 차단한다(자세한 이유는 subscribeToSessionTerminal 참고).
+const terminalSubscriptionGenerations = new Map<string, number>();
 const pendingSessionConnections = new Set<string>();
 const pendingSftpConnections = new Set<string>();
 const runtimeSessionSnapshots = new Map<string, string>();
@@ -572,7 +577,6 @@ let syncPromise: Promise<void> | null = null;
 // 진행 중 syncPromise 가 캡처한 볼트 세대. 세대가 다르면 그 결과는 버려질 예정이므로
 // 새 호출자는 기다렸다가 새로 돈다(잠금해제 직후의 pull 이 stale dedup 으로 유실 방지).
 let syncPromiseGeneration = 0;
-let russhInitPromise: Promise<void> | null = null;
 let offlineRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 let offlineRecoveryAttempt = 0;
 let offlineRecoveryInFlight = false;
@@ -690,7 +694,15 @@ function sortKnownHosts(knownHosts: KnownHostRecord[]): KnownHostRecord[] {
   });
 }
 
-function sortSessions(sessions: MobileSessionRecord[]): MobileSessionRecord[] {
+// 최근 활동 순(내림차순) 정렬. `sessions` 자체에는 적용하지 않는다 — 그 배열이
+// 터미널 탭 순서이고, 원격 출력마다 lastEventAt 이 갱신되므로 정렬하면 사용자가
+// 타이핑하는 중에 탭이 손가락 밑에서 맨 왼쪽으로 튄다.
+//
+// 그래서 탭 순서는 안정적(추가된 순서)으로 두고, 최근순은 그게 실제로 필요한
+// 곳에서만 쓴다: 목록 표시(ConnectionsScreen)와 영속 세션 잘라내기.
+export function sortSessionsByRecency(
+  sessions: MobileSessionRecord[],
+): MobileSessionRecord[] {
   return [...sessions].sort((left, right) =>
     right.lastEventAt.localeCompare(left.lastEventAt),
   );
@@ -968,7 +980,7 @@ function isLiveSession(session: MobileSessionRecord): boolean {
 function getLiveSessions(
   sessions: MobileSessionRecord[],
 ): MobileSessionRecord[] {
-  return sortSessions(sessions).filter(isLiveSession);
+  return sessions.filter(isLiveSession);
 }
 
 function sortSftpSessions(
@@ -1108,10 +1120,8 @@ function patchSessionRecord(
   sessionId: string,
   patch: Partial<MobileSessionRecord>,
 ): MobileSessionRecord[] {
-  return sortSessions(
-    sessions.map(session =>
-      session.id === sessionId ? { ...session, ...patch } : session,
-    ),
+  return sessions.map(session =>
+    session.id === sessionId ? { ...session, ...patch } : session,
   );
 }
 
@@ -1123,12 +1133,12 @@ function upsertSessionRecord(
     session => session.id === nextRecord.id,
   );
   if (existingIndex === -1) {
-    return sortSessions([nextRecord, ...sessions]);
+    return [...sessions, nextRecord];
   }
 
   const nextSessions = [...sessions];
   nextSessions[existingIndex] = nextRecord;
-  return sortSessions(nextSessions);
+  return nextSessions;
 }
 
 function createSessionRecord(host: HostRecord): MobileSessionRecord {
@@ -1141,8 +1151,8 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
           .filter(Boolean)
           .join(' · ')
       : isSshHostRecord(host)
-        ? `${host.username}@${host.hostname}:${host.port}`
-        : host.label;
+      ? `${host.username}@${host.hostname}:${host.port}`
+      : host.label;
   return {
     id,
     sessionId: id,
@@ -1181,44 +1191,39 @@ function createSftpSessionRecord(
   };
 }
 
-function toDirectoryListing(
-  listing: Awaited<ReturnType<NativeSftpConnectionHandle['listDirectory']>>,
-): DirectoryListing {
-  return {
-    path: listing.path,
-    entries: listing.entries.map(entry => ({
-      name: entry.name,
-      path: entry.path,
-      isDirectory: entry.isDirectory,
-      size: entry.size,
-      mtime: entry.mtime ?? '',
-      kind:
-        entry.kind === 'directory'
-          ? 'folder'
-          : entry.kind === 'file' || entry.kind === 'symlink'
-            ? entry.kind
-            : 'unknown',
-      permissions: entry.permissions ?? undefined,
-    })),
-  };
-}
-
-function wrapNativeSftpConnection(
-  connection: NativeSftpConnectionHandle,
+// Adapts an engine SFTP session to MobileSftpConnection, the port the file
+// browser and transfer loops already speak — the same port the AWS backend is
+// adapted to above. Doing it here keeps the ~25 call sites and the chunked
+// transfer loops untouched by the engine swap.
+function wrapEngineSftpConnection(
+  sftp: EngineSftpConnection,
 ): MobileSftpConnection {
   return {
-    listDirectory: async path =>
-      toDirectoryListing(await connection.listDirectory(path)),
-    readFileChunk: (path, offset, length) =>
-      connection.readFileChunk(path, offset, length),
+    listDirectory: async path => {
+      const listing = await sftp.list(path);
+      return { path: listing.path, entries: listing.entries };
+    },
+    readFileChunk: async (path, offset, length) => {
+      const chunk = await sftp.readChunk(path, offset, length);
+      const bytes = chunk.bytes;
+      return {
+        // The transfer loops advance by bytesRead, which the engine does not
+        // report separately: what came back is what was read.
+        bytes: bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer,
+        bytesRead: bytes.byteLength,
+        eof: chunk.eof,
+      };
+    },
     writeFileChunk: (path, offset, data) =>
-      connection.writeFileChunk(path, offset, data),
-    mkdir: path => connection.mkdir(path),
-    rename: (sourcePath, targetPath) =>
-      connection.rename(sourcePath, targetPath),
-    chmod: (path, permissions) => connection.chmod(path, permissions),
-    delete: path => connection.delete(path),
-    close: () => connection.close(),
+      sftp.writeChunk(path, offset, new Uint8Array(data)),
+    mkdir: path => sftp.mkdir(path),
+    rename: (sourcePath, targetPath) => sftp.rename(sourcePath, targetPath),
+    chmod: (path, permissions) => sftp.chmod(path, permissions),
+    delete: path => sftp.remove(path),
+    close: () => sftp.close(),
   };
 }
 
@@ -1472,8 +1477,13 @@ async function deleteRemoteEntryRecursive(
 function compactPersistedSessions(
   sessions: MobileSessionRecord[],
 ): MobileSessionRecord[] {
-  return sortSessions(sessions)
-    .slice(0, MAX_PERSISTED_SESSIONS)
+  const keep = new Set(
+    sortSessionsByRecency(sessions)
+      .slice(0, MAX_PERSISTED_SESSIONS)
+      .map(session => session.id),
+  );
+  return sessions
+    .filter(session => keep.has(session.id))
     .map(session => ({
       ...session,
       lastViewportSnapshot: '',
@@ -1484,24 +1494,22 @@ function normalizePersistedSessionsForColdStart(
   sessions: MobileSessionRecord[],
 ): MobileSessionRecord[] {
   const now = new Date().toISOString();
-  return sortSessions(
-    sessions.map(session => {
-      const normalizedSession: MobileSessionRecord = !isLiveSession(session)
-        ? session
-        : {
-            ...session,
-            status: 'closed',
-            errorMessage: null,
-            lastEventAt: now,
-            lastDisconnectedAt: session.lastDisconnectedAt ?? now,
-          };
+  return sessions.map(session => {
+    const normalizedSession: MobileSessionRecord = !isLiveSession(session)
+      ? session
+      : {
+          ...session,
+          status: 'closed',
+          errorMessage: null,
+          lastEventAt: now,
+          lastDisconnectedAt: session.lastDisconnectedAt ?? now,
+        };
 
-      return {
-        ...normalizedSession,
-        lastViewportSnapshot: '',
-      };
-    }),
-  );
+    return {
+      ...normalizedSession,
+      lastViewportSnapshot: '',
+    };
+  });
 }
 
 function isSecureStateRestoreCurrent(
@@ -1675,7 +1683,12 @@ function disconnectRuntimeSession(sessionId: string): void {
   if (runtime.kind === 'ssh') {
     try {
       if (runtime.backgroundListenerId !== null) {
-        runtime.shell.removeListener(runtime.backgroundListenerId);
+        // This teardown is synchronous, so the detach is fired and forgotten.
+        // Leaving it unawaited is fine: the shell is going away regardless, and
+        // its ring closing ends the subscription on its own.
+        void runtime.shell
+          .unfollow(runtime.backgroundListenerId)
+          .catch(() => {});
       }
     } catch {}
   } else {
@@ -1877,18 +1890,6 @@ export const useMobileAppStore = create<MobileAppState>()(
           authGateResolved: true,
           secureStateReady: options?.secureStateReady ?? true,
         });
-      };
-
-      const ensureRusshInitialized = async () => {
-        if (russhInitPromise) {
-          return russhInitPromise;
-        }
-
-        russhInitPromise = RnRussh.uniffiInitAsync().catch(error => {
-          russhInitPromise = null;
-          throw error;
-        });
-        return russhInitPromise;
       };
 
       const isSessionRecoveryContextCurrent = (
@@ -2820,7 +2821,6 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          await ensureRusshInitialized();
           const credentials = await resolveHostCredentials(host);
           if (!credentials) {
             markSftpSessionState(
@@ -2831,7 +2831,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const security = buildRusshSecurity(host, credentials);
+          const security = buildEngineCredential(host, credentials);
 
           if (!security) {
             markSftpSessionState(
@@ -2842,7 +2842,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const validationMessage = validateRusshSecurity(security);
+          const validationMessage = await validateEngineCredential(security);
           if (validationMessage) {
             markSftpSessionState(
               sftpSessionRecord.id,
@@ -2864,18 +2864,23 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
 
-          const nativeConnection = await RnRussh.connectSftp({
+          const engine = getEngine();
+          console.info(
+            `[mobile-sftp] engine=${engine.name} session=${sftpSessionRecord.id}`,
+          );
+          const engineSftp = await engine.connectSftp({
+            connectionId: sftpSessionRecord.id,
             host: host.hostname,
             port: host.port,
             username: host.username,
-            security,
+            credential: security,
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
               disconnectRuntimeSftpSession(sftpSessionRecord.id);
               markSftpSessionState(sftpSessionRecord.id, 'closed');
             },
           });
-          const connection = wrapNativeSftpConnection(nativeConnection);
+          const connection = wrapEngineSftpConnection(engineSftp);
 
           runtimeSftpSessions.set(sftpSessionRecord.id, {
             recordId: sftpSessionRecord.id,
@@ -3194,7 +3199,6 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          await ensureRusshInitialized();
           const credentials = await resolveHostCredentials(host);
           if (!credentials) {
             markSessionState(
@@ -3205,7 +3209,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const security = buildRusshSecurity(host, credentials);
+          const security = buildEngineCredential(host, credentials);
 
           if (!security) {
             markSessionState(
@@ -3216,7 +3220,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          const validationMessage = validateRusshSecurity(security);
+          const validationMessage = await validateEngineCredential(security);
           if (validationMessage) {
             markSessionState(sessionRecord.id, 'error', validationMessage);
             return;
@@ -3233,46 +3237,52 @@ export const useMobileAppStore = create<MobileAppState>()(
             }),
           }));
 
-          const connection = await RnRussh.connect({
+          const engine = getEngine();
+          // Names the engine in the device log. With one engine left this reads
+          // mostly as a session-start marker, but it stays because it is what
+          // ties a device log back to a session id.
+          console.info(
+            `[mobile-ssh] engine=${engine.name} session=${sessionRecord.id}`,
+          );
+          const markClosed = () => {
+            flushSessionSnapshot(sessionRecord.id, {
+              markActivity: false,
+            });
+            disconnectRuntimeSession(sessionRecord.id);
+            markSessionState(sessionRecord.id, 'closed');
+          };
+
+          const terminalSize = await resolvePtyTerminalGridSize();
+          const connection = await engine.connect({
+            connectionId: sessionRecord.id,
             host: host.hostname,
             port: host.port,
             username: host.username,
-            security,
+            credential: security,
+            size: terminalSize,
             onServerKey: async info => resolveKnownHostTrust(host, info),
-            onDisconnected: () => {
-              flushSessionSnapshot(sessionRecord.id, {
-                markActivity: false,
-              });
-              disconnectRuntimeSession(sessionRecord.id);
-              markSessionState(sessionRecord.id, 'closed');
-            },
+            onDisconnected: markClosed,
           });
-          const terminalSize = await resolvePtyTerminalGridSize();
           const shell = await connection.startShell({
-            term: 'Xterm',
-            terminalSize: toRusshTerminalSize(terminalSize),
-            onClosed: () => {
-              flushSessionSnapshot(sessionRecord.id, {
-                markActivity: false,
-              });
-              disconnectRuntimeSession(sessionRecord.id);
-              markSessionState(sessionRecord.id, 'closed');
-            },
+            // Kept at plain xterm, which is what this session flow has always
+            // requested; TERM changes what remote programs emit.
+            term: 'xterm',
+            size: terminalSize,
+            onClosed: markClosed,
           });
 
-          const backgroundListenerId = shell.addListener(
-            event => {
-              if ('kind' in event) {
-                return;
-              }
-              const text = Buffer.from(event.bytes).toString('utf8');
-              const currentSnapshot =
-                runtimeSessionSnapshots.get(sessionRecord.id) ?? '';
-              runtimeSessionSnapshots.set(
-                sessionRecord.id,
-                trimSnapshot(`${currentSnapshot}${text}`),
-              );
-              scheduleSessionSnapshotFlush(sessionRecord.id);
+          const backgroundListenerId = await shell.follow(
+            {
+              onChunk: chunk => {
+                const text = Buffer.from(chunk.bytes).toString('utf8');
+                const currentSnapshot =
+                  runtimeSessionSnapshots.get(sessionRecord.id) ?? '';
+                runtimeSessionSnapshots.set(
+                  sessionRecord.id,
+                  trimSnapshot(`${currentSnapshot}${text}`),
+                );
+                scheduleSessionSnapshotFlush(sessionRecord.id);
+              },
             },
             {
               cursor: { mode: 'live' },
@@ -3748,8 +3758,8 @@ export const useMobileAppStore = create<MobileAppState>()(
                 serverInfo?.capabilities.vault?.e2ee === true
                   ? 'supported'
                   : serverInfo
-                    ? 'unsupported'
-                    : 'unknown',
+                  ? 'unsupported'
+                  : 'unknown',
             };
             const authenticatedAuth: AuthState = {
               status: 'authenticated',
@@ -4953,7 +4963,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const expectedEpoch =
             'epoch' in currentVault
               ? currentVault.epoch
-              : (get().auth.session?.vaultBootstrap.epoch ?? 0);
+              : get().auth.session?.vaultBootstrap.epoch ?? 0;
           let mutation;
           try {
             mutation = await callWithFreshAccessToken(
@@ -5243,8 +5253,8 @@ export const useMobileAppStore = create<MobileAppState>()(
             credentialMode === 'preserve'
               ? existingSsh?.secretRef
               : credentialMode === 'replace' && hasReplacementCredential
-                ? (existingSsh?.secretRef ?? createLocalId('secret'))
-                : undefined;
+              ? existingSsh?.secretRef ?? createLocalId('secret')
+              : undefined;
           const record: SshHostRecord = {
             ...(existingSsh ?? {}),
             id: existingSsh?.id ?? createLocalId('host'),
@@ -5571,8 +5581,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           const runtime = runtimeSessions.get(sessionId);
 
           set(state => {
-            const nextSessions = sortSessions(
-              state.sessions.filter(session => session.id !== sessionId),
+            const nextSessions = state.sessions.filter(
+              session => session.id !== sessionId,
             );
             return {
               sessions: nextSessions,
@@ -5619,10 +5629,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const bytes = Buffer.from(data, 'utf8');
           if (runtime.kind === 'ssh') {
             await runtime.shell.sendData(
-              bytes.buffer.slice(
-                bytes.byteOffset,
-                bytes.byteOffset + bytes.byteLength,
-              ),
+              new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
             );
             return;
           }
@@ -5640,28 +5647,82 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           if (runtime.kind === 'ssh') {
-            const replay = runtime.shell.readBuffer({ mode: 'head' });
-            handlers.onReplay(
-              replay.chunks.map(chunk => new Uint8Array(chunk.bytes)),
-            );
+            // The caller uses the returned function as a React effect cleanup,
+            // so it has to come back synchronously, while the engine's reads and
+            // subscriptions are async because they cross the native bridge.
+            //
+            // Attaching in the background is safe: the engine retains output in
+            // its ring buffer, and the cursor the replay hands back is exactly
+            // where the live feed resumes, so nothing is lost or repeated in the
+            // gap between the two calls.
+            const shell = runtime.shell;
 
-            const listenerId = runtime.shell.addListener(
-              event => {
-                if ('kind' in event) {
+            // Only the newest subscription for a session may deliver.
+            //
+            // The caller re-subscribes whenever its session record changes
+            // identity, which happens on every snapshot flush — so a resubscribe
+            // arrives roughly every time output arrives. Detaching is async
+            // (it crosses the bridge), so the outgoing listener is still live
+            // while the incoming one attaches, and both would write the same
+            // bytes: every character appears twice until the old one detaches,
+            // then the shell's next repaint "fixes" it.
+            //
+            // Gating on a generation makes a superseded listener go silent
+            // immediately, without waiting for its detach to complete.
+            const generation =
+              (terminalSubscriptionGenerations.get(sessionId) ?? 0) + 1;
+            terminalSubscriptionGenerations.set(sessionId, generation);
+            const isCurrent = () =>
+              terminalSubscriptionGenerations.get(sessionId) === generation;
+
+            let attachedListenerId: number | null = null;
+
+            void (async () => {
+              try {
+                const replay = await shell.readBuffer({ mode: 'head' });
+                if (!isCurrent()) {
                   return;
                 }
-                handlers.onData(new Uint8Array(event.bytes));
-              },
-              {
-                cursor: { mode: 'seq', seq: replay.nextSeq },
-                coalesceMs: 16,
-              },
-            );
+                handlers.onReplay(
+                  replay.bytes.length > 0 ? [replay.bytes] : [],
+                );
+
+                const listenerId = await shell.follow(
+                  {
+                    onChunk: chunk => {
+                      if (isCurrent()) {
+                        handlers.onData(chunk.bytes);
+                      }
+                    },
+                  },
+                  {
+                    cursor: { mode: 'seq', seq: replay.nextSeq },
+                    coalesceMs: 16,
+                  },
+                );
+
+                if (!isCurrent()) {
+                  // Superseded while attaching; drop it rather than leaking.
+                  void shell.unfollow(listenerId).catch(() => {});
+                  return;
+                }
+                attachedListenerId = listenerId;
+              } catch {
+                // A shell that went away mid-attach needs no cleanup; the
+                // session's own close path already reports it.
+              }
+            })();
 
             return () => {
-              try {
-                runtime.shell.removeListener(listenerId);
-              } catch {}
+              // Bumping the generation silences this listener at once; the
+              // detach that follows is just housekeeping.
+              if (isCurrent()) {
+                terminalSubscriptionGenerations.set(sessionId, generation + 1);
+              }
+              if (attachedListenerId !== null) {
+                void shell.unfollow(attachedListenerId).catch(() => {});
+                attachedListenerId = null;
+              }
             };
           }
 
@@ -5669,16 +5730,16 @@ export const useMobileAppStore = create<MobileAppState>()(
             runtime.replayChunks.length > 0
               ? runtime.replayChunks
               : sessionId
-                ? [
-                    Uint8Array.from(
-                      Buffer.from(
-                        get().sessions.find(item => item.id === sessionId)
-                          ?.lastViewportSnapshot ?? '',
-                        'utf8',
-                      ),
+              ? [
+                  Uint8Array.from(
+                    Buffer.from(
+                      get().sessions.find(item => item.id === sessionId)
+                        ?.lastViewportSnapshot ?? '',
+                      'utf8',
                     ),
-                  ]
-                : [],
+                  ),
+                ]
+              : [],
           );
           const subscriptionId = `aws-sub-${runtimeSubscriptionCounter++}`;
           runtime.subscribers.set(subscriptionId, handlers);
@@ -6432,7 +6493,6 @@ export function resetMobileStoreRuntimeForTests(): void {
   initializePromise = null;
   syncPromise = null;
   syncPromiseGeneration = 0;
-  russhInitPromise = null;
   secureStateRestoreVersion = 0;
   lastSyncRevision = null;
   vaultSyncGeneration = 0;

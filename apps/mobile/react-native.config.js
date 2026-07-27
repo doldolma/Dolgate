@@ -1,15 +1,6 @@
-const path = require('node:path');
-
+// The Go SSH engine is an app-local native module (android/app/src/main/.../
+// GoSshEngineModule.kt and ios/GoSshEngine), so there is nothing here to
+// autolink. This file previously pointed at the vendored russh package.
 module.exports = {
-  dependencies: {
-    '@fressh/react-native-uniffi-russh': {
-      root: path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'packages',
-        'fressh-react-native-uniffi-russh',
-      ),
-    },
-  },
+  dependencies: {},
 };

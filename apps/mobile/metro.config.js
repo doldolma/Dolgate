@@ -13,9 +13,7 @@ const projectNodeModules = path.resolve(projectRoot, 'node_modules');
 const rootNodeModules = path.resolve(workspaceRoot, 'node_modules');
 const workspacePackages = [
   path.resolve(workspaceRoot, 'packages', 'shared-core'),
-  path.resolve(workspaceRoot, 'packages', 'fressh-react-native-uniffi-russh'),
   path.resolve(workspaceRoot, 'packages', 'fressh-react-native-xtermjs-webview'),
-  path.resolve(workspaceRoot, 'packages', 'uniffi-bindgen-react-native'),
 ];
 
 const config = {

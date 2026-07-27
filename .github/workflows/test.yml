@@ -11,9 +11,7 @@ permissions:
   contents: read
 
 env:
-  MOBILE_RUSSH_ANDROID_TARGETS: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
-  MOBILE_RUSSH_CARGO_NDK_VERSION: "4.1.2"
-  MOBILE_RUSSH_NDK_VERSION: "27.1.12297006"
+  MOBILE_ENGINE_NDK_VERSION: "27.1.12297006"
 
 jobs:
   version-check:
@@ -212,7 +210,7 @@ jobs:
         run: npm run test:mobile -- --runInBand
 
   mobile-native-check:
-    name: mobile native artifact check
+    name: mobile native engine check
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -224,6 +222,11 @@ jobs:
           node-version: "24.15.0"
           cache: npm
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -234,66 +237,26 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android NDK
-        shell: bash
         run: |
-          sdkmanager "ndk;${MOBILE_RUSSH_NDK_VERSION}"
-          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${MOBILE_RUSSH_NDK_VERSION}" >> "${GITHUB_ENV}"
-          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${MOBILE_RUSSH_NDK_VERSION}" >> "${GITHUB_ENV}"
+          sdkmanager "ndk;${MOBILE_ENGINE_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ env.MOBILE_RUSSH_ANDROID_TARGETS }}
-
-      - name: Cache mobile russh Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/cargo-ndk
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: mobile-russh-cargo-deps-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-${{ hashFiles('packages/fressh-react-native-uniffi-russh/rust/Cargo.lock', 'packages/fressh-react-native-uniffi-russh/rust/rust-toolchain.toml', 'package-lock.json') }}
-          restore-keys: |
-            mobile-russh-cargo-deps-${{ runner.os }}-${{ env.MOBILE_RUSSH_CARGO_NDK_VERSION }}-${{ env.MOBILE_RUSSH_NDK_VERSION }}-
-            mobile-russh-cargo-deps-${{ runner.os }}-
-
-      - name: Run mobile russh Rust tests
-        working-directory: packages/fressh-react-native-uniffi-russh/rust
-        run: cargo test --workspace
-
-      - name: Install cargo-ndk
-        shell: bash
+      - name: Install gomobile
         run: |
-          if ! cargo ndk --version 2>/dev/null | grep -q "cargo-ndk ${MOBILE_RUSSH_CARGO_NDK_VERSION}"; then
-            cargo install cargo-ndk --version "${MOBILE_RUSSH_CARGO_NDK_VERSION}" --locked --force
-          fi
-          cargo ndk --version
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Regenerate mobile russh Android artifacts
-        run: npm run mobile:russh:regenerate -- --platform android
+      # All four ABIs, not just the one the release ships: `int` is 32-bit on
+      # armeabi-v7a and x86, and a width bug there compiles fine on arm64 and
+      # would otherwise reach a release unnoticed.
+      - name: Bind the Go SSH engine for every Android ABI
+        run: npm run mobile:engine:build -- android "arm64-v8a,armeabi-v7a,x86_64,x86"
 
-      - name: Verify generated artifacts are committed
-        shell: bash
+      - name: Verify the engine compiles for iOS targets
         run: |
-          # Android static archives are not byte-for-byte stable across host
-          # toolchains, and generated C++ formatting depends on whether
-          # clang-format is installed on the runner. The JS/type outputs are
-          # deterministic and carry the UniFFI contract, so use them as the
-          # freshness gate here while release builds still regenerate native
-          # artifacts on the runner.
-          git diff --exit-code -- \
-            packages/fressh-react-native-uniffi-russh/src/generated \
-            packages/fressh-react-native-uniffi-russh/lib/module \
-            packages/fressh-react-native-uniffi-russh/lib/typescript
-
-          if ! git diff --quiet -- \
-            packages/fressh-react-native-uniffi-russh/cpp/generated \
-            packages/fressh-react-native-uniffi-russh/android/src/main/jniLibs; then
-            echo "::notice::Native binary/C++ outputs changed after regeneration; ignored because they are runner-toolchain dependent."
-            git diff --name-only -- \
-              packages/fressh-react-native-uniffi-russh/cpp/generated \
-              packages/fressh-react-native-uniffi-russh/android/src/main/jniLibs
-          fi
+          cd services/ssh-core
+          GOOS=ios GOARCH=arm64 CGO_ENABLED=1 go build $(go list ./... | grep -v '/cmd/')

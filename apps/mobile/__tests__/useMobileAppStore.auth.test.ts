@@ -1,6 +1,5 @@
-import { Linking } from "react-native";
+import { Linking, NativeModules } from "react-native";
 import { act } from "react-test-renderer";
-import { RnRussh } from "@fressh/react-native-uniffi-russh";
 import { gcm } from "@noble/ciphers/aes.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
 import type {
@@ -27,7 +26,6 @@ import {
 import {
   resetReportedTerminalGridForTests,
   setReportedTerminalGrid,
-  toRusshTerminalSize,
 } from "../src/lib/terminal-size";
 import {
   resetMobileStoreRuntimeForTests,
@@ -36,15 +34,64 @@ import {
 
 const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
 
-jest.mock("@fressh/react-native-uniffi-russh", () => ({
-  RnRussh: {
-    uniffiInitAsync: jest.fn(async () => undefined),
-    connect: jest.fn(),
-    connectSftp: jest.fn(),
-    validatePrivateKey: jest.fn(() => ({ valid: true })),
-    validateCertificate: jest.fn(() => ({ valid: true })),
-  },
-}));
+// The SSH engine's native module, installed once by jest.setup.js. The store
+// reaches the engine through it, so connection assertions are made here rather
+// than on a stand-in connection object.
+const engineNative = NativeModules.GoSshEngineModule as Record<string, jest.Mock>;
+
+// connect and startShell take their arguments as JSON, the same wire format the
+// desktop sends ssh-core, so a test has to decode before it can assert.
+function lastConnectRequest(): Record<string, unknown> {
+  const { calls } = engineNative.connect.mock;
+  return JSON.parse(calls[calls.length - 1][1] as string) as Record<
+    string,
+    unknown
+  >;
+}
+
+function lastStartShellOptions(): Record<string, unknown> {
+  const { calls } = engineNative.startShell.mock;
+  return JSON.parse(calls[calls.length - 1][1] as string) as Record<
+    string,
+    unknown
+  >;
+}
+
+/**
+ * A known-host record matching the key the engine's probe reports.
+ *
+ * The engine probes the host key first and the store only connects once that
+ * key is trusted, so a connection test that starts with an empty known-hosts
+ * list stops at the approval prompt and never reaches the engine at all. The
+ * key is read back from the probe mock rather than restated here, so the two
+ * cannot drift apart.
+ */
+async function trustedHostKey(
+  hostname: string,
+  port: number,
+): Promise<KnownHostRecord> {
+  const probed = JSON.parse(
+    (await engineNative.probeHostKey("{}")) as string,
+  ) as {
+    algorithm: string;
+    publicKeyBase64: string;
+    fingerprintSha256: string;
+  };
+  engineNative.probeHostKey.mockClear();
+
+  return {
+    id: `known-host-${hostname}-${port}`,
+    host: hostname,
+    port,
+    algorithm: probed.algorithm,
+    publicKeyBase64: probed.publicKeyBase64,
+    fingerprintSha256: probed.fingerprintSha256,
+    createdAt: "2026-04-13T00:00:00.000Z",
+    lastSeenAt: "2026-04-13T00:00:00.000Z",
+    updatedAt: "2026-04-13T00:00:00.000Z",
+  };
+}
+
 jest.mock("@aws-sdk/client-sts", () => ({
   STSClient: jest.fn().mockImplementation(() => ({
     send: jest.fn(async () => ({
@@ -817,7 +864,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.syncStatus.status).toBe("syncing");
     expect(state.awsProfiles).toEqual([]);
     expect(state.secretsByRef).toEqual({});
-    expect(RnRussh.uniffiInitAsync).not.toHaveBeenCalled();
+    expect(NativeModules.GoSshEngineModule.connect).not.toHaveBeenCalled();
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
       .toEqual(["/auth/refresh"]);
 
@@ -1681,23 +1728,14 @@ describe("useMobileAppStore auth and sync flows", () => {
       passphrase: "key-passphrase",
       updatedAt: "2026-04-13T00:00:00.000Z",
     };
-    const shell = {
-      addListener: jest.fn(() => 1n),
-      removeListener: jest.fn(),
-      sendData: jest.fn(async () => undefined),
-      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
-    };
-    const connection = {
-      startShell: jest.fn(async () => shell),
-      disconnect: jest.fn(async () => undefined),
-    };
 
-    (RnRussh.connect as jest.Mock).mockResolvedValue(connection);
+    const knownHost = await trustedHostKey(host.hostname, host.port);
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        knownHosts: [knownHost],
         secretsByRef: {
           [secret.secretRef]: secret,
         },
@@ -1711,23 +1749,21 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(sessionId).not.toBeNull();
-    expect(RnRussh.validatePrivateKey).toHaveBeenCalledWith(
+    expect(engineNative.inspectPrivateKey).toHaveBeenCalledWith(
       "PRIVATE KEY",
       "key-passphrase",
     );
-    expect(RnRussh.connect).toHaveBeenCalledWith(
+    expect(lastConnectRequest()).toEqual(
       expect.objectContaining({
         host: host.hostname,
         port: host.port,
         username: host.username,
-        security: {
-          type: "key",
-          privateKey: "PRIVATE KEY",
-          passphrase: "key-passphrase",
-        },
+        authType: "privateKey",
+        privateKeyPem: "PRIVATE KEY",
+        passphrase: "key-passphrase",
       }),
     );
-    expect(connection.startShell).toHaveBeenCalledTimes(1);
+    expect(engineNative.startShell).toHaveBeenCalledTimes(1);
   });
 
   it("connects certificate SSH hosts with synced private key and certificate", async () => {
@@ -1753,23 +1789,14 @@ describe("useMobileAppStore auth and sync flows", () => {
       passphrase: "cert-passphrase",
       updatedAt: "2026-04-13T00:00:00.000Z",
     };
-    const shell = {
-      addListener: jest.fn(() => 1n),
-      removeListener: jest.fn(),
-      sendData: jest.fn(async () => undefined),
-      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
-    };
-    const connection = {
-      startShell: jest.fn(async () => shell),
-      disconnect: jest.fn(async () => undefined),
-    };
 
-    (RnRussh.connect as jest.Mock).mockResolvedValue(connection);
+    const knownHost = await trustedHostKey(host.hostname, host.port);
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        knownHosts: [knownHost],
         secretsByRef: {
           [secret.secretRef]: secret,
         },
@@ -1783,27 +1810,25 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(sessionId).not.toBeNull();
-    expect(RnRussh.validatePrivateKey).toHaveBeenCalledWith(
+    expect(engineNative.inspectPrivateKey).toHaveBeenCalledWith(
       "PRIVATE KEY",
       "cert-passphrase",
     );
-    expect(RnRussh.validateCertificate).toHaveBeenCalledWith(
+    expect(engineNative.inspectCertificate).toHaveBeenCalledWith(
       "SSH CERTIFICATE",
     );
-    expect(RnRussh.connect).toHaveBeenCalledWith(
+    expect(lastConnectRequest()).toEqual(
       expect.objectContaining({
         host: host.hostname,
         port: host.port,
         username: host.username,
-        security: {
-          type: "certificate",
-          privateKey: "PRIVATE KEY",
-          certificate: "SSH CERTIFICATE",
-          passphrase: "cert-passphrase",
-        },
+        authType: "certificate",
+        privateKeyPem: "PRIVATE KEY",
+        certificateText: "SSH CERTIFICATE",
+        passphrase: "cert-passphrase",
       }),
     );
-    expect(connection.startShell).toHaveBeenCalledTimes(1);
+    expect(engineNative.startShell).toHaveBeenCalledTimes(1);
   });
 
   it("connects certificate SFTP tabs with the same SSH credential material", async () => {
@@ -1843,20 +1868,13 @@ describe("useMobileAppStore auth and sync flows", () => {
       lastDisconnectedAt: null,
       errorMessage: null,
     };
-    const sftpConnection = {
-      listDirectory: jest.fn(async () => ({
-        path: ".",
-        entries: [],
-      })),
-      close: jest.fn(async () => undefined),
-    };
-
-    (RnRussh.connectSftp as jest.Mock).mockResolvedValue(sftpConnection);
+    const knownHost = await trustedHostKey(host.hostname, host.port);
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        knownHosts: [knownHost],
         sessions: [session],
         secretsByRef: {
           [secret.secretRef]: secret,
@@ -1873,20 +1891,23 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(sftpSessionId).not.toBeNull();
-    expect(RnRussh.connectSftp).toHaveBeenCalledWith(
+    expect(lastConnectRequest()).toEqual(
       expect.objectContaining({
         host: host.hostname,
         port: host.port,
         username: host.username,
-        security: {
-          type: "certificate",
-          privateKey: "PRIVATE KEY",
-          certificate: "SSH CERTIFICATE",
-          passphrase: "cert-passphrase",
-        },
+        authType: "certificate",
+        privateKeyPem: "PRIVATE KEY",
+        certificateText: "SSH CERTIFICATE",
+        passphrase: "cert-passphrase",
       }),
     );
-    expect(sftpConnection.listDirectory).toHaveBeenCalledWith(".");
+    // A file-transfer tab rides its own connection, so the subsystem is opened
+    // on the id that connection was made with.
+    expect(engineNative.startSftp).toHaveBeenCalledWith(
+      engineNative.connect.mock.calls[0][0],
+    );
+    expect(engineNative.sftpList).toHaveBeenCalledWith("test-sftp", ".");
   });
 
   it("opens AWS EC2 SFTP tabs through the sync-api proxy", async () => {
@@ -2158,24 +2179,13 @@ describe("useMobileAppStore auth and sync flows", () => {
       password: "super-secret",
       updatedAt: "2026-04-13T00:00:00.000Z",
     };
-    const disconnect = jest.fn(async () => undefined);
-    const shell = {
-      addListener: jest.fn(() => 1n),
-      removeListener: jest.fn(),
-      sendData: jest.fn(async () => undefined),
-      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
-    };
-    const connection = {
-      startShell: jest.fn(async () => shell),
-      disconnect,
-    };
-
-    (RnRussh.connect as jest.Mock).mockResolvedValue(connection);
+    const knownHost = await trustedHostKey(host.hostname, host.port);
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        knownHosts: [knownHost],
         secretsByRef: {
           [secret.secretRef]: secret,
         },
@@ -2187,13 +2197,13 @@ describe("useMobileAppStore auth and sync flows", () => {
       await flushAsyncWork();
     });
 
-    expect(RnRussh.uniffiInitAsync).toHaveBeenCalledTimes(1);
-    expect(RnRussh.connect).toHaveBeenCalledTimes(1);
-    expect(connection.startShell).toHaveBeenCalledTimes(1);
-    expect(connection.startShell).toHaveBeenCalledWith(
+    expect(engineNative.connect).toHaveBeenCalledTimes(1);
+    expect(engineNative.startShell).toHaveBeenCalledTimes(1);
+    expect(lastStartShellOptions()).toEqual(
       expect.objectContaining({
-        term: "Xterm",
-        terminalSize: toRusshTerminalSize(REPORTED_TEST_GRID),
+        term: "xterm",
+        cols: REPORTED_TEST_GRID.cols,
+        rows: REPORTED_TEST_GRID.rows,
       }),
     );
 
@@ -2204,7 +2214,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     const state = useMobileAppStore.getState();
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(engineNative.disconnect).toHaveBeenCalledTimes(1);
     expect(state.auth.status).toBe("unauthenticated");
     expect(state.hosts).toHaveLength(0);
     expect(state.sessions).toHaveLength(0);
@@ -2233,29 +2243,25 @@ describe("useMobileAppStore auth and sync flows", () => {
       password: "super-secret",
       updatedAt: "2026-04-13T00:00:00.000Z",
     };
-    const shell = {
-      addListener: jest.fn(() => 1n),
-      removeListener: jest.fn(),
-      sendData: jest.fn(async () => undefined),
-      readBuffer: jest.fn(() => ({ chunks: [], nextSeq: 0 })),
-    };
-    const connection = {
-      startShell: jest.fn(async () => shell),
-      disconnect: jest.fn(async () => undefined),
-    };
-
-    let resolveConnect: ((value: typeof connection) => void) | null = null;
-    (RnRussh.connect as jest.Mock).mockImplementation(
+    // Held open so the second attempt lands while the first is still in flight.
+    // Only the first call is stubbed: were the guard to let a second through, it
+    // would fall back to the default mock and connect for real, which is exactly
+    // what the call count below catches.
+    let resolveConnect: (() => void) | null = null;
+    engineNative.connect.mockImplementationOnce(
       async () =>
-        await new Promise<typeof connection>((resolve) => {
-          resolveConnect = resolve;
+        await new Promise<void>((resolve) => {
+          resolveConnect = () => resolve();
         }),
     );
+
+    const knownHost = await trustedHostKey(host.hostname, host.port);
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        knownHosts: [knownHost],
         secretsByRef: {
           [secret.secretRef]: secret,
         },
@@ -2275,18 +2281,19 @@ describe("useMobileAppStore auth and sync flows", () => {
       await flushAsyncWork();
     });
 
-    expect(RnRussh.connect).toHaveBeenCalledTimes(1);
+    expect(engineNative.connect).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveConnect?.(connection);
+      resolveConnect?.();
       await flushAsyncWork();
     });
 
-    expect(connection.startShell).toHaveBeenCalledTimes(1);
-    expect(connection.startShell).toHaveBeenCalledWith(
+    expect(engineNative.startShell).toHaveBeenCalledTimes(1);
+    expect(lastStartShellOptions()).toEqual(
       expect.objectContaining({
-        term: "Xterm",
-        terminalSize: toRusshTerminalSize(REPORTED_TEST_GRID),
+        term: "xterm",
+        cols: REPORTED_TEST_GRID.cols,
+        rows: REPORTED_TEST_GRID.rows,
       }),
     );
     expect(useMobileAppStore.getState().sessions[0]?.status).toBe("connected");

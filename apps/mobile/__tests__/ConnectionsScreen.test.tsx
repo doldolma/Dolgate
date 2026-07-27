@@ -20,12 +20,6 @@ jest.mock("@react-navigation/native", () => ({
   }),
 }));
 jest.mock("react-native-vector-icons/Ionicons", () => "Ionicons");
-jest.mock("@fressh/react-native-uniffi-russh", () => ({
-  RnRussh: {
-    uniffiInitAsync: jest.fn(async () => undefined),
-    connect: jest.fn(),
-  },
-}));
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),

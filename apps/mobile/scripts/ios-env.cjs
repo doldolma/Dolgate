@@ -7,20 +7,6 @@ const iosRoot = path.join(appRoot, "ios");
 const repoRoot = path.resolve(appRoot, "..", "..");
 const xcodeWorkspaceName = "Dolgate.xcworkspace";
 const legacyIosBundleIds = ["com.dolgate.mobile"];
-const russhXcframeworkInfoPlist = path.join(
-  repoRoot,
-  "packages",
-  "fressh-react-native-uniffi-russh",
-  "FresshReactNativeUniffiRusshFramework.xcframework",
-  "Info.plist",
-);
-const russhXcframeworkScript = path.join(
-  iosRoot,
-  "Pods",
-  "Target Support Files",
-  "ReactNativeUniffiRussh",
-  "ReactNativeUniffiRussh-xcframeworks.sh",
-);
 
 function hasExecutable(candidatePath) {
   return Boolean(candidatePath && fs.existsSync(candidatePath));
@@ -100,37 +86,29 @@ function readFileIfExists(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
 
-function getXcframeworkLibraryIdentifiers(infoPlistContent) {
-  return Array.from(
-    infoPlistContent.matchAll(
-      /<key>LibraryIdentifier<\/key>\s*<string>([^<]+)<\/string>/g,
-    ),
-    (match) => match[1],
-  );
-}
+// Collects the local paths Podfile.lock recorded for its externally sourced
+// pods, resolved against the ios directory the lock lives in.
+function getExternalSourcePaths(podfileLockContent) {
+  const externalPaths = [];
+  let insideSection = false;
 
-function shouldRefreshRusshPodSupportFiles() {
-  if (!fs.existsSync(russhXcframeworkInfoPlist)) {
-    return false;
+  for (const line of podfileLockContent.split("\n")) {
+    // Section headers sit at column zero; everything under them is indented.
+    if (line.trim().length > 0 && !line.startsWith(" ")) {
+      insideSection = line.startsWith("EXTERNAL SOURCES:");
+      continue;
+    }
+    if (!insideSection) {
+      continue;
+    }
+
+    const match = line.match(/^\s+:(?:path|podspec):\s*(.+?)\s*$/);
+    if (match) {
+      externalPaths.push(path.resolve(iosRoot, match[1].replace(/^"(.*)"$/, "$1")));
+    }
   }
 
-  if (!fs.existsSync(russhXcframeworkScript)) {
-    return true;
-  }
-
-  const infoStats = fs.statSync(russhXcframeworkInfoPlist);
-  const scriptStats = fs.statSync(russhXcframeworkScript);
-  if (infoStats.mtimeMs > scriptStats.mtimeMs) {
-    return true;
-  }
-
-  const infoPlistContent = readFileIfExists(russhXcframeworkInfoPlist) ?? "";
-  const scriptContent = readFileIfExists(russhXcframeworkScript) ?? "";
-  const libraryIdentifiers = getXcframeworkLibraryIdentifiers(infoPlistContent);
-
-  return libraryIdentifiers.some(
-    (libraryIdentifier) => !scriptContent.includes(libraryIdentifier),
-  );
+  return externalPaths;
 }
 
 function shouldInstallPods() {
@@ -149,11 +127,19 @@ function shouldInstallPods() {
     return true;
   }
 
-  if (shouldRefreshRusshPodSupportFiles()) {
+  const podfileLockContent = readFileIfExists(podfileLockPath);
+
+  // Most pods are autolinked from node_modules rather than named in the
+  // Podfile, so deleting one leaves the Podfile untouched and both locks in
+  // agreement — neither check above notices. The generated Pods project keeps
+  // pointing at the vanished directory and the build dies on an (l)stat of a
+  // framework that is no longer there, which reads as an Xcode problem rather
+  // than a stale install. The recorded paths are the honest signal.
+  if (getExternalSourcePaths(podfileLockContent).some((externalPath) => !fs.existsSync(externalPath))) {
     return true;
   }
 
-  return readFileIfExists(podfileLockPath) !== readFileIfExists(manifestLockPath);
+  return podfileLockContent !== readFileIfExists(manifestLockPath);
 }
 
 function ensurePodsInstalled(env) {

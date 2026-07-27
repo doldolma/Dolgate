@@ -19,16 +19,6 @@ import {
   useMobileAppStore,
 } from "../src/store/useMobileAppStore";
 
-jest.mock("@fressh/react-native-uniffi-russh", () => ({
-  RnRussh: {
-    uniffiInitAsync: jest.fn(async () => undefined),
-    connect: jest.fn(),
-    connectSftp: jest.fn(),
-    validatePrivateKey: jest.fn(() => ({ valid: true })),
-    validateCertificate: jest.fn(() => ({ valid: true })),
-    deriveArgon2idKey: jest.fn(() => new Uint8Array(32)),
-  },
-}));
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => null),

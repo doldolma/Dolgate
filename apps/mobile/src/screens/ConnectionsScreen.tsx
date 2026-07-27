@@ -12,7 +12,10 @@ import Ionicons from "react-native-vector-icons/Ionicons";
 import { formatRelativeTime } from "../lib/mobile";
 import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
-import { useMobileAppStore } from "../store/useMobileAppStore";
+import {
+  sortSessionsByRecency,
+  useMobileAppStore,
+} from "../store/useMobileAppStore";
 import { type MobilePalette, useMobilePalette } from "../theme";
 
 function getStatusTone(status: string, palette: MobilePalette) {
@@ -42,10 +45,18 @@ export function ConnectionsScreen(): React.JSX.Element {
   const palette = useMobilePalette();
   const screenPadding = useScreenPadding();
   const navigation = useNavigation<NavigationProp<MainTabParamList>>();
-  const sessions = useMobileAppStore((state) => state.sessions);
+  const storedSessions = useMobileAppStore((state) => state.sessions);
   const hosts = useMobileAppStore((state) => state.hosts);
   const resumeSession = useMobileAppStore((state) => state.resumeSession);
   const removeSession = useMobileAppStore((state) => state.removeSession);
+
+  // 스토어의 sessions 는 터미널 탭 순서(추가된 순서)다. 이 목록은 "현재/최근
+  // 세션"이라 최근순이 맞으므로 여기서 정렬한다 — 탭 순서를 최근순으로 두면
+  // 출력이 올 때마다 탭이 재배치돼 타이핑 중에 튄다.
+  const sessions = useMemo(
+    () => sortSessionsByRecency(storedSessions),
+    [storedSessions],
+  );
 
   const hostLabelById = useMemo(
     () => new Map(hosts.map((host) => [host.id, host.label])),
