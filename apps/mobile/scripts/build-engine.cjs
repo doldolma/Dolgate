@@ -60,8 +60,11 @@ function resolveGomobile() {
     throw new Error(
       [
         "gomobile not found. Install the bind toolchain first:",
-        "  go install golang.org/x/mobile/cmd/gomobile@latest",
-        "  go install golang.org/x/mobile/cmd/gobind@latest",
+        "  cd services/ssh-core",
+        "  go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind",
+        "",
+        "Run it from inside the module (and without @latest) so the version in",
+        "go.mod is used — that is the version CI binds with.",
       ].join("\n"),
     );
   }
@@ -137,7 +140,11 @@ function buildAndroid(gomobile, binDir, targets) {
       ANDROID_API,
       "-trimpath",
       "-ldflags",
-      "-s -w",
+      // max-page-size: Go's default leaves the LOAD segments 4KB-aligned, which
+      // a 16KB-page device cannot load — and Play requires 16KB support at the
+      // targetSdk this app ships. Every other native library in the APK is
+      // already 0x4000; without this the engine is the only one that is not.
+      "-s -w -extldflags=-Wl,-z,max-page-size=16384",
       "-o",
       outputPath,
       bindTarget,

@@ -98,12 +98,24 @@ export type ConnectOptions = {
   /** Initial PTY geometry, applied to shells that do not override it. */
   size?: EngineTerminalSize;
   /**
+   * Every host key already on file for this host and port.
+   *
+   * Supplying them lets the engine connect straight away instead of probing the
+   * host first to find out what it presents, which saves a TCP connection and a
+   * full key exchange on every connect after the first. All of them are passed,
+   * not just one, because the server picks the algorithm — handing over only the
+   * Ed25519 key would fail against a server that negotiates ECDSA.
+   *
+   * onServerKey is not called when the connect succeeds this way: the keys were
+   * accepted before, and the engine verifies the presented key against exactly
+   * this list. A key outside the list still reaches onServerKey — see connect().
+   */
+  trustedHostKeysBase64?: string[];
+  /**
    * Decides whether to trust the host key. Resolving false aborts the connect.
    *
-   * Both engines call this exactly once per connect, but they get there
-   * differently: russh invokes it mid-handshake, while the Go engine probes the
-   * host first and then connects trusting only what was accepted. The contract
-   * is the same either way, so callers do not branch on the engine.
+   * Called once per connect that has to ask — that is, when the host is new, or
+   * when it presents a key that is not in trustedHostKeysBase64.
    */
   onServerKey: (info: ServerPublicKeyInfo) => Promise<boolean>;
   /** Fires if the transport goes away without disconnect() being called. */

@@ -125,6 +125,72 @@ describe('connect', () => {
     expect(mockNative.connect).not.toHaveBeenCalled();
   });
 
+  // The probe is a whole extra TCP connection and key exchange, so a host whose
+  // keys are already on file must not pay for it.
+  it('skips the probe entirely when keys are already on file', async () => {
+    const engine = new GoSshEngineAdapter();
+    const options = baseConnectOptions({
+      trustedHostKeysBase64: ['AAAAKEY1', 'AAAAKEY2'],
+    });
+
+    const connection = await engine.connect(options);
+
+    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
+    expect(options.onServerKey).not.toHaveBeenCalled();
+    expect(connection.id).toBe('conn-1');
+
+    // All of them go over, because the server picks which algorithm it presents.
+    const payload = JSON.parse(mockNative.connect.mock.calls[0][1]);
+    expect(payload.trustedHostKeysBase64).toEqual(['AAAAKEY1', 'AAAAKEY2']);
+  });
+
+  it('does not skip the probe when the key list is empty', async () => {
+    const engine = new GoSshEngineAdapter();
+    await engine.connect(baseConnectOptions({ trustedHostKeysBase64: [] }));
+
+    expect(mockNative.probeHostKey).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(mockNative.connect.mock.calls[0][1]);
+    expect(payload.trustedHostKeysBase64).toBeUndefined();
+  });
+
+  // A host that presents something outside the list has to reach the prompt, not
+  // hand the caller a bare mismatch error: it may have rotated its key, dropped
+  // the algorithm on file, or be an impostor, and only the caller can tell.
+  it('falls back to the probe when the keys on file are rejected', async () => {
+    mockNative.connect
+      .mockRejectedValueOnce(new Error('connect: host key mismatch'))
+      .mockResolvedValueOnce(JSON.stringify({ id: 'conn-1' }));
+
+    const engine = new GoSshEngineAdapter();
+    const options = baseConnectOptions({
+      trustedHostKeysBase64: ['AAAASTALE'],
+    });
+
+    const connection = await engine.connect(options);
+
+    expect(mockNative.probeHostKey).toHaveBeenCalledTimes(1);
+    expect(options.onServerKey).toHaveBeenCalledWith(EXPECTED_KEY_INFO);
+    expect(connection.id).toBe('conn-1');
+
+    // The retry trusts what the caller just accepted, not the stale list.
+    const retry = JSON.parse(mockNative.connect.mock.calls[1][1]);
+    expect(retry.trustedHostKeyBase64).toBe(PROBED_KEY.publicKeyBase64);
+    expect(retry.trustedHostKeysBase64).toBeUndefined();
+  });
+
+  it('surfaces a non-mismatch failure instead of probing again', async () => {
+    mockNative.connect.mockRejectedValueOnce(new Error('connection refused'));
+
+    const engine = new GoSshEngineAdapter();
+    const options = baseConnectOptions({
+      trustedHostKeysBase64: ['AAAAKEY1'],
+    });
+
+    await expect(engine.connect(options)).rejects.toThrow(/refused/);
+    expect(mockNative.probeHostKey).not.toHaveBeenCalled();
+    expect(options.onServerKey).not.toHaveBeenCalled();
+  });
+
   it('maps a private key credential onto the desktop connect payload', async () => {
     const engine = new GoSshEngineAdapter();
     await engine.connect(

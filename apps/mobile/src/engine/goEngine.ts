@@ -190,6 +190,7 @@ function credentialFields(options: ConnectOptions): Record<string, unknown> {
 function connectPayload(
   options: ConnectOptions,
   trustedHostKeyBase64: string,
+  trustedHostKeysBase64?: string[],
 ): Record<string, unknown> {
   return {
     id: options.connectionId,
@@ -197,10 +198,28 @@ function connectPayload(
     port: options.port,
     username: options.username,
     trustedHostKeyBase64,
+    // ssh-core takes the plural list in preference to the single key, and
+    // accepts the connection if the presented key matches any entry. Omitted
+    // when empty so the singular field stays in charge.
+    ...(trustedHostKeysBase64?.length
+      ? { trustedHostKeysBase64 }
+      : {}),
     rows: options.size?.rows ?? 0,
     cols: options.size?.cols ?? 0,
     ...credentialFields(options),
   };
+}
+
+/**
+ * ssh-core's strict host key check fails with this when the key a host presents
+ * is not among the ones it was handed. It is the signal that a connect made from
+ * keys on file has to fall back to asking.
+ */
+const HOST_KEY_MISMATCH = 'host key mismatch';
+
+function isHostKeyMismatch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes(HOST_KEY_MISMATCH);
 }
 
 /** Shared event plumbing: one emitter, fanned out to per-shell subscribers. */
@@ -484,19 +503,43 @@ export class GoSshEngineAdapter implements MobileSshEngine {
   readonly name = 'go' as const;
 
   /**
-   * Connects in two steps, because the dialer checks host keys strictly against
-   * keys it was handed rather than asking mid-handshake: probe the host, let the
-   * caller accept or reject what it presents, then connect trusting exactly that
-   * key.
+   * Connects, asking about the host key only when it has to.
    *
-   * The probe costs one extra TCP round-trip on every connect. Skipping it for
-   * hosts that are already trusted is a worthwhile optimisation later — the
-   * connect enforces the same check on its own — but always probing keeps the
-   * callback contract identical to the russh engine's, which is what lets the
-   * session flow stay engine-agnostic.
+   * The dialer checks host keys strictly against keys it was handed rather than
+   * asking mid-handshake, so a host nobody has seen before takes two steps:
+   * probe it, let the caller accept or reject what it presents, then connect
+   * trusting exactly that key. That costs an extra TCP connection and a full key
+   * exchange, which is why a host with keys already on file skips the probe and
+   * connects against those directly.
+   *
+   * A mismatch is not treated as a failure but as "this needs asking about": the
+   * host may have rotated its key, or dropped the algorithm we had on file, or
+   * be something else entirely. Falling back to the probe routes all three to
+   * the same prompt the first connect uses, so the caller can see what changed
+   * and decide, rather than being handed a bare mismatch error.
    */
   async connect(options: ConnectOptions): Promise<EngineConnection> {
     const native = requireNative();
+    const onFile = options.trustedHostKeysBase64?.filter(Boolean) ?? [];
+
+    if (onFile.length > 0) {
+      if (options.onDisconnected) {
+        events.registerDisconnected(options.connectionId, options.onDisconnected);
+      }
+      try {
+        await native.connect(
+          options.connectionId,
+          JSON.stringify(connectPayload(options, onFile[0], onFile)),
+        );
+        return new GoConnection(options.connectionId, options.size);
+      } catch (error) {
+        events.forgetConnection(options.connectionId);
+        if (!isHostKeyMismatch(error)) {
+          throw error;
+        }
+        // Fall through to the probe so the caller gets asked.
+      }
+    }
 
     const probeRaw = await native.probeHostKey(
       JSON.stringify(connectPayload(options, '')),
@@ -540,9 +583,9 @@ export class GoSshEngineAdapter implements MobileSshEngine {
   }
 
   /**
-   * Opens a file-transfer session on its own connection, going through the same
-   * probe-then-connect handshake as a terminal session so host key trust is
-   * decided identically.
+   * Opens a file-transfer session on its own connection, reusing connect() so
+   * host key trust — including when the probe is skipped — is decided identically
+   * to a terminal session.
    */
   async connectSftp(options: ConnectOptions): Promise<EngineSftpConnection> {
     await this.connect(options);

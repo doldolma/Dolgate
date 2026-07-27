@@ -1766,6 +1766,97 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(engineNative.startShell).toHaveBeenCalledTimes(1);
   });
 
+  // Probing costs a whole extra TCP connection and key exchange, so a host that
+  // was approved once must not pay for it again.
+  it("connects without probing when the host key is already on file", async () => {
+    const host: SshHostRecord = {
+      id: "host-known",
+      kind: "ssh",
+      label: "Known SSH",
+      hostname: "host.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: "secret-known",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-known",
+      label: "Known SSH credentials",
+      password: "super-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const knownHost = await trustedHostKey(host.hostname, host.port);
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.probeHostKey).not.toHaveBeenCalled();
+    expect(engineNative.connect).toHaveBeenCalledTimes(1);
+    // The key on file is what the connect is checked against.
+    expect(lastConnectRequest().trustedHostKeysBase64).toEqual([
+      knownHost.publicKeyBase64,
+    ]);
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
+  });
+
+  // The other side of that skip: nothing on file means the user still decides,
+  // and no connection is opened until they do.
+  it("prompts for an unknown host key instead of connecting", async () => {
+    const host: SshHostRecord = {
+      id: "host-unknown",
+      kind: "ssh",
+      label: "Unknown SSH",
+      hostname: "fresh.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: "secret-unknown",
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-unknown",
+      label: "Unknown SSH credentials",
+      password: "super-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.probeHostKey).toHaveBeenCalledTimes(1);
+    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().pendingServerKeyPrompt).not.toBeNull();
+  });
+
   it("connects certificate SSH hosts with synced private key and certificate", async () => {
     const host: SshHostRecord = {
       id: "host-cert",

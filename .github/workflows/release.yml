@@ -408,10 +408,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Installed from inside the module rather than with @latest, so a tag is
+      # built with the x/mobile version services/ssh-core/go.mod pins. With
+      # @latest a breaking gomobile release could fail a release build with no
+      # change in the repository at all.
       - name: Install gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+        working-directory: services/ssh-core
+        run: go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 
       - name: Build Go SSH engine (Android)
         run: npm run mobile:engine:build -- android "${DOLGATE_ANDROID_RELEASE_ARCHES}"

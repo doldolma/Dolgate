@@ -23,7 +23,7 @@ function buildGoEngine(platform, androidAbis) {
   const result = spawnSync(process.execPath, args, { stdio: "inherit" });
   if (result.status !== 0) {
     throw new Error(
-      `Go SSH engine build failed for ${platform}. See the output above; gomobile must be installed (go install golang.org/x/mobile/cmd/gomobile@latest).`,
+      `Go SSH engine build failed for ${platform}. See the output above; gomobile must be installed — from inside services/ssh-core, so the pinned version is used: go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind`,
     );
   }
 }

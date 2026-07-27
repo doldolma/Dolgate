@@ -2438,6 +2438,18 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
       };
 
+      // Every key on file for an address, so the engine can connect without
+      // probing the host first. All of them rather than one: the server chooses
+      // the algorithm, and a host with both Ed25519 and ECDSA on file would
+      // otherwise fail whenever it picks the one that was left out.
+      const trustedHostKeysFor = (hostname: string, port: number): string[] =>
+        get()
+          .knownHosts.filter(
+            record => record.host === hostname && record.port === port,
+          )
+          .map(record => record.publicKeyBase64)
+          .filter(Boolean);
+
       const resolveKnownHostTrust = async (
         host: Pick<HostRecord, 'id' | 'label'>,
         info: MobileServerPublicKeyInfo,
@@ -2874,6 +2886,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             port: host.port,
             username: host.username,
             credential: security,
+            trustedHostKeysBase64: trustedHostKeysFor(host.hostname, host.port),
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
               disconnectRuntimeSftpSession(sftpSessionRecord.id);
@@ -3260,6 +3273,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             username: host.username,
             credential: security,
             size: terminalSize,
+            trustedHostKeysBase64: trustedHostKeysFor(host.hostname, host.port),
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: markClosed,
           });

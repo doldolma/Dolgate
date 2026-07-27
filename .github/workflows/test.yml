@@ -251,10 +251,13 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${MOBILE_ENGINE_NDK_VERSION}" >> "${GITHUB_ENV}"
 
+      # Installed from inside the module rather than with @latest, so the bind
+      # runs against the x/mobile version services/ssh-core/go.mod pins — which
+      # is what bindtools.go exists to keep. With @latest a breaking gomobile
+      # release would change what CI builds with while the repo stood still.
       - name: Install gomobile
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+        working-directory: services/ssh-core
+        run: go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 
       - name: Install dependencies
         run: npm ci
