@@ -19,7 +19,7 @@ flowchart LR
   end
   subgraph Mobile["React Native Mobile"]
     MobileApp["app<br/>host/group browser / session tabs / auth"]
-    MobileSSH["uniffi-russh<br/>direct SSH runtime"]
+    MobileSSH["ssh-core/mobile<br/>gomobile in-process engine"]
     MobileApp --> MobileSSH
   end
   Main <-->|"stdio framed IPC"| CoreCmd["cmd/ssh-core<br/>wire adapter"]
@@ -53,17 +53,19 @@ flowchart LR
 - React Native 기반 iOS / Android 앱입니다.
 - 동기화된 host / group / session 상태를 기반으로 현재 연결된 세션 탭 워크스페이스를 구성합니다.
 - 하단 단축키 바와 모바일 터미널 입력 보조 UI로 터치 환경의 터미널 입력을 돕습니다.
-- SSH 세션은 모바일 런타임에서 직접 처리하고, 인증/동기화/AWS SSM 브로커 경로는 `sync-api`와 통신합니다.
+- SSH/SFTP는 `ssh-core`를 앱 프로세스 안에 바인딩한 엔진이 직접 처리하고, 인증·동기화·AWS SSM 브로커는 `sync-api`와 통신합니다.
+- 하위 프로세스를 띄울 수 없고 터미널 출력을 청크마다 React Native 브리지로 넘기는 비용도 커서, 출력은 ring buffer에 쌓고 앱이 커서로 읽어 갑니다.
 - 모바일은 데스크톱과 같은 저장소 버전을 따르지만, 별도 앱 런타임과 별도 build 체계를 가집니다(빌드·실행은 [build-and-deploy](./build-and-deploy.md) 참고).
 
 ## SSH 코어
 
 - `services/ssh-core/pkg/runtime`이 공개 런타임 façade 역할을 합니다.
-- 내부 구현은 여전히 `internal/awssession`, `internal/sshsession`, `internal/moshsession`, `internal/tmuxsession`, `internal/sftp`, `internal/containers`, `internal/forwarding`, `internal/ssmforward` 같은 세부 서비스에 남아 있습니다.
-- 연결 유형은 서비스로 분리돼 있습니다 — `sshsession`(일반 SSH/PTY), `moshsession`(SSH 부트스트랩 후 UDP로 전환하는 mosh), `tmuxsession`(tmux control mode — 원격 윈도우/패인을 탭·분할로 매핑).
-- Electron 데스크톱은 여전히 `cmd/ssh-core` child process를 띄워 사용합니다.
+- 그 아래는 연결 유형마다 서비스가 나뉩니다 — 일반 SSH/PTY, mosh(SSH로 부트스트랩한 뒤 UDP로 전환), tmux control mode(원격 윈도우·패인을 탭·분할로 매핑), SFTP, 포트 포워딩, AWS SSM, 컨테이너.
+- Electron 데스크톱은 `cmd/ssh-core` child process를 띄워 사용합니다.
 - `cmd/ssh-core`는 stdio framed protocol을 decode/encode하는 호환 어댑터이고, 실제 작업은 `pkg/runtime`에 위임합니다.
 - `sync-api`는 AWS SSM WebSocket 브로커에서 `pkg/runtime`를 직접 import해서 고루틴 기반으로 세션을 처리합니다.
+- 모바일은 `pkg/runtime` 대신 gomobile로 바인딩한 별도 표면을 앱 프로세스 안에서 직접 씁니다.
+- 세 경로 모두 다이얼링·점프 체인·host key 정책·인증은 같은 연결 계층을 공유합니다.
 - control 명령은 metadata JSON frame으로, 터미널 입출력은 raw byte stream frame으로 주고받습니다.
 - SSH 터미널 세션은 `sessionId`, SFTP endpoint는 `endpointId`, 전송 작업은 `jobId`로 구분합니다.
 - 개발 모드에서 desktop는 `go run ./cmd/ssh-core`를 필요 시 실행하고, 서버는 `sync-api` 프로세스 안에 embedded runtime을 직접 구성합니다.
@@ -82,13 +84,13 @@ flowchart LR
 ## 경계 요약
 
 - 데스크톱은 `cmd/ssh-core` child process를 사용합니다.
-- 모바일은 자체 모바일 런타임으로 SSH 세션을 처리하고, 서버와는 인증/동기화/AWS 경계에서 통신합니다.
+- 모바일은 `ssh-core/mobile`을 gomobile로 바인딩해 앱 프로세스 안에서 SSH를 처리하고, 서버와는 인증/동기화/AWS 경계에서 통신합니다.
 - `sync-api`는 브라우저 로그인, 암호화된 동기화 저장소, session share, AWS SSM 브로커를 한 프로세스에서 담당합니다.
-- `ssh-core/pkg/runtime`는 desktop과 server 양쪽에서 재사용되는 공용 코어 런타임입니다.
+- `ssh-core/pkg/runtime`는 desktop과 server 양쪽에서 재사용되는 공용 코어 런타임입니다. 모바일은 이 façade 대신 `mobile` 패키지를 쓰지만, 연결 계층인 `internal/sshconn`은 셋이 함께 씁니다.
 
 ## 주요 흐름
 
-최근 추가된 복잡한 사용자 흐름을 빠르게 이해하기 위한 요약입니다.
+복잡한 사용자 흐름을 빠르게 이해하기 위한 요약입니다.
 
 ### 인증과 오프라인
 

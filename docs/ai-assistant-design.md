@@ -44,13 +44,13 @@ AI 패널은 터미널 오른쪽에 열리는 세션 단위 패널입니다. 우
 
 AI는 provider가 tool/function calling을 지원하는 경우 아래 도구를 사용할 수 있습니다. Codex provider는 같은 도구를 로컬 MCP bridge로 연결합니다.
 
-| 도구 | 실행 위치 | 용도 |
-|---|---|---|
-| `inspect_command` | 숨은 SSH exec 채널 | 진단·조회용 read-only 명령 실행. 약 15초 timeout과 출력 길이 제한이 있습니다. |
-| `run_in_terminal` | 사용자가 보는 활성 터미널 | 변경 작업, interactive/streaming/장기 실행 명령, 사용자가 직접 봐야 하는 명령 실행. |
+| 도구 | 실행 위치                  | 용도 |
+|---|----------------------------|---|
+| `inspect_command` | 보조 SSH exec 채널         | 진단·조회용 read-only 명령 실행. 약 15초 timeout과 출력 길이 제한이 있습니다. |
+| `run_in_terminal` | 사용자가 보는 활성 터미널  | 변경 작업, interactive/streaming/장기 실행 명령, 사용자가 직접 봐야 하는 명령 실행. |
 | `read_terminal_output` | renderer terminal snapshot | 자동 첨부된 최근 100줄보다 이전 scrollback 읽기. 기본 200줄, 최대 500줄 단위입니다. |
-| `web_search` | Electron main | 웹 검색. 검색 키가 있으면 설정된 backend를 사용합니다. |
-| `fetch_url` | Electron main | URL 내용을 가져와 요약 또는 분석에 사용합니다. |
+| `web_search` | Electron main              | 웹 검색. 검색 키가 있으면 설정된 backend를 사용합니다. |
+| `fetch_url` | Electron main              | URL 내용을 가져와 요약 또는 분석에 사용합니다. |
 
 도구 사용 기준:
 
