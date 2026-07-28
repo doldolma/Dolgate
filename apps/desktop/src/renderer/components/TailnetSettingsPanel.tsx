@@ -40,6 +40,18 @@ interface TailnetDraft {
 }
 
 /**
+ * 노드가 올라오는 중인지. 누가 시작했는지가 아니라 상태로 판단한다 — 호스트 연결도 노드를
+ * 올리고, 그 시도에도 브라우저 로그인·관리자 승인처럼 사람을 기다리는 구간이 있다.
+ */
+function isComingUp(status: TailnetStatus | undefined): boolean {
+  return (
+    status?.state === 'starting' ||
+    status?.state === 'needsAuth' ||
+    status?.state === 'needsApproval'
+  );
+}
+
+/**
  * 이름이 비었을 때 대신 쓸 이름.
  *
  * 저장은 연결에 성공한 뒤에만 되므로, 그때는 컨트롤 플레인이 알려 준 tailnet 이름이 있다.
@@ -110,8 +122,6 @@ export function TailnetSettingsPanel() {
    * 여기서 다시 계산하지 않고 받아 온다.
    */
   const [localNodeName, setLocalNodeName] = useState<string | null>(null);
-  // 테스트가 끝난 뒤 도착하는 늦은 상태로 화면을 되돌리지 않도록 현재 대상만 반영한다.
-  const testingIdRef = useRef<string | null>(null);
   // 이미 연 인증 URL. 같은 URL 로 창을 여러 번 띄우지 않는다.
   const openedAuthUrlRef = useRef<string | null>(null);
   // 저장되지 않은 채 노드가 올라간 초안. 취소 버튼을 거치지 않고 화면을 떠나는 경로(다른
@@ -216,21 +226,16 @@ export function TailnetSettingsPanel() {
 
   useEffect(() => {
     return onTailnetStatus((status) => {
-      if (testingIdRef.current !== status.id) {
-        return;
-      }
+      // 여기서 시작한 시도만 반영하면, 다른 곳에서 올린 노드는 이 화면에 없는 것이 된다 —
+      // 호스트에 연결하면 그 경로가 노드를 올리는데, 그동안 이 화면은 "연결" 을 띄운 채
+      // 접을 방법도 내주지 않았다. 이 화면은 노드가 지금 어떤 상태인지 보여 주는 곳이다.
       setStatusById((current) => ({ ...current, [status.id]: status }));
 
-      // 컨트롤 플레인이 URL 을 내주기까지 실측 2~15 초가 걸린다. 그 뒤에 버튼을 띄워 놓고
-      // 또 누르게 하면, 사용자는 아무 일도 일어나지 않는 시간을 두 번 겪는다. 시험을 누른
-      // 것 자체가 인증하겠다는 뜻이므로 URL 이 나오는 즉시 연다. 버튼은 다시 열기용으로
-      // 남는다.
-      if (status.authUrl && status.authUrl !== openedAuthUrlRef.current) {
-        openedAuthUrlRef.current = status.authUrl;
-        void openExternalUrl(status.authUrl);
-      }
+      // 인증 링크는 메인 프로세스가 연다. 이 화면 말고 호스트 연결 중에도 인증이 필요해질 수
+      // 있고, 구독자가 둘이면 같은 링크로 브라우저가 두 번 열린다. "브라우저 다시 열기" 버튼은
+      // 사용자가 직접 누르는 것이라 그대로 둔다.
     });
-  }, [openExternalUrl]);
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!draft) {
@@ -279,7 +284,6 @@ export function TailnetSettingsPanel() {
       setError(null);
       setRemovedPersistent(null);
       setTestingId(config.id);
-      testingIdRef.current = config.id;
       openedAuthUrlRef.current = null;
       if (config.isDraft) {
         unsavedDraftIdRef.current = config.id;
@@ -305,7 +309,6 @@ export function TailnetSettingsPanel() {
           },
         }));
       } finally {
-        testingIdRef.current = null;
         setTestingId(null);
       }
     },
@@ -488,9 +491,10 @@ export function TailnetSettingsPanel() {
                     >
                       {translate('tailnetSettings.disconnect')}
                     </Button>
-                  ) : testingId === record.id ? (
+                  ) : testingId === record.id || isComingUp(status) ? (
                     // 시도 중에는 접을 수 있어야 한다. 브라우저 로그인은 최대 3 분까지
                     // 사람을 기다리는데, 그동안 누를 것이 없으면 갇힌 것과 같다.
+                    // 여기서 시작한 시도만 보지 않는다 — 호스트 연결이 올리는 중일 수도 있다.
                     <Button
                       variant="secondary"
                       onClick={() => void handleCancel(record.id)}

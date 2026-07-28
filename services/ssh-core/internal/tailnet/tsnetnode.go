@@ -224,6 +224,7 @@ func statusFromBackend(state *ipnstate.Status) Status {
 		status.TailnetName = state.CurrentTailnet.Name
 	}
 	if state.Self != nil {
+		status.Expired = state.Self.Expired
 		// DNSName 은 끝에 점이 붙어 온다("host.tailnet.ts.net.").
 		status.NodeName = strings.TrimSuffix(state.Self.DNSName, ".")
 		if profile, ok := state.User[state.Self.UserID]; ok {

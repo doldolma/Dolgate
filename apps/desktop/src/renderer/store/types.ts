@@ -639,6 +639,13 @@ interface AppStateParts {
   isReady: boolean;
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
+  /**
+   * 지금 브라우저 인증을 기다리는 tailnet. 연결 오버레이의 "브라우저 다시 열기"·"취소" 가 쓴다.
+   *
+   * 노드는 tailnet 단위로 공유되므로 세션별이 아니다 — 같은 tailnet 을 쓰는 연결 여럿이 같은
+   * 인증을 기다린다.
+   */
+  pendingTailnetAuth: { tailnetId: string; label: string; authUrl: string | null } | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
   activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
@@ -1251,6 +1258,7 @@ export type NetworkSlice = Pick<
   | "portForwardRuntimes"
   | "knownHosts"
   | "pendingHostKeyPrompt"
+  | "pendingTailnetAuth"
   | "savePortForward"
   | "saveDnsOverride"
   | "setStaticDnsOverrideActive"

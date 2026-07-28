@@ -20,6 +20,12 @@ export function normalizeErrorMessage(
 export interface ConnectionFailurePresentation {
   title: string;
   message: string;
+  /**
+   * 사용자가 그 자리에서 할 수 있는 일이 있는 실패의 종류.
+   *
+   * 실패 화면이 이것으로 동작을 고른다 — 다른 화면으로 보내지 않고 여기서 끝내기 위해서다.
+   */
+  kind?: "tailnet-unreachable";
 }
 
 function extractDialTarget(message: string): string {
@@ -85,6 +91,17 @@ export function resolveConnectionFailurePresentation(
       title: "Connection Failed",
       message:
         t('connectFailure.agentUnreachable'),
+    };
+  }
+  // 코어가 tailnet 경유 dial 실패에 붙이는 표식. 일반 타임아웃으로 뭉개면 사용자는 호스트가
+  // 죽은 줄 알고 엉뚱한 곳을 본다.
+  if (/could not reach the host through the tailnet/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: t('connectFailure.tailnetUnreachable'),
+      // 이 실패는 사용자가 그 자리에서 할 수 있는 일이 있다 — 노드 재인증. 종류를 실어 보내
+      // 실패 화면이 그 동작을 낼 수 있게 한다(설정 화면으로 보내지 않는다).
+      kind: "tailnet-unreachable",
     };
   }
   if (/host key is not trusted yet/i.test(normalized)) {

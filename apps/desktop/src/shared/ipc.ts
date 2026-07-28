@@ -318,6 +318,13 @@ export interface TailnetStatus {
   tailnetName?: string;
   nodeName?: string;
   nodeIp?: string;
+  /** 노드 키가 만료됐는지. state 가 running 이어도 true 일 수 있다. */
+  expired?: boolean;
+  /**
+   * 사용자가 시도를 접어서 끝났는지. 실패가 아니라서 error 가 비어 있는데, 그렇다고 진행
+   * 중인 것도 아니다 — 이 표시가 없으면 시도가 끝났는지 알 수 없다.
+   */
+  cancelled?: boolean;
 
   /** 이 tailnet 안에서 보이는 기기들과 그 경로. 붙어 있지 않으면 비어 있다. */
   peers?: TailnetPeer[];

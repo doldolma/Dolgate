@@ -437,3 +437,63 @@ func TestSecondTestSupersedesTheFirst(t *testing.T) {
 		t.Fatal("the first test kept polling after a second one started")
 	}
 }
+
+// 취소는 실패가 아니라서 오류로 끝나지 않는다. 그래서 마지막 상태 이벤트가 "접혔다"고 말해
+// 줘야 기다리는 쪽이 시도가 끝났음을 안다 — 노드가 올라오기 전에도 Stopped 가 진행 상태로
+// 나가므로, 그 표시가 중복 제거에 걸려 묻히면 화면에서 취소를 눌러도 아무 일이 없다.
+func TestTailnetCancelEmitsATerminalStatus(t *testing.T) {
+	// Stopped 로 폴링을 시작하는 노드. 진행 이벤트로 Stopped 가 먼저 나간다.
+	node := &countingNode{status: tailnet.Status{State: tailnet.StateStopped}}
+	instance := newTailnetTestRuntime(t, node)
+
+	var mu sync.Mutex
+	var events []coretypes.TailnetStatusPayload
+	instance.emitEvent = func(event coretypes.Event) {
+		status, ok := event.Payload.(coretypes.TailnetStatusPayload)
+		if !ok {
+			return
+		}
+		mu.Lock()
+		events = append(events, status)
+		mu.Unlock()
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+			Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+			TimeoutMs: 60_000,
+		})
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		if instance.tailnetTests.cancel("corp") {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the test never registered itself as cancellable")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("TailnetTest() error = %v, want nil after a cancel", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("TailnetTest did not return after being cancelled")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("no status events were emitted")
+	}
+	last := events[len(events)-1]
+	if !last.Cancelled {
+		t.Errorf("last status = %#v, want Cancelled so the caller knows the attempt ended", last)
+	}
+}

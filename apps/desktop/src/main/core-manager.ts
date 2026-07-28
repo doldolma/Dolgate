@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -673,6 +673,8 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     tailnetName: optionalText(payload.tailnetName),
     nodeName: optionalText(payload.nodeName),
     nodeIp: optionalText(payload.nodeIp),
+    expired: payload.expired === true,
+    cancelled: payload.cancelled === true,
     peers: toTailnetPeers(payload.peers),
     authUrl:
       typeof payload.authUrl === "string" && payload.authUrl.length > 0
@@ -972,6 +974,8 @@ export class CoreManager {
   private readonly sessionOwnerStorage = new AsyncLocalStorage<number>();
   private readonly sessionOwnerById = new Map<string, number>();
   private readonly tabs = new Map<string, TerminalTab>();
+  /** 이미 열어 준 tailnet 인증 링크. 연결을 여러 번 시도하면 같은 URL 이 반복해서 온다. */
+  private readonly openedTailnetAuthUrls = new Set<string>();
   /**
    * 코어가 뜰 때 밀어 넣을 tailnet 설정을 가져오는 함수.
    *
@@ -4488,6 +4492,7 @@ export class CoreManager {
 
   private handleControlEvent(event: CoreEvent<Record<string, unknown>>): void {
     this.resolvePendingResponse(event);
+    this.openTailnetAuthUrlIfNeeded(event);
     if (this.resolvePendingSessionReady(event)) {
       return;
     }
@@ -4906,7 +4911,12 @@ export class CoreManager {
       {
         timeoutMs: coreTimeoutMs + 15_000,
         onProgress: (progress) => onStatus(toTailnetStatus(progress)),
-        isTerminal: (progress) => toTailnetStatus(progress).state === "running",
+        // 취소로 끝나면 코어가 오류 없이 끝낸다. running 만 종료로 보면 그 요청이 한도까지
+        // 매달려서, 화면에서는 취소를 눌러도 아무 일이 없는 것처럼 보인다.
+        isTerminal: (progress) => {
+          const status = toTailnetStatus(progress);
+          return status.state === "running" || status.cancelled === true;
+        },
       },
     );
 
@@ -5011,6 +5021,33 @@ export class CoreManager {
         metadata: { error: error instanceof Error ? error.message : String(error) },
       });
     }
+  }
+
+  /**
+   * tailnet 인증 링크가 오면 브라우저를 연다.
+   *
+   * 여는 곳을 여기 하나로 모은 이유: 링크가 필요한 순간이 설정 화면일 수도, 호스트 연결 중일
+   * 수도 있다. 화면마다 열게 하면 둘 다 떠 있을 때 같은 링크로 브라우저가 두 번 열리고,
+   * 설정 화면이 닫혀 있으면 아무도 열지 않는다.
+   */
+  private openTailnetAuthUrlIfNeeded(
+    event: CoreEvent<Record<string, unknown>>,
+  ): void {
+    if (event.type !== "tailnetStatus") {
+      return;
+    }
+    const authUrl = event.payload.authUrl;
+    if (typeof authUrl !== "string" || authUrl.length === 0) {
+      return;
+    }
+    if (this.openedTailnetAuthUrls.has(authUrl)) {
+      return;
+    }
+    this.openedTailnetAuthUrls.add(authUrl);
+    void shell.openExternal(authUrl).catch(() => {
+      // 못 열었으면 다시 열 수 있도록 기록을 지운다.
+      this.openedTailnetAuthUrls.delete(authUrl);
+    });
   }
 
   /** 지금 살아 있는 노드들의 상태. 없는 tailnet 은 결과에 들어 있지 않다. */

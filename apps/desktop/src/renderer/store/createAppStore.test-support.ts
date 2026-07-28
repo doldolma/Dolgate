@@ -927,6 +927,18 @@ export function createMockApi(): DesktopApi {
       update: vi.fn(),
       remove: vi.fn().mockResolvedValue(undefined),
     },
+    tailnet: {
+      list: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn().mockResolvedValue(undefined),
+      // 기본은 곧바로 running — tailnet 을 안 쓰는 테스트가 이 경로에 걸리지 않는다.
+      test: vi.fn().mockResolvedValue({ id: "net-1", state: "running" }),
+      forget: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      snapshot: vi.fn().mockResolvedValue({ statuses: [] }),
+      onStatus: vi.fn(() => () => undefined),
+    },
     knownHosts: {
       list: vi.fn().mockResolvedValue([]),
       probeHost: vi.fn().mockResolvedValue({

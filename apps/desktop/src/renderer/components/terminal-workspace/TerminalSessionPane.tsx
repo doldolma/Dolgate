@@ -7,6 +7,7 @@ import {
 } from '@shared';
 import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
+import { cancelTailnet, forgetTailnet } from '../../services/desktop/tailnet';
 import {
   extractDroppedAbsolutePaths,
   hasExternalFileDrop,
@@ -68,6 +69,26 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   } = props;
 
   const snippets = useAppStore((state) => state.snippets);
+  // tailnet 인증 대기는 노드 단위(tailnet 별)라 세션 상태가 아니다. 오버레이의 "브라우저 다시
+  // 열기"·"취소" 가 이 값을 쓴다.
+  const pendingTailnetAuth = useAppStore((state) => state.pendingTailnetAuth);
+  const openExternalUrl = useAppStore((state) => state.openExternalUrl);
+
+  /**
+   * tailnet 재인증. 죽은 등록을 버리고 곧바로 다시 연결한다 — 그러면 준비 단계가 처음부터
+   * 인증 흐름을 돌려서(브라우저 열기 포함) 이 화면에서 끝난다.
+   *
+   * forget 은 등록만 해제하고 tailnet 설정은 남기므로 다시 등록할 것이 없다.
+   */
+  const tailnetIdOfHost =
+    props.host && isSshHostRecord(props.host) ? props.host.tailnetId?.trim() : undefined;
+  const reauthenticateTailnet = useCallback(async () => {
+    if (!tailnetIdOfHost) {
+      return;
+    }
+    await forgetTailnet(tailnetIdOfHost).catch(() => undefined);
+    await onRetry?.();
+  }, [onRetry, tailnetIdOfHost]);
   const connectHost = useAppStore((state) => state.connectHost);
   const killTmuxSession = useAppStore((state) => state.killTmuxSession);
   // tmux 하단바 "열기" — 같은 호스트로 control mode(tmux -CC) 연결을 시작한다(기본 dolgate 세션).
@@ -654,12 +675,37 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                   void onClose?.();
                 }}
                 showCancel={
-                  tab?.connectionProgress?.stage === 'reconnecting' &&
+                  (tab?.connectionProgress?.stage === 'reconnecting' ||
+                    pendingTailnetAuth !== null) &&
                   tab?.status !== 'error'
                 }
+                cancelLabel={
+                  pendingTailnetAuth !== null ? translate('common.cancel') : undefined
+                }
                 onCancel={() => {
+                  if (pendingTailnetAuth) {
+                    // 인증을 접으면 준비 단계가 실패로 끝나고 연결도 그 이유로 멈춘다.
+                    void cancelTailnet(pendingTailnetAuth.tailnetId);
+                    return;
+                  }
                   void onCancelReconnect?.();
                 }}
+                secondaryActionLabel={
+                  connectionFailurePresentation?.kind === 'tailnet-unreachable' &&
+                  tailnetIdOfHost
+                    ? translate('misc.reauthenticateTailnet')
+                    : pendingTailnetAuth?.authUrl
+                      ? translate('misc.reopenBrowser')
+                      : undefined
+                }
+                onSecondaryAction={
+                  connectionFailurePresentation?.kind === 'tailnet-unreachable' &&
+                  tailnetIdOfHost
+                    ? () => void reauthenticateTailnet()
+                    : pendingTailnetAuth?.authUrl
+                      ? () => void openExternalUrl(pendingTailnetAuth.authUrl as string)
+                      : undefined
+                }
               />
             ) : null}
             <TerminalAutocompleteOverlay

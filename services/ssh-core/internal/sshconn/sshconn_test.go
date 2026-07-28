@@ -427,3 +427,42 @@ func TestProbeHostKeyRejectsBothWsProxyAndTailnetDialer(t *testing.T) {
 		t.Fatalf("ProbeHostKey() error = %v, want ErrTransportConflict", err)
 	}
 }
+
+// tailnet 경유 dial 이 실패했을 때, 그것이 tailnet 문제라는 사실이 에러에 남아야 한다.
+//
+// "dial failed" 로만 두면 일반 네트워크 실패와 구분되지 않는다. 그러면 사용자는 호스트가 죽은
+// 줄 알고 엉뚱한 곳을 본다 — 실제 원인(노드 재인증 필요)은 컨트롤 플레인 쪽인데도.
+func TestTailnetDialFailureIsIdentifiable(t *testing.T) {
+	wrapped := wrapTailnetDialError(errors.New("i/o timeout"))
+
+	if !errors.Is(wrapped, ErrTailnetUnreachable) {
+		t.Fatalf("error = %v, want it to wrap ErrTailnetUnreachable", wrapped)
+	}
+	// 원래 이유도 남아야 한다 — 진단에 필요하다.
+	if !strings.Contains(wrapped.Error(), "i/o timeout") {
+		t.Errorf("error = %q, want it to keep the underlying reason", wrapped)
+	}
+	// 무엇을 확인해야 하는지 담겨 있어야 한다. 클라이언트는 원인을 단정할 수 없다.
+	if !strings.Contains(wrapped.Error(), "re-authenticated") {
+		t.Errorf("error = %q, want it to point at re-authentication", wrapped)
+	}
+}
+
+// tailnet 경유 dial 예산에는 하한과 상한이 둘 다 있다.
+//
+// 너무 짧으면 노드가 막 올라온 직후의 첫 dial 이 깨진다 — netmap 전파와 경로 설정이 함께
+// 일어나기 때문이다(3 초로 줄였다가 로그인 직후 연결이 실패하는 것을 확인했다). 너무 길면 못
+// 붙는 경우에 사용자가 아무 설명 없이 그만큼 갇힌다(예전 60 초).
+func TestTailnetDialBudgetIsSaneForAFirstConnect(t *testing.T) {
+	budget := DefaultConfig.TailnetDialTimeout
+	if budget < 5*time.Second {
+		t.Errorf("TailnetDialTimeout = %v — 노드가 막 올라온 직후의 첫 dial 이 깨진다", budget)
+	}
+	if budget > DefaultConfig.TCPDialTimeout {
+		t.Errorf(
+			"TailnetDialTimeout %v > TCPDialTimeout %v — 못 붙는 경우에 이만큼 갇힐 이유가 없다",
+			budget,
+			DefaultConfig.TCPDialTimeout,
+		)
+	}
+}

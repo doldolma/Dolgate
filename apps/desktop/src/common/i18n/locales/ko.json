@@ -2260,6 +2260,7 @@
     "wrongPassword": "암호가 올바르지 않거나 파일이 손상되었습니다."
   },
   "connectFailure": {
+    "tailnetUnreachable": "tailnet 을 통해 호스트에 닿지 못했습니다. 노드 등록이 만료된 것일 수 있습니다.",
     "targetHost": "대상 호스트",
     "viaJump": " · 점프 경유 {{target}}",
     "ssmExit": "AWS SSM 세션이 종료되었습니다. (code {{code}})",
@@ -2346,6 +2347,11 @@
     "send": "전송"
   },
   "connectProgress": {
+    "tailnetVerifyingAuth": "{{label}} 로그인을 확인하는 중입니다.",
+    "tailnetPreparingAuth": "{{label}} 인증 링크를 받는 중입니다.",
+    "tailnetNeedsAuth": "{{label}} 브라우저에서 로그인을 마쳐 주세요.",
+    "tailnetNeedsApproval": "{{label}} 관리자 승인을 기다리는 중입니다.",
+    "tailnetConnecting": "{{label}} tailnet 에 연결하는 중입니다.",
     "hostKeyChecking": "{{label}} 호스트 키를 확인하는 중입니다.",
     "hostKeyNeeded": "{{label}} 호스트 키 확인이 필요합니다.",
     "ssmStarting": "{{label}} SSM 세션을 시작하는 중입니다.",
@@ -2714,6 +2720,9 @@
     "requestFailed": "Codex 요청에 실패했습니다."
   },
   "sessionSvc": {
+    "tailnetAuthCancelled": "{{label}} tailnet 인증을 취소했습니다.",
+    "tailnetConnectFailed": "{{label}} tailnet 에 연결하지 못했습니다.",
+    "tailnetMissing": "이 호스트가 지정한 tailnet 이 이 기기에 없습니다. 설정 → 네트워크에서 추가해 주세요.",
     "connectFailed": "호스트 연결을 시작하지 못했습니다.",
     "localFailed": "로컬 터미널을 시작하지 못했습니다.",
     "ssmRetrying": "{{label}} SSM 연결을 다시 시도하는 중입니다."
@@ -2954,6 +2963,8 @@
     "removeTag": "{{tag}} 태그 제거"
   },
   "misc": {
+    "reauthenticateTailnet": "tailnet 다시 로그인",
+    "reopenBrowser": "브라우저 다시 열기",
     "tmuxPrefixDefault": "Ctrl-B (기본)",
     "secretSummary": "{{label}} · {{type}} ({{count}}개 호스트)",
     "snapshotRange": "{{from}}~{{to}}줄 전",

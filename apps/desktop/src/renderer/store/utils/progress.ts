@@ -3,8 +3,15 @@ import {
   isSshHostRecord,
   isWarpgateSshHostRecord,
 } from "@shared";
-import type { HostRecord, TerminalConnectionProgress } from "@shared";
+import type {
+  HostRecord,
+  SftpConnectionStage,
+  TerminalConnectionProgress,
+} from "@shared";
+import type { StoreApi } from "zustand";
+import type { AppState } from "../types";
 import { createConnectionProgress } from "./errors-and-prompts";
+import { getPane, resolveSftpPaneIdByEndpoint, updatePaneState } from "./sftp";
 import { t } from '../../i18n';
 
 export function resolveCredentialRetryKind(
@@ -151,5 +158,87 @@ export function resolveErrorProgress(
 ): TerminalConnectionProgress {
   return createConnectionProgress("connecting", message, {
     retryable,
+  });
+}
+
+/**
+ * tailnet 노드가 올라오는 동안의 진행 상태.
+ *
+ * 무엇을 기다리는지가 매번 다르다 — 링크를 받는 중인지, 사람이 브라우저에서 로그인해야 하는지,
+ * 관리자 승인을 기다리는지. 문구를 만드는 곳을 한 군데로 모아 둔다.
+ */
+export function resolveTailnetProgress(
+  tailnetLabel: string,
+  waiting: 'connecting' | 'preparingAuth' | 'needsAuth' | 'verifyingAuth' | 'needsApproval',
+): TerminalConnectionProgress {
+  const messages = {
+    connecting: 'connectProgress.tailnetConnecting',
+    preparingAuth: 'connectProgress.tailnetPreparingAuth',
+    needsAuth: 'connectProgress.tailnetNeedsAuth',
+    verifyingAuth: 'connectProgress.tailnetVerifyingAuth',
+    needsApproval: 'connectProgress.tailnetNeedsApproval',
+  } as const;
+  return createConnectionProgress(
+    "tailnet-connecting",
+    t(messages[waiting], { label: tailnetLabel }),
+    // 사람이 브라우저에서 할 일이 있는 단계만 차단으로 표시한다 — AWS SSO 로그인과 같은 취급.
+    { blockingKind: waiting === 'needsAuth' ? 'browser' : 'none' },
+  );
+}
+
+/**
+ * 연결 진행을 그 연결이 보이는 곳에 반영한다.
+ *
+ * 소비자마다 진행을 담는 자리가 다르다 — 터미널은 탭(sessionId), SFTP 는 패인(endpointId),
+ * 컨테이너는 컨테이너 탭(hostId). 알리는 쪽마다 그 자리를 찾게 두면 호출부가 늘어날 때마다
+ * 하나씩 빠뜨린다. 여기 한 곳에서 처리한다.
+ */
+export function applyConnectionProgress(
+  set: StoreApi<AppState>["setState"],
+  target: { sessionId?: string | null; endpointId?: string | null; hostId: string },
+  progress: TerminalConnectionProgress,
+): void {
+  set((state) => {
+    const next: Partial<AppState> = {};
+
+    if (target.sessionId && state.tabs.some((tab) => tab.sessionId === target.sessionId)) {
+      next.tabs = state.tabs.map((tab) =>
+        tab.sessionId === target.sessionId ? { ...tab, connectionProgress: progress } : tab,
+      );
+    }
+
+    if (target.endpointId) {
+      const endpointId = target.endpointId;
+      const paneId = resolveSftpPaneIdByEndpoint(state, endpointId);
+      if (paneId) {
+        // SFTP·컨테이너 진행 이벤트는 blockingKind/retryable 을 담지 않는다.
+        next.sftp = updatePaneState(state, paneId, {
+          ...getPane(state, paneId),
+          connectionProgress: {
+            hostId: target.hostId,
+            endpointId,
+            stage: progress.stage as SftpConnectionStage,
+            message: progress.message,
+          },
+        });
+      }
+      if (state.containerTabs.some((tab) => tab.hostId === target.hostId)) {
+        next.containerTabs = state.containerTabs.map((tab) =>
+          tab.hostId === target.hostId
+            ? {
+                ...tab,
+                connectionProgress: {
+                  hostId: target.hostId,
+                  endpointId,
+                  stage: progress.stage as SftpConnectionStage,
+                  message: progress.message,
+                },
+              }
+            : tab,
+        );
+      }
+    }
+
+    return next;
   });
 }

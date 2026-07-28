@@ -570,6 +570,13 @@ type TailnetStatusPayload struct {
 	TailnetName string `json:"tailnetName,omitempty"`
 	NodeName    string `json:"nodeName,omitempty"`
 	NodeIP      string `json:"nodeIp,omitempty"`
+	// Expired 는 노드 키가 만료됐는지다. State 가 running 이어도 true 일 수 있다 — 컨트롤
+	// 플레인에서 노드를 만료시켜도 백엔드는 한동안 Running 으로 남는다.
+	Expired bool `json:"expired,omitempty"`
+	// Cancelled 는 사용자가 시도를 접어서 끝났다는 표시다. 실패가 아니므로 Error 는 비어
+	// 있는데, Stopped 는 노드가 올라오기 전 진행 상태로도 나가기 때문에 상태만으로는 시도가
+	// 끝났는지 알 수 없다. 요청을 기다리는 쪽은 이 표시로 끝을 안다.
+	Cancelled bool `json:"cancelled,omitempty"`
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 그 경로다. 붙어 있지 않으면 빈 목록이다.
 	Peers []TailnetPeerPayload `json:"peers,omitempty"`

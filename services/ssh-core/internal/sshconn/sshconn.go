@@ -86,9 +86,14 @@ type ProgressFunc func(ProgressEvent)
 type Config struct {
 	TCPDialTimeout       time.Duration
 	TCPKeepAliveInterval time.Duration
-	// TailnetDialTimeout 은 Dial(tailnet 경유)에 주는 예산이다. 일반 TCP 보다 크다 — 이 안에
-	// 노드 기동(컨트롤 플레인 핸드셰이크, 필요하면 재등록)과 대상까지의 경로 탐색이 들어간다.
-	// TCPDialTimeout 을 그대로 쓰면 정상적인 첫 연결이 잘린다(실측 2~15 초).
+	// TailnetDialTimeout 은 tailnet 경유 dial 에 주는 예산이다.
+	//
+	// 짧게 잡으면 안 된다. 노드가 막 올라온 직후의 첫 dial 은 netmap 전파와 경로(DERP) 설정이
+	// 함께 일어나서 몇 초가 걸린다 — 3 초로 줄였다가 로그인 직후 연결이 실패하고 재시도해야만
+	// 붙는 것을 실기기에서 확인했다. 두 번째 연결부터는 즉시 붙는다.
+	//
+	// 못 붙는 경우에 그만큼 기다리는 것은 대가다. 클라이언트가 "곧 붙는다" 와 "영원히 안 붙는다"
+	// 를 구분할 방법이 없어서, 정상 경우를 깨지 않는 쪽을 택한다.
 	TailnetDialTimeout time.Duration
 	// Progress가 설정되면 DialClient가 홉마다 connecting→connected(또는 failed)를 보고한다.
 	// config가 점프 체인 재귀에 전파돼 가장 깊은 점프부터 순서대로 이벤트가 도착한다.
@@ -185,10 +190,9 @@ type InteractiveResponder func(challenge InteractiveChallenge) ([]string, error)
 var DefaultConfig = Config{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
-	// 브라우저 로그인까지 여기서 기다리게 하지는 않는다 — 그건 설정 화면의 연결 흐름이 할 일
-	// 이고, 여기서 몇 분을 붙들면 사용자는 앱이 멈춘 것으로 본다. auth key 등록과 경로 탐색이
-	// 넉넉히 들어가는 값이면 된다.
-	TailnetDialTimeout: 60 * time.Second,
+	// 일반 TCP 와 같다. 노드 기동이 준비 단계로 빠져서 예전의 60 초는 근거가 없어졌지만,
+	// 이보다 줄이면 노드가 막 올라온 직후의 첫 연결이 깨진다.
+	TailnetDialTimeout: 10 * time.Second,
 }
 
 // HopProgress builds a Config.Progress callback that emits EventConnectionHopProgress for
@@ -235,6 +239,24 @@ func HopProgress(target Target, sessionID, endpointID string, emit func(coretype
 var ErrTransportConflict = errors.New(
 	"sshconn: ws proxy and tailnet dialer are mutually exclusive",
 )
+
+// ErrTailnetUnreachable 는 tailnet 을 통해 대상에 닿지 못했을 때다.
+//
+// 원인을 클라이언트가 구분할 수 없다. 노드 등록이 만료됐거나(컨트롤 플레인에서 지웠어도 로컬
+// 상태는 한동안 running 으로 남는다 — Self.Expired 도 켜지지 않는다), 컨트롤 플레인이 죽었거나,
+// ACL 이 막았거나, 대상이 그 tailnet 에 없을 수 있다. 그래서 원인을 단정하지 않고 무엇을
+// 확인해야 하는지만 말한다.
+var ErrTailnetUnreachable = errors.New(
+	"tailnet: could not reach the host through the tailnet — the node may need to be re-authenticated",
+)
+
+// wrapTailnetDialError 는 tailnet 경유 dial 실패를 그 사실이 드러나는 에러로 바꾼다.
+//
+// 그냥 "dial failed" 로 두면 일반 네트워크 실패와 구분되지 않아서, 사용자는 호스트가 죽은 줄
+// 알고 엉뚱한 곳을 본다.
+func wrapTailnetDialError(err error) error {
+	return fmt.Errorf("%w: %v", ErrTailnetUnreachable, err)
+}
 
 func assertSingleTransport(target Target, config Config) error {
 	if target.WSProxy != nil && config.Dial != nil {
@@ -322,7 +344,7 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		rawConn, err = config.Dial(ctx, "tcp", addr)
 		if err != nil {
 			reportProgress(ProgressFailed)
-			return nil, fmt.Errorf("dial failed: %w", err)
+			return nil, wrapTailnetDialError(err)
 		}
 	} else {
 		reportProgress(ProgressConnecting)
@@ -419,15 +441,13 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 		// 프로브도 같은 통로로 가야 한다. 여기서 직접 TCP 로 나가면 tailnet 안에만 있는
 		// 호스트의 키를 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽게 된다.
 		reportTarget(ProgressConnecting)
-		// 노드 기동이 이 안에 들어가므로 일반 TCP 예산으로는 부족하다. 프로브가 실연결보다
-		// 먼저 나가서, 첫 연결의 기동 대기는 사실상 여기서 다 치른다.
 		ctx, cancel := context.WithTimeout(context.Background(), config.TailnetDialTimeout)
 		defer cancel()
 		var err error
 		rawConn, err = config.Dial(ctx, "tcp", addr)
 		if err != nil {
 			reportTarget(ProgressFailed)
-			return HostKeyProbeResult{}, fmt.Errorf("dial failed: %w", err)
+			return HostKeyProbeResult{}, wrapTailnetDialError(err)
 		}
 	} else {
 		reportTarget(ProgressConnecting)

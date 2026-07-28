@@ -87,8 +87,8 @@ type ManagerConfig struct {
 	// bootstrap SSH 와 그 위의 UDP 세션 **둘 다** 이 dialer 로 보낸다. dialer 가 network 를
 	// 받으므로 같은 함수로 "tcp" 와 "udp" 를 다 열 수 있다.
 	TailnetDial sshconn.TailnetDialResolver
-	// TailnetDialTimeout 은 UDP 세션을 tailnet 으로 열 때 주는 예산이다. bootstrap 이 이미
-	// 노드를 올려 둔 뒤라 짧아도 되지만, 노드가 그 사이 유휴로 내려갔을 수 있어 여유를 둔다.
+	// TailnetDialTimeout 은 UDP 세션을 tailnet 으로 열 때 주는 예산이다. bootstrap SSH 가 이미
+	// 같은 노드로 붙은 뒤이므로 노드는 올라와 있다 — 남은 일은 UDP 소켓을 여는 것뿐이다.
 	TailnetDialTimeout time.Duration
 	// HandshakeTimeout 은 첫 SSP 응답을 기다리는 시간이다. 이 안에 아무것도 오지 않으면 연결
 	// 실패로 본다. 테스트가 짧게 줄일 수 있도록 설정으로 둔다.
@@ -98,7 +98,7 @@ type ManagerConfig struct {
 var defaultManagerConfig = ManagerConfig{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
-	TailnetDialTimeout:   60 * time.Second,
+	TailnetDialTimeout:   10 * time.Second,
 	HandshakeTimeout:     10 * time.Second,
 }
 

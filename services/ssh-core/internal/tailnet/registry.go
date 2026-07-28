@@ -60,6 +60,9 @@ type Status struct {
 	TailnetName string
 	NodeName    string
 	NodeIP      string
+	// Expired 는 이 노드의 키가 만료됐는지다. BackendState 와 별개다 — 컨트롤 플레인에서
+	// 노드를 만료시켜도 백엔드는 한동안 Running 으로 남는다.
+	Expired bool
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 지금 그 기기까지 가는 경로다.
 	Peers []Peer

@@ -102,7 +102,14 @@ export type SftpConnectionStage =
   | 'generating-key'
   | 'sending-public-key'
   | 'opening-tunnel'
-  | 'connecting-sftp';
+  | 'connecting-sftp'
+  /**
+   * 이 호스트가 경유할 tailnet 노드를 올리는 중. 연결을 만들기 전 단계다.
+   *
+   * 터미널·SFTP·컨테이너가 같은 단계를 쓴다 — 노드는 tailnet 단위로 공유되고, 어느 쪽에서
+   * 시작한 연결이든 같은 것을 기다린다.
+   */
+  | 'tailnet-connecting';
 export type AwsSftpDiagnosticReasonCode =
   | 'missing-username'
   | 'missing-availability-zone'

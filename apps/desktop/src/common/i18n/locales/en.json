@@ -2260,6 +2260,7 @@
     "wrongPassword": "The passphrase is wrong, or the file is corrupted."
   },
   "connectFailure": {
+    "tailnetUnreachable": "Could not reach the host through the tailnet. The node registration may have expired.",
     "targetHost": "the target host",
     "viaJump": " · via jump {{target}}",
     "ssmExit": "The AWS SSM session ended. (code {{code}})",
@@ -2346,6 +2347,11 @@
     "send": "Send"
   },
   "connectProgress": {
+    "tailnetVerifyingAuth": "Verifying the {{label}} login…",
+    "tailnetPreparingAuth": "Getting the {{label}} login link…",
+    "tailnetNeedsAuth": "Finish the {{label}} login in your browser.",
+    "tailnetNeedsApproval": "Waiting for an administrator to approve {{label}}.",
+    "tailnetConnecting": "Connecting to the {{label}} tailnet…",
     "hostKeyChecking": "Checking the host key for {{label}}.",
     "hostKeyNeeded": "{{label}} needs host key verification.",
     "ssmStarting": "Starting the SSM session for {{label}}.",
@@ -2714,6 +2720,9 @@
     "requestFailed": "The Codex request failed."
   },
   "sessionSvc": {
+    "tailnetAuthCancelled": "The {{label}} tailnet login was cancelled.",
+    "tailnetConnectFailed": "Could not connect to the {{label}} tailnet.",
+    "tailnetMissing": "The tailnet this host uses is not registered on this device. Add it in Settings → Network.",
     "connectFailed": "Could not start the host connection.",
     "localFailed": "Could not start the local terminal.",
     "ssmRetrying": "Retrying the SSM connection for {{label}}."
@@ -2954,6 +2963,8 @@
     "removeTag": "Remove tag {{tag}}"
   },
   "misc": {
+    "reauthenticateTailnet": "Log in to tailnet again",
+    "reopenBrowser": "Reopen browser",
     "tmuxPrefixDefault": "Ctrl-B (default)",
     "secretSummary": "{{label}} · {{type}} ({{count}} hosts)",
     "snapshotRange": "lines {{from}}–{{to}} back",

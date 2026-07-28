@@ -237,6 +237,7 @@ func tailnetStatusPayload(id string, status tailnet.Status) coretypes.TailnetSta
 		TailnetName: status.TailnetName,
 		NodeName:    status.NodeName,
 		NodeIP:      status.NodeIP,
+		Expired:     status.Expired,
 		Peers:       tailnetPeerPayloads(status.Peers),
 	}
 }
@@ -356,8 +357,9 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 			// 사용자가 접은 것이면 실패가 아니다. 마지막 상태만 정리해 보내고 조용히 끝낸다.
 			if errors.Is(ctx.Err(), context.Canceled) {
 				emit(coretypes.TailnetStatusPayload{
-					ID:    id,
-					State: string(tailnet.StateStopped),
+					ID:        id,
+					State:     string(tailnet.StateStopped),
+					Cancelled: true,
 				})
 				return nil
 			}
@@ -453,6 +455,9 @@ func sameTailnetProgress(a, b coretypes.TailnetStatusPayload) bool {
 		a.State == b.State &&
 		a.AuthURL == b.AuthURL &&
 		a.Error == b.Error &&
+		// Cancelled 를 빼면 취소가 묻힌다 — 노드가 올라오기 전에도 Stopped 가 진행 상태로
+		// 나가므로, 시도를 접었다는 마지막 이벤트가 앞의 Stopped 와 같다고 버려진다.
+		a.Cancelled == b.Cancelled &&
 		a.LoginName == b.LoginName &&
 		a.TailnetName == b.TailnetName &&
 		a.NodeName == b.NodeName &&
