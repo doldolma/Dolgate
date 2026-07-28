@@ -346,6 +346,9 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        // tailnet 경유면 코어가 그 노드로 raw 전송을 연다. 기대 이름을 함께 넘겨서 실제로
+        // 붙은 tailnet 이 다르면 연결을 거부하게 한다.
+        ...ctx.resolveTailnetRoute(sshHost),
         cols: input.cols,
         rows: input.rows,
         // tmux control mode 진입이면 tmuxCommand(특정 세션 attach 등)를 Go payload.Command 로

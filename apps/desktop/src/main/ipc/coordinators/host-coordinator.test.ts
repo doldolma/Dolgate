@@ -94,6 +94,17 @@ function createCoordinator(
       }),
       buildDiagnosticDetails: vi.fn(() => ({})),
     },
+    tailnets: {
+      list: vi.fn(() => [
+        {
+          id: "net-a",
+          label: "Work",
+          tailnetName: "gridwiz.com",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]),
+    },
     resolveRuntimeSshSecrets: vi
       .fn()
       .mockResolvedValue({ secrets: {}, shouldPersistHostSecret: false }),
@@ -198,5 +209,45 @@ describe("host coordinator", () => {
       }),
     );
     expect(deps.awsSsmTunnelService.start).not.toHaveBeenCalled();
+  });
+});
+
+// 코어가 실제로 붙은 tailnet 과 대조하려면 기대 이름을 함께 넘겨야 한다. 안 넘기면 다른
+// 계정으로 로그인해 엉뚱한 tailnet 의 동명 머신에 붙어도 그냥 진행된다.
+describe("resolveTailnetRoute", () => {
+  it("carries the expected tailnet name from the settings record", () => {
+    const { coordinator } = createCoordinator();
+
+    expect(coordinator.resolveTailnetRoute({ tailnetId: "net-a" })).toEqual({
+      tailnetId: "net-a",
+      tailnetName: "gridwiz.com",
+    });
+  });
+
+  it("returns no route when the host does not use a tailnet", () => {
+    const { coordinator } = createCoordinator();
+
+    expect(coordinator.resolveTailnetRoute({})).toEqual({});
+    expect(coordinator.resolveTailnetRoute({ tailnetId: null })).toEqual({});
+    expect(coordinator.resolveTailnetRoute({ tailnetId: "  " })).toEqual({});
+  });
+
+  // 저장소의 신뢰 범위 정규화(normalizeTailnetScope)와 같은 규칙이어야 한다. 여기서 안
+  // 다듬으면 같은 tailnet 이 경로에서는 안 잡히고 신뢰 범위에서는 잡혀 어긋난다.
+  it("trims the id so a padded value still resolves", () => {
+    const { coordinator } = createCoordinator();
+
+    expect(coordinator.resolveTailnetRoute({ tailnetId: " net-a " })).toEqual({
+      tailnetId: "net-a",
+      tailnetName: "gridwiz.com",
+    });
+  });
+
+  // 설정이 지워졌는데 호스트에만 id 가 남은 경우. 없는 tailnet 으로 조용히 나가는 것보다
+  // 평소 경로로 가서 실패하는 편이 낫다.
+  it("drops the route when the tailnet setting is gone", () => {
+    const { coordinator } = createCoordinator();
+
+    expect(coordinator.resolveTailnetRoute({ tailnetId: "net-deleted" })).toEqual({});
   });
 });

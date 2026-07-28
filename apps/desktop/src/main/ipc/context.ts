@@ -42,6 +42,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  TailnetRepository,
   SnippetRepository,
   SyncOutboxRepository,
 } from "../database";
@@ -95,6 +96,7 @@ export interface MainIpcContext {
   hosts: HostRepository;
   groups: GroupRepository;
   settings: SettingsRepository;
+  tailnets: TailnetRepository;
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
   snippets: SnippetRepository;
@@ -265,7 +267,22 @@ export interface MainIpcContext {
     secrets: HostSecretInput,
   ) => Promise<SshCertificateInfo | null>;
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
-  requireTrustedHostKeys: (host: { hostname: string; port: number }) => string[];
+  requireTrustedHostKeys: (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }) => string[];
+  /**
+   * 이 호스트를 어느 tailnet 으로 보낼지. tailnet 이 없으면 빈 객체다.
+   *
+   * 기대 이름(tailnetName)까지 함께 넘기는 이유는, 코어가 실제로 붙은 tailnet 과 대조해
+   * 다르면 연결을 거부해야 하기 때문이다 — 다른 계정으로 로그인해 엉뚱한 tailnet 의 동명
+   * 머신에 붙는 것을 막는다. 그 이름은 tailnet 설정에만 있으므로 여기서 읽어 넣는다.
+   */
+  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+    tailnetId?: string;
+    tailnetName?: string;
+  };
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;

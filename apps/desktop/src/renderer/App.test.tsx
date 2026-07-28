@@ -402,6 +402,17 @@ function createDolsshApi(options: {
     shell: {
       openExternal: vi.fn().mockResolvedValue(undefined),
     },
+    tailnet: {
+      list: vi.fn().mockResolvedValue([]),
+      save: vi.fn(),
+      remove: vi.fn(),
+      test: vi.fn(),
+      cancel: vi.fn(),
+      disconnect: vi.fn(),
+      forget: vi.fn(),
+      snapshot: vi.fn().mockResolvedValue({ statuses: [] }),
+      onStatus: vi.fn(() => () => undefined),
+    },
   };
 
   return api;

@@ -9,6 +9,7 @@ import type {
   SessionShareChatEvent,
   SessionShareEvent,
   SftpConnectionProgressEvent,
+  TailnetStatus,
   TabCommandPayload,
   TransferJobEvent,
   UpdateEvent,
@@ -46,6 +47,7 @@ const sftpConnectionProgressHub =
   createListenerHub<SftpConnectionProgressEvent>();
 const containerConnectionProgressHub =
   createListenerHub<ContainerConnectionProgressEvent>();
+const tailnetStatusHub = createListenerHub<TailnetStatus>();
 const activityLogsChangedHub = createListenerHub<void>();
 const portForwardEventHub = createListenerHub<PortForwardRuntimeEvent>();
 const updateEventHub = createListenerHub<UpdateEvent>();
@@ -202,6 +204,16 @@ export function subscribeContainerConnectionProgress(
   listener: Listener<ContainerConnectionProgressEvent>,
 ): () => void {
   return containerConnectionProgressHub.subscribe(listener);
+}
+
+export function emitTailnetStatus(payload: TailnetStatus): void {
+  tailnetStatusHub.emit(payload);
+}
+
+export function subscribeTailnetStatus(
+  listener: Listener<TailnetStatus>,
+): () => void {
+  return tailnetStatusHub.subscribe(listener);
 }
 
 export function emitActivityLogsChanged(): void {

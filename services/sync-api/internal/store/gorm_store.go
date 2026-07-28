@@ -1219,6 +1219,25 @@ func (s *GormStore) ListSyncRecords(ctx context.Context, userID string, kind syn
 
 // listSyncRecordsTx 는 주어진 tx/DB 핸들에서 한 kind 의 레코드를 읽는다. GetSyncSnapshot 이
 // revision + 모든 kind 를 단일 읽기 트랜잭션으로 묶는 데 재사용한다.
+// listAllSyncRecordsTx 는 이 사용자의 모든 레코드를 kind 로 묶어 돌려준다. 레코드가 하나도
+// 없는 kind 는 키 자체가 없다 — 클라이언트는 없는 배열을 빈 배열로 다룬다.
+func listAllSyncRecordsTx(tx *gorm.DB, userID string) (syncmodel.Payload, error) {
+	var rows []syncRecordRow
+	if err := tx.
+		Where("user_id = ?", userID).
+		Order("updated_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	payload := make(syncmodel.Payload)
+	for _, row := range rows {
+		kind := syncmodel.Kind(row.Kind)
+		payload[kind] = append(payload[kind], toSyncRecord(row))
+	}
+	return payload, nil
+}
+
 func listSyncRecordsTx(tx *gorm.DB, userID string, kind syncmodel.Kind) ([]syncmodel.Record, error) {
 	var rows []syncRecordRow
 	if err := tx.
@@ -1363,20 +1382,12 @@ func upsertSyncRecordsTx(tx *gorm.DB, userID string, kind syncmodel.Kind, record
 // 상태와 대조하므로, v1 구클라이언트 push도 reset/v2 migration이 먼저 커밋됐다면 어떤
 // 레코드도 쓰기 전에 거부된다.
 func (s *GormStore) ApplyPushRecords(ctx context.Context, userID string, payload syncmodel.Payload, fence VaultPushFence) (int64, error) {
-	kinds := []struct {
-		kind    syncmodel.Kind
-		records []syncmodel.Record
-	}{
-		{syncmodel.KindGroups, payload.Groups},
-		{syncmodel.KindHosts, payload.Hosts},
-		{syncmodel.KindSecrets, payload.Secrets},
-		{syncmodel.KindKnownHosts, payload.KnownHosts},
-		{syncmodel.KindPortForwards, payload.PortForwards},
-		{syncmodel.KindDNSOverrides, payload.DNSOverrides},
-		{syncmodel.KindPreferences, payload.Preferences},
-		{syncmodel.KindAWSProfiles, payload.AWSProfiles},
-		{syncmodel.KindSnippets, payload.Snippets},
+	// 페이로드에 담긴 kind 만 순회한다. 안 담긴 kind 는 손대지 않는다 — 그래서 tailnets 를
+	// 모르는 구버전 클라이언트가 push 해도 서버의 tailnets 레코드가 지워지지 않는다.
+	if err := payload.Validate(); err != nil {
+		return 0, fmt.Errorf("%w: %v", ErrBadSyncRecord, err)
 	}
+	kinds := payload.Kinds()
 	var revision int64
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 사용자 행 선잠금 — 이 사용자의 push 전체를 직렬화해 LWW 판정이 항상 최신
@@ -1388,11 +1399,8 @@ func (s *GormStore) ApplyPushRecords(ctx context.Context, userID string, payload
 			return err
 		}
 		totalWritten := 0
-		for _, k := range kinds {
-			if err := validateKind(k.kind); err != nil {
-				return err
-			}
-			written, err := upsertSyncRecordsTx(tx, userID, k.kind, k.records)
+		for _, kind := range kinds {
+			written, err := upsertSyncRecordsTx(tx, userID, kind, payload[kind])
 			if err != nil {
 				return err
 			}
@@ -1466,35 +1474,11 @@ func (s *GormStore) GetSyncSnapshot(ctx context.Context, userID string) (int64, 
 		}
 		revision = row.SyncRevision
 
+		// 종류별로 쿼리하면 kind 목록을 서버가 알아야 한다. 사용자 행을 한 번 읽어
+		// kind 로 묶으면 서버가 몰라도 되고, 왕복도 kind 수만큼에서 한 번으로 준다.
 		var lerr error
-		if payload.Groups, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindGroups); lerr != nil {
-			return lerr
-		}
-		if payload.Hosts, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindHosts); lerr != nil {
-			return lerr
-		}
-		if payload.Secrets, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindSecrets); lerr != nil {
-			return lerr
-		}
-		if payload.KnownHosts, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindKnownHosts); lerr != nil {
-			return lerr
-		}
-		if payload.PortForwards, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindPortForwards); lerr != nil {
-			return lerr
-		}
-		if payload.DNSOverrides, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindDNSOverrides); lerr != nil {
-			return lerr
-		}
-		if payload.Preferences, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindPreferences); lerr != nil {
-			return lerr
-		}
-		if payload.AWSProfiles, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindAWSProfiles); lerr != nil {
-			return lerr
-		}
-		if payload.Snippets, lerr = listSyncRecordsTx(tx, userID, syncmodel.KindSnippets); lerr != nil {
-			return lerr
-		}
-		return nil
+		payload, lerr = listAllSyncRecordsTx(tx, userID)
+		return lerr
 	}
 	var err error
 	if s.driver == "sqlite" {
@@ -1506,7 +1490,7 @@ func (s *GormStore) GetSyncSnapshot(ctx context.Context, userID string) (int64, 
 		})
 	}
 	if err != nil {
-		return 0, syncmodel.Payload{}, err
+		return 0, nil, err
 	}
 	return revision, payload, nil
 }
@@ -1559,13 +1543,10 @@ func equalTimePointers(a *time.Time, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
+// validateKind 는 형식만 본다. 어떤 kind 인지는 서버가 알 필요가 없다 — 그것을 열거하면
+// 동기화 항목을 하나 늘릴 때마다 서버 배포가 묶인다.
 func validateKind(kind syncmodel.Kind) error {
-	switch kind {
-	case syncmodel.KindGroups, syncmodel.KindHosts, syncmodel.KindSecrets, syncmodel.KindKnownHosts, syncmodel.KindPortForwards, syncmodel.KindDNSOverrides, syncmodel.KindPreferences, syncmodel.KindAWSProfiles, syncmodel.KindSnippets:
-		return nil
-	default:
-		return fmt.Errorf("invalid sync kind: %s", kind)
-	}
+	return syncmodel.ValidateKind(kind)
 }
 
 // UserExists 는 탈퇴 여부 판별용 — "행 없음"은 (false, nil), 드라이버 에러만 err.

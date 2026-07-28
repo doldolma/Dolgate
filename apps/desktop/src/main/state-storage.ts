@@ -18,6 +18,7 @@ import type {
   ActivityLogRecord,
   AppLanguage,
   AwsProfileMetadataRecord,
+  TailnetRecord,
   AwsSsmPortForwardRuleRecord,
   AppTheme,
   ContainerPortForwardRuleRecord,
@@ -158,6 +159,8 @@ export interface DesktopStateFile {
     dnsOverrides: DnsOverrideRecord[];
     secretMetadata: SecretMetadataRecord[];
     awsProfiles: AwsProfileMetadataRecord[];
+    /** 등록된 tailnet. auth key 는 secure.tailnetAuthKeysById 에 따로 둔다. */
+    tailnets: TailnetRecord[];
     snippets: SnippetRecord[];
     syncOutbox: SyncDeletionRecord[];
   };
@@ -168,6 +171,11 @@ export interface DesktopStateFile {
     appSecretsByAccount: Record<string, StoredEncryptedValue>;
     managedSecretsByRef: Record<string, StoredEncryptedValue>;
     managedAwsProfilesById: Record<string, StoredEncryptedValue>;
+    /**
+     * tailnet id → auth key. 설정(이름·ControlURL 등)은 평문 상태에 두지만 키는 비밀이라
+     * 여기 둔다. 1b 에서 tailnet 설정이 동기화 대상이 되어도 키는 딸려 나가지 않는다.
+     */
+    tailnetAuthKeysById: Record<string, StoredEncryptedValue>;
   };
 }
 
@@ -582,6 +590,7 @@ function createDefaultStateFile(): DesktopStateFile {
       dnsOverrides: [],
       secretMetadata: [],
       awsProfiles: [],
+      tailnets: [],
       snippets: [],
       syncOutbox: []
     },
@@ -589,7 +598,8 @@ function createDefaultStateFile(): DesktopStateFile {
       refreshToken: null,
       appSecretsByAccount: {},
       managedSecretsByRef: {},
-      managedAwsProfilesById: {}
+      managedAwsProfilesById: {},
+      tailnetAuthKeysById: {}
     }
   };
 }
@@ -829,6 +839,9 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
     secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
     jumpHostId: jumpHostIds[0] ?? null,
     jumpHostIds: jumpHostIds.length > 0 ? jumpHostIds : null,
+    // 이 정규화는 필드를 나열해 새로 만드는 화이트리스트다. 빠뜨리면 디스크 리로드와 동기화
+    // 적용에서 조용히 사라진다 — 저장은 됐는데 앱을 다시 켜면 없다.
+    tailnetId: typeof value.tailnetId === 'string' ? value.tailnetId : null,
     useMosh: value.useMosh === true ? true : null,
     agentForwarding: value.agentForwarding === true ? true : null,
     // env는 호스트 속성으로 저장된다(시크릿 분리). 디스크 리로드 시에도 보존돼야 한다.
@@ -890,6 +903,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
   const appSecrets = isObject(secure.appSecretsByAccount) ? secure.appSecretsByAccount : {};
   const managedSecrets = isObject(secure.managedSecretsByRef) ? secure.managedSecretsByRef : {};
   const managedAwsProfiles = isObject(secure.managedAwsProfilesById) ? secure.managedAwsProfilesById : {};
+  const tailnetAuthKeys = isObject(secure.tailnetAuthKeysById) ? secure.tailnetAuthKeysById : {};
   const normalizedTerminalFontFamily = normalizeTerminalFontFamily(terminal.fontFamily, fallback.terminal.fontFamily);
   const normalizedTerminalWebglEnabled = normalizeTerminalWebglEnabled(terminal.webglEnabled);
 
@@ -919,6 +933,13 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
     const normalized = normalizeStoredEncryptedValue(record);
     if (normalized) {
       normalizedManagedAwsProfiles[profileId] = normalized;
+    }
+  }
+  const normalizedTailnetAuthKeys: Record<string, StoredEncryptedValue> = {};
+  for (const [tailnetId, record] of Object.entries(tailnetAuthKeys)) {
+    const normalized = normalizeStoredEncryptedValue(record);
+    if (normalized) {
+      normalizedTailnetAuthKeys[tailnetId] = normalized;
     }
   }
 
@@ -1065,13 +1086,15 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         : [],
       snippets: Array.isArray(data.snippets) ? (data.snippets as SnippetRecord[]) : [],
       awsProfiles: Array.isArray(data.awsProfiles) ? (data.awsProfiles as AwsProfileMetadataRecord[]) : [],
+      tailnets: Array.isArray(data.tailnets) ? (data.tailnets as TailnetRecord[]) : [],
       syncOutbox: Array.isArray(data.syncOutbox) ? (data.syncOutbox as SyncDeletionRecord[]) : []
     },
     secure: {
       refreshToken: normalizeStoredEncryptedValue(secure.refreshToken),
       appSecretsByAccount: normalizedAppSecrets,
       managedSecretsByRef: normalizedManagedSecrets,
-      managedAwsProfilesById: normalizedManagedAwsProfiles
+      managedAwsProfilesById: normalizedManagedAwsProfiles,
+      tailnetAuthKeysById: normalizedTailnetAuthKeys
     }
   };
 }

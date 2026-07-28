@@ -2,20 +2,21 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import type {
   AwsProfilesServerSupport,
   DnsOverrideRecord,
-  SnippetRecord,
   GroupRecord,
   HostRecord,
   KnownHostRecord,
   ManagedAwsProfilePayload,
   ManagedSecretPayload,
-  ServerInfoResponse,
   PortForwardRuleRecord,
   SecretMetadataRecord,
+  ServerInfoResponse,
+  SnippetRecord,
   SyncPayloadV2,
   SyncRecord,
   SyncStatus,
-  TerminalPreferencesRecord
-} from '@shared';
+  TailnetPayload,
+  TerminalPreferencesRecord,
+} from "@shared";
 import {
   formatSyncRevisionEtag,
   isVaultEpochRejectionCode,
@@ -29,6 +30,7 @@ import {
   DnsOverrideRepository,
   PortForwardRepository,
   SnippetRepository,
+  TailnetRepository,
   SecretMetadataRepository,
   AwsProfileRepository,
   SettingsRepository,
@@ -116,6 +118,7 @@ function totalRecordCount(payload: SyncPayloadV2): number {
     payload.portForwards.length +
     payload.dnsOverrides.length +
     payload.snippets.length +
+    payload.tailnets.length +
     payload.preferences.length +
     payload.awsProfiles.length
   );
@@ -134,6 +137,7 @@ function normalizeSyncPayload(
     portForwards: Array.isArray(payload?.portForwards) ? payload.portForwards : [],
     dnsOverrides: Array.isArray(payload?.dnsOverrides) ? payload.dnsOverrides : [],
     snippets: Array.isArray(payload?.snippets) ? payload.snippets : [],
+    tailnets: Array.isArray(payload?.tailnets) ? payload.tailnets : [],
     preferences: Array.isArray(payload?.preferences) ? payload.preferences : [],
     awsProfiles:
       includeAwsProfiles && Array.isArray(payload?.awsProfiles) ? payload.awsProfiles : []
@@ -346,7 +350,9 @@ export class SyncService {
     private readonly awsProfiles: AwsProfileRepository,
     private readonly settings: SettingsRepository,
     private readonly secretStore: SecretStore,
-    private readonly outbox: SyncOutboxRepository
+    private readonly outbox: SyncOutboxRepository,
+    // 새 인자는 끝에 붙인다. 중간에 끼우면 나머지 호출 인자가 조용히 한 칸씩 밀린다.
+    private readonly tailnets: TailnetRepository
   ) {
     this.state = this.loadPersistedState();
   }
@@ -747,6 +753,7 @@ export class SyncService {
     this.portForwards.replaceAll([]);
     this.dnsOverrides.replaceAll([]);
     this.snippets.replaceAll([]);
+    this.tailnets.replaceAll([]);
     this.awsProfiles.replaceAll([]);
     this.settings.clearSyncedTerminalPreferences();
     this.outbox.clearAll();
@@ -933,6 +940,10 @@ export class SyncService {
     const portForwards = this.portForwards.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const dnsOverrides = this.dnsOverrides.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const snippets = this.snippets.list().map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
+    // auth key 를 포함한 페이로드를 올린다. 서버는 암호문만 보므로(E2EE) 키가 실려도 안전하다.
+    const tailnets = this.tailnets
+      .listPayloads()
+      .map((record) => this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64));
     const preferences = [this.settings.getSyncedTerminalPreferences()].map((record) =>
       this.toSyncRecord(record.id, record.updatedAt, record, vaultKeyBase64)
     );
@@ -965,7 +976,8 @@ export class SyncService {
           dnsOverrides,
           snippets,
           preferences,
-          awsProfiles
+          awsProfiles,
+          tailnets
         },
         includedDeletions: []
       };
@@ -1007,6 +1019,9 @@ export class SyncService {
         case 'awsProfiles':
           awsProfiles.push(record);
           break;
+        case 'tailnets':
+          tailnets.push(record);
+          break;
       }
     }
 
@@ -1020,7 +1035,8 @@ export class SyncService {
         dnsOverrides,
         snippets,
         preferences,
-        awsProfiles
+        awsProfiles,
+        tailnets
       },
       includedDeletions
     };
@@ -1071,6 +1087,9 @@ export class SyncService {
     const snippets = payload.snippets
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<SnippetRecord>(record.encrypted_payload, vaultKeyBase64));
+    const tailnets = payload.tailnets
+      .filter((record) => !record.deleted_at)
+      .map((record) => decodeEncryptedPayload<TailnetPayload>(record.encrypted_payload, vaultKeyBase64));
     const preferences = payload.preferences
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<TerminalPreferencesRecord>(record.encrypted_payload, vaultKeyBase64));
@@ -1125,6 +1144,21 @@ export class SyncService {
       state.data.portForwards = portForwards;
       state.data.dnsOverrides = dnsOverrides;
       state.data.snippets = snippets;
+      // 레코드와 auth key 를 한 커밋에서 같이 쓴다. 나눠 쓰면 그 사이에 ephemeral 판정이
+      // hasAuthKey 를 잘못 보게 된다.
+      state.data.tailnets = tailnets.map((payload) => {
+        const hasAuthKey = Boolean(payload.authKey);
+        const { authKey: _authKey, ...record } = payload;
+        return { ...record, hasAuthKey, ephemeral: hasAuthKey };
+      });
+      state.secure.tailnetAuthKeysById = Object.fromEntries(
+        tailnets
+          .filter((payload) => Boolean(payload.authKey))
+          .map((payload) => [
+            payload.id,
+            encodeSecretForStorage(payload.authKey as string),
+          ]),
+      );
       if (shouldSyncAwsProfiles) {
         state.data.awsProfiles = awsProfiles.map((record) => ({
           id: record.id,
@@ -1278,4 +1312,5 @@ type SyncRecordKind =
   | 'dnsOverrides'
   | 'snippets'
   | 'preferences'
-  | 'awsProfiles';
+  | 'awsProfiles'
+  | 'tailnets';

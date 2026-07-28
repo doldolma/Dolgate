@@ -91,7 +91,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
 
       - name: Run sync-api tests
         working-directory: services/sync-api
@@ -118,7 +118,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
 
       - name: Run ssh-core tests
         working-directory: services/ssh-core
@@ -191,7 +191,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
 
       - name: Install dependencies
         run: npm ci
@@ -244,7 +244,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.4"
+          go-version: "1.26.5"
 
       - name: Set up Java
         uses: actions/setup-java@v4

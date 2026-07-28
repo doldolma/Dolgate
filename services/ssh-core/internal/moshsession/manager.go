@@ -61,6 +61,12 @@ type ManagerConfig struct {
 	TCPDialTimeout time.Duration
 	// TCPKeepAliveInterval은 bootstrap SSH 커널 keepalive probe 간격이다.
 	TCPKeepAliveInterval time.Duration
+	// TailnetDial 은 payload 의 tailnet 경로를 raw dialer 로 바꿔 준다. nil 이거나 경로가
+	// 비어 있으면 평소처럼 직접 TCP 로 나간다.
+	//
+	// mosh 는 bootstrap SSH 만 tailnet 을 탄다. 그 위의 UDP 는 mosh-server 가 직접 여는
+	// 것이라 이 경로 밖이다 — tailnet 안의 호스트에 mosh 를 쓰면 UDP 가 닿지 않을 수 있다.
+	TailnetDial sshconn.TailnetDialResolver
 }
 
 var defaultManagerConfig = ManagerConfig{
@@ -121,8 +127,18 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 	}
+	dial, dialErr := sshconn.ResolveTailnetDial(
+		m.config.TailnetDial,
+		payload.TailnetID,
+		payload.TailnetName,
+	)
+	if dialErr != nil {
+		return dialErr
+	}
+
 	// bootstrap SSH도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 세션과 동일한 공통 헬퍼.
 	client, err := sshconn.DialClient(target, sshconn.Config{
+		Dial:                  dial,
 		TCPDialTimeout:        m.config.TCPDialTimeout,
 		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
 		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),

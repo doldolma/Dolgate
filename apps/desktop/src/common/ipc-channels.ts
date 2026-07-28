@@ -245,6 +245,19 @@ export const ipcChannels = {
     update: 'snippets:update',
     remove: 'snippets:remove'
   },
+  tailnet: {
+    list: 'tailnet:list',
+    save: 'tailnet:save',
+    remove: 'tailnet:remove',
+    test: 'tailnet:test',
+    forget: 'tailnet:forget',
+    disconnect: 'tailnet:disconnect',
+    cancel: 'tailnet:cancel',
+    snapshot: 'tailnet:snapshot',
+    // 연결 테스트 중 진행 상태를 렌더러로 밀어 준다. 브라우저 로그인이면 사용자가 인증하는
+    // 동안 무엇을 기다리는지 보여줘야 해서 응답 하나로는 부족하다.
+    status: 'tailnet:status'
+  },
   knownHosts: {
     list: 'known-hosts:list',
     probeHost: 'known-hosts:probe-host',

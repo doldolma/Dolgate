@@ -52,6 +52,25 @@ type Service struct {
 	transfers         map[string]*transferHandle
 	pendingChallenges map[string]*pendingChallenge
 	emit              EventEmitter
+	tailnetDial       sshconn.TailnetDialResolver
+}
+
+// SetTailnetDial 은 tailnet 경로를 raw dialer 로 바꾸는 함수를 주입한다.
+//
+// 생성자에서 받지 않는 이유는 tailnet 레지스트리가 런타임 소유이고, 서비스가 런타임보다 먼저
+// 만들어지기 때문이다. coreManager.setSsmPortForwardTokenIssuer 와 같은 방식이다.
+func (s *Service) SetTailnetDial(resolve sshconn.TailnetDialResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tailnetDial = resolve
+}
+
+// tailnetDialer 는 이 연결에 쓸 dialer 를 만든다. 경로가 없으면 nil 이라 평소대로 나간다.
+func (s *Service) tailnetDialer(tailnetID, expectedName string) (sshconn.DialFunc, error) {
+	s.mu.RLock()
+	resolve := s.tailnetDial
+	s.mu.RUnlock()
+	return sshconn.ResolveTailnetDial(resolve, tailnetID, expectedName)
 }
 
 func New(emit EventEmitter) *Service {
@@ -116,6 +135,11 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
 	config.AuthAgentEndpointKind = payload.AuthAgentEndpointKind
 	config.AuthAgentEndpoint = payload.AuthAgentEndpoint
+	dial, dialErr := s.tailnetDialer(payload.TailnetID, payload.TailnetName)
+	if dialErr != nil {
+		return dialErr
+	}
+	config.Dial = dial
 	client, err := sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

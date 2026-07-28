@@ -21,6 +21,7 @@ import (
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 	"dolssh/services/ssh-core/internal/ssmforward"
+	"dolssh/services/ssh-core/internal/tailnet"
 	"dolssh/services/ssh-core/internal/tmuxsession"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
@@ -28,6 +29,9 @@ import (
 type Options struct {
 	EmitEvent  func(coretypes.Event)
 	EmitStream func(coretypes.StreamFrame, []byte)
+	// TailnetStateDir 는 tailnet 노드 상태를 두는 루트다. 비면 tailnet 명령이 명확한
+	// 오류로 거절된다 — tsnet 에 맡기면 os.UserConfigDir() 밑에 앱과 무관한 경로를 만든다.
+	TailnetStateDir string
 }
 
 type sshSessionManager interface {
@@ -167,6 +171,9 @@ type Runtime struct {
 	ssmForwarding             ssmForwardingService
 	probeHostKey              hostKeyProbeFunc
 	inspectCertificate        certificateInspectFunc
+	tailnets                  *tailnet.Registry
+	tailnetConfigs            *tailnetConfigs
+	tailnetTests              *tailnetTests
 	autocompleteMu            sync.Mutex
 	autocompleteRevisions     map[string]int
 	shellIntegrationInstalled map[string]bool
@@ -182,17 +189,38 @@ func New(options Options) *Runtime {
 		emitStream = func(coretypes.StreamFrame, []byte) {}
 	}
 
-	return newRuntimeWithDeps(
+	// 매니저는 런타임보다 먼저 만들어지는데 tailnet 레지스트리는 런타임 소유다. 그래서
+	// dialer 는 아래에서 채워질 변수를 잡는 클로저로 넘긴다 — 실제 호출은 연결 시점이라
+	// 그때는 이미 채워져 있다.
+	var instance *Runtime
+	tailnetDial := func(tailnetID, expectedName string) (sshconn.DialFunc, error) {
+		return instance.tailnetDial(TailnetRoute{ID: tailnetID, ExpectedName: expectedName})
+	}
+	sshManager := sshsession.NewManagerWithConfig(emitEvent, emitStream, sshsession.ManagerConfig{
+		TailnetDial: tailnetDial,
+	})
+	moshManager := moshsession.NewManagerWithConfig(emitEvent, emitStream, moshsession.ManagerConfig{
+		TailnetDial: tailnetDial,
+	})
+	sftpService := coresftp.New(emitEvent)
+	containersService := containersvc.New(emitEvent)
+	forwardingService := forwarding.New(emitEvent)
+	// 생성자에서 못 받는 것들. tailnet 레지스트리가 런타임 소유라 서비스보다 늦게 생긴다.
+	sftpService.SetTailnetDial(tailnetDial)
+	containersService.SetTailnetDial(tailnetDial)
+	forwardingService.SetTailnetDial(tailnetDial)
+
+	instance = newRuntimeWithDeps(
 		emitEvent,
 		emitStream,
-		sshsession.NewManager(emitEvent, emitStream),
-		moshsession.NewManager(emitEvent, emitStream),
+		sshManager,
+		moshManager,
 		awssession.NewManager(emitEvent, emitStream),
 		localsession.NewManager(emitEvent, emitStream),
 		serialsession.NewManager(emitEvent, emitStream),
-		coresftp.New(emitEvent),
-		containersvc.New(emitEvent),
-		forwarding.New(emitEvent),
+		sftpService,
+		containersService,
+		forwardingService,
 		ssmforward.New(emitEvent),
 		func(payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error) {
 			jump := sshconn.JumpTargetFromCore(payload.Jump)
@@ -200,6 +228,15 @@ func New(options Options) *Runtime {
 			// config.Progress로 보고. 상관 ID는 renderer가 넘긴 sessionId/endpointId를 그대로 사용해
 			// 프로브 홉이 실제 연결과 같은 오버레이에 표시되게 한다.
 			probeConfig := sshconn.DefaultConfig
+			// 연결과 같은 tailnet 을 타야 한다. 경로가 없으면 dial 이 nil 이라 평소대로 나간다.
+			probeDial, dialErr := instance.tailnetDial(TailnetRoute{
+				ID:           payload.TailnetID,
+				ExpectedName: payload.TailnetName,
+			})
+			if dialErr != nil {
+				return coretypes.HostKeyProbedPayload{}, dialErr
+			}
+			probeConfig.Dial = probeDial
 			probeConfig.Progress = sshconn.HopProgress(
 				sshconn.Target{
 					Host:    payload.Host,
@@ -240,6 +277,16 @@ func New(options Options) *Runtime {
 			return inspected
 		},
 	)
+
+	// tailnet 레지스트리는 여기서만 붙인다. newRuntimeWithDeps 는 테스트가 직접 부르는
+	// 생성자라 시그니처를 늘리지 않는다.
+	instance.tailnetConfigs = newTailnetConfigs(options.TailnetStateDir)
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(instance.tailnetConfigs.newNode, tailnet.Options{})
+	// tmux 매니저는 newRuntimeWithDeps 안에서 만들어지므로 여기서 붙인다.
+	instance.tmux.SetTailnetDial(tailnetDial)
+
+	return instance
 }
 
 func newRuntimeWithDeps(
@@ -969,4 +1016,16 @@ func (runtime *Runtime) Shutdown() {
 	runtime.containers.Shutdown()
 	runtime.forwarding.Shutdown()
 	runtime.ssmForwarding.Shutdown()
+
+	runtime.shutdownTailnets()
+}
+
+// shutdownTailnets 는 노드를 닫는다. 로그아웃은 하지 않는다 — 로그아웃하면 등록이 사라져서
+// 다음 실행 때 브라우저 로그인을 처음부터 다시 해야 한다. 닫기만 하면 컨트롤 플레인은 즉시
+// 오프라인으로 보고, ephemeral 노드는 그쪽 정책에 따라 정리된다.
+func (runtime *Runtime) shutdownTailnets() {
+	if runtime.tailnets == nil {
+		return
+	}
+	_ = runtime.tailnets.Close()
 }

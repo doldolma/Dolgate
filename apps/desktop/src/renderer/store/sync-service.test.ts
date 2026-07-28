@@ -45,6 +45,7 @@ function createRemoteSnapshotWithPreferences(keyBase64: string): SyncPayloadV2 {
     dnsOverrides: [],
     snippets: [],
     awsProfiles: [],
+    tailnets: [],
     preferences: [
       {
         id: 'global-terminal',
@@ -140,6 +141,7 @@ function createRemoteSnapshotWithManagedSecrets(keyBase64: string, secretCount =
     dnsOverrides: [],
     snippets: [],
     awsProfiles: [],
+    tailnets: [],
     preferences: [
       {
         id: 'global-terminal',
@@ -220,6 +222,10 @@ function createSyncService() {
   const snippets = {
     list: vi.fn().mockReturnValue([]),
     replaceAll: vi.fn()
+  };
+  const tailnets = {
+    listPayloads: vi.fn(() => []),
+    replaceAll: vi.fn(),
   };
   const knownHosts = {
     list: vi.fn().mockReturnValue([]),
@@ -329,7 +335,8 @@ function createSyncService() {
     awsProfiles as never,
     settings as never,
     secretStore as never,
-    outbox as never
+    outbox as never,
+    tailnets as never
   );
 
   return {

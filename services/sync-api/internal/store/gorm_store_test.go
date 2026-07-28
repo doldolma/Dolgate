@@ -776,7 +776,7 @@ func TestGormStoreVaultStateAndPushFenceLifecycle(t *testing.T) {
 				t.Fatalf("GetOrCreateUserVaultKey() error = %v", err)
 			}
 			staleLegacyFence := VaultPushFence{Epoch: legacy.Epoch, Version: legacy.Version}
-			payload := syncmodel.Payload{Hosts: []syncmodel.Record{{
+			payload := syncmodel.Payload{syncmodel.KindHosts: []syncmodel.Record{{
 				ID:               "stale-host",
 				EncryptedPayload: "stale-ciphertext",
 				UpdatedAt:        "2026-07-15T00:00:00Z",
@@ -918,7 +918,7 @@ func TestSyncSnapshotIsolationKeepsRevisionAndRecordsTogether(t *testing.T) {
 			pushDone := make(chan error, 1)
 			go func() {
 				_, err := store.ApplyPushRecords(ctx, user.ID, syncmodel.Payload{
-					Hosts: []syncmodel.Record{{
+					syncmodel.KindHosts: []syncmodel.Record{{
 						ID:               "concurrent-host",
 						EncryptedPayload: "ciphertext",
 						UpdatedAt:        "2026-07-15T00:00:00Z",
@@ -946,7 +946,7 @@ func TestSyncSnapshotIsolationKeepsRevisionAndRecordsTogether(t *testing.T) {
 				t.Fatalf("rollback snapshot transaction: %v", err)
 			}
 			_, current, err := store.GetSyncSnapshot(ctx, user.ID)
-			if err != nil || len(current.Hosts) != 1 {
+			if err != nil || len(current[syncmodel.KindHosts]) != 1 {
 				t.Fatalf("current snapshot after push = %#v, %v", current, err)
 			}
 		})
@@ -1140,5 +1140,98 @@ func TestGormStoreUpdateUserVaultV2RequiresV2Row(t *testing.T) {
 				t.Fatalf("UpdateUserVaultV2() over v1 error = %v, want ErrVaultConflict", err)
 			}
 		})
+	}
+}
+
+// 서버가 kind 를 열거하지 않게 만든 변경의 핵심 계약이다.
+//
+// 첫째, 서버가 모르는 kind 도 저장되고 그대로 돌아와야 한다 — 그래야 동기화 항목을 늘릴 때
+// 서버를 배포하지 않아도 된다. 둘째, push 에 없는 kind 는 손대지 않아야 한다 — 그래야 새
+// kind 를 모르는 구버전 클라이언트가 그것을 지워 버리지 않는다.
+func TestGormStoreStoresUnknownKindsAndLeavesAbsentOnesAlone(t *testing.T) {
+	for _, tc := range storeTestCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := tc.open(t)
+
+			user, err := store.CreateUser(ctx, "anykind@example.com", "hash")
+			if err != nil {
+				t.Fatalf("CreateUser() error = %v", err)
+			}
+			vault, err := store.GetOrCreateUserVaultKey(ctx, user.ID)
+			if err != nil {
+				t.Fatalf("GetOrCreateUserVaultKey() error = %v", err)
+			}
+			fence := VaultPushFence{Epoch: vault.Epoch, Version: 1}
+
+			// 서버 코드에 존재하지 않는 kind.
+			if _, err := store.ApplyPushRecords(ctx, user.ID, syncmodel.Payload{
+				syncmodel.Kind("tailnets"): {{
+					ID:               "net-1",
+					EncryptedPayload: "ciphertext-tailnet",
+					UpdatedAt:        "2026-07-28T00:00:00Z",
+				}},
+				syncmodel.KindHosts: {{
+					ID:               "host-1",
+					EncryptedPayload: "ciphertext-host",
+					UpdatedAt:        "2026-07-28T00:00:00Z",
+				}},
+			}, fence); err != nil {
+				t.Fatalf("ApplyPushRecords() error = %v", err)
+			}
+
+			// 그 kind 를 모르는 구버전 클라이언트가 자기가 아는 것만 push 한다.
+			if _, err := store.ApplyPushRecords(ctx, user.ID, syncmodel.Payload{
+				syncmodel.KindHosts: {{
+					ID:               "host-1",
+					EncryptedPayload: "ciphertext-host-v2",
+					UpdatedAt:        "2026-07-28T01:00:00Z",
+				}},
+			}, fence); err != nil {
+				t.Fatalf("legacy ApplyPushRecords() error = %v", err)
+			}
+
+			_, snapshot, err := store.GetSyncSnapshot(ctx, user.ID)
+			if err != nil {
+				t.Fatalf("GetSyncSnapshot() error = %v", err)
+			}
+
+			tailnets := snapshot[syncmodel.Kind("tailnets")]
+			if len(tailnets) != 1 || tailnets[0].EncryptedPayload != "ciphertext-tailnet" {
+				t.Errorf("tailnets = %#v — a client that does not know the kind must not drop it", tailnets)
+			}
+			hosts := snapshot[syncmodel.KindHosts]
+			if len(hosts) != 1 || hosts[0].EncryptedPayload != "ciphertext-host-v2" {
+				t.Errorf("hosts = %#v, want the newer payload", hosts)
+			}
+		})
+	}
+}
+
+// 열거를 없앤 대신 형식으로 막는다.
+func TestGormStoreRejectsMalformedKinds(t *testing.T) {
+	ctx := context.Background()
+	store := openSQLiteTestStore(t)
+	user, err := store.CreateUser(ctx, "badkind@example.com", "hash")
+	if err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	vault, err := store.GetOrCreateUserVaultKey(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateUserVaultKey() error = %v", err)
+	}
+	fence := VaultPushFence{Epoch: vault.Epoch, Version: 1}
+
+	for _, kind := range []string{"", "has space", "has/slash", strings.Repeat("k", 65)} {
+		_, err := store.ApplyPushRecords(ctx, user.ID, syncmodel.Payload{
+			syncmodel.Kind(kind): {{
+				ID:               "x",
+				EncryptedPayload: "c",
+				UpdatedAt:        "2026-07-28T00:00:00Z",
+			}},
+		}, fence)
+		if !errors.Is(err, ErrBadSyncRecord) {
+			t.Errorf("ApplyPushRecords(kind=%q) error = %v, want ErrBadSyncRecord", kind, err)
+		}
 	}
 }

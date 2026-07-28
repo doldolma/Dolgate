@@ -9,11 +9,18 @@ import (
 )
 
 type stubCoreRuntime struct {
-	awsConnectSession string
-	awsConnectPayload protocol.AWSConnectPayload
-	inputSession      string
-	inputPayload      []byte
-	awsConnectDone    chan struct{}
+	awsConnectSession   string
+	awsConnectPayload   protocol.AWSConnectPayload
+	inputSession        string
+	inputPayload        []byte
+	awsConnectDone      chan struct{}
+	tailnetTestID       string
+	tailnetDisconnectID string
+	tailnetCancelID     string
+	tailnetSnapshots    int
+	tailnetTestDone     chan struct{}
+	tailnetForgetID     string
+	tailnetForgetDone   chan struct{}
 }
 
 func (stub *stubCoreRuntime) EmitReady()              {}
@@ -77,6 +84,35 @@ func (stub *stubCoreRuntime) RunCompletionQuery(sessionID, requestID, command st
 	return nil
 }
 func (stub *stubCoreRuntime) RunCommand(sessionID, requestID, command string, timeoutMs int) error {
+	return nil
+}
+func (stub *stubCoreRuntime) TailnetTest(requestID string, payload protocol.TailnetTestPayload) error {
+	stub.tailnetTestID = payload.Config.ID
+	if stub.tailnetTestDone != nil {
+		close(stub.tailnetTestDone)
+	}
+	return nil
+}
+func (stub *stubCoreRuntime) TailnetForget(requestID string, payload protocol.TailnetForgetPayload) error {
+	stub.tailnetForgetID = payload.ID
+	if stub.tailnetForgetDone != nil {
+		close(stub.tailnetForgetDone)
+	}
+	return nil
+}
+
+func (stub *stubCoreRuntime) TailnetDisconnect(_ string, payload protocol.TailnetDisconnectPayload) error {
+	stub.tailnetDisconnectID = payload.ID
+	return nil
+}
+
+func (stub *stubCoreRuntime) TailnetCancel(_ string, payload protocol.TailnetDisconnectPayload) error {
+	stub.tailnetCancelID = payload.ID
+	return nil
+}
+
+func (stub *stubCoreRuntime) TailnetSnapshot(_ string) error {
+	stub.tailnetSnapshots += 1
 	return nil
 }
 func (stub *stubCoreRuntime) ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error {
@@ -229,5 +265,64 @@ func TestDispatchAWSConnectUsesRuntimeFacade(t *testing.T) {
 	}
 	if core.awsConnectPayload.Region != "ap-northeast-2" || core.awsConnectPayload.InstanceID != "i-0123456789" {
 		t.Fatalf("unexpected AWS payload: %#v", core.awsConnectPayload)
+	}
+}
+
+func TestDispatchTailnetTestUsesRuntimeFacade(t *testing.T) {
+	core := &stubCoreRuntime{tailnetTestDone: make(chan struct{})}
+	payload, err := json.Marshal(protocol.TailnetTestPayload{
+		Config: protocol.TailnetConfigPayload{
+			ID:         "corp",
+			Hostname:   "dolgate-laptop",
+			ControlURL: "https://headscale.example.com",
+			Ephemeral:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal tailnet payload: %v", err)
+	}
+
+	if err := dispatch(core, newEventWriter(), protocol.Request{
+		ID:      "req-tailnet-1",
+		Type:    protocol.CommandTailnetTest,
+		Payload: payload,
+	}); err != nil {
+		t.Fatalf("dispatch() error = %v", err)
+	}
+
+	select {
+	case <-core.tailnetTestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for async tailnet test dispatch")
+	}
+
+	if core.tailnetTestID != "corp" {
+		t.Fatalf("expected tailnet test for corp, got %q", core.tailnetTestID)
+	}
+}
+
+func TestDispatchTailnetForgetUsesRuntimeFacade(t *testing.T) {
+	core := &stubCoreRuntime{tailnetForgetDone: make(chan struct{})}
+	payload, err := json.Marshal(protocol.TailnetForgetPayload{ID: "corp"})
+	if err != nil {
+		t.Fatalf("marshal forget payload: %v", err)
+	}
+
+	if err := dispatch(core, newEventWriter(), protocol.Request{
+		ID:      "req-tailnet-2",
+		Type:    protocol.CommandTailnetForget,
+		Payload: payload,
+	}); err != nil {
+		t.Fatalf("dispatch() error = %v", err)
+	}
+
+	select {
+	case <-core.tailnetForgetDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for async tailnet forget dispatch")
+	}
+
+	if core.tailnetForgetID != "corp" {
+		t.Fatalf("expected tailnet forget for corp, got %q", core.tailnetForgetID)
 	}
 }

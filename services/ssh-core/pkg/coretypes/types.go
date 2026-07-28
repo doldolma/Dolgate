@@ -55,6 +55,11 @@ const (
 	CommandContainersRemove            CommandType = "containersRemove"
 	CommandContainersStats             CommandType = "containersStats"
 	CommandContainersSearchLogs        CommandType = "containersSearchLogs"
+	CommandTailnetTest                 CommandType = "tailnetTest"
+	CommandTailnetForget               CommandType = "tailnetForget"
+	CommandTailnetDisconnect           CommandType = "tailnetDisconnect"
+	CommandTailnetCancel               CommandType = "tailnetCancel"
+	CommandTailnetSnapshot             CommandType = "tailnetSnapshot"
 	CommandTerminalAutocompletePrepare CommandType = "terminalAutocompletePrepare"
 	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
@@ -91,6 +96,9 @@ const (
 	EventSerialControlCompleted         EventType = "serialControlCompleted"
 	EventHostKeyProbed                  EventType = "hostKeyProbed"
 	EventCertificateInspected           EventType = "certificateInspected"
+	EventTailnetStatus                  EventType = "tailnetStatus"
+	EventTailnetForgot                  EventType = "tailnetForgot"
+	EventTailnetSnapshot                EventType = "tailnetSnapshot"
 	EventPrivateKeyGenerated            EventType = "privateKeyGenerated"
 	EventPrivateKeyInspected            EventType = "privateKeyInspected"
 	EventAuthorizedKeyInstalled         EventType = "authorizedKeyInstalled"
@@ -313,6 +321,11 @@ type ConnectPayload struct {
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프(포워딩과 별개).
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
+	// TailnetID 가 있으면 그 tailnet 을 경유해 붙는다. 비면 일반 네트워크로 직접 붙는다.
+	TailnetID string `json:"tailnetId,omitempty"`
+	// TailnetName 은 설정에 박아 둔 tailnet 이름이다. 실제로 붙은 곳과 다르면 연결을
+	// 거부한다 — 다른 계정으로 로그인해 엉뚱한 tailnet 의 동명 머신에 붙는 것을 막는다.
+	TailnetName string `json:"tailnetName,omitempty"`
 	// UseMosh가 true면 SSH 대신 mosh(UDP)로 연결한다. SSH는 mosh-server 부트스트랩에만
 	// 쓰이고 이후 통신은 mosh SSP다. jump host와는 상호 배타(데스크톱 UI에서 차단).
 	UseMosh bool `json:"useMosh,omitempty"`
@@ -474,6 +487,10 @@ type SFTPConnectPayload struct {
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
+	// TailnetID 가 있으면 그 tailnet 을 경유해 붙는다. TailnetName 은 설정에 박아 둔 이름으로,
+	// 실제로 붙은 곳과 다르면 코어가 연결을 거부한다.
+	TailnetID   string `json:"tailnetId,omitempty"`
+	TailnetName string `json:"tailnetName,omitempty"`
 }
 
 type ContainersConnectPayload struct {
@@ -492,6 +509,76 @@ type ContainersConnectPayload struct {
 	// AuthType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프.
 	AuthAgentEndpointKind string `json:"authAgentEndpointKind,omitempty"`
 	AuthAgentEndpoint     string `json:"authAgentEndpoint,omitempty"`
+	// TailnetID 가 있으면 그 tailnet 을 경유해 붙는다. TailnetName 은 설정에 박아 둔 이름으로,
+	// 실제로 붙은 곳과 다르면 코어가 연결을 거부한다.
+	TailnetID   string `json:"tailnetId,omitempty"`
+	TailnetName string `json:"tailnetName,omitempty"`
+}
+
+// TailnetConfigPayload 는 tailnet 노드를 어떻게 등록할지다. 컨트롤 플레인(서버)과 인증
+// 방식은 직교한다 — 어느 서버든 auth key 와 브라우저 로그인 둘 다 쓸 수 있다.
+type TailnetConfigPayload struct {
+	ID string `json:"id"`
+	// Hostname 은 tailnet 디바이스 목록에 보일 이름이다.
+	Hostname string `json:"hostname,omitempty"`
+	// ControlURL 이 비면 Tailscale, 채우면 Headscale 같은 다른 컨트롤 플레인이다.
+	ControlURL string `json:"controlUrl,omitempty"`
+	// AuthKey 가 있으면 브라우저 없이 등록한다. 비면 대화형 로그인으로 간다.
+	AuthKey string `json:"authKey,omitempty"`
+	// Ephemeral 은 활동이 멈추면 노드를 지우도록 요청한다. 컨트롤 플레인이 최종 판단하며,
+	// Headscale 의 OIDC 경로는 이를 무시하는 알려진 버그가 있다.
+	Ephemeral bool `json:"ephemeral,omitempty"`
+}
+
+// TailnetTestPayload 는 연결 테스트 요청이다. 노드를 올려 Running 까지 가는지 확인하고,
+// 그 과정을 EventTailnetStatus 로 흘려보낸다.
+type TailnetTestPayload struct {
+	Config TailnetConfigPayload `json:"config"`
+	// TimeoutMs 가 0 이면 기본값을 쓴다. 브라우저 로그인은 사람이 개입하므로 auth key
+	// 경로보다 넉넉해야 한다.
+	TimeoutMs int `json:"timeoutMs,omitempty"`
+}
+
+type TailnetForgetPayload struct {
+	ID string `json:"id"`
+}
+
+// TailnetStatusPayload 는 노드가 올라오는 동안 여러 번 방출된다. AuthURL 이 채워지면
+// 사용자가 브라우저에서 인가해야 한다는 뜻이다.
+type TailnetStatusPayload struct {
+	ID      string `json:"id"`
+	State   string `json:"state"`
+	AuthURL string `json:"authUrl,omitempty"`
+	Error   string `json:"error,omitempty"`
+
+	// 아래는 붙은 뒤에만 채워진다. Tailscale 기본 서버로 여러 개를 등록하면 설정이 전부
+	// 같아서 화면에서 구분할 수 없다 — 누구로 어디에 붙었는지가 유일한 단서다.
+	LoginName   string `json:"loginName,omitempty"`
+	TailnetName string `json:"tailnetName,omitempty"`
+	NodeName    string `json:"nodeName,omitempty"`
+	NodeIP      string `json:"nodeIp,omitempty"`
+}
+
+type TailnetForgotPayload struct {
+	ID    string `json:"id"`
+	Error string `json:"error,omitempty"`
+}
+
+// TailnetDisconnectPayload 는 노드를 지금 내리라는 요청이다. 등록은 남으므로 다시 쓰면
+// 재인증 없이 올라온다.
+type TailnetDisconnectPayload struct {
+	ID string `json:"id"`
+}
+
+// TailnetSnapshotPayload 는 지금 살아 있는 노드들의 상태다.
+//
+// 여기 없는 tailnet 은 노드가 없다는 뜻이고 그것 자체가 "연결 안 됨"이다. 화면을 여는 것
+// 만으로 노드를 올리지 않기 위해, 없는 것을 위해 노드를 만들지는 않는다.
+type TailnetSnapshotPayload struct {
+	Statuses []TailnetStatusPayload `json:"statuses"`
+	// LocalNodeName 은 이 기기가 tailnet 에 등록할 때 쓰는 이름이다. 붙어 있지 않아도
+	// 알 수 있어야 한다 — 사용자가 기기 목록에서 자기 기기를 찾는 단서다.
+	LocalNodeName string `json:"localNodeName,omitempty"`
 }
 
 type HostKeyProbePayload struct {
@@ -506,6 +593,10 @@ type HostKeyProbePayload struct {
 	// WSProxy가 설정되면 직접 TCP dial 대신 sync-api WebSocket으로 전송을 라우팅해
 	// 호스트 키를 읽는다(서버 프록시/bastion — IP 제한 VPC에서 probe도 서버 IP 경유).
 	WSProxy *WSProxyTarget `json:"wsProxy,omitempty"`
+	// 프로브도 연결과 같은 통로로 가야 한다. 안 그러면 tailnet 안에만 있는 호스트의 키를
+	// 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽어 잘못 신뢰하게 된다.
+	TailnetID   string `json:"tailnetId,omitempty"`
+	TailnetName string `json:"tailnetName,omitempty"`
 }
 
 type CertificateInspectPayload struct {
@@ -728,6 +819,10 @@ type PortForwardStartPayload struct {
 	TargetHost            string         `json:"targetHost,omitempty"`
 	TargetPort            int            `json:"targetPort,omitempty"`
 	SourceEndpointID      string         `json:"sourceEndpointId,omitempty"`
+	// TailnetID 가 있으면 그 tailnet 을 경유해 붙는다. TailnetName 은 설정에 박아 둔 이름으로,
+	// 실제로 붙은 곳과 다르면 코어가 연결을 거부한다.
+	TailnetID   string `json:"tailnetId,omitempty"`
+	TailnetName string `json:"tailnetName,omitempty"`
 }
 
 type SSMPortForwardStartPayload struct {

@@ -11,6 +11,12 @@ vi.mock("electron", () => ({
 
 function createDependencies(): RegisterIpcDependencies {
   return {
+    tailnets: {
+      list: vi.fn(() => []),
+      save: vi.fn(),
+      remove: vi.fn(),
+      readAuthKey: vi.fn(() => null),
+    } as unknown as RegisterIpcDependencies["tailnets"],
     hosts: {
       list: vi.fn(() => []),
       updateSecretRef: vi.fn(),

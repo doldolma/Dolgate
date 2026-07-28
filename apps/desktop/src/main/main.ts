@@ -22,6 +22,7 @@ import {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  TailnetRepository,
   SnippetRepository,
   SyncOutboxRepository
 } from './database';
@@ -198,6 +199,7 @@ if (termiusHelperArgIndex >= 0) {
   const groupRepository = new GroupRepository();
   const desktopConfigService = new DesktopConfigService();
   const settingsRepository = new SettingsRepository(desktopConfigService);
+  const tailnetRepository = new TailnetRepository();
   const portForwardRepository = new PortForwardRepository();
   const dnsOverrideRepository = new DnsOverrideRepository();
   const snippetRepository = new SnippetRepository();
@@ -275,7 +277,8 @@ if (termiusHelperArgIndex >= 0) {
     awsProfileRepository,
     settingsRepository,
     secretStore,
-    syncOutboxRepository
+    syncOutboxRepository,
+    tailnetRepository
   );
   const sessionShareService = new SessionShareService(authService, coreManager);
   const sessionReplayService = new SessionReplayService(settingsRepository, coreManager);
@@ -691,6 +694,7 @@ if (termiusHelperArgIndex >= 0) {
       xshellImportService,
       sessionShareService,
       sessionReplayService,
+      tailnetRepository,
       {
         openWindow: async (intent) => {
           await createWindow(intent);

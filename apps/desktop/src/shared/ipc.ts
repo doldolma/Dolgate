@@ -47,6 +47,7 @@ import type {
   XshellProbeResult,
   HostKeyProbeResult,
   KnownHostRecord,
+  TailnetRecord,
   KnownHostTrustInput,
   PortForwardDraft,
   PortForwardListSnapshot,
@@ -219,6 +220,11 @@ export type CoreCommandType =
   | "inspectPrivateKey"
   | "installAuthorizedKey"
   | "keyboardInteractiveRespond"
+  | "tailnetTest"
+  | "tailnetForget"
+  | "tailnetDisconnect"
+  | "tailnetCancel"
+  | "tailnetSnapshot"
   | "portForwardStart"
   | "ssmPortForwardStart"
   | "portForwardStop"
@@ -267,6 +273,54 @@ export type CoreCommandType =
   | "tmuxRenameWindow"
   | "tmuxDetach"
   | "tmuxCommand";
+/** tailnet 노드가 올라오는 동안의 상태. ssh-core 의 State 와 같은 값이다. */
+export type TailnetState =
+  | "stopped"
+  | "needsAuth"
+  | "needsApproval"
+  | "starting"
+  | "running";
+
+/** 연결 테스트 중 여러 번 도착한다. authUrl 이 있으면 브라우저에서 인가해야 한다. */
+export interface TailnetStatus {
+  id: string;
+  state: TailnetState;
+  authUrl?: string;
+  error?: string;
+
+  /**
+   * 붙은 뒤에만 채워진다.
+   *
+   * Tailscale 기본 서버는 폼이 전부 비어 있어서 여러 개를 등록하면 화면에서 구분할 수
+   * 없다 — 누구로 어느 tailnet 에 붙었는지가 유일한 단서다.
+   */
+  loginName?: string;
+  tailnetName?: string;
+  nodeName?: string;
+  nodeIp?: string;
+}
+
+/**
+ * tailnet 등록 정보. 컨트롤 플레인(서버)과 인증 방식은 직교한다 — 어느 서버든 auth key 와
+ * 브라우저 로그인 둘 다 쓸 수 있다.
+ */
+/** 지금 살아 있는 노드들의 상태와, 이 기기가 등록에 쓰는 이름. */
+export interface TailnetSnapshot {
+  statuses: TailnetStatus[];
+  /** 붙어 있지 않아도 알 수 있다 — 기기 목록에서 자기 기기를 찾는 단서다. */
+  localNodeName?: string;
+}
+
+export interface TailnetConfig {
+  id: string;
+  /** 비면 Tailscale, 채우면 Headscale 같은 다른 컨트롤 플레인. */
+  controlUrl?: string;
+  /** 있으면 브라우저 없이 등록한다. 비면 대화형 로그인으로 간다. */
+  authKey?: string;
+  /** 활동이 멈추면 노드를 지우도록 요청한다. 컨트롤 플레인이 최종 판단한다. */
+  ephemeral?: boolean;
+}
+
 export type CoreEventType =
   | "status"
   | "connected"
@@ -279,6 +333,9 @@ export type CoreEventType =
   | "serialControlCompleted"
   | "hostKeyProbed"
   | "certificateInspected"
+  | "tailnetStatus"
+  | "tailnetForgot"
+  | "tailnetSnapshot"
   | "privateKeyGenerated"
   | "privateKeyInspected"
   | "authorizedKeyInstalled"
@@ -458,6 +515,10 @@ export interface ResolvedCoreConnectPayload {
   // authType이 "agent"일 때 서명을 위임할 로컬 ssh-agent 소켓/파이프(연결 단위, config로 전파).
   authAgentEndpointKind?: string;
   authAgentEndpoint?: string;
+  /** 있으면 이 tailnet 을 경유해 붙는다. */
+  tailnetId?: string;
+  /** 설정에 박아 둔 tailnet 이름. 실제로 붙은 곳과 다르면 코어가 연결을 거부한다. */
+  tailnetName?: string;
   cols: number;
   rows: number;
   command?: string;
@@ -634,6 +695,10 @@ export interface ResolvedSftpConnectPayload {
   authAgentEndpointKind?: string;
   authAgentEndpoint?: string;
   wsProxy?: WsProxyTarget;
+  /** 있으면 이 tailnet 을 경유해 붙는다. */
+  tailnetId?: string;
+  /** 설정에 박아 둔 tailnet 이름. 실제로 붙은 곳과 다르면 코어가 연결을 거부한다. */
+  tailnetName?: string;
 }
 
 export interface ResolvedContainersConnectPayload {
@@ -651,6 +716,10 @@ export interface ResolvedContainersConnectPayload {
   authAgentEndpointKind?: string;
   authAgentEndpoint?: string;
   wsProxy?: WsProxyTarget;
+  /** 있으면 이 tailnet 을 경유해 붙는다. */
+  tailnetId?: string;
+  /** 설정에 박아 둔 tailnet 이름. 실제로 붙은 곳과 다르면 코어가 연결을 거부한다. */
+  tailnetName?: string;
 }
 
 export interface ResolvedHostKeyProbePayload {
@@ -665,6 +734,12 @@ export interface ResolvedHostKeyProbePayload {
   // 설정되면 직접 dial 대신 sync-api WebSocket으로 전송을 라우팅해 호스트 키를 읽는다
   // (서버 프록시/bastion). 실연결과 동일하게 IP 제한 VPC에서도 probe가 서버 IP를 경유한다.
   wsProxy?: WsProxyTarget;
+  /**
+   * 프로브도 실연결과 같은 tailnet 을 타야 한다. 안 그러면 tailnet 안에만 있는 호스트의 키를
+   * 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽어 잘못 신뢰하게 된다.
+   */
+  tailnetId?: string;
+  tailnetName?: string;
 }
 
 export interface ResolvedPortForwardStartPayload {
@@ -690,6 +765,10 @@ export interface ResolvedPortForwardStartPayload {
   // 설정되면 직접 dial 대신 sync-api WebSocket으로 SSH 전송을 라우팅한다(서버 프록시/bastion).
   // AWS EC2 포트포워딩을 네이티브 SSM 대신 SSH -L로 서버 경유시킬 때 쓴다.
   wsProxy?: WsProxyTarget;
+  /** 있으면 이 tailnet 을 경유해 붙는다. */
+  tailnetId?: string;
+  /** 설정에 박아 둔 tailnet 이름. 실제로 붙은 곳과 다르면 코어가 연결을 거부한다. */
+  tailnetName?: string;
 }
 
 export interface ResolvedSsmPortForwardStartPayload {
@@ -1274,6 +1353,36 @@ export interface DesktopApi {
   };
   notifications: {
     commandFinished: (payload: CommandFinishedNotification) => Promise<void>;
+  };
+  tailnet: {
+    list: () => Promise<TailnetRecord[]>;
+    /** authKey 를 생략하면 기존 키를 그대로 둔다. 빈 문자열이면 지운다. */
+    save: (input: {
+      record: TailnetRecord;
+      authKey?: string;
+    }) => Promise<TailnetRecord>;
+    /** 노드를 정리하고 설정까지 지운다. */
+    remove: (id: string) => Promise<void>;
+    /**
+     * 노드를 올려 running 까지 가는지 확인한다. 반환값은 마지막 상태이고, 그 전의 진행은
+     * onStatus 로 온다 — 브라우저 로그인이면 사용자가 인증하는 구간이 있어서 응답 하나로는
+     * 무엇을 기다리는지 보여줄 수 없다.
+     */
+    test: (config: TailnetConfig) => Promise<TailnetStatus>;
+    /** 노드 등록을 해제한다. tailnet 설정 자체는 남는다. */
+    forget: (id: string) => Promise<void>;
+    /** 노드를 지금 내린다. 등록은 남으므로 다시 연결해도 재인증이 없다. */
+    disconnect: (id: string) => Promise<void>;
+    /** 진행 중인 연결 시도를 접는다. 브라우저 로그인은 최대 3 분까지 사람을 기다린다. */
+    cancel: (id: string) => Promise<void>;
+    /**
+     * 지금 살아 있는 노드들의 상태.
+     *
+     * 여기 없는 tailnet 은 연결돼 있지 않다는 뜻이다. 없는 것을 위해 노드를 만들지 않으므로,
+     * 설정 화면을 여는 것만으로 모든 tailnet 이 붙는 일은 없다.
+     */
+    snapshot: () => Promise<TailnetSnapshot>;
+    onStatus: (listener: (status: TailnetStatus) => void) => () => void;
   };
   knownHosts: {
     list: () => Promise<KnownHostRecord[]>;

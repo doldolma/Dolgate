@@ -57,6 +57,7 @@ function createContext() {
     },
     assertSshHost: vi.fn(),
     requireTrustedHostKey: vi.fn(),
+    resolveTailnetRoute: vi.fn(() => ({})),
     requireTrustedHostKeys: vi.fn(),
     requireConfiguredSshUsername: vi.fn(),
     resolveRuntimeSshSecrets: vi.fn(),

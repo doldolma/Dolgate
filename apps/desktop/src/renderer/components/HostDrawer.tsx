@@ -15,6 +15,7 @@ interface HostDrawerProps {
   keychainEntries: SecretMetadataRecord[];
   groupOptions: Array<{ value: string | null; label: string }>;
   jumpHostOptions?: SearchableSelectOption[];
+  tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
@@ -33,6 +34,7 @@ export function HostDrawer({
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  tailnetOptions = [],
   snippets = [],
   defaultGroupPath = null,
   createKind = 'ssh',
@@ -142,6 +144,7 @@ export function HostDrawer({
           keychainEntries={keychainEntries}
           groupOptions={groupOptions}
           jumpHostOptions={jumpHostOptions}
+          tailnetOptions={tailnetOptions}
           snippets={snippets}
           defaultGroupPath={defaultGroupPath}
           createKind={createKind}

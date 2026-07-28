@@ -2,11 +2,13 @@ package sshsession_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -21,6 +23,7 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 )
 
@@ -702,5 +705,108 @@ func echoShell(ch ssh.Channel, server *sshTestServer) {
 		if err != nil {
 			return
 		}
+	}
+}
+
+// tailnet 경로가 있으면 raw 전송이 그 dialer 로 가야 한다. 여기서 안 넘기면 tailnet 안에만
+// 있는 호스트에 붙지 못하고, 붙더라도 tailnet 밖의 동명 호스트에 붙는다.
+func TestConnectUsesTheTailnetDialer(t *testing.T) {
+	var gotID, gotName string
+	dialCalled := false
+
+	manager := sshsession.NewManagerWithConfig(
+		func(protocol.Event) {},
+		func(protocol.StreamFrame, []byte) {},
+		sshsession.ManagerConfig{
+			TCPDialTimeout: 50 * time.Millisecond,
+			TailnetDial: func(tailnetID, expectedName string) (sshconn.DialFunc, error) {
+				gotID, gotName = tailnetID, expectedName
+				return func(context.Context, string, string) (net.Conn, error) {
+					dialCalled = true
+					return nil, errors.New("dial refused by the test")
+				}, nil
+			},
+		},
+	)
+
+	err := manager.Connect("session-1", "req-1", protocol.ConnectPayload{
+		Host:                 "server",
+		Port:                 22,
+		Username:             "root",
+		AuthType:             "password",
+		Password:             "x",
+		TrustedHostKeyBase64: "AAAA",
+		TailnetID:            "net-a",
+		TailnetName:          "gridwiz.com",
+	})
+
+	if err == nil {
+		t.Fatal("Connect() error = nil, want the dial failure")
+	}
+	if gotID != "net-a" || gotName != "gridwiz.com" {
+		t.Errorf("TailnetDial got (%q, %q), want (net-a, gridwiz.com)", gotID, gotName)
+	}
+	if !dialCalled {
+		t.Error("the tailnet dialer was never used — the connection went out directly")
+	}
+}
+
+// 경로가 없으면 리졸버를 부르지도 않아야 한다. 부르면 일반 네트워크 연결마다 tailnet 조회가
+// 붙고, 리졸버가 실수로 무언가를 잡으면 그 비용이 모든 연결에 실린다.
+func TestConnectWithoutATailnetDoesNotAskForADialer(t *testing.T) {
+	asked := false
+	manager := sshsession.NewManagerWithConfig(
+		func(protocol.Event) {},
+		func(protocol.StreamFrame, []byte) {},
+		sshsession.ManagerConfig{
+			TCPDialTimeout: 50 * time.Millisecond,
+			TailnetDial: func(tailnetID, expectedName string) (sshconn.DialFunc, error) {
+				asked = true
+				// 런타임은 빈 경로에 nil dialer 를 돌려준다.
+				return nil, nil
+			},
+		},
+	)
+
+	_ = manager.Connect("session-1", "req-1", protocol.ConnectPayload{
+		Host:                 "127.0.0.1",
+		Port:                 1,
+		Username:             "root",
+		AuthType:             "password",
+		Password:             "x",
+		TrustedHostKeyBase64: "AAAA",
+	})
+
+	if asked {
+		t.Error("consulted TailnetDial for a host that does not use a tailnet")
+	}
+}
+
+// dialer 를 만들 수 없으면(레지스트리 꺼짐, 알 수 없는 tailnet) 연결을 진행하면 안 된다 —
+// 조용히 일반 네트워크로 나가면 사용자가 의도한 경로가 아니다.
+func TestConnectFailsWhenTheTailnetDialerCannotBeBuilt(t *testing.T) {
+	manager := sshsession.NewManagerWithConfig(
+		func(protocol.Event) {},
+		func(protocol.StreamFrame, []byte) {},
+		sshsession.ManagerConfig{
+			TCPDialTimeout: 50 * time.Millisecond,
+			TailnetDial: func(string, string) (sshconn.DialFunc, error) {
+				return nil, errors.New("tailnet support is not enabled")
+			},
+		},
+	)
+
+	err := manager.Connect("session-1", "req-1", protocol.ConnectPayload{
+		Host:                 "server",
+		Port:                 22,
+		Username:             "root",
+		AuthType:             "password",
+		Password:             "x",
+		TrustedHostKeyBase64: "AAAA",
+		TailnetID:            "net-a",
+	})
+
+	if err == nil || !strings.Contains(err.Error(), "tailnet support is not enabled") {
+		t.Fatalf("Connect() error = %v, want the dialer failure", err)
 	}
 }

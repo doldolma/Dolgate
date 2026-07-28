@@ -27,7 +27,11 @@ import {
 } from "../../aws-ws-proxy";
 import type { AwsSsmTunnelService } from "../../aws-ssm-tunnel-service";
 import type { CoreManager } from "../../core-manager";
-import type { HostRepository, KnownHostRepository } from "../../database";
+import type {
+  HostRepository,
+  KnownHostRepository,
+  TailnetRepository,
+} from "../../database";
 import type { AwsSftpCoordinator } from "./aws-sftp-coordinator";
 import {
   isTransientAwsSsmSshError,
@@ -46,7 +50,11 @@ import { getAwsSftpDiagnosticMessage } from "../../../common/aws-diagnostics";
 
 export interface HostCoordinator {
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
-  requireTrustedHostKeys: (host: { hostname: string; port: number }) => string[];
+  requireTrustedHostKeys: (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }) => string[];
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   buildKnownSshDuplicateKeys: () => Set<string>;
   assertSshHost: (host: ReturnType<HostRepository["getById"]>) => void;
@@ -67,6 +75,10 @@ export interface HostCoordinator {
   resolveJumpHostTarget: (
     host: SshHostRecord,
   ) => Promise<ResolvedJumpHost | undefined>;
+  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+    tailnetId?: string;
+    tailnetName?: string;
+  };
 }
 
 export function createHostCoordinator(deps: {
@@ -77,6 +89,7 @@ export function createHostCoordinator(deps: {
   authService: AuthService;
   awsSsmTunnelService: AwsSsmTunnelService;
   awsSftpCoordinator: AwsSftpCoordinator;
+  tailnets: TailnetRepository;
   resolveRuntimeSshSecrets: (
     host: SshHostRecord,
     secrets?: HostSecretInput,
@@ -94,6 +107,7 @@ export function createHostCoordinator(deps: {
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
+    tailnets,
     resolveRuntimeSshSecrets,
     ensureCertificateAuthReady,
   } = deps;
@@ -101,13 +115,39 @@ export function createHostCoordinator(deps: {
   const requireTrustedHostKeys = (host: {
     hostname: string;
     port: number;
+    // 신뢰는 tailnet 범위 안에서만 유효하다. 이것을 안 넘기면 다른 tailnet(또는 일반
+    // 네트워크)의 같은 이름 호스트 키를 신뢰한 것으로 착각한다.
+    tailnetId?: string | null;
   }): string[] => {
-    const trusted = knownHosts.listByHostPort(host.hostname, host.port);
+    const tailnetId = host.tailnetId ?? undefined;
+    const trusted = knownHosts.listByHostPort(host.hostname, host.port, tailnetId);
     if (trusted.length === 0) {
       throw new Error("Host key is not trusted yet.");
     }
-    knownHosts.touch(host.hostname, host.port);
+    knownHosts.touch(host.hostname, host.port, undefined, tailnetId);
     return trusted.map((record) => record.publicKeyBase64);
+  };
+
+  /**
+   * 호스트를 어느 tailnet 으로 보낼지 해석한다.
+   *
+   * 기대 이름을 함께 돌려주는 것이 핵심이다 — 코어가 실제로 붙은 tailnet 과 대조해 다르면
+   * 연결을 거부한다. 그 이름은 tailnet 설정에만 있으므로 여기서 붙여 준다. 설정이 사라졌으면
+   * 경로 자체를 넘기지 않는다: 지워진 tailnet 으로 조용히 나가는 것보다 평소 경로로 가서
+   * 실패하는 편이 낫다.
+   */
+  const resolveTailnetRoute = (host: {
+    tailnetId?: string | null;
+  }): { tailnetId?: string; tailnetName?: string } => {
+    const tailnetId = host.tailnetId?.trim();
+    if (!tailnetId) {
+      return {};
+    }
+    const record = tailnets.list().find((entry) => entry.id === tailnetId);
+    if (!record) {
+      return {};
+    }
+    return { tailnetId, tailnetName: record.tailnetName };
   };
 
   const requireConfiguredSshUsername = (host: SshHostRecord): string => {
@@ -472,12 +512,21 @@ export function createHostCoordinator(deps: {
         // 프로브 홉 진행을 활성 오버레이에 매핑하기 위한 상관 ID(renderer가 넘긴 값 그대로).
         sessionId: input.sessionId ?? undefined,
         endpointId: input.endpointId ?? undefined,
+        // 프로브도 실연결과 같은 tailnet 을 타야 한다. 다른 통로로 읽으면 tailnet 밖의
+        // 동명 호스트 키를 이 호스트의 것으로 저장하게 된다.
+        ...resolveTailnetRoute(isSshHostRecord(host) ? host : {}),
       }),
     );
+    // 신뢰 조회는 이 호스트가 속한 tailnet 안에서만 해야 한다. 범위를 빼면 다른 tailnet 의
+    // 같은 이름 호스트 키를 이 호스트의 것으로 읽는다.
+    const probeTailnetId = isSshHostRecord(host)
+      ? (host.tailnetId ?? undefined)
+      : undefined;
     const existing = knownHosts.getByHostPortAlgorithm(
       probeHost,
       probePort,
       probed.algorithm,
+      probeTailnetId,
     );
     const status = !existing
       ? "untrusted"
@@ -486,7 +535,7 @@ export function createHostCoordinator(deps: {
         : "mismatch";
 
     if (status === "trusted") {
-      knownHosts.touch(probeHost, probePort, probed.algorithm);
+      knownHosts.touch(probeHost, probePort, probed.algorithm, probeTailnetId);
     }
 
     return {
@@ -570,5 +619,6 @@ export function createHostCoordinator(deps: {
     describeHostTarget,
     buildHostKeyProbeResult,
     resolveJumpHostTarget,
+    resolveTailnetRoute,
   };
 }

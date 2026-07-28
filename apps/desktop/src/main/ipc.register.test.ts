@@ -81,9 +81,16 @@ vi.mock("./ipc/window-updater-settings-files", () => ({
     moduleSpies.windowUpdaterSettingsFiles,
 }));
 
+import type { TailnetRepository } from "./database";
 import { registerIpcHandlers } from "./ipc";
 
 function createDependencySet() {
+  const tailnets = {
+    list: vi.fn(() => []),
+    save: vi.fn(),
+    remove: vi.fn(),
+    readAuthKey: vi.fn(() => null),
+  } as unknown as TailnetRepository;
   const coreManager = {
     setTerminalEventHandler: vi.fn(),
     setPortForwardEventHandler: vi.fn(),
@@ -110,6 +117,7 @@ function createDependencySet() {
     awsSsmTunnelService: {} as any,
     warpgateService: {} as any,
     coreManager,
+    tailnets,
     hostsOverrideManager: {} as any,
     updater: {} as any,
     authService: {} as any,
@@ -155,6 +163,7 @@ describe("registerIpcHandlers", () => {
       deps.xshellImportService,
       deps.sessionShareService,
       deps.sessionReplayService,
+      deps.tailnets,
     );
 
     expect(deps.coreManager.setTerminalEventHandler).toHaveBeenCalledTimes(1);

@@ -53,6 +53,25 @@ type Service struct {
 	emit              EventEmitter
 	dialRemote        func(client *ssh.Client, address string) (net.Conn, error)
 	openSessionProxy  func(handle *runtimeHandle, targetHost string, targetPort int) (io.ReadWriteCloser, error)
+	tailnetDial       sshconn.TailnetDialResolver
+}
+
+// SetTailnetDial 은 tailnet 경로를 raw dialer 로 바꾸는 함수를 주입한다.
+//
+// 생성자에서 받지 않는 이유는 tailnet 레지스트리가 런타임 소유이고, 서비스가 런타임보다 먼저
+// 만들어지기 때문이다. coreManager.setSsmPortForwardTokenIssuer 와 같은 방식이다.
+func (s *Service) SetTailnetDial(resolve sshconn.TailnetDialResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tailnetDial = resolve
+}
+
+// tailnetDialer 는 이 연결에 쓸 dialer 를 만든다. 경로가 없으면 nil 이라 평소대로 나간다.
+func (s *Service) tailnetDialer(tailnetID, expectedName string) (sshconn.DialFunc, error) {
+	s.mu.RLock()
+	resolve := s.tailnetDial
+	s.mu.RUnlock()
+	return sshconn.ResolveTailnetDial(resolve, tailnetID, expectedName)
 }
 
 func New(emit EventEmitter) *Service {
@@ -122,7 +141,7 @@ func (s *Service) Start(ruleID, requestID string, payload protocol.PortForwardSt
 		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 		WSProxy:               payload.WSProxy,
-	}, payload.AuthAgentEndpointKind, payload.AuthAgentEndpoint)
+	}, payload.AuthAgentEndpointKind, payload.AuthAgentEndpoint, payload.TailnetID, payload.TailnetName)
 	if err != nil {
 		return err
 	}
@@ -245,13 +264,18 @@ func (s *Service) Stop(ruleID, requestID string) error {
 	return nil
 }
 
-func (s *Service) dialTarget(endpointID, requestID string, target sshconn.Target, authAgentEndpointKind, authAgentEndpoint string) (*ssh.Client, error) {
+func (s *Service) dialTarget(endpointID, requestID string, target sshconn.Target, authAgentEndpointKind, authAgentEndpoint, tailnetID, tailnetName string) (*ssh.Client, error) {
 	attempt := 0
 	// 홉 진행을 renderer로 방출(EndpointID=ruleID로 포트포워딩에 매핑) — 공통 헬퍼 재사용.
 	config := sshconn.DefaultConfig
 	config.Progress = sshconn.HopProgress(target, "", endpointID, s.emit)
 	config.AuthAgentEndpointKind = authAgentEndpointKind
 	config.AuthAgentEndpoint = authAgentEndpoint
+	dial, dialErr := s.tailnetDialer(tailnetID, tailnetName)
+	if dialErr != nil {
+		return nil, dialErr
+	}
+	config.Dial = dial
 	return sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)

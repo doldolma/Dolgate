@@ -44,6 +44,7 @@ function emptySyncPayload() {
     snippets: [],
     preferences: [],
     awsProfiles: [],
+    tailnets: [],
   };
 }
 
@@ -98,6 +99,8 @@ async function createHarness(initialContext: AuthSyncContext) {
 
   const emptyRepository = {
     list: vi.fn(() => []),
+    // tailnet 저장소는 동기화에 auth key 를 포함한 페이로드를 올린다.
+    listPayloads: vi.fn(() => []),
     replaceAll: vi.fn(),
   };
   const settings = {
@@ -139,6 +142,7 @@ async function createHarness(initialContext: AuthSyncContext) {
     settings as never,
     secretStore as never,
     outbox as never,
+    emptyRepository as never,
   );
 
   return {

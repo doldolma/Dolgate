@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
 	"dolssh/services/ssh-core/internal/protocol"
 	coreruntime "dolssh/services/ssh-core/pkg/runtime"
@@ -28,6 +30,11 @@ type coreRuntime interface {
 	TmuxKillSession(sessionID, sessionName string) error
 	TmuxRenameWindow(sessionID, windowID, name string) error
 	TmuxDetach(sessionID string) error
+	TailnetTest(requestID string, payload protocol.TailnetTestPayload) error
+	TailnetForget(requestID string, payload protocol.TailnetForgetPayload) error
+	TailnetDisconnect(requestID string, payload protocol.TailnetDisconnectPayload) error
+	TailnetCancel(requestID string, payload protocol.TailnetDisconnectPayload) error
+	TailnetSnapshot(requestID string) error
 	ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error
 	ConnectLocal(sessionID, requestID string, payload protocol.LocalConnectPayload) error
 	ConnectSerial(sessionID, requestID string, payload protocol.SerialConnectPayload) error
@@ -108,8 +115,27 @@ func main() {
 	core := coreruntime.New(coreruntime.Options{
 		EmitEvent:  writer.emit,
 		EmitStream: writer.emitStream,
+		// tailnet 노드 상태를 둘 곳. 앱이 자기 데이터 디렉터리를 알려준다 — 비워 두면
+		// tsnet 이 os.UserConfigDir() 밑에 앱과 무관한 경로를 만들어, 사용자가 찾을 수도
+		// 등록 해제로 지울 수도 없게 된다. 값이 없으면 tailnet 명령만 거절되고 나머지
+		// 기능은 그대로 동작한다.
+		TailnetStateDir: os.Getenv("DOLGATE_TAILNET_STATE_DIR"),
 	})
-	defer core.Shutdown()
+	// 시그널로 죽으면 defer 는 실행되지 않는다. 데스크톱은 종료할 때 stdin 을 닫으면서
+	// SIGTERM 도 같이 보내는데, 시그널이 EOF 보다 먼저 도착하면 Shutdown 이 통째로
+	// 건너뛰어져 tailnet 노드가 컨트롤 플레인에 붙은 채로 남는다.
+	var shutdownOnce sync.Once
+	shutdown := func() { shutdownOnce.Do(core.Shutdown) }
+	defer shutdown()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-signals
+		shutdown()
+		os.Exit(0)
+	}()
+
 	core.EmitReady()
 
 	for {
@@ -244,6 +270,49 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 				Enabled: payload.Enabled,
 			},
 		})
+		return nil
+	case protocol.CommandTailnetTest:
+		var payload protocol.TailnetTestPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// 노드가 올라오기까지 사람이 브라우저에서 로그인하는 시간이 들어갈 수 있어 오래
+		// 걸린다. 다른 요청을 막지 않도록 비동기로 돌린다.
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetTest(request.ID, payload)
+		})()
+		return nil
+	case protocol.CommandTailnetDisconnect:
+		var payload protocol.TailnetDisconnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetDisconnect(request.ID, payload)
+		})()
+		return nil
+	case protocol.CommandTailnetCancel:
+		var payload protocol.TailnetDisconnectPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetCancel(request.ID, payload)
+		})()
+		return nil
+	case protocol.CommandTailnetSnapshot:
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetSnapshot(request.ID)
+		})()
+		return nil
+	case protocol.CommandTailnetForget:
+		var payload protocol.TailnetForgetPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetForget(request.ID, payload)
+		})()
 		return nil
 	case protocol.CommandProbeHostKey:
 		var payload protocol.HostKeyProbePayload

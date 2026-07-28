@@ -65,6 +65,8 @@ frame kind는 두 가지입니다.
 - `sftpWriteFile`
 - `sftpTransferStart`
 - `sftpTransferCancel`
+- `tailnetTest`
+- `tailnetForget`
 
 ## 이벤트 종류
 
@@ -82,6 +84,8 @@ frame kind는 두 가지입니다.
 - `sftpTransferCompleted`
 - `sftpTransferFailed`
 - `sftpTransferCancelled`
+- `tailnetStatus`
+- `tailnetForgot`
 
 ## stream frame
 
@@ -101,6 +105,44 @@ frame kind는 두 가지입니다.
 ## `connect` payload
 
 renderer는 비밀값 자체가 아니라 참조값만 들고 있고, Electron `main`이 키체인에서 실제 값을 복원한 뒤 Go 코어로 전달합니다. 이렇게 하면 renderer에 비밀번호나 passphrase가 오래 머물지 않도록 제어할 수 있습니다.
+
+## tailnet
+
+노드 상태를 둘 위치는 요청이 아니라 **프로세스 환경변수**로 정해집니다. spawn 시점에
+결정되는 값이고 요청마다 달라지지 않기 때문입니다.
+
+```
+DOLGATE_TAILNET_STATE_DIR=<앱 데이터>/tailnet
+```
+
+비어 있으면 `tailnetTest`·`tailnetForget` 만 거절되고 나머지 기능은 그대로 동작합니다.
+값을 주지 않으면 tsnet 이 `os.UserConfigDir()` 밑에 앱과 무관한 경로를 만들어, 사용자가
+찾을 수도 등록 해제로 지울 수도 없게 됩니다. 노드키가 들어가므로 이 디렉터리는 **기기
+로컬 전용**이며 동기화 대상이 아닙니다.
+
+### `tailnetTest`
+
+노드를 올려 `running` 까지 가는지 확인하고, 그 과정을 **같은 `requestId` 로 여러 번**
+`tailnetStatus` 이벤트로 흘립니다. 단일 응답이 아닌 이유는 브라우저 로그인처럼 사람이
+개입하는 구간이 있기 때문입니다.
+
+`state` 값:
+
+| 값 | 뜻 |
+|---|---|
+| `needsAuth` | 인증 필요. `authUrl` 이 함께 오면 브라우저에서 인가해야 한다 |
+| `needsApproval` | 등록됐고 관리자 인가 대기 |
+| `starting` | 올라오는 중 |
+| `running` | 완료 |
+| `stopped` | 멈춤. `error` 에 이유가 담긴다 |
+
+같은 상태는 중복 방출하지 않습니다. `running` 에 도달하거나 시간이 다하면 끝납니다.
+
+### `tailnetForget`
+
+노드 등록을 해제합니다 — 컨트롤 플레인에서 노드를 지우고(logout), 서버를 닫고, 로컬 상태
+디렉터리까지 삭제합니다. tailnet 설정 자체는 남으므로 다시 연결하면 최초 등록과 같은
+흐름을 탑니다. 결과는 `tailnetForgot` 로 옵니다.
 
 ## SFTP 관련 식별자
 

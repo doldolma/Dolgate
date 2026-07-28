@@ -29,6 +29,7 @@ import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
+import { TailnetSettingsPanel } from './TailnetSettingsPanel';
 import { AwsProfilesPanel } from './AwsProfilesPanel';
 import { AiSettingsPanel } from './AiSettingsPanel';
 import {
@@ -149,6 +150,7 @@ const settingsSections: Array<{ id: SettingsSection; title: string }> = [
   { id: 'security', title: 'Security' },
   { id: 'secrets', title: 'Saved Credentials' },
   { id: 'aws-profiles', title: 'AWS Profiles' },
+  { id: 'tailnet', title: 'Tailscale' },
   { id: 'ai', title: 'AI' },
   { id: 'account', title: 'Account' }
 ];
@@ -1602,6 +1604,7 @@ export function SettingsPanel({
       ) : null}
 
       {activeSection === 'aws-profiles' ? <AwsProfilesPanel hosts={hosts} /> : null}
+      {activeSection === 'tailnet' ? <TailnetSettingsPanel /> : null}
 
       {activeSection === 'ai' ? (
         <AiSettingsPanel settings={settings.ai} onUpdateSettings={onUpdateSettings} />

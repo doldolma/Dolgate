@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { listTailnets } from '../services/desktop/tailnet';
 import {
   buildGroupOptions,
   getGroupLabel,
@@ -144,6 +145,39 @@ export function HomeShell({
     active &&
     homeViewModel.homeSection === 'hosts' &&
     homeViewModel.hostDrawer.mode !== 'closed';
+
+  // 호스트 편집에서 경유할 tailnet 을 고르려면 등록된 목록이 필요하다.
+  //
+  // 드로어가 열릴 때마다 다시 읽는다. 마운트에 한 번만 읽으면, 설정에서 tailnet 을 추가한 뒤
+  // 호스트로 돌아와도 이 셸은 재마운트되지 않아(백그라운드에 남는다) 목록이 낡은 채로 남고
+  // 방금 추가한 tailnet 을 고를 수 없다.
+  const [tailnetOptions, setTailnetOptions] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  useEffect(() => {
+    if (!isDrawerOpen) {
+      return;
+    }
+    let cancelled = false;
+    // Promise 로 감싸는 이유: 브리지가 없으면 listTailnets 가 동기적으로 던지고, 그러면
+    // .catch 가 잡지 못해 셸 전체가 죽는다. tailnet 을 못 읽는 것이 호스트 편집을 막을
+    // 이유는 없다.
+    void Promise.resolve()
+      .then(listTailnets)
+      .then((records) => {
+        if (!cancelled) {
+          setTailnetOptions(
+            records.map((record) => ({ id: record.id, label: record.label })),
+          );
+        }
+      })
+      .catch(() => {
+        // tailnet 을 못 읽어도 호스트 편집 자체는 되어야 한다.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDrawerOpen]);
   const highlightedHostId = editingHostId ?? selectedHostId;
   const sectionTitle =
     homeViewModel.homeSection === 'portForwarding'
@@ -341,6 +375,7 @@ export function HomeShell({
       keychainEntries={settingsViewModel.keychainEntries}
       groupOptions={groupOptions}
       jumpHostOptions={jumpHostOptions}
+      tailnetOptions={tailnetOptions}
       snippets={homeViewModel.snippets}
       defaultGroupPath={
         homeViewModel.hostDrawer.mode === 'create'

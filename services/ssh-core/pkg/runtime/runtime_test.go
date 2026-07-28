@@ -194,7 +194,7 @@ func (stub *stubLocalManager) InstallShellIntegration(string) error {
 	return nil
 }
 func (stub *stubLocalManager) ReinjectShellIntegration(string) error { return nil }
-func (stub *stubLocalManager) FlushShellIntegration(string) {}
+func (stub *stubLocalManager) FlushShellIntegration(string)          {}
 func (stub *stubLocalManager) RunCompletionCommand(string, string) (string, bool, error) {
 	return "", false, nil
 }

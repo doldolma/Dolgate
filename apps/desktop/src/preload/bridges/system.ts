@@ -3,6 +3,7 @@ import type { DesktopApi } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import {
   subscribeActivityLogsChanged,
+  subscribeTailnetStatus,
   subscribeCloseActiveTab,
   subscribeTabCommand,
   subscribePortForwardEvent,
@@ -138,6 +139,23 @@ export function buildNotificationsBridge(
   return {
     commandFinished: (payload) =>
       ipcRenderer.invoke(ipcChannels.notifications.commandFinished, payload),
+  };
+}
+
+export function buildTailnetBridge(
+  ipcRenderer: IpcRenderer,
+): DesktopApi["tailnet"] {
+  return {
+    list: () => ipcRenderer.invoke(ipcChannels.tailnet.list),
+    save: (input) => ipcRenderer.invoke(ipcChannels.tailnet.save, input),
+    remove: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.remove, id),
+    test: (config) => ipcRenderer.invoke(ipcChannels.tailnet.test, config),
+    forget: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.forget, id),
+    disconnect: (id: string) =>
+      ipcRenderer.invoke(ipcChannels.tailnet.disconnect, id),
+    cancel: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.cancel, id),
+    snapshot: () => ipcRenderer.invoke(ipcChannels.tailnet.snapshot),
+    onStatus: (listener) => subscribeTailnetStatus(listener),
   };
 }
 

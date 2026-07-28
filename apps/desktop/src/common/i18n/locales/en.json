@@ -1332,6 +1332,11 @@
     },
     "env": {
       "description": "Injected into the shell on connect (SetEnv with an export fallback). Values are encrypted like passwords when stored and synced."
+    },
+    "tailnet": {
+      "none": "Not used (plain network)",
+      "description": "Connect through this tailnet. Trusted host keys are scoped to it as well — the same name in another tailnet is a different machine.",
+      "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own."
     }
   },
   "hostTransfer": {
@@ -3042,5 +3047,56 @@
       "remoteAddressUnset": "No remote address",
       "usernameUnset": "No username"
     }
+  },
+  "tailnetSettings": {
+    "heading": "Networks",
+    "description": "Join a Tailscale or Headscale network (tailnet) as a node to reach the hosts inside it.",
+    "add": "Add network",
+    "empty": "No networks registered.",
+    "emptyHint": "Once you add one, the connection test tells you whether the node comes up.",
+    "test": "Test connection",
+    "remove": "Delete {{label}}",
+    "tailscaleDefault": "Tailscale",
+    "usingAuthKey": "auth key",
+    "usingBrowser": "browser login",
+    "needsAuth": "Finish authenticating in the browser. If no window opened, open it again.",
+    "openBrowser": "Reopen browser",
+    "headscaleApprovalHint": "If this server has no OIDC configured, the browser shows instructions and an Auth ID instead of a login page — an administrator has to approve it.",
+    "state": {
+      "stopped": "Stopped",
+      "needsAuth": "Waiting for sign-in",
+      "needsApproval": "Waiting for approval",
+      "starting": "Connecting",
+      "running": "Connected",
+      "failed": "Failed",
+      "preparingAuth": "Getting sign-in link",
+      "expired": "Sign-in expired"
+    },
+    "field": {
+      "label": "Network name",
+      "labelPlaceholder": "e.g. Work network",
+      "controlUrl": "Headscale server (optional)",
+      "controlUrlPlaceholder": "https://headscale.example.com",
+      "authKey": "Auth key",
+      "authKeyPlaceholder": "Blank for browser login",
+      "connectedTo": "Connected tailnet",
+      "connectedToPlaceholder": "Filled in once the connection test succeeds",
+      "authKeyHint": "Use a reusable + ephemeral key — unused nodes clean themselves up, and a single-use key fails on reconnect."
+    },
+    "removeConfirm": "This deletes the network settings and the stored auth key, and unregisters the node. It cannot be undone.",
+    "disconnect": "Disconnect",
+    "identity": {
+      "tailnet": "Tailnet",
+      "account": "Account",
+      "node": "This device"
+    },
+    "connect": "Connect",
+    "tailnetMismatch": "This entry is for {{expected}} but it connected to {{actual}}. It looks like a different account was used — if that tailnet has a machine with the same name, you could reach the wrong one.",
+    "stopTest": "Stop test",
+    "removed": {
+      "tailscale": "The node key was expired. Removing the entry itself is up to the control plane, though — unless the node was registered as ephemeral it stays in the device list, marked expired. Delete it from the Tailscale admin console if it lingers.",
+      "headscale": "The node key was expired. Removing the entry itself is up to the control plane, though — unless the node was registered as ephemeral it stays in the device list, marked expired. Delete it on the server if it lingers (headscale nodes delete)."
+    },
+    "localNodeName": "This device registers as"
   }
 }

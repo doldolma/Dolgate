@@ -133,6 +133,17 @@ func (h *controlHandle) paneHandshake(paneID string) *autocomplete.Handshake {
 const listWindowsCommand = "list-windows -F \"#{window_id} #{window_index} #{window_active} #{window_name} #{window_visible_layout}\"\n"
 const defaultControlCommand = "if tmux list-sessions >/dev/null 2>&1; then exec tmux -CC attach; else exec tmux -CC new-session -A -s dolgate; fi"
 
+// SetTailnetDial 은 tailnet 경로를 raw dialer 로 바꾸는 함수를 주입한다.
+//
+// 생성자에서 못 받는 이유: 이 매니저는 테스트가 직접 부르는 런타임 생성자 안에서 만들어지고,
+// tailnet 레지스트리는 그 뒤에 붙는다. 그 생성자의 시그니처를 늘리지 않기로 했으므로 세터를
+// 쓴다. 다른 서비스들(sftp·containers·forwarding)과 같은 방식이다.
+func (m *Manager) SetTailnetDial(resolve sshconn.TailnetDialResolver) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.config.TailnetDial = resolve
+}
+
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
 	return NewManagerWithConfig(emit, stream, sshsession.ManagerConfig{})
 }
@@ -198,8 +209,21 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 		WSProxy:               payload.WSProxy,
 	}
+	m.mu.RLock()
+	resolveTailnet := m.config.TailnetDial
+	m.mu.RUnlock()
+	dial, dialErr := sshconn.ResolveTailnetDial(
+		resolveTailnet,
+		payload.TailnetID,
+		payload.TailnetName,
+	)
+	if dialErr != nil {
+		return dialErr
+	}
+
 	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
 	client, err := sshconn.DialClient(target, sshconn.Config{
+		Dial:                  dial,
 		TCPDialTimeout:        m.config.TCPDialTimeout,
 		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
 		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),

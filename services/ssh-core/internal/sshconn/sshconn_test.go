@@ -1,17 +1,21 @@
 package sshconn
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
 func generateTestKeyPair(t *testing.T) (ssh.Signer, []byte) {
@@ -372,5 +376,54 @@ func TestGeneratePrivateKeyWithPassphrase(t *testing.T) {
 	}
 	if inspected.PublicKey != generated.PublicKey {
 		t.Fatalf("InspectPrivateKey(encrypted).PublicKey = %q, want %q", inspected.PublicKey, generated.PublicKey)
+	}
+}
+
+// 서버 프록시와 tailnet 은 둘 다 대상까지의 raw 전송을 대신하므로 함께 쓸 수 없다.
+//
+// 지금은 호스트 종류로 갈려서(wsProxy 는 aws-ec2, tailnet 은 ssh) 동시에 설정될 일이 없다.
+// 그래도 소리 나게 막는 이유는, 조용히 한쪽이 이기면 "tailnet 을 지정했는데 서버 프록시로
+// 나가는" 것을 아무도 모르기 때문이다.
+func TestDialClientRejectsBothWsProxyAndTailnetDialer(t *testing.T) {
+	_, err := DialClient(
+		Target{
+			Host:                 "server",
+			Port:                 22,
+			Username:             "root",
+			AuthType:             "password",
+			Password:             "x",
+			TrustedHostKeyBase64: "AAAA",
+			WSProxy:              &coretypes.WSProxyTarget{URL: "wss://example/ws"},
+		},
+		Config{
+			Dial: func(context.Context, string, string) (net.Conn, error) {
+				t.Fatal("dialled despite the conflict")
+				return nil, nil
+			},
+		},
+		nil,
+	)
+
+	if !errors.Is(err, ErrTransportConflict) {
+		t.Fatalf("DialClient() error = %v, want ErrTransportConflict", err)
+	}
+}
+
+func TestProbeHostKeyRejectsBothWsProxyAndTailnetDialer(t *testing.T) {
+	_, err := ProbeHostKey(
+		"server",
+		22,
+		nil,
+		&coretypes.WSProxyTarget{URL: "wss://example/ws"},
+		Config{
+			Dial: func(context.Context, string, string) (net.Conn, error) {
+				t.Fatal("dialled despite the conflict")
+				return nil, nil
+			},
+		},
+	)
+
+	if !errors.Is(err, ErrTransportConflict) {
+		t.Fatalf("ProbeHostKey() error = %v, want ErrTransportConflict", err)
 	}
 }

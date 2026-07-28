@@ -45,15 +45,13 @@ import type {
   AppSettings,
   AppTheme,
   AuthType,
-  AwsProfileMetadataRecord,
-  AwsSshMetadataStatus,
   AwsEc2HostDraft,
   AwsEc2HostRecord,
   AwsEcsHostDraft,
   AwsEcsHostRecord,
+  AwsProfileMetadataRecord,
+  AwsSshMetadataStatus,
   DnsOverrideDraft,
-  SnippetDraft,
-  SnippetRecord,
   DnsOverrideRecord,
   GlobalTerminalThemeId,
   GroupPathMutationResult,
@@ -71,26 +69,34 @@ import type {
   PortForwardDraft,
   PortForwardRuleRecord,
   SecretMetadataRecord,
-  SftpBrowserColumnWidths,
-  SshHostDraft,
-  SshHostRecord,
-  SerialHostDraft,
-  SerialHostRecord,
   SerialDataBits,
   SerialFlowControl,
+  SerialHostDraft,
+  SerialHostRecord,
   SerialParity,
   SerialStopBits,
+  SftpBrowserColumnWidths,
+  SnippetDraft,
+  SnippetRecord,
+  SshHostDraft,
+  SshHostRecord,
   SyncKind,
+  TailnetPayload,
+  TailnetRecord,
   TerminalFontFamilyId,
   TerminalPreferencesRecord,
   TerminalThemeId,
   WarpgateSshHostDraft,
-  WarpgateSshHostRecord
-} from '@shared';
+  WarpgateSshHostRecord,
+} from "@shared";
 import { normalizeAppLanguage } from '../common/i18n/locale';
 import type { ActivityLogMessage } from './activity-log-message';
 import { DesktopConfigService } from './app-config';
-import { getDesktopStateStorage, type SyncDeletionRecord } from './state-storage';
+import {
+  getDesktopStateStorage,
+  type StoredEncryptedValue,
+  type SyncDeletionRecord,
+} from './state-storage';
 import type { LocalHistoryOwner } from './local-history-scope';
 import { decodeSecretFromStorage, encodeSecretForStorage } from './secret-store';
 import { getServerUrlValidationMessage } from '../common/shared-messages';
@@ -502,6 +508,9 @@ function toSshHostRecord(id: string, draft: SshHostDraft, secretRef: string | nu
     secretRef: secretRef ?? draft.secretRef ?? null,
     jumpHostId: jumpHostIds[0] ?? null,
     jumpHostIds: jumpHostIds.length > 0 ? jumpHostIds : null,
+    // 이 변환도 필드를 나열하는 화이트리스트다. 빠뜨리면 폼에서 고른 tailnet 이 저장 시점에
+    // 사라진다 — 화면에는 선택돼 보이는데 레코드에는 없다.
+    tailnetId: draft.tailnetId?.trim() || null,
     useMosh: draft.useMosh ?? null,
     agentForwarding: draft.agentForwarding === true ? true : null,
     groupName: normalizeGroupPath(draft.groupName),
@@ -1223,6 +1232,105 @@ export class GroupRepository {
   }
 }
 
+/**
+ * 등록된 tailnet. 설정과 auth key 를 분리해 보관한다 — 키는 비밀이라 암호화 저장소에 두고,
+ * 레코드에는 키가 있는지 여부만 남긴다. 1b 에서 설정이 기기 간 동기화 대상이 되어도 키는
+ * 따라가지 않는다.
+ */
+export class TailnetRepository {
+  list(): TailnetRecord[] {
+    return stateStorage.getState().data.tailnets;
+  }
+
+  /** 설정을 저장한다. authKey 가 undefined 면 기존 키를 그대로 둔다(빈 문자열은 삭제). */
+  save(record: TailnetRecord, authKey?: string): TailnetRecord {
+    const now = new Date().toISOString();
+    stateStorage.updateState((state) => {
+      if (authKey !== undefined) {
+        if (authKey.length > 0) {
+          state.secure.tailnetAuthKeysById[record.id] =
+            encodeSecretForStorage(authKey);
+        } else {
+          delete state.secure.tailnetAuthKeysById[record.id];
+        }
+      }
+
+      const hasAuthKey = Boolean(state.secure.tailnetAuthKeysById[record.id]);
+      const existing = state.data.tailnets.find((item) => item.id === record.id);
+      const next: TailnetRecord = {
+        ...record,
+        hasAuthKey,
+        // ephemeral 여부는 인증 방식이 정한다. 렌더러가 아니라 여기서 정하는 이유는, 키가
+        // 있는지 아는 곳이 여기뿐이라 둘이 어긋날 수 없기 때문이다.
+        //
+        // auth key 면 ephemeral 이 공짜다 — 재등록이 자동이라 사용자는 못 느끼고 기기
+        // 목록도 알아서 정리된다. 브라우저 로그인이면 반대다: 노드가 지워지면 다음 실행마다
+        // 브라우저를 다시 거쳐야 한다. 그래서 그때는 노드를 남긴다.
+        ephemeral: hasAuthKey,
+        createdAt: existing?.createdAt ?? record.createdAt ?? now,
+        updatedAt: now,
+      };
+
+      state.data.tailnets = existing
+        ? state.data.tailnets.map((item) => (item.id === record.id ? next : item))
+        : [...state.data.tailnets, next];
+    });
+
+    return this.list().find((item) => item.id === record.id) ?? record;
+  }
+
+  remove(id: string): void {
+    stateStorage.updateState((state) => {
+      state.data.tailnets = state.data.tailnets.filter((item) => item.id !== id);
+      delete state.secure.tailnetAuthKeysById[id];
+    });
+  }
+
+  /**
+   * 동기화에 실을 형태 — 레코드 + auth key.
+   *
+   * 렌더러로 가는 list() 와 달리 키가 들어 있다. 볼트 키로 암호화해 서버로 올리는 경로만
+   * 이걸 쓴다. AWS 프로필의 listPayloads() 와 같은 역할이다.
+   */
+  listPayloads(): TailnetPayload[] {
+    return this.list().map((record) => {
+      const authKey = this.readAuthKey(record.id);
+      return authKey ? { ...record, authKey } : { ...record };
+    });
+  }
+
+  /**
+   * 동기화로 내려온 것으로 전부 갈아 끼운다.
+   *
+   * 순서가 계약이다 — 키를 먼저 넣고 레코드를 넣어야 한다. save() 가 ephemeral 을
+   * hasAuthKey 에서 다시 계산하므로, 반대로 하면 키 있는 tailnet 이 영속으로 저장된다.
+   * 여기서는 한 번의 updateState 로 둘을 같이 쓰므로 그 문제가 없다.
+   */
+  replaceAll(payloads: TailnetPayload[]): void {
+    stateStorage.updateState((state) => {
+      const keys: Record<string, StoredEncryptedValue> = {};
+      state.data.tailnets = payloads.map((payload) => {
+        const { authKey, ...record } = payload;
+        const hasAuthKey = Boolean(authKey);
+        if (authKey) {
+          keys[record.id] = encodeSecretForStorage(authKey);
+        }
+        return { ...record, hasAuthKey, ephemeral: hasAuthKey };
+      });
+      state.secure.tailnetAuthKeysById = keys;
+    });
+  }
+
+  /** 연결할 때만 읽는다. 렌더러로는 절대 내보내지 않는다. */
+  readAuthKey(id: string): string | null {
+    const record = stateStorage.getState().secure.tailnetAuthKeysById[id];
+    if (!record) {
+      return null;
+    }
+    return decodeSecretFromStorage(record);
+  }
+}
+
 export class SettingsRepository {
   constructor(private readonly configService: DesktopConfigService = new DesktopConfigService()) {}
 
@@ -1907,6 +2015,16 @@ export class SnippetRepository {
   }
 }
 
+/**
+ * 신뢰 범위를 정규화한다. 없음·빈 문자열·공백은 모두 "일반 네트워크"다.
+ *
+ * 이 비교가 곧 보안 경계다. 느슨하게 맞추면 tailnet 안에서 신뢰한 키가 일반 네트워크의
+ * 같은 이름 호스트에도 적용되고, 그 반대도 된다.
+ */
+function normalizeTailnetScope(tailnetId?: string | null): string {
+  return (tailnetId ?? '').trim();
+}
+
 export class KnownHostRepository {
   list(): KnownHostRecord[] {
     return stateStorage
@@ -1928,28 +2046,51 @@ export class KnownHostRepository {
     return stateStorage.getState().data.knownHosts.find((record) => record.host === host && record.port === port) ?? null;
   }
 
-  getByHostPortAlgorithm(host: string, port: number, algorithm: string): KnownHostRecord | null {
+  getByHostPortAlgorithm(
+    host: string,
+    port: number,
+    algorithm: string,
+    tailnetId?: string,
+  ): KnownHostRecord | null {
+    const scope = normalizeTailnetScope(tailnetId);
     return (
       stateStorage
         .getState()
         .data.knownHosts.find(
-          (record) => record.host === host && record.port === port && record.algorithm === algorithm
+          (record) =>
+            normalizeTailnetScope(record.tailnetId) === scope &&
+            record.host === host &&
+            record.port === port &&
+            record.algorithm === algorithm
         ) ?? null
     );
   }
 
-  listByHostPort(host: string, port: number): KnownHostRecord[] {
+  listByHostPort(host: string, port: number, tailnetId?: string): KnownHostRecord[] {
+    const scope = normalizeTailnetScope(tailnetId);
     return stateStorage
       .getState()
-      .data.knownHosts.filter((record) => record.host === host && record.port === port)
+      .data.knownHosts.filter(
+        (record) =>
+          normalizeTailnetScope(record.tailnetId) === scope &&
+          record.host === host &&
+          record.port === port
+      )
       .sort((left, right) => left.algorithm.localeCompare(right.algorithm));
   }
 
   trust(input: KnownHostTrustInput): KnownHostRecord {
-    const current = this.getByHostPortAlgorithm(input.host, input.port, input.algorithm);
+    const current = this.getByHostPortAlgorithm(
+      input.host,
+      input.port,
+      input.algorithm,
+      input.tailnetId,
+    );
     const timestamp = nowIso();
+    const scope = normalizeTailnetScope(input.tailnetId);
     const record: KnownHostRecord = {
       id: current?.id ?? randomUUID(),
+      ...(scope ? { tailnetId: scope } : {}),
       host: input.host,
       port: input.port,
       algorithm: input.algorithm,
@@ -1970,11 +2111,17 @@ export class KnownHostRepository {
     return record;
   }
 
-  touch(host: string, port: number, algorithm?: string): void {
+  touch(host: string, port: number, algorithm?: string, tailnetId?: string): void {
     const timestamp = nowIso();
+    const scope = normalizeTailnetScope(tailnetId);
     stateStorage.updateState((state) => {
       state.data.knownHosts = state.data.knownHosts.map((entry) => {
-        if (entry.host !== host || entry.port !== port || (algorithm && entry.algorithm !== algorithm)) {
+        if (
+          normalizeTailnetScope(entry.tailnetId) !== scope ||
+          entry.host !== host ||
+          entry.port !== port ||
+          (algorithm && entry.algorithm !== algorithm)
+        ) {
           return entry;
         }
         return {

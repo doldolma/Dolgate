@@ -9,6 +9,7 @@ import type {
   SessionShareChatEvent,
   SessionShareEvent,
   SftpConnectionProgressEvent,
+  TailnetStatus,
   TransferJobEvent,
   UpdateEvent,
   WarpgateImportEvent,
@@ -20,6 +21,7 @@ import {
   emitAuthEvent,
   emitActivityLogsChanged,
   emitContainerConnectionProgress,
+  emitTailnetStatus,
   emitCoreEvent,
   emitPortForwardEvent,
   emitSessionShareChatEvent,
@@ -66,6 +68,13 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
     ipcChannels.containers.connectionProgress,
     (_event, payload: ContainerConnectionProgressEvent) => {
       emitContainerConnectionProgress(payload);
+    },
+  );
+
+  ipcRenderer.on(
+    ipcChannels.tailnet.status,
+    (_event, payload: TailnetStatus) => {
+      emitTailnetStatus(payload);
     },
   );
 

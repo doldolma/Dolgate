@@ -1589,6 +1589,111 @@ describe('KnownHostRepository', () => {
   });
 });
 
+// 호스트 이름은 tailnet 안에서만 유효하다 — 다른 tailnet 의 같은 이름은 다른 머신이다.
+// 이 경계가 새면 신뢰한 적 없는 머신을 신뢰한 것으로 착각한다.
+describe('KnownHostRepository tailnet scoping', () => {
+  const base = {
+    hostId: 'host-1',
+    hostLabel: 'Prod',
+    host: 'server',
+    port: 22,
+    algorithm: 'ssh-ed25519',
+    fingerprintSha256: 'SHA256:x',
+  };
+
+  it('keeps the same name in different tailnets apart', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, publicKeyBase64: 'AAAPLAIN' });
+    knownHosts.trust({ ...base, tailnetId: 'net-a', publicKeyBase64: 'AAANETA' });
+    knownHosts.trust({ ...base, tailnetId: 'net-b', publicKeyBase64: 'AAANETB' });
+
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519')?.publicKeyBase64,
+    ).toBe('AAAPLAIN');
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519', 'net-a')
+        ?.publicKeyBase64,
+    ).toBe('AAANETA');
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519', 'net-b')
+        ?.publicKeyBase64,
+    ).toBe('AAANETB');
+    // 세 개가 각자 남아야 한다. 하나를 다른 것으로 덮어썼다면 경계가 없는 것이다.
+    expect(knownHosts.list().filter((record) => record.host === 'server')).toHaveLength(3);
+  });
+
+  it('does not offer a tailnet key to a plain-network lookup', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, tailnetId: 'net-a', publicKeyBase64: 'AAANETA' });
+
+    expect(knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519')).toBeNull();
+    expect(knownHosts.listByHostPort('server', 22)).toEqual([]);
+  });
+
+  it('does not offer a plain-network key inside a tailnet', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, publicKeyBase64: 'AAAPLAIN' });
+
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519', 'net-a'),
+    ).toBeNull();
+    expect(knownHosts.listByHostPort('server', 22, 'net-a')).toEqual([]);
+  });
+
+  // 예전 레코드에는 tailnetId 가 없다. 그것은 일반 네트워크에서 신뢰한 것으로 계속 읽혀야
+  // 한다 — 아니면 업그레이드 직후 모든 호스트가 다시 신뢰를 물어본다.
+  it('reads records saved before tailnets existed as plain-network trust', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, publicKeyBase64: 'AAAPLAIN' });
+    const stored = knownHosts.list().find((record) => record.host === 'server');
+
+    expect(stored).not.toHaveProperty('tailnetId');
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519')?.publicKeyBase64,
+    ).toBe('AAAPLAIN');
+  });
+
+  // 빈 문자열과 공백은 "일반 네트워크"와 같아야 한다. 다르게 취급하면 같은 신뢰가 둘로 갈린다.
+  it('treats a blank tailnet id as the plain network', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, publicKeyBase64: 'AAAPLAIN' });
+    knownHosts.trust({ ...base, tailnetId: '  ', publicKeyBase64: 'AAAUPDATED' });
+
+    expect(knownHosts.list().filter((record) => record.host === 'server')).toHaveLength(1);
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519')?.publicKeyBase64,
+    ).toBe('AAAUPDATED');
+  });
+
+  it('updates within its own tailnet only', async () => {
+    const { KnownHostRepository } = await loadRepositories();
+    const knownHosts = new KnownHostRepository();
+
+    knownHosts.trust({ ...base, tailnetId: 'net-a', publicKeyBase64: 'AAAOLD' });
+    knownHosts.trust({ ...base, tailnetId: 'net-b', publicKeyBase64: 'AAAOTHER' });
+    knownHosts.trust({ ...base, tailnetId: 'net-a', publicKeyBase64: 'AAANEW' });
+
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519', 'net-a')
+        ?.publicKeyBase64,
+    ).toBe('AAANEW');
+    expect(
+      knownHosts.getByHostPortAlgorithm('server', 22, 'ssh-ed25519', 'net-b')
+        ?.publicKeyBase64,
+    ).toBe('AAAOTHER');
+  });
+});
+
 describe('DnsOverrideRepository', () => {
   it('stores normalized hostnames linked to eligible loopback rules', async () => {
     const { PortForwardRepository, DnsOverrideRepository } = await loadRepositories();

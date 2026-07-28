@@ -315,6 +315,8 @@ export interface HostFormProps {
   groupOptions: Array<{ value: string | null; label: string }>;
   /** Saved SSH hosts selectable as a jump host (bastion). See getJumpHostCandidates. */
   jumpHostOptions?: SearchableSelectOption[];
+  /** 설정에 등록된 tailnet. 이 호스트를 어느 tailnet 으로 보낼지 고르는 데 쓴다. */
+  tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
   createKind?: 'ssh' | 'serial';
@@ -551,6 +553,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   keychainEntries,
   groupOptions,
   jumpHostOptions = [],
+  tailnetOptions = [],
   snippets = [],
   defaultGroupPath = null,
   createKind = 'ssh',
@@ -1972,6 +1975,35 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 ) : null}
               </div>
             ) : null}
+
+            {/* 등록된 tailnet 이 없어도 칸은 보여 준다. 숨기면 이 기능이 있다는 것 자체를
+                알 수 없고, 기기마다 따로 등록해야 하는 구조라 "다른 PC 에서는 없다"로
+                보이기 때문이다. 대신 어디서 등록하는지 알려 준다. */}
+            <div className={fieldClassName}>
+              <span className={fieldLabelClassName}>Tailnet</span>
+              <SelectField
+                value={sshDraft.tailnetId ?? ''}
+                disabled={tailnetOptions.length === 0}
+                onChange={(event) =>
+                  setDraft({
+                    ...sshDraft,
+                    tailnetId: event.target.value || null,
+                  })
+                }
+              >
+                <option value="">{translate('hostForm.tailnet.none')}</option>
+                {tailnetOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </SelectField>
+              <span className="text-[0.82rem] text-[var(--text-soft)]">
+                {tailnetOptions.length === 0
+                  ? translate('hostForm.tailnet.empty')
+                  : translate('hostForm.tailnet.description')}
+              </span>
+            </div>
 
             <div className={fieldClassName}>
               <span className={fieldLabelClassName}>Jump hosts</span>

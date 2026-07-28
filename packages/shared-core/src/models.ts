@@ -196,6 +196,13 @@ interface HostBaseDraft {
 
 export interface SshHostRecord extends HostBaseRecord {
   kind: 'ssh';
+  /**
+   * 이 호스트에 닿을 때 경유할 tailnet. 없으면 일반 네트워크로 직접 붙는다.
+   *
+   * 호스트 이름이 유효한 범위를 정하기도 한다 — 신뢰한 호스트 키는 이 tailnet 안에서만
+   * 유효하다(다른 tailnet 의 같은 이름은 다른 머신이다).
+   */
+  tailnetId?: string | null;
   hostname: string;
   port: number;
   username: string;
@@ -225,6 +232,8 @@ export interface SshHostRecord extends HostBaseRecord {
 
 export interface SshHostDraft extends HostBaseDraft {
   kind: 'ssh';
+  /** 경유할 tailnet. 없으면 일반 네트워크로 직접 붙는다. SshHostRecord.tailnetId 와 같다. */
+  tailnetId?: string | null;
   hostname: string;
   port: number;
   username: string;
@@ -963,6 +972,55 @@ export function normalizeSftpBrowserColumnWidths(
 }
 
 export type HomeHostViewMode = 'grid' | 'list';
+
+/**
+ * 등록된 tailnet 하나. **auth key 는 여기 없다** — 비밀이라 기기 로컬 암호화 저장소에
+ * 따로 두고, 이 레코드에는 키가 설정돼 있는지 여부만 남긴다. 그래야 나중에 tailnet 설정이
+ * 기기 간 동기화 대상이 되어도 키가 딸려 나가지 않는다.
+ *
+ * 노드 상태(노드키)도 여기 없다. 기기마다 자기 노드를 가지므로 공유하면 서로를 밀어낸다.
+ */
+export interface TailnetRecord {
+  id: string;
+  /** 사용자가 알아볼 이름. */
+  label: string;
+  /** 비면 Tailscale, 채우면 Headscale 같은 다른 컨트롤 플레인. */
+  controlUrl?: string;
+  /**
+   * 활동이 멈추면 노드를 지우도록 요청한다. 컨트롤 플레인이 최종 판단하며, Headscale 의
+   * OIDC 경로는 이를 무시하는 알려진 버그가 있다.
+   */
+  ephemeral?: boolean;
+  /** auth key 가 저장돼 있는지. 키 자체는 암호화 저장소에 있다. */
+  hasAuthKey?: boolean;
+  /**
+   * 이 설정이 묶인 tailnet 의 이름. 처음 연결에 성공했을 때 컨트롤 플레인이 알려 준 값이다.
+   *
+   * 대조용이다. Tailscale 기본 서버는 설정에 서버 주소조차 없어서, 다른 기기에서(또는 같은
+   * 기기에서 나중에) 다른 계정으로 로그인하면 조용히 다른 tailnet 에 붙는다. 그 tailnet 에
+   * 같은 이름의 다른 머신이 있으면 엉뚱한 곳으로 연결을 시도하게 된다.
+   */
+  tailnetName?: string;
+  /** 마지막으로 이 설정을 인증한 계정. 안내용이고 대조에는 쓰지 않는다 — 한 tailnet 에 여러 사용자가 있는 것은 정상이다. */
+  loginName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 동기화에 실리는 tailnet. 레코드에 auth key 를 합친 것이다.
+ *
+ * 로컬 저장은 둘로 나뉜다 — 레코드는 data.tailnets, 키는 OS 암호화 저장소인
+ * secure.tailnetAuthKeysById. 동기화는 이 둘을 합쳐 볼트 키로 암호화해 올린다. 서버는
+ * 암호문만 보관하므로 키가 실려도 서버가 볼 수 없다. AWS 프로필과 같은 구조다.
+ *
+ * 기기별 상태(tailscaled.state 의 머신키·노드키)는 여기 없다. 기기마다 tailnet 안에서
+ * 별개의 노드라 공유하면 안 되는 물건이다.
+ */
+export interface TailnetPayload extends TailnetRecord {
+  /** 없으면 브라우저 로그인으로 등록하는 tailnet 이다. */
+  authKey?: string;
+}
 
 export interface AppSettings extends TerminalAppearanceSettings {
   theme: AppTheme;
@@ -2044,6 +2102,14 @@ export function isDnsOverrideEligiblePortForwardRule(rule: PortForwardRuleRecord
 // KnownHostRecord는 신뢰된 호스트 키 한 건을 나타낸다.
 export interface KnownHostRecord {
   id: string;
+  /**
+   * 이 키를 신뢰한 tailnet. 없으면 일반 네트워크에서 신뢰한 것이다.
+   *
+   * 호스트 이름은 tailnet 안에서만 유효하다 — 다른 tailnet 의 같은 이름은 다른 머신이다.
+   * 이것을 키에 넣지 않으면 서로의 호스트 키를 오인해, 신뢰한 적 없는 머신을 신뢰한 것으로
+   * 착각하게 된다.
+   */
+  tailnetId?: string;
   host: string;
   port: number;
   algorithm: string;
@@ -2072,6 +2138,8 @@ export interface HostKeyProbeResult {
 export interface KnownHostTrustInput {
   hostId: string;
   hostLabel: string;
+  /** 이 신뢰가 어느 tailnet 안에서인지. 없으면 일반 네트워크다. */
+  tailnetId?: string;
   host: string;
   port: number;
   algorithm: string;

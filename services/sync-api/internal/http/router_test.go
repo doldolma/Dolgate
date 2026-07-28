@@ -242,28 +242,28 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	}
 
 	payload := syncmodel.Payload{
-		Groups: []syncmodel.Record{
+		syncmodel.KindGroups: []syncmodel.Record{
 			{
 				ID:               "group-1",
 				EncryptedPayload: "ciphertext-group",
 				UpdatedAt:        "2026-03-21T15:00:00Z",
 			},
 		},
-		Hosts: []syncmodel.Record{
+		syncmodel.KindHosts: []syncmodel.Record{
 			{
 				ID:               "host-1",
 				EncryptedPayload: "ciphertext-host",
 				UpdatedAt:        "2026-03-21T15:00:00Z",
 			},
 		},
-		Secrets: []syncmodel.Record{
+		syncmodel.KindSecrets: []syncmodel.Record{
 			{
 				ID:               "secret-1",
 				EncryptedPayload: "ciphertext-secret",
 				UpdatedAt:        "2026-03-21T15:00:00Z",
 			},
 		},
-		Preferences: []syncmodel.Record{
+		syncmodel.KindPreferences: []syncmodel.Record{
 			{
 				ID:               "global-terminal",
 				EncryptedPayload: "ciphertext-preferences",
@@ -294,7 +294,7 @@ func TestAuthRefreshAndSyncFlow(t *testing.T) {
 	if err := json.Unmarshal(getSyncRecorder.Body.Bytes(), &syncResponse); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
-	if len(syncResponse.Groups) != 1 || len(syncResponse.Hosts) != 1 || len(syncResponse.Secrets) != 1 || len(syncResponse.Preferences) != 1 {
+	if len(syncResponse[syncmodel.KindGroups]) != 1 || len(syncResponse[syncmodel.KindHosts]) != 1 || len(syncResponse[syncmodel.KindSecrets]) != 1 || len(syncResponse[syncmodel.KindPreferences]) != 1 {
 		t.Fatalf("unexpected sync response: %#v", syncResponse)
 	}
 
@@ -1282,7 +1282,7 @@ func TestAccountDeleteRemovesAllDataAndInvalidatesTokens(t *testing.T) {
 	}
 
 	payload := syncmodel.Payload{
-		Hosts: []syncmodel.Record{
+		syncmodel.KindHosts: []syncmodel.Record{
 			{ID: "host-1", EncryptedPayload: "ciphertext-host", UpdatedAt: "2026-03-21T15:00:00Z"},
 		},
 	}
@@ -1360,8 +1360,8 @@ func TestAccountDeleteRemovesAllDataAndInvalidatesTokens(t *testing.T) {
 	if err := json.Unmarshal(getSyncRecorder.Body.Bytes(), &syncResponse); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
-	if len(syncResponse.Hosts) != 0 {
-		t.Fatalf("expected no hosts after account deletion, got %#v", syncResponse.Hosts)
+	if len(syncResponse[syncmodel.KindHosts]) != 0 {
+		t.Fatalf("expected no hosts after account deletion, got %#v", syncResponse[syncmodel.KindHosts])
 	}
 }
 
@@ -1827,8 +1827,8 @@ func TestVaultV2EndToEndFlow(t *testing.T) {
 	if err := json.Unmarshal(getSyncRecorder.Body.Bytes(), &syncAfterReset); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
-	if len(syncAfterReset.Hosts) != 0 {
-		t.Fatalf("expected sync records wiped after vault reset, got %d hosts", len(syncAfterReset.Hosts))
+	if len(syncAfterReset[syncmodel.KindHosts]) != 0 {
+		t.Fatalf("expected sync records wiped after vault reset, got %d hosts", len(syncAfterReset[syncmodel.KindHosts]))
 	}
 
 	// 재로그인 후 version 0 을 받고, 새 볼트를 다시 설정할 수 있다.

@@ -259,6 +259,9 @@ export function buildEmptySyncPayload(): SyncPayloadV2 {
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
+    // 모바일은 tailnet 을 쓰지 않지만(스코프 밖), 페이로드 모양은 맞춰야 한다. 빈 배열을
+    // 보내는 것은 "이 kind 에 변경 없음"이라 서버의 tailnets 레코드를 건드리지 않는다.
+    tailnets: [],
     preferences: [],
     awsProfiles: [],
     snippets: [],

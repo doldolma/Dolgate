@@ -358,6 +358,8 @@ export function registerSftpIpcHandlers(ctx: MainIpcContext): void {
         trustedHostKeyBase64: trustedHostKeysBase64[0],
         trustedHostKeysBase64,
         jump,
+        // 셸과 같은 경로를 타야 한다. 안 넘기면 tailnet 호스트의 SFTP 가 일반 네트워크로 나간다.
+        ...ctx.resolveTailnetRoute(sshHost),
         authAgentEndpointKind: authAgentEndpoint?.kind,
         authAgentEndpoint: authAgentEndpoint?.endpoint,
         hostId: sshHost.id,

@@ -316,3 +316,104 @@ describe('registerKnownHostsLogsKeychainIpcHandlers', () => {
     expect(ctx.hosts.updateSecretRef).toHaveBeenCalledWith('host-1', 'secret-2');
   });
 });
+
+// 신뢰 범위를 렌더러가 정하게 두면 그것이 곧 우회 경로가 된다 — tailnet 밖에서 신뢰한 키를
+// tailnet 안에서 통하게 만들 수 있다. 범위는 호스트 레코드가 정한다.
+describe('known host trust scope', () => {
+  it('takes the tailnet from the host record, not from the renderer', async () => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    ctx.hosts.getById = vi.fn(() => ({
+      id: 'host-1',
+      kind: 'ssh',
+      label: 'Prod',
+      hostname: 'server',
+      port: 22,
+      username: 'root',
+      authType: 'password',
+      tailnetId: 'net-a',
+    })) as never;
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    const handler = ipcHandlers.get(ipcChannels.knownHosts.trust)!;
+    await handler({}, {
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'server',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAA',
+      fingerprintSha256: 'SHA256:x',
+      // 렌더러가 다른 범위를 주장한다.
+      tailnetId: 'net-attacker',
+    });
+
+    expect(ctx.knownHosts.trust).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnetId: 'net-a' }),
+    );
+  });
+
+  it('scopes to the plain network when the host has no tailnet', async () => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    ctx.hosts.getById = vi.fn(() => ({
+      id: 'host-1',
+      kind: 'ssh',
+      label: 'Prod',
+      hostname: 'server',
+      port: 22,
+      username: 'root',
+      authType: 'password',
+    })) as never;
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    const handler = ipcHandlers.get(ipcChannels.knownHosts.trust)!;
+    await handler({}, {
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'server',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAA',
+      fingerprintSha256: 'SHA256:x',
+      tailnetId: 'net-attacker',
+    });
+
+    expect(ctx.knownHosts.trust).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnetId: undefined }),
+    );
+  });
+
+  // 교체(호스트키 변경 수락)도 같은 경계를 지나야 한다.
+  it('applies the same scope rule when replacing a key', async () => {
+    ipcHandlers.clear();
+    const ctx = createContext();
+    ctx.hosts.getById = vi.fn(() => ({
+      id: 'host-1',
+      kind: 'ssh',
+      label: 'Prod',
+      hostname: 'server',
+      port: 22,
+      username: 'root',
+      authType: 'password',
+      tailnetId: 'net-a',
+    })) as never;
+    registerKnownHostsLogsKeychainIpcHandlers(ctx as never);
+
+    const handler = ipcHandlers.get(ipcChannels.knownHosts.replace)!;
+    await handler({}, {
+      hostId: 'host-1',
+      hostLabel: 'Prod',
+      host: 'server',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAANEW',
+      fingerprintSha256: 'SHA256:new',
+      tailnetId: 'net-attacker',
+    });
+
+    expect(ctx.knownHosts.trust).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnetId: 'net-a' }),
+    );
+  });
+});

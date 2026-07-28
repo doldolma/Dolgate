@@ -112,9 +112,24 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
     },
   );
 
+  /**
+   * 신뢰를 어느 tailnet 범위에 저장할지는 호스트 레코드가 정한다.
+   *
+   * 렌더러가 보낸 값을 쓰지 않는 이유는, 그 값이 곧 "이 키를 어디서 신뢰하는가"를 결정하는
+   * 보안 경계이기 때문이다. 렌더러가 틀리거나 조작되면 tailnet 밖에서 신뢰한 키가 tailnet
+   * 안에서 통하게 된다.
+   */
+  const resolveTrustScope = (input: KnownHostTrustInput): KnownHostTrustInput => {
+    const host = ctx.hosts.getById(input.hostId);
+    const tailnetId =
+      host && isSshHostRecord(host) ? (host.tailnetId ?? undefined) : undefined;
+    return { ...input, tailnetId };
+  };
+
   ipcMain.handle(
     ipcChannels.knownHosts.trust,
-    async (_event, input: KnownHostTrustInput) => {
+    async (_event, rawInput: KnownHostTrustInput) => {
+      const input = resolveTrustScope(rawInput);
       const record = ctx.knownHosts.trust(input);
       ctx.activityLogs.append(
         "info",
@@ -133,7 +148,8 @@ export function registerKnownHostsLogsKeychainIpcHandlers(
 
   ipcMain.handle(
     ipcChannels.knownHosts.replace,
-    async (_event, input: KnownHostTrustInput) => {
+    async (_event, rawInput: KnownHostTrustInput) => {
+      const input = resolveTrustScope(rawInput);
       const record = ctx.knownHosts.trust(input);
       ctx.activityLogs.append("warn", "audit", logMessage('knownHostsIpc.hostKeyReplaced'), {
         host: input.host,

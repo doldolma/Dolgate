@@ -2,6 +2,7 @@ package sshconn
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -92,6 +93,33 @@ type Config struct {
 	// 연결해 서명을 위임한다. config가 점프 체인 재귀에 전파되므로 모든 홉이 같은 로컬 agent를 쓴다.
 	AuthAgentEndpointKind string
 	AuthAgentEndpoint     string
+	// Dial 이 설정되면 직접 TCP 대신 이것으로 raw 연결을 연다(tailnet 경유).
+	//
+	// config 는 점프 체인 재귀에 전파되므로, 점프가 있으면 베스천까지만 이 경로로 가고
+	// 대상은 베스천 연결 위로 간다 — 실제로 소켓을 여는 홉만 tailnet 을 탄다는 뜻이고,
+	// 그게 맞는 동작이다.
+	//
+	// 반환된 conn 의 Close 가 tailnet 노드 리스를 놓는 지점이다. 그래서 호출부가 리스를
+	// 따로 들고 다닐 필요가 없다 — 이미 conn/client 를 닫고 있으므로 수명이 저절로 맞는다.
+	Dial DialFunc
+}
+
+// DialFunc 는 raw 전송을 여는 함수다.
+type DialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// TailnetDialResolver 는 tailnet 경로를 raw dialer 로 바꾼다. 런타임이 레지스트리를 들고
+// 있으므로 세션 계층은 이 함수만 받는다 — 반환된 dialer 가 만든 conn 이 닫힐 때 노드 리스가
+// 풀리므로, 호출부는 평소처럼 client 만 닫으면 된다.
+type TailnetDialResolver func(tailnetID, expectedName string) (DialFunc, error)
+
+// ResolveTailnetDial 은 resolver 가 없거나 경로가 비었을 때 nil 을 돌려준다. 다섯 군데가 같은
+// nil 검사를 반복하지 않게 하려고 여기 둔다 — 한 곳이라도 빼먹으면 그 경로만 조용히 일반
+// 네트워크로 나간다.
+func ResolveTailnetDial(resolve TailnetDialResolver, tailnetID, expectedName string) (DialFunc, error) {
+	if resolve == nil || strings.TrimSpace(tailnetID) == "" {
+		return nil, nil
+	}
+	return resolve(tailnetID, expectedName)
 }
 
 type HostKeyProbeResult struct {
@@ -191,7 +219,26 @@ func HopProgress(target Target, sessionID, endpointID string, emit func(coretype
 	}
 }
 
+// ErrTransportConflict 는 서버 프록시와 tailnet 을 동시에 요구했을 때다.
+//
+// 둘은 대상까지의 raw 전송을 각자 대신하므로 함께 쓸 수 없다. 지금은 호스트 종류로 갈려서
+// (wsProxy 는 aws-ec2, tailnet 은 ssh) 동시에 설정될 일이 없지만, 조용히 한쪽이 이기게 두면
+// 나중에 넓어질 때 "tailnet 을 지정했는데 서버 프록시로 나가는" 것을 아무도 모른다.
+var ErrTransportConflict = errors.New(
+	"sshconn: ws proxy and tailnet dialer are mutually exclusive",
+)
+
+func assertSingleTransport(target Target, config Config) error {
+	if target.WSProxy != nil && config.Dial != nil {
+		return ErrTransportConflict
+	}
+	return nil
+}
+
 func DialClient(target Target, config Config, responder InteractiveResponder) (*ssh.Client, error) {
+	if err := assertSingleTransport(target, config); err != nil {
+		return nil, err
+	}
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
 	}
@@ -255,6 +302,17 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 			_ = jumpClient.Close()
 			return nil, fmt.Errorf("dial through jump host: %w", err)
 		}
+	} else if config.Dial != nil {
+		// tailnet 경유. 노드가 아직 안 올라와 있으면 여기서 올라오기를 기다린다 — 최초
+		// 등록이면 브라우저 로그인 시간이 이 안에 들어간다.
+		reportProgress(ProgressConnecting)
+		ctx, cancel := context.WithTimeout(context.Background(), config.TCPDialTimeout)
+		defer cancel()
+		rawConn, err = config.Dial(ctx, "tcp", addr)
+		if err != nil {
+			reportProgress(ProgressFailed)
+			return nil, fmt.Errorf("dial failed: %w", err)
+		}
 	} else {
 		reportProgress(ProgressConnecting)
 		dialer := &net.Dialer{
@@ -298,6 +356,9 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 // 비대화형(password/privateKey/certificate)만 지원하며(responder 없이 DialClient),
 // keyboard-interactive 베스천을 경유하는 probe는 현재 지원하지 않는다.
 func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProxyTarget, config Config) (HostKeyProbeResult, error) {
+	if err := assertSingleTransport(Target{WSProxy: wsProxy}, config); err != nil {
+		return HostKeyProbeResult{}, err
+	}
 	if config.TCPDialTimeout == 0 {
 		config.TCPDialTimeout = DefaultConfig.TCPDialTimeout
 	}
@@ -339,6 +400,18 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 		if err != nil {
 			reportTarget(ProgressFailed)
 			return HostKeyProbeResult{}, fmt.Errorf("dial through jump host: %w", err)
+		}
+	} else if config.Dial != nil {
+		// 프로브도 같은 통로로 가야 한다. 여기서 직접 TCP 로 나가면 tailnet 안에만 있는
+		// 호스트의 키를 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽게 된다.
+		reportTarget(ProgressConnecting)
+		ctx, cancel := context.WithTimeout(context.Background(), config.TCPDialTimeout)
+		defer cancel()
+		var err error
+		rawConn, err = config.Dial(ctx, "tcp", addr)
+		if err != nil {
+			reportTarget(ProgressFailed)
+			return HostKeyProbeResult{}, fmt.Errorf("dial failed: %w", err)
 		}
 	} else {
 		reportTarget(ProgressConnecting)

@@ -1332,6 +1332,11 @@
     },
     "env": {
       "description": "연결 시 셸에 주입됩니다(SetEnv→export 폴백). 값은 비밀번호처럼 암호화되어 저장·동기화됩니다."
+    },
+    "tailnet": {
+      "none": "사용하지 않음 (일반 네트워크)",
+      "description": "이 tailnet 을 경유해 붙습니다. 신뢰한 호스트 키도 이 tailnet 안에서만 유효합니다 — 다른 tailnet 의 같은 이름은 다른 기기입니다.",
+      "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다."
     }
   },
   "hostTransfer": {
@@ -3042,5 +3047,56 @@
       "remoteAddressUnset": "원격 주소 미설정",
       "usernameUnset": "사용자명 미설정"
     }
+  },
+  "tailnetSettings": {
+    "heading": "네트워크",
+    "description": "Tailscale 또는 Headscale 네트워크(tailnet)에 노드로 참여해, 그 안의 호스트에 연결합니다.",
+    "add": "네트워크 추가",
+    "empty": "등록된 네트워크가 없습니다.",
+    "emptyHint": "네트워크를 추가하면 연결 테스트로 노드가 올라오는지 먼저 확인할 수 있습니다.",
+    "test": "연결 테스트",
+    "remove": "{{label}} 삭제",
+    "tailscaleDefault": "Tailscale",
+    "usingAuthKey": "auth key",
+    "usingBrowser": "브라우저 로그인",
+    "needsAuth": "브라우저에서 인증을 마쳐야 연결이 완료됩니다. 창이 열리지 않았다면 다시 열어 주세요.",
+    "openBrowser": "브라우저 다시 열기",
+    "headscaleApprovalHint": "이 서버에 OIDC 가 설정돼 있지 않으면 로그인 화면 대신 안내문과 Auth ID 가 표시됩니다. 그 경우 관리자가 승인해야 완료됩니다.",
+    "state": {
+      "stopped": "중지됨",
+      "needsAuth": "인증 대기",
+      "needsApproval": "관리자 승인 대기",
+      "starting": "연결 중",
+      "running": "연결됨",
+      "failed": "실패",
+      "preparingAuth": "인증 링크 받는 중",
+      "expired": "인증 만료"
+    },
+    "field": {
+      "label": "네트워크 이름",
+      "labelPlaceholder": "예: 회사 네트워크",
+      "controlUrl": "Headscale 서버 (선택)",
+      "controlUrlPlaceholder": "https://headscale.example.com",
+      "authKey": "auth key",
+      "authKeyPlaceholder": "비우면 브라우저 로그인",
+      "connectedTo": "연결된 Tailnet",
+      "connectedToPlaceholder": "연결 테스트에 성공하면 채워집니다",
+      "authKeyHint": "reusable + ephemeral 권장 — 안 쓰는 노드가 자동 정리되고, 1회용 키는 재연결에 실패합니다."
+    },
+    "removeConfirm": "이 네트워크 설정과 저장된 auth key 가 지워지고, 등록된 노드도 해제됩니다. 되돌릴 수 없습니다.",
+    "disconnect": "연결 종료",
+    "identity": {
+      "tailnet": "Tailnet",
+      "account": "계정",
+      "node": "이 기기"
+    },
+    "connect": "연결",
+    "tailnetMismatch": "이 설정은 {{expected}} 용인데 {{actual}} 에 연결됐습니다. 다른 계정으로 로그인한 것 같습니다 — 이 tailnet 에 같은 이름의 다른 기기가 있으면 엉뚱한 곳에 연결될 수 있습니다.",
+    "stopTest": "테스트 중단",
+    "removed": {
+      "tailscale": "노드 키를 만료시켰습니다. 다만 항목을 지우는 것은 컨트롤 플레인의 정책이라, ephemeral 로 등록된 노드가 아니면 기기 목록에 만료된 채로 남습니다. 남아 있으면 Tailscale 관리 콘솔에서 지워 주세요.",
+      "headscale": "노드 키를 만료시켰습니다. 다만 항목을 지우는 것은 컨트롤 플레인의 정책이라, ephemeral 로 등록된 노드가 아니면 기기 목록에 만료된 채로 남습니다. 남아 있으면 서버에서 지워 주세요 (headscale nodes delete)."
+    },
+    "localNodeName": "이 기기는 다음 이름으로 등록됩니다 —"
   }
 }

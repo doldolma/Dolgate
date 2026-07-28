@@ -83,7 +83,8 @@ export type SyncKind =
   | 'dnsOverrides'
   | 'preferences'
   | 'awsProfiles'
-  | 'snippets';
+  | 'snippets'
+  | 'tailnets';
 
 // 서버는 payload를 해석하지 않고 암호문 그대로 저장한다.
 export interface SyncRecord {
@@ -104,6 +105,8 @@ export interface SyncPayloadV2 {
   preferences: SyncRecord[];
   awsProfiles: SyncRecord[];
   snippets: SyncRecord[];
+  /** 서버는 kind 를 열거하지 않는다 — 항목 추가는 클라이언트만 고치면 된다. */
+  tailnets: SyncRecord[];
 }
 
 export interface ServerInfoResponse {

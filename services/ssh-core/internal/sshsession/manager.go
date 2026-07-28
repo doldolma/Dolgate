@@ -78,6 +78,13 @@ type ManagerConfig struct {
 	TCPKeepAliveInterval time.Duration
 	// SSHKeepAliveInterval은 애플리케이션 레벨 keepalive 전송 간격이다. 음수면 비활성화한다.
 	SSHKeepAliveInterval time.Duration
+	// TailnetDial 은 payload 의 tailnet 경로를 raw dialer 로 바꿔 준다. nil 이거나 경로가
+	// 비어 있으면 평소처럼 직접 TCP 로 나간다.
+	//
+	// 여기서 받는 이유는 tailnet 레지스트리가 런타임 소유라서다. 매니저가 레지스트리를 직접
+	// 알면 세션 계층이 tailnet 수명 관리까지 떠안게 된다 — 반환된 dialer 가 만든 conn 이
+	// 닫힐 때 리스가 풀리므로, 매니저는 평소처럼 client 만 닫으면 된다.
+	TailnetDial sshconn.TailnetDialResolver
 	// SSHKeepAliveMaxFailures는 세션을 끊김으로 판단하기 전 허용하는 연속 keepalive
 	// 실패 횟수다(OpenSSH의 ServerAliveCountMax에 해당). 단발 네트워크 블립으로 멀쩡한
 	// 세션을 죽이는 오탐을 막는다. 0 이하면 기본값을 쓴다.
@@ -185,6 +192,16 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
 		WSProxy:               payload.WSProxy,
 	}
+	// tailnet 경유면 raw 전송을 그 노드로 바꾼다. 경로가 없으면 dial 이 nil 이라 평소대로다.
+	dial, dialErr := sshconn.ResolveTailnetDial(
+		m.config.TailnetDial,
+		payload.TailnetID,
+		payload.TailnetName,
+	)
+	if dialErr != nil {
+		return dialErr
+	}
+
 	// 다단 ProxyJump 연결 단계 UI: DialClient가 홉마다 보고하는 진행을 공통 헬퍼로 renderer에
 	// 전달한다(세션·SFTP·컨테이너·probe가 전부 동일 방식). SessionID로 해당 터미널 탭에 매핑.
 	client, err := sshconn.DialClient(target, sshconn.Config{
@@ -193,6 +210,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
 		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
 		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
+		Dial:                  dial,
 	}, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", sessionID, attempt)

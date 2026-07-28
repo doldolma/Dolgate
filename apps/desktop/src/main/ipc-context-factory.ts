@@ -11,6 +11,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  TailnetRepository,
   SnippetRepository,
   SyncOutboxRepository,
 } from "./database";
@@ -43,6 +44,7 @@ export interface RegisterIpcDependencies {
   hosts: HostRepository;
   groups: GroupRepository;
   settings: SettingsRepository;
+  tailnets: TailnetRepository;
   portForwards: PortForwardRepository;
   dnsOverrides: DnsOverrideRepository;
   snippets: SnippetRepository;
@@ -73,6 +75,7 @@ export function createMainIpcContext(
     hosts,
     groups,
     settings,
+    tailnets,
     portForwards,
     dnsOverrides,
     snippets,
@@ -155,6 +158,7 @@ export function createMainIpcContext(
     authService,
     awsSsmTunnelService,
     awsSftpCoordinator,
+    tailnets,
     resolveRuntimeSshSecrets: secretCoordinator.resolveRuntimeSshSecrets,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
   });
@@ -205,6 +209,7 @@ export function createMainIpcContext(
     hosts,
     groups,
     settings,
+    tailnets,
     portForwards,
     dnsOverrides,
     snippets,
@@ -287,6 +292,7 @@ export function createMainIpcContext(
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
     requireTrustedHostKey: hostCoordinator.requireTrustedHostKey,
     requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
+    resolveTailnetRoute: hostCoordinator.resolveTailnetRoute,
     requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys: hostCoordinator.buildKnownSshDuplicateKeys,
     assertSshHost: hostCoordinator.assertSshHost,

@@ -9,75 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type {
-  ActivityLogRecord,
-  ContainerActionLogMetadata,
-  ContainerLifecycleLogMetadata,
-  ContainerLifecycleTransport,
-  ContainerWorkspaceKind,
-  HostKeyProbeResult,
-  HostContainerAction,
-  HostContainerDetails,
-  HostContainerListResult,
-  HostContainerLogSearchResult,
-  HostContainerLogsSnapshot,
-  HostContainerRuntime,
-  HostContainerStatsSample,
-  CoreEvent,
-  CoreEventType,
-  CoreRequest,
-  CoreStreamFrame,
-  DirectoryListing,
-  FileEntry,
-  PortForwardMode,
-  PortForwardTransport,
-  PortForwardRuntimeEvent,
-  PortForwardRuntimeRecord,
-  KeyboardInteractiveRespondInput,
-  ControlSignalPayload,
-  ResolvedCertificateInspectPayload,
-  ResolvedAwsConnectPayload,
-  ResolvedAuthorizedKeyInstallPayload,
-  ResolvedAuthorizedKeyInstallResult,
-  ResolvedContainersConnectPayload,
-  ResolvedCoreConnectPayload,
-  ResolvedHostKeyProbePayload,
-  ResolvedLocalConnectPayload,
-  ResolvedPrivateKeyGeneratePayload,
-  ResolvedPrivateKeyGenerateResult,
-  ResolvedPrivateKeyInspectPayload,
-  ResolvedPrivateKeyInspectResult,
-  ResolvedSerialConnectPayload,
-  ResolvedSerialControlPayload,
-  ResolvedSerialControlResult,
-  ResolvedSerialListPortsPayload,
-  ResolvedPortForwardStartPayload,
-  ResolvedSsmPortForwardStartPayload,
-  ResolvedSftpConnectPayload,
-  SessionConnectionKind,
-  SessionLifecycleLogMetadata,
-  SerialPortSummary,
-  SftpChmodInput,
-  SftpChownInput,
-  SftpDeleteInput,
-  SftpReadFileInput,
-  SftpReadFileResult,
-  SftpWriteFileInput,
-  SftpEndpointSummary,
-  SftpLifecycleLogMetadata,
-  SftpListPrincipalsInput,
-  SftpListInput,
-  SftpMkdirInput,
-  SftpPrincipal,
-  SftpRenameInput,
-  SessionShareControlSignal,
-  SshCertificateInfo,
-  TerminalTab,
-  TransferFailedItem,
-  TransferJob,
-  TransferJobEvent,
-  TransferStartInput,
-} from "@shared";
+import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, ContainerLifecycleTransport, ContainerWorkspaceKind, ControlSignalPayload, CoreEvent, CoreEventType, CoreRequest, CoreStreamFrame, DirectoryListing, FileEntry, HostContainerAction, HostContainerDetails, HostContainerListResult, HostContainerLogSearchResult, HostContainerLogsSnapshot, HostContainerRuntime, HostContainerStatsSample, HostKeyProbeResult, KeyboardInteractiveRespondInput, PortForwardMode, PortForwardRuntimeEvent, PortForwardRuntimeRecord, PortForwardTransport, ResolvedAuthorizedKeyInstallPayload, ResolvedAuthorizedKeyInstallResult, ResolvedAwsConnectPayload, ResolvedCertificateInspectPayload, ResolvedContainersConnectPayload, ResolvedCoreConnectPayload, ResolvedHostKeyProbePayload, ResolvedLocalConnectPayload, ResolvedPortForwardStartPayload, ResolvedPrivateKeyGeneratePayload, ResolvedPrivateKeyGenerateResult, ResolvedPrivateKeyInspectPayload, ResolvedPrivateKeyInspectResult, ResolvedSerialConnectPayload, ResolvedSerialControlPayload, ResolvedSerialControlResult, ResolvedSerialListPortsPayload, ResolvedSftpConnectPayload, ResolvedSsmPortForwardStartPayload, SerialPortSummary, SessionConnectionKind, SessionLifecycleLogMetadata, SessionShareControlSignal, SftpChmodInput, SftpChownInput, SftpDeleteInput, SftpEndpointSummary, SftpLifecycleLogMetadata, SftpListInput, SftpListPrincipalsInput, SftpMkdirInput, SftpPrincipal, SftpReadFileInput, SftpReadFileResult, SftpRenameInput, SftpWriteFileInput, SshCertificateInfo, TailnetConfig, TailnetSnapshot, TailnetState, TailnetStatus, TerminalTab, TransferFailedItem, TransferJob, TransferJobEvent, TransferStartInput } from "@shared";
 import { MAX_HOST_STARTUP_COMMAND_LENGTH } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import {
@@ -506,16 +438,43 @@ function assignEnvValue(
   }
 }
 
+/**
+ * 앱 데이터 밑의 tailnet 상태 경로. Electron app 이 없는 환경(단위 테스트)에서는 조용히
+ * 비운다 — 값이 없으면 코어가 tailnet 명령만 거절하고 나머지는 그대로 동작한다.
+ */
+function resolveTailnetStateDir(): string | null {
+  try {
+    return path.join(app.getPath("userData"), "tailnet");
+  } catch {
+    return null;
+  }
+}
+
 export function buildCoreChildEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   options?: {
     platform?: NodeJS.Platform;
     isPackaged?: boolean;
+    /**
+     * tailnet 노드 상태를 둘 위치. 기본은 앱 데이터 디렉터리이고, 테스트는 Electron app
+     * 객체 없이 이 함수를 부르므로 주입할 수 있게 열어 둔다.
+     */
+    tailnetStateDir?: string;
   },
 ): NodeJS.ProcessEnv {
   const platform = options?.platform ?? process.platform;
   const isPackaged = options?.isPackaged ?? app.isPackaged;
   const env = { ...baseEnv };
+
+  // 주지 않으면 tsnet 이 os.UserConfigDir() 밑에 앱과 무관한 경로를 만들어, 사용자가 찾을
+  // 수도 등록 해제로 지울 수도 없게 된다. 노드키가 들어가므로 기기 로컬 전용이고 동기화
+  // 대상이 아니다. 개발/패키징 모두 필요하므로 아래 패키징 분기보다 앞에 둔다.
+  if (!env.DOLGATE_TAILNET_STATE_DIR) {
+    const tailnetStateDir = options?.tailnetStateDir ?? resolveTailnetStateDir();
+    if (tailnetStateDir) {
+      env.DOLGATE_TAILNET_STATE_DIR = tailnetStateDir;
+    }
+  }
 
   if (!isPackaged) {
     return env;
@@ -656,6 +615,13 @@ interface PendingResponse<TPayload> {
   reject: (error: Error) => void;
   expectedTypes: Set<CoreEventType>;
   timeout: NodeJS.Timeout;
+  /**
+   * 같은 requestId 로 여러 번 오는 진행 이벤트를 흘려보낸다. 설정 없으면 첫 매칭 이벤트에
+   * 곧바로 resolve 하는 기존 동작 그대로다.
+   */
+  onProgress?: (payload: Record<string, unknown>) => void;
+  /** 진행 이벤트 중 어느 것이 마지막인지. 설정 없으면 첫 이벤트가 곧 마지막이다. */
+  isTerminal?: (payload: Record<string, unknown>) => boolean;
 }
 
 interface PendingAwsAutocompleteResponse {
@@ -670,6 +636,37 @@ interface PendingSessionReadyWaiter {
   reject: (error: Error) => void;
   suppressFailureEvent: boolean;
   settled: boolean;
+}
+
+function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
+  const state = String(payload.state ?? "starting");
+  return {
+    id: String(payload.id ?? ""),
+    // 모르는 상태는 "시작 중"으로 본다. 코어에 새 상태가 생겼을 때 "정지"로 표시해
+    // 사용자를 오도하는 것보다 낫다.
+    state: (
+      ["stopped", "needsAuth", "needsApproval", "starting", "running"] as const
+    ).includes(state as TailnetState)
+      ? (state as TailnetState)
+      : "starting",
+    loginName: optionalText(payload.loginName),
+    tailnetName: optionalText(payload.tailnetName),
+    nodeName: optionalText(payload.nodeName),
+    nodeIp: optionalText(payload.nodeIp),
+    authUrl:
+      typeof payload.authUrl === "string" && payload.authUrl.length > 0
+        ? payload.authUrl
+        : undefined,
+    error:
+      typeof payload.error === "string" && payload.error.length > 0
+        ? payload.error
+        : undefined,
+  };
+}
+
+/** 빈 문자열은 "없음"이다 — 화면에 빈 줄을 만들지 않는다. */
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function isTransferEvent(type: CoreEventType): boolean {
@@ -4836,11 +4833,140 @@ export class CoreManager {
     this.pendingStartupCommandsBySessionId.delete(sessionId);
   }
 
+  /**
+   * tailnet 노드를 올려 running 까지 가는지 확인한다.
+   *
+   * 응답이 하나가 아니라 진행 상태가 여러 번 온다. 브라우저 로그인이면 사용자가 브라우저를
+   * 열고 인증하는 구간이 있어서, 그동안 무엇을 기다리는지(로그인인지 관리자 승인인지)
+   * 보여줘야 하기 때문이다. onStatus 로 중간 상태를 흘리고 running 에서 완료된다.
+   */
+  async testTailnet(
+    config: TailnetConfig,
+    onStatus: (status: TailnetStatus) => void,
+    options?: { timeoutMs?: number },
+  ): Promise<TailnetStatus> {
+    await this.start();
+
+    // 사람이 브라우저에서 로그인하는 시간을 포함한다. 코어에도 같은 값을 넘겨 양쪽 한도가
+    // 어긋나지 않게 하고, 여기 타이머는 코어가 먼저 끝내도록 조금 더 길게 잡는다.
+    const coreTimeoutMs = options?.timeoutMs ?? 3 * 60 * 1000;
+
+    const payload = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetTest",
+        payload: {
+          config: {
+            id: config.id,
+            controlUrl: config.controlUrl,
+            authKey: config.authKey,
+            ephemeral: config.ephemeral,
+          },
+          timeoutMs: coreTimeoutMs,
+        },
+      },
+      ["tailnetStatus"],
+      {
+        timeoutMs: coreTimeoutMs + 15_000,
+        onProgress: (progress) => onStatus(toTailnetStatus(progress)),
+        isTerminal: (progress) => toTailnetStatus(progress).state === "running",
+      },
+    );
+
+    return toTailnetStatus(payload);
+  }
+
+  /**
+   * 노드 등록을 해제한다 — 컨트롤 플레인에서 노드를 지우고 로컬 상태까지 삭제한다.
+   * tailnet 설정 자체는 남으므로 다시 연결하면 최초 등록과 같은 흐름을 탄다.
+   */
+  async forgetTailnet(id: string): Promise<void> {
+    await this.start();
+    const payload = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetForget",
+        payload: { id },
+      },
+      ["tailnetForgot"],
+      { timeoutMs: 30_000 },
+    );
+
+    // 코어는 실패해도 이벤트를 보내고 사유를 담는다 — 등록 해제는 여러 단계라 일부만 실패할
+    // 수 있고, 그 경우에도 어디까지 됐는지 알려야 한다.
+    const message = payload.error;
+    if (typeof message === "string" && message.length > 0) {
+      throw new Error(message);
+    }
+  }
+
+  /**
+   * 노드를 지금 내린다. 로그아웃이 아니라서 등록과 노드키는 남는다 — 다시 연결하면
+   * 재인증 없이 올라온다.
+   */
+  async disconnectTailnet(id: string): Promise<void> {
+    await this.start();
+    await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetDisconnect",
+        payload: { id },
+      },
+      ["tailnetStatus"],
+      { timeoutMs: 30_000 },
+    );
+  }
+
+  /**
+   * 진행 중인 연결 시도를 접는다.
+   *
+   * 시도를 걸어 둔 요청은 취소로 인해 마지막 상태를 받고 끝난다. 여기서는 취소가 접수됐다는
+   * 것만 확인하면 된다.
+   */
+  async cancelTailnet(id: string): Promise<void> {
+    await this.start();
+    await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetCancel",
+        payload: { id },
+      },
+      ["tailnetStatus"],
+      { timeoutMs: 30_000 },
+    );
+  }
+
+  /** 지금 살아 있는 노드들의 상태. 없는 tailnet 은 결과에 들어 있지 않다. */
+  async snapshotTailnets(): Promise<TailnetSnapshot> {
+    await this.start();
+    const payload = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetSnapshot",
+        payload: {},
+      },
+      ["tailnetSnapshot"],
+      { timeoutMs: 30_000 },
+    );
+
+    const statuses = payload.statuses;
+    return {
+      statuses: Array.isArray(statuses)
+        ? statuses.map((entry) =>
+            toTailnetStatus((entry ?? {}) as Record<string, unknown>),
+          )
+        : [],
+      localNodeName: optionalText(payload.localNodeName),
+    };
+  }
+
   private requestResponse<TPayload extends Record<string, unknown>>(
     request: CoreRequest<unknown>,
     expectedTypes: CoreEventType[],
     options?: {
       timeoutMs?: number;
+      onProgress?: (payload: Record<string, unknown>) => void;
+      isTerminal?: (payload: Record<string, unknown>) => boolean;
     },
   ): Promise<TPayload> {
     if (!this.process) {
@@ -4861,6 +4987,8 @@ export class CoreManager {
         reject,
         expectedTypes: new Set(expectedTypes),
         timeout,
+        onProgress: options?.onProgress,
+        isTerminal: options?.isTerminal,
       });
 
       this.sendControl(request);
@@ -4893,6 +5021,12 @@ export class CoreManager {
     }
 
     if (!pending.expectedTypes.has(event.type)) {
+      return;
+    }
+
+    pending.onProgress?.(event.payload);
+    // 진행 이벤트가 여러 번 오는 요청은 종료 조건을 만족할 때까지 pending 을 유지한다.
+    if (pending.isTerminal && !pending.isTerminal(event.payload)) {
       return;
     }
 

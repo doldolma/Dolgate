@@ -11,6 +11,7 @@ import type {
   PortForwardRepository,
   SecretMetadataRepository,
   SettingsRepository,
+  TailnetRepository,
   SnippetRepository,
   SyncOutboxRepository,
 } from "./database";
@@ -32,6 +33,7 @@ import { registerContainersIpcHandlers } from "./ipc/containers";
 import { registerHostsGroupsIpcHandlers } from "./ipc/hosts-groups";
 import { registerImportIpcHandlers } from "./ipc/imports";
 import { registerKnownHostsLogsKeychainIpcHandlers } from "./ipc/known-hosts-logs-keychain";
+import { registerTailnetIpcHandlers } from "./ipc/tailnet";
 import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
 import { registerSnippetsIpcHandlers } from "./ipc/snippets";
@@ -70,12 +72,14 @@ export function registerIpcHandlers(
   xshellImportService: XshellImportService,
   sessionShareService: SessionShareService,
   sessionReplayService: SessionReplayService,
+  tailnets: TailnetRepository,
   windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   const ctx = createMainIpcContext({
     hosts,
     groups,
     settings,
+    tailnets,
     portForwards,
     dnsOverrides,
     snippets,
@@ -113,6 +117,7 @@ export function registerIpcHandlers(
   registerPortForwardAndDnsIpcHandlers(ctx);
   registerSnippetsIpcHandlers(ctx);
   registerKnownHostsLogsKeychainIpcHandlers(ctx);
+  registerTailnetIpcHandlers(ctx);
   registerSshKeyIpcHandlers(ctx);
   registerWindowUpdaterSettingsFilesIpcHandlers(ctx, windowRuntime);
 }
