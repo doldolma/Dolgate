@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { DesktopWindowState, HostRecord, SessionConnectionKind, TerminalTab, UpdateState } from '@shared';
+import type { DesktopWindowState, HostRecord, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
+import { isSshHostRecord } from '@shared';
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -8,6 +9,7 @@ import type {
   WorkspaceTabId
 } from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
+import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
 import { cn } from '../lib/cn';
 import {
   getSessionConnectedAt,
@@ -309,12 +311,182 @@ type TabHoverInfo = {
 
 // hover 카드 내용: 탭이 이미 보여주는 것(제목·상태점·활성 RTT)은 빼고, 탭만 봐선 모르는
 // 것만 모은다 — 연결 종류(헤드라인)·대상·비정상 상태·명령·점프·비활성 RTT·공유.
+
+/**
+ * 이 연결이 tailnet 을 경유하는지, 경유하면 지금 어떤 경로인지 조회하는 함수.
+ *
+ * 경로는 고정이 아니라서 폴링한다 — 유저스페이스 노드는 붙은 직후 릴레이로 시작해 홀펀칭이
+ * 되면 직결로 승격한다. 그 승격이 눈에 보여야 "느리다"를 추측이 아니라 확인으로 판단할 수
+ * 있다.
+ *
+ * tailnet 을 쓰는 탭이 하나도 없으면 아무것도 하지 않는다. tailnet 을 안 쓰는 사용자에게
+ * 주기적인 IPC 를 들일 이유가 없다.
+ */
+type TailnetPathLookup = (host: HostRecord) => TailnetPathInfo | null;
+
+type TailnetPathInfo = {
+  label: string;
+  /** 노드 자체가 안 붙어 있으면 undefined — 경로를 말할 단계가 아니다. */
+  connected: boolean;
+  /** 대상 기기를 아직 못 찾았으면 undefined(경로 확인 중). */
+  direct?: boolean;
+  relay?: string;
+};
+
+const TAILNET_PATH_POLL_MS = 5_000;
+
+function useTailnetPathLookup(tabs: TerminalTab[], hosts: HostRecord[]): TailnetPathLookup {
+  const tailnetIdsInUse = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tab of tabs) {
+      const host = hosts.find((candidate) => candidate.id === tab.hostId);
+      const tailnetId = host && isSshHostRecord(host) ? host.tailnetId?.trim() : '';
+      if (tailnetId) {
+        ids.add(tailnetId);
+      }
+    }
+    return ids;
+  }, [tabs, hosts]);
+  // Set 은 매번 새 객체라 의존성으로 쓰면 효과가 매 렌더 재실행된다. 내용으로 비교한다.
+  const tailnetKey = useMemo(() => [...tailnetIdsInUse].sort().join(','), [tailnetIdsInUse]);
+
+  const [labels, setLabels] = useState<Map<string, string>>(new Map());
+  const [statuses, setStatuses] = useState<Map<string, TailnetStatus>>(new Map());
+
+  useEffect(() => {
+    if (!tailnetKey) {
+      setStatuses(new Map());
+      return;
+    }
+    let cancelled = false;
+    // 브리지가 없으면 이 함수들이 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡는다.
+    void Promise.resolve()
+      .then(listTailnets)
+      .then((records) => {
+        if (!cancelled) {
+          setLabels(new Map(records.map((record) => [record.id, record.label])));
+        }
+      })
+      .catch(() => {
+        // 이름을 못 읽어도 경로는 보여줄 수 있다.
+      });
+
+    const poll = () => {
+      void Promise.resolve()
+        .then(snapshotTailnets)
+        .then((snapshot) => {
+          if (!cancelled) {
+            setStatuses(new Map(snapshot.statuses.map((status) => [status.id, status])));
+          }
+        })
+        .catch(() => {
+          // 스냅샷을 못 읽는 것이 툴팁 전체를 막을 이유는 없다.
+        });
+    };
+    poll();
+    const timer = window.setInterval(poll, TAILNET_PATH_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [tailnetKey]);
+
+  return useCallback(
+    (host: HostRecord): TailnetPathInfo | null => {
+      if (!isSshHostRecord(host)) {
+        return null;
+      }
+      const tailnetId = host.tailnetId?.trim();
+      if (!tailnetId) {
+        return null;
+      }
+      const label = labels.get(tailnetId) ?? tailnetId;
+      const status = statuses.get(tailnetId);
+      if (!status || status.state !== 'running') {
+        return { label, connected: false };
+      }
+      const peer = findTailnetPeer(status.peers, host.hostname);
+      if (!peer) {
+        return { label, connected: true };
+      }
+      return { label, connected: true, direct: peer.direct, relay: peer.relay };
+    },
+    [labels, statuses],
+  );
+}
+
+/**
+ * 호스트 주소로 tailnet 기기를 찾는다.
+ *
+ * 주소는 MagicDNS 짧은 이름("agt-1")일 수도, FQDN 일 수도, tailnet IP 일 수도 있다. 셋 다
+ * 맞춰야 한다 — 하나라도 빠뜨리면 그 형태를 쓰는 사용자에게는 늘 "경로 확인 중"으로 보인다.
+ */
+export function findTailnetPeer(
+  peers: TailnetPeer[] | undefined,
+  hostname: string,
+): TailnetPeer | null {
+  const target = hostname.trim().toLowerCase().replace(/\.$/, '');
+  if (!target || !peers) {
+    return null;
+  }
+  return (
+    peers.find((peer) => {
+      if (peer.hostName?.toLowerCase() === target) {
+        return true;
+      }
+      const dnsName = peer.dnsName?.toLowerCase();
+      if (dnsName === target) {
+        return true;
+      }
+      // 짧은 이름으로 저장한 호스트를 FQDN peer 에 맞춘다(그 역도 위에서 처리된다).
+      if (dnsName && dnsName.split('.')[0] === target) {
+        return true;
+      }
+      return peer.ips?.includes(target) === true;
+    }) ?? null
+  );
+}
+
+/** 경로 한 줄을 만든다. 릴레이면 어느 DERP 지역인지까지 보여 준다. */
+function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
+  if (!info.connected) {
+    return {
+      label: t('titleBar.hover.tailnet'),
+      value: `${info.label} · ${t('titleBar.hover.tailnetNotConnected')}`,
+      valueColor: TAB_DOT_COLOR.error,
+    };
+  }
+  if (info.direct === undefined) {
+    return {
+      label: t('titleBar.hover.tailnet'),
+      value: `${info.label} · ${t('titleBar.hover.tailnetPathUnknown')}`,
+    };
+  }
+  if (info.direct) {
+    return {
+      label: t('titleBar.hover.tailnet'),
+      value: `${info.label} · ${t('titleBar.hover.tailnetPathDirect')}`,
+      valueColor: 'var(--success,#3fae8f)',
+    };
+  }
+  return {
+    label: t('titleBar.hover.tailnet'),
+    value: `${info.label} · ${
+      info.relay
+        ? t('titleBar.hover.tailnetPathRelay', { relay: info.relay })
+        : t('titleBar.hover.tailnetPathRelayUnknown')
+    }`,
+    valueColor: 'var(--warning-text)',
+  };
+}
+
 function buildTabHoverInfo(
   item: TitlebarDynamicItem,
   tabs: TerminalTab[],
   hosts: HostRecord[],
   tmuxGroups: TmuxSessionGroup[],
   workspaces: WorkspaceTab[],
+  tailnetPath: TailnetPathLookup,
 ): TabHoverInfo {
   const rows: TabHoverRow[] = [];
 
@@ -376,6 +548,14 @@ function buildTabHoverInfo(
         });
       }
     }
+    // 지연 바로 위에 둔다. "느리다"를 판단할 때 이 둘을 같이 읽어야 한다 — 릴레이 경유면
+    // 지연이 큰 이유가 설명되고, 직결인데도 크면 원인이 다른 데 있다.
+    if (host) {
+      const path = tailnetPath(host);
+      if (path) {
+        rows.push(tailnetPathRow(path));
+      }
+    }
     if (item.rttMs != null) {
       rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
     }
@@ -414,6 +594,12 @@ function buildTabHoverInfo(
       label: t('titleBar.hover.windows'),
       value: t('titleBar.hover.windowCount', { count: item.windowCount }),
     });
+    if (host) {
+      const path = tailnetPath(host);
+      if (path) {
+        rows.push(tailnetPathRow(path));
+      }
+    }
     if (item.rttMs != null) {
       rows.push({ label: t('titleBar.hover.latency'), value: `${item.rttMs}ms`, valueColor: rttColor(item.rttMs) });
     }
@@ -1088,8 +1274,9 @@ export function AppTitleBar({
           (item) => getTabKey(itemToTarget(item)) === hoveredTab.key,
         ) ?? null
       : null;
+  const tailnetPath = useTailnetPathLookup(tabs, hosts);
   const hoverInfo = hoveredItem
-    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces)
+    ? buildTabHoverInfo(hoveredItem, tabs, hosts, tmuxGroups, workspaces, tailnetPath)
     : null;
 
   // 오버플로우로 잘리는 끝 탭을 직각으로 자르지 않고 알파(투명도)로 부드럽게 페이드한다.

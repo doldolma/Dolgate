@@ -326,6 +326,8 @@ export interface HostFormProps {
   onConnect?: (hostId: string) => Promise<void>;
   onEditExistingSecret?: (secretRef: string) => void;
   onOpenSecrets?: () => void;
+  /** TAILNET 옆 Manage. 설정의 네트워크 섹션으로 보낸다. */
+  onOpenTailnets?: () => void;
   onActionStateChange?: (state: HostFormActionState) => void;
   /** draft.label 이 바뀔 때마다 호출 — 드로어 헤더의 편집 가능한 타이틀과 동기화한다. */
   onLabelChange?: (label: string) => void;
@@ -563,6 +565,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   onConnect,
   onEditExistingSecret,
   onOpenSecrets,
+  onOpenTailnets,
   onActionStateChange,
   onLabelChange
 }: HostFormProps, ref) {
@@ -866,6 +869,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         secretRef: host.secretRef,
         jumpHostId: host.jumpHostId ?? null,
         jumpHostIds: host.jumpHostIds ?? (host.jumpHostId ? [host.jumpHostId] : null),
+        // 이 seeding 도 필드를 나열하는 화이트리스트다. 빠뜨리면 저장은 되는데 폼이 되읽지
+        // 못해 "사용하지 않음"으로 보이고, 그 상태에서 한 번 더 저장하면 실제로 null 이 된다.
+        tailnetId: host.tailnetId ?? null,
         groupName: host.groupName ?? '',
         terminalThemeId: host.terminalThemeId ?? null,
         startupCommand: host.startupCommand ?? null,
@@ -1980,7 +1986,20 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 알 수 없고, 기기마다 따로 등록해야 하는 구조라 "다른 PC 에서는 없다"로
                 보이기 때문이다. 대신 어디서 등록하는지 알려 준다. */}
             <div className={fieldClassName}>
-              <span className={fieldLabelClassName}>Tailnet</span>
+              <div className="flex items-center justify-between gap-3">
+                <span className={fieldLabelClassName}>Tailnet</span>
+                {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
+                    오히려 여기로 갈 이유가 가장 큰 순간이다. */}
+                {onOpenTailnets ? (
+                  <button
+                    type="button"
+                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
+                    onClick={onOpenTailnets}
+                  >
+                    Manage
+                  </button>
+                ) : null}
+              </div>
               <SelectField
                 value={sshDraft.tailnetId ?? ''}
                 disabled={tailnetOptions.length === 0}
@@ -1998,11 +2017,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   </option>
                 ))}
               </SelectField>
-              <span className="text-[0.82rem] text-[var(--text-soft)]">
-                {tailnetOptions.length === 0
-                  ? translate('hostForm.tailnet.empty')
-                  : translate('hostForm.tailnet.description')}
-              </span>
+              {/* 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다 —
+                  tailnet 은 기기마다 따로 등록해야 해서 "다른 PC 에는 있는데" 로 헷갈린다. */}
+              {tailnetOptions.length === 0 ? (
+                <span className="text-[0.82rem] text-[var(--text-soft)]">
+                  {translate('hostForm.tailnet.empty')}
+                </span>
+              ) : null}
             </div>
 
             <div className={fieldClassName}>

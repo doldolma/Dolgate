@@ -356,6 +356,9 @@ if (termiusHelperArgIndex >= 0) {
     void awsService.materializeManagedProfiles().catch(() => undefined);
     void reconcileAwsHostProfileReferences().catch(() => undefined);
     void rewriteDnsOverridesForCurrentState().catch(() => undefined);
+    // 다른 기기에서 등록한 tailnet 이 동기화로 내려왔을 수 있다. 코어에 알려 주지 않으면
+    // 그 tailnet 을 쓰는 호스트가 "is not configured" 로 실패한다.
+    coreManager.pushTailnetConfigs();
     broadcastWorkspaceChanged();
   });
   syncService.setOnPurgedSyncedCache(() =>

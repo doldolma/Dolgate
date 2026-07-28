@@ -191,6 +191,88 @@ describe('HostForm', () => {
     );
   });
 
+  // 저장은 되는데 폼이 되읽지 못하면 "저장이 안 된다"로 보인다. 그리고 그 상태에서 한 번 더
+  // 저장하면 draft 의 null 이 레코드를 덮어써서 실제로 사라진다 — 그쪽이 더 나쁘다.
+  it('seeds the tailnet selection from the host record and keeps it across an unrelated save', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
+
+    render(
+      <HostForm
+        ref={ref}
+        host={createHost({ tailnetId: 'net-corp' })}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[{ id: 'net-corp', label: 'corp' }]}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    // 이 폼의 필드 라벨은 htmlFor 로 묶인 <label> 이 아니라 <span> 이라(전체 관례) 옵션으로 찾는다.
+    const select = screen.getByRole('option', { name: 'corp' }).closest('select');
+    expect(select).not.toBeNull();
+    expect((select as HTMLSelectElement).value).toBe('net-corp');
+
+    // tailnet 을 건드리지 않은 저장이 그 값을 지우지 않아야 한다.
+    act(() => ref.current?.setLabel('Prod API'));
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnetId: 'net-corp' }),
+      undefined,
+    );
+  });
+
+  // 자격증명 옆 Manage 와 같은 자리다. 등록된 tailnet 이 없을 때가 오히려 여기로 갈 이유가
+  // 가장 큰 순간이므로, 목록이 비어도 보여야 한다.
+  it('offers a tailnet manage link even when nothing is registered', () => {
+    const onOpenTailnets = vi.fn();
+
+    const { unmount } = render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[]}
+        onOpenTailnets={onOpenTailnets}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const manageButtons = screen.getAllByRole('button', { name: 'Manage' });
+    fireEvent.click(manageButtons[manageButtons.length - 1] as HTMLElement);
+    expect(onOpenTailnets).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  // 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다.
+  it('explains the empty tailnet list but stays quiet once one exists', () => {
+    const { unmount } = render(
+      <HostForm
+        host={createHost()}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[]}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/등록된 Tailnet 이 없습니다|No tailnets/i)).not.toBeNull();
+    unmount();
+
+    render(
+      <HostForm
+        host={createHost({ tailnetId: 'net-corp' })}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[{ id: 'net-corp', label: 'corp' }]}
+        onSubmit={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/등록된 Tailnet 이 없습니다|No tailnets/i)).toBeNull();
+    // 신뢰 범위 설명도 더 이상 붙지 않는다.
+    expect(screen.queryByText(/이 tailnet 을 경유해|connect through this tailnet/i)).toBeNull();
+  });
+
   it('configures a direct startup command for an SSH host', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const ref = createRef<HostFormHandle>();

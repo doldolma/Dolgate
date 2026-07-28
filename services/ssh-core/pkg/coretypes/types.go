@@ -60,6 +60,7 @@ const (
 	CommandTailnetDisconnect           CommandType = "tailnetDisconnect"
 	CommandTailnetCancel               CommandType = "tailnetCancel"
 	CommandTailnetSnapshot             CommandType = "tailnetSnapshot"
+	CommandTailnetConfigure            CommandType = "tailnetConfigure"
 	CommandTerminalAutocompletePrepare CommandType = "terminalAutocompletePrepare"
 	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
@@ -543,6 +544,18 @@ type TailnetForgetPayload struct {
 	ID string `json:"id"`
 }
 
+// TailnetConfigurePayload 는 이 기기에 등록된 tailnet 설정 전체다.
+//
+// 코어가 설정을 알아야 노드를 만들 수 있다. 이것이 없으면 설정 화면에서 연결 테스트를 한
+// tailnet 만 쓸 수 있고, 앱을 다시 켜면 그것도 잊는다 — 호스트 연결이 "is not configured"
+// 로 실패한다. 그래서 코어가 뜰 때와 설정이 바뀔 때 전체를 밀어 넣는다.
+//
+// 목록에 없는 id 의 설정은 지운다. 삭제를 따로 통보하지 않아도 되고, 코어의 상태가 항상
+// 데스크톱의 상태와 같아진다.
+type TailnetConfigurePayload struct {
+	Configs []TailnetConfigPayload `json:"configs"`
+}
+
 // TailnetStatusPayload 는 노드가 올라오는 동안 여러 번 방출된다. AuthURL 이 채워지면
 // 사용자가 브라우저에서 인가해야 한다는 뜻이다.
 type TailnetStatusPayload struct {
@@ -557,6 +570,32 @@ type TailnetStatusPayload struct {
 	TailnetName string `json:"tailnetName,omitempty"`
 	NodeName    string `json:"nodeName,omitempty"`
 	NodeIP      string `json:"nodeIp,omitempty"`
+
+	// Peers 는 이 tailnet 안에서 보이는 기기들과 그 경로다. 붙어 있지 않으면 빈 목록이다.
+	Peers []TailnetPeerPayload `json:"peers,omitempty"`
+}
+
+// TailnetPeerPayload 는 이 tailnet 안의 기기 하나와, 그 기기까지 지금 어떤 경로로 가는지다.
+//
+// 경로를 노출하는 이유: 유저스페이스 노드는 붙은 직후 릴레이로 시작해 홀펀칭이 되면 직결로
+// 승격한다. "느리다"가 릴레이 때문인지 다른 이유인지는 이 값 없이는 추측밖에 안 된다.
+//
+// 이름을 셋 다 실어 보낸다. 호스트 레코드의 주소가 MagicDNS 짧은 이름일 수도, FQDN 일 수도,
+// tailnet IP 일 수도 있어서 어느 것으로든 맞출 수 있어야 한다.
+type TailnetPeerPayload struct {
+	// HostName 은 기기의 짧은 이름, DNSName 은 FQDN(끝점 제거됨)이다.
+	HostName string   `json:"hostName,omitempty"`
+	DNSName  string   `json:"dnsName,omitempty"`
+	IPs      []string `json:"ips,omitempty"`
+	// Direct 는 직결 경로가 서 있는지다. false 면 릴레이를 거친다.
+	Direct bool `json:"direct"`
+	// Relay 는 이 기기와 통신에 쓰는 DERP 지역이다. Direct 여도 폴백 경로로 남아 있어
+	// 채워질 수 있다.
+	Relay string `json:"relay,omitempty"`
+	// RxBytes·TxBytes 는 이 노드가 만들어진 뒤의 누적치다. 경로가 실제로 쓰이고 있는지를
+	// 구분하는 단서다 — 0 이면 아직 이 기기와 주고받은 것이 없다.
+	RxBytes int64 `json:"rxBytes,omitempty"`
+	TxBytes int64 `json:"txBytes,omitempty"`
 }
 
 type TailnetForgotPayload struct {

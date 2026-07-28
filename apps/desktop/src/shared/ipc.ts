@@ -225,6 +225,7 @@ export type CoreCommandType =
   | "tailnetDisconnect"
   | "tailnetCancel"
   | "tailnetSnapshot"
+  | "tailnetConfigure"
   | "portForwardStart"
   | "ssmPortForwardStart"
   | "portForwardStop"
@@ -282,6 +283,25 @@ export type TailnetState =
   | "running";
 
 /** 연결 테스트 중 여러 번 도착한다. authUrl 이 있으면 브라우저에서 인가해야 한다. */
+/**
+ * tailnet 안의 기기 하나와, 그 기기까지 지금 어떤 경로로 가는지.
+ *
+ * 경로를 노출하는 이유: 유저스페이스 노드는 붙은 직후 릴레이로 시작해 홀펀칭이 되면 직결로
+ * 승격한다. "느리다"가 릴레이 때문인지 아닌지는 이 값 없이는 추측밖에 안 된다.
+ */
+export interface TailnetPeer {
+  /** 짧은 이름과 FQDN(끝점 제거). 호스트 주소가 어느 형태든 맞출 수 있어야 해서 둘 다 온다. */
+  hostName?: string;
+  dnsName?: string;
+  ips?: string[];
+  /** 직결 경로가 서 있는지. false 면 릴레이 경유. */
+  direct: boolean;
+  /** 이 기기와 쓰는 DERP 지역. 직결이어도 폴백으로 남아 채워질 수 있다. */
+  relay?: string;
+  rxBytes?: number;
+  txBytes?: number;
+}
+
 export interface TailnetStatus {
   id: string;
   state: TailnetState;
@@ -298,6 +318,9 @@ export interface TailnetStatus {
   tailnetName?: string;
   nodeName?: string;
   nodeIp?: string;
+
+  /** 이 tailnet 안에서 보이는 기기들과 그 경로. 붙어 있지 않으면 비어 있다. */
+  peers?: TailnetPeer[];
 }
 
 /**

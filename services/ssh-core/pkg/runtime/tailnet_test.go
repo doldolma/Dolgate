@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -177,12 +178,18 @@ func TestShutdownDoesNotLogOut(t *testing.T) {
 	lease.Release()
 	instance.shutdownTailnets()
 
-	if node.logouts != 0 {
-		t.Errorf("logouts = %d on shutdown, want 0 — logging out would force a fresh browser login", node.logouts)
+	if _, logouts := node.counts(); logouts != 0 {
+		t.Errorf("logouts = %d on shutdown, want 0 — logging out would force a fresh browser login", logouts)
 	}
 }
 
+// countingNode 는 노드 하나를 대신한다.
+//
+// 모든 접근에 락이 필요하다. TailnetTest 는 노드가 올라오는 동안 별도 goroutine 에서 상태를
+// 폴링하므로, 테스트가 status 를 갈아 끼우는 것과 런타임이 그것을 읽는 것이 실제로 겹친다 —
+// 락이 없으면 그 자체가 데이터 레이스이고, tailnet 런타임을 -race 로 검사할 수 없게 된다.
 type countingNode struct {
+	mu      sync.Mutex
 	onClose func()
 	logouts int
 	ups     int
@@ -190,22 +197,41 @@ type countingNode struct {
 	status  tailnet.Status
 }
 
+// setStatus 는 노드가 보고할 상태를 바꾼다. 폴링 중에도 안전하다.
+func (n *countingNode) setStatus(status tailnet.Status) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.status = status
+}
+
+func (n *countingNode) counts() (ups, logouts int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.ups, n.logouts
+}
+
 func (n *countingNode) Dial(context.Context, string, string) (net.Conn, error) {
 	return nil, errors.New("not dialable")
 }
 func (n *countingNode) Status(context.Context) (tailnet.Status, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.status.State == "" {
 		return tailnet.Status{State: tailnet.StateStopped}, nil
 	}
 	return n.status, nil
 }
 func (n *countingNode) Up(context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.ups += 1
 	return n.upErr
 }
 
 func (n *countingNode) Down(context.Context) error { return nil }
 func (n *countingNode) Logout(context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.logouts += 1
 	return nil
 }
@@ -232,8 +258,8 @@ func TestTailnetTestBringsTheNodeUp(t *testing.T) {
 		t.Fatalf("TailnetTest() error = %v", err)
 	}
 
-	if node.ups != 1 {
-		t.Errorf("Up called %d times, want 1 — a downed node never comes back without it", node.ups)
+	if ups, _ := node.counts(); ups != 1 {
+		t.Errorf("Up called %d times, want 1 — a downed node never comes back without it", ups)
 	}
 }
 
@@ -394,7 +420,7 @@ func TestSecondTestSupersedesTheFirst(t *testing.T) {
 		}
 	}
 
-	node.status = tailnet.Status{State: tailnet.StateRunning}
+	node.setStatus(tailnet.Status{State: tailnet.StateRunning})
 	if err := instance.TailnetTest("req-2", coretypes.TailnetTestPayload{
 		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
 		TimeoutMs: 60_000,

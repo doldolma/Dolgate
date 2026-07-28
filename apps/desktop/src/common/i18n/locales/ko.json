@@ -656,6 +656,12 @@
       "days": "{{count}}일 전"
     },
     "hover": {
+        "tailnet": "Tailnet",
+        "tailnetPathDirect": "직결",
+        "tailnetPathRelay": "릴레이 경유 ({{relay}})",
+        "tailnetPathRelayUnknown": "릴레이 경유",
+        "tailnetPathUnknown": "경로 확인 중",
+        "tailnetNotConnected": "연결 안 됨",
       "jump": "점프",
       "reconnect": "재연결",
       "waitingNetwork": "네트워크 대기 중",
@@ -1335,7 +1341,6 @@
     },
     "tailnet": {
       "none": "사용하지 않음 (일반 네트워크)",
-      "description": "이 tailnet 을 경유해 붙습니다. 신뢰한 호스트 키도 이 tailnet 안에서만 유효합니다 — 다른 tailnet 의 같은 이름은 다른 기기입니다.",
       "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다."
     }
   },
@@ -1530,6 +1535,7 @@
       "sharedCount": "· {{count}}개 호스트 공유"
     },
     "row": {
+      "tailnetMissing": "설정 없음 — 연결되지 않습니다",
       "usernameUnset": "미설정",
       "enabled": "사용",
       "serverProxy": "서버 프록시",
@@ -2104,6 +2110,7 @@
     "jumpChainTooDeep": "점프 호스트는 최대 {{max}}단까지 설정할 수 있습니다.",
     "jumpChainSelf": "점프 호스트 체인에 자기 자신을 포함할 수 없습니다.",
     "jumpHostMissing": "점프 호스트를 찾을 수 없습니다. 호스트 설정에서 점프 호스트를 다시 선택해 주세요.",
+    "tailnetMissing": "tailnet 연결에 실패했습니다. 이 호스트는 tailnet 을 경유하도록 설정돼 있지만 그 네트워크가 이 기기에 등록돼 있지 않습니다. 설정 → 네트워크에서 추가한 뒤 다시 연결해 주세요.",
     "jumpHostMustBeSsh": "점프 호스트는 일반 SSH 호스트여야 합니다."
   },
   "hostsOverride": {

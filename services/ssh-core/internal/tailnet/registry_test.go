@@ -25,6 +25,11 @@ type fakeNode struct {
 	logoutEr error
 	closeEr  error
 	purgeEr  error
+
+	downEntered  chan struct{}
+	downGate     chan struct{}
+	closeEntered chan struct{}
+	closeGate    chan struct{}
 }
 
 func (n *fakeNode) Dial(context.Context, string, string) (net.Conn, error) {
@@ -49,11 +54,35 @@ func (n *fakeNode) Up(context.Context) error {
 }
 
 func (n *fakeNode) Down(context.Context) error {
+	// 게이트가 걸려 있으면 Down 안에서 멈춘다. 해체가 락 밖에서 진행되는 **동안** 도착한
+	// Acquire 를 재현하는 수단이다 — 그 창이 없으면 경합을 테스트할 수 없다.
+	n.mu.Lock()
+	entered, gate := n.downEntered, n.downGate
+	n.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if gate != nil {
+		<-gate
+	}
+
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.downs += 1
 	n.ops = append(n.ops, "down")
 	return nil
+}
+
+// gateDown 은 다음 Down 을 붙잡아 둔다. 반환된 entered 는 Down 진입을, release 는 붙잡은
+// Down 을 놓아주는 함수다.
+func (n *fakeNode) gateDown() (entered <-chan struct{}, release func()) {
+	enteredCh := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	n.mu.Lock()
+	n.downEntered = enteredCh
+	n.downGate = gate
+	n.mu.Unlock()
+	return enteredCh, func() { close(gate) }
 }
 
 func (n *fakeNode) Logout(context.Context) error {
@@ -66,10 +95,31 @@ func (n *fakeNode) Logout(context.Context) error {
 
 func (n *fakeNode) Close() error {
 	n.mu.Lock()
+	entered, gate := n.closeEntered, n.closeGate
+	n.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if gate != nil {
+		<-gate
+	}
+
+	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.closes += 1
 	n.ops = append(n.ops, "close")
 	return n.closeEr
+}
+
+// gateClose 는 다음 Close 를 붙잡아 둔다. Reset·Forget 의 해체가 락 밖에서 도는 창을 재현한다.
+func (n *fakeNode) gateClose() (entered <-chan struct{}, release func()) {
+	enteredCh := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	n.mu.Lock()
+	n.closeEntered = enteredCh
+	n.closeGate = gate
+	n.mu.Unlock()
+	return enteredCh, func() { close(gate) }
 }
 
 func (n *fakeNode) Purge() error {
@@ -603,5 +653,224 @@ func TestSnapshotOnlyReportsLiveNodes(t *testing.T) {
 	}
 	if len(nodes) != 1 {
 		t.Errorf("snapshot built %d nodes, want 1", len(nodes))
+	}
+}
+
+// leasedConn.Close 는 핸드셰이크 실패 정리와 SSH 읽기 루프에서 각각 불리고, 그 둘은 다른
+// goroutine 이다. 겹쳐 불렸을 때 refcount 가 두 번 깎이면 아직 쓰는 중인 노드가 유예에
+// 들어간다 — 같은 tailnet 에 다른 세션이 얹혀 있으면 그 세션이 30 분 뒤 끊긴다.
+//
+// -race 로 돌려야 의미가 있다. bool 가드였을 때 이 테스트는 레이스로 잡혔다.
+func TestConcurrentReleaseDecrementsOnce(t *testing.T) {
+	registry, timer, _ := newTestRegistry(t)
+
+	survivor, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer survivor.Release()
+	doubled, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i += 1 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			doubled.Release()
+		}()
+	}
+	wg.Wait()
+
+	if got := registry.Leases("corp"); got != 1 {
+		t.Errorf("Leases() = %d, want 1 — 살아 있는 리스가 있는데 refcount 가 더 깎였다", got)
+	}
+	// refs 가 남아 있으므로 유예 자체가 예약되지 않아야 한다.
+	if got := timer.live(); got != 0 {
+		t.Errorf("live timers = %d, want 0 — 쓰는 중인 노드에 teardown 이 예약됐다", got)
+	}
+}
+
+// 유예가 만료돼 Down 이 진행되는 중(락 밖)에 도착한 Acquire 는 기다려야 한다. 기다리지
+// 않으면 그 소비자가 Up 으로 올린 노드를 뒤늦게 도착한 Down 이 다시 꺼 버린다.
+func TestAcquireWaitsForInFlightIdleTeardown(t *testing.T) {
+	registry, timer, nodes := newTestRegistry(t)
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	node := nodes["corp"]
+	entered, release := node.gateDown()
+	lease.Release()
+
+	teardownDone := make(chan struct{})
+	go func() { defer close(teardownDone); timer.fireAll() }()
+	<-entered // 해체가 락을 놓고 Down 안에 들어왔다
+
+	acquired := make(chan *Lease, 1)
+	go func() {
+		fresh, ferr := registry.Acquire("corp")
+		if ferr != nil {
+			t.Errorf("acquire during teardown: %v", ferr)
+			acquired <- nil
+			return
+		}
+		acquired <- fresh
+	}()
+
+	// 해체가 끝나기 전에는 리스가 나오지 않아야 한다.
+	select {
+	case <-acquired:
+		t.Fatal("해체 중인 노드에 리스가 발급됐다 — Down 이 이 소비자 뒤에 도착한다")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	<-teardownDone
+
+	fresh := <-acquired
+	if fresh == nil {
+		t.Fatal("해체가 끝난 뒤에도 리스를 받지 못했다")
+	}
+	defer fresh.Release()
+
+	// 이제 Down 은 이미 끝났다. 이 소비자가 Up 을 부르면 그 뒤로 Down 이 오지 않는다.
+	if err := fresh.Node.Up(context.Background()); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	if got := node.order(); got[len(got)-1] != "up" {
+		t.Errorf("order() = %v, want up 이 마지막 — Down 이 Up 뒤에 도착했다", got)
+	}
+}
+
+// countingRegistry 는 노드를 몇 개 만들었는지 센다. Reset·Forget 의 핵심 위험이 "닫히는 중인
+// 노드 밑에서 두 번째 노드가 만들어지는 것"이라, 노드 수가 곧 계약이다.
+func countingRegistry(t *testing.T) (*Registry, *manualTimer, func() int, func() *fakeNode) {
+	t.Helper()
+	timer := &manualTimer{}
+	var mu sync.Mutex
+	built := 0
+	var last *fakeNode
+	registry := NewRegistry(func(id string) (Node, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		built += 1
+		last = &fakeNode{id: id}
+		return last, nil
+	}, Options{AfterFunc: timer.afterFunc})
+	t.Cleanup(func() { _ = registry.Close() })
+	return registry, timer,
+		func() int { mu.Lock(); defer mu.Unlock(); return built },
+		func() *fakeNode { mu.Lock(); defer mu.Unlock(); return last }
+}
+
+// Reset 이 Close 를 끝내기 전에 항목을 지우면, 그 창에 도착한 Acquire 가 같은 상태 디렉터리로
+// 두 번째 노드를 만든다. tsnet 서버 둘이 같은 노드키 파일을 두고 겹치게 된다.
+func TestResetDoesNotLetANewNodeStartWhileClosing(t *testing.T) {
+	registry, _, built, lastNode := countingRegistry(t)
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	node := lastNode()
+	lease.Release()
+
+	entered, release := node.gateClose()
+	resetDone := make(chan error, 1)
+	go func() { resetDone <- registry.Reset("corp") }()
+	<-entered // Reset 이 락을 놓고 Close 안에 들어왔다
+
+	acquired := make(chan *Lease, 1)
+	go func() {
+		fresh, ferr := registry.Acquire("corp")
+		if ferr != nil {
+			t.Errorf("acquire during reset: %v", ferr)
+		}
+		acquired <- fresh
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("닫히는 중인 노드 위에서 Acquire 가 통과했다 — 두 번째 노드가 같은 상태로 뜬다")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := built(); got != 1 {
+		t.Fatalf("nodes built = %d during close, want 1", got)
+	}
+
+	release()
+	if err := <-resetDone; err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+
+	fresh := <-acquired
+	if fresh == nil {
+		t.Fatal("Reset 이 끝난 뒤에도 리스를 받지 못했다")
+	}
+	defer fresh.Release()
+
+	// Reset 의 목적은 새 설정으로 다시 만들게 하는 것이다 — 닫힌 노드를 재사용하면 안 된다.
+	if got := built(); got != 2 {
+		t.Errorf("nodes built = %d, want 2 — Reset 뒤 Acquire 는 새 노드를 만들어야 한다", got)
+	}
+	if fresh.Node == node {
+		t.Error("Acquire reused the closed node")
+	}
+}
+
+// Forget 은 Purge 까지 한다. 그 창에 새 노드가 같은 디렉터리를 잡으면 방금 만든 노드의 키가
+// 지워진다 — Reset 보다 나쁘다.
+func TestForgetDoesNotLetANewNodeStartWhileTearingDown(t *testing.T) {
+	registry, _, built, lastNode := countingRegistry(t)
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	node := lastNode()
+	lease.Release()
+
+	entered, release := node.gateClose()
+	forgetDone := make(chan error, 1)
+	go func() { forgetDone <- registry.Forget(context.Background(), "corp") }()
+	<-entered
+
+	acquired := make(chan *Lease, 1)
+	go func() {
+		fresh, ferr := registry.Acquire("corp")
+		if ferr != nil {
+			t.Errorf("acquire during forget: %v", ferr)
+		}
+		acquired <- fresh
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("Purge 가 남은 해체 중에 Acquire 가 통과했다 — 새 노드의 키가 지워진다")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	if err := <-forgetDone; err != nil {
+		t.Fatalf("Forget() error = %v", err)
+	}
+
+	fresh := <-acquired
+	if fresh == nil {
+		t.Fatal("Forget 이 끝난 뒤에도 리스를 받지 못했다")
+	}
+	defer fresh.Release()
+
+	// 해체 순서는 그대로 지켜져야 한다. Purge 가 Close 뒤여야 상태 파일이 닫힌 뒤 지워진다.
+	if got := node.order(); len(got) < 3 ||
+		got[len(got)-3] != "logout" || got[len(got)-2] != "close" || got[len(got)-1] != "purge" {
+		t.Errorf("order() = %v, want …logout, close, purge", got)
+	}
+	if got := built(); got != 2 {
+		t.Errorf("nodes built = %d, want 2", got)
 	}
 }

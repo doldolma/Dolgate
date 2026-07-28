@@ -86,6 +86,10 @@ type ProgressFunc func(ProgressEvent)
 type Config struct {
 	TCPDialTimeout       time.Duration
 	TCPKeepAliveInterval time.Duration
+	// TailnetDialTimeout 은 Dial(tailnet 경유)에 주는 예산이다. 일반 TCP 보다 크다 — 이 안에
+	// 노드 기동(컨트롤 플레인 핸드셰이크, 필요하면 재등록)과 대상까지의 경로 탐색이 들어간다.
+	// TCPDialTimeout 을 그대로 쓰면 정상적인 첫 연결이 잘린다(실측 2~15 초).
+	TailnetDialTimeout time.Duration
 	// Progress가 설정되면 DialClient가 홉마다 connecting→connected(또는 failed)를 보고한다.
 	// config가 점프 체인 재귀에 전파돼 가장 깊은 점프부터 순서대로 이벤트가 도착한다.
 	Progress ProgressFunc
@@ -181,6 +185,10 @@ type InteractiveResponder func(challenge InteractiveChallenge) ([]string, error)
 var DefaultConfig = Config{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
+	// 브라우저 로그인까지 여기서 기다리게 하지는 않는다 — 그건 설정 화면의 연결 흐름이 할 일
+	// 이고, 여기서 몇 분을 붙들면 사용자는 앱이 멈춘 것으로 본다. auth key 등록과 경로 탐색이
+	// 넉넉히 들어가는 값이면 된다.
+	TailnetDialTimeout: 60 * time.Second,
 }
 
 // HopProgress builds a Config.Progress callback that emits EventConnectionHopProgress for
@@ -245,6 +253,9 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 	if config.TCPKeepAliveInterval == 0 {
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
 	}
+	if config.TailnetDialTimeout == 0 {
+		config.TailnetDialTimeout = DefaultConfig.TailnetDialTimeout
+	}
 
 	authMethods, cleanupAuth, err := resolveAuthMethods(target, config, responder)
 	if err != nil {
@@ -306,7 +317,7 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		// tailnet 경유. 노드가 아직 안 올라와 있으면 여기서 올라오기를 기다린다 — 최초
 		// 등록이면 브라우저 로그인 시간이 이 안에 들어간다.
 		reportProgress(ProgressConnecting)
-		ctx, cancel := context.WithTimeout(context.Background(), config.TCPDialTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), config.TailnetDialTimeout)
 		defer cancel()
 		rawConn, err = config.Dial(ctx, "tcp", addr)
 		if err != nil {
@@ -365,6 +376,9 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 	if config.TCPKeepAliveInterval == 0 {
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
 	}
+	if config.TailnetDialTimeout == 0 {
+		config.TailnetDialTimeout = DefaultConfig.TailnetDialTimeout
+	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 
@@ -405,7 +419,9 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 		// 프로브도 같은 통로로 가야 한다. 여기서 직접 TCP 로 나가면 tailnet 안에만 있는
 		// 호스트의 키를 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽게 된다.
 		reportTarget(ProgressConnecting)
-		ctx, cancel := context.WithTimeout(context.Background(), config.TCPDialTimeout)
+		// 노드 기동이 이 안에 들어가므로 일반 TCP 예산으로는 부족하다. 프로브가 실연결보다
+		// 먼저 나가서, 첫 연결의 기동 대기는 사실상 여기서 다 치른다.
+		ctx, cancel := context.WithTimeout(context.Background(), config.TailnetDialTimeout)
 		defer cancel()
 		var err error
 		rawConn, err = config.Dial(ctx, "tcp", addr)

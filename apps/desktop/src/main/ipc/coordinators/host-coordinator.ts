@@ -132,9 +132,15 @@ export function createHostCoordinator(deps: {
    * 호스트를 어느 tailnet 으로 보낼지 해석한다.
    *
    * 기대 이름을 함께 돌려주는 것이 핵심이다 — 코어가 실제로 붙은 tailnet 과 대조해 다르면
-   * 연결을 거부한다. 그 이름은 tailnet 설정에만 있으므로 여기서 붙여 준다. 설정이 사라졌으면
-   * 경로 자체를 넘기지 않는다: 지워진 tailnet 으로 조용히 나가는 것보다 평소 경로로 가서
-   * 실패하는 편이 낫다.
+   * 연결을 거부한다. 그 이름은 tailnet 설정에만 있으므로 여기서 붙여 준다.
+   *
+   * tailnet 을 지정했는데 그 설정이 없으면 연결 자체를 거부한다. 경로만 비워서 넘기면 일반
+   * 네트워크로 나가는데, 그건 실패가 아니라 **성공**이다 — 사용자는 tailnet 안에 있다고 믿는
+   * 트래픽이 공개망으로 나간다. 게다가 신뢰 범위는 여전히 호스트 레코드의 tailnetId 라서,
+   * 일반 네트워크에서 TOFU 로 받은 키가 그 tailnet 범위에 저장된다.
+   *
+   * 설정이 사라지는 경로는 전부 평범하다: 설정에서 tailnet 삭제(호스트의 tailnetId 는 남는다),
+   * 다른 기기로 툼스톤 전파, 호스트 전송 번들 가져오기(번들은 tailnets 를 담지 않는다).
    */
   const resolveTailnetRoute = (host: {
     tailnetId?: string | null;
@@ -145,7 +151,7 @@ export function createHostCoordinator(deps: {
     }
     const record = tailnets.list().find((entry) => entry.id === tailnetId);
     if (!record) {
-      return {};
+      throw new Error(t("hostIpc.tailnetMissing"));
     }
     return { tailnetId, tailnetName: record.tailnetName };
   };

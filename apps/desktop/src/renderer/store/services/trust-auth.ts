@@ -53,16 +53,24 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
             instanceId: host.awsInstanceId,
           }),
           port: getAwsEc2HostSshPort(host),
+          // AWS·warpgate 호스트는 tailnet 을 타지 않는다 — 항상 기본 범위다.
+          tailnetId: null,
         }
       : isWarpgateSshHostRecord(host)
         ? {
             host: host.warpgateSshHost,
             port: host.warpgateSshPort,
+            tailnetId: null,
           }
         : isSshHostRecord(host)
           ? {
               host: host.hostname,
               port: host.port,
+              // 신뢰는 tailnet 범위 안에서만 유효하다. 메인은 이 범위로 조회하므로 여기서
+              // 빼면 판정이 어긋난다 — 렌더러는 "이미 신뢰함"이라 프로브를 건너뛰는데 메인은
+              // 거부해서, 신뢰할 방법이 없는 막다른 오류가 된다. tailnet 을 나중에 붙인
+              // 호스트가 정확히 그 상태가 된다.
+              tailnetId: host.tailnetId ?? null,
             }
           : null;
 
@@ -70,8 +78,14 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       return false;
     }
 
+    // 빈 문자열과 없음은 같은 범위다(메인의 normalizeTailnetScope 와 같은 규칙).
+    const scope = (target.tailnetId ?? "").trim();
+
     return state.knownHosts.some(
-      (record) => record.host === target.host && record.port === target.port,
+      (record) =>
+        record.host === target.host &&
+        record.port === target.port &&
+        (record.tailnetId ?? "").trim() === scope,
     );
   };
 

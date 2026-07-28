@@ -60,6 +60,27 @@ type Status struct {
 	TailnetName string
 	NodeName    string
 	NodeIP      string
+
+	// Peers 는 이 tailnet 안에서 보이는 기기들과 지금 그 기기까지 가는 경로다.
+	Peers []Peer
+}
+
+// Peer 는 tailnet 안의 기기 하나와 그 기기까지의 현재 경로다.
+//
+// 경로는 고정이 아니다. 유저스페이스 노드는 붙은 직후 릴레이로 시작해, 홀펀칭이 되면 직결로
+// 승격한다. 그래서 "지금" 어느 쪽인지가 관찰 대상이다.
+type Peer struct {
+	// HostName 은 짧은 이름, DNSName 은 FQDN(끝점 제거)이다. 호스트 레코드의 주소가 둘 중
+	// 무엇이든, 또는 tailnet IP 든 맞출 수 있어야 해서 다 담는다.
+	HostName string
+	DNSName  string
+	IPs      []string
+	// Direct 는 직결 경로가 서 있는지다. false 면 릴레이 경유다.
+	Direct bool
+	// Relay 는 이 기기와 쓰는 DERP 지역이다. 직결이어도 폴백으로 남아 채워질 수 있다.
+	Relay   string
+	RxBytes int64
+	TxBytes int64
 }
 
 // Node 는 tailnet 멤버십 하나다. 노드는 그 tailnet 의 모든 호스트가 공유하므로 구현체는
@@ -106,6 +127,90 @@ type entry struct {
 	// idle 은 마지막 소비자가 떠난 뒤 유예 시간이 지나면 teardown 을 발동한다. 소비자가
 	// 있는 동안에는 nil 이다.
 	idle Stopper
+	// teardown 은 이 노드를 해체하는 중일 때만 non-nil 이고, 끝나면 닫힌다.
+	//
+	// 해체(Down·Close·Logout·Purge)는 컨트롤 플레인이나 디스크와 통신하므로 락 밖에서 한다.
+	// 그 사이에 도착한 Acquire 가 그냥 리스를 받아 가면, 그 소비자가 올린 노드를 뒤늦게 도착한
+	// Down 이 꺼 버리거나, 지워지는 중인 상태 디렉터리로 두 번째 노드가 만들어진다.
+	// Acquire 는 이 채널이 닫히기를 기다린 뒤 다시 시도한다.
+	teardown chan struct{}
+	// teardownCloses 는 진행 중인 해체가 노드를 Close 까지 하는지다(Reset·Forget). 종료 시
+	// Registry.Close 가 같은 노드를 또 닫지 않으려면 구분이 필요하다 — Down 만 하는 해체
+	// (유휴 만료·Disconnect)는 노드를 남기므로 종료 때 닫아야 한다.
+	teardownCloses bool
+}
+
+// beginTeardown 은 해체 중임을 표시한다. 호출자가 락을 쥔 상태여야 한다. closes 는 이 해체가
+// 노드를 Close 까지 하는지다.
+func (e *entry) beginTeardown(closes bool) chan struct{} {
+	done := make(chan struct{})
+	e.teardown = done
+	e.teardownCloses = closes
+	return done
+}
+
+// endTeardown 은 표시를 지우고 기다리던 Acquire 들을 깨운다. 항목은 남긴다 — Down 은 등록을
+// 유지하므로 다음 Acquire 가 재인증 없이 그 노드를 다시 쓴다.
+//
+// 순서가 계약이다. 필드를 먼저 비워야 한다 — 채널을 먼저 닫으면 깨어난 Acquire 가 아직
+// 남아 있는 teardown 을 보고 이미 닫힌 채널을 다시 기다려 제자리를 돈다.
+func (r *Registry) endTeardown(id string, existing *entry, done chan struct{}) {
+	r.mu.Lock()
+	// 그 사이 Reset/Forget 이 이 항목을 치웠을 수 있다. 그때는 남의 항목을 건드리지 않는다.
+	if r.entries[id] == existing {
+		existing.teardown = nil
+		existing.teardownCloses = false
+	}
+	r.mu.Unlock()
+	close(done)
+}
+
+// endTeardownRemoving 은 해체가 끝난 항목을 레지스트리에서 지우고 기다리던 Acquire 들을 깨운다.
+//
+// endTeardown 과 나뉘어 있는 이유: Down 은 노드를 다시 쓸 수 있게 남기지만 Close·Purge 는
+// 그 노드를 못 쓰게 만든다. 항목을 남기면 다음 Acquire 가 닫힌 노드를 재사용한다.
+//
+// 여기서도 순서가 계약이다. 지도에서 먼저 빼야 한다 — 채널을 먼저 닫으면 깨어난 Acquire 가
+// 아직 남아 있는 항목의 닫힌 teardown 을 다시 기다려 제자리를 돈다.
+func (r *Registry) endTeardownRemoving(id string, existing *entry, done chan struct{}) {
+	r.mu.Lock()
+	if r.entries[id] == existing {
+		// 해체 중에 리스가 풀려 유예가 예약됐을 수 있다(Forget 은 refs 를 보지 않는다). 항목이
+		// 사라지면 발동해도 무해하지만, 30 분간 살아 있을 이유는 없다.
+		if existing.idle != nil {
+			existing.idle.Stop()
+			existing.idle = nil
+		}
+		delete(r.entries, id)
+	}
+	r.mu.Unlock()
+	close(done)
+}
+
+// lockEntrySettled 는 id 의 항목을 해체가 진행되지 않는 상태로 잡아 돌려준다. 진행 중이면
+// 끝나기를 기다린 뒤 **다시 읽는다** — 그 사이 Reset/Forget 이 항목을 치웠거나 다른 소비자가
+// 새로 만들었을 수 있다.
+//
+// 반환 시 락을 쥔 상태다. 호출자가 반드시 풀어야 한다. 항목이 없으면 nil 을 돌려주는데 그때도
+// 락은 쥔 상태다 — "없음"을 확인한 뒤 만들기까지가 한 임계구역이어야 두 소비자가 같은 tailnet
+// 노드를 두 개 만들지 않는다.
+//
+// 이 대기가 없으면 해체와 겹친 호출들이 서로의 teardown 표시를 덮어쓴다. 그러면 먼저 끝난
+// 쪽이 남의 표시를 지워, 아직 Close·Purge 가 도는 중인데 Acquire 가 통과한다.
+func (r *Registry) lockEntrySettled(id string) *entry {
+	for {
+		r.mu.Lock()
+		existing, ok := r.entries[id]
+		if !ok {
+			return nil
+		}
+		if existing.teardown == nil {
+			return existing
+		}
+		teardown := existing.teardown
+		r.mu.Unlock()
+		<-teardown
+	}
 }
 
 // Registry 는 노드를 소유하고 언제 없앨지 결정한다.
@@ -149,31 +254,35 @@ type Lease struct {
 
 	registry *Registry
 	id       string
-	released bool
+	// once 는 여러 번 놓아도 refcount 가 한 번만 깎이게 한다. 평범한 bool 이 아니라 Once 인
+	// 이유는 겹치는 호출이 순차가 아니라 **동시**이기 때문이다 — leasedConn.Close 는 핸드셰이크
+	// 실패 정리와 SSH 읽기 루프의 teardown 에서 각각 불리고, 그 둘은 다른 goroutine 이다.
+	// bool 로는 둘 다 "아직 안 놓았다"를 읽어 두 번 깎고(살아 있는 세션 밑에서 노드가 내려간다),
+	// 그 자체가 데이터 레이스다.
+	once sync.Once
 }
 
-// Release 는 점유를 놓는다. defer Release 와 명시적 Release 가 함께 있어도 안전하도록
-// 멱등이다.
+// Release 는 점유를 놓는다. 몇 번 불려도, 동시에 불려도 한 번만 놓는다.
 func (l *Lease) Release() {
-	if l == nil || l.released {
+	if l == nil {
 		return
 	}
-	l.released = true
-	l.registry.release(l.id)
+	l.once.Do(func() { l.registry.release(l.id) })
 }
 
 // Acquire 는 tailnet 노드의 점유권을 돌려준다. 첫 소비자면 노드를 만든다. 유예 중인
 // 노드에 도착한 호출자는 그 노드를 재사용하고 예약된 teardown 을 취소한다.
+// 해체가 진행 중인 노드에는 리스를 내주지 않는다. 내주면 Down 이 이 소비자가 올린 노드를 꺼
+// 버리고, Close·Purge 중이었다면 같은 상태 디렉터리로 두 번째 노드를 만들게 된다.
 func (r *Registry) Acquire(id string) (*Lease, error) {
-	r.mu.Lock()
+	existing := r.lockEntrySettled(id)
 	defer r.mu.Unlock()
 
 	if r.closed {
 		return nil, ErrClosed
 	}
 
-	existing, ok := r.entries[id]
-	if !ok {
+	if existing == nil {
 		node, err := r.newNode(id)
 		if err != nil {
 			return nil, fmt.Errorf("tailnet %q: %w", id, err)
@@ -225,12 +334,15 @@ func (r *Registry) idleExpired(id string) {
 		return
 	}
 	existing.idle = nil
+	done := existing.beginTeardown(false)
 	node := existing.node
 	r.mu.Unlock()
 
 	// 락 밖에서: 노드를 내리는 건 컨트롤 플레인과 통신하는 일이라, 레지스트리 락을 쥔 채
-	// 하면 다른 tailnet 전부가 멈춘다.
+	// 하면 다른 tailnet 전부가 멈춘다. 그래서 이 사이에 도착하는 Acquire 는 teardown 표시를
+	// 보고 기다린다.
 	_ = node.Down(context.Background())
+	r.endTeardown(id, existing, done)
 }
 
 // Leases 는 이 tailnet 을 쓰는 중인 소비자 수다.
@@ -252,9 +364,8 @@ func (r *Registry) Leases(id string) int {
 //
 // 노드는 레지스트리에 남겨 둔다. idleExpired 와 같은 이유다.
 func (r *Registry) Disconnect(ctx context.Context, id string) error {
-	r.mu.Lock()
-	existing, ok := r.entries[id]
-	if !ok {
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
 		r.mu.Unlock()
 		return nil
 	}
@@ -266,11 +377,15 @@ func (r *Registry) Disconnect(ctx context.Context, id string) error {
 		existing.idle.Stop()
 		existing.idle = nil
 	}
+	done := existing.beginTeardown(false)
 	node := existing.node
 	r.mu.Unlock()
 
-	// 락 밖에서: 노드를 내리는 건 컨트롤 플레인과 통신하는 일이다.
-	return node.Down(ctx)
+	// 락 밖에서: 노드를 내리는 건 컨트롤 플레인과 통신하는 일이다. idleExpired 와 같은 이유로
+	// 이 사이에 도착하는 Acquire 는 기다리게 한다.
+	err := node.Down(ctx)
+	r.endTeardown(id, existing, done)
+	return err
 }
 
 // Snapshot 은 지금 레지스트리가 들고 있는 노드들의 상태다.
@@ -309,9 +424,8 @@ var ErrNodeInUse = errors.New("tailnet node is in use")
 //
 // 쓰이는 중이면 거절한다. 세션이 얹혀 있는 노드를 그 밑에서 닫으면 그 세션이 죽는다.
 func (r *Registry) Reset(id string) error {
-	r.mu.Lock()
-	existing, ok := r.entries[id]
-	if !ok {
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
 		r.mu.Unlock()
 		return nil
 	}
@@ -321,29 +435,37 @@ func (r *Registry) Reset(id string) error {
 	}
 	if existing.idle != nil {
 		existing.idle.Stop()
+		existing.idle = nil
 	}
-	delete(r.entries, id)
+	// 항목은 여기서 지우지 않는다. Close 가 끝나기 전에 지우면 그 사이 도착한 Acquire 가 같은
+	// 상태 디렉터리로 두 번째 노드를 만들어, 닫히는 중인 노드와 노드키를 두고 겹친다. 표시만
+	// 남기고 Close 가 끝난 뒤 지운다.
+	done := existing.beginTeardown(true)
+	node := existing.node
 	r.mu.Unlock()
 
-	return existing.node.Close()
+	err := node.Close()
+	r.endTeardownRemoving(id, existing, done)
+	return err
 }
 
 // Forget 은 노드를 로그아웃시키고 버린다. 이것이 "등록 해제" 동작이다 — 컨트롤 플레인이
 // 노드를 지우고, 다음 Acquire 는 처음부터 인증한다.
 func (r *Registry) Forget(ctx context.Context, id string) error {
-	r.mu.Lock()
-	existing, ok := r.entries[id]
-	if ok {
-		if existing.idle != nil {
-			existing.idle.Stop()
-		}
-		delete(r.entries, id)
-	}
-	r.mu.Unlock()
-
-	if !ok {
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
+		r.mu.Unlock()
 		return nil
 	}
+	if existing.idle != nil {
+		existing.idle.Stop()
+		existing.idle = nil
+	}
+	// Reset 과 같은 이유로 항목을 남긴 채 해체한다. 여기서는 더 중요하다 — Purge 가 상태 파일을
+	// 지우는 동안 새 노드가 같은 디렉터리를 붙잡고 있으면, 방금 만든 노드의 키가 지워진다.
+	done := existing.beginTeardown(true)
+	node := existing.node
+	r.mu.Unlock()
 
 	// 순서가 계약이다. 로그아웃이 먼저여야 노드가 실제로 지워진다 — 닫힌 노드는 컨트롤
 	// 플레인에 닿지 못하므로 먼저 닫으면 등록이 남은 채 방치될 뿐이다. Purge 가 마지막인
@@ -351,10 +473,11 @@ func (r *Registry) Forget(ctx context.Context, id string) error {
 	//
 	// 앞 단계가 실패해도 나머지는 모두 실행한다. 컨트롤 플레인에 닿지 못했다고 해서 노드를
 	// 열어 둔 채 죽은 키까지 디스크에 남길 이유는 없다.
-	logoutErr := existing.node.Logout(ctx)
-	closeErr := existing.node.Close()
-	purgeErr := existing.node.Purge()
+	logoutErr := node.Logout(ctx)
+	closeErr := node.Close()
+	purgeErr := node.Purge()
 
+	r.endTeardownRemoving(id, existing, done)
 	return errors.Join(logoutErr, closeErr, purgeErr)
 }
 
@@ -371,6 +494,11 @@ func (r *Registry) Close() error {
 	for _, existing := range r.entries {
 		if existing.idle != nil {
 			existing.idle.Stop()
+		}
+		// 이미 Close 까지 하는 해체가 도는 중이면 건너뛴다. 같은 노드를 두 번 닫게 된다.
+		// Down 만 하는 해체는 노드를 남기므로 여기서 닫아야 한다.
+		if existing.teardownCloses {
+			continue
 		}
 		nodes = append(nodes, existing.node)
 	}

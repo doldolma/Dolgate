@@ -15,6 +15,7 @@ import type {
   SnippetRecord,
   SshHostRecord,
 } from '@shared';
+import { listTailnets } from '../../services/desktop/tailnet';
 import { cn } from '../../lib/cn';
 import { Button } from '../../ui';
 import {
@@ -313,6 +314,7 @@ function buildConnectionRows(
   hosts: HostRecord[],
   snippets: SnippetRecord[] | undefined,
   keychainEntries: SecretMetadataRecord[],
+  tailnets: Array<{ id: string; label: string }>,
 ): Array<{ label: string; value: React.ReactNode }> {
   const rows: Array<{ label: string; value: React.ReactNode }> = [];
   const address = getHostAddress(host);
@@ -353,6 +355,23 @@ function buildConnectionRows(
                 </span>
               );
             })}
+          </span>
+        ),
+      });
+    }
+    // tailnet 을 경유하는 호스트라는 것은 주소만 봐서는 알 수 없다 — 같은 이름이 tailnet
+    // 안과 밖에서 다른 기기일 수 있으므로 어디를 거치는지 보여 준다. 설정이 지워졌으면
+    // 라벨을 못 찾는데, 그때는 id 를 그대로 보여 준다(연결도 그 상태에서는 거부된다).
+    const tailnetId = host.tailnetId?.trim();
+    if (tailnetId) {
+      const known = tailnets.find((entry) => entry.id === tailnetId);
+      rows.push({
+        label: 'Tailnet',
+        value: known ? (
+          known.label
+        ) : (
+          <span className="text-[var(--danger)]">
+            {t('hostDetail.row.tailnetMissing')}
           </span>
         ),
       });
@@ -736,6 +755,28 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
   const activeTab: DetailTab = hb.detailTab ?? 'overview';
   const [keyInstallOpen, setKeyInstallOpen] = useState(false);
 
+  // tailnet 라벨을 보여주려면 등록 목록이 필요하다. 호스트가 바뀔 때 다시 읽는다 — 이 패널은
+  // 섹션을 옮겨도 재마운트되지 않아서, 한 번만 읽으면 설정에서 방금 추가한 tailnet 이 계속
+  // "설정 없음"으로 보인다.
+  const [tailnets, setTailnets] = useState<Array<{ id: string; label: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    // 브리지가 없으면 listTailnets 가 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡는다.
+    void Promise.resolve()
+      .then(listTailnets)
+      .then((records) => {
+        if (!cancelled) {
+          setTailnets(records.map((record) => ({ id: record.id, label: record.label })));
+        }
+      })
+      .catch(() => {
+        // 목록을 못 읽어도 상세 화면은 그대로 보여야 한다.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHostId]);
+
   const hostActivity = useMemo(() => {
     if (!host) {
       return [] as ActivityLogRecord[];
@@ -923,7 +964,13 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
         {activeTab === 'connection' ? (
           <SectionCard title="Connection">
             <div className="divide-y divide-[var(--border)]">
-              {buildConnectionRows(host, hosts, hb.snippets, hb.keychainEntries).map((row) => (
+              {buildConnectionRows(
+                host,
+                hosts,
+                hb.snippets,
+                hb.keychainEntries,
+                tailnets,
+              ).map((row) => (
                 <InfoRow key={row.label} label={row.label} value={row.value} />
               ))}
             </div>

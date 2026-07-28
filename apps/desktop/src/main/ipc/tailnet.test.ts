@@ -41,6 +41,7 @@ function createContext() {
   return {
     tailnets: {
       list: vi.fn(() => [record({ hasAuthKey: true })]),
+      listPayloads: vi.fn(() => [{ ...record({ hasAuthKey: true }), authKey: 'tskey-secret' }]),
       save: vi.fn((next: TailnetRecord) => next),
       remove: vi.fn(),
       readAuthKey: vi.fn<(id: string) => string | null>(() => 'tskey-secret'),
@@ -56,6 +57,8 @@ function createContext() {
         ) => Promise<TailnetStatus>
       >(async () => ({ id: 'net-1', state: 'running' })),
       forgetTailnet: vi.fn(async (_id: string) => {}),
+      setTailnetConfigProvider: vi.fn<(provider: () => TailnetConfig[]) => void>(),
+      pushTailnetConfigs: vi.fn(),
     },
   };
 }
@@ -232,5 +235,43 @@ describe('tailnet ipc handlers', () => {
     await invoke(ipcChannels.tailnet.save, { record: saved });
 
     expect(ctx.tailnets.save).toHaveBeenCalledWith(saved, undefined);
+  });
+});
+
+// 코어는 설정을 알아야 노드를 만들 수 있는데 연결 경로는 tailnetId 만 들고 온다. 이 배선이
+// 없으면 설정 화면에서 미리 연결 테스트를 한 tailnet 만 쓸 수 있고, 앱을 다시 켜면 그것도
+// 잊어서 호스트 연결이 "is not configured" 로 실패한다.
+describe('tailnet config push', () => {
+  it('registers a provider that carries the stored auth key', () => {
+    const ctx = createContext();
+    registerTailnetIpcHandlers(ctx as never);
+
+    const provider = ctx.coreManager.setTailnetConfigProvider.mock.calls[0]?.[0];
+    expect(provider).toBeTypeOf('function');
+    expect(provider?.()).toEqual([
+      // ephemeral 은 auth key 유무로 다시 계산한다 — 연결 테스트와 어긋나면 같은 tailnet 에
+      // 노드가 둘로 갈라진다.
+      { id: 'net-1', controlUrl: undefined, authKey: 'tskey-secret', ephemeral: true },
+    ]);
+  });
+
+  it('re-pushes after a save so a new tailnet works without a settings test', async () => {
+    const ctx = createContext();
+    registerTailnetIpcHandlers(ctx as never);
+    ctx.coreManager.pushTailnetConfigs.mockClear();
+
+    await invoke(ipcChannels.tailnet.save, { record: record(), authKey: 'tskey-new' });
+
+    expect(ctx.coreManager.pushTailnetConfigs).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-pushes after a removal so the core drops the deleted config', async () => {
+    const ctx = createContext();
+    registerTailnetIpcHandlers(ctx as never);
+    ctx.coreManager.pushTailnetConfigs.mockClear();
+
+    await invoke(ipcChannels.tailnet.remove, 'net-1');
+
+    expect(ctx.coreManager.pushTailnetConfigs).toHaveBeenCalledTimes(1);
   });
 });

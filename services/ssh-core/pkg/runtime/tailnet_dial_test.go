@@ -233,3 +233,54 @@ func TestTailnetDialRejectedWhenSupportIsDisabled(t *testing.T) {
 		t.Error("expected tailnetDial to be rejected without a registry")
 	}
 }
+
+// 인증이 남은 노드로는 dial 하지 않는다. 그대로 넘기면 tsnet 이 인증이 끝나기를 기다리다
+// 예산을 다 쓰고 타임아웃으로 실패하는데, 그 메시지로는 무엇을 해야 할지 알 수 없다.
+//
+// 반대로 이 판단을 노드 계층(Up)에 두면 안 된다. 설정 화면의 연결 테스트는 Up 이 돌아온 뒤에야
+// 상태를 폴링해 인증 URL 을 방출하므로, 거기서 붙들면 브라우저가 영원히 열리지 않는다.
+func TestTailnetDialRefusesANodeThatStillNeedsAuth(t *testing.T) {
+	cases := []struct {
+		state tailnet.State
+		want  error
+	}{
+		{tailnet.StateNeedsAuth, ErrTailnetNeedsAuth},
+		{tailnet.StateNeedsApproval, ErrTailnetNeedsApproval},
+	}
+
+	for _, testCase := range cases {
+		node := &dialNode{status: tailnet.Status{State: testCase.state}}
+		instance := newDialRuntime(t, node)
+
+		dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp"})
+		_, err := dial(context.Background(), "tcp", "server:22")
+
+		if !errors.Is(err, testCase.want) {
+			t.Fatalf("state %s: dial() error = %v, want %v", testCase.state, err, testCase.want)
+		}
+		if node.dials != 0 {
+			t.Errorf("state %s: dialled the target anyway", testCase.state)
+		}
+		// 거부한 연결이 리스를 들고 있으면 노드가 유예에 들어가지 못한다.
+		if leased := leaseCount(instance, "corp"); leased != 0 {
+			t.Errorf("state %s: leases = %d after a refused dial, want 0", testCase.state, leased)
+		}
+	}
+}
+
+// Starting 은 막지 않는다 — 곧 Running 이 될 상태이고, tsnet 의 awaitRunning 이 기다려 준다.
+// 여기서 거부하면 정상적인 첫 연결이 실패한다.
+func TestTailnetDialProceedsWhileTheNodeIsStarting(t *testing.T) {
+	node := &dialNode{status: tailnet.Status{State: tailnet.StateStarting}}
+	instance := newDialRuntime(t, node)
+
+	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp"})
+	conn, err := dial(context.Background(), "tcp", "server:22")
+	if err != nil {
+		t.Fatalf("dial() error = %v, want the dial to proceed", err)
+	}
+	_ = conn.Close()
+	if node.dials != 1 {
+		t.Errorf("dials = %d, want 1", node.dials)
+	}
+}

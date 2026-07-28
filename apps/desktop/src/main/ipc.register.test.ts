@@ -87,6 +87,7 @@ import { registerIpcHandlers } from "./ipc";
 function createDependencySet() {
   const tailnets = {
     list: vi.fn(() => []),
+    listPayloads: vi.fn(() => []),
     save: vi.fn(),
     remove: vi.fn(),
     readAuthKey: vi.fn(() => null),
@@ -99,6 +100,8 @@ function createDependencySet() {
     listPortForwardRuntimes: vi.fn(() => []),
     inspectPrivateKey: vi.fn(),
     installAuthorizedKey: vi.fn(),
+    setTailnetConfigProvider: vi.fn(),
+    pushTailnetConfigs: vi.fn(),
   };
 
   return {

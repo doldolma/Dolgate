@@ -21,6 +21,7 @@ const (
 	CommandTailnetDisconnect           = coretypes.CommandTailnetDisconnect
 	CommandTailnetCancel               = coretypes.CommandTailnetCancel
 	CommandTailnetSnapshot             = coretypes.CommandTailnetSnapshot
+	CommandTailnetConfigure            = coretypes.CommandTailnetConfigure
 	CommandAWSConnect                  = coretypes.CommandAWSConnect
 	CommandLocalConnect                = coretypes.CommandLocalConnect
 	CommandSerialConnect               = coretypes.CommandSerialConnect
@@ -184,6 +185,7 @@ type ContainersConnectPayload = coretypes.ContainersConnectPayload
 type TailnetConfigPayload = coretypes.TailnetConfigPayload
 type TailnetTestPayload = coretypes.TailnetTestPayload
 type TailnetForgetPayload = coretypes.TailnetForgetPayload
+type TailnetConfigurePayload = coretypes.TailnetConfigurePayload
 type TailnetStatusPayload = coretypes.TailnetStatusPayload
 type TailnetForgotPayload = coretypes.TailnetForgotPayload
 type TailnetDisconnectPayload = coretypes.TailnetDisconnectPayload

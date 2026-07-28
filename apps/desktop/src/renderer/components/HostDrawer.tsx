@@ -25,6 +25,7 @@ interface HostDrawerProps {
   onConnect?: HostFormProps['onConnect'];
   onEditExistingSecret?: (secretRef: string) => void;
   onOpenSecrets?: () => void;
+  onOpenTailnets?: () => void;
 }
 
 export function HostDrawer({
@@ -43,7 +44,8 @@ export function HostDrawer({
   onSubmit,
   onConnect,
   onEditExistingSecret,
-  onOpenSecrets
+  onOpenSecrets,
+  onOpenTailnets
 }: HostDrawerProps) {
   const { t: translate } = useTranslation();
   const drawerRef = useRef<HTMLElement | null>(null);
@@ -153,6 +155,7 @@ export function HostDrawer({
           onConnect={onConnect}
           onEditExistingSecret={onEditExistingSecret}
           onOpenSecrets={onOpenSecrets}
+          onOpenTailnets={onOpenTailnets}
           onActionStateChange={setFormActionState}
           onLabelChange={handleFormLabelChange}
         />

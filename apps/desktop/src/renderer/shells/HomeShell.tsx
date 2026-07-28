@@ -412,6 +412,7 @@ export function HomeShell({
       }
       onEditExistingSecret={openHostSecretEditor}
       onOpenSecrets={() => settingsViewModel.openSettingsSection('secrets')}
+      onOpenTailnets={() => settingsViewModel.openSettingsSection('tailnet')}
     />
   ) : null;
 

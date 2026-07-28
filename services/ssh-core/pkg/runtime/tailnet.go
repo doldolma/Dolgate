@@ -119,6 +119,37 @@ func (c *tailnetConfigs) set(config coretypes.TailnetConfigPayload) (changed boo
 	return existed && previous != config
 }
 
+// replaceAll 은 설정 전체를 갈아 끼우고, 노드를 다시 만들어야 하는 id 들을 알려준다.
+//
+// 목록에 없던 id 는 지운다. 그렇게 해야 코어의 상태가 데스크톱과 같아진다 — 삭제를 따로
+// 통보받지 않아도 되고, 지워진 tailnet 의 auth key 를 코어가 계속 들고 있지도 않는다.
+func (c *tailnetConfigs) replaceAll(configs []coretypes.TailnetConfigPayload) (changed []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	next := make(map[string]coretypes.TailnetConfigPayload, len(configs))
+	for _, config := range configs {
+		id := strings.TrimSpace(config.ID)
+		if id == "" {
+			continue
+		}
+		config.ID = id
+		next[id] = config
+		if previous, existed := c.byID[id]; existed && previous != config {
+			changed = append(changed, id)
+		}
+	}
+	// 사라진 설정도 노드를 버려야 한다. 남겨 두면 지워진 tailnet 으로 계속 붙는다.
+	for id := range c.byID {
+		if _, kept := next[id]; !kept {
+			changed = append(changed, id)
+		}
+	}
+
+	c.byID = next
+	return changed
+}
+
 func (c *tailnetConfigs) remove(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -206,7 +237,27 @@ func tailnetStatusPayload(id string, status tailnet.Status) coretypes.TailnetSta
 		TailnetName: status.TailnetName,
 		NodeName:    status.NodeName,
 		NodeIP:      status.NodeIP,
+		Peers:       tailnetPeerPayloads(status.Peers),
 	}
+}
+
+func tailnetPeerPayloads(peers []tailnet.Peer) []coretypes.TailnetPeerPayload {
+	if len(peers) == 0 {
+		return nil
+	}
+	payloads := make([]coretypes.TailnetPeerPayload, 0, len(peers))
+	for _, peer := range peers {
+		payloads = append(payloads, coretypes.TailnetPeerPayload{
+			HostName: peer.HostName,
+			DNSName:  peer.DNSName,
+			IPs:      peer.IPs,
+			Direct:   peer.Direct,
+			Relay:    peer.Relay,
+			RxBytes:  peer.RxBytes,
+			TxBytes:  peer.TxBytes,
+		})
+	}
+	return payloads
 }
 
 // TailnetTest 는 노드를 올려 Running 까지 가는지 확인하고, 그 과정을 이벤트로 흘린다.
@@ -272,7 +323,11 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 	var last coretypes.TailnetStatusPayload
 	emit := func(status coretypes.TailnetStatusPayload) {
 		// 같은 상태를 반복해 보내지 않는다 — 폴링 간격마다 이벤트가 쌓이면 UI 가 깜빡인다.
-		if status == last {
+		//
+		// Peers 는 비교에서 뺀다. 경로는 승격되며 계속 바뀌는데(릴레이→직결) 그것 때문에
+		// 진행 이벤트가 매 폴링마다 다시 나가면 연결 화면이 깜빡인다. 이 이벤트는 "등록이
+		// 어디까지 갔는가"를 보여주는 것이고, 경로는 스냅샷으로 본다.
+		if sameTailnetProgress(status, last) {
 			return
 		}
 		last = status
@@ -390,6 +445,45 @@ func (runtime *Runtime) TailnetSnapshot(requestID string) error {
 		},
 	})
 	return nil
+}
+
+// sameTailnetProgress 는 등록 진행 표시에 쓰이는 필드만 비교한다.
+func sameTailnetProgress(a, b coretypes.TailnetStatusPayload) bool {
+	return a.ID == b.ID &&
+		a.State == b.State &&
+		a.AuthURL == b.AuthURL &&
+		a.Error == b.Error &&
+		a.LoginName == b.LoginName &&
+		a.TailnetName == b.TailnetName &&
+		a.NodeName == b.NodeName &&
+		a.NodeIP == b.NodeIP
+}
+
+// TailnetConfigure 는 이 기기의 tailnet 설정을 코어에 심는다.
+//
+// 데스크톱이 코어를 띄운 직후와 설정이 바뀔 때마다 부른다. 이것이 있어야 설정 화면에서 미리
+// 연결해 두지 않아도 호스트 연결이 노드를 알아서 올린다 — 연결 경로는 tailnetId 만 들고
+// 오므로, 코어가 설정을 모르면 노드를 만들 수 없다.
+//
+// 노드를 올리지는 않는다. 여기서 올리면 앱을 켜는 것만으로 등록된 모든 tailnet 이 붙어
+// 디바이스 목록에 online 으로 뜬다. 실제 기동은 첫 dial 이 한다.
+func (runtime *Runtime) TailnetConfigure(payload coretypes.TailnetConfigurePayload) error {
+	if runtime.tailnets == nil || runtime.tailnetConfigs == nil {
+		return errors.New("tailnet support is not enabled")
+	}
+
+	// 설정이 바뀐 노드는 버린다 — 노드는 만들어질 때 설정을 받으므로, 살아 있는 노드는 새
+	// auth key 나 새 컨트롤 플레인을 알 방법이 없다.
+	//
+	// 쓰이는 중이면 버릴 수 없다(그 위의 세션이 죽는다). 그때는 다음 기회에 정리된다 —
+	// 리스가 다 풀린 뒤의 Configure 나, 유휴 유예가 지난 뒤의 Acquire 가 새 설정으로 만든다.
+	var errs []error
+	for _, id := range runtime.tailnetConfigs.replaceAll(payload.Configs) {
+		if err := runtime.tailnets.Reset(id); err != nil && !errors.Is(err, tailnet.ErrNodeInUse) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // TailnetForget 은 노드 등록을 해제한다 — 컨트롤 플레인에서 노드를 지우고 로컬 상태까지

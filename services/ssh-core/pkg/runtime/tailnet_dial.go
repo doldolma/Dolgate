@@ -71,26 +71,55 @@ func dialThroughLease(
 	if err := lease.Node.Up(ctx); err != nil {
 		return nil, err
 	}
-	if err := assertTailnetIdentity(ctx, lease, expectedName); err != nil {
+
+	status, err := lease.Node.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// 인증이 남은 노드는 여기서 끊는다. 그대로 dial 하면 tsnet 이 인증이 끝나기를 기다리다
+	// 예산을 다 쓰고 타임아웃으로 실패하는데, 사용자는 무엇을 해야 할지 알 수 없다. 인증은
+	// 설정 화면의 흐름이 할 일이다(브라우저를 열고 진행 상태를 보여 준다).
+	if err := assertTailnetAuthenticated(status); err != nil {
+		return nil, err
+	}
+	if err := assertTailnetIdentity(status, expectedName); err != nil {
 		return nil, err
 	}
 	return lease.Node.Dial(ctx, network, address)
+}
+
+// ErrTailnetNeedsAuth 는 노드 등록이 끝나지 않았을 때다. 호스트 연결 경로에서는 기다리지 않고
+// 곧바로 안내한다 — 인증은 설정 화면에서 해야 한다.
+var ErrTailnetNeedsAuth = errors.New(
+	"tailnet: this tailnet is not connected yet — connect it in settings first",
+)
+
+// ErrTailnetNeedsApproval 은 등록은 됐지만 관리자 인가가 남았을 때다.
+var ErrTailnetNeedsApproval = errors.New(
+	"tailnet: this node is waiting for administrator approval",
+)
+
+func assertTailnetAuthenticated(status tailnet.Status) error {
+	switch status.State {
+	case tailnet.StateNeedsAuth:
+		return ErrTailnetNeedsAuth
+	case tailnet.StateNeedsApproval:
+		return ErrTailnetNeedsApproval
+	default:
+		return nil
+	}
 }
 
 // assertTailnetIdentity 는 붙은 곳이 설정이 가리키는 tailnet 인지 확인한다.
 //
 // 이름을 모르면(설정이 예전 것이거나 컨트롤 플레인이 안 알려 주면) 통과시킨다. 모른다는 것을
 // 이유로 연결을 막으면, 이름을 기록하기 전에 만든 설정이 전부 못 쓰게 된다.
-func assertTailnetIdentity(ctx context.Context, lease *tailnet.Lease, expectedName string) error {
+func assertTailnetIdentity(status tailnet.Status, expectedName string) error {
 	expected := strings.TrimSpace(expectedName)
 	if expected == "" {
 		return nil
 	}
 
-	status, err := lease.Node.Status(ctx)
-	if err != nil {
-		return err
-	}
 	actual := strings.TrimSpace(status.TailnetName)
 	if actual == "" || actual == expected {
 		return nil

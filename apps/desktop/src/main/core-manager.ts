@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, ContainerLifecycleTransport, ContainerWorkspaceKind, ControlSignalPayload, CoreEvent, CoreEventType, CoreRequest, CoreStreamFrame, DirectoryListing, FileEntry, HostContainerAction, HostContainerDetails, HostContainerListResult, HostContainerLogSearchResult, HostContainerLogsSnapshot, HostContainerRuntime, HostContainerStatsSample, HostKeyProbeResult, KeyboardInteractiveRespondInput, PortForwardMode, PortForwardRuntimeEvent, PortForwardRuntimeRecord, PortForwardTransport, ResolvedAuthorizedKeyInstallPayload, ResolvedAuthorizedKeyInstallResult, ResolvedAwsConnectPayload, ResolvedCertificateInspectPayload, ResolvedContainersConnectPayload, ResolvedCoreConnectPayload, ResolvedHostKeyProbePayload, ResolvedLocalConnectPayload, ResolvedPortForwardStartPayload, ResolvedPrivateKeyGeneratePayload, ResolvedPrivateKeyGenerateResult, ResolvedPrivateKeyInspectPayload, ResolvedPrivateKeyInspectResult, ResolvedSerialConnectPayload, ResolvedSerialControlPayload, ResolvedSerialControlResult, ResolvedSerialListPortsPayload, ResolvedSftpConnectPayload, ResolvedSsmPortForwardStartPayload, SerialPortSummary, SessionConnectionKind, SessionLifecycleLogMetadata, SessionShareControlSignal, SftpChmodInput, SftpChownInput, SftpDeleteInput, SftpEndpointSummary, SftpLifecycleLogMetadata, SftpListInput, SftpListPrincipalsInput, SftpMkdirInput, SftpPrincipal, SftpReadFileInput, SftpReadFileResult, SftpRenameInput, SftpWriteFileInput, SshCertificateInfo, TailnetConfig, TailnetSnapshot, TailnetState, TailnetStatus, TerminalTab, TransferFailedItem, TransferJob, TransferJobEvent, TransferStartInput } from "@shared";
+import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, ContainerLifecycleTransport, ContainerWorkspaceKind, ControlSignalPayload, CoreEvent, CoreEventType, CoreRequest, CoreStreamFrame, DirectoryListing, FileEntry, HostContainerAction, HostContainerDetails, HostContainerListResult, HostContainerLogSearchResult, HostContainerLogsSnapshot, HostContainerRuntime, HostContainerStatsSample, HostKeyProbeResult, KeyboardInteractiveRespondInput, PortForwardMode, PortForwardRuntimeEvent, PortForwardRuntimeRecord, PortForwardTransport, ResolvedAuthorizedKeyInstallPayload, ResolvedAuthorizedKeyInstallResult, ResolvedAwsConnectPayload, ResolvedCertificateInspectPayload, ResolvedContainersConnectPayload, ResolvedCoreConnectPayload, ResolvedHostKeyProbePayload, ResolvedLocalConnectPayload, ResolvedPortForwardStartPayload, ResolvedPrivateKeyGeneratePayload, ResolvedPrivateKeyGenerateResult, ResolvedPrivateKeyInspectPayload, ResolvedPrivateKeyInspectResult, ResolvedSerialConnectPayload, ResolvedSerialControlPayload, ResolvedSerialControlResult, ResolvedSerialListPortsPayload, ResolvedSftpConnectPayload, ResolvedSsmPortForwardStartPayload, SerialPortSummary, SessionConnectionKind, SessionLifecycleLogMetadata, SessionShareControlSignal, SftpChmodInput, SftpChownInput, SftpDeleteInput, SftpEndpointSummary, SftpLifecycleLogMetadata, SftpListInput, SftpListPrincipalsInput, SftpMkdirInput, SftpPrincipal, SftpReadFileInput, SftpReadFileResult, SftpRenameInput, SftpWriteFileInput, SshCertificateInfo, TailnetConfig, TailnetPeer, TailnetSnapshot, TailnetState, TailnetStatus, TerminalTab, TransferFailedItem, TransferJob, TransferJobEvent, TransferStartInput } from "@shared";
 import { MAX_HOST_STARTUP_COMMAND_LENGTH } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import {
@@ -638,6 +638,26 @@ interface PendingSessionReadyWaiter {
   settled: boolean;
 }
 
+function toTailnetPeers(value: unknown): TailnetPeer[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const peers = value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      hostName: optionalText(entry.hostName),
+      dnsName: optionalText(entry.dnsName),
+      ips: Array.isArray(entry.ips)
+        ? entry.ips.filter((ip): ip is string => typeof ip === "string")
+        : undefined,
+      direct: entry.direct === true,
+      relay: optionalText(entry.relay),
+      rxBytes: typeof entry.rxBytes === "number" ? entry.rxBytes : undefined,
+      txBytes: typeof entry.txBytes === "number" ? entry.txBytes : undefined,
+    }));
+  return peers.length > 0 ? peers : undefined;
+}
+
 function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
   const state = String(payload.state ?? "starting");
   return {
@@ -653,6 +673,7 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     tailnetName: optionalText(payload.tailnetName),
     nodeName: optionalText(payload.nodeName),
     nodeIp: optionalText(payload.nodeIp),
+    peers: toTailnetPeers(payload.peers),
     authUrl:
       typeof payload.authUrl === "string" && payload.authUrl.length > 0
         ? payload.authUrl
@@ -951,6 +972,17 @@ export class CoreManager {
   private readonly sessionOwnerStorage = new AsyncLocalStorage<number>();
   private readonly sessionOwnerById = new Map<string, number>();
   private readonly tabs = new Map<string, TerminalTab>();
+  /**
+   * 코어가 뜰 때 밀어 넣을 tailnet 설정을 가져오는 함수.
+   *
+   * 코어는 설정을 알아야 노드를 만들 수 있는데, 연결 경로는 tailnetId 만 들고 온다. 이것이
+   * 없으면 설정 화면에서 미리 연결 테스트를 한 tailnet 만 쓸 수 있고 앱을 다시 켜면 그것도
+   * 잊는다 — 호스트 연결이 "is not configured" 로 실패한다.
+   *
+   * 콜백으로 받는 이유: CoreManager 는 데이터베이스를 모르고, 코어는 이 프로세스보다 짧게
+   * 살면서 다시 뜰 수 있다(크래시·재시작). 그때마다 최신 설정을 다시 읽어야 한다.
+   */
+  private tailnetConfigProvider: (() => TailnetConfig[]) | null = null;
   private readonly sftpEndpoints = new Map<string, SftpEndpointSummary>();
   private readonly sftpEndpointOwnerById = new Map<string, number>();
   private readonly sftpLifecycleByEndpointId = new Map<
@@ -1580,6 +1612,11 @@ export class CoreManager {
       env: childEnv,
       windowsHide: true,
     });
+
+    // tailnet 설정은 다른 어떤 요청보다 먼저 보낸다. 코어가 설정을 모르면 tailnet 을 지정한
+    // 호스트 연결이 노드를 만들 수 없다. 같은 stdin 파이프라 순서가 곧 보장이고, 코어가 다시
+    // 떠도(크래시·재시작) 여기를 다시 지나므로 매번 최신 설정으로 복구된다.
+    this.pushTailnetConfigs();
 
     // stdout은 control + raw stream이 섞인 framed binary 채널이다.
     this.process.stdout.on("data", (chunk: Buffer) => {
@@ -4934,6 +4971,46 @@ export class CoreManager {
       ["tailnetStatus"],
       { timeoutMs: 30_000 },
     );
+  }
+
+  /**
+   * tailnet 설정 제공자를 등록한다. 등록 시점에 코어가 이미 떠 있으면 곧바로 한 번 밀어 넣는다.
+   */
+  setTailnetConfigProvider(provider: () => TailnetConfig[]): void {
+    this.tailnetConfigProvider = provider;
+    if (this.process) {
+      this.pushTailnetConfigs();
+    }
+  }
+
+  /**
+   * 코어에 tailnet 설정 전체를 밀어 넣는다. 설정이 바뀌면(추가·수정·삭제) 다시 부른다.
+   *
+   * 응답을 기다리지 않는다. 같은 stdin 파이프에 순서대로 쓰이므로, 이 뒤에 보내는 연결 요청은
+   * 코어에서 반드시 이 설정을 본 뒤에 처리된다 — 그 순서가 필요한 보장의 전부다.
+   *
+   * 코어가 안 떠 있으면 아무것도 하지 않는다. 다음 start() 가 어차피 밀어 넣는다.
+   */
+  pushTailnetConfigs(): void {
+    if (!this.process || !this.tailnetConfigProvider) {
+      return;
+    }
+    try {
+      this.sendControl({
+        id: randomUUID(),
+        type: "tailnetConfigure",
+        payload: { configs: this.tailnetConfigProvider() },
+      });
+    } catch (error) {
+      // 설정을 못 밀어 넣어도 나머지 기능은 그대로 동작해야 한다. tailnet 호스트 연결만
+      // 실패하고, 그 실패는 연결 시점에 사용자에게 보인다.
+      this.appendLog?.({
+        level: "warn",
+        category: "session",
+        message: "tailnet 설정을 코어에 전달하지 못했습니다.",
+        metadata: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
   }
 
   /** 지금 살아 있는 노드들의 상태. 없는 tailnet 은 결과에 들어 있지 않다. */

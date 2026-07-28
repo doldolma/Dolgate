@@ -264,11 +264,15 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               };
             }),
     openSettingsSection: (section) =>
+            // 호스트 드로어는 닫지 않는다. 편집 중에 "Manage" 로 설정을 다녀오는 것이 정상 흐름
+            // 인데, 닫아 버리면 돌아왔을 때 편집하던 호스트를 다시 찾아 들어가야 한다.
+            //
+            // 열어 둬도 설정 화면을 가리지 않는다 — 드로어는 HostBrowser 안에 렌더되고, 그건
+            // homeSection === 'hosts' 일 때만 마운트된다.
             set({
               activeWorkspaceTab: "home",
               homeSection: "settings",
               settingsSection: section,
-              hostDrawer: { mode: "closed" },
             }),
     openCreateHostDrawer: () =>
             set({

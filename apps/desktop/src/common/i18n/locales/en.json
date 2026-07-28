@@ -656,6 +656,12 @@
       "days": "{{count}}d ago"
     },
     "hover": {
+        "tailnet": "Tailnet",
+        "tailnetPathDirect": "Direct",
+        "tailnetPathRelay": "Relayed ({{relay}})",
+        "tailnetPathRelayUnknown": "Relayed",
+        "tailnetPathUnknown": "Checking path",
+        "tailnetNotConnected": "Not connected",
       "jump": "Jump",
       "reconnect": "Reconnect",
       "waitingNetwork": "Waiting for network",
@@ -1335,7 +1341,6 @@
     },
     "tailnet": {
       "none": "Not used (plain network)",
-      "description": "Connect through this tailnet. Trusted host keys are scoped to it as well — the same name in another tailnet is a different machine.",
       "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own."
     }
   },
@@ -1530,6 +1535,7 @@
       "sharedCount": "· shared by {{count}} hosts"
     },
     "row": {
+      "tailnetMissing": "Not configured — connections are refused",
       "usernameUnset": "Not set",
       "enabled": "On",
       "serverProxy": "Server proxy",
@@ -2104,6 +2110,7 @@
     "jumpChainTooDeep": "A jump host chain can be at most {{max}} levels deep.",
     "jumpChainSelf": "A jump host chain cannot include the host itself.",
     "jumpHostMissing": "The jump host was not found. Choose it again in the host settings.",
+    "tailnetMissing": "The tailnet connection failed. This host is set to connect through a tailnet, but that network is not registered on this device. Add it in Settings → Network and try again.",
     "jumpHostMustBeSsh": "The jump host must be a plain SSH host."
   },
   "hostsOverride": {

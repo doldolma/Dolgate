@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
@@ -114,13 +116,71 @@ func (n *tsnetNode) Up(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("tailnet: local client: %w", err)
 	}
+	return n.bringUp(ctx, client)
+}
+
+// bringUp 은 WantRunning 을 켜고 노드가 실제로 올라오기를 기다린다.
+//
+// Up 에서 떼어낸 이유는 이 두 단계가 **함께** 있어야 한다는 것이 계약이기 때문이다. 켜기만
+// 하고 기다리지 않으면 첫 dial 이 NoState 로 즉시 깨진다. 좁힌 인터페이스로 받아 두면 살아
+// 있는 백엔드 없이 그 배선을 검증할 수 있다.
+func (n *tsnetNode) bringUp(ctx context.Context, client localClient) error {
 	if _, err := client.EditPrefs(ctx, &ipn.MaskedPrefs{
 		Prefs:          ipn.Prefs{WantRunning: true},
 		WantRunningSet: true,
 	}); err != nil {
 		return fmt.Errorf("tailnet: bring up: %w", err)
 	}
-	return nil
+	return n.awaitBackendReady(ctx, client)
+}
+
+// awaitBackendReady 는 백엔드가 상태를 보고하기 시작할 때까지만 기다린다.
+//
+// 이것이 없으면 첫 dial 이 "tsnet: backend in state NoState" 로 즉시 실패한다. Start 는
+// 백엔드를 비동기로 띄우므로 돌아온 직후에는 아직 아무 상태도 없는데, tsnet 의 awaitRunning
+// 은 NeedsLogin·Starting 만 기다리고 나머지(NoState 포함)는 종료 상태로 보고 곧장 에러를 낸다.
+//
+// **Running 까지 기다리지는 않는다.** 그렇게 하면 브라우저 로그인이 필요한 노드에서 이 함수가
+// 인증이 끝날 때까지 갇힌다. 설정 화면의 연결 테스트는 Up 이 돌아온 뒤에야 상태를 폴링해
+// 인증 URL 을 방출하므로, 여기서 붙들면 URL 이 영원히 나가지 않고 브라우저도 열리지 않는다.
+//
+// NoState 만 벗어나면 뒤는 tsnet 이 맡는다 — awaitRunning 이 NeedsLogin·Starting 을 지켜보며
+// 기다린다. 인증이 필요한 상태를 실패로 볼지는 호출자가 정할 일이고, 그 판단은 dial 경로에
+// 있다(설정 화면은 기다려야 하고, 호스트 연결은 즉시 안내해야 한다).
+func (n *tsnetNode) awaitBackendReady(ctx context.Context, client localClient) error {
+	for {
+		status, err := client.Status(ctx)
+		if err != nil {
+			return fmt.Errorf("tailnet: status: %w", err)
+		}
+		if backendHasReported(status.BackendState) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("tailnet: backend did not start: %w", ctx.Err())
+		case <-time.After(nodeStatusPollInterval):
+		}
+	}
+}
+
+// backendHasReported 는 백엔드가 상태를 보고했는지다. ipn.NoState 는 "아직 아무것도"라는
+// 뜻이고, 그 상태로 dial 하면 tsnet 이 종료 상태로 오해해 즉시 실패한다.
+func backendHasReported(backendState string) bool {
+	trimmed := strings.TrimSpace(backendState)
+	return trimmed != "" && trimmed != ipn.NoState.String()
+}
+
+// nodeStatusPollInterval 은 백엔드 기동을 기다리는 동안의 폴링 간격이다. 상태 변화는 컨트롤
+// 플레인 왕복에 달려 있어 촘촘히 볼 이유가 없다.
+const nodeStatusPollInterval = 150 * time.Millisecond
+
+// localClient 는 bringUp 이 쓰는 부분만 좁힌 것이다. 진짜 백엔드 없이 대기 규칙을
+// 검증할 수 있게 한다.
+type localClient interface {
+	Status(ctx context.Context) (*ipnstate.Status, error)
+	EditPrefs(ctx context.Context, prefs *ipn.MaskedPrefs) (*ipn.Prefs, error)
 }
 
 // Status 는 등록 진행 상황을 보고한다. 설정 화면이 이걸 구독해 화면을 만든다.
@@ -173,7 +233,41 @@ func statusFromBackend(state *ipnstate.Status) Status {
 	if len(state.TailscaleIPs) > 0 {
 		status.NodeIP = state.TailscaleIPs[0].String()
 	}
+	status.Peers = peersFromBackend(state)
 	return status
+}
+
+// peersFromBackend 는 tailnet 안의 기기들과 그 경로를 옮긴다.
+//
+// 직결 판정은 CurAddr 이다 — 실제로 쓰는 엔드포인트가 정해져 있으면 직결이고, 비어 있으면
+// 릴레이를 거친다. Relay 는 직결이어도 폴백 경로로 남아 채워지므로, 그것만 보고 릴레이라고
+// 판단하면 안 된다.
+func peersFromBackend(state *ipnstate.Status) []Peer {
+	if len(state.Peer) == 0 {
+		return nil
+	}
+	peers := make([]Peer, 0, len(state.Peer))
+	for _, peer := range state.Peer {
+		if peer == nil {
+			continue
+		}
+		ips := make([]string, 0, len(peer.TailscaleIPs))
+		for _, ip := range peer.TailscaleIPs {
+			ips = append(ips, ip.String())
+		}
+		peers = append(peers, Peer{
+			HostName: peer.HostName,
+			DNSName:  strings.TrimSuffix(peer.DNSName, "."),
+			IPs:      ips,
+			Direct:   strings.TrimSpace(peer.CurAddr) != "",
+			Relay:    peer.Relay,
+			RxBytes:  peer.RxBytes,
+			TxBytes:  peer.TxBytes,
+		})
+	}
+	// 맵 순회 순서에 결과가 흔들리면 안 된다 — 화면에서 목록이 매 폴링마다 뒤바뀐다.
+	sort.Slice(peers, func(a, b int) bool { return peers[a].DNSName < peers[b].DNSName })
+	return peers
 }
 
 // mapBackendState 는 tsnet 의 상태 문자열을 우리 State 로 옮긴다. 모르는 값은 시작 중으로

@@ -101,6 +101,10 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
     certificatePath: null,
     secretRef: record.secretRef ?? null,
     jumpHostId: record.jumpHostId ?? null,
+    jumpHostIds: record.jumpHostIds ?? null,
+    // 복제·그룹 이동은 이 draft 를 그대로 저장한다. 빠뜨린 필드는 그 동작에서 사라진다.
+    tailnetId: record.tailnetId ?? null,
+    env: record.env ?? null,
     groupName: record.groupName ?? null,
     tags: record.tags ?? [],
     terminalThemeId: record.terminalThemeId ?? null,

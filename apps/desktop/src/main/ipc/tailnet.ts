@@ -21,7 +21,33 @@ export interface TailnetSaveInput {
  * 인증하는 구간이 있어서, 그동안 무엇을 기다리는지(로그인인지 관리자 승인인지)를 보여줘야
  * 한다. 그래서 중간 상태를 요청한 창으로 밀어 주고, 마지막 상태만 invoke 의 반환값이 된다.
  */
+
+/**
+ * 코어에 심을 설정 목록. auth key 를 포함하므로 렌더러로는 절대 나가지 않는다.
+ *
+ * ephemeral 을 여기서 다시 계산하는 이유는 연결 테스트와 같아야 하기 때문이다 — 테스트는
+ * ephemeral 로 붙였는데 실제 연결이 persistent 로 붙으면 같은 tailnet 에 노드가 둘로 갈라진다.
+ * 판단 기준은 auth key 유무다(키가 있으면 재등록이 자동이라 지워져도 공짜지만, 브라우저
+ * 로그인은 노드가 지워질 때마다 사람이 다시 로그인해야 한다).
+ */
+function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
+  return ctx.tailnets.listPayloads().map((payload) => {
+    const authKey = payload.authKey?.trim() || undefined;
+    return {
+      id: payload.id,
+      controlUrl: payload.controlUrl,
+      authKey,
+      ephemeral: Boolean(authKey),
+    };
+  });
+}
+
 export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
+  // 코어는 설정을 알아야 노드를 만들 수 있는데, 호스트 연결 경로는 tailnetId 만 들고 온다.
+  // 이걸 등록해 두면 설정 화면에서 미리 연결해 두지 않아도 첫 dial 이 노드를 올린다. 코어가
+  // 다시 떠도 CoreManager 가 이 제공자를 다시 불러 복구한다.
+  ctx.coreManager.setTailnetConfigProvider(() => buildTailnetConfigs(ctx));
+
   ipcMain.handle(
     ipcChannels.tailnet.list,
     async (): Promise<TailnetRecord[]> => ctx.tailnets.list(),
@@ -29,8 +55,12 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.tailnet.save,
-    async (_event, input: TailnetSaveInput): Promise<TailnetRecord> =>
-      ctx.tailnets.save(input.record, input.authKey),
+    async (_event, input: TailnetSaveInput): Promise<TailnetRecord> => {
+      const saved = ctx.tailnets.save(input.record, input.authKey);
+      // 코어가 새 설정을 알아야 이 tailnet 을 지정한 호스트가 곧바로 붙는다.
+      ctx.coreManager.pushTailnetConfigs();
+      return saved;
+    },
   );
 
   ipcMain.handle(
@@ -45,6 +75,8 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
         // 사용자가 지우겠다고 한 것이고, 남은 노드는 콘솔에서 지울 수 있다.
       }
       ctx.tailnets.remove(id);
+      // 지워진 설정은 코어에서도 빼야 한다. 목록에 없는 id 는 코어가 버린다.
+      ctx.coreManager.pushTailnetConfigs();
       // 다른 기기도 지워야 한다. 동기화는 "안 보낸 것을 지운다"가 아니라 툼스톤 기반이라,
       // 여기서 기록하지 않으면 다른 기기에서 되살아난다.
       ctx.syncOutbox.upsertDeletion("tailnets", id);

@@ -17,6 +17,7 @@ type stubCoreRuntime struct {
 	tailnetTestID       string
 	tailnetDisconnectID string
 	tailnetCancelID     string
+	tailnetConfigured   []protocol.TailnetConfigPayload
 	tailnetSnapshots    int
 	tailnetTestDone     chan struct{}
 	tailnetForgetID     string
@@ -113,6 +114,11 @@ func (stub *stubCoreRuntime) TailnetCancel(_ string, payload protocol.TailnetDis
 
 func (stub *stubCoreRuntime) TailnetSnapshot(_ string) error {
 	stub.tailnetSnapshots += 1
+	return nil
+}
+
+func (stub *stubCoreRuntime) TailnetConfigure(payload protocol.TailnetConfigurePayload) error {
+	stub.tailnetConfigured = payload.Configs
 	return nil
 }
 func (stub *stubCoreRuntime) ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error {
@@ -324,5 +330,29 @@ func TestDispatchTailnetForgetUsesRuntimeFacade(t *testing.T) {
 
 	if core.tailnetForgetID != "corp" {
 		t.Fatalf("expected tailnet forget for corp, got %q", core.tailnetForgetID)
+	}
+}
+
+// Configure 는 동기여야 한다. 데스크톱이 코어를 띄운 직후 보내고 곧바로 연결을 요청하는데,
+// 비동기로 돌리면 그 연결이 설정을 못 보고 "is not configured" 로 실패한다.
+func TestDispatchTailnetConfigureAppliesBeforeReturning(t *testing.T) {
+	core := &stubCoreRuntime{}
+	payload, err := json.Marshal(protocol.TailnetConfigurePayload{
+		Configs: []protocol.TailnetConfigPayload{{ID: "corp", AuthKey: "tskey-abc"}},
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	if err := dispatch(core, newEventWriter(), protocol.Request{
+		ID:      "req-1",
+		Type:    protocol.CommandTailnetConfigure,
+		Payload: payload,
+	}); err != nil {
+		t.Fatalf("dispatch() error = %v", err)
+	}
+
+	if len(core.tailnetConfigured) != 1 || core.tailnetConfigured[0].ID != "corp" {
+		t.Errorf("configured = %#v, want one config for corp", core.tailnetConfigured)
 	}
 }

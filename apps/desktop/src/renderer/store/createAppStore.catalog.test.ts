@@ -339,6 +339,28 @@ describe("createAppStore catalog and settings", () => {
     expect(store.getState().settingsSection).toBe("general");
   });
 
+  // 호스트를 편집하다 TAILNET·SAVED CREDENTIALS 옆 "Manage" 로 설정을 다녀오는 것이 정상
+  // 흐름이다. 드로어를 닫아 버리면 돌아왔을 때 편집하던 호스트를 다시 찾아 들어가야 한다.
+  //
+  // 열어 둬도 설정 화면을 가리지 않는다 — 드로어는 HostBrowser 안에 렌더되고 그건
+  // homeSection === "hosts" 일 때만 마운트된다.
+  it("keeps the host editor open while visiting settings", async () => {
+    const store = createAppStore(createMockApi());
+
+    await store.getState().bootstrap();
+    store.getState().openEditHostDrawer("host-1");
+    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+
+    store.getState().openSettingsSection("tailnet");
+    expect(store.getState().homeSection).toBe("settings");
+    expect(store.getState().settingsSection).toBe("tailnet");
+    // 편집 중이던 호스트가 그대로 남아야 한다.
+    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+
+    store.getState().openHomeSection("hosts");
+    expect(store.getState().hostDrawer).toEqual({ mode: "edit", hostId: "host-1" });
+  });
+
   it("preserves saved credentials search while navigating settings", async () => {
     const store = createAppStore(createMockApi());
 

@@ -243,11 +243,17 @@ describe("resolveTailnetRoute", () => {
     });
   });
 
-  // 설정이 지워졌는데 호스트에만 id 가 남은 경우. 없는 tailnet 으로 조용히 나가는 것보다
-  // 평소 경로로 가서 실패하는 편이 낫다.
-  it("drops the route when the tailnet setting is gone", () => {
+  // 설정이 지워졌는데 호스트에만 id 가 남은 경우. 경로만 비워서 넘기면 일반 네트워크로
+  // 나가는데 그건 실패가 아니라 성공이다 — tailnet 안에 있다고 믿는 트래픽이 공개망으로
+  // 나가고, 신뢰 범위는 여전히 그 tailnet 이라 거기서 받은 키가 tailnet 범위에 저장된다.
+  //
+  // 이 경로는 평범하게 열린다: 설정에서 tailnet 삭제(호스트의 tailnetId 는 남는다), 툼스톤
+  // 전파, 호스트 전송 번들 가져오기(번들은 tailnets 를 담지 않는다).
+  it("refuses to connect when the tailnet setting is gone", () => {
     const { coordinator } = createCoordinator();
 
-    expect(coordinator.resolveTailnetRoute({ tailnetId: "net-deleted" })).toEqual({});
+    expect(() => coordinator.resolveTailnetRoute({ tailnetId: "net-deleted" })).toThrow(
+      /tailnet/i,
+    );
   });
 });

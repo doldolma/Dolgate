@@ -35,6 +35,7 @@ type coreRuntime interface {
 	TailnetDisconnect(requestID string, payload protocol.TailnetDisconnectPayload) error
 	TailnetCancel(requestID string, payload protocol.TailnetDisconnectPayload) error
 	TailnetSnapshot(requestID string) error
+	TailnetConfigure(payload protocol.TailnetConfigurePayload) error
 	ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error
 	ConnectLocal(sessionID, requestID string, payload protocol.LocalConnectPayload) error
 	ConnectSerial(sessionID, requestID string, payload protocol.SerialConnectPayload) error
@@ -300,6 +301,14 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return core.TailnetCancel(request.ID, payload)
 		})()
 		return nil
+	case protocol.CommandTailnetConfigure:
+		var payload protocol.TailnetConfigurePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// 동기다. 데스크톱이 코어를 띄운 직후 보내는데, 뒤따라오는 연결 요청이 설정을 볼 수
+		// 있어야 한다. 노드를 올리지 않으므로 오래 걸리지도 않는다.
+		return core.TailnetConfigure(payload)
 	case protocol.CommandTailnetSnapshot:
 		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
 			return core.TailnetSnapshot(request.ID)
