@@ -41,7 +41,6 @@ function createCoordinator(
       getProfileStatus: vi.fn().mockResolvedValue({ isAuthenticated: true }),
       login: vi.fn().mockResolvedValue(undefined),
       shouldUseInProcessSsm: vi.fn(() => false),
-      ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
       describeEc2Instance: vi.fn().mockResolvedValue(null),
       isManagedInstance: vi.fn().mockResolvedValue(true),
       loadHostSshMetadata: vi.fn().mockResolvedValue({

@@ -30,7 +30,6 @@ function createProfileDetails(
     accountId: '123456789012',
     arn: 'arn:aws:iam::123456789012:user/test',
     errorMessage: null,
-    missingTools: [],
     kind: 'static',
     maskedAccessKeyId: 'AKIA****1234',
     hasSecretAccessKey: true,

@@ -314,7 +314,6 @@ export function createMockApi(): DesktopApi {
         accountId: null,
         arn: null,
         errorMessage: null,
-        missingTools: [],
         kind: "static",
         maskedAccessKeyId: null,
         hasSecretAccessKey: false,
@@ -341,7 +340,6 @@ export function createMockApi(): DesktopApi {
         accountId: null,
         arn: null,
         errorMessage: null,
-        missingTools: [],
       }),
       getProfileStatusById: vi.fn().mockResolvedValue({
         profileName: "default",
@@ -352,7 +350,6 @@ export function createMockApi(): DesktopApi {
         accountId: null,
         arn: null,
         errorMessage: null,
-        missingTools: [],
       }),
       login: vi.fn().mockResolvedValue(undefined),
       loginById: vi.fn().mockResolvedValue(undefined),

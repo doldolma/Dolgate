@@ -520,10 +520,6 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     )
   };
 
-  const missingTools = useMemo(() => profileStatus?.missingTools ?? [], [profileStatus?.missingTools]);
-  const shouldShowMissingToolsBanner =
-    missingTools.includes('aws-cli') ||
-    (importMode === 'ec2' && missingTools.includes('session-manager-plugin'));
   const unknownSsmAvailabilityReason = useMemo(
     () =>
       instances.find((instance) => instance.ssmAvailability === 'unknown')
@@ -722,15 +718,6 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
               {profileStatus.isSsoProfile
                 ? translate('awsImport.profile.ssoLoginNeeded')
                 : profileStatus.errorMessage || translate('awsImport.profile.credentialsNeeded')}
-            </NoticeCard>
-          ) : null}
-
-          {shouldShowMissingToolsBanner ? (
-            <NoticeCard tone="danger" role="alert">
-              {missingTools.includes('aws-cli') ? translate('awsImport.profile.awsCliRequired') : ''}
-              {importMode === 'ec2' && missingTools.includes('session-manager-plugin')
-                ? translate('awsImport.profile.sessionManagerRequired')
-                : ''}
             </NoticeCard>
           ) : null}
 

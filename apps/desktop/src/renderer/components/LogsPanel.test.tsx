@@ -273,7 +273,7 @@ describe('LogsPanel', () => {
             disconnectedAt: '2026-03-29T00:05:12.000Z',
             durationMs: 312000,
             status: 'error',
-            disconnectReason: 'session-manager-plugin failed',
+            disconnectReason: 'opening SSM data channel: websocket: bad handshake',
             recordingId: 'recording-1',
             hasReplay: true,
           })
@@ -289,7 +289,7 @@ describe('LogsPanel', () => {
     expect(screen.getByText('default · ap-northeast-2 · i-1234567890')).toBeInTheDocument();
     expect(within(lifecycleCard as HTMLElement).getByText('Error')).toBeInTheDocument();
     expect(screen.getByText('5분 12초')).toBeInTheDocument();
-    expect(screen.getByText('session-manager-plugin failed')).toBeInTheDocument();
+    expect(screen.getByText('opening SSM data channel: websocket: bad handshake')).toBeInTheDocument();
   });
 
   it('keeps generic logs rendering metadata details', () => {

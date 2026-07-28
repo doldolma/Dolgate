@@ -154,12 +154,10 @@ afterEach(async () => {
 describe('AwsService.isManagedInstance', () => {
   it('returns true when the target instance is present in the managed instance list', async () => {
     const service = new AwsService() as unknown as {
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     service.getSsmClient = vi.fn().mockReturnValue({
       send: vi.fn().mockResolvedValue({
         InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Online' }],
@@ -171,12 +169,10 @@ describe('AwsService.isManagedInstance', () => {
 
   it('returns false when the instance is not currently managed by SSM', async () => {
     const service = new AwsService() as unknown as {
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     service.getSsmClient = vi.fn().mockReturnValue({
       send: vi.fn().mockResolvedValue({
         InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'Inactive' }],
@@ -188,12 +184,10 @@ describe('AwsService.isManagedInstance', () => {
 
   it('returns false when Session Manager reports ConnectionLost', async () => {
     const service = new AwsService() as unknown as {
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       getSsmClient: ReturnType<typeof vi.fn>;
       isManagedInstance: (profileName: string, region: string, instanceId: string) => Promise<boolean>;
     };
 
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     service.getSsmClient = vi.fn().mockReturnValue({
       send: vi.fn().mockResolvedValue({
         InstanceInformationList: [{ InstanceId: 'i-123', PingStatus: 'ConnectionLost' }],
@@ -1121,7 +1115,6 @@ describe('AwsService AWS profile management', () => {
       accountId: null,
       arn: null,
       errorMessage: null,
-      missingTools: [],
     }));
 
     await expect(service.getProfileDetails('static-profile')).resolves.toMatchObject({
@@ -2134,7 +2127,6 @@ describe('AwsService EC2 helpers', () => {
   it('loads SSH metadata over SSM and recommends a username', async () => {
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       sendRunCommand: ReturnType<typeof vi.fn>;
       getCommandInvocation: ReturnType<typeof vi.fn>;
       loadHostSshMetadata: (input: {
@@ -2149,7 +2141,6 @@ describe('AwsService EC2 helpers', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     service.sendRunCommand = vi.fn().mockResolvedValue('cmd-123');
     service.getCommandInvocation = vi.fn().mockResolvedValue({
       Status: 'Success',
@@ -2179,7 +2170,6 @@ describe('AwsService EC2 helpers', () => {
 
   it('retries polling when the invocation is not registered yet (InvocationDoesNotExist)', async () => {
     const service = new AwsService() as unknown as {
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       getSsmClient: ReturnType<typeof vi.fn>;
       loadHostSshMetadata: (input: {
         profileName: string;
@@ -2192,7 +2182,6 @@ describe('AwsService EC2 helpers', () => {
       }>;
     };
 
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     const send = vi
       .fn()
       .mockResolvedValueOnce({ Command: { CommandId: 'cmd-123' } })
@@ -2231,7 +2220,6 @@ describe('AwsService EC2 helpers', () => {
     vi.useFakeTimers();
     const service = new AwsService() as unknown as {
       ensureAwsCliAvailable: () => Promise<void>;
-      ensureSessionManagerPluginAvailable: () => Promise<void>;
       sendRunCommand: ReturnType<typeof vi.fn>;
       getCommandInvocation: ReturnType<typeof vi.fn>;
       loadHostSshMetadata: (input: {
@@ -2242,7 +2230,6 @@ describe('AwsService EC2 helpers', () => {
     };
 
     service.ensureAwsCliAvailable = vi.fn().mockResolvedValue(undefined);
-    service.ensureSessionManagerPluginAvailable = vi.fn().mockResolvedValue(undefined);
     service.sendRunCommand = vi.fn().mockResolvedValue('cmd-123');
     service.getCommandInvocation = vi.fn().mockResolvedValue({
       Status: 'InProgress',

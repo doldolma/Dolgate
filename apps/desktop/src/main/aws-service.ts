@@ -3090,7 +3090,6 @@ export class AwsService {
         isAuthenticated: false,
         configuredRegion: null,
         errorMessage: t('aws.profile.noneManaged'),
-        missingTools: [],
       };
     }
     if (isE2EFakeAwsSessionEnabled()) {
@@ -3103,7 +3102,6 @@ export class AwsService {
         configuredRegion: "ap-northeast-2",
         accountId: "000000000000",
         arn: "arn:aws:iam::000000000000:user/dolssh-smoke",
-        missingTools: [],
       };
     }
 
@@ -3130,7 +3128,6 @@ export class AwsService {
         configuredRegion: configuredRegion || null,
         accountId: identity.account,
         arn: identity.arn,
-        missingTools: [],
       };
     } catch {
       return {
@@ -3143,7 +3140,6 @@ export class AwsService {
         errorMessage: isSsoProfile
           ? t('aws.auth.browserLoginRequired')
           : t('aws.auth.storedCredentialsFailed'),
-        missingTools: [],
       };
     }
   }
@@ -3183,7 +3179,6 @@ export class AwsService {
         ssoRoleName: null,
         referencedByProfileNames: [],
         orphanedSsoSessionName: null,
-        missingTools: [],
       };
     }
 

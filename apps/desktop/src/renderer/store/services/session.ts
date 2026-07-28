@@ -826,7 +826,7 @@ export function createSessionServices(deps: SliceDeps) {
       const message =
         error instanceof Error
           ? error.message
-          : t('sessionSvc.connectFailedSsm');
+          : t('sessionSvc.connectFailed');
       markSessionError(set, sessionId, message);
     }
   };

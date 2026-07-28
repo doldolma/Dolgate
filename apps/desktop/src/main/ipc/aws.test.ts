@@ -99,7 +99,6 @@ describe("registerAwsIpcHandlers", () => {
       available: true,
       isSsoProfile: true,
       isAuthenticated: false,
-      missingTools: [],
     });
     const login = vi.fn().mockResolvedValue(undefined);
 
@@ -291,7 +290,6 @@ describe("registerAwsIpcHandlers", () => {
       awsService: {
         requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable,
-        ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
         shouldUseInProcessSsm: vi.fn().mockReturnValue(true),
         startEcsExecSession,
         describeEcsServiceActionContext,
@@ -377,7 +375,6 @@ describe("registerAwsIpcHandlers", () => {
       awsService: {
         requireManagedProfileName: vi.fn().mockReturnValue("default"),
         ensureAwsCliAvailable: vi.fn().mockResolvedValue(undefined),
-        ensureSessionManagerPluginAvailable: vi.fn().mockResolvedValue(undefined),
         resolveEcsTaskTunnelTargetForTask,
         invalidateEcsServiceActionContext,
       },

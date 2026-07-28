@@ -926,12 +926,6 @@ export function AwsProfilesPanel({ hosts }: AwsProfilesPanelProps) {
                 </div>
               </div>
 
-              {selectedDetails.missingTools && selectedDetails.missingTools.length > 0 ? (
-                <NoticeCard tone="warning">
-                  {translate('awsProfiles.detail.missingTools', { tools: selectedDetails.missingTools.join(', ') })}
-                </NoticeCard>
-              ) : null}
-
               {selectedHostReferences.length > 0 ? (
                 <NoticeCard title={translate('awsProfiles.detail.hostReferences')} tone="warning">
                   {renderHostReferenceList(selectedHostReferences)}

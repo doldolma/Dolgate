@@ -12,7 +12,6 @@ const REASON_CODE_KEYS: Record<AwsSftpDiagnosticReasonCode, string> = {
   'missing-username': 'missingUsername',
   'missing-availability-zone': 'missingAvailabilityZone',
   'host-key-missing': 'hostKeyMissing',
-  'ssm-plugin-missing': 'ssmPluginMissing',
   'not-managed-instance': 'notManagedInstance',
   'eic-access-denied': 'eicAccessDenied',
   'eic-invalid-os-user': 'eicInvalidOsUser',

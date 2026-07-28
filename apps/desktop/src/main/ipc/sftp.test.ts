@@ -248,7 +248,7 @@ describe("registerSftpIpcHandlers", () => {
   it("emits a tunnel diagnostic and keeps SFTP connect from running when SSM tunnel startup fails", async () => {
     const ctx = createContext();
     ctx.awsSsmTunnelService.start.mockRejectedValue(
-      new Error("session-manager-plugin failed"),
+      new Error("opening SSM data channel: websocket: bad handshake"),
     );
     registerSftpIpcHandlers(ctx);
 
@@ -258,7 +258,7 @@ describe("registerSftpIpcHandlers", () => {
         hostId: "aws-host-1",
         endpointId: "endpoint-aws",
       }),
-    ).rejects.toThrow("session-manager-plugin failed");
+    ).rejects.toThrow("opening SSM data channel: websocket: bad handshake");
 
     expect(ctx.emitSftpConnectionFailureProgress).toHaveBeenCalledWith(
       expect.objectContaining({

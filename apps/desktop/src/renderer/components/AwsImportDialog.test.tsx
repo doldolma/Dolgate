@@ -19,7 +19,6 @@ function createStatus(overrides: Partial<AwsProfileStatus> = {}): AwsProfileStat
     accountId: null,
     arn: null,
     errorMessage: null,
-    missingTools: [],
     ...overrides,
   };
 }

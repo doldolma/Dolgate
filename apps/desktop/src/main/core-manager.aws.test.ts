@@ -729,7 +729,7 @@ describe("CoreManager AWS SSM sessions", () => {
           type: "error",
           sessionId,
           payload: {
-            message: "session-manager-plugin failed",
+            message: "opening SSM data channel: websocket: bad handshake",
           },
         }),
         encodeControlFrame({
@@ -761,7 +761,7 @@ describe("CoreManager AWS SSM sessions", () => {
     expect(metadata.connectionDetails).toBe("default · us-east-1 · i-abcd");
     expect(metadata.connectionKind).toBe("aws-ssm");
     expect(metadata.status).toBe("error");
-    expect(metadata.disconnectReason).toBe("session-manager-plugin failed");
+    expect(metadata.disconnectReason).toBe("opening SSM data channel: websocket: bad handshake");
     expect(metadata.durationMs).toBeTypeOf("number");
     expect(manager.listTabs()).toEqual([]);
 

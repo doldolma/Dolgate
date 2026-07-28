@@ -255,7 +255,7 @@ describe("createAppStore sessions and auth recovery", () => {
       type: "error",
       sessionId: "aws-session-1",
       payload: {
-        message: "session-manager-plugin failed",
+        message: "opening SSM data channel: websocket: bad handshake",
       },
     });
     store.getState().handleCoreEvent({
@@ -270,14 +270,14 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().tabs[0]).toMatchObject({
       sessionId: "aws-session-1",
       status: "error",
-      errorMessage: "session-manager-plugin failed",
+      errorMessage: "opening SSM data channel: websocket: bad handshake",
     });
     expect(store.getState().tabs[0]?.connectionProgress?.message).toBe(
-      "session-manager-plugin failed",
+      "opening SSM data channel: websocket: bad handshake",
     );
   });
 
-  it("keeps an AWS SSM session tab open when the plugin closes with a non-zero exit code", async () => {
+  it("keeps an AWS SSM session tab open when the SSM session closes with a non-zero exit code", async () => {
     const store = createAppStore(createMockApi());
     await store.getState().bootstrap();
     store.setState((state) => ({
@@ -671,7 +671,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: null,
       arn: null,
       errorMessage: null,
-      missingTools: [],
     });
     const connect = createDeferred<{ sessionId: string }>();
     api.ssh.connect = vi.fn().mockImplementation(() => connect.promise);
@@ -876,7 +875,7 @@ describe("createAppStore sessions and auth recovery", () => {
     });
     store.getState().markSessionOutput(
       "ecs-shell-1",
-      new TextEncoder().encode("The Session Manager plugin was installed successfully."),
+      new TextEncoder().encode("/app # "),
     );
     store.getState().handleCoreEvent({
       type: "error",
@@ -1168,7 +1167,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: null,
       arn: null,
       errorMessage: null,
-      missingTools: [],
     });
     api.knownHosts.probeHost = vi.fn().mockResolvedValue({
       hostId: "aws-host-1",
@@ -1595,7 +1593,6 @@ describe("createAppStore sessions and auth recovery", () => {
         accountId: null,
         arn: null,
         errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
-        missingTools: [],
       })
       .mockResolvedValueOnce({
         profileName: "sso-profile",
@@ -1605,7 +1602,6 @@ describe("createAppStore sessions and auth recovery", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/test",
         errorMessage: null,
-        missingTools: [],
       });
     const store = createAppStore(api);
 
@@ -1671,7 +1667,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: null,
       arn: null,
       errorMessage: "???꾨줈?꾩? AWS CLI ?먭꺽 利앸챸???꾩슂?⑸땲??",
-      missingTools: [],
     });
     const store = createAppStore(api);
 
@@ -1749,7 +1744,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: null,
       arn: null,
       errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
-      missingTools: [],
     });
     await flushMicrotasks();
 
@@ -1769,7 +1763,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: "123456789012",
       arn: "arn:aws:iam::123456789012:user/test",
       errorMessage: null,
-      missingTools: [],
     });
     await flushMicrotasks();
     await flushMicrotasks();
@@ -1838,7 +1831,6 @@ describe("createAppStore sessions and auth recovery", () => {
       accountId: "123456789012",
       arn: "arn:aws:iam::123456789012:user/test",
       errorMessage: null,
-      missingTools: [],
     });
 
     await Promise.all([firstConnect, secondConnect]);

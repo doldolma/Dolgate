@@ -152,7 +152,6 @@ describe("createAppStore containers", () => {
       accountId: "123456789012",
       arn: "arn:aws:iam::123456789012:user/test",
       errorMessage: null,
-      missingTools: [],
     });
     await flushMicrotasks();
     await flushMicrotasks();
@@ -217,7 +216,6 @@ describe("createAppStore containers", () => {
         accountId: null,
         arn: null,
         errorMessage: "釉뚮씪?곗? 濡쒓렇?몄씠 ?꾩슂?⑸땲??",
-        missingTools: [],
       })
       .mockResolvedValueOnce({
         id: "default",
@@ -228,7 +226,6 @@ describe("createAppStore containers", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/test",
         errorMessage: null,
-        missingTools: [],
       });
     const store = createAppStore(api);
     await store.getState().bootstrap();
@@ -264,7 +261,6 @@ describe("createAppStore containers", () => {
         accountId: null,
         arn: null,
         errorMessage: "브라우저 로그인이 필요합니다.",
-        missingTools: [],
       })
       .mockResolvedValueOnce({
         id: "default",
@@ -275,7 +271,6 @@ describe("createAppStore containers", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/test",
         errorMessage: null,
-        missingTools: [],
       });
     api.aws.loginById = vi.fn().mockReturnValue(login.promise);
     const store = createAppStore(api);
@@ -344,7 +339,6 @@ describe("createAppStore containers", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/test",
         errorMessage: null,
-        missingTools: [],
       })
       .mockResolvedValueOnce({
         profileName: "default",
@@ -354,7 +348,6 @@ describe("createAppStore containers", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/test",
         errorMessage: null,
-        missingTools: [],
       });
     api.aws.loadEcsClusterSnapshot = vi
       .fn()

@@ -107,7 +107,6 @@ export type AwsSftpDiagnosticReasonCode =
   | 'missing-username'
   | 'missing-availability-zone'
   | 'host-key-missing'
-  | 'ssm-plugin-missing'
   | 'not-managed-instance'
   | 'eic-access-denied'
   | 'eic-invalid-os-user'
@@ -598,7 +597,6 @@ export const AWS_SFTP_DIAGNOSTIC_REASON_CODES: readonly AwsSftpDiagnosticReasonC
   'missing-username',
   'missing-availability-zone',
   'host-key-missing',
-  'ssm-plugin-missing',
   'not-managed-instance',
   'eic-access-denied',
   'eic-invalid-os-user',
@@ -631,9 +629,6 @@ export function inferAwsSftpDiagnosticReasonCode(
   message: string,
 ): AwsSftpDiagnosticReasonCode {
   const normalized = message.toLowerCase();
-  if (/session manager plugin|session-manager-plugin/.test(normalized)) {
-    return 'ssm-plugin-missing';
-  }
   if (/host key is not trusted|host key.+trusted|호스트 키/.test(normalized)) {
     return 'host-key-missing';
   }
@@ -1585,7 +1580,6 @@ export interface AwsProfileStatus {
   accountId?: string | null;
   arn?: string | null;
   errorMessage?: string | null;
-  missingTools?: string[];
 }
 
 export interface AwsProfileDetails extends AwsProfileStatus {

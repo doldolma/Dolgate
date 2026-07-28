@@ -497,7 +497,6 @@
       "accountAfterAuth": "Available after authentication",
       "authOk": "Ready to authenticate.",
       "authNeeded": "Another sign-in is needed, or the credentials must be checked again.",
-      "missingTools": "Missing tools: {{tools}}",
       "hostReferences": "Hosts referencing this profile",
       "sourceProfileReferences": "Local profiles referencing this as source_profile",
       "defaultRegion": "Default region",
@@ -1152,9 +1151,7 @@
       "wizardSyncUnsupported": "This server does not support AWS profile sync, so the profile is stored on this device only.",
       "syncUnsupported": "This server does not support AWS profile sync yet. Until it is updated, profiles are stored on this device only.",
       "ssoLoginNeeded": "This profile is not signed in yet. Finish the AWS SSO sign-in in the browser.",
-      "credentialsNeeded": "This profile needs AWS CLI credentials.",
-      "awsCliRequired": "The AWS CLI must be installed. ",
-      "sessionManagerRequired": "session-manager-plugin must be installed to start an SSM connection."
+      "credentialsNeeded": "This profile needs AWS CLI credentials."
     },
     "inspect": {
       "inProgress": "Checking the username and SSH connection details.",
@@ -2719,8 +2716,7 @@
   "sessionSvc": {
     "connectFailed": "Could not start the host connection.",
     "localFailed": "Could not start the local terminal.",
-    "ssmRetrying": "Retrying the SSM connection for {{label}}.",
-    "connectFailedSsm": "Could not start the host connection. AWS SSM connections may require session-manager-plugin."
+    "ssmRetrying": "Retrying the SSM connection for {{label}}."
   },
   "blockOverlay": {
     "copyOutput": "Copy output",
@@ -2986,7 +2982,6 @@
       "missingUsername": "Could not determine the SSH username.",
       "missingAvailabilityZone": "Could not determine the availability zone.",
       "hostKeyMissing": "Host key verification is required.",
-      "ssmPluginMissing": "Session Manager Plugin is required.",
       "notManagedInstance": "Not an SSM managed instance.",
       "eicAccessDenied": "Insufficient Instance Connect permissions.",
       "eicInvalidOsUser": "The Instance Connect username does not match.",
@@ -3000,7 +2995,6 @@
       "missingUsername": "The SSH username for this instance could not be detected automatically.",
       "missingAvailabilityZone": "The availability zone required for the Instance Connect request is missing.",
       "hostKeyMissing": "The SSH host key of this AWS SSM target is not trusted yet.",
-      "ssmPluginMissing": "The AWS Session Manager Plugin cannot be run in this local environment.",
       "notManagedInstance": "The selected EC2 instance is not currently recognized as an SSM managed instance.",
       "eicAccessDenied": "The EC2 Instance Connect public key push was denied for permission reasons.",
       "eicInvalidOsUser": "EC2 Instance Connect did not accept the current SSH username as a target OS user.",
@@ -3014,12 +3008,11 @@
       "missingUsername": "Enter the SSH username for this instance and try again.",
       "missingAvailabilityZone": "Refresh the EC2 instance details or re-import the host, then try again.",
       "hostKeyMissing": "Add the host key to the trust list, then retry the SFTP connection.",
-      "ssmPluginMissing": "Check that the AWS Session Manager Plugin is installed, then try again.",
       "notManagedInstance": "Check the SSM Agent, the instance IAM role, and whether it is online, then try again.",
       "eicAccessDenied": "Check that IAM allows ec2-instance-connect:SendSSHPublicKey.",
       "eicInvalidOsUser": "Change the SSH settings to a real OS username such as ubuntu or ec2-user.",
       "eicAzMismatch": "Refresh the EC2 metadata to store the current availability zone again.",
-      "tunnelOpenFailed": "Check the SSM connection and whether the local Session Manager Plugin can run.",
+      "tunnelOpenFailed": "Check the AWS credentials, the ssm:StartSession permission, and network access to the SSM endpoints, then try again.",
       "sshAuthFailed": "Check the SSH username, port, and EC2 Instance Connect support.",
       "sftpSubsystemFailed": "Check the SFTP subsystem configuration on the remote SSH server.",
       "unknown": "Check the AWS profile, SSM status, and SSH settings, then try again."
