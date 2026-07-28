@@ -1,5 +1,5 @@
 import type { TmuxSessionInfo } from '../../store/types';
-import { TmuxSessionMenu } from './TmuxSessionMenu';
+import { TerminalTmuxBar } from './TerminalTmuxBar';
 import { useTranslation } from 'react-i18next';
 
 interface TerminalTmuxStatusBarProps {
@@ -18,6 +18,9 @@ interface TerminalTmuxStatusBarProps {
 // SSH 접속 후 보조채널로 감지한 원격 tmux 를 알리는 하단 1줄 바. tmux 의 status line
 // 을 GUI 로 옮긴 진입점 — "열기"로 기본 control 세션을, 세션 메뉴에서 감지된 세션
 // attach / 이름 지정 새 세션 생성. (tmux 안에서는 같은 메뉴를 세션 푸터가 제공한다.)
+//
+// 생김새는 TerminalTmuxBar 가 소유한다 — 이 파일은 감지 상황의 값(버전·세션 수·열기)을
+// 그 바에 맞춰 넘기는 어댑터다.
 export function TerminalTmuxStatusBar({
   version,
   sessions,
@@ -33,35 +36,15 @@ export function TerminalTmuxStatusBar({
       : translate('tmuxStatus.noSessions');
 
   return (
-    <div
-      className="mx-[0.35rem] mb-[0.2rem] flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]"
-      role="status"
-    >
-      <span
-        className="leading-none"
-        style={{ color: 'var(--accent, #6aa84f)' }}
-        aria-hidden
-      >
-        ▤
-      </span>
-      <span className="font-medium text-[var(--text)]">tmux</span>
-      <span aria-hidden>·</span>
-      <span>{version}</span>
-      <span aria-hidden>·</span>
-      <TmuxSessionMenu
-        sessions={sessions}
-        triggerLabel={summary}
-        onCreateSession={onCreateSession}
-        onSelectSession={onAttachSession}
-        onKillSession={onKillSession}
-      />
-      <button
-        type="button"
-        onClick={onOpen}
-        className="ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[0.7rem] font-medium text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--surface)_80%,var(--text)_20%)]"
-      >
-        {translate('tmuxStatus.open')}
-      </button>
-    </div>
+    <TerminalTmuxBar
+      detail={version}
+      sessions={sessions}
+      menuLabel={summary}
+      onCreateSession={onCreateSession}
+      onSelectSession={onAttachSession}
+      onKillSession={onKillSession}
+      actionLabel={translate('tmuxStatus.open')}
+      onAction={onOpen}
+    />
   );
 }

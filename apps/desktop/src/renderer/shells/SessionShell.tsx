@@ -7,6 +7,7 @@ import { listWorkspaceSessionIds } from '../components/terminal-workspace/termin
 import { useHostMetrics } from '../controllers/useHostMetrics';
 import { useAppStore } from '../store/appStore';
 import { TmuxSessionFooter } from '../components/terminal-workspace/TmuxSessionFooter';
+import { statusBarStack } from '../components/terminal-workspace/terminalStatusBarChrome';
 import { TmuxCommandPrompt } from '../components/terminal-workspace/TmuxCommandPrompt';
 import { TerminalTransferToastRegion } from '../components/TerminalTransferToastRegion';
 import type { useLoginController } from '../controllers/useLoginController';
@@ -258,75 +259,78 @@ export function SessionShell({
           <TerminalTransferToastRegion />
           <TmuxCommandPrompt />
         </div>
+        {/* tmux 그룹의 하단 바는 pane 바깥에 붙지만, pane 안쪽(TerminalSessionPane)과
+            같은 statusBarStack 으로 감싼다 — 컨테이너가 갈리면 같은 바가 연결 방식에
+            따라 다른 간격으로 놓여 "tmux 와 ssh 의 UI 가 다르다"로 보인다. */}
         {activeTmuxGroup ? (
-          <TerminalHostStatusBar
-            status={tmuxHostMetrics.status}
-            metrics={tmuxHostMetrics.metrics}
-            onRetry={tmuxHostMetrics.retry}
-          />
-        ) : null}
-        {activeTmuxGroup ? (
-          <TmuxSessionFooter
-            sessionName={activeTmuxGroup.sessionName}
-            sessions={activeTmuxGroup.sessions ?? []}
-            onCreateSession={(name) => {
-              const hostId = activeTmuxGroup.hostId;
-              if (!hostId) {
-                return;
-              }
-              // 새 세션 = 새 그룹 탭(replaceSessionId 없음 — 현재 tmux 유지). strict new.
-              const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-              void sessionViewModel.connectHost(
-                hostId,
-                120,
-                32,
-                undefined,
-                true,
-                `tmux -CC new-session -s ${quoted}`,
-                undefined,
-                undefined,
-                activeTmuxGroup.tmuxVersion ?? undefined,
-              );
-            }}
-            onSelectSession={(name) => {
-              const hostId = activeTmuxGroup.hostId;
-              if (!hostId) {
-                return;
-              }
-              // 다른 세션 전환 = 새 그룹 탭으로 attach(현재 세션 유지).
-              const quoted = `'${name.replace(/'/g, "'\\''")}'`;
-              void sessionViewModel.connectHost(
-                hostId,
-                120,
-                32,
-                undefined,
-                true,
-                `tmux -CC attach -t ${quoted}`,
-                undefined,
-                undefined,
-                activeTmuxGroup.tmuxVersion ?? undefined,
-              );
-            }}
-            onKillSession={(name) => {
-              if (activeWorkspace) {
-                sessionViewModel.killTmuxSession(
-                  activeWorkspace.activeSessionId,
-                  name,
+          <div className={statusBarStack}>
+            <TerminalHostStatusBar
+              status={tmuxHostMetrics.status}
+              metrics={tmuxHostMetrics.metrics}
+              onRetry={tmuxHostMetrics.retry}
+            />
+            <TmuxSessionFooter
+              sessionName={activeTmuxGroup.sessionName}
+              sessions={activeTmuxGroup.sessions ?? []}
+              onCreateSession={(name) => {
+                const hostId = activeTmuxGroup.hostId;
+                if (!hostId) {
+                  return;
+                }
+                // 새 세션 = 새 그룹 탭(replaceSessionId 없음 — 현재 tmux 유지). strict new.
+                const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+                void sessionViewModel.connectHost(
+                  hostId,
+                  120,
+                  32,
+                  undefined,
+                  true,
+                  `tmux -CC new-session -s ${quoted}`,
+                  undefined,
+                  undefined,
+                  activeTmuxGroup.tmuxVersion ?? undefined,
                 );
-              }
-            }}
-            onDetach={() => {
-              if (activeWorkspace) {
-                void sessionViewModel.detachTmuxWorkspace(activeWorkspace.id);
-              }
-            }}
-            onRefresh={() => {
-              if (activeWorkspace) {
-                // 드롭다운 열 때 세션 목록 즉시 재조회(다른 SSH 연결의 새 세션 반영).
-                void refreshTmuxSessions(activeWorkspace.activeSessionId);
-              }
-            }}
-          />
+              }}
+              onSelectSession={(name) => {
+                const hostId = activeTmuxGroup.hostId;
+                if (!hostId) {
+                  return;
+                }
+                // 다른 세션 전환 = 새 그룹 탭으로 attach(현재 세션 유지).
+                const quoted = `'${name.replace(/'/g, "'\\''")}'`;
+                void sessionViewModel.connectHost(
+                  hostId,
+                  120,
+                  32,
+                  undefined,
+                  true,
+                  `tmux -CC attach -t ${quoted}`,
+                  undefined,
+                  undefined,
+                  activeTmuxGroup.tmuxVersion ?? undefined,
+                );
+              }}
+              onKillSession={(name) => {
+                if (activeWorkspace) {
+                  sessionViewModel.killTmuxSession(
+                    activeWorkspace.activeSessionId,
+                    name,
+                  );
+                }
+              }}
+              onDetach={() => {
+                if (activeWorkspace) {
+                  void sessionViewModel.detachTmuxWorkspace(activeWorkspace.id);
+                }
+              }}
+              onRefresh={() => {
+                if (activeWorkspace) {
+                  // 드롭다운 열 때 세션 목록 즉시 재조회(다른 SSH 연결의 새 세션 반영).
+                  void refreshTmuxSessions(activeWorkspace.activeSessionId);
+                }
+              }}
+            />
+          </div>
         ) : null}
       </div>
     </section>

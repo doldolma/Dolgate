@@ -20,6 +20,7 @@ import { TerminalConnectionOverlay } from './TerminalConnectionOverlay';
 import { TerminalHostStatusBar } from './TerminalHostStatusBar';
 import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
 import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
+import { statusBarStack } from './terminalStatusBarChrome';
 import { useHostMetrics } from '../../controllers/useHostMetrics';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
@@ -680,8 +681,10 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         ) : null}
       </div>
       {/* 하단 상태바들은 서로 바짝 붙이고, 아래 여백은 이 컨테이너에서 한 번만 준다.
-          각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다. */}
-      <div className="pb-[0.15rem]">
+          각 바가 아래 여백을 들고 있으면 여러 개가 쌓일 때 간격이 그만큼 배로 벌어진다.
+          tmux 경로(SessionShell)도 같은 statusBarStack 을 쓴다 — 컨테이너가 갈리면 같은
+          바가 연결 방식에 따라 다른 간격으로 놓인다. */}
+      <div className={statusBarStack}>
         <TerminalHostStatusBar
           status={hostMetrics.status}
           metrics={hostMetrics.metrics}

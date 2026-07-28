@@ -2924,7 +2924,8 @@
   "tmuxStatus": {
     "sessionCount": "{{count}} sessions",
     "noSessions": "No sessions",
-    "open": "Open"
+    "open": "Open",
+    "detach": "detach"
   },
   "stickyHeader": {
     "jumpToCommand": "Jump to this command line",

@@ -16,6 +16,7 @@ import {
   type HostMetrics,
 } from '../../lib/host-metrics';
 import type { HostMetricsStatus } from '../../controllers/useHostMetrics';
+import { statusBarChrome, statusBarSpacing } from './terminalStatusBarChrome';
 import { useTranslation } from 'react-i18next';
 import { t } from '../../i18n';
 
@@ -89,13 +90,15 @@ export function TerminalHostStatusBar({
 
   return (
     <div
-      className="relative mx-[0.35rem] mb-[0.2rem]"
+      className={cn('relative', statusBarSpacing)}
       onMouseEnter={() => setTooltipOpen(true)}
       onMouseLeave={() => setTooltipOpen(false)}
     >
       <div
         className={cn(
-          'flex items-center gap-[0.9rem] rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem]',
+          statusBarChrome,
+          // 지표를 여럿 나열하므로 항목 간격만 공통값보다 넓힌다(twMerge 가 gap 을 덮는다).
+          'gap-[0.9rem]',
           stale && 'opacity-60',
         )}
         role="status"

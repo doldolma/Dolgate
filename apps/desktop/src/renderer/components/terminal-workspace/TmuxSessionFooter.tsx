@@ -1,7 +1,5 @@
-import { cn } from '../../lib/cn';
-import { Columns2 } from '../../ui/icons';
 import type { TmuxSessionInfo } from '../../store/types';
-import { TmuxSessionMenu } from './TmuxSessionMenu';
+import { TerminalTmuxBar } from './TerminalTmuxBar';
 import { useTranslation } from 'react-i18next';
 
 interface TmuxSessionFooterProps {
@@ -22,6 +20,9 @@ interface TmuxSessionFooterProps {
 // tmux 세션 그룹 하단 1줄 바: 세션 메뉴(목록/생성/전환/kill) + detach. 감지 하단바와
 // 동일한 메뉴를 tmux 안에서도 제공한다. detach 는 서버 세션을 살린 채 control 채널만
 // 분리(재attach 로 복원). 세션 kill 은 메뉴 항목 hover 시 ×.
+//
+// 생김새는 TerminalTmuxBar 가 소유한다 — 이 파일은 tmux 안의 값(현재 세션명·detach)을
+// 그 바에 맞춰 넘기는 어댑터다. 버전은 넘기지 않는다(이미 붙어서 들어온 상태).
 export function TmuxSessionFooter({
   sessionName,
   sessions,
@@ -32,33 +33,19 @@ export function TmuxSessionFooter({
   onRefresh,
 }: TmuxSessionFooterProps) {
   const { t: translate } = useTranslation();
+
   return (
-    <div className="mx-[0.55rem] mb-[0.55rem] mt-1 flex items-center gap-1.5 rounded-[6px] border border-[var(--border)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-[0.7rem] py-[0.25rem] text-[0.7rem] text-[var(--text-muted)]">
-      <span className="leading-none text-[var(--accent)]" aria-hidden>
-        <Columns2 className="h-3.5 w-3.5" />
-      </span>
-      <span className="font-medium text-[var(--text)]">tmux</span>
-      <span aria-hidden>·</span>
-      <TmuxSessionMenu
-        sessions={sessions}
-        activeName={sessionName}
-        triggerLabel={sessionName}
-        onCreateSession={onCreateSession}
-        onSelectSession={onSelectSession}
-        onKillSession={onKillSession}
-        onRefresh={onRefresh}
-      />
-      <button
-        type="button"
-        className={cn(
-          'ml-auto rounded-[4px] border border-[var(--border)] bg-[var(--surface)] px-[0.55rem] py-[0.25rem] text-[var(--text)] transition-colors',
-          'hover:border-[var(--accent)] hover:text-[var(--accent)]',
-        )}
-        title={translate('misc.detachTitle')}
-        onClick={onDetach}
-      >
-        detach
-      </button>
-    </div>
+    <TerminalTmuxBar
+      sessions={sessions}
+      menuLabel={sessionName}
+      activeName={sessionName}
+      onCreateSession={onCreateSession}
+      onSelectSession={onSelectSession}
+      onKillSession={onKillSession}
+      onRefresh={onRefresh}
+      actionLabel={translate('tmuxStatus.detach')}
+      actionTitle={translate('misc.detachTitle')}
+      onAction={onDetach}
+    />
   );
 }

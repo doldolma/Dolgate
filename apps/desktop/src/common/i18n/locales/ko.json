@@ -2924,7 +2924,8 @@
   "tmuxStatus": {
     "sessionCount": "세션 {{count}}개",
     "noSessions": "세션 없음",
-    "open": "열기"
+    "open": "열기",
+    "detach": "detach"
   },
   "stickyHeader": {
     "jumpToCommand": "이 명령 줄로 이동",
