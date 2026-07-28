@@ -12,10 +12,18 @@
 // jump host is intentionally NOT supported with mosh: the UDP leg cannot cross a
 // bastion. The desktop UI blocks the combination, so Jump is forwarded only
 // defensively here.
+//
+// tailnet 은 두 단계 모두 경유한다. bootstrap 만 태우면 UDP 가 일반 네트워크로 나가는데,
+// tailnet 안에만 있는 호스트에는 닿지 않고 조용히 실패한다 — 호스트에 tailnet 을 지정한
+// 사용자는 mosh 도 당연히 그 안으로 간다고 본다. UDP 도 같은 노드로 보낸다.
 package moshsession
 
 import (
+	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,6 +43,15 @@ type EventEmitter func(protocol.Event)
 // StreamEmitter는 raw 터미널 바이트를 상위 레이어로 흘려보내는 함수 타입이다.
 type StreamEmitter func(protocol.StreamFrame, []byte)
 
+// moshNoUDPResponseMessage 는 부트스트랩은 됐는데 UDP 가 한 번도 오지 않았을 때의 안내다.
+//
+// 원인을 거의 항상 하나로 특정할 수 있어서 추측을 그대로 적는다 — mosh 의 UDP 포트는 SSH 와
+// 다른 포트여서, SSH 만 열어 둔 서버에서는 반드시 이 증상이 난다. 실제로 이걸 찾는 데 한참
+// 걸렸다.
+const moshNoUDPResponseMessage = "mosh 서버가 UDP 로 응답하지 않습니다. " +
+	"mosh 는 SSH 포트와 별개로 UDP 60000-61000 이 열려 있어야 합니다 — " +
+	"서버 방화벽(ufw 등)과 클라우드 보안 그룹 양쪽을 확인하세요."
+
 // 종료 사유 — sshsession과 동일한 의미로 ClosedPayload.Reason에 실린다. mosh는 UDP
 // 로밍으로 전송 단절에 강인해 보통 client(사용자 종료)만 발생한다.
 const (
@@ -46,7 +63,10 @@ const (
 	// 양방향 heartbeat가 흘러 정상 연결이면 LastRecv가 항상 최근이다.
 	moshReconnectingAfter = 4 * time.Second
 	moshDisconnectedAfter = 12 * time.Second
-	moshMonitorInterval   = 1 * time.Second
+	// moshHandshakePollInterval 은 첫 응답을 기다리는 동안의 확인 간격이다. 한 왕복이면 오므로
+	// 촘촘히 본다 — 정상 연결에서 이 간격이 곧 추가 지연이 된다.
+	moshHandshakePollInterval = 20 * time.Millisecond
+	moshMonitorInterval       = 1 * time.Second
 	// Recv 폴링 타임아웃. 짧게 잡아 close 신호에 빠르게 반응한다.
 	moshRecvTimeout = 200 * time.Millisecond
 	// 원격에서 mosh-server new가 MOSH CONNECT를 내놓기까지 허용하는 최대 시간.
@@ -62,22 +82,34 @@ type ManagerConfig struct {
 	// TCPKeepAliveInterval은 bootstrap SSH 커널 keepalive probe 간격이다.
 	TCPKeepAliveInterval time.Duration
 	// TailnetDial 은 payload 의 tailnet 경로를 raw dialer 로 바꿔 준다. nil 이거나 경로가
-	// 비어 있으면 평소처럼 직접 TCP 로 나간다.
+	// 비어 있으면 평소처럼 직접 나간다.
 	//
-	// mosh 는 bootstrap SSH 만 tailnet 을 탄다. 그 위의 UDP 는 mosh-server 가 직접 여는
-	// 것이라 이 경로 밖이다 — tailnet 안의 호스트에 mosh 를 쓰면 UDP 가 닿지 않을 수 있다.
+	// bootstrap SSH 와 그 위의 UDP 세션 **둘 다** 이 dialer 로 보낸다. dialer 가 network 를
+	// 받으므로 같은 함수로 "tcp" 와 "udp" 를 다 열 수 있다.
 	TailnetDial sshconn.TailnetDialResolver
+	// TailnetDialTimeout 은 UDP 세션을 tailnet 으로 열 때 주는 예산이다. bootstrap 이 이미
+	// 노드를 올려 둔 뒤라 짧아도 되지만, 노드가 그 사이 유휴로 내려갔을 수 있어 여유를 둔다.
+	TailnetDialTimeout time.Duration
+	// HandshakeTimeout 은 첫 SSP 응답을 기다리는 시간이다. 이 안에 아무것도 오지 않으면 연결
+	// 실패로 본다. 테스트가 짧게 줄일 수 있도록 설정으로 둔다.
+	HandshakeTimeout time.Duration
 }
 
 var defaultManagerConfig = ManagerConfig{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
+	TailnetDialTimeout:   60 * time.Second,
+	HandshakeTimeout:     10 * time.Second,
 }
 
 type sessionHandle struct {
 	client *mosh.Client
 	closed chan struct{}
 	closer sync.Once
+	// startedAt 은 UDP 세션을 만든 시각이다. "아직 한 번도 못 받았다"를 판정하는 기준점이다 —
+	// mosh-go 의 NewTransport 가 lastRecv 를 time.Now() 로 초기화하므로 LastRecv() 만으로는
+	// 실제 수신과 세션 생성을 구분할 수 없다.
+	startedAt time.Time
 }
 
 type Manager struct {
@@ -101,6 +133,12 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 	if config.TCPKeepAliveInterval == 0 {
 		config.TCPKeepAliveInterval = defaultManagerConfig.TCPKeepAliveInterval
 	}
+	if config.TailnetDialTimeout == 0 {
+		config.TailnetDialTimeout = defaultManagerConfig.TailnetDialTimeout
+	}
+	if config.HandshakeTimeout == 0 {
+		config.HandshakeTimeout = defaultManagerConfig.HandshakeTimeout
+	}
 	return &Manager{
 		sessions:          make(map[string]*sessionHandle),
 		pendingChallenges: make(map[string]chan []string),
@@ -108,6 +146,78 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 		emitStream:        stream,
 		config:            config,
 	}
+}
+
+// dialMosh 는 mosh UDP 세션을 연다. tailnet 경로가 있으면 그 노드를 통해, 없으면 일반
+// 네트워크로 나간다.
+//
+// 두 경우 모두 conn 을 여기서 열고 mosh.DialConn 에 넘긴다. mosh.Dial 을 쓰지 않는 이유가
+// 있다 — 그 함수는 host 를 net.ParseIP 로 해석해서 **이름을 받지 못한다.** 이름을 넘기면
+// ParseIP 가 nil 을 돌려주고, net.DialUDP 는 그것을 거부하지 않고 127.0.0.1 로 연결한다.
+// UDP 는 핸드셰이크가 없으니 dial 도 write 도 성공하고, 부트스트랩까지 정상으로 보인 뒤
+// 세션만 영원히 응답을 못 받는다("첫 출력을 보내는 중"에서 멈춤). 주소가 IP 리터럴인 호스트만
+// 우연히 동작하던 셈이다.
+//
+// 직접 열면 tailnet 이든 아니든 이름이 해석된다 — 일반 경로는 net.Dialer 가, tailnet 경로는
+// tsnet 이 MagicDNS 로.
+//
+// udp4 를 쓰는 것은 mosh-go 가 하던 선택을 그대로 따른 것이다. mosh-server 가 IPv4 로만
+// 듣는 환경에서 이름이 AAAA 로도 풀릴 때 엉뚱한 족으로 붙는 것을 피한다.
+func (m *Manager) dialMosh(
+	dial sshconn.DialFunc,
+	host string,
+	port int,
+	key string,
+) (*mosh.Client, error) {
+	// 키를 먼저 본다. dial 뒤에 검사하면 실패 경로에서 tailnet 리스를 잡았다가 놓을 자리가
+	// 없어져, 노드가 유예에 들어가지 못하고 계속 떠 있는다.
+	ocb, err := moshOCBFromKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.TailnetDialTimeout)
+	defer cancel()
+
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	var conn net.Conn
+	if dial != nil {
+		conn, err = dial(ctx, "udp4", addr)
+		if err != nil {
+			return nil, fmt.Errorf("tailnet udp: %w", err)
+		}
+	} else {
+		var dialer net.Dialer
+		conn, err = dialer.DialContext(ctx, "udp4", addr)
+		if err != nil {
+			return nil, fmt.Errorf("udp: %w", err)
+		}
+	}
+
+	// 여기서부터 conn 의 수명은 mosh 클라이언트가 쥔다. 실패하면 우리가 닫아야 한다 — tailnet
+	// 경유면 그 닫힘이 리스를 놓는 지점이기도 하다.
+	client, err := mosh.DialConn(conn, ocb)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// moshOCBFromKey 는 bootstrap 이 회수한 base64 키를 mosh 암호 상태로 바꾼다.
+//
+// mosh.Dial 이 내부에서 하던 것과 같아야 한다. mosh-server 는 패딩 없는 base64 를 출력하므로
+// 붙여 주지 않으면 디코딩이 실패한다.
+func moshOCBFromKey(key string) (*mosh.OCB, error) {
+	padded := key
+	for len(padded)%4 != 0 {
+		padded += "="
+	}
+	rawKey, err := base64.StdEncoding.DecodeString(padded)
+	if err != nil {
+		return nil, fmt.Errorf("mosh: bad key: %w", err)
+	}
+	return mosh.NewOCB(rawKey)
 }
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
@@ -172,7 +282,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	}
 
 	// 3) mosh UDP 세션 수립. host는 부트스트랩과 동일(타깃이 UDP를 직접 서비스).
-	moshClient, err := mosh.Dial(payload.Host, port, key)
+	moshClient, err := m.dialMosh(dial, payload.Host, port, key)
 	if err != nil {
 		return fmt.Errorf("mosh dial failed: %w", err)
 	}
@@ -189,7 +299,27 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	handle := &sessionHandle{
 		client: moshClient,
 		closed: make(chan struct{}),
+		// DialConn 직후여야 한다. mosh-go 가 그 안에서 lastRecv 를 time.Now() 로 잡으므로,
+		// 이 값보다 lastRecv 가 뒤여야 "실제로 받았다"가 된다.
+		startedAt: time.Now(),
 	}
+
+	// SSP 응답이 올 때까지 기다린 뒤에 연결 성공을 보고한다.
+	//
+	// 여기서 기다리지 않고 곧바로 connected 를 보내면, 응답이 영원히 안 오는 경우가
+	// "연결됐다가 나중에 끊긴 세션"이 된다. 그 경로는 탭을 조용히 없애서 사용자에게 이유가
+	// 남지 않는다 — 실제로 그렇게 보였다. 연결 실패로 반환하면 평소의 연결 실패 안내(모달 +
+	// 탭 유지)를 그대로 탄다.
+	//
+	// 성공 시에는 한 왕복이면 돌아오므로(수십 ms) 정상 연결이 느려지지 않는다.
+	if err := m.awaitFirstResponse(handle); err != nil {
+		handle.closer.Do(func() {
+			close(handle.closed)
+			moshClient.Close()
+		})
+		return err
+	}
+
 	// 세션 등록 이후에야 write/resize가 정상적으로 동작할 수 있다.
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
@@ -360,9 +490,9 @@ func (m *Manager) monitor(sessionID string, handle *sessionHandle) {
 		case <-ticker.C:
 			transport := handle.client.Transport()
 			lastRecv := transport.LastRecv()
-			if lastRecv.IsZero() {
-				continue // 아직 첫 SSP 수신 전 — 상태 판정 보류(연결 직후).
-			}
+
+			// Connect 가 첫 SSP 응답을 확인한 뒤에야 세션을 등록하므로, 여기서 lastRecv 는 항상 실제
+			// 수신이다. mosh-go 가 lastRecv 를 생성 시각으로 초기화하는 것에 기대지 않아도 된다.
 			state := moshStateFor(time.Since(lastRecv))
 			if state == lastState {
 				continue
@@ -473,6 +603,32 @@ func parseMoshConnect(output []byte) (int, string, error) {
 		return 0, "", fmt.Errorf("invalid mosh port %q", match[1])
 	}
 	return port, string(match[2]), nil
+}
+
+// awaitFirstResponse 는 첫 SSP 응답을 기다린다. 오지 않으면 무엇을 해야 하는지 담은 에러를
+// 돌려준다.
+//
+// 부트스트랩(SSH)이 됐는데 UDP 가 한 번도 오지 않는 경우는 거의 항상 방화벽이다 — mosh 의 UDP
+// 포트는 SSH 와 다른 포트여서, SSH 만 열어 둔 서버에서는 반드시 이 증상이 난다.
+func (m *Manager) awaitFirstResponse(handle *sessionHandle) error {
+	deadline := handle.startedAt.Add(m.config.HandshakeTimeout)
+	for {
+		if moshHasReceivedAnything(handle.startedAt, handle.client.Transport().LastRecv()) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New(moshNoUDPResponseMessage)
+		}
+		time.Sleep(moshHandshakePollInterval)
+	}
+}
+
+// moshHasReceivedAnything 은 SSP 응답을 실제로 받았는지 본다.
+//
+// mosh-go 의 NewTransport 가 lastRecv 를 time.Now() 로 초기화하므로, 세션 생성 시각보다 뒤로
+// 갱신됐을 때만 실제 수신이다. IsZero 검사는 한 번도 발동하지 않는다.
+func moshHasReceivedAnything(startedAt, lastRecv time.Time) bool {
+	return lastRecv.After(startedAt)
 }
 
 func moshStateFor(age time.Duration) string {

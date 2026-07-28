@@ -40,6 +40,13 @@ func TestEverySshConsumerWiresTheTailnetDialer(t *testing.T) {
 		if !strings.Contains(body, "Dial:") && !strings.Contains(body, "config.Dial =") {
 			t.Errorf("%s resolves a dialer but never puts it on sshconn.Config", consumer.name)
 		}
+
+		// mosh 는 두 단계다. bootstrap SSH 만 태우면 그 위의 UDP 세션이 일반 네트워크로 나가서
+		// tailnet 안에만 있는 호스트에는 닿지 않는다 — 사용자에게는 "tailnet 설정했는데 mosh 만
+		// 안 된다"로 보인다. UDP 구간도 같은 dialer 로 열어야 한다.
+		if consumer.name == "mosh" && !strings.Contains(body, `dial(ctx, "udp`) {
+			t.Errorf("mosh never opens its UDP leg through the tailnet dialer — the bootstrap would go through the tailnet but the session would not")
+		}
 	}
 }
 
