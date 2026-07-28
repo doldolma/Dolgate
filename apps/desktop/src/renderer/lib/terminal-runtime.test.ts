@@ -144,7 +144,11 @@ describe('terminal-runtime', () => {
     expect(terminal.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('batches output chunks until the next animation frame flush', () => {
+  // 첫 출력은 프레임을 기다리지 않는다. 예전에는 모든 출력이 requestAnimationFrame 을 한 번
+  // 거쳐서, 키 하나에 에코 하나 오는 상호작용에도 8~17ms 가 붙었다. xterm 은 내부 WriteBuffer
+  // 로 이미 청크를 모으고 자기 프레임에 렌더하므로(공식 AttachAddon 도 바로 write 한다) 밖에서
+  // 한 번 더 기다릴 이유가 없다. 배칭은 쓰기가 진행되는 동안으로 옮겼다.
+  it('writes the first chunk immediately instead of waiting for a frame', () => {
     const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
     const fitAddon = {
       fit: vi.fn(),
@@ -176,15 +180,21 @@ describe('terminal-runtime', () => {
     });
 
     runtime.write('hello');
-    runtime.write(' world');
-    expect(writes).toHaveLength(0);
+    // 한가할 때 도착한 첫 청크는 곧바로 나간다 — 프레임 예약 없이.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.value).toBe('hello');
+    expect(scheduleAnimationFrame).not.toHaveBeenCalled();
 
+    // 쓰는 중에 도착한 것은 큐에 모인다.
+    runtime.write(' world');
+    expect(writes).toHaveLength(1);
+
+    // 완료 콜백이 배칭 창을 열고, 그 창에서 남은 것이 한 번에 나간다.
+    triggerWriteCallback(0);
     const flushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
     flushCallback?.(16);
-    expect(writes).toHaveLength(1);
-    expect(writes[0]?.value).toBe('hello world');
-
-    triggerWriteCallback(0);
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.value).toBe(' world');
   });
 
   it('flushes queued output after the current write completes', () => {
@@ -218,9 +228,8 @@ describe('terminal-runtime', () => {
       }
     });
 
+    // 첫 청크는 프레임 없이 즉시 나간다.
     runtime.write('first');
-    const firstFlushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
-    firstFlushCallback?.(16);
     expect(writes).toHaveLength(1);
     expect(writes[0]?.value).toBe('first');
 
@@ -229,7 +238,8 @@ describe('terminal-runtime', () => {
     expect(writes).toHaveLength(1);
 
     triggerWriteCallback(0);
-    const secondFlushCallback = scheduleAnimationFrame.mock.calls[1]?.[0] as ((time: number) => void) | undefined;
+    // 첫 쓰기가 프레임을 예약하지 않으므로, 배칭 창이 첫 번째 예약이다.
+    const secondFlushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
     secondFlushCallback?.(32);
     expect(writes).toHaveLength(2);
     expect(writes[1]?.value).toBe('secondthird');
@@ -266,15 +276,21 @@ describe('terminal-runtime', () => {
       }
     });
 
+    // 첫 청크는 즉시 나가고, 그 쓰기가 끝나기 전에 도착한 것들이 배칭 대상이다.
     runtime.write('a'.repeat(7_000));
-    runtime.write('b'.repeat(3_000));
+    expect(writes).toHaveLength(1);
 
+    runtime.write('b'.repeat(3_000));
+    runtime.write('c'.repeat(2_000));
+
+    triggerWriteCallback(0);
     const firstFlushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
     firstFlushCallback?.(16);
 
-    expect(writes).toHaveLength(1);
-    expect(typeof writes[0]?.value).toBe('string');
-    expect((writes[0]?.value as string).length).toBe(10_000);
+    // 두 청크가 한 번의 write 로 합쳐져야 한다 — 부하가 있을 때의 배칭은 그대로다.
+    expect(writes).toHaveLength(2);
+    expect(typeof writes[1]?.value).toBe('string');
+    expect((writes[1]?.value as string).length).toBe(5_000);
   });
   it('runs write-drain callbacks only after the queued output finishes flushing', () => {
     const { terminal, writes, triggerWriteCallback } = createFakeTerminal();
@@ -385,15 +401,24 @@ describe('terminal-runtime', () => {
       }
     });
 
+    // 첫 청크는 즉시, 쓰기 중에 온 것들은 합쳐져 나간다. 바이너리는 문자열로 뭉개지 않는다 —
+    // 전체화면 앱(vim·htop)의 제어 시퀀스가 깨지면 화면이 망가진다.
     runtime.write(Uint8Array.from([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68]));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.value).toEqual(
+      Uint8Array.from([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68]),
+    );
+
     runtime.write(Uint8Array.from([0x1b, 0x5b, 0x48]));
+    runtime.write(Uint8Array.from([0x1b, 0x5b, 0x4a]));
+    triggerWriteCallback(0);
 
     const flushCallback = scheduleAnimationFrame.mock.calls[0]?.[0] as ((time: number) => void) | undefined;
     flushCallback?.(16);
 
-    expect(writes).toHaveLength(1);
-    expect(writes[0]?.value).toEqual(
-      Uint8Array.from([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68, 0x1b, 0x5b, 0x48])
+    expect(writes).toHaveLength(2);
+    expect(writes[1]?.value).toEqual(
+      Uint8Array.from([0x1b, 0x5b, 0x48, 0x1b, 0x5b, 0x4a])
     );
 
     triggerWriteCallback(0);
@@ -435,7 +460,7 @@ describe('terminal-runtime', () => {
   });
 
   it('cancels pending flushes when disposed', () => {
-    const { terminal } = createFakeTerminal();
+    const { terminal, triggerWriteCallback } = createFakeTerminal();
     const fitAddon = {
       fit: vi.fn(),
       activate: vi.fn(),
@@ -465,7 +490,11 @@ describe('terminal-runtime', () => {
       }
     });
 
+    // 첫 쓰기는 즉시 나가므로 취소할 프레임이 없다. 그 쓰기가 끝나며 배칭 창이 열린 뒤에야
+    // 취소 대상이 생긴다 — dispose 가 그 창을 걷어내는지가 이 테스트의 계약이다.
     runtime.write('queued');
+    runtime.write('while writing');
+    triggerWriteCallback(0);
     runtime.dispose();
 
     expect(cancelScheduledAnimationFrame).toHaveBeenCalledWith(42);

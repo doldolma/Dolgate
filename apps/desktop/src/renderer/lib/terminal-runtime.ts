@@ -566,14 +566,35 @@ export function createTerminalRuntime({
     });
   };
 
+  /**
+   * 대기 중인 출력을 쓴다. 쓸 수 있으면 **지금** 쓰고, 쓰는 중이면 프레임 뒤로 미룬다.
+   *
+   * 예전에는 모든 출력이 requestAnimationFrame 을 한 번 기다렸다. 대량 출력에서는 그게 맞다 —
+   * 여러 청크를 한 번에 합쳐 써서 레이아웃 스래싱을 막는다. 그런데 키 하나 눌러 에코 하나가
+   * 오는 상호작용에서는 모을 것이 없는데도 프레임을 기다려, 매 왕복에 8~17ms(60Hz 기준
+   * 평균 반 프레임~한 프레임)가 그냥 붙었다.
+   *
+   * 이 지연은 전송 방식과 무관하게 xterm 에 쓰는 모든 경로에 걸리므로, 네트워크가 빠를수록
+   * 비중이 커진다 — LAN·localhost 에서는 체감 지연의 대부분이 이것이었다.
+   *
+   * 배칭은 그대로 유지된다. 쓰기가 진행되는 동안(writeInFlight) 도착한 청크는 큐에 모이고,
+   * 쓰기 완료 콜백이 그것들을 합쳐 쓴다. 즉 부하가 있을 때는 자동으로 모이고, 한가할 때만
+   * 즉시 쓴다 — 상호작용에서 이득을 보고 대량 출력은 손해가 없다.
+   */
   const scheduleFlush = () => {
-    if (disposed || pendingFrameHandle !== null || writeInFlight || queuedChunks.length === 0) {
+    if (disposed || queuedChunks.length === 0) {
       return;
     }
-    pendingFrameHandle = scheduleAnimationFrame(() => {
-      pendingFrameHandle = null;
-      flushWriteQueue();
-    });
+    // 쓰는 중이면 아무것도 하지 않는다. 완료 콜백이 남은 큐를 이어서 비우고, 그 사이 도착한
+    // 청크들은 거기서 한 번에 합쳐진다 — 부하가 있을 때의 배칭이 이 경로다.
+    if (writeInFlight) {
+      return;
+    }
+    // 이미 예약된 배칭 창이 있으면 그것을 기다린다. 여기서 또 쓰면 창이 무의미해진다.
+    if (pendingFrameHandle !== null) {
+      return;
+    }
+    flushWriteQueue();
   };
 
   const syncDisplayMetrics = () => {
