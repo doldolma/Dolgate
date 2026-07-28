@@ -10,12 +10,14 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 ### 대표 기능
 
-- **SSH/SSM 워크스페이스** — 일반 SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서 다룹니다. SSH Agent 인증과 Agent Forwarding도 지원합니다.
+- **SSH 워크스페이스** — 다중 세션 터미널, SFTP, 포트 포워딩을 한 앱에서 다룹니다. SSH Agent 인증과 Agent Forwarding, 점프 호스트(베스천) 경유도 지원합니다.
+- **AWS SSM 통합** — AWS CLI나 session-manager-plugin 설치 없이, 공인 IP·인바운드 포트가 없는 EC2에 접속합니다. SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec을 지원합니다.
+- **Tailscale 내장** — Tailscale 설치 없이 앱 자체가 tailnet 노드가 되고, OS 네트워크 설정은 건드리지 않습니다. 여러 tailnet에 동시에 참여해, 망이 달라도 전환 없이 한 창에서 오갈 수 있습니다.
+- **명령 블록** — 실행한 명령마다 성공·실패와 소요 시간을 표시합니다. 출력만 복사하거나 바로 재실행하고, 실패한 명령만 골라 이동할 수 있습니다.
 - **tmux control mode** — 원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로 보여주고 detach된 세션에 다시 붙습니다.
 - **AI 어시스턴트** — `Cmd/Ctrl+I`로 열어 현재 SSH 세션의 호스트 정보와 최근 터미널 출력을 바탕으로 질문하고, 승인된 도구로 조회·실행을 도와줍니다.
 - **세션 녹화 및 재생** — 종료된 터미널 세션을 로컬에만 저장하고, 타임라인으로 다시 볼 수 있습니다.
-- **동기화를 self-host로** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다.
-- **종단간 암호화 동기화 (zero-knowledge)** — 동기화 데이터는 업로드 전에 기기에서 암호화되고, 복호화 키는 사용자의 동기화 암호로 보호됩니다. 서버에는 암호문과 감싼 키만 저장됩니다.
+- **셀프호스팅 동기화 & 종단간 암호화** — 호스트·세션·스니펫을 데스크톱↔모바일로 동기화하는 `sync-api`를 직접 띄울 수 있습니다. 데이터는 업로드 전에 기기에서 암호화되고 복호화 키는 사용자의 동기화 암호로 보호되므로, 서버에는 암호문만 남습니다(zero-knowledge).
 - **세션 공유 & 협업** — 실행 중인 세션을 브라우저 viewer 링크로 공유하고 실시간 채팅으로 함께 봅니다.
 
 ## 구성
@@ -26,17 +28,29 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 저장소 전체는 하나의 `vX.Y.Z` 버전으로 함께 릴리즈됩니다.
 
+## 빠른 시작
+
+### 다운로드
+
+[**다운로드 페이지**](https://doldolma.github.io/Dolgate/)에서 쓰는 OS에 맞는 설치 파일을 바로 받을 수 있습니다 — Windows(exe), macOS(dmg), Linux(AppImage), Android(APK). iOS는 App Store 출시를 준비 중입니다.
+
+Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에 있습니다.
+
+데스크톱 앱은 자동 업데이트를 지원합니다. 한 번 설치하면 새 버전이 나올 때 앱 안에서 바로 업데이트할 수 있습니다.
+
+개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
+
 ## 기능 전체
 
 **터미널 & 세션**
 
 - 다중 SSH 세션과 분할 워크스페이스(탭 기반)
 - tmux control mode — 윈도우→탭, 패인→분할로 보여주고 단축키 없이 조작, detach 지원
-- mosh 연결 (옵션) — UDP 기반이라 네트워크 전환·절전/복귀엔 강하지만, 셸 통합(자동완성·명령 완료 알림)은 비활성화됩니다 (원격 `mosh-server` 필요)
+- mosh 연결 — 네트워크 전환·절전 복귀에 강한 UDP 연결 (원격 `mosh-server` 필요, 셸 통합 기능은 비활성)
 - 명령어 자동완성 — Fig 스펙 + 원격 generator 동적 값 + 파일/폴더 경로 + 스니펫
 - 명령어 스니펫 — `{{변수}}` 치환 지원
 - 세션 녹화 및 재생 — 로컬 저장, 서버 동기화 없음
-- 명령 완료 OS 알림 — 오래 걸리거나 실패한 명령 종료 시 (셸 통합 기반; 기준 시간·실패 시·비활성 시 옵션)
+- 명령 완료 OS 알림 — 오래 걸리거나 실패한 명령이 끝났을 때 (기준 시간·조건 설정)
 - 명령 블록 — 셸 통합 기반으로 명령 단위 상태 표시, hover 액션(출력/명령 복사·재실행·AI), 명령 팔레트(`Cmd/Ctrl+Shift+P`)
 
 **AI 어시스턴트**
@@ -58,10 +72,14 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 - SSH Agent Forwarding — 신뢰하는 호스트에서 원격 hop에 로컬 키를 전달
 - 점프 호스트(베스천) 경유 연결 — 저장된 SSH 호스트를 ProxyJump로 지정
 - Local / Remote / Dynamic 포트 포워딩
+- Tailscale 내장 — Tailscale 클라이언트 설치 없이 앱 자체가 tailnet 노드로 참여
+- OS 네트워크에 영향 없음 — 앱 내부 네트워크 스택에서만 동작. 시스템 라우팅·DNS 변경도, 관리자 권한도 필요 없음
+- 여러 tailnet 동시 연결 — 서로 다른 tailnet을 함께 등록하고, 호스트마다 경유할 tailnet을 지정
 
 **AWS & 컨테이너**
 
 - AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
+- SSM 데이터 채널 내장 — AWS CLI·session-manager-plugin 설치 불필요
 - Docker / Podman 컨테이너 모니터링·로그·메트릭·셸·터널링
 
 **공유 · 내보내기 & 가져오기**
@@ -74,7 +92,7 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 - 패스키(WebAuthn) 로그인 — 생체 인증·보안 키로 비밀번호 없이 로그인 (서버에서 켠 경우)
 - 종단간 암호화(E2EE) — 호스트·자격 증명·스니펫 등은 기기에서 암호화되어 서버에는 암호문만 저장됩니다
-- Zero-knowledge — E2EE 계정의 암호화 키(DEK)는 사용자의 동기화 암호(Argon2id)로 감싸 보관되며, 서버는 원문 키를 저장하지 않습니다. 동기화 암호를 잊으면 서버도 복구해 줄 수 없습니다
+- Zero-knowledge — 암호화 키는 동기화 암호(Argon2id)로 감싸 보관되고 서버는 원문 키를 갖지 않습니다. 암호를 잊으면 서버도 복구해 줄 수 없습니다
 
 자세한 설계는 [데이터 보호 문서](./docs/data-protection.md)를 참고하세요.
 
@@ -86,19 +104,6 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
   <source media="(prefers-color-scheme: dark)" srcset="./docs/port-forwarding-dark.png">
   <img alt="Dolgate 포트 포워딩 화면" src="./docs/port-forwarding.png">
 </picture>
-
-## 빠른 시작
-
-### 다운로드
-
-- 최신 데스크톱 빌드와 Android APK는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에서 받을 수 있습니다.
-- 데스크톱은 Windows(exe), macOS(dmg), Linux(AppImage·deb)를 지원합니다.
-- iOS는 현재 개발/내부 빌드 중심으로 관리합니다.
-
-데스크톱 앱은 자동 업데이트를 지원합니다. 한 번 설치하면 새 버전이 나올 때 앱 안에서 바로 업데이트할 수 있습니다.
-
-개발 환경 구성, 로컬 실행, 릴리즈 빌드는 [빌드 및 배포 문서](./docs/build-and-deploy.md)를 참고해 주세요.
-
 
 ## 자체 sync-api 호스팅
 
