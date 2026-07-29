@@ -673,7 +673,16 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     tailnetName: optionalText(payload.tailnetName),
     nodeName: optionalText(payload.nodeName),
     nodeIp: optionalText(payload.nodeIp),
+    // 판정은 코어가 한다. 여기서 다시 조합하지 않고 그 결과만 옮긴다.
+    ready: payload.ready === true,
+    online: payload.online === true,
     expired: payload.expired === true,
+    // 백엔드가 스스로 보고하는 문제들. state 가 정상인데 통신이 안 될 때의 유일한 단서다.
+    health: Array.isArray(payload.health)
+      ? payload.health.filter((entry): entry is string => typeof entry === "string")
+      : undefined,
+    backendState: optionalText(payload.backendState),
+    keyExpiry: optionalText(payload.keyExpiry),
     cancelled: payload.cancelled === true,
     peers: toTailnetPeers(payload.peers),
     authUrl:
@@ -4885,7 +4894,7 @@ export class CoreManager {
   async testTailnet(
     config: TailnetConfig,
     onStatus: (status: TailnetStatus) => void,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; forceRelogin?: boolean },
   ): Promise<TailnetStatus> {
     await this.start();
 
@@ -4905,17 +4914,26 @@ export class CoreManager {
             ephemeral: config.ephemeral,
           },
           timeoutMs: coreTimeoutMs,
+          // 만료된 등록은 로컬에서 구분되지 않는다. 연결이 실패한 뒤의 확인 요청만 이걸 켜서
+          // 컨트롤 플레인에 등록을 다시 확인시킨다.
+          forceRelogin: options?.forceRelogin === true,
         },
       },
       ["tailnetStatus"],
       {
         timeoutMs: coreTimeoutMs + 15_000,
         onProgress: (progress) => onStatus(toTailnetStatus(progress)),
-        // 취소로 끝나면 코어가 오류 없이 끝낸다. running 만 종료로 보면 그 요청이 한도까지
-        // 매달려서, 화면에서는 취소를 눌러도 아무 일이 없는 것처럼 보인다.
+        // 어느 이벤트가 마지막인지도 코어의 판정(ready)을 따른다.
+        //
+        // state 로 가르면 안 된다 — 코어는 폴링마다 상태를 흘려보내고, 그중에 "running 이지만
+        // 아직 준비 안 됨"(컨트롤 플레인과 동기화 전, 만료 확인 전)이 섞여 있다. 그것을 종료로
+        // 보면 요청이 준비되기 전에 끝나서, 관문은 실패로 받고 화면은 잠시 뒤 전부 정상으로
+        // 보이는 상태가 된다.
+        //
+        // 취소도 종료다. 그것까지 running 만 보면 취소를 눌러도 요청이 한도까지 매달린다.
         isTerminal: (progress) => {
           const status = toTailnetStatus(progress);
-          return status.state === "running" || status.cancelled === true;
+          return status.ready === true || status.cancelled === true;
         },
       },
     );

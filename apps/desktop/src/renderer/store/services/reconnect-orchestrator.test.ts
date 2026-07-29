@@ -4,10 +4,12 @@ import {
   __resetReconnectOrchestratorForTest,
   cancelReconnect,
   computeBackoffDelay,
+  initReconnectHold,
   initReconnectOrchestrator,
   isReconnecting,
   onConnectivityChange,
   registerReconnectHandler,
+  resumeReconnectsAfterHold,
   scheduleReconnect,
   type ReconnectAttemptInfo,
 } from "./reconnect-orchestrator";
@@ -130,5 +132,65 @@ describe("connectivity gating", () => {
     onConnectivityChange(true);
     await vi.advanceTimersByTimeAsync(500);
     expect(handler.perform).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Tailscale 이 브라우저 로그인을 기다리는 동안은 재연결이 될 수 없다. 그 사이에 시도 횟수를
+// 소비하면 사용자가 로그인하기 전에 상한을 다 써서 포기해 버리고, 로그인을 마쳐도 아무 일도
+// 일어나지 않는다.
+describe("사람을 기다리는 동안의 재연결", () => {
+  it("시도 횟수를 소비하지 않고 다시 확인한다", async () => {
+    const handler = makeHandler();
+    registerReconnectHandler("session", handler);
+    let held = true;
+    initReconnectHold(() => held);
+
+    scheduleReconnect({ kind: "session", key: "s1" });
+    await vi.advanceTimersByTimeAsync(1500);
+
+    // 막혀 있는 동안은 실행하지 않는다.
+    expect(handler.perform).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(handler.perform).not.toHaveBeenCalled();
+    // 상한(3)을 넘도록 기다려도 포기하지 않는다.
+    expect(handler.renderGaveUp).not.toHaveBeenCalled();
+    expect(__getReconnectStateForTest("s1")?.attempt).toBe(0);
+
+    // 사람이 로그인을 마치면 그때 진행한다.
+    held = false;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(handler.perform).toHaveBeenCalledTimes(1);
+  });
+
+  // 로그인을 마쳤는데 백오프를 기다리게 두면 화면이 한동안 멈춘 것처럼 보인다.
+  it("열리는 순간 백오프를 기다리지 않고 재발화한다", async () => {
+    const handler = makeHandler();
+    registerReconnectHandler("session", handler);
+    let held = true;
+    initReconnectHold(() => held);
+
+    scheduleReconnect({ kind: "session", key: "s1" });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(handler.perform).not.toHaveBeenCalled();
+
+    held = false;
+    resumeReconnectsAfterHold();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(handler.perform).toHaveBeenCalledTimes(1);
+  });
+
+  // 막지 않는 대상은 평소처럼 시도 횟수를 쓴다. 안 그러면 영원히 재시도하는 대상이 생긴다.
+  it("막히지 않은 대상은 평소처럼 시도한다", async () => {
+    const handler = makeHandler();
+    registerReconnectHandler("session", handler);
+    initReconnectHold(() => false);
+
+    scheduleReconnect({ kind: "session", key: "s1" });
+    // 백오프에 0.8~1.2 지터가 있어 정각(1000ms)으로는 불안정하다. 상한을 넘겨 기다린다.
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(handler.perform).toHaveBeenCalledTimes(1);
+    expect(__getReconnectStateForTest("s1")?.attempt).toBe(1);
   });
 });

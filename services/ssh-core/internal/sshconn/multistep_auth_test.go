@@ -2,6 +2,7 @@ package sshconn
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -74,7 +75,7 @@ func TestDialClientMultiStepPublicKeyThenPassword(t *testing.T) {
 	host, port := startAuthTestServer(t, config)
 
 	passwordPrompted := false
-	client, err := DialClient(Target{
+	client, err := DialClient(context.Background(), Target{
 		Host:                 host,
 		Port:                 port,
 		Username:             "user",
@@ -90,7 +91,7 @@ func TestDialClientMultiStepPublicKeyThenPassword(t *testing.T) {
 		return responses, nil
 	})
 	if err != nil {
-		t.Fatalf("DialClient(publickey,password) failed: %v", err)
+		t.Fatalf("DialClient(context.Background(), publickey,password) failed: %v", err)
 	}
 	defer client.Close()
 
@@ -136,7 +137,7 @@ func TestDialClientMultiStepPublicKeyThenKeyboardInteractive(t *testing.T) {
 	host, port := startAuthTestServer(t, config)
 
 	var askedQuestion string
-	client, err := DialClient(Target{
+	client, err := DialClient(context.Background(), Target{
 		Host:                 host,
 		Port:                 port,
 		Username:             "user",
@@ -152,7 +153,7 @@ func TestDialClientMultiStepPublicKeyThenKeyboardInteractive(t *testing.T) {
 		return responses, nil
 	})
 	if err != nil {
-		t.Fatalf("DialClient(publickey,keyboard-interactive) failed: %v", err)
+		t.Fatalf("DialClient(context.Background(), publickey,keyboard-interactive) failed: %v", err)
 	}
 	defer client.Close()
 

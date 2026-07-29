@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TerminalTab } from "@shared";
+import { t } from "../../i18n";
+import { resolveConnectionFailurePresentation } from "../../store/utils";
 import {
   resolveConnectionOverlayMessage,
   resolveConnectionOverlayTitle,
+  resolveTailnetFailureGuidance,
+  resolveTailnetPhaseMessage,
 } from "./terminalSessionHelpers";
 
 function createErrorTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
@@ -55,6 +59,27 @@ describe("terminalSessionHelpers connection error presentation", () => {
     );
   });
 
+  // 브라우저 대기 문구가 실패 화면에 남으면, "로그인을 마쳐 주세요" 라고 하면서 실패로 앉아 있는
+  // 화면이 된다 — 실패 이유가 그 문구에 덮여서 무엇이 잘못됐는지 알 수 없다.
+  it("실패하면 브라우저 대기 문구 대신 실패 이유를 보여준다", () => {
+    const tab = createErrorTab({
+    errorMessage: "tailnet: could not reach the host through the tailnet",
+    connectionProgress: {
+      stage: "tailnet-connecting",
+      message: "basket 브라우저에서 로그인을 마쳐 주세요.",
+      blockingKind: "browser",
+      retryable: true,
+    },
+  });
+
+  expect(resolveConnectionOverlayMessage(tab)).not.toBe(
+    "basket 브라우저에서 로그인을 마쳐 주세요.",
+  );
+  expect(resolveConnectionOverlayMessage(tab)).toBe(
+    resolveConnectionFailurePresentation(tab.errorMessage as string).message,
+  );
+});
+
   it("keeps blocking progress messages for credential retry prompts", () => {
     const tab = createErrorTab({
       errorMessage: "permission denied",
@@ -69,5 +94,65 @@ describe("terminalSessionHelpers connection error presentation", () => {
     expect(resolveConnectionOverlayMessage(tab)).toBe(
       "nas 인증 정보를 다시 확인해 주세요.",
     );
+  });
+});
+
+// 만료는 Tailscale 계층이 판정해 알려 준 것만 온다. 여기서 정하는 것은 "그래서 무엇을 할 수
+// 있는가" 다 — auth key 경로에는 다시 할 로그인이 없다.
+describe("resolveTailnetFailureGuidance", () => {
+  it("브라우저 로그인 tailnet 은 다시 로그인으로 복구한다", () => {
+    const guidance = resolveTailnetFailureGuidance(false);
+
+    expect(guidance.recovery).toBe("login");
+    expect(guidance.message).toContain(t("connectFailure.tailnetExpired"));
+    expect(guidance.message).toContain(t("connectFailure.tailnetReauthHint"));
+  });
+
+  // 버튼을 내밀면 눌러도 같은 키로 같은 결과다. 무엇을 확인해야 하는지 알려야 한다.
+  it("auth key tailnet 에는 복구 동작을 내주지 않는다", () => {
+    const guidance = resolveTailnetFailureGuidance(true);
+
+    expect(guidance.recovery).toBe("none");
+    expect(guidance.message).toContain(t("connectFailure.tailnetAuthKeyHint"));
+    expect(guidance.message).not.toContain(t("connectFailure.tailnetReauthHint"));
+  });
+
+  // 설정을 아직 못 읽었으면 브라우저 경로로 떨어진다 — 그쪽이 기본이고 눌러 보는 값이 가장 싸다.
+  it("인증 방식을 모르면 브라우저 경로로 떨어진다", () => {
+    expect(resolveTailnetFailureGuidance(null).recovery).toBe("login");
+  });
+});
+
+// 진행 문구를 시도를 시작한 세션에만 흘리면, 나머지 화면은 "연결하는 중" 만 보다가 갑자기
+// 브라우저가 뜬다. 공유 상태에서 직접 만들어야 누가 시작했는지와 무관하게 같은 말을 한다.
+describe("resolveTailnetPhaseMessage", () => {
+  it("무엇을 기다리는지 단계별로 말한다", () => {
+    expect(resolveTailnetPhaseMessage("회사망", { state: "starting" })).toBe(
+      t("connectProgress.tailnetConnecting", { label: "회사망" }),
+    );
+    expect(
+      resolveTailnetPhaseMessage("회사망", {
+        state: "needsAuth",
+        authUrl: "https://login.example",
+      }),
+    ).toBe(t("connectProgress.tailnetNeedsAuth", { label: "회사망" }));
+    expect(resolveTailnetPhaseMessage("회사망", { state: "needsApproval" })).toBe(
+      t("connectProgress.tailnetNeedsApproval", { label: "회사망" }),
+    );
+  });
+
+  // 링크가 오기까지 몇 초 걸린다. 그동안 "로그인하세요" 라고 하면 누를 것을 찾다가 없다는 것만
+  // 확인하게 된다.
+  it("링크가 아직 없으면 링크를 받는 중이라고 한다", () => {
+    expect(resolveTailnetPhaseMessage("회사망", { state: "needsAuth" })).toBe(
+      t("connectProgress.tailnetPreparingAuth", { label: "회사망" }),
+    );
+  });
+
+  // 붙어 있으면 tailnet 이 할 말이 없다. 여기서 문구를 내면 세션 자신의 진행을 덮어버린다.
+  it("붙어 있거나 상태를 모르면 아무 말도 하지 않는다", () => {
+    expect(resolveTailnetPhaseMessage("회사망", { state: "running" })).toBeNull();
+    expect(resolveTailnetPhaseMessage("회사망", { state: "stopped" })).toBeNull();
+    expect(resolveTailnetPhaseMessage("회사망", undefined)).toBeNull();
   });
 });

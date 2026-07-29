@@ -32,7 +32,7 @@ func (n *dialNode) Dial(context.Context, string, string) (net.Conn, error) {
 func (n *dialNode) Up(context.Context) error { n.ups += 1; return nil }
 func (n *dialNode) Status(context.Context) (tailnet.Status, error) {
 	if n.status.State == "" {
-		return tailnet.Status{State: tailnet.StateRunning}, nil
+		return tailnet.Status{State: tailnet.StateRunning, Online: true}, nil
 	}
 	return n.status, nil
 }
@@ -163,6 +163,7 @@ func TestTailnetDialReleasesTheLeaseWhenDialFails(t *testing.T) {
 func TestTailnetDialRefusesADifferentTailnet(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{
 		State:       tailnet.StateRunning,
+		Online:      true,
 		TailnetName: "someone-else.example.com",
 	}}
 	instance := newDialRuntime(t, node)
@@ -184,6 +185,7 @@ func TestTailnetDialRefusesADifferentTailnet(t *testing.T) {
 func TestTailnetDialAllowsTheExpectedTailnet(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{
 		State:       tailnet.StateRunning,
+		Online:      true,
 		TailnetName: "gridwiz.com",
 	}}
 	instance := newDialRuntime(t, node)
@@ -200,6 +202,7 @@ func TestTailnetDialAllowsTheExpectedTailnet(t *testing.T) {
 func TestTailnetDialAllowsAnUnknownExpectedName(t *testing.T) {
 	node := &dialNode{status: tailnet.Status{
 		State:       tailnet.StateRunning,
+		Online:      true,
 		TailnetName: "gridwiz.com",
 	}}
 	instance := newDialRuntime(t, node)
@@ -215,7 +218,7 @@ func TestTailnetDialAllowsAnUnknownExpectedName(t *testing.T) {
 // 컨트롤 플레인이 이름을 안 알려 주는 경우도 막지 않는다 — 우리가 모르는 것을 이유로 연결을
 // 거부하면 안 된다.
 func TestTailnetDialAllowsWhenTheControlPlaneReportsNoName(t *testing.T) {
-	node := &dialNode{status: tailnet.Status{State: tailnet.StateRunning}}
+	node := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
 	instance := newDialRuntime(t, node)
 
 	dial, _ := instance.tailnetDial(TailnetRoute{ID: "corp", ExpectedName: "gridwiz.com"})
@@ -280,6 +283,44 @@ func TestTailnetDialProceedsWhileTheNodeIsStarting(t *testing.T) {
 		t.Fatalf("dial() error = %v, want the dial to proceed", err)
 	}
 	_ = conn.Close()
+	if node.dials != 1 {
+		t.Errorf("dials = %d, want 1", node.dials)
+	}
+}
+
+// 만료가 확인됐으면 dial 하지 않는다. 그대로 보내면 예산을 다 쓰고 원인을 알 수 없는 타임아웃으로
+// 끝나는데, 사용자는 호스트가 죽은 줄 알고 엉뚱한 곳을 본다.
+func TestTailnetDialRefusesAnExpiredRegistration(t *testing.T) {
+	node := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true, Expired: true}}
+	runtime := newDialRuntime(t, node)
+
+	dial, err := runtime.tailnetDial(TailnetRoute{ID: "corp"})
+	if err != nil {
+		t.Fatalf("tailnetDial: %v", err)
+	}
+
+	_, err = dial(context.Background(), "tcp", "nas.corp.ts.net:22")
+	if !errors.Is(err, ErrTailnetExpired) {
+		t.Fatalf("err = %v, want ErrTailnetExpired", err)
+	}
+	if node.dials != 0 {
+		t.Errorf("dials = %d, want 0 — an expired registration must not be dialed", node.dials)
+	}
+}
+
+// 만료가 아니면 평소처럼 나간다. 만료 검사가 멀쩡한 연결을 막으면 tailnet 이 전부 못 쓰게 된다.
+func TestTailnetDialProceedsWhenNotExpired(t *testing.T) {
+	node := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
+	runtime := newDialRuntime(t, node)
+
+	dial, err := runtime.tailnetDial(TailnetRoute{ID: "corp"})
+	if err != nil {
+		t.Fatalf("tailnetDial: %v", err)
+	}
+
+	if _, err := dial(context.Background(), "tcp", "nas.corp.ts.net:22"); err != nil {
+		t.Fatalf("dial: %v", err)
+	}
 	if node.dials != 1 {
 		t.Errorf("dials = %d, want 1", node.dials)
 	}

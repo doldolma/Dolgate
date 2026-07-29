@@ -655,12 +655,12 @@
       "days": "{{count}}일 전"
     },
     "hover": {
-        "tailnet": "Tailnet",
-        "tailnetPathDirect": "직결",
-        "tailnetPathRelay": "릴레이 경유 ({{relay}})",
-        "tailnetPathRelayUnknown": "릴레이 경유",
-        "tailnetPathUnknown": "경로 확인 중",
-        "tailnetNotConnected": "연결 안 됨",
+      "tailnet": "Tailnet",
+      "tailnetPathDirect": "직결",
+      "tailnetPathRelay": "릴레이 경유 ({{relay}})",
+      "tailnetPathRelayUnknown": "릴레이 경유",
+      "tailnetPathUnknown": "경로 확인 중",
+      "tailnetNotConnected": "연결 안 됨",
       "jump": "점프",
       "reconnect": "재연결",
       "waitingNetwork": "네트워크 대기 중",
@@ -2260,7 +2260,6 @@
     "wrongPassword": "암호가 올바르지 않거나 파일이 손상되었습니다."
   },
   "connectFailure": {
-    "tailnetUnreachable": "tailnet 을 통해 호스트에 닿지 못했습니다. 노드 등록이 만료된 것일 수 있습니다.",
     "targetHost": "대상 호스트",
     "viaJump": " · 점프 경유 {{target}}",
     "ssmExit": "AWS SSM 세션이 종료되었습니다. (code {{code}})",
@@ -2272,7 +2271,15 @@
     "refused": "{{target}}에서 연결을 거부했습니다.",
     "timeout": "{{target}} 연결 시간이 초과되었습니다.",
     "reset": "{{target}} 연결이 중간에 끊겼습니다.",
-    "generic": "연결을 완료하지 못했습니다."
+    "generic": "연결을 완료하지 못했습니다.",
+    "tailnetExpired": "이 Tailnet 의 노드 등록이 만료됐습니다.",
+    "tailnetAuthKeyHint": "auth key 로 등록된 Tailnet 이라 다시 로그인할 것이 없습니다. 키가 만료·소진됐다면 새 키가 필요합니다.",
+    "tailnetReauthHint": "다시 로그인하면 브라우저 인증부터 새로 진행합니다.",
+    "tailnetAuthInFlight": "이 Tailnet 의 인증이 진행 중입니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
+    "tailscaleNeedsAuth": "Tailscale 인증이 끝나지 않았습니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
+    "tailscaleNeedsApproval": "이 기기가 관리자 승인을 기다리는 중입니다. 승인되면 연결할 수 있습니다.",
+    "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요.",
+    "tailscaleOffline": "Tailscale 이 컨트롤 플레인과 연결되지 않았습니다. 연결됨으로 보이지만 실제로는 통신되지 않는 상태입니다 — 다시 로그인해야 할 수 있습니다."
   },
   "knownHostsIpc": {
     "noSecrets": "저장할 인증 정보가 없습니다.",
@@ -2725,7 +2732,8 @@
     "tailnetMissing": "이 호스트가 지정한 tailnet 이 이 기기에 없습니다. 설정 → 네트워크에서 추가해 주세요.",
     "connectFailed": "호스트 연결을 시작하지 못했습니다.",
     "localFailed": "로컬 터미널을 시작하지 못했습니다.",
-    "ssmRetrying": "{{label}} SSM 연결을 다시 시도하는 중입니다."
+    "ssmRetrying": "{{label}} SSM 연결을 다시 시도하는 중입니다.",
+    "tailnetOffline": "인터넷에 연결되어 있지 않아 Tailscale 에 연결할 수 없습니다."
   },
   "blockOverlay": {
     "copyOutput": "출력 복사",
@@ -2986,7 +2994,8 @@
     "ssmTunnelUnsupported": "AWS SSM 터널을 시작할 수 없습니다. 이 구성에서는 in-process SSM 터널만 지원됩니다.",
     "connectSuccess": "연결에 성공했습니다.",
     "noTerminalSession": "연결된 터미널 세션이 없어 명령을 입력할 수 없습니다.",
-    "sessionExpiredOrInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요."
+    "sessionExpiredOrInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.",
+    "restartTailnet": "다시 시도"
   },
   "awsDiagnostic": {
     "title": {
@@ -3081,7 +3090,8 @@
       "running": "연결됨",
       "failed": "실패",
       "preparingAuth": "인증 링크 받는 중",
-      "expired": "인증 만료"
+      "expired": "인증 만료",
+      "offline": "연결 끊김"
     },
     "field": {
       "label": "네트워크 이름",
@@ -3108,6 +3118,36 @@
       "tailscale": "노드 키를 만료시켰습니다. 다만 항목을 지우는 것은 컨트롤 플레인의 정책이라, ephemeral 로 등록된 노드가 아니면 기기 목록에 만료된 채로 남습니다. 남아 있으면 Tailscale 관리 콘솔에서 지워 주세요.",
       "headscale": "노드 키를 만료시켰습니다. 다만 항목을 지우는 것은 컨트롤 플레인의 정책이라, ephemeral 로 등록된 노드가 아니면 기기 목록에 만료된 채로 남습니다. 남아 있으면 서버에서 지워 주세요 (headscale nodes delete)."
     },
-    "localNodeName": "이 기기는 다음 이름으로 등록됩니다 —"
+    "localNodeName": "이 기기는 다음 이름으로 등록됩니다 —",
+    "unknownError": "알 수 없는 오류가 발생했습니다."
+  },
+  "tailnetIpc": {
+    "nodeInUse": "이 Tailnet 을 사용하는 연결이 있습니다. 해당 세션·SFTP·포트포워딩을 먼저 닫아 주세요."
+  },
+  "connectStages": {
+    "tailscaleNode": "Tailscale 노드 시작",
+    "tailscaleRegistration": "기기 등록 확인",
+    "tailscaleAuth": "Tailscale 로그인",
+    "tailscaleHealth": "이 기기가 보고한 경고",
+    "tailscaleError": "Tailscale 오류",
+    "tailscaleExpiredDetail": "등록이 만료됐습니다. 다시 로그인해야 합니다.",
+    "tailscaleKeyExpiryDetail": "만료 예정 {{at}}",
+    "tailscaleApprovalDetail": "관리자 승인을 기다리는 중입니다.",
+    "tailscaleBrowserDetail": "브라우저에서 로그인을 마쳐 주세요.",
+    "tailscaleLinkDetail": "로그인 링크를 받는 중입니다.",
+    "tailscalePeersDetail": "기기 {{count}}대가 보입니다.",
+    "hostKey": "호스트 키 확인",
+    "hostKeyPromptDetail": "이 호스트를 신뢰할지 확인해 주세요.",
+    "ssh": "SSH 연결",
+    "groupTailscale": "Tailscale",
+    "groupHost": "호스트",
+    "tailscaleSync": "컨트롤 플레인 동기화",
+    "tailscaleStaleDetail": "연결됨으로 보이지만 동기화가 끊겼습니다.",
+    "tailscaleTarget": "{{target}} 까지 경로",
+    "tailscaleTargetDirect": "직접 연결",
+    "tailscaleTargetRelay": "릴레이 경유 ({{relay}})",
+    "tailscaleTargetNoPath": "직접 연결도 릴레이도 서지 않았습니다.",
+    "tailscaleTargetMissing": "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다.",
+    "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}"
   }
 }

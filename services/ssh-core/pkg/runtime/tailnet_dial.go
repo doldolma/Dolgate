@@ -76,10 +76,10 @@ func dialThroughLease(
 	if err != nil {
 		return nil, err
 	}
-	// 인증이 남은 노드는 여기서 끊는다. 그대로 dial 하면 tsnet 이 인증이 끝나기를 기다리다
-	// 예산을 다 쓰고 타임아웃으로 실패하는데, 사용자는 무엇을 해야 할지 알 수 없다. 인증은
-	// 설정 화면의 흐름이 할 일이다(브라우저를 열고 진행 상태를 보여 준다).
-	if err := assertTailnetAuthenticated(status); err != nil {
+	// dial 직전 안전망. 관문(Connected)과 다른 질문을 묻는다 — "확실히 막혔나".
+	//
+	// 판정은 tailnet.Status 에만 있다. 여기서 running·만료·인증을 다시 조합하지 않는다.
+	if err := assertTailnetNotBlocked(status); err != nil {
 		return nil, err
 	}
 	if err := assertTailnetIdentity(status, expectedName); err != nil {
@@ -99,12 +99,32 @@ var ErrTailnetNeedsApproval = errors.New(
 	"tailnet: this node is waiting for administrator approval",
 )
 
-func assertTailnetAuthenticated(status tailnet.Status) error {
-	switch status.State {
-	case tailnet.StateNeedsAuth:
+// ErrTailnetExpired 는 노드 등록이 만료됐을 때다.
+var ErrTailnetExpired = errors.New(
+	"tailnet: this tailnet's node registration has expired",
+)
+
+// ErrTailnetOffline 은 컨트롤 플레인과 세션이 끊겼을 때다.
+//
+// 이 상태에서는 노드가 running 으로 보고되고 기기 목록도 남아 있지만 실제로는 통하지 않는다 —
+// 낡은 값이기 때문이다. 만료가 아직 드러나지 않은 구간도 여기에 들어온다.
+var ErrTailnetOffline = errors.New(
+	"tailnet: not connected to the control plane yet",
+)
+
+// assertTailnetNotBlocked 는 확정적으로 막힌 상태면 그 이유로 끊는다.
+//
+// 판정 자체는 tailnet.Status.BlockedReason 한 곳에 있고, 여기서는 그 결과를 에러로 옮기기만 한다.
+func assertTailnetNotBlocked(status tailnet.Status) error {
+	switch status.BlockedReason() {
+	case tailnet.BlockNeedsAuth:
 		return ErrTailnetNeedsAuth
-	case tailnet.StateNeedsApproval:
+	case tailnet.BlockNeedsApproval:
 		return ErrTailnetNeedsApproval
+	case tailnet.BlockExpired:
+		return ErrTailnetExpired
+	case tailnet.BlockOffline:
+		return ErrTailnetOffline
 	default:
 		return nil
 	}

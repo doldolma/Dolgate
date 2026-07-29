@@ -63,10 +63,78 @@ type Status struct {
 	// Expired 는 이 노드의 키가 만료됐는지다. BackendState 와 별개다 — 컨트롤 플레인에서
 	// 노드를 만료시켜도 백엔드는 한동안 Running 으로 남는다.
 	Expired bool
+	// Online 은 지금 컨트롤 플레인과 세션이 살아 있는지다(map poll 중인지).
+	//
+	// State 와 Expired 는 컨트롤 플레인과 끊긴 뒤에도 그대로 남는다 — 등록이 만료돼도 새 netmap
+	// 이 오지 않으니 running 인 채로, 기기 목록까지 낡은 값으로 유지된다. 그래서 이것 없이는
+	// "확실히 연결됨" 을 표현할 수 없다.
+	Online bool
+	// BackendState 는 tsnet 이 보고한 원문 상태다. 우리 State 는 몇 가지로 뭉치므로, 무엇을
+	// 보고 그렇게 판단했는지 확인하려면 원문이 필요하다.
+	BackendState string
+	// KeyExpiry 는 노드 키 만료 시각이다(모르면 빈 문자열). 만료를 판단하는 근거 자체라서
+	// 화면에서 그대로 확인할 수 있어야 한다.
+	KeyExpiry string
+	// Health 는 백엔드가 스스로 보고하는 문제들이다.
+	//
+	// 만료를 상태만으로는 알 수 없기 때문에 필요하다 — 컨트롤 플레인에서 노드를 만료시켜도
+	// State 는 running 으로 남는다. tailscale 은 로그아웃·마지막 로그인 오류·컨트롤 플레인과
+	// 동기화 안 됨 같은 것을 여기에 담으므로, 상태가 정상으로 보일 때 유일하게 남는 단서다.
+	Health []string
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 지금 그 기기까지 가는 경로다.
 	Peers []Peer
 }
+
+// Connected 는 이 tailnet 을 통해 실제로 통신할 수 있는 상태인지다.
+//
+// 판정은 여기 한 곳에만 있다. 대기 관문과 dial 직전 검사, 화면 표시가 모두 이 결과를 쓴다 —
+// 곳곳에서 각자 판단하면 기준이 갈리고, 어느 하나가 반쪽 기준이면 그 틈으로 통과한다.
+//
+// 세 조건이 함께여야 한다:
+//   - 컨트롤 플레인과 세션이 살아 있다(Online). 이것이 없으면 아래 둘은 낡은 값이다.
+//   - 그 세션이 우리를 인가했다(State == running).
+//   - 등록이 만료되지 않았다(!Expired).
+func (s Status) Connected() bool {
+	return s.State == StateRunning && !s.Expired && s.Online
+}
+
+// BlockedReason 은 지금 이 tailnet 으로 나갈 수 없는 확정적인 이유다. 없으면 빈 문자열이다.
+//
+// Connected 의 반대가 아니다. 그 둘은 다른 질문이다:
+//
+//   - Connected: "확실히 연결됐다" — 연결 흐름의 관문이 묻는다. 확실할 때만 다음 단계로 넘긴다.
+//   - BlockedReason: "확실히 막혔다" — dial 직전 안전망이 묻는다. 노드가 막 올라오는 중(starting)
+//     이면 확실히 막힌 것이 아니므로 통과시킨다 — tsnet 의 Dial 이 Running 을 기다려 주고, 그
+//     경로가 실기기에서 검증된 동작이다. 여기서 막으면 기동 직후 첫 연결이 깨진다.
+//
+// 판정을 이 두 함수 밖에서 다시 조합하지 않는다. 곳곳에서 각자 판단하면 기준이 갈린다.
+func (s Status) BlockedReason() BlockReason {
+	switch {
+	case s.State == StateNeedsAuth:
+		return BlockNeedsAuth
+	case s.State == StateNeedsApproval:
+		return BlockNeedsApproval
+	case s.Expired:
+		return BlockExpired
+	case s.State == StateRunning && !s.Online:
+		// 컨트롤 플레인과 끊긴 채 running 으로 남은 상태다. State 도 기기 목록도 낡은 값이라
+		// 정상으로 보이지만 실제로는 통하지 않는다 — 만료가 아직 드러나지 않은 구간이 여기다.
+		return BlockOffline
+	default:
+		return ""
+	}
+}
+
+// BlockReason 은 나갈 수 없는 이유다. 화면 문구가 아니라 판정 결과를 옮기는 값이다.
+type BlockReason string
+
+const (
+	BlockNeedsAuth     BlockReason = "needsAuth"
+	BlockNeedsApproval BlockReason = "needsApproval"
+	BlockExpired       BlockReason = "expired"
+	BlockOffline       BlockReason = "offline"
+)
 
 // Peer 는 tailnet 안의 기기 하나와 그 기기까지의 현재 경로다.
 //
@@ -96,8 +164,6 @@ type Node interface {
 	// 한 번만 유효해서, 두 번째 호출은 Down 이 꺼 둔 WantRunning 을 되돌리지 않는다.
 	// 멱등이므로 이미 올라와 있어도 부담 없이 부를 수 있다.
 	Up(ctx context.Context) error
-	// Down 은 네트워킹만 멈추고 등록은 남긴다. 그래서 다시 올릴 때 재인증이 필요 없다.
-	Down(ctx context.Context) error
 	// Logout 은 등록 자체를 버린다. 컨트롤 플레인이 노드를 지우고, 다음 기동에서 다시
 	// 인증해야 한다.
 	Logout(ctx context.Context) error
@@ -325,8 +391,15 @@ func (r *Registry) release(id string) {
 	existing.idle = r.afterFunc(r.idleGrace, func() { r.idleExpired(id) })
 }
 
-// idleExpired 는 유예가 지난 노드를 내린다. 노드는 레지스트리에 남겨 둔다 — Down 은
-// 등록을 유지하므로 나중에 Acquire 하면 재인증 없이 다시 올라온다.
+// idleExpired 는 유예가 지난 노드를 닫는다.
+//
+// 닫는다(Down 이 아니다). WantRunning 만 끄면 tsnet 서버가 살아남아서 계속 컨트롤 플레인과
+// 통신하고 DERP 에 붙으려 한다 — 사용자에게는 "연결 안 됨" 인데 상태가 계속 바뀌고 경고가 뜬다.
+// 게다가 그 노드는 낡은 netmap 을 메모리에 들고 있어서, 다음 연결 때 만료된 등록을 정상으로
+// 보고한다.
+//
+// 등록과 노드 키는 상태 디렉터리에 남으므로, 다음 Acquire 가 새로 만든 노드는 재인증 없이
+// 올라온다 — 그때는 netmap 이 없어서 컨트롤 플레인의 답이 그대로 진실이 된다.
 func (r *Registry) idleExpired(id string) {
 	r.mu.Lock()
 	existing, ok := r.entries[id]
@@ -337,15 +410,14 @@ func (r *Registry) idleExpired(id string) {
 		return
 	}
 	existing.idle = nil
-	done := existing.beginTeardown(false)
+	done := existing.beginTeardown(true)
 	node := existing.node
 	r.mu.Unlock()
 
-	// 락 밖에서: 노드를 내리는 건 컨트롤 플레인과 통신하는 일이라, 레지스트리 락을 쥔 채
-	// 하면 다른 tailnet 전부가 멈춘다. 그래서 이 사이에 도착하는 Acquire 는 teardown 표시를
-	// 보고 기다린다.
-	_ = node.Down(context.Background())
-	r.endTeardown(id, existing, done)
+	// 락 밖에서: 노드를 닫는 것은 시간이 걸리는 일이라, 레지스트리 락을 쥔 채 하면 다른 tailnet
+	// 전부가 멈춘다. 그래서 이 사이에 도착하는 Acquire 는 teardown 표시를 보고 기다린다.
+	_ = node.Close()
+	r.endTeardownRemoving(id, existing, done)
 }
 
 // Leases 는 이 tailnet 을 쓰는 중인 소비자 수다.
@@ -362,6 +434,14 @@ func (r *Registry) Leases(id string) int {
 	return existing.refs
 }
 
+// Disconnect 는 노드를 지금 닫는다. 유휴 유예를 기다리지 않을 뿐 결과는 같다.
+//
+// 닫는다(Down 이 아니다). WantRunning 만 끄면 tsnet 서버가 살아남아 계속 컨트롤 플레인과
+// 통신하고 DERP 에 붙으려 한다 — 사용자가 "연결 종료" 를 눌렀는데 상태가 계속 바뀌고 경고가
+// 뜨는 것이 그 때문이다. 등록과 노드 키는 상태 디렉터리에 남으므로 다시 연결할 때 재인증이
+// 필요 없다.
+//
+// 쓰이는 중이면 거절한다. 세션이 얹혀 있는 노드를 그 밑에서 닫으면 그 세션이 죽는다.
 // Disconnect 는 노드를 지금 내린다. 유휴 유예를 기다리지 않을 뿐 결과는 같다 — 네트워킹만
 // 끄고 등록과 노드키는 남으므로, 다시 쓰면 재인증 없이 올라온다.
 //
@@ -380,14 +460,14 @@ func (r *Registry) Disconnect(ctx context.Context, id string) error {
 		existing.idle.Stop()
 		existing.idle = nil
 	}
-	done := existing.beginTeardown(false)
+	// 항목은 Close 가 끝난 뒤 지운다. 먼저 지우면 그 사이 도착한 Acquire 가 같은 상태
+	// 디렉터리로 두 번째 노드를 만들어, 닫히는 중인 노드와 노드 키를 두고 겹친다.
+	done := existing.beginTeardown(true)
 	node := existing.node
 	r.mu.Unlock()
 
-	// 락 밖에서: 노드를 내리는 건 컨트롤 플레인과 통신하는 일이다. idleExpired 와 같은 이유로
-	// 이 사이에 도착하는 Acquire 는 기다리게 한다.
-	err := node.Down(ctx)
-	r.endTeardown(id, existing, done)
+	err := node.Close()
+	r.endTeardownRemoving(id, existing, done)
 	return err
 }
 
@@ -413,6 +493,24 @@ func (r *Registry) Snapshot(ctx context.Context) map[string]Status {
 		statuses[id] = status
 	}
 	return statuses
+}
+
+// StatusOf 는 노드 하나의 상태다. 없는 id 면 두 번째 값이 false 다.
+//
+// 없는 노드를 위해 만들지 않는다 — 상태를 물어보는 것만으로 tailnet 이 붙으면 안 된다.
+func (r *Registry) StatusOf(ctx context.Context, id string) (Status, bool) {
+	r.mu.Lock()
+	existing := r.entries[id]
+	r.mu.Unlock()
+	if existing == nil {
+		return Status{}, false
+	}
+
+	status, err := existing.node.Status(ctx)
+	if err != nil {
+		return Status{State: StateStopped}, true
+	}
+	return status, true
 }
 
 // ErrNodeInUse 는 쓰이는 중인 노드를 버리려 할 때 나온다.

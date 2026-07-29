@@ -63,6 +63,13 @@ interface ReconnectState {
 const MAX_CONCURRENT_RECONNECTS = 3;
 const WATCHDOG_MS = 30_000;
 const CONCURRENCY_REQUEUE_MS = 400;
+/**
+ * 사람을 기다리는 동안 다시 확인하는 간격.
+ *
+ * 브라우저 로그인은 몇십 초가 걸릴 수 있어 촘촘히 볼 이유가 없다. 로그인을 마치는 순간은
+ * resumeReconnectsAfterHold() 가 잡으므로, 이 값은 그것을 놓쳤을 때의 안전망이다.
+ */
+const HOLD_REQUEUE_MS = 2000;
 
 const reconnectStates = new Map<string, ReconnectState>();
 const handlers = new Map<ReconnectKind, ReconnectHandler>();
@@ -83,6 +90,27 @@ export function initReconnectOrchestrator(
   provider: () => AutoReconnectConfig,
 ): void {
   configProvider = provider;
+}
+
+/**
+ * 이 대상이 지금 사람을 기다리는 중인지 알려 주는 판정.
+ *
+ * Tailscale 을 쓰는 호스트는 그 계층이 브라우저 로그인을 기다리는 동안 재연결이 될 수 없다.
+ * 그런데 그 사이에도 시도 횟수를 소비하면, 사용자가 로그인하기 전에 상한을 다 써서 포기해
+ * 버린다 — 로그인을 마쳐도 아무 일도 일어나지 않는다.
+ *
+ * 판정 자체는 여기 없다(코어가 하고 공유 상태에 담는다). 오케스트레이터는 결과만 묻는다.
+ */
+let holdProvider: ((meta: ReconnectMeta) => boolean) | null = null;
+
+export function initReconnectHold(
+  provider: (meta: ReconnectMeta) => boolean,
+): void {
+  holdProvider = provider;
+}
+
+function isHeldWaitingForPerson(meta: ReconnectMeta): boolean {
+  return holdProvider?.(meta) === true;
 }
 
 export function registerReconnectHandler(
@@ -214,6 +242,15 @@ async function runExecute(key: string): Promise<void> {
     return;
   }
 
+  // 사람을 기다리는 중이면 시도 횟수를 소비하지 않고 재큐한다. 로그인을 마치면
+  // resumeReconnectsAfterHold() 가 즉시 재발화한다.
+  if (isHeldWaitingForPerson(state.meta)) {
+    state.timerId = setTimeout(() => {
+      void runExecute(key);
+    }, HOLD_REQUEUE_MS);
+    return;
+  }
+
   // 동시 재연결 상한 초과 시 잠시 후 재시도(시도 횟수 소비 안 함).
   if (inFlightCount >= MAX_CONCURRENT_RECONNECTS) {
     state.timerId = setTimeout(() => {
@@ -315,6 +352,18 @@ export function onConnectivityChange(online: boolean): void {
   }
 }
 
+/**
+ * 사람이 할 일을 마쳐서(Tailscale 로그인 등) 막혀 있던 대상이 다시 진행할 수 있게 됐을 때.
+ *
+ * 백오프를 기다리게 두면 로그인을 마쳐도 화면이 한동안 멈춘 것처럼 보인다.
+ */
+export function resumeReconnectsAfterHold(): void {
+  if (isOffline) {
+    return;
+  }
+  fireAllImmediately();
+}
+
 /** OS 절전 복귀. navigator.onLine이 true여도 소켓이 죽었을 수 있어 전부 재검증. */
 export function onSystemResume(): void {
   if (isOffline) {
@@ -351,6 +400,7 @@ export function __resetReconnectOrchestratorForTest(): void {
   reconnectStates.clear();
   handlers.clear();
   configProvider = null;
+  holdProvider = null;
   isOffline = false;
   inFlightCount = 0;
 }

@@ -24,8 +24,20 @@ export interface ConnectionFailurePresentation {
    * 사용자가 그 자리에서 할 수 있는 일이 있는 실패의 종류.
    *
    * 실패 화면이 이것으로 동작을 고른다 — 다른 화면으로 보내지 않고 여기서 끝내기 위해서다.
+   *
+   * Tailscale 관련은 그 계층이 직접 알려 주는 것만 여기 들어온다. 대상까지 못 닿았다는 사실
+   * (타임아웃)로 Tailscale 을 의심하지 않는다 — 등록이 유효한지는 그 계층이 이미 확인했고,
+   * 그러고도 못 닿는 것은 대상이나 경로의 문제다. 섞으면 멀쩡한 등록을 다시 로그인하라고 권하게
+   * 된다.
    */
-  kind?: "tailnet-unreachable";
+  kind?: "tailscale-expired" | "tailscale-auth";
+  /**
+   * 어느 계층에서 실패했는지.
+   *
+   * 화면이 문구를 다시 뒤져 계층을 추측하면 같은 판단이 두 곳에 생긴다. 실패를 분류하는 자리는
+   * 하나여야 한다 — 사용자에게 "Tailscale 때문인지 SSH 가 거절한 것인지" 를 말해 주는 근거다.
+   */
+  layer?: "tailscale" | "hostKey" | "ssh";
 }
 
 function extractDialTarget(message: string): string {
@@ -93,15 +105,52 @@ export function resolveConnectionFailurePresentation(
         t('connectFailure.agentUnreachable'),
     };
   }
-  // 코어가 tailnet 경유 dial 실패에 붙이는 표식. 일반 타임아웃으로 뭉개면 사용자는 호스트가
-  // 죽은 줄 알고 엉뚱한 곳을 본다.
-  if (/could not reach the host through the tailnet/i.test(normalized)) {
+  // tailnet 을 거치지 않는 실패는 대상까지 가는 길이나 SSH 자체의 문제다. 아래 분류들이 그
+  // 계층을 정하고, 화면은 그 계층의 단계에 실패를 붙인다.
+  // --- Tailscale 계층이 직접 알려 주는 실패들 ---
+  //
+  // 이것들은 그 계층에서 판정된 것이라 원인이 확실하다. 사용자가 할 일도 정해져 있다.
+
+  // 등록 만료. 다시 로그인해야 붙는다.
+  if (/node registration has expired/i.test(normalized)) {
     return {
       title: "Connection Failed",
-      message: t('connectFailure.tailnetUnreachable'),
-      // 이 실패는 사용자가 그 자리에서 할 수 있는 일이 있다 — 노드 재인증. 종류를 실어 보내
-      // 실패 화면이 그 동작을 낼 수 있게 한다(설정 화면으로 보내지 않는다).
-      kind: "tailnet-unreachable",
+      message: t('connectFailure.tailnetExpired'),
+      kind: "tailscale-expired",
+      layer: "tailscale",
+    };
+  }
+  // 인증이 아직 안 끝났다. 이미 진행 중일 수 있으므로 새 로그인을 걸지 않고 브라우저로 보낸다.
+  if (/this tailnet is not connected yet/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: t('connectFailure.tailscaleNeedsAuth'),
+      kind: "tailscale-auth",
+      layer: "tailscale",
+    };
+  }
+  if (/waiting for administrator approval/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: t('connectFailure.tailscaleNeedsApproval'),
+      layer: "tailscale",
+    };
+  }
+  // 설정이 가리키는 tailnet 이 아닌 곳에 붙었다. 사용자가 계정을 바꿔 로그인한 경우다.
+  if (/connected to a different tailnet/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: t('connectFailure.tailscaleMismatch'),
+      layer: "tailscale",
+    };
+  }
+
+  // 컨트롤 플레인과 세션이 끊긴 상태. 노드는 연결됨으로 보고되지만 낡은 값이다.
+  if (/not connected to the control plane yet/i.test(normalized)) {
+    return {
+      title: "Connection Failed",
+      message: t('connectFailure.tailscaleOffline'),
+      layer: "tailscale",
     };
   }
   if (/host key is not trusted yet/i.test(normalized)) {
@@ -109,6 +158,7 @@ export function resolveConnectionFailurePresentation(
       title: "Host Key Not Trusted",
       message:
         t('connectFailure.hostKeyUntrusted'),
+      layer: "hostKey",
     };
   }
   if (
@@ -133,10 +183,17 @@ export function resolveConnectionFailurePresentation(
       message: t('connectFailure.refused', { target }),
     };
   }
-  if (/i\/o timeout|timed out|operation timed out/i.test(normalized)) {
+  // context deadline exceeded 도 여기다 — tailnet 경유 dial 이 예산을 다 쓰면 Go 의 ctx 만료가
+  // 그대로 올라온다. 그것을 분류하지 않으면 원문이 화면에 뜨고, 실패한 단계도 표시되지 않는다.
+  if (
+    /i\/o timeout|timed out|operation timed out|context deadline exceeded|deadline exceeded/i.test(
+      normalized,
+    )
+  ) {
     return {
       title: "Connection Failed",
       message: t('connectFailure.timeout', { target }),
+      layer: "ssh",
     };
   }
   if (/connection reset|\bEOF\b/i.test(normalized)) {

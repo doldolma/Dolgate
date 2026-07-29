@@ -86,15 +86,6 @@ type ProgressFunc func(ProgressEvent)
 type Config struct {
 	TCPDialTimeout       time.Duration
 	TCPKeepAliveInterval time.Duration
-	// TailnetDialTimeout 은 tailnet 경유 dial 에 주는 예산이다.
-	//
-	// 짧게 잡으면 안 된다. 노드가 막 올라온 직후의 첫 dial 은 netmap 전파와 경로(DERP) 설정이
-	// 함께 일어나서 몇 초가 걸린다 — 3 초로 줄였다가 로그인 직후 연결이 실패하고 재시도해야만
-	// 붙는 것을 실기기에서 확인했다. 두 번째 연결부터는 즉시 붙는다.
-	//
-	// 못 붙는 경우에 그만큼 기다리는 것은 대가다. 클라이언트가 "곧 붙는다" 와 "영원히 안 붙는다"
-	// 를 구분할 방법이 없어서, 정상 경우를 깨지 않는 쪽을 택한다.
-	TailnetDialTimeout time.Duration
 	// Progress가 설정되면 DialClient가 홉마다 connecting→connected(또는 failed)를 보고한다.
 	// config가 점프 체인 재귀에 전파돼 가장 깊은 점프부터 순서대로 이벤트가 도착한다.
 	Progress ProgressFunc
@@ -190,9 +181,6 @@ type InteractiveResponder func(challenge InteractiveChallenge) ([]string, error)
 var DefaultConfig = Config{
 	TCPDialTimeout:       10 * time.Second,
 	TCPKeepAliveInterval: 30 * time.Second,
-	// 일반 TCP 와 같다. 노드 기동이 준비 단계로 빠져서 예전의 60 초는 근거가 없어졌지만,
-	// 이보다 줄이면 노드가 막 올라온 직후의 첫 연결이 깨진다.
-	TailnetDialTimeout: 10 * time.Second,
 }
 
 // HopProgress builds a Config.Progress callback that emits EventConnectionHopProgress for
@@ -240,24 +228,6 @@ var ErrTransportConflict = errors.New(
 	"sshconn: ws proxy and tailnet dialer are mutually exclusive",
 )
 
-// ErrTailnetUnreachable 는 tailnet 을 통해 대상에 닿지 못했을 때다.
-//
-// 원인을 클라이언트가 구분할 수 없다. 노드 등록이 만료됐거나(컨트롤 플레인에서 지웠어도 로컬
-// 상태는 한동안 running 으로 남는다 — Self.Expired 도 켜지지 않는다), 컨트롤 플레인이 죽었거나,
-// ACL 이 막았거나, 대상이 그 tailnet 에 없을 수 있다. 그래서 원인을 단정하지 않고 무엇을
-// 확인해야 하는지만 말한다.
-var ErrTailnetUnreachable = errors.New(
-	"tailnet: could not reach the host through the tailnet — the node may need to be re-authenticated",
-)
-
-// wrapTailnetDialError 는 tailnet 경유 dial 실패를 그 사실이 드러나는 에러로 바꾼다.
-//
-// 그냥 "dial failed" 로 두면 일반 네트워크 실패와 구분되지 않아서, 사용자는 호스트가 죽은 줄
-// 알고 엉뚱한 곳을 본다.
-func wrapTailnetDialError(err error) error {
-	return fmt.Errorf("%w: %v", ErrTailnetUnreachable, err)
-}
-
 func assertSingleTransport(target Target, config Config) error {
 	if target.WSProxy != nil && config.Dial != nil {
 		return ErrTransportConflict
@@ -265,7 +235,12 @@ func assertSingleTransport(target Target, config Config) error {
 	return nil
 }
 
-func DialClient(target Target, config Config, responder InteractiveResponder) (*ssh.Client, error) {
+func DialClient(
+	ctx context.Context,
+	target Target,
+	config Config,
+	responder InteractiveResponder,
+) (*ssh.Client, error) {
 	if err := assertSingleTransport(target, config); err != nil {
 		return nil, err
 	}
@@ -274,9 +249,6 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 	}
 	if config.TCPKeepAliveInterval == 0 {
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
-	}
-	if config.TailnetDialTimeout == 0 {
-		config.TailnetDialTimeout = DefaultConfig.TailnetDialTimeout
 	}
 
 	authMethods, cleanupAuth, err := resolveAuthMethods(target, config, responder)
@@ -324,7 +296,7 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 			return nil, fmt.Errorf("ws proxy: %w", err)
 		}
 	} else if target.Jump != nil {
-		jumpClient, err = DialClient(*target.Jump, config, responder)
+		jumpClient, err = DialClient(ctx, *target.Jump, config, responder)
 		if err != nil {
 			return nil, fmt.Errorf("jump host: %w", err)
 		}
@@ -339,12 +311,16 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 		// tailnet 경유. 노드가 아직 안 올라와 있으면 여기서 올라오기를 기다린다 — 최초
 		// 등록이면 브라우저 로그인 시간이 이 안에 들어간다.
 		reportProgress(ProgressConnecting)
-		ctx, cancel := context.WithTimeout(context.Background(), config.TailnetDialTimeout)
+		// 예산은 일반 TCP dial 과 같다 — tailnet 을 거친다고 짧게 줄 근거가 없다. 노드를 올리는
+		// 것은 이미 앞 단계(관문)가 끝냈고, 여기부터는 대상까지 가는 raw 연결일 뿐이다.
+		//
+		// 호출자의 ctx 를 그대로 받는다. 더 이른 데드라인이나 취소가 있으면 그것이 이긴다.
+		dialCtx, cancel := context.WithTimeout(ctx, config.TCPDialTimeout)
 		defer cancel()
-		rawConn, err = config.Dial(ctx, "tcp", addr)
+		rawConn, err = config.Dial(dialCtx, "tcp", addr)
 		if err != nil {
 			reportProgress(ProgressFailed)
-			return nil, wrapTailnetDialError(err)
+			return nil, err
 		}
 	} else {
 		reportProgress(ProgressConnecting)
@@ -388,7 +364,14 @@ func DialClient(target Target, config Config, responder InteractiveResponder) (*
 // 읽는다 — 베스천 뒤의(직접 닿지 않는) 타깃 키도 신뢰할 수 있게 한다. 베스천 인증은
 // 비대화형(password/privateKey/certificate)만 지원하며(responder 없이 DialClient),
 // keyboard-interactive 베스천을 경유하는 probe는 현재 지원하지 않는다.
-func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProxyTarget, config Config) (HostKeyProbeResult, error) {
+func ProbeHostKey(
+	ctx context.Context,
+	host string,
+	port int,
+	jump *Target,
+	wsProxy *coretypes.WSProxyTarget,
+	config Config,
+) (HostKeyProbeResult, error) {
 	if err := assertSingleTransport(Target{WSProxy: wsProxy}, config); err != nil {
 		return HostKeyProbeResult{}, err
 	}
@@ -397,9 +380,6 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 	}
 	if config.TCPKeepAliveInterval == 0 {
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
-	}
-	if config.TailnetDialTimeout == 0 {
-		config.TailnetDialTimeout = DefaultConfig.TailnetDialTimeout
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
@@ -426,7 +406,7 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 			return HostKeyProbeResult{}, fmt.Errorf("ws proxy: %w", err)
 		}
 	} else if jump != nil {
-		jumpClient, err := DialClient(*jump, config, nil)
+		jumpClient, err := DialClient(ctx, *jump, config, nil)
 		if err != nil {
 			return HostKeyProbeResult{}, fmt.Errorf("jump host: %w", err)
 		}
@@ -441,13 +421,14 @@ func ProbeHostKey(host string, port int, jump *Target, wsProxy *coretypes.WSProx
 		// 프로브도 같은 통로로 가야 한다. 여기서 직접 TCP 로 나가면 tailnet 안에만 있는
 		// 호스트의 키를 읽을 수 없고, 읽더라도 tailnet 밖의 동명 호스트 키를 읽게 된다.
 		reportTarget(ProgressConnecting)
-		ctx, cancel := context.WithTimeout(context.Background(), config.TailnetDialTimeout)
+		// DialClient 와 같은 계약이다 — 예산은 일반 TCP dial 과 같고, 호출자의 ctx 가 이긴다.
+		dialCtx, cancel := context.WithTimeout(ctx, config.TCPDialTimeout)
 		defer cancel()
 		var err error
-		rawConn, err = config.Dial(ctx, "tcp", addr)
+		rawConn, err = config.Dial(dialCtx, "tcp", addr)
 		if err != nil {
 			reportTarget(ProgressFailed)
-			return HostKeyProbeResult{}, wrapTailnetDialError(err)
+			return HostKeyProbeResult{}, err
 		}
 	} else {
 		reportTarget(ProgressConnecting)

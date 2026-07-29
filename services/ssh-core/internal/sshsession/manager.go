@@ -1,6 +1,7 @@
 package sshsession
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -204,7 +205,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 
 	// 다단 ProxyJump 연결 단계 UI: DialClient가 홉마다 보고하는 진행을 공통 헬퍼로 renderer에
 	// 전달한다(세션·SFTP·컨테이너·probe가 전부 동일 방식). SessionID로 해당 터미널 탭에 매핑.
-	client, err := sshconn.DialClient(target, sshconn.Config{
+	client, err := sshconn.DialClient(context.Background(), target, sshconn.Config{
 		TCPDialTimeout:        m.config.TCPDialTimeout,
 		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
 		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),

@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -117,6 +118,7 @@ func (e *Engine) ProbeHostKey(requestJSON string) (string, error) {
 
 	payload := request.ConnectPayload
 	result, err := sshconn.ProbeHostKey(
+		context.Background(),
 		payload.Host,
 		payload.Port,
 		sshconn.JumpTargetFromCore(payload.Jump),

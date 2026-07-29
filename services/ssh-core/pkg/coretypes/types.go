@@ -538,6 +538,12 @@ type TailnetTestPayload struct {
 	// TimeoutMs 가 0 이면 기본값을 쓴다. 브라우저 로그인은 사람이 개입하므로 auth key
 	// 경로보다 넉넉해야 한다.
 	TimeoutMs int `json:"timeoutMs,omitempty"`
+	// ForceRelogin 이면 기다리기 전에 컨트롤 플레인에 등록을 다시 확인시킨다.
+	//
+	// 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 Running 이고 통신만 안 된다. 그래서
+	// 연결이 실패한 뒤에 이 플래그로 다시 물어서, 인증이 필요하다는 답(authUrl)을 받거나
+	// 그대로 붙는 것을 확인한다.
+	ForceRelogin bool `json:"forceRelogin,omitempty"`
 }
 
 type TailnetForgetPayload struct {
@@ -573,6 +579,19 @@ type TailnetStatusPayload struct {
 	// Expired 는 노드 키가 만료됐는지다. State 가 running 이어도 true 일 수 있다 — 컨트롤
 	// 플레인에서 노드를 만료시켜도 백엔드는 한동안 Running 으로 남는다.
 	Expired bool `json:"expired,omitempty"`
+	// Health 는 백엔드가 스스로 보고하는 문제들이다. State 가 정상으로 보이는데 통신이 안 될
+	// 때 유일하게 남는 단서다 — tailscale 은 로그아웃·로그인 오류·동기화 실패를 여기에 담는다.
+	Health []string `json:"health,omitempty"`
+	// Ready 는 이 tailnet 을 통해 실제로 통신할 수 있는지다. 판정은 코어 한 곳에서만 하고,
+	// 화면은 다시 판단하지 않는다 — 곳곳에서 각자 판단하면 기준이 갈린다.
+	Ready bool `json:"ready,omitempty"`
+	// Online 은 컨트롤 플레인과 세션이 살아 있는지다. Ready 의 근거이자, 상태가 정상으로
+	// 보이는데 통신이 안 되는 경우를 설명하는 값이다.
+	Online bool `json:"online,omitempty"`
+	// BackendState 는 tsnet 이 보고한 원문 상태, KeyExpiry 는 노드 키 만료 시각이다.
+	// 무엇을 보고 그렇게 판단했는지 화면에서 확인할 수 있어야 한다.
+	BackendState string `json:"backendState,omitempty"`
+	KeyExpiry    string `json:"keyExpiry,omitempty"`
 	// Cancelled 는 사용자가 시도를 접어서 끝났다는 표시다. 실패가 아니므로 Error 는 비어
 	// 있는데, Stopped 는 노드가 올라오기 전 진행 상태로도 나가기 때문에 상태만으로는 시도가
 	// 끝났는지 알 수 없다. 요청을 기다리는 쪽은 이 표시로 끝을 안다.

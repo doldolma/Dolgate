@@ -1,7 +1,32 @@
 import { BrowserWindow, ipcMain } from "electron";
-import type { TailnetConfig, TailnetRecord, TailnetSnapshot, TailnetStatus } from "@shared";
+import type {
+  TailnetConfig,
+  TailnetRecord,
+  TailnetSnapshot,
+  TailnetStatus,
+  TailnetTestOptions,
+} from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
+import { t } from "../i18n";
 import type { MainIpcContext } from "./context";
+
+/**
+ * 코어가 올려 보낸 오류를 사용자가 읽을 수 있는 문장으로 바꾼다.
+ *
+ * 코어 오류는 진단용이라 식별자와 영어가 섞여 있다 — 그대로 화면에 띄우면
+ * `tailnet node is in use: "8404eb7b-…"` 처럼 사용자가 할 수 있는 일이 없는 문장이 된다.
+ * 여기서 걸러 두면 렌더러 세 군데가 각자 문자열을 뒤지지 않는다.
+ */
+function toUserFacingTailnetError(cause: unknown): Error {
+  const message = cause instanceof Error ? cause.message : String(cause);
+
+  // Go 의 tailnet.ErrNodeInUse. 노드에 얹힌 세션이 있으면 끊지 않는다 — 그 밑에서 내리면
+  // 그 세션이 죽는다.
+  if (message.includes("node is in use")) {
+    return new Error(t("tailnetIpc.nodeInUse"));
+  }
+  return cause instanceof Error ? cause : new Error(message);
+}
 
 /** 렌더러가 저장을 요청할 때 보내는 것. authKey 는 저장 시에만 위로 올라온다. */
 export interface TailnetSaveInput {
@@ -70,9 +95,14 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       // 그것을 지울 자격증명은 이미 사라진 뒤다.
       try {
         await ctx.coreManager.forgetTailnet(id);
-      } catch {
-        // 노드가 없거나 컨트롤 플레인에 닿지 못한 경우. 설정 삭제까지 막을 이유는 없다 —
-        // 사용자가 지우겠다고 한 것이고, 남은 노드는 콘솔에서 지울 수 있다.
+      } catch (cause) {
+        // 쓰이는 중이면 설정만 지우고 노드를 남기는 것이 아니라, 지우지 않고 알린다 —
+        // 설정이 사라지면 그 노드를 정리할 자격증명도 함께 사라진다.
+        if (cause instanceof Error && cause.message.includes("node is in use")) {
+          throw toUserFacingTailnetError(cause);
+        }
+        // 그 외에는 노드가 없거나 컨트롤 플레인에 닿지 못한 경우. 설정 삭제까지 막을 이유는
+        // 없다 — 사용자가 지우겠다고 한 것이고, 남은 노드는 콘솔에서 지울 수 있다.
       }
       ctx.tailnets.remove(id);
       // 지워진 설정은 코어에서도 빼야 한다. 목록에 없는 id 는 코어가 버린다.
@@ -85,7 +115,11 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.tailnet.test,
-    async (event, config: TailnetConfig): Promise<TailnetStatus> => {
+    async (
+      event,
+      config: TailnetConfig,
+      options?: TailnetTestOptions,
+    ): Promise<TailnetStatus> => {
       // 진행 상태는 요청한 창에만 보낸다. 다른 창이 남의 tailnet 인증 URL 을 받을 이유가
       // 없고, 창이 닫힌 뒤 보내면 예외가 난다.
       const sender = BrowserWindow.fromWebContents(event.sender);
@@ -104,7 +138,8 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
         ? typedAuthKey
         : (ctx.tailnets.readAuthKey(config.id) ?? undefined);
 
-      return ctx.coreManager.testTailnet(
+      return ctx.coreManager
+        .testTailnet(
         {
           ...config,
           authKey,
@@ -113,14 +148,22 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
           ephemeral: Boolean(authKey),
         },
         pushStatus,
-      );
+        { forceRelogin: options?.forceRelogin },
+        )
+        .catch((cause: unknown) => {
+          throw toUserFacingTailnetError(cause);
+        });
     },
   );
 
   ipcMain.handle(
     ipcChannels.tailnet.disconnect,
     async (_event, id: string): Promise<void> => {
-      await ctx.coreManager.disconnectTailnet(id);
+      try {
+        await ctx.coreManager.disconnectTailnet(id);
+      } catch (cause) {
+        throw toUserFacingTailnetError(cause);
+      }
     },
   );
 

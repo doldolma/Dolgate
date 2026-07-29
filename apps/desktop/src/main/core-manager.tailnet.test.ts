@@ -173,8 +173,40 @@ describe("tailnet test completion", () => {
     emitControl({
       type: "tailnetStatus",
       requestId,
-      payload: { id: "net-1", state: "running" },
+      payload: { id: "net-1", state: "running", ready: true },
     } as CoreEvent<Record<string, unknown>>);
     expect((await test).state).toBe("running");
+  });
+
+  // 코어는 폴링마다 상태를 흘려보내고, 그중에 "running 이지만 아직 준비 안 됨"이 섞여 있다
+  // (컨트롤 플레인과 동기화 전, 만료 확인 전). 그것을 종료로 보면 관문이 준비되기 전에 실패를
+  // 받고, 화면은 잠시 뒤 전부 정상으로 보인다 — "설정에서는 연결됐다는데 연결이 안 된다".
+  it("running 이어도 준비되지 않았으면 끝내지 않는다", async () => {
+    const { manager, child, emitControl } = await startManager();
+
+    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const requestId = await lastRequestId(child);
+
+    emitControl({
+      type: "tailnetStatus",
+      requestId,
+      payload: { id: "net-1", state: "running", ready: false, online: false },
+    } as CoreEvent<Record<string, unknown>>);
+
+    let settled = false;
+    void test.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    emitControl({
+      type: "tailnetStatus",
+      requestId,
+      payload: { id: "net-1", state: "running", ready: true, online: true },
+    } as CoreEvent<Record<string, unknown>>);
+
+    const final = await test;
+    expect(final.ready).toBe(true);
   });
 });

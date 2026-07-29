@@ -54,9 +54,13 @@ function createContext() {
         (
           config: TailnetConfig,
           onStatus: (status: TailnetStatus) => void,
+          options?: { timeoutMs?: number; forceRelogin?: boolean },
         ) => Promise<TailnetStatus>
       >(async () => ({ id: 'net-1', state: 'running' })),
       forgetTailnet: vi.fn(async (_id: string) => {}),
+      disconnectTailnet: vi.fn(async (_id: string) => {}),
+      cancelTailnet: vi.fn(async (_id: string) => {}),
+      snapshotTailnets: vi.fn(async () => ({ statuses: [] })),
       setTailnetConfigProvider: vi.fn<(provider: () => TailnetConfig[]) => void>(),
       pushTailnetConfigs: vi.fn(),
     },
@@ -100,6 +104,7 @@ describe('tailnet ipc handlers', () => {
     expect(ctx.coreManager.testTailnet).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'net-1', authKey: 'tskey-secret' }),
       expect.any(Function),
+      expect.objectContaining({ forceRelogin: undefined }),
     );
   });
 
@@ -110,6 +115,30 @@ describe('tailnet ipc handlers', () => {
 
     expect(ctx.coreManager.testTailnet.mock.calls[0]?.[0]).toMatchObject({
       authKey: undefined,
+    });
+  });
+
+  // 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 연결됨이고 통신만 안 된다. 연결이 실패한
+  // 뒤의 확인 요청만 컨트롤 플레인에 등록을 다시 확인시켜야 하므로, 이 플래그가 렌더러에서
+  // 코어까지 가야 한다. 삼켜지면 확인이 "이미 연결됨" 으로 끝나서 아무것도 알아내지 못한다.
+  it('연결 실패 뒤 확인 요청이면 forceRelogin 을 코어까지 전달한다', async () => {
+    await invoke(
+      ipcChannels.tailnet.test,
+      { id: 'net-1', ephemeral: true },
+      { forceRelogin: true },
+    );
+
+    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[2]).toMatchObject({
+      forceRelogin: true,
+    });
+  });
+
+  // 평소 테스트가 매번 다시 물으면 살아 있는 등록에도 새 노드 키를 만들 수 있다.
+  it('평소 연결 테스트에는 켜지지 않는다', async () => {
+    await invoke(ipcChannels.tailnet.test, { id: 'net-1', ephemeral: true });
+
+    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[2]).toMatchObject({
+      forceRelogin: undefined,
     });
   });
 
@@ -208,6 +237,41 @@ describe('tailnet ipc handlers', () => {
 
   it('still deletes the config when the node cannot be unregistered', async () => {
     ctx.coreManager.forgetTailnet.mockRejectedValue(new Error('control plane down'));
+
+    await expect(invoke(ipcChannels.tailnet.remove, 'net-1')).resolves.toBeUndefined();
+    expect(ctx.tailnets.remove).toHaveBeenCalledWith('net-1');
+  });
+
+  // 코어 오류는 진단용이라 식별자와 영어가 섞여 있다. 그대로 화면에 띄우면 사용자가 할 수
+  // 있는 일이 없는 문장이 된다 — tailnet node is in use: "8404eb7b-…" 같은 것.
+  it('turns a busy node into a message the user can act on', async () => {
+    ctx.coreManager.disconnectTailnet.mockRejectedValue(
+      new Error('tailnet node is in use: "8404eb7b-bdba-4451-9d68-c9f1867082a7"'),
+    );
+
+    await expect(
+      invoke(ipcChannels.tailnet.disconnect, 'net-1'),
+    ).rejects.toThrow(/tailnetIpc\.nodeInUse|사용하는 연결/);
+    await expect(
+      invoke(ipcChannels.tailnet.disconnect, 'net-1'),
+    ).rejects.not.toThrow(/8404eb7b/);
+  });
+
+  // 설정을 지우면 그 노드를 정리할 자격증명도 사라진다. 쓰이는 중이면 지우지 않고 알린다.
+  it('refuses to delete a tailnet whose node is still in use', async () => {
+    ctx.coreManager.forgetTailnet.mockRejectedValue(
+      new Error('tailnet node is in use: "net-1"'),
+    );
+
+    await expect(invoke(ipcChannels.tailnet.remove, 'net-1')).rejects.toThrow();
+    expect(ctx.tailnets.remove).not.toHaveBeenCalled();
+  });
+
+  // 그 외의 실패는 설정 삭제를 막지 않는다 — 남은 노드는 콘솔에서 지울 수 있다.
+  it('still deletes the config when the node merely cannot be reached', async () => {
+    ctx.coreManager.forgetTailnet.mockRejectedValue(
+      new Error('control plane unreachable'),
+    );
 
     await expect(invoke(ipcChannels.tailnet.remove, 'net-1')).resolves.toBeUndefined();
     expect(ctx.tailnets.remove).toHaveBeenCalledWith('net-1');

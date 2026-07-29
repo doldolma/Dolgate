@@ -33,6 +33,43 @@ const (
 	tailnetStatusPollSlow = time.Second
 )
 
+// tailnetAuthURLGrace 는 인증 링크를 기다려 주는 시간이다.
+//
+// 실측에서 링크는 2.05~15.41 초 사이에 왔다. 그 상한 위로 잡아야 한다 — 짧게 잡으면 느리게
+// 오는 정상 링크를 죽이고 노드를 새로 만들어서, 잘 되던 연결이 갑자기 안 된다.
+//
+// 링크가 아예 오지 않는 경우(컨트롤 플레인에서 노드를 지운 뒤 죽은 키로 재등록을 반복하는 상태)만
+// 잡으면 되므로, 상한보다 넉넉히 두어도 목적을 잃지 않는다.
+var tailnetAuthURLGrace = 25 * time.Second
+
+// restartNode 는 노드를 닫고 새로 만든다. 새 노드를 받으면 true 다.
+//
+// 리스를 들고 있으면 노드를 버릴 수 없으므로 우리 리스를 먼저 놓는다. 다른 소비자가 쓰고 있으면
+// 버리지 못하는데, 그건 이 tailnet 으로 통신이 되고 있다는 뜻이라 다시 만들 이유도 없다 — 그때는
+// 원래 리스를 그대로 다시 잡고 false 를 돌려준다.
+func (runtime *Runtime) restartNode(id string, lease **tailnet.Lease) (bool, error) {
+	(*lease).Release()
+
+	if err := runtime.tailnets.Reset(id); err != nil {
+		if !errors.Is(err, tailnet.ErrNodeInUse) {
+			return false, err
+		}
+		again, acquireErr := runtime.tailnets.Acquire(id)
+		if acquireErr != nil {
+			return false, acquireErr
+		}
+		*lease = again
+		return false, nil
+	}
+
+	fresh, err := runtime.tailnets.Acquire(id)
+	if err != nil {
+		return false, err
+	}
+	*lease = fresh
+	return true, nil
+}
+
 // tailnetStatusPollFor 는 현재 무엇을 기다리는지로 간격을 고른다.
 func tailnetStatusPollFor(status tailnet.Status) time.Duration {
 	if status.AuthURL == "" {
@@ -46,49 +83,60 @@ func tailnetStatusPollFor(status tailnet.Status) time.Duration {
 // 브라우저 로그인은 사람을 기다리는 구간이라 최대 3 분까지 간다. 그동안 사용자가 그만두고
 // 싶을 수 있는데, 붙들 방법이 없으면 타임아웃까지 갇힌다.
 type tailnetTests struct {
-	mu     sync.Mutex
-	byID   map[string]context.CancelFunc
-	closed bool
+	mu   sync.Mutex
+	byID map[string]*tailnetAttempt
+}
+
+// tailnetAttempt 는 시도 하나의 신원이다.
+//
+// 취소 함수 자체로는 자기 시도인지 알 수 없다 — Go 는 함수값을 비교할 수 없다. 포인터로
+// 들고 있으면 신원 비교가 성립해서, 늦게 끝난 앞 시도가 뒤 시도의 취소를 지우는 일이 없다.
+type tailnetAttempt struct {
+	cancel context.CancelFunc
 }
 
 func newTailnetTests() *tailnetTests {
-	return &tailnetTests{byID: make(map[string]context.CancelFunc)}
+	return &tailnetTests{byID: make(map[string]*tailnetAttempt)}
 }
 
-// begin 은 취소 함수를 등록한다. 같은 tailnet 을 다시 시도하면 앞의 것을 접는다.
-func (t *tailnetTests) begin(id string, cancel context.CancelFunc) {
+// begin 은 시도를 등록하고 그 신원을 돌려준다. 같은 tailnet 을 다시 시도하면 앞의 것을 접는다.
+func (t *tailnetTests) begin(id string, cancel context.CancelFunc) *tailnetAttempt {
+	attempt := &tailnetAttempt{cancel: cancel}
+
 	t.mu.Lock()
-	previous, ok := t.byID[id]
-	t.byID[id] = cancel
+	previous := t.byID[id]
+	t.byID[id] = attempt
 	t.mu.Unlock()
 
-	if ok {
-		previous()
+	if previous != nil {
+		previous.cancel()
 	}
+	return attempt
 }
 
-// end 는 자기 자신이 등록돼 있을 때만 지운다. 늦게 끝난 앞 시도가 새 시도를 지우면 안 된다.
-func (t *tailnetTests) end(id string, cancel context.CancelFunc) {
+// end 는 자기 자신이 등록돼 있을 때만 지운다.
+//
+// 늦게 끝난 앞 시도가 새 시도를 지우면, 살아 있는 시도를 아무도 취소할 수 없게 된다 — 사용자
+// 화면에서는 취소를 눌러도 아무 일이 없는 것으로 보인다.
+func (t *tailnetTests) end(id string, attempt *tailnetAttempt) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if current, ok := t.byID[id]; ok && &current == &cancel {
+	if t.byID[id] == attempt {
 		delete(t.byID, id)
-		return
 	}
-	delete(t.byID, id)
 }
 
 // cancel 은 진행 중이면 접고 그 사실을 알려 준다.
 func (t *tailnetTests) cancel(id string) bool {
 	t.mu.Lock()
-	cancel, ok := t.byID[id]
+	attempt, ok := t.byID[id]
 	if ok {
 		delete(t.byID, id)
 	}
 	t.mu.Unlock()
 
 	if ok {
-		cancel()
+		attempt.cancel()
 	}
 	return ok
 }
@@ -230,15 +278,20 @@ func sanitizeTailnetDir(id string) string {
 // tailnetStatusPayload 는 노드 상태를 이벤트 페이로드로 옮긴다.
 func tailnetStatusPayload(id string, status tailnet.Status) coretypes.TailnetStatusPayload {
 	return coretypes.TailnetStatusPayload{
-		ID:          id,
-		State:       string(status.State),
-		AuthURL:     status.AuthURL,
-		LoginName:   status.LoginName,
-		TailnetName: status.TailnetName,
-		NodeName:    status.NodeName,
-		NodeIP:      status.NodeIP,
-		Expired:     status.Expired,
-		Peers:       tailnetPeerPayloads(status.Peers),
+		ID:           id,
+		State:        string(status.State),
+		AuthURL:      status.AuthURL,
+		LoginName:    status.LoginName,
+		TailnetName:  status.TailnetName,
+		NodeName:     status.NodeName,
+		NodeIP:       status.NodeIP,
+		Expired:      status.Expired,
+		Ready:        status.Connected(),
+		Online:       status.Online,
+		Health:       status.Health,
+		BackendState: status.BackendState,
+		KeyExpiry:    status.KeyExpiry,
+		Peers:        tailnetPeerPayloads(status.Peers),
 	}
 }
 
@@ -282,15 +335,47 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 		if err := runtime.tailnets.Reset(id); err != nil {
 			return err
 		}
+	} else if payload.ForceRelogin {
+		// 만료를 상태로는 알 수 없다. 컨트롤 플레인에서 노드를 만료시켜도 tsnet 은 메모리에
+		// 남은 낡은 netmap 으로 계속 running 을 보고한다 — 만료 여부는 새 netmap 이 올 때만
+		// 계산되고(그런데 만료되면 그게 오지 않는다), running 은 한 번 되면 그대로 유지된다.
+		// WantRunning 을 껐다 켜도 같은 netmap 으로 돌아오므로 달라지지 않는다.
+		//
+		// 그래서 노드를 닫고 다시 만든다. netmap 없이 시작하면 컨트롤 플레인의 답을 받아야
+		// running 이 되므로, 만료라면 인증이 필요하다는 상태로 떨어진다. 노드 키는 상태
+		// 디렉터리에 남으니 새로 발급되지 않는다 — 확인할 때마다 키가 쌓이지 않는다.
+		//
+		// 쓰이는 중이면 버릴 수 없는데, 그건 다른 세션이 이 tailnet 으로 통신하고 있다는
+		// 뜻이라 등록이 살아 있다는 증거다. 확인할 것이 없으니 그대로 진행한다.
+		if err := runtime.tailnets.Reset(id); err != nil &&
+			!errors.Is(err, tailnet.ErrNodeInUse) {
+			return err
+		}
 	}
 
 	lease, err := runtime.tailnets.Acquire(id)
 	if err != nil {
 		return err
 	}
+	// 취소로 끝나면 노드도 내린다.
+	//
+	// 여기서 하는 이유: 취소 명령이 직접 내리려 하면 이 테스트가 아직 리스를 들고 있어서
+	// 거절당한다(쓰이는 중인 노드는 내릴 수 없다). 리스를 놓는 시점을 아는 것은 이쪽이다.
+	//
+	// defer 는 늦게 등록한 것이 먼저 돌아서, 이 등록이 Release 보다 앞에 있어야 Release 다음에
+	// 실행된다.
+	cancelled := false
+	defer func() {
+		if cancelled {
+			runtime.stopUnauthenticatedNode(id)
+		}
+	}()
+
 	// 테스트는 노드를 붙들지 않는다. 놓아도 유예 동안 살아 있으므로, 곧바로 호스트에
 	// 연결하면 이미 올라온 노드를 그대로 쓴다.
-	defer lease.Release()
+	//
+	// 아래에서 노드를 새로 만들며 리스를 바꿔 낄 수 있어서, 그때그때의 리스를 놓는다.
+	defer func() { lease.Release() }()
 
 	timeout := tailnetTestTimeout
 	if payload.TimeoutMs > 0 {
@@ -302,8 +387,8 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 	// 사용자가 중간에 그만둘 수 있어야 한다. 브라우저 로그인은 사람을 기다리는 구간이라
 	// 최대 3 분까지 가는데, 접을 방법이 없으면 그때까지 갇힌다.
 	if runtime.tailnetTests != nil {
-		runtime.tailnetTests.begin(id, cancel)
-		defer runtime.tailnetTests.end(id, cancel)
+		attempt := runtime.tailnetTests.begin(id, cancel)
+		defer runtime.tailnetTests.end(id, attempt)
 	}
 
 	// 이미 있는 노드는 Down 된 상태일 수 있다(사용자가 끊었거나 유휴 유예가 지났거나).
@@ -339,6 +424,10 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 		})
 	}
 
+	// 인증 링크를 기다린 시각. 링크가 안 오는 채로 갇히는 경우를 여기서 푼다.
+	var waitingForAuthURLSince time.Time
+	restarted := false
+
 	for {
 		status, err := lease.Node.Status(ctx)
 		if err != nil {
@@ -348,7 +437,47 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 
 		emit(tailnetStatusPayload(id, status))
 
-		if status.State == tailnet.StateRunning {
+		// 인증이 필요한데 링크가 오지 않는 상태로 갇힐 수 있다.
+		//
+		// 컨트롤 플레인에서 노드를 지우면 디스크의 노드 키가 그쪽에 존재하지 않는다. 이미 떠 있던
+		// 노드의 컨트롤 클라이언트는 그 죽은 키로 재등록을 반복하며 백오프에 들어가고, 그 사이
+		// 로그인 링크가 나오지 않는다 — 사용자는 "링크를 받는 중" 에서 끝까지 갇힌다.
+		//
+		// 노드를 새로 만들면 등록을 처음부터 밟아서 링크가 곧바로 나온다. 한 번만 한다 — 그래도
+		// 안 되면 한도까지 기다린 뒤 정직하게 끝낸다.
+		if status.State == tailnet.StateNeedsAuth && status.AuthURL == "" {
+			if waitingForAuthURLSince.IsZero() {
+				waitingForAuthURLSince = time.Now()
+			} else if !restarted && time.Since(waitingForAuthURLSince) > tailnetAuthURLGrace {
+				restarted = true
+				fresh, restartErr := runtime.restartNode(id, &lease)
+				if restartErr != nil {
+					emit(coretypes.TailnetStatusPayload{
+						ID:    id,
+						State: string(tailnet.StateStopped),
+						Error: restartErr.Error(),
+					})
+					return restartErr
+				}
+				if fresh {
+					if err := lease.Node.Up(ctx); err != nil {
+						emit(coretypes.TailnetStatusPayload{
+							ID:    id,
+							State: string(tailnet.StateStopped),
+							Error: err.Error(),
+						})
+						return err
+					}
+					continue
+				}
+			}
+		} else {
+			waitingForAuthURLSince = time.Time{}
+		}
+
+		// 관문은 판정 한 곳만 본다. running 이나 만료 여부를 여기서 다시 조합하지 않는다 —
+		// 그러면 기준이 갈리고, 반쪽 기준이 낡은 상태를 통과시킨다.
+		if status.Connected() {
 			return nil
 		}
 
@@ -356,6 +485,7 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 		case <-ctx.Done():
 			// 사용자가 접은 것이면 실패가 아니다. 마지막 상태만 정리해 보내고 조용히 끝낸다.
 			if errors.Is(ctx.Err(), context.Canceled) {
+				cancelled = true
 				emit(coretypes.TailnetStatusPayload{
 					ID:        id,
 					State:     string(tailnet.StateStopped),
@@ -388,6 +518,15 @@ func (runtime *Runtime) TailnetCancel(requestID string, payload coretypes.Tailne
 		runtime.tailnetTests.cancel(id)
 	}
 
+	// 기다리던 요청만 접으면 노드는 인증 대기 상태로 그대로 남는다. 그러면 취소한 화면에서는
+	// 끝난 것으로 보이는데 다른 화면(설정)은 "브라우저에서 인증을 마쳐 주세요" 를 계속 보여준다 —
+	// 같은 노드를 두고 두 화면이 다른 말을 하게 된다.
+	//
+	// 그래서 아직 붙지 못한 노드는 함께 내린다. 이미 붙어 있는 노드는 건드리지 않는다(취소가
+	// 멀쩡한 연결을 끊으면 안 된다). 쓰이는 중이면 레지스트리가 거절하는데, 그건 다른 세션이
+	// 그 인증을 기다리고 있다는 뜻이므로 그대로 둔다.
+	runtime.stopUnauthenticatedNode(id)
+
 	runtime.emitEvent(coretypes.Event{
 		Type:      coretypes.EventTailnetStatus,
 		RequestID: requestID,
@@ -397,6 +536,16 @@ func (runtime *Runtime) TailnetCancel(requestID string, payload coretypes.Tailne
 		},
 	})
 	return nil
+}
+
+// stopUnauthenticatedNode 는 아직 붙지 못한 노드를 내린다. 실패는 삼킨다 — 취소는 어떤 경우에도
+// 사용자에게 오류로 보이면 안 된다.
+func (runtime *Runtime) stopUnauthenticatedNode(id string) {
+	status, ok := runtime.tailnets.StatusOf(context.Background(), id)
+	if !ok || status.State == tailnet.StateRunning {
+		return
+	}
+	_ = runtime.tailnets.Disconnect(context.Background(), id)
 }
 
 // TailnetDisconnect 는 노드를 지금 내린다. 유휴 유예를 기다리지 않을 뿐 결과는 같다 —
@@ -458,6 +607,11 @@ func sameTailnetProgress(a, b coretypes.TailnetStatusPayload) bool {
 		// Cancelled 를 빼면 취소가 묻힌다 — 노드가 올라오기 전에도 Stopped 가 진행 상태로
 		// 나가므로, 시도를 접었다는 마지막 이벤트가 앞의 Stopped 와 같다고 버려진다.
 		a.Cancelled == b.Cancelled &&
+		// Ready·Online 도 같은 이유다. 준비 여부는 State 와 따로 바뀐다 — running 으로 보고되는
+		// 동안 컨트롤 플레인과 동기화되면서 준비됨으로 넘어간다. 그 전이가 곧 시도의 끝인데,
+		// 여기서 빼면 앞의 running 과 같다고 버려져서 기다리는 쪽이 영원히 끝을 못 본다.
+		a.Ready == b.Ready &&
+		a.Online == b.Online &&
 		a.LoginName == b.LoginName &&
 		a.TailnetName == b.TailnetName &&
 		a.NodeName == b.NodeName &&

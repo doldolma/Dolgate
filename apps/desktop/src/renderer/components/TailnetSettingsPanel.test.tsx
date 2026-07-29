@@ -2,7 +2,19 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { TailnetRecord, TailnetStatus } from '@shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mocks } = vi.hoisted(() => ({
+const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
+  // 상태는 스토어 한곳에서 온다. 이 화면이 자기 구독을 갖지 않으므로, 테스트도 스토어를 통해
+  // 상태를 준다 — 화면이 실제로 읽는 자리와 같다.
+  storeState: {
+    openExternalUrl: () => {},
+    tailnetStatuses: {} as Record<string, unknown>,
+    localTailnetNodeName: 'dev' as string | null,
+  },
+  watchMocks: {
+    acquireTailnetWatch: () => () => {},
+    applyTailnetStatus: (_status: { id: string }) => {},
+    forgetTailnetStatus: (_id: string) => {},
+  },
   mocks: {
     listTailnets: vi.fn(),
     snapshotTailnets: vi.fn(),
@@ -19,9 +31,10 @@ const { mocks } = vi.hoisted(() => ({
 vi.mock('../services/desktop/tailnet', () => mocks);
 
 vi.mock('../store/appStore', () => ({
-  useAppStore: (selector: (state: { openExternalUrl: () => void }) => unknown) =>
-    selector({ openExternalUrl: vi.fn() }),
+  useAppStore: (selector: (state: unknown) => unknown) => selector(storeState),
 }));
+
+vi.mock('../services/desktop/tailnet-watch', () => watchMocks);
 
 import { TailnetSettingsPanel } from './TailnetSettingsPanel';
 
@@ -39,11 +52,9 @@ function createRecord(overrides: Partial<TailnetRecord> = {}): TailnetRecord {
   } as TailnetRecord;
 }
 
-/** 화면이 구독한 상태 리스너. 코어가 상태를 흘리는 것과 같은 자리다. */
-function emitStatus(status: TailnetStatus) {
-  for (const [listener] of mocks.onTailnetStatus.mock.calls) {
-    (listener as (value: TailnetStatus) => void)(status);
-  }
+/** 공유 상태에 값을 넣는다. 코어가 흘린 상태가 스토어에 닿은 것과 같은 자리다. */
+function putStatus(status: TailnetStatus) {
+  storeState.tailnetStatuses = { ...storeState.tailnetStatuses, [status.id]: status };
 }
 
 describe('TailnetSettingsPanel', () => {
@@ -55,6 +66,8 @@ describe('TailnetSettingsPanel', () => {
     mocks.snapshotTailnets.mockResolvedValue({ statuses: [], localNodeName: 'dev' });
     mocks.onTailnetStatus.mockReturnValue(() => {});
     mocks.cancelTailnet.mockResolvedValue(undefined);
+    storeState.tailnetStatuses = {};
+    storeState.localTailnetNodeName = 'dev';
   });
 
   // 노드를 올리는 것은 이 화면만이 아니다. 호스트에 연결하면 그 경로가 노드를 올리는데, 그때
@@ -64,8 +77,9 @@ describe('TailnetSettingsPanel', () => {
     render(<TailnetSettingsPanel />);
     expect(await screen.findByRole('button', { name: '연결' })).toBeInTheDocument();
 
+    putStatus({ id: 'net-1', state: 'needsAuth' });
     act(() => {
-      emitStatus({ id: 'net-1', state: 'needsAuth' });
+      render(<TailnetSettingsPanel />);
     });
 
     const cancel = await screen.findByRole('button', { name: '취소' });
@@ -78,16 +92,16 @@ describe('TailnetSettingsPanel', () => {
     render(<TailnetSettingsPanel />);
     await screen.findByRole('button', { name: '연결' });
 
-    act(() => {
-      emitStatus({ id: 'net-1', state: 'needsAuth' });
-    });
+    putStatus({ id: 'net-1', state: 'needsAuth' });
+    const { unmount } = render(<TailnetSettingsPanel />);
     await screen.findByRole('button', { name: '취소' });
+    unmount();
 
-    act(() => {
-      emitStatus({ id: 'net-1', state: 'stopped', cancelled: true });
-    });
+    // 접히면 상태가 stopped 로 내려온다. 버튼이 남으면 무엇을 기다리는지 알 수 없다.
+    putStatus({ id: 'net-1', state: 'stopped', cancelled: true });
+    render(<TailnetSettingsPanel />);
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '연결' })).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: '연결' }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole('button', { name: '취소' })).not.toBeInTheDocument();
   });

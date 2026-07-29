@@ -4,6 +4,7 @@ import type {
   SshHostRecord,
   TerminalConnectionProgress,
 } from "@shared";
+import { consumeTailnetRelogin } from "../../lib/tailnet-relogin";
 import {
   buildAwsSsmKnownHostIdentity,
   getAwsEc2HostSshPort,
@@ -281,6 +282,12 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     input: EnsureTrustedHostInput,
     tailnetId: string,
   ): Promise<boolean> => {
+    // 인터넷이 없으면 노드를 올릴 수 없다. 그런데 tsnet 의 Start 는 그 사실을 알려 주지 않고
+    // 돌아오지 않아서, 그대로 두면 사용자는 아무 설명 없이 기다리다 한도까지 간다.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error(t('sessionSvc.tailnetOffline'));
+    }
+
     const records = await api.tailnet.list();
     const record = records.find((entry) => entry.id === tailnetId);
     if (!record) {
@@ -310,14 +317,6 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
         return;
       }
       if (status.state === 'needsAuth') {
-        // 오버레이가 "브라우저 다시 열기"·"취소" 를 낼 수 있게 기다리는 대상을 남긴다.
-        set({
-          pendingTailnetAuth: {
-            tailnetId,
-            label: record.label,
-            authUrl: status.authUrl ?? null,
-          },
-        });
         if (status.authUrl) {
           sawAuthUrl = true;
           report('needsAuth');
@@ -332,11 +331,18 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     });
 
     try {
-      const final = await api.tailnet.test({
-        id: tailnetId,
-        controlUrl: record.controlUrl,
-      });
-      if (final.state === 'running') {
+      const final = await api.tailnet.test(
+        {
+          id: tailnetId,
+          controlUrl: record.controlUrl,
+        },
+        // 연결이 실패해서 복구를 누른 직후에만 참이다. 그때는 등록이 아직 유효한지 컨트롤
+        // 플레인에 다시 확인시켜야 한다 — 만료는 상태로 드러나지 않는다.
+        { forceRelogin: consumeTailnetRelogin(tailnetId) },
+      );
+      // 관문은 코어의 판정 하나만 본다. state 로 다시 조합하면 기준이 갈린다 — 만료된 노드는
+      // 새 netmap 이 오기 전까지 running 으로 보고되므로, state 만 보면 그 낡은 값에 통과한다.
+      if (final.ready === true) {
         return true;
       }
       // 실패를 예외로 알린다. false 로 돌려주면 호출부가 "호스트 키 신뢰 대기" 로 취급해서,
@@ -353,7 +359,6 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       );
     } finally {
       unsubscribe();
-      set({ pendingTailnetAuth: null });
     }
   };
 

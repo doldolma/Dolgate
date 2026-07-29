@@ -17,7 +17,6 @@ type fakeNode struct {
 	mu       sync.Mutex
 	ups      int
 	upEr     error
-	downs    int
 	logouts  int
 	closes   int
 	ops      []string
@@ -27,7 +26,6 @@ type fakeNode struct {
 	purgeEr  error
 
 	downEntered  chan struct{}
-	downGate     chan struct{}
 	closeEntered chan struct{}
 	closeGate    chan struct{}
 }
@@ -51,38 +49,6 @@ func (n *fakeNode) Up(context.Context) error {
 	n.ups += 1
 	n.ops = append(n.ops, "up")
 	return n.upEr
-}
-
-func (n *fakeNode) Down(context.Context) error {
-	// 게이트가 걸려 있으면 Down 안에서 멈춘다. 해체가 락 밖에서 진행되는 **동안** 도착한
-	// Acquire 를 재현하는 수단이다 — 그 창이 없으면 경합을 테스트할 수 없다.
-	n.mu.Lock()
-	entered, gate := n.downEntered, n.downGate
-	n.mu.Unlock()
-	if entered != nil {
-		entered <- struct{}{}
-	}
-	if gate != nil {
-		<-gate
-	}
-
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.downs += 1
-	n.ops = append(n.ops, "down")
-	return nil
-}
-
-// gateDown 은 다음 Down 을 붙잡아 둔다. 반환된 entered 는 Down 진입을, release 는 붙잡은
-// Down 을 놓아주는 함수다.
-func (n *fakeNode) gateDown() (entered <-chan struct{}, release func()) {
-	enteredCh := make(chan struct{}, 1)
-	gate := make(chan struct{})
-	n.mu.Lock()
-	n.downEntered = enteredCh
-	n.downGate = gate
-	n.mu.Unlock()
-	return enteredCh, func() { close(gate) }
 }
 
 func (n *fakeNode) Logout(context.Context) error {
@@ -129,10 +95,10 @@ func (n *fakeNode) Purge() error {
 	return n.purgeEr
 }
 
-func (n *fakeNode) counts() (downs, logouts, closes int) {
+func (n *fakeNode) counts() (logouts, closes int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.downs, n.logouts, n.closes
+	return n.logouts, n.closes
 }
 
 // order 는 수행된 순서대로 동작을 돌려준다. 계약의 일부는 발생 여부가 아니라 순서다.
@@ -274,15 +240,15 @@ func TestNodeStaysUpWhileAnyConsumerRemains(t *testing.T) {
 	first.Release()
 	timer.fireAll()
 
-	if downs, _, _ := nodes["corp"].counts(); downs != 0 {
-		t.Errorf("node was brought down with a consumer still holding it (downs=%d)", downs)
+	if _, closes := nodes["corp"].counts(); closes != 0 {
+		t.Errorf("node was closed with a consumer still holding it (closes=%d)", closes)
 	}
 
 	second.Release()
 	timer.fireAll()
 
-	if downs, _, _ := nodes["corp"].counts(); downs != 1 {
-		t.Errorf("downs = %d after the last release, want 1", downs)
+	if _, closes := nodes["corp"].counts(); closes != 1 {
+		t.Errorf("closes = %d after the last release, want 1", closes)
 	}
 }
 
@@ -311,8 +277,8 @@ func TestReacquireDuringGraceKeepsTheNodeUp(t *testing.T) {
 
 	timer.fireAll()
 
-	if downs, _, _ := nodes["corp"].counts(); downs != 0 {
-		t.Errorf("node came down despite being re-acquired during grace (downs=%d)", downs)
+	if _, closes := nodes["corp"].counts(); closes != 0 {
+		t.Errorf("node was closed despite being re-acquired during grace (closes=%d)", closes)
 	}
 	if again.Node != nodes["corp"] {
 		t.Error("re-acquire built a new node instead of reusing the idle one")
@@ -341,42 +307,51 @@ func TestTeardownAlreadyInFlightYieldsToANewConsumer(t *testing.T) {
 	}
 	inFlight[0]()
 
-	if downs, _, _ := nodes["corp"].counts(); downs != 0 {
-		t.Errorf("an in-flight teardown took down a node that had been re-acquired (downs=%d)", downs)
+	if _, closes := nodes["corp"].counts(); closes != 0 {
+		t.Errorf("an in-flight teardown closed a node that had been re-acquired (closes=%d)", closes)
 	}
 
 	// 그리고 그 뒤에도 노드는 정상적으로 쓰인다.
 	again.Release()
 	timer.fireAll()
-	if downs, _, _ := nodes["corp"].counts(); downs != 1 {
-		t.Errorf("downs = %d after the real release, want 1", downs)
+	if _, closes := nodes["corp"].counts(); closes != 1 {
+		t.Errorf("closes = %d after the real release, want 1", closes)
 	}
 }
 
-// Close 가 아니라 Down 인 이유: 등록이 살아 있어야 다음 Acquire 에 재인증이 필요 없다.
-func TestIdleTeardownKeepsTheRegistration(t *testing.T) {
+// 유휴 해체는 노드를 **닫는다**.
+//
+// Down(WantRunning 만 끄기)으로는 tsnet 서버가 살아남아 계속 컨트롤 플레인과 통신하고 DERP 에
+// 붙으려 한다 — 사용자에게는 연결이 끝난 것인데 상태가 계속 바뀌고, 그 노드가 낡은 netmap 을
+// 들고 있어서 다음 연결 때 만료된 등록을 정상으로 보고한다.
+//
+// 등록과 노드 키는 상태 디렉터리에 남으므로, 다음 Acquire 가 만드는 새 노드는 재인증 없이
+// 올라온다. 로그아웃은 하지 않는다 — 그것이 등록을 버리는 동작이다.
+func TestIdleTeardownClosesButKeepsTheRegistration(t *testing.T) {
 	registry, timer, nodes := newTestRegistry(t)
 
 	lease, _ := registry.Acquire("corp")
+	first := nodes["corp"]
 	lease.Release()
 	timer.fireAll()
 
-	downs, logouts, closes := nodes["corp"].counts()
-	if downs != 1 {
-		t.Errorf("downs = %d, want 1", downs)
+	logouts, closes := first.counts()
+	if closes != 1 {
+		t.Errorf("closes = %d, want 1", closes)
 	}
-	if logouts != 0 || closes != 0 {
-		t.Errorf("idle teardown logged out or closed the node (logouts=%d closes=%d)", logouts, closes)
+	if logouts != 0 {
+		t.Errorf("유휴 해체가 로그아웃했다 — 등록을 버리면 다음 연결에 재인증이 생긴다 (logouts=%d)", logouts)
 	}
 
-	// 그리고 노드는 다시 집어 쓸 수 있게 남아 있다.
+	// 다음 소비자는 새 노드를 받는다. 닫힌 노드를 재사용하면 통신하지 못한다.
 	again, err := registry.Acquire("corp")
 	if err != nil {
 		t.Fatalf("acquire after idle teardown: %v", err)
 	}
-	if again.Node != nodes["corp"] {
-		t.Error("acquire after idle teardown built a new node")
+	if again.Node == first {
+		t.Error("닫힌 노드를 그대로 다시 내줬다")
 	}
+	again.Release()
 }
 
 // 등록 해제는 노드를 닫기 전에 컨트롤 플레인에 닿아야 한다 — 닫힌 노드는 통신하지 못하므로
@@ -448,8 +423,8 @@ func TestReleaseIsIdempotent(t *testing.T) {
 	timer.fireAll()
 
 	// 이중 Release 가 두 번째 소비자까지 없애버리면 안 된다.
-	if downs, _, _ := nodes["corp"].counts(); downs != 0 {
-		t.Errorf("double release tore down a node still in use (downs=%d)", downs)
+	if _, closes := nodes["corp"].counts(); closes != 0 {
+		t.Errorf("double release tore down a node still in use (closes=%d)", closes)
 	}
 	second.Release()
 }
@@ -467,7 +442,7 @@ func TestCloseClosesEveryNodeAndRefusesFurtherAcquires(t *testing.T) {
 	}
 
 	for id, node := range nodes {
-		if _, _, closes := node.counts(); closes != 1 {
+		if _, closes := node.counts(); closes != 1 {
 			t.Errorf("%s: closes = %d, want 1", id, closes)
 		}
 	}
@@ -554,58 +529,47 @@ func TestResetStopsTheIdleTimer(t *testing.T) {
 
 	again, _ := registry.Acquire("corp")
 	timer.fireAll()
-	if downs, _, _ := nodes["corp"].counts(); downs != 0 {
-		t.Errorf("the stale timer took down the replacement node (downs=%d)", downs)
+	if _, closes := nodes["corp"].counts(); closes != 0 {
+		t.Errorf("the stale timer closed the replacement node (closes=%d)", closes)
 	}
 	again.Release()
 }
 
 // 사용자가 지금 끊겠다고 한 것. 유휴 유예를 기다리지 않을 뿐, 등록은 남아야 한다 —
 // 로그아웃하면 다음 연결에서 브라우저 로그인을 다시 해야 한다.
-func TestDisconnectTakesTheNodeDownWithoutLoggingOut(t *testing.T) {
+func TestDisconnectClosesWithoutLoggingOut(t *testing.T) {
 	registry, _, nodes := newTestRegistry(t)
 
 	lease, _ := registry.Acquire("corp")
+	first := nodes["corp"]
 	lease.Release()
 
 	if err := registry.Disconnect(context.Background(), "corp"); err != nil {
 		t.Fatalf("Disconnect() error = %v", err)
 	}
 
-	if got := nodes["corp"].order(); len(got) != 1 || got[0] != "down" {
-		t.Errorf("operations were %v, want [down]", got)
+	// 닫기만 한다. 로그아웃은 등록을 버리는 동작이라, 그러면 다시 연결할 때 재인증이 생긴다.
+	if got := first.order(); len(got) != 1 || got[0] != "close" {
+		t.Errorf("operations were %v, want [close]", got)
 	}
 
-	// 같은 노드를 다시 집어 쓸 수 있어야 한다. 새로 만들면 재인증이 붙는다.
+	// 다음 소비자는 새 노드를 받는다 — 등록은 상태 디렉터리에 남아 있으므로 재인증은 없다.
 	again, err := registry.Acquire("corp")
 	if err != nil {
 		t.Fatalf("acquire after disconnect: %v", err)
 	}
-	if again.Node != nodes["corp"] {
-		t.Error("acquire after disconnect built a new node")
+	if again.Node == first {
+		t.Error("닫힌 노드를 그대로 다시 내줬다")
 	}
 	again.Release()
 }
 
-func TestDisconnectRefusesWhileInUse(t *testing.T) {
-	registry, _, nodes := newTestRegistry(t)
-
-	lease, _ := registry.Acquire("corp")
-	defer lease.Release()
-
-	if err := registry.Disconnect(context.Background(), "corp"); !errors.Is(err, ErrNodeInUse) {
-		t.Fatalf("Disconnect() error = %v, want ErrNodeInUse", err)
-	}
-	if got := nodes["corp"].order(); len(got) != 0 {
-		t.Errorf("operations were %v, want none", got)
-	}
-}
-
-// 유예 타이머를 세워 둔 채 내리면, 나중에 타이머가 발동해 다시 올라온 노드를 내린다.
+// 유예 타이머를 세워 둔 채 닫으면, 나중에 그 타이머가 발동해 새로 올라온 노드를 닫는다.
 func TestDisconnectStopsTheIdleTimer(t *testing.T) {
 	registry, timer, nodes := newTestRegistry(t)
 
 	lease, _ := registry.Acquire("corp")
+	first := nodes["corp"]
 	lease.Release() // 유예 시작
 
 	if err := registry.Disconnect(context.Background(), "corp"); err != nil {
@@ -614,11 +578,15 @@ func TestDisconnectStopsTheIdleTimer(t *testing.T) {
 	if timer.live() != 0 {
 		t.Errorf("live timers = %d after Disconnect, want 0", timer.live())
 	}
+	if _, closes := first.counts(); closes != 1 {
+		t.Errorf("closes = %d, want 1 — 연결 종료는 노드를 닫는다", closes)
+	}
 
 	again, _ := registry.Acquire("corp")
+	replacement := nodes["corp"]
 	timer.fireAll()
-	if downs, _, _ := nodes["corp"].counts(); downs != 1 {
-		t.Errorf("downs = %d, want 1 — the stale timer took the node down again", downs)
+	if _, closes := replacement.counts(); closes != 0 {
+		t.Errorf("낡은 타이머가 새 노드를 닫았다 (closes=%d)", closes)
 	}
 	again.Release()
 }
@@ -703,7 +671,7 @@ func TestAcquireWaitsForInFlightIdleTeardown(t *testing.T) {
 		t.Fatalf("acquire: %v", err)
 	}
 	node := nodes["corp"]
-	entered, release := node.gateDown()
+	entered, release := node.gateClose()
 	lease.Release()
 
 	teardownDone := make(chan struct{})
@@ -724,7 +692,7 @@ func TestAcquireWaitsForInFlightIdleTeardown(t *testing.T) {
 	// 해체가 끝나기 전에는 리스가 나오지 않아야 한다.
 	select {
 	case <-acquired:
-		t.Fatal("해체 중인 노드에 리스가 발급됐다 — Down 이 이 소비자 뒤에 도착한다")
+		t.Fatal("해체 중인 노드에 리스가 발급됐다 — Close 가 이 소비자 뒤에 도착한다")
 	case <-time.After(50 * time.Millisecond):
 	}
 
@@ -737,12 +705,12 @@ func TestAcquireWaitsForInFlightIdleTeardown(t *testing.T) {
 	}
 	defer fresh.Release()
 
-	// 이제 Down 은 이미 끝났다. 이 소비자가 Up 을 부르면 그 뒤로 Down 이 오지 않는다.
-	if err := fresh.Node.Up(context.Background()); err != nil {
-		t.Fatalf("up: %v", err)
+	// 기다린 소비자는 **새** 노드를 받아야 한다. 닫히는 중이던 그 노드를 내주면 통신하지 못한다.
+	if fresh.Node == node {
+		t.Error("닫히는 중이던 노드를 기다린 소비자에게 내줬다")
 	}
-	if got := node.order(); got[len(got)-1] != "up" {
-		t.Errorf("order() = %v, want up 이 마지막 — Down 이 Up 뒤에 도착했다", got)
+	if got := node.order(); len(got) != 1 || got[0] != "close" {
+		t.Errorf("order() = %v, want [close]", got)
 	}
 }
 
@@ -872,5 +840,53 @@ func TestForgetDoesNotLetANewNodeStartWhileTearingDown(t *testing.T) {
 	}
 	if got := built(); got != 2 {
 		t.Errorf("nodes built = %d, want 2", got)
+	}
+}
+
+// 판정은 이 두 함수에만 있다. 여기가 흔들리면 관문과 dial 안전망이 동시에 흔들린다.
+func TestStatusConnectedRequiresALiveControlPlaneSession(t *testing.T) {
+	// 만료돼도 새 netmap 이 오지 않으면 running 이 그대로 남는다. 그것을 연결됨으로 읽으면
+	// 연결 흐름이 tailnet 을 기다리지 않고 SSH 로 넘어가고, 사용자는 브라우저에서 로그인하는
+	// 중에 화면이 실패로 뒤집히는 것을 본다.
+	for name, status := range map[string]Status{
+		"컨트롤 플레인과 끊김": {State: StateRunning, Online: false},
+		"만료":          {State: StateRunning, Online: true, Expired: true},
+		"인증 대기":       {State: StateNeedsAuth, Online: true},
+		"승인 대기":       {State: StateNeedsApproval, Online: true},
+		"기동 중":        {State: StateStarting, Online: true},
+		"중단됨":         {State: StateStopped, Online: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if status.Connected() {
+				t.Errorf("%s 은 확실히 연결된 것이 아니다: %#v", name, status)
+			}
+		})
+	}
+
+	connected := Status{State: StateRunning, Online: true}
+	if !connected.Connected() {
+		t.Error("살아 있는 세션 + 인가 + 만료 아님은 연결됨이어야 한다")
+	}
+}
+
+// 관문과 다른 질문이다. 노드가 막 올라오는 중이면 확실히 막힌 것이 아니므로 통과시켜야 한다 —
+// tsnet 의 Dial 이 Running 을 기다려 주고, 여기서 막으면 기동 직후 첫 연결이 깨진다.
+func TestStatusBlockedReasonOnlyReportsDefiniteBlockers(t *testing.T) {
+	for name, expected := range map[string]struct {
+		status Status
+		reason BlockReason
+	}{
+		"인증 대기":      {Status{State: StateNeedsAuth}, BlockNeedsAuth},
+		"승인 대기":      {Status{State: StateNeedsApproval}, BlockNeedsApproval},
+		"만료":         {Status{State: StateRunning, Online: true, Expired: true}, BlockExpired},
+		"낡은 running": {Status{State: StateRunning, Online: false}, BlockOffline},
+		"기동 중":       {Status{State: StateStarting}, ""},
+		"연결됨":        {Status{State: StateRunning, Online: true}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := expected.status.BlockedReason(); got != expected.reason {
+				t.Errorf("BlockedReason() = %q, want %q", got, expected.reason)
+			}
+		})
 	}
 }

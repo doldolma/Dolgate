@@ -1,6 +1,7 @@
 package containers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -898,7 +899,7 @@ func (s *Service) dialTarget(
 		return nil, dialErr
 	}
 	config.Dial = dial
-	return sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+	return sshconn.DialClient(context.Background(), target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
 		responseCh := make(chan []string, 1)

@@ -318,8 +318,38 @@ export interface TailnetStatus {
   tailnetName?: string;
   nodeName?: string;
   nodeIp?: string;
+  /**
+   * 이 Tailscale 네트워크를 통해 **확실히** 통신할 수 있는지.
+   *
+   * 판정은 코어 한 곳에서만 한다(`tailnet.Status.Connected`). 화면과 연결 흐름은 이 값을 읽고,
+   * state·expired·peers 로 다시 조합하지 않는다 — 곳곳에서 각자 판단하면 기준이 갈리고, 반쪽
+   * 기준이 낡은 상태를 통과시킨다.
+   */
+  ready?: boolean;
+  /**
+   * 컨트롤 플레인과 세션이 살아 있는지(map poll 중인지).
+   *
+   * state 와 expired 는 끊긴 뒤에도 낡은 값으로 남는다 — 등록이 만료돼도 연결됨으로, 기기
+   * 목록까지 그대로다. ready 가 false 인 이유를 설명하는 값이다.
+   */
+  online?: boolean;
   /** 노드 키가 만료됐는지. state 가 running 이어도 true 일 수 있다. */
   expired?: boolean;
+  /**
+   * 백엔드가 스스로 보고하는 문제들.
+   *
+   * state 가 정상으로 보이는데 통신이 안 될 때 유일하게 남는 단서다 — tailscale 은 로그아웃,
+   * 마지막 로그인 오류, 컨트롤 플레인과 동기화 실패를 여기에 담는다.
+   */
+  health?: string[];
+  /**
+   * tsnet 이 보고한 원문 상태와 노드 키 만료 시각.
+   *
+   * state 는 몇 가지로 뭉치므로, 무엇을 보고 그렇게 판단했는지 확인하려면 원문이 필요하다.
+   * 만료가 상태로 드러나지 않는 문제를 눈으로 확인하는 유일한 수단이다.
+   */
+  backendState?: string;
+  keyExpiry?: string;
   /**
    * 사용자가 시도를 접어서 끝났는지. 실패가 아니라서 error 가 비어 있는데, 그렇다고 진행
    * 중인 것도 아니다 — 이 표시가 없으면 시도가 끝났는지 알 수 없다.
@@ -339,6 +369,17 @@ export interface TailnetSnapshot {
   statuses: TailnetStatus[];
   /** 붙어 있지 않아도 알 수 있다 — 기기 목록에서 자기 기기를 찾는 단서다. */
   localNodeName?: string;
+}
+
+/** 연결 테스트 요청 옵션. 설정이 아니라 이번 요청에만 해당하는 것들이다. */
+export interface TailnetTestOptions {
+  /**
+   * 기다리기 전에 컨트롤 플레인에 등록을 다시 확인시킨다.
+   *
+   * 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 연결됨이고 통신만 안 된다. 그래서
+   * 연결이 실패한 뒤에만 이걸 켜서, 인증이 필요하다는 답을 받거나 그대로 붙는 것을 확인한다.
+   */
+  forceRelogin?: boolean;
 }
 
 export interface TailnetConfig {
@@ -1398,7 +1439,10 @@ export interface DesktopApi {
      * onStatus 로 온다 — 브라우저 로그인이면 사용자가 인증하는 구간이 있어서 응답 하나로는
      * 무엇을 기다리는지 보여줄 수 없다.
      */
-    test: (config: TailnetConfig) => Promise<TailnetStatus>;
+    test: (
+      config: TailnetConfig,
+      options?: TailnetTestOptions,
+    ) => Promise<TailnetStatus>;
     /** 노드 등록을 해제한다. tailnet 설정 자체는 남는다. */
     forget: (id: string) => Promise<void>;
     /** 노드를 지금 내린다. 등록은 남으므로 다시 연결해도 재인증이 없다. */

@@ -66,6 +66,9 @@ describe("resolveConnectionFailurePresentation", () => {
       title: "Host Key Not Trusted",
       message:
         "이 호스트의 SSH 호스트 키를 아직 신뢰하지 않았습니다. 호스트 키를 신뢰한 뒤 다시 시도해 주세요.",
+      // 실패를 분류하는 자리는 하나여야 한다 — 화면이 문구를 다시 뒤져 계층을 추측하면 같은
+      // 판단이 두 곳에 생긴다. 이 계층 표시로 실패가 그 단계에 붙는다.
+      layer: "hostKey",
     });
   });
 

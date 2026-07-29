@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -248,7 +249,14 @@ func New(options Options) *Runtime {
 				payload.EndpointID,
 				emitEvent,
 			)
-			result, err := sshconn.ProbeHostKey(payload.Host, payload.Port, jump, payload.WSProxy, probeConfig)
+			result, err := sshconn.ProbeHostKey(
+				context.Background(),
+				payload.Host,
+				payload.Port,
+				jump,
+				payload.WSProxy,
+				probeConfig,
+			)
 			if err != nil {
 				return coretypes.HostKeyProbedPayload{}, err
 			}
@@ -814,7 +822,7 @@ fi
 `
 
 func (runtime *Runtime) InstallAuthorizedKey(requestID string, payload coretypes.AuthorizedKeyInstallPayload) error {
-	client, err := sshconn.DialClient(sshconn.Target{
+	client, err := sshconn.DialClient(context.Background(), sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
 		Username:              payload.Username,

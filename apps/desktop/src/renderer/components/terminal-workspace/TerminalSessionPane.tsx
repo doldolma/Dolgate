@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import {
   isAwsEc2HostRecord,
@@ -7,7 +7,9 @@ import {
 } from '@shared';
 import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
-import { cancelTailnet, forgetTailnet } from '../../services/desktop/tailnet';
+import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
+import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
+import { requestTailnetRelogin } from '../../lib/tailnet-relogin';
 import {
   extractDroppedAbsolutePaths,
   hasExternalFileDrop,
@@ -31,6 +33,11 @@ import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
+import {
+  resolveTailnetFailureGuidance,
+  resolveTailnetPhaseMessage,
+} from './terminalSessionHelpers';
+import { resolveConnectionStages } from './connectionStages';
 import { TerminalAutocompleteOverlay } from './TerminalAutocompleteOverlay';
 import { TerminalBlockOverlay } from './TerminalBlockOverlay';
 import { TerminalBlockStickyHeader } from './TerminalBlockStickyHeader';
@@ -69,26 +76,30 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   } = props;
 
   const snippets = useAppStore((state) => state.snippets);
-  // tailnet 인증 대기는 노드 단위(tailnet 별)라 세션 상태가 아니다. 오버레이의 "브라우저 다시
-  // 열기"·"취소" 가 이 값을 쓴다.
-  const pendingTailnetAuth = useAppStore((state) => state.pendingTailnetAuth);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
 
   /**
-   * tailnet 재인증. 죽은 등록을 버리고 곧바로 다시 연결한다 — 그러면 준비 단계가 처음부터
-   * 인증 흐름을 돌려서(브라우저 열기 포함) 이 화면에서 끝난다.
+   * tailnet 복구. 등록을 다시 확인하라고 표시하고 곧바로 다시 연결한다.
    *
-   * forget 은 등록만 해제하고 tailnet 설정은 남기므로 다시 등록할 것이 없다.
+   * 확인을 여기서 직접 쏘지 않는 이유: 코어는 tailnet 당 시도 하나만 유지해서, 확인과 재연결을
+   * 잇달아 쏘면 둘이 서로를 접는다. 표시만 남기면 재연결이 태우는 그 하나의 요청이 확인까지
+   * 겸하고, 진행 상황도 이 화면에 그대로 보인다.
+   *
+   * 등록을 버리지 않는다. 만료인지 알 수 없으니, 버리는 대신 컨트롤 플레인에 물어서 답을
+   * 받는다 — 만료였으면 인증이 필요하다고 답하고(브라우저가 열린다), 살아 있었으면 그대로
+   * 붙는다. 만료가 아니었을 때 멀쩡한 등록을 날리는 손해가 없다.
    */
   const tailnetIdOfHost =
     props.host && isSshHostRecord(props.host) ? props.host.tailnetId?.trim() : undefined;
-  const reauthenticateTailnet = useCallback(async () => {
+  const recoverTailnet = useCallback(async () => {
     if (!tailnetIdOfHost) {
       return;
     }
-    await forgetTailnet(tailnetIdOfHost).catch(() => undefined);
+    requestTailnetRelogin(tailnetIdOfHost);
     await onRetry?.();
   }, [onRetry, tailnetIdOfHost]);
+
+
   const connectHost = useAppStore((state) => state.connectHost);
   const killTmuxSession = useAppStore((state) => state.killTmuxSession);
   // tmux 하단바 "열기" — 같은 호스트로 control mode(tmux -CC) 연결을 시작한다(기본 dolgate 세션).
@@ -315,6 +326,176 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         : null,
     [tab?.errorMessage],
   );
+  /**
+   * 이 호스트의 tailnet 이 지금 어떤 상태인지. 설정 화면과 같은 값을 본다.
+   *
+   * 화면마다 따로 읽으면 서로 다른 말을 한다 — 설정에서는 인증이 진행 중인데 여기는 실패한
+   * 채로 멈춰 있고, 로그인을 마쳐도 여기만 그대로 남는다. 노드는 tailnet 단위로 공유되므로
+   * 상태도 하나여야 한다.
+   */
+  const tailnetStatus = useAppStore((state) =>
+    tailnetIdOfHost ? state.tailnetStatuses[tailnetIdOfHost] : undefined,
+  );
+
+  /**
+   * Tailscale 계층이 직접 알린 실패인지.
+   *
+   * 대상까지 못 닿았다는 사실(타임아웃)로는 판단하지 않는다 — 등록이 유효한지는 그 계층이 이미
+   * 확인했고, 그러고도 못 닿는 것은 대상이나 경로의 문제다. 섞으면 멀쩡한 등록을 다시 로그인하라고
+   * 권하게 된다.
+   */
+  const failureKind = connectionFailurePresentation?.kind;
+
+  const tailscaleFailure =
+    Boolean(tailnetIdOfHost) &&
+    (failureKind === 'tailscale-expired' || failureKind === 'tailscale-auth');
+
+
+  /**
+   * 아직 붙지 못한 tailnet 세션인 동안만 상태를 읽는다. 붙은 연결에는 이 왕복이 얹히지 않는다.
+   *
+   * 실패한 경우만 보면 안 된다 — 같은 tailnet 을 쓰는 터미널을 하나 더 열면 그 세션은 진행 중인
+   * 인증에 합류하는데, 진행 문구는 시도를 시작한 세션에만 간다. 그 세션도 여기서 같은 상태를
+   * 읽어야 "무엇을 기다리는지" 를 알 수 있다.
+   */
+  //
+  // 'pending' 을 빼먹으면 아무것도 보이지 않는다 — 연결을 시작한 탭은 세션 id 를 받기 전까지
+  // pending 이고, tailnet 을 올리는 구간이 바로 그 안이다.
+  //
+  // 실패 종류로 가르면 안 된다 — Tailscale 이 아닌 이유로 실패한 화면도 그 계층 상태를 보여주고
+  // 있어서, 감시를 끊으면 그 표시가 실패한 순간 값으로 얼어붙는다. 그러면 설정 화면은 살아 있는
+  // 값을, 이 화면은 굳은 값을 보여줘서 둘이 다른 말을 한다.
+  const tailnetSessionPending = Boolean(tailnetIdOfHost) && tab?.status !== 'connected';
+  useEffect(() => {
+    if (!tailnetSessionPending) {
+      return;
+    }
+    return acquireTailnetWatch();
+  }, [tailnetSessionPending]);
+
+  /**
+   * tailnet 이 지금 사람을 기다리는 중인지(브라우저 로그인·관리자 승인).
+   *
+   * 그 경우 실패 화면을 그대로 두면 거짓말이 된다 — 이미 인증이 진행 중인데 "다시 로그인"을
+   * 권하게 된다. 진행 중이라고 말하고, 설정 화면과 같은 동작(브라우저 다시 열기·취소)을 준다.
+   */
+  const tailnetAuthInFlight =
+    tailnetSessionPending &&
+    (tailnetStatus?.state === 'needsAuth' || tailnetStatus?.state === 'needsApproval');
+
+  /**
+   * 실패를 어떻게 말할지 정하는 데 필요한 사실들.
+   *
+   * 만료 여부는 공유 상태에서 오고, 인증 방식은 이 tailnet 의 설정에서 온다(auth key 경로에는
+   * 다시 할 로그인이 없어서 낼 수 있는 동작이 다르다).
+   */
+  const [tailnetUsesAuthKey, setTailnetUsesAuthKey] = useState<boolean | null>(null);
+  const [tailnetLabel, setTailnetLabel] = useState('');
+  useEffect(() => {
+    if (!tailnetSessionPending || !tailnetIdOfHost) {
+      setTailnetUsesAuthKey(null);
+      return;
+    }
+    let cancelled = false;
+    void Promise.resolve()
+      .then(listTailnets)
+      .then((records) => {
+        if (!cancelled) {
+          const record = records.find((entry) => entry.id === tailnetIdOfHost);
+          setTailnetUsesAuthKey(record?.hasAuthKey === true);
+          setTailnetLabel(record?.label ?? '');
+        }
+      })
+      .catch(() => {
+        // 못 읽으면 브라우저 경로로 떨어진다 — 그쪽이 기본이다.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tailnetIdOfHost, tailnetSessionPending]);
+
+  // 만료만 그 자리에서 다시 로그인해서 풀린다. 인증이 진행 중인 경우는 새 로그인을 걸면 진행
+  // 중인 것을 버리게 되므로 브라우저로 보낸다.
+  const tailnetGuidance =
+    failureKind === 'tailscale-expired'
+      ? resolveTailnetFailureGuidance(tailnetUsesAuthKey)
+      : null;
+
+  const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
+
+  /**
+   * 이 연결이 거치는 단계들. 오버레이가 이것을 그린다.
+   *
+   * 한 줄 문구는 새 단계가 앞 단계를 덮어써서, 빨리 지나간 단계는 사용자가 못 본 것과 같았다.
+   * 실패해도 어디까지 갔는지 알 수 없어서 Tailscale 문제인지 SSH 문제인지 구분이 안 됐다.
+   */
+  const connectionStages = useMemo(
+    () =>
+      resolveConnectionStages({
+        tab,
+        hasTailscale: Boolean(tailnetIdOfHost),
+        // 대상 주소로 넷맵에서 그 기기를 찾아 경로를 보여준다 — Tailscale 이 붙어 있어도 대상에
+        // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.
+        targetAddress:
+          props.host && isSshHostRecord(props.host) ? props.host.hostname : undefined,
+        tailnetStatus,
+        failureLayer: connectionFailurePresentation?.layer ?? null,
+        failureMessage: connectionFailurePresentation?.message,
+        hostKeyPrompted:
+          pendingHostKeyPrompt != null &&
+          pendingHostKeyPrompt.action.hostId === props.host?.id,
+      }),
+    [
+      connectionFailurePresentation?.layer,
+      connectionFailurePresentation?.message,
+      pendingHostKeyPrompt,
+      props.host,
+      tab,
+      tailnetIdOfHost,
+      tailnetLabel,
+      tailnetStatus,
+    ],
+  );
+
+  const tailnetPhaseMessage = tailnetSessionPending
+    ? resolveTailnetPhaseMessage(tailnetLabel, tailnetStatus)
+    : null;
+  /**
+   * 지금 열어야 할 인증 링크.
+   *
+   * 누가 그 인증을 시작했는지는 상관없다 — 노드가 tailnet 단위로 공유되므로 링크도 공유 상태
+   * 하나에서 온다. 세션별로 따로 들고 있으면 다른 화면이 시작한 인증을 이 화면이 모른다.
+   */
+  const tailnetAuthUrl = tailnetAuthInFlight ? tailnetStatus?.authUrl : undefined;
+
+  /**
+   * 인증이 필요한데 링크가 아직 없는 상태.
+   *
+   * 코어가 유예를 넘기면 노드를 새로 만들어 스스로 푼다. 그래도 안 풀리는 경우에 사용자가 할 수
+   * 있는 일이 취소뿐이면 막다른 화면이 된다 — 새 노드로 처음부터 다시 밟는 길을 준다.
+   */
+  const tailnetWaitingForLink =
+    tailnetAuthInFlight && tailnetStatus?.state === 'needsAuth' && !tailnetStatus.authUrl;
+
+  /** 노드를 버리고 처음부터 다시. 취소가 그 노드를 닫으므로 다음 시도는 새 노드로 시작한다. */
+  const restartTailnet = useCallback(async () => {
+    if (!tailnetIdOfHost) {
+      return;
+    }
+    await cancelTailnet(tailnetIdOfHost).catch(() => undefined);
+    requestTailnetRelogin(tailnetIdOfHost);
+    await onRetry?.();
+  }, [onRetry, tailnetIdOfHost]);
+
+  const tailnetFailureMessage =
+    tab?.status === 'error'
+      ? // 실패한 화면에서는 "브라우저에서 로그인을 마쳐 주세요" 라고 하면 안 된다 — 실패로
+        // 앉아 있으면서 진행 중인 것처럼 말하게 된다. 인증이 아직 살아 있다는 사실만 알리고,
+        // 로그인을 마치면 여기서 이어 붙는다는 것까지 말한다.
+        (tailnetGuidance?.message ??
+        (tailnetAuthInFlight ? translate('connectFailure.tailnetAuthInFlight') : null))
+      : tailnetPhaseMessage;
+
 
   // --- 터미널 파일 드롭 → 현재 cwd로 SFTP 업로드 ---
   const uploadLocalFilesToHost = useAppStore(
@@ -500,7 +681,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
       {tab?.errorMessage ? (
         <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
-          {connectionFailurePresentation?.message ?? tab.errorMessage}
+          {tailnetFailureMessage ?? connectionFailurePresentation?.message ?? tab.errorMessage}
         </NoticeCard>
       ) : null}
       {serialNotice ? (
@@ -665,7 +846,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
               <TerminalConnectionOverlay
                 error={tab?.status === 'error'}
                 title={controller.connectionOverlayTitle}
-                message={controller.connectionOverlayMessage}
+                message={tailnetFailureMessage ?? controller.connectionOverlayMessage}
+                stages={connectionStages}
                 steps={tab?.connectionHops}
                 showRetry={tab?.connectionProgress?.retryable !== false}
                 onRetry={() => {
@@ -676,35 +858,38 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                 }}
                 showCancel={
                   (tab?.connectionProgress?.stage === 'reconnecting' ||
-                    pendingTailnetAuth !== null) &&
+                    tailnetAuthInFlight) &&
                   tab?.status !== 'error'
                 }
                 cancelLabel={
-                  pendingTailnetAuth !== null ? translate('common.cancel') : undefined
+                  tailnetAuthInFlight ? translate('common.cancel') : undefined
                 }
                 onCancel={() => {
-                  if (pendingTailnetAuth) {
+                  if (tailnetAuthInFlight && tailnetIdOfHost) {
                     // 인증을 접으면 준비 단계가 실패로 끝나고 연결도 그 이유로 멈춘다.
-                    void cancelTailnet(pendingTailnetAuth.tailnetId);
+                    // 노드도 함께 내려간다(코어가 처리) — 설정 화면도 같이 정리된다.
+                    void cancelTailnet(tailnetIdOfHost);
                     return;
                   }
                   void onCancelReconnect?.();
                 }}
                 secondaryActionLabel={
-                  connectionFailurePresentation?.kind === 'tailnet-unreachable' &&
-                  tailnetIdOfHost
-                    ? translate('misc.reauthenticateTailnet')
-                    : pendingTailnetAuth?.authUrl
-                      ? translate('misc.reopenBrowser')
+                  // 이미 인증이 진행 중이면 할 일은 브라우저로 돌아가는 것뿐이다. 그 상태에서
+                  // "다시 로그인" 을 내밀면 진행 중인 인증을 버리게 된다.
+                  tailnetAuthUrl
+                    ? translate('misc.reopenBrowser')
+                    : tailnetGuidance?.recovery === 'login'
+                      ? translate('misc.reauthenticateTailnet')
                       : undefined
                 }
                 onSecondaryAction={
-                  connectionFailurePresentation?.kind === 'tailnet-unreachable' &&
-                  tailnetIdOfHost
-                    ? () => void reauthenticateTailnet()
-                    : pendingTailnetAuth?.authUrl
-                      ? () => void openExternalUrl(pendingTailnetAuth.authUrl as string)
-                      : undefined
+                  tailnetAuthUrl
+                    ? () => void openExternalUrl(tailnetAuthUrl)
+                    : tailnetWaitingForLink
+                      ? () => void restartTailnet()
+                      : tailnetGuidance?.recovery === 'login'
+                        ? () => void recoverTailnet()
+                        : undefined
                 }
               />
             ) : null}

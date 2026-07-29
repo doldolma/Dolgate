@@ -144,44 +144,6 @@ describe("tailnet readiness before connecting", () => {
     expect(messageNow()).toContain("확인하는 중");
   });
 
-  // 오버레이의 "브라우저 다시 열기"·"취소" 는 이 값으로 뜬다. 안 채워지면 버튼이 없어서
-  // 사용자는 브라우저를 실수로 닫았을 때 되살릴 방법이 없다.
-  it("exposes the pending auth so the overlay can offer actions", async () => {
-    const api = createTailnetApi();
-    let emitStatus: ((status: { id: string; state: string; authUrl?: string }) => void) | undefined;
-    vi.mocked(api.tailnet.onStatus).mockImplementation((listener) => {
-      emitStatus = listener as never;
-      return () => undefined;
-    });
-    let resolveTest: ((value: unknown) => void) | undefined;
-    vi.mocked(api.tailnet.test).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveTest = resolve as (value: unknown) => void;
-        }) as never,
-    );
-
-    const store = createAppStore(api);
-    await store.getState().bootstrap();
-    void store.getState().connectHost("host-1", 120, 32);
-    await flushMicrotasks();
-
-    expect(store.getState().pendingTailnetAuth).toBeNull();
-
-    emitStatus?.({ id: "net-1", state: "needsAuth", authUrl: "https://login.example.com/a/x" });
-    await flushMicrotasks();
-    expect(store.getState().pendingTailnetAuth).toEqual({
-      tailnetId: "net-1",
-      label: "회사망",
-      authUrl: "https://login.example.com/a/x",
-    });
-
-    // 끝나면 지워져야 한다 — 남으면 다음 연결에서 있지도 않은 인증을 기다리는 버튼이 뜬다.
-    resolveTest?.({ id: "net-1", state: "running" });
-    await flushMicrotasks();
-    expect(store.getState().pendingTailnetAuth).toBeNull();
-  });
-
   // 취소하거나 실패하면 그 사실이 화면에 드러나야 한다. 조용히 끝나면 오버레이가 마지막 문구
   // 그대로 멈춰서, 사용자에게는 "취소를 눌렀는데 아무 일도 없다" 로 보인다.
   it("surfaces a failed or cancelled tailnet as a connection error", async () => {
@@ -224,7 +186,6 @@ describe("tailnet readiness before connecting", () => {
 
     emitStatus?.({ id: "net-1", state: "needsAuth", authUrl: "https://login.example.com/a/x" });
     await flushMicrotasks();
-    expect(store.getState().pendingTailnetAuth).not.toBeNull();
 
     // 취소가 코어에 닿으면 진행 중이던 시도가 이 모양으로 끝난다.
     resolveTest?.({ id: "net-1", state: "stopped", cancelled: true });
@@ -233,8 +194,6 @@ describe("tailnet readiness before connecting", () => {
 
     const tab = store.getState().tabs.find((item) => item.hostId === "host-1");
     expect(tab?.status).toBe("error");
-    // 남아 있으면 실패 화면에 "브라우저 다시 열기"·"취소" 가 계속 뜬다.
-    expect(store.getState().pendingTailnetAuth).toBeNull();
   });
 
   // 다른 tailnet 의 상태가 이 연결의 진행을 덮으면 안 된다.

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -62,7 +63,7 @@ type DialOptions struct {
 
 // Dial establishes a connection.
 func Dial(opts DialOptions) (*Conn, error) {
-	client, err := sshconn.DialClient(opts.Target, opts.Config, opts.Responder)
+	client, err := sshconn.DialClient(context.Background(), opts.Target, opts.Config, opts.Responder)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,10 @@
-import type { TailnetConfig, TailnetRecord, TailnetSnapshot, TailnetStatus } from '@shared';
+import type {
+  TailnetConfig,
+  TailnetRecord,
+  TailnetSnapshot,
+  TailnetStatus,
+  TailnetTestOptions,
+} from '@shared';
 import { desktopApi } from '../desktopApi';
 
 export function listTailnets(): Promise<TailnetRecord[]> {
@@ -15,8 +21,11 @@ export function removeTailnet(id: string): Promise<void> {
   return desktopApi.tailnet.remove(id);
 }
 
-export function testTailnet(config: TailnetConfig): Promise<TailnetStatus> {
-  return desktopApi.tailnet.test(config);
+export function testTailnet(
+  config: TailnetConfig,
+  options?: TailnetTestOptions,
+): Promise<TailnetStatus> {
+  return desktopApi.tailnet.test(config, options);
 }
 
 export function forgetTailnet(id: string): Promise<void> {

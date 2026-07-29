@@ -53,7 +53,7 @@ type tsnetNode struct {
 // 해두고 한 번도 연결하지 않은 채 등록 해제하는 것은 충분히 흔한 경로다.
 //
 // Start 자체는 멱등이라 여러 번 불러도 문제없다.
-func (n *tsnetNode) ensureStarted() error {
+func (n *tsnetNode) ensureStarted(ctx context.Context) error {
 	n.mu.Lock()
 	if n.closed {
 		n.mu.Unlock()
@@ -61,14 +61,35 @@ func (n *tsnetNode) ensureStarted() error {
 	}
 	n.mu.Unlock()
 
-	if err := n.server.Start(); err != nil {
-		return fmt.Errorf("tailnet: start: %w", err)
+	if err := startWithCancel(ctx, n.server.Start); err != nil {
+		return err
 	}
 
 	n.mu.Lock()
 	n.started = true
 	n.mu.Unlock()
 	return nil
+}
+
+// startWithCancel 은 기동을 기다리되 취소되면 그 이유로 돌아간다.
+//
+// tsnet 의 Start 는 ctx 를 받지 않고, 네트워크가 없으면 돌아오지 않는다. 그대로 기다리면
+// 사용자가 취소를 눌러도 아무 일이 없다 — 취소는 ctx 를 끊는데 그 호출은 그것을 보지 못한다.
+//
+// 남은 고루틴은 Start 가 끝나면 스스로 사라진다. 그 노드는 어차피 닫히므로 결과를 쓸 일이 없다.
+func startWithCancel(ctx context.Context, start func() error) error {
+	started := make(chan error, 1)
+	go func() { started <- start() }()
+
+	select {
+	case err := <-started:
+		if err != nil {
+			return fmt.Errorf("tailnet: start: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("tailnet: start: %w", ctx.Err())
+	}
 }
 
 // NewNode 는 설정대로 tsnet 노드를 만든다. 서버는 여기서 기동하지 않는다 — tsnet 의
@@ -109,7 +130,7 @@ func (n *tsnetNode) Dial(ctx context.Context, network, address string) (net.Conn
 // 반환하므로, Down 이 꺼 둔 WantRunning 을 되돌려 주지 않는다. 그래서 여기서 명시적으로
 // 켠다. 이것이 없으면 "연결 종료 후 다시 연결"이 영원히 Stopped 에 머문다.
 func (n *tsnetNode) Up(ctx context.Context) error {
-	if err := n.ensureStarted(); err != nil {
+	if err := n.ensureStarted(ctx); err != nil {
 		return err
 	}
 	client, err := n.server.LocalClient()
@@ -189,7 +210,7 @@ type localClient interface {
 // terminal 로 보고 "tsnet: backend in state NeedsMachineAuth" 같은 문자열로 뭉갠다.
 // 사용자에게 보여줄 수 없는 형태라, 상태를 직접 읽어 우리 State 로 옮긴다.
 func (n *tsnetNode) Status(ctx context.Context) (Status, error) {
-	if err := n.ensureStarted(); err != nil {
+	if err := n.ensureStarted(ctx); err != nil {
 		return Status{}, err
 	}
 	client, err := n.server.LocalClient()
@@ -201,21 +222,23 @@ func (n *tsnetNode) Status(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("tailnet: status: %w", err)
 	}
 
-	return statusFromBackend(state), nil
+	return statusFromBackend(state, time.Now()), nil
 }
 
 // statusFromBackend 는 tsnet 이 보고한 상태를 우리 Status 로 옮긴다.
 //
 // 순수 함수로 둔 이유는, 살아 있는 tailnet 없이는 검증할 방법이 없기 때문이다 — 계정 정보가
-// 비어 나오는 버그를 실기기에서야 발견했다.
-func statusFromBackend(state *ipnstate.Status) Status {
+// 비어 나오는 버그를 실기기에서야 발견했다. now 를 받는 것도 같은 이유다(키 만료 판정).
+func statusFromBackend(state *ipnstate.Status, now time.Time) Status {
 	if state == nil {
 		return Status{State: StateStarting}
 	}
 
 	status := Status{
-		State:   mapBackendState(state.BackendState),
-		AuthURL: state.AuthURL,
+		State:        mapBackendState(state.BackendState),
+		AuthURL:      state.AuthURL,
+		BackendState: state.BackendState,
+		Health:       state.Health,
 	}
 
 	// 누구로, 어느 tailnet 에 붙었는지. Tailscale 기본 서버는 설정이 전부 비어 있어서
@@ -224,7 +247,20 @@ func statusFromBackend(state *ipnstate.Status) Status {
 		status.TailnetName = state.CurrentTailnet.Name
 	}
 	if state.Self != nil {
+		// ipnlocal 이 이 값을 health.GetInPollNetMap() 으로 채운다 — 지금 컨트롤 플레인과
+		// map poll 중인가. 만료되면 컨트롤 플레인이 그 세션을 끊으므로 여기서 드러난다.
+		status.Online = state.Self.Online
 		status.Expired = state.Self.Expired
+		// Self.Expired 만으로는 부족하다 — 컨트롤 플레인에서 노드를 만료시켜도 실측에서
+		// 켜지지 않았다. 키 만료 시각이 이미 지난 것도 만료의 확정 신호이므로 같이 본다.
+		// 이 방향으로만 켜는 것이 안전하다: 살아 있는 노드의 만료 시각은 미래이고, 넷맵이
+		// 낡았다면 예전의 미래 값이 남아 있어서 거짓 양성이 되지 않는다.
+		if !status.Expired && keyExpired(state.Self.KeyExpiry, now) {
+			status.Expired = true
+		}
+		if state.Self.KeyExpiry != nil && !state.Self.KeyExpiry.IsZero() {
+			status.KeyExpiry = state.Self.KeyExpiry.Format(time.RFC3339)
+		}
 		// DNSName 은 끝에 점이 붙어 온다("host.tailnet.ts.net.").
 		status.NodeName = strings.TrimSuffix(state.Self.DNSName, ".")
 		if profile, ok := state.User[state.Self.UserID]; ok {
@@ -236,6 +272,14 @@ func statusFromBackend(state *ipnstate.Status) Status {
 	}
 	status.Peers = peersFromBackend(state)
 	return status
+}
+
+// keyExpired 는 노드 키의 만료 시각이 이미 지났는지다.
+//
+// 시각을 모르면(nil, 또는 제로) 판정하지 않는다 — 모르는 것을 만료로 읽으면 멀쩡한 노드를
+// 만료라고 단정해 버린다. 화면은 확실할 때만 "만료" 라고 쓴다.
+func keyExpired(expiry *time.Time, now time.Time) bool {
+	return expiry != nil && !expiry.IsZero() && expiry.Before(now)
 }
 
 // peersFromBackend 는 tailnet 안의 기기들과 그 경로를 옮긴다.
@@ -286,28 +330,6 @@ func mapBackendState(backend string) State {
 	default:
 		return StateStarting
 	}
-}
-
-// Down 은 네트워킹만 끈다(tailscale down 상당). 등록과 노드키는 남으므로 다시 올릴 때
-// 재인증이 없다.
-func (n *tsnetNode) Down(ctx context.Context) error {
-	// 기동한 적 없으면 이미 내려가 있는 것과 같다. 굳이 올렸다가 내리면 컨트롤 플레인에
-	// 불필요한 등록이 생긴다.
-	if !n.hasStarted() {
-		return nil
-	}
-	client, err := n.server.LocalClient()
-	if err != nil {
-		return fmt.Errorf("tailnet: local client: %w", err)
-	}
-	_, err = client.EditPrefs(ctx, &ipn.MaskedPrefs{
-		Prefs:          ipn.Prefs{WantRunning: false},
-		WantRunningSet: true,
-	})
-	if err != nil {
-		return fmt.Errorf("tailnet: bring down: %w", err)
-	}
-	return nil
 }
 
 // Logout 은 등록 자체를 버린다. 컨트롤 플레인이 노드를 지우므로 다음 기동은 처음부터

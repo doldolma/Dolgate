@@ -69,6 +69,7 @@ import type {
   TransferJob,
   TransferJobEvent,
   TransferStartInput,
+  TailnetStatus,
 } from "@shared";
 
 export type SessionWorkspaceTabId = `session:${string}`;
@@ -640,12 +641,14 @@ interface AppStateParts {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   /**
-   * 지금 브라우저 인증을 기다리는 tailnet. 연결 오버레이의 "브라우저 다시 열기"·"취소" 가 쓴다.
+   * tailnet 별 최신 상태. 화면들이 여기만 읽어서 서로 다른 말을 하지 않게 한다.
    *
-   * 노드는 tailnet 단위로 공유되므로 세션별이 아니다 — 같은 tailnet 을 쓰는 연결 여럿이 같은
-   * 인증을 기다린다.
+   * 노드는 tailnet 단위로 공유되므로 상태도 하나다 — 설정에서 시작한 연결의 진행을 터미널
+   * 화면도 봐야 하고, 그 반대도 마찬가지다.
    */
-  pendingTailnetAuth: { tailnetId: string; label: string; authUrl: string | null } | null;
+  tailnetStatuses: Record<string, TailnetStatus>;
+  /** 이 기기가 tailnet 에 등록될 때 쓰는 이름. 기기 목록에서 자기를 찾는 단서다. */
+  localTailnetNodeName: string | null;
   pendingCredentialRetry: PendingCredentialRetry | null;
   activeCredentialRetryAttempt: PendingCredentialRetryAttempt | null;
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
@@ -1258,7 +1261,8 @@ export type NetworkSlice = Pick<
   | "portForwardRuntimes"
   | "knownHosts"
   | "pendingHostKeyPrompt"
-  | "pendingTailnetAuth"
+  | "tailnetStatuses"
+  | "localTailnetNodeName"
   | "savePortForward"
   | "saveDnsOverride"
   | "setStaticDnsOverrideActive"

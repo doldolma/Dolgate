@@ -19,6 +19,12 @@ import {
 import { DialogBackdrop } from './DialogBackdrop';
 import { RefreshCw } from '../ui/icons';
 import { useAppStore } from '../store/appStore';
+import { normalizeErrorMessage } from '../store/utils/errors-and-prompts';
+import {
+  acquireTailnetWatch,
+  applyTailnetStatus,
+  forgetTailnetStatus,
+} from '../services/desktop/tailnet-watch';
 import {
   cancelTailnet,
   disconnectTailnet,
@@ -43,6 +49,13 @@ interface TailnetDraft {
  * 노드가 올라오는 중인지. 누가 시작했는지가 아니라 상태로 판단한다 — 호스트 연결도 노드를
  * 올리고, 그 시도에도 브라우저 로그인·관리자 승인처럼 사람을 기다리는 구간이 있다.
  */
+// 스냅샷을 다시 읽는 간격.
+//
+// tailnet 상태에는 밀어 주는 채널이 없다 — 코어는 연결 시험 중에만 상태 이벤트를 낸다. 그래서
+// 화면이 열려 있는 동안은 이쪽에서 읽는다. 만료로 노드가 떨어지는 것을 화면을 열어 둔 채로
+// 지켜볼 수 있어야 하므로 1 초로 둔다(읽기 한 번은 코어 안의 상태 조회라 값싸다).
+const snapshotPollIntervalMs = 1000;
+
 function isComingUp(status: TailnetStatus | undefined): boolean {
   return (
     status?.state === 'starting' ||
@@ -99,7 +112,9 @@ export function TailnetSettingsPanel() {
   const { t: translate } = useTranslation();
   const [records, setRecords] = useState<TailnetRecord[]>([]);
   const [draft, setDraft] = useState<TailnetDraft | null>(null);
-  const [statusById, setStatusById] = useState<Record<string, TailnetStatus>>({});
+  // 상태는 스토어 한곳에서 온다. 화면마다 따로 읽으면 설정과 터미널이 서로 다른 말을 한다.
+  const statusById = useAppStore((state) => state.tailnetStatuses);
+  const localNodeName = useAppStore((state) => state.localTailnetNodeName);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<TailnetRecord | null>(null);
   /**
@@ -121,7 +136,7 @@ export function TailnetSettingsPanel() {
    * 어느 항목이 이 기기인지 알려면 그 이름을 화면에 보여 줘야 한다. 값은 Go 가 정하므로
    * 여기서 다시 계산하지 않고 받아 온다.
    */
-  const [localNodeName, setLocalNodeName] = useState<string | null>(null);
+
   // 이미 연 인증 URL. 같은 URL 로 창을 여러 번 띄우지 않는다.
   const openedAuthUrlRef = useRef<string | null>(null);
   // 저장되지 않은 채 노드가 올라간 초안. 취소 버튼을 거치지 않고 화면을 떠나는 경로(다른
@@ -146,33 +161,12 @@ export function TailnetSettingsPanel() {
     void refresh();
   }, [refresh]);
 
-  // 화면을 열면 실제로 무엇이 붙어 있는지 읽어 온다. 이게 없으면 화면은 이번 렌더러 세션에서
-  // 시험한 결과밖에 모른다 — 리로드 한 번에 "연결 안 됨"으로 보이지만 노드는 살아 있다.
-  // 키 만료로 노드가 needsAuth 로 떨어진 것도 여기서만 알 수 있다.
-  useEffect(() => {
-    let cancelled = false;
-    void snapshotTailnets()
-      .then((snapshot) => {
-        if (cancelled) {
-          return;
-        }
-        setLocalNodeName(snapshot.localNodeName ?? null);
-        setStatusById((current) => {
-          const next = { ...current };
-          for (const status of snapshot.statuses) {
-            next[status.id] = status;
-          }
-          return next;
-        });
-      })
-      .catch(() => {
-        // 코어가 아직 안 떴거나 tailnet 지원이 꺼진 경우. 상태를 모르는 것뿐이라
-        // 화면을 막을 이유는 없다.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // 화면이 열려 있는 동안 실제로 무엇이 붙어 있는지 계속 읽어 온다.
+  //
+  // 한 번만 읽으면 화면을 열어 둔 채로는 값이 굳는다 — 노드가 만료로 떨어져도, 다른 창에서
+  // 연결이 됐어도 들어온 순간의 상태를 계속 보여준다. 읽은 값은 스토어로 가므로 터미널 화면도
+  // 같은 것을 본다.
+  useEffect(() => acquireTailnetWatch(), []);
 
   /**
    * 붙고 나서야 알 수 있는 값들을 설정에 채워 넣는다.
@@ -229,7 +223,7 @@ export function TailnetSettingsPanel() {
       // 여기서 시작한 시도만 반영하면, 다른 곳에서 올린 노드는 이 화면에 없는 것이 된다 —
       // 호스트에 연결하면 그 경로가 노드를 올리는데, 그동안 이 화면은 "연결" 을 띄운 채
       // 접을 방법도 내주지 않았다. 이 화면은 노드가 지금 어떤 상태인지 보여 주는 곳이다.
-      setStatusById((current) => ({ ...current, [status.id]: status }));
+      applyTailnetStatus(status);
 
       // 인증 링크는 메인 프로세스가 연다. 이 화면 말고 호스트 연결 중에도 인증이 필요해질 수
       // 있고, 구독자가 둘이면 같은 링크로 브라우저가 두 번 열린다. "브라우저 다시 열기" 버튼은
@@ -264,7 +258,7 @@ export function TailnetSettingsPanel() {
         authKey: draft.authKey.length > 0 ? draft.authKey : undefined,
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));
       return;
     }
     unsavedDraftIdRef.current = null;
@@ -288,26 +282,20 @@ export function TailnetSettingsPanel() {
       if (config.isDraft) {
         unsavedDraftIdRef.current = config.id;
       }
-      setStatusById((current) => ({
-        ...current,
-        [config.id]: { id: config.id, state: 'starting' },
-      }));
+      applyTailnetStatus({ id: config.id, state: 'starting' });
       try {
         const status = await testTailnet({
           id: config.id,
           controlUrl: config.controlUrl,
           authKey: config.authKey,
         });
-        setStatusById((current) => ({ ...current, [config.id]: status }));
+        applyTailnetStatus(status);
       } catch (cause) {
-        setStatusById((current) => ({
-          ...current,
-          [config.id]: {
-            id: config.id,
-            state: 'stopped',
-            error: cause instanceof Error ? cause.message : String(cause),
-          },
-        }));
+        applyTailnetStatus({
+          id: config.id,
+          state: 'stopped',
+          error: normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')),
+        });
       } finally {
         setTestingId(null);
       }
@@ -320,7 +308,26 @@ export function TailnetSettingsPanel() {
     try {
       await cancelTailnet(id);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));
+    }
+  }, []);
+
+  /**
+   * 노드를 버리고 처음부터 다시 붙인다.
+   *
+   * 취소가 그 노드를 닫으므로, 뒤이은 시도는 새 노드로 등록을 처음부터 밟는다 — 컨트롤 플레인에서
+   * 노드가 지워졌을 때 죽은 노드 키로 재등록을 반복하며 링크가 안 오는 상태를 그렇게 푼다.
+   */
+  const handleRestart = useCallback(async (record: TailnetRecord) => {
+    setError(null);
+    try {
+      await cancelTailnet(record.id);
+      await testTailnet(
+        { id: record.id, controlUrl: record.controlUrl },
+        { forceRelogin: true },
+      );
+    } catch (cause) {
+      setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));
     }
   }, []);
 
@@ -328,12 +335,9 @@ export function TailnetSettingsPanel() {
     setError(null);
     try {
       await disconnectTailnet(record.id);
-      setStatusById((current) => ({
-        ...current,
-        [record.id]: { id: record.id, state: 'stopped' },
-      }));
+      applyTailnetStatus({ id: record.id, state: 'stopped' });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));
     }
   }, []);
 
@@ -346,11 +350,7 @@ export function TailnetSettingsPanel() {
     if (!abandoned || !statusById[abandoned.id]) {
       return;
     }
-    setStatusById((current) => {
-      const next = { ...current };
-      delete next[abandoned.id];
-      return next;
-    });
+    forgetTailnetStatus(abandoned.id);
     try {
       await forgetTailnet(abandoned.id);
     } catch {
@@ -370,7 +370,7 @@ export function TailnetSettingsPanel() {
       // 키가 있으면 키에 밀리고, Headscale 은 브라우저 경로에서 아예 무시한다.
       setRemovedPersistent(pendingRemoval.controlUrl ? 'headscale' : 'tailscale');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(normalizeErrorMessage(cause, translate('tailnetSettings.unknownError')));
     }
     setPendingRemoval(null);
     await refresh();
@@ -478,12 +478,28 @@ export function TailnetSettingsPanel() {
                       nodeIp={status?.nodeIp}
                     />
                   </div>
+                  {/* 백엔드가 스스로 보고하는 문제. 상태가 "연결됨" 인데 통신이 안 되는 경우가
+                      있고(컨트롤 플레인에서 노드를 만료시켜도 상태는 그대로 남는다), 그때
+                      여기에만 단서가 남는다 — tailscale 자신의 GUI 도 이것을 보여 준다. */}
+                  {status?.health?.length ? (
+                    <ul className="mt-2 space-y-1 text-xs text-[var(--text-soft)]">
+                      {status.health.map((warning) => (
+                        <li key={warning}>⚠ {warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {/* 상태가 "연결됨" 인데 통신이 안 되는 경우가 있다 — 만료는 새 netmap 이 올
+                      때만 계산되는데, 만료되면 그 netmap 이 오지 않아서 그대로 남는다. 무엇을
+                      보고 그렇게 판단했는지 여기서 확인할 수 있어야 한다. */}
+                  {status ? <TailnetDiagnostics status={status} /> : null}
                 </CardMain>
 
                 <div className="flex flex-none items-center gap-2">
                   {/* 저장된 네트워크에서 "시험"과 "연결"은 같은 동작이다. 둘을 따로 두면
                       사용자가 무엇이 다른지 알 수 없다. 상태에 따라 하나만 보여 준다. */}
-                  {status?.state === 'running' ? (
+                  {/* 판정은 코어가 한다(ready). 여기서 state 로 다시 판단하면 설정 화면만
+                      "연결됨" 이라고 말하는 상태가 생긴다 — 만료된 노드가 그렇다. */}
+                  {status?.ready === true ? (
                     <Button
                       variant="secondary"
                       onClick={() => void handleDisconnect(record)}
@@ -495,13 +511,26 @@ export function TailnetSettingsPanel() {
                     // 시도 중에는 접을 수 있어야 한다. 브라우저 로그인은 최대 3 분까지
                     // 사람을 기다리는데, 그동안 누를 것이 없으면 갇힌 것과 같다.
                     // 여기서 시작한 시도만 보지 않는다 — 호스트 연결이 올리는 중일 수도 있다.
-                    <Button
-                      variant="secondary"
-                      onClick={() => void handleCancel(record.id)}
-                    >
-                      <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
-                      {translate('common.cancel')}
-                    </Button>
+                    <>
+                      {/* 인증이 필요한데 링크가 오지 않는 상태로 갇힐 수 있다(컨트롤 플레인에서
+                          노드를 지운 경우 등). 코어가 유예를 넘기면 노드를 새로 만들어 스스로
+                          풀지만, 그래도 안 되면 사용자가 할 수 있는 일이 취소뿐이 된다. */}
+                      {status?.state === 'needsAuth' && !status.authUrl ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => void handleRestart(record)}
+                        >
+                          {translate('misc.restartTailnet')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="secondary"
+                        onClick={() => void handleCancel(record.id)}
+                      >
+                        <RefreshCw className="h-4 w-4 animate-spin" aria-hidden />
+                        {translate('common.cancel')}
+                      </Button>
+                    </>
                   ) : (
                     <Button
                       variant="secondary"
@@ -686,6 +715,12 @@ function TailnetStateBadge({ status }: { status: TailnetStatus }) {
   // 라고 하면 사용자는 인증하려 들지만 누를 것이 없다. 무엇을 기다리는지 그대로 말한다.
   const waitingForAuthUrl = status.state === 'needsAuth' && !status.authUrl;
 
+  // running 으로 보고되지만 컨트롤 플레인과 끊긴 상태가 있다. 그것을 "연결됨" 이라고 쓰면 화면이
+  // 거짓말을 한다 — 판정(ready)이 아니라고 하면 그렇게 보여준다.
+  if (status.state === 'running' && status.ready !== true) {
+    return <Badge tone="stopped">{translate('tailnetSettings.state.offline')}</Badge>;
+  }
+
   return (
     <Badge tone={tone[status.state]}>
       {waitingForAuthUrl
@@ -865,5 +900,31 @@ function TailnetForm({
         </Button>
       </div>
     </Card>
+  );
+}
+
+/**
+ * 상태 판단의 근거를 그대로 보여준다.
+ *
+ * "연결됨" 이라고 나오는데 실제로 통신이 안 되는 일이 있다. 그때 화면에 요약만 있으면 무엇을
+ * 믿어야 할지 알 수 없다 — 원문 상태, 만료 여부와 그 근거가 되는 만료 시각, 그리고 이 tailnet
+ * 에서 몇 대가 보이는지(넷맵을 받고 있는지)를 그대로 드러낸다.
+ */
+function TailnetDiagnostics({ status }: { status: TailnetStatus }) {
+  const parts = [
+    `backend=${status.backendState || status.state}`,
+    // 판정 결과와 그 근거. 두 화면이 다른 말을 할 때 어느 쪽이 굳은 값인지 이걸로 가른다.
+    `ready=${status.ready === true}`,
+    `online=${status.online === true}`,
+    `expired=${status.expired === true}`,
+    status.keyExpiry ? `keyExpiry=${status.keyExpiry}` : null,
+    `peers=${status.peers?.length ?? 0}`,
+    status.authUrl ? 'authUrl=yes' : null,
+  ].filter((part): part is string => part !== null);
+
+  return (
+    <p className="mt-1 font-mono text-[0.68rem] leading-[1.5] text-[var(--text-subtle)]">
+      {parts.join('  ')}
+    </p>
   );
 }

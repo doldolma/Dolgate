@@ -5,11 +5,14 @@ import {
   refreshAllTerminals,
 } from "../lib/terminal-write-registry";
 import { registerReconnectHandlers } from "../store/services/reconnect-handlers";
+import { startTailnetStatusStream } from "../services/desktop/tailnet-watch";
 import {
+  initReconnectHold,
   initReconnectOrchestrator,
   onConnectivityChange,
   onSystemResume,
 } from "../store/services/reconnect-orchestrator";
+import { isSshHostRecord } from "@shared";
 
 // NetworkBridge는 재연결 오케스트레이터에 네트워크/절전 신호를 연결한다.
 //  - window online/offline: 오프라인이면 재연결 대기, 복귀하면 즉시 전부 재시도.
@@ -27,6 +30,29 @@ export function NetworkBridge() {
       };
     });
     registerReconnectHandlers();
+
+    // Tailscale 이 브라우저 로그인을 기다리는 동안은 재연결이 될 수 없다. 그 사이에 시도 횟수를
+    // 소비하면 사용자가 로그인하기 전에 상한을 다 써서 포기해 버린다.
+    //
+    // 판정은 코어가 하고(ready) 공유 상태에 담는다. 여기서는 그 결과만 읽는다.
+    initReconnectHold((meta) => {
+      const hostId = typeof meta.hostId === "string" ? meta.hostId : null;
+      const state = appStore.getState();
+      const host = hostId
+        ? state.hosts.find((item) => item.id === hostId)
+        : undefined;
+      const tailnetId =
+        host && isSshHostRecord(host) ? host.tailnetId?.trim() : undefined;
+      if (!tailnetId) {
+        return false;
+      }
+      const status = state.tailnetStatuses[tailnetId];
+      return status?.state === "needsAuth" || status?.state === "needsApproval";
+    });
+
+    // tailnet 상태를 한곳으로 모은다. 어느 화면이 시험을 시작했는지와 무관하게 받아야 한다 —
+    // 설정에서 시작한 연결의 진행을 터미널 화면도 알아야 하고, 그 반대도 마찬가지다.
+    const stopTailnetStatusStream = startTailnetStatusStream();
 
     // 초기 상태 시드.
     onConnectivityChange(
@@ -107,6 +133,7 @@ export function NetworkBridge() {
       offResume();
       offCloseActiveTab();
       offTabCommand();
+      stopTailnetStatusStream();
     };
   }, []);
 

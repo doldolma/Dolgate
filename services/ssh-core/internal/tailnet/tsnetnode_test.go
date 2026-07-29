@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"sync"
 	"testing"
@@ -30,7 +31,7 @@ func TestStatusFromBackendCarriesTheAccountAndTailnet(t *testing.T) {
 		},
 	}
 
-	status := statusFromBackend(state)
+	status := statusFromBackend(state, time.Now())
 
 	if status.State != StateRunning {
 		t.Errorf("State = %q, want running", status.State)
@@ -54,7 +55,7 @@ func TestStatusFromBackendBeforeConnecting(t *testing.T) {
 	status := statusFromBackend(&ipnstate.Status{
 		BackendState: ipn.NeedsLogin.String(),
 		AuthURL:      "https://login.tailscale.com/a/abc",
-	})
+	}, time.Now())
 
 	if status.State != StateNeedsAuth {
 		t.Errorf("State = %q, want needsAuth", status.State)
@@ -73,7 +74,7 @@ func TestStatusFromBackendToleratesAMissingUserProfile(t *testing.T) {
 		BackendState:   ipn.Running.String(),
 		CurrentTailnet: &ipnstate.TailnetStatus{Name: "gridwiz.com"},
 		Self:           &ipnstate.PeerStatus{UserID: tailcfg.UserID(7), DNSName: "node.gridwiz.com."},
-	})
+	}, time.Now())
 
 	if status.LoginName != "" {
 		t.Errorf("LoginName = %q, want empty", status.LoginName)
@@ -84,18 +85,25 @@ func TestStatusFromBackendToleratesAMissingUserProfile(t *testing.T) {
 }
 
 func TestStatusFromBackendHandlesNil(t *testing.T) {
-	if got := statusFromBackend(nil); got.State != StateStarting {
+	if got := statusFromBackend(nil, time.Now()); got.State != StateStarting {
 		t.Errorf("State = %q, want starting", got.State)
 	}
 }
 
 // fakeLocalClient 는 백엔드 상태를 순서대로 돌려준다. 마지막 값은 계속 유지된다.
 type fakeLocalClient struct {
+	logins   int
+	loginErr error
 	mu       sync.Mutex
 	states   []string
 	calls    int
 	err      error
 	editCall int
+}
+
+func (c *fakeLocalClient) StartLoginInteractive(ctx context.Context) error {
+	c.logins++
+	return c.loginErr
 }
 
 func (c *fakeLocalClient) EditPrefs(context.Context, *ipn.MaskedPrefs) (*ipn.Prefs, error) {
@@ -262,5 +270,104 @@ func TestPeersFromBackendJudgesDirectByCurAddr(t *testing.T) {
 	}
 	if peers[0].RxBytes != 4096 {
 		t.Errorf("RxBytes = %d, want 4096", peers[0].RxBytes)
+	}
+}
+
+// 컨트롤 플레인에서 노드를 만료시켜도 Self.Expired 는 실측에서 켜지지 않았다. 그래서 키 만료
+// 시각도 같이 보는데, 그 판정이 실제로 "만료" 로 이어지는지가 여기서 지켜지는 것이다 —
+// 화면은 이 값이 확실할 때만 만료라고 단정하고, 아니면 확인할 곳만 알린다.
+func TestStatusFromBackendTreatsAPastKeyExpiryAsExpired(t *testing.T) {
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Hour)
+
+	status := statusFromBackend(&ipnstate.Status{
+		BackendState: ipn.Running.String(),
+		Self:         &ipnstate.PeerStatus{Expired: false, KeyExpiry: &past},
+	}, now)
+
+	if !status.Expired {
+		t.Error("a key expiry in the past means the registration is expired")
+	}
+}
+
+// 반대 방향으로는 절대 켜지지 않아야 한다. 멀쩡한 노드를 만료라고 쓰면, 사용자는 있지도 않은
+// 재인증을 하러 간다.
+func TestStatusFromBackendKeepsAValidKeyUnexpired(t *testing.T) {
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	future := now.Add(180 * 24 * time.Hour)
+	zero := time.Time{}
+
+	for name, self := range map[string]*ipnstate.PeerStatus{
+		"expiry in the future": {KeyExpiry: &future},
+		"expiry unknown":       {KeyExpiry: nil},
+		// 모르는 값이 제로로 올 수도 있다. 그것을 "1년 0월 0일에 만료" 로 읽으면 모든 노드가
+		// 만료가 된다.
+		"expiry zero": {KeyExpiry: &zero},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status := statusFromBackend(&ipnstate.Status{
+				BackendState: ipn.Running.String(),
+				Self:         self,
+			}, now)
+
+			if status.Expired {
+				t.Errorf("%s must not read as expired", name)
+			}
+		})
+	}
+}
+
+// 백엔드가 만료라고 말하면 키 만료 시각과 무관하게 만료다.
+func TestStatusFromBackendKeepsBackendExpiredFlag(t *testing.T) {
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	future := now.Add(time.Hour)
+
+	status := statusFromBackend(&ipnstate.Status{
+		BackendState: ipn.Running.String(),
+		Self:         &ipnstate.PeerStatus{Expired: true, KeyExpiry: &future},
+	}, now)
+
+	if !status.Expired {
+		t.Error("Self.Expired must survive")
+	}
+}
+
+// tsnet 의 Start 는 ctx 를 받지 않고, 네트워크가 없으면 돌아오지 않는다. 그것을 그대로 기다리면
+// 사용자가 취소를 눌러도 아무 일이 없다 — 취소는 ctx 를 끊는데 그 호출은 그것을 보지 못한다.
+func TestStartWithCancelGivesUpWhenCancelled(t *testing.T) {
+	blocked := make(chan struct{})
+	t.Cleanup(func() { close(blocked) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- startWithCancel(ctx, func() error {
+			<-blocked // 네트워크가 없어 돌아오지 않는 Start 를 흉내낸다.
+			return nil
+		})
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("취소했는데 돌아오지 않았다 — 네트워크가 없으면 여기서 영원히 갇힌다")
+	}
+}
+
+// 평소에는 기동 결과를 그대로 돌려줘야 한다. 취소 처리를 붙이면서 성공·실패를 삼키면 안 된다.
+func TestStartWithCancelPassesTheResultThrough(t *testing.T) {
+	if err := startWithCancel(context.Background(), func() error { return nil }); err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+
+	failure := errors.New("no network interfaces")
+	err := startWithCancel(context.Background(), func() error { return failure })
+	if !errors.Is(err, failure) {
+		t.Errorf("err = %v, want it to wrap the start failure", err)
 	}
 }

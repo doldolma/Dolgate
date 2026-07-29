@@ -1,6 +1,7 @@
 package sshconn
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -186,7 +187,7 @@ func execBanner(t *testing.T, client *ssh.Client) string {
 func TestDialClientDirectNoJump(t *testing.T) {
 	target := newJumpTestServer(t, "user", "pw", "DIRECT-OK")
 
-	client, err := DialClient(target.target("user", "pw"), DefaultConfig, nil)
+	client, err := DialClient(context.Background(), target.target("user", "pw"), DefaultConfig, nil)
 	if err != nil {
 		t.Fatalf("DialClient direct: %v", err)
 	}
@@ -205,7 +206,7 @@ func TestDialClientThroughJumpHost(t *testing.T) {
 	jump := bastion.target("buser", "bpw")
 	targetTarget.Jump = &jump
 
-	client, err := DialClient(targetTarget, DefaultConfig, nil)
+	client, err := DialClient(context.Background(), targetTarget, DefaultConfig, nil)
 	if err != nil {
 		t.Fatalf("DialClient through jump: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestDialClientThroughTwoJumpHops(t *testing.T) {
 	jump2Target.Jump = &jump1Target
 	targetTarget.Jump = &jump2Target
 
-	client, err := DialClient(targetTarget, DefaultConfig, nil)
+	client, err := DialClient(context.Background(), targetTarget, DefaultConfig, nil)
 	if err != nil {
 		t.Fatalf("DialClient through two jump hops: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestDialClientJumpHostKeyMismatch(t *testing.T) {
 	jump.TrustedHostKeyBase64 = wrongKey // bastion's real key won't match
 	targetTarget.Jump = &jump
 
-	if _, err := DialClient(targetTarget, DefaultConfig, nil); err == nil {
+	if _, err := DialClient(context.Background(), targetTarget, DefaultConfig, nil); err == nil {
 		t.Fatal("DialClient = nil error, want jump host key mismatch")
 	}
 }
@@ -274,7 +275,7 @@ func TestDialClientThroughJumpTargetKeyMismatch(t *testing.T) {
 
 	// The bastion is trusted, so the tunnel opens, but the target's host key is
 	// wrong — the failure must surface from the second (tunneled) handshake.
-	if _, err := DialClient(targetTarget, DefaultConfig, nil); err == nil {
+	if _, err := DialClient(context.Background(), targetTarget, DefaultConfig, nil); err == nil {
 		t.Fatal("DialClient = nil error, want target host key mismatch through jump")
 	}
 }
@@ -282,7 +283,7 @@ func TestDialClientThroughJumpTargetKeyMismatch(t *testing.T) {
 func TestProbeHostKeyDirect(t *testing.T) {
 	target := newJumpTestServer(t, "u", "pw", "TARGET-OK")
 
-	result, err := ProbeHostKey("127.0.0.1", target.port(), nil, nil, DefaultConfig)
+	result, err := ProbeHostKey(context.Background(), "127.0.0.1", target.port(), nil, nil, DefaultConfig)
 	if err != nil {
 		t.Fatalf("ProbeHostKey direct: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestProbeHostKeyThroughJumpHost(t *testing.T) {
 	bastion := newJumpTestServer(t, "buser", "bpw", "BASTION-OK")
 
 	jump := bastion.target("buser", "bpw")
-	result, err := ProbeHostKey("127.0.0.1", target.port(), &jump, nil, DefaultConfig)
+	result, err := ProbeHostKey(context.Background(), "127.0.0.1", target.port(), &jump, nil, DefaultConfig)
 	if err != nil {
 		t.Fatalf("ProbeHostKey through jump: %v", err)
 	}
@@ -318,7 +319,7 @@ func TestDialClientClosesJumpWhenTargetCloses(t *testing.T) {
 	jump := bastion.target("buser", "bpw")
 	targetTarget.Jump = &jump
 
-	client, err := DialClient(targetTarget, DefaultConfig, nil)
+	client, err := DialClient(context.Background(), targetTarget, DefaultConfig, nil)
 	if err != nil {
 		t.Fatalf("DialClient through jump: %v", err)
 	}

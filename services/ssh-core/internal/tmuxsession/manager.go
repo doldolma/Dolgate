@@ -1,6 +1,7 @@
 package tmuxsession
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -222,7 +223,7 @@ func (m *Manager) Connect(sessionID, requestID string, payload coretypes.Connect
 	}
 
 	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
-	client, err := sshconn.DialClient(target, sshconn.Config{
+	client, err := sshconn.DialClient(context.Background(), target, sshconn.Config{
 		Dial:                  dial,
 		TCPDialTimeout:        m.config.TCPDialTimeout,
 		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,

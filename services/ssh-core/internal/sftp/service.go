@@ -140,7 +140,7 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		return dialErr
 	}
 	config.Dial = dial
-	client, err := sshconn.DialClient(target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+	client, err := sshconn.DialClient(context.Background(), target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
 		responseCh := make(chan []string, 1)

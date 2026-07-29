@@ -173,7 +173,8 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     portForwardRuntimes: [],
     knownHosts: [],
     pendingHostKeyPrompt: null,
-    pendingTailnetAuth: null,
+    tailnetStatuses: {},
+    localTailnetNodeName: null,
     savePortForward: async (ruleId, draft) => {
             const next = ruleId
               ? await api.portForwards.update(ruleId, draft)

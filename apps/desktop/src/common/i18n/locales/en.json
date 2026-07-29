@@ -655,12 +655,12 @@
       "days": "{{count}}d ago"
     },
     "hover": {
-        "tailnet": "Tailnet",
-        "tailnetPathDirect": "Direct",
-        "tailnetPathRelay": "Relayed ({{relay}})",
-        "tailnetPathRelayUnknown": "Relayed",
-        "tailnetPathUnknown": "Checking path",
-        "tailnetNotConnected": "Not connected",
+      "tailnet": "Tailnet",
+      "tailnetPathDirect": "Direct",
+      "tailnetPathRelay": "Relayed ({{relay}})",
+      "tailnetPathRelayUnknown": "Relayed",
+      "tailnetPathUnknown": "Checking path",
+      "tailnetNotConnected": "Not connected",
       "jump": "Jump",
       "reconnect": "Reconnect",
       "waitingNetwork": "Waiting for network",
@@ -2260,7 +2260,6 @@
     "wrongPassword": "The passphrase is wrong, or the file is corrupted."
   },
   "connectFailure": {
-    "tailnetUnreachable": "Could not reach the host through the tailnet. The node registration may have expired.",
     "targetHost": "the target host",
     "viaJump": " · via jump {{target}}",
     "ssmExit": "The AWS SSM session ended. (code {{code}})",
@@ -2272,7 +2271,15 @@
     "refused": "{{target}} refused the connection.",
     "timeout": "The connection to {{target}} timed out.",
     "reset": "The connection to {{target}} was reset.",
-    "generic": "The connection could not be completed."
+    "generic": "The connection could not be completed.",
+    "tailnetExpired": "This tailnet's node registration has expired.",
+    "tailnetAuthKeyHint": "This tailnet registers with an auth key, so there is no login to redo. If the key has expired or been used up, a new one is needed.",
+    "tailnetReauthHint": "Logging in again starts over from the browser authorization.",
+    "tailnetAuthInFlight": "This tailnet is being authenticated. Finish the browser login and the connection will continue.",
+    "tailscaleNeedsAuth": "Tailscale authentication has not finished. Finish the browser login and the connection will continue.",
+    "tailscaleNeedsApproval": "This device is waiting for administrator approval. You can connect once it is approved.",
+    "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in.",
+    "tailscaleOffline": "Tailscale is not connected to its control plane. It looks connected but traffic cannot flow — you may need to log in again."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -2725,7 +2732,8 @@
     "tailnetMissing": "The tailnet this host uses is not registered on this device. Add it in Settings → Network.",
     "connectFailed": "Could not start the host connection.",
     "localFailed": "Could not start the local terminal.",
-    "ssmRetrying": "Retrying the SSM connection for {{label}}."
+    "ssmRetrying": "Retrying the SSM connection for {{label}}.",
+    "tailnetOffline": "Cannot connect to Tailscale because this device is offline."
   },
   "blockOverlay": {
     "copyOutput": "Copy output",
@@ -2986,7 +2994,8 @@
     "ssmTunnelUnsupported": "The AWS SSM tunnel cannot start. This configuration supports the in-process SSM tunnel only.",
     "connectSuccess": "Connected successfully.",
     "noTerminalSession": "No terminal session is connected, so the command cannot be sent.",
-    "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again."
+    "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again.",
+    "restartTailnet": "Try again"
   },
   "awsDiagnostic": {
     "title": {
@@ -3081,7 +3090,8 @@
       "running": "Connected",
       "failed": "Failed",
       "preparingAuth": "Getting sign-in link",
-      "expired": "Sign-in expired"
+      "expired": "Sign-in expired",
+      "offline": "Disconnected"
     },
     "field": {
       "label": "Network name",
@@ -3108,6 +3118,36 @@
       "tailscale": "The node key was expired. Removing the entry itself is up to the control plane, though — unless the node was registered as ephemeral it stays in the device list, marked expired. Delete it from the Tailscale admin console if it lingers.",
       "headscale": "The node key was expired. Removing the entry itself is up to the control plane, though — unless the node was registered as ephemeral it stays in the device list, marked expired. Delete it on the server if it lingers (headscale nodes delete)."
     },
-    "localNodeName": "This device registers as"
+    "localNodeName": "This device registers as",
+    "unknownError": "Something went wrong."
+  },
+  "tailnetIpc": {
+    "nodeInUse": "Something is still connected through this tailnet. Close those sessions, SFTP tabs, or port forwards first."
+  },
+  "connectStages": {
+    "tailscaleNode": "Starting Tailscale node",
+    "tailscaleRegistration": "Checking device registration",
+    "tailscaleAuth": "Tailscale login",
+    "tailscaleHealth": "Warning reported by this device",
+    "tailscaleError": "Tailscale error",
+    "tailscaleExpiredDetail": "The registration has expired. You need to log in again.",
+    "tailscaleKeyExpiryDetail": "Expires {{at}}",
+    "tailscaleApprovalDetail": "Waiting for an administrator to approve this device.",
+    "tailscaleBrowserDetail": "Finish the login in your browser.",
+    "tailscaleLinkDetail": "Getting the login link.",
+    "tailscalePeersDetail": "{{count}} devices visible.",
+    "hostKey": "Host key check",
+    "hostKeyPromptDetail": "Confirm whether to trust this host.",
+    "ssh": "SSH connection",
+    "groupTailscale": "Tailscale",
+    "groupHost": "Host",
+    "tailscaleSync": "Control plane sync",
+    "tailscaleStaleDetail": "Looks connected but the sync is broken.",
+    "tailscaleTarget": "Path to {{target}}",
+    "tailscaleTargetDirect": "Direct connection",
+    "tailscaleTargetRelay": "Via relay ({{relay}})",
+    "tailscaleTargetNoPath": "Neither a direct connection nor a relay is up.",
+    "tailscaleTargetMissing": "That device is not on this Tailscale network.",
+    "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}"
   }
 }
