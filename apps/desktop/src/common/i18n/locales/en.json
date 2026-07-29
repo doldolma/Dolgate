@@ -3084,7 +3084,7 @@
     "headscaleApprovalHint": "If this server has no OIDC configured, the browser shows instructions and an Auth ID instead of a login page — an administrator has to approve it.",
     "state": {
       "stopped": "Stopped",
-      "needsAuth": "Waiting for sign-in",
+      "needsAuth": "Sign-in required",
       "needsApproval": "Waiting for approval",
       "starting": "Connecting",
       "running": "Connected",

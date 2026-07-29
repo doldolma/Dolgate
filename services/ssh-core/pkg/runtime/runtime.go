@@ -161,20 +161,24 @@ type Runtime struct {
 	ssh        sshSessionManager
 	// tmux 는 control mode 명령(SplitPane/NewWindow/…)을 위해 concrete 타입으로 둔다.
 	// sshSessionManager 인터페이스(HasSession/WriteBytes/…)도 만족하므로 라우팅에 그대로 쓰인다.
-	tmux                      *tmuxsession.Manager
-	mosh                      moshSessionManager
-	aws                       awsSessionManager
-	local                     localSessionManager
-	serial                    serialSessionManager
-	sftp                      sftpService
-	containers                containersService
-	forwarding                forwardingService
-	ssmForwarding             ssmForwardingService
-	probeHostKey              hostKeyProbeFunc
-	inspectCertificate        certificateInspectFunc
-	tailnets                  *tailnet.Registry
-	tailnetConfigs            *tailnetConfigs
-	tailnetTests              *tailnetTests
+	tmux               *tmuxsession.Manager
+	mosh               moshSessionManager
+	aws                awsSessionManager
+	local              localSessionManager
+	serial             serialSessionManager
+	sftp               sftpService
+	containers         containersService
+	forwarding         forwardingService
+	ssmForwarding      ssmForwardingService
+	probeHostKey       hostKeyProbeFunc
+	inspectCertificate certificateInspectFunc
+	tailnets           *tailnet.Registry
+	tailnetConfigs     *tailnetConfigs
+	tailnetTests       *tailnetTests
+	// tailnetRecovery* 는 백엔드 알림이 몰려 올 때 복구 판정을 한 번으로 모으기 위한 것이다.
+	// 복구는 폴링이 아니라 IPN 버스 알림으로 시작된다.
+	tailnetRecoveryMu         sync.Mutex
+	tailnetRecoveryPending    map[string]bool
 	autocompleteMu            sync.Mutex
 	autocompleteRevisions     map[string]int
 	shellIntegrationInstalled map[string]bool
@@ -291,6 +295,9 @@ func New(options Options) *Runtime {
 	instance.tailnetConfigs = newTailnetConfigs(options.TailnetStateDir)
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(instance.tailnetConfigs.newNode, tailnet.Options{})
+	// 복구는 코어가 맡는다. 세션이 각자 하면 같은 노드를 두고 여러 곳이 복구를 시도해 인증
+	// 링크가 서로를 무효화한다. 폴링이 아니라 백엔드 알림(IPN 버스)으로 시작된다.
+	instance.tailnetConfigs.notify = instance.onTailnetNotify
 	// tmux 매니저는 newRuntimeWithDeps 안에서 만들어지므로 여기서 붙인다.
 	instance.tmux.SetTailnetDial(tailnetDial)
 

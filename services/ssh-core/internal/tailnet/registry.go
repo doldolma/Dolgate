@@ -164,6 +164,10 @@ type Node interface {
 	// 한 번만 유효해서, 두 번째 호출은 Down 이 꺼 둔 WantRunning 을 되돌리지 않는다.
 	// 멱등이므로 이미 올라와 있어도 부담 없이 부를 수 있다.
 	Up(ctx context.Context) error
+	// Reauth 는 인증이 필요한 노드의 대화형 로그인을 개시해 인증 링크가 나오게 한다.
+	// 이미 떠 있는 노드의 키가 만료된 경우처럼 Up 만으로는 로그인이 시작되지 않는 상황을
+	// 푼다. 인증 대기 구간마다 한 번만 실제로 개시하므로 반복 호출은 안전하다.
+	Reauth(ctx context.Context) error
 	// Logout 은 등록 자체를 버린다. 컨트롤 플레인이 노드를 지우고, 다음 기동에서 다시
 	// 인증해야 한다.
 	Logout(ctx context.Context) error
@@ -193,6 +197,9 @@ type AfterFunc func(d time.Duration, fn func()) Stopper
 type entry struct {
 	node Node
 	refs int
+	// generation 은 이 항목의 일련번호다. 리스가 같은 값을 들고 다녀서, 강제 해체 뒤 남은 옛
+	// 리스의 Release 를 골라낼 수 있다.
+	generation uint64
 	// idle 은 마지막 소비자가 떠난 뒤 유예 시간이 지나면 teardown 을 발동한다. 소비자가
 	// 있는 동안에는 nil 이다.
 	idle Stopper
@@ -291,6 +298,11 @@ type Registry struct {
 	mu      sync.Mutex
 	entries map[string]*entry
 	closed  bool
+	// generations 는 항목마다 붙는 일련번호의 출처다. 리스는 자기 세대를 들고 다니고, 세대가
+	// 다른 Release 는 무시된다 — 그래야 강제 해체(Discard) 뒤에 남은 옛 리스가 나중에 만들어진
+	// 새 항목의 refs 를 깎아 멀쩡한 노드를 내려버리는 일이 없다. release 는 id 로만 항목을
+	// 찾으므로 이 표시가 없으면 그 사고를 막을 방법이 없다.
+	generations uint64
 }
 
 // Options 는 Registry 설정이다. 각 필드의 제로값은 기본값으로 대체된다.
@@ -323,6 +335,9 @@ type Lease struct {
 
 	registry *Registry
 	id       string
+	// generation 은 이 리스를 발급한 항목의 일련번호다. 강제 해체된 뒤의 Release 는 이 값이
+	// 달라서 무시된다 — 그러지 않으면 새로 만들어진 항목의 refs 를 깎는다.
+	generation uint64
 	// once 는 여러 번 놓아도 refcount 가 한 번만 깎이게 한다. 평범한 bool 이 아니라 Once 인
 	// 이유는 겹치는 호출이 순차가 아니라 **동시**이기 때문이다 — leasedConn.Close 는 핸드셰이크
 	// 실패 정리와 SSH 읽기 루프의 teardown 에서 각각 불리고, 그 둘은 다른 goroutine 이다.
@@ -336,7 +351,7 @@ func (l *Lease) Release() {
 	if l == nil {
 		return
 	}
-	l.once.Do(func() { l.registry.release(l.id) })
+	l.once.Do(func() { l.registry.release(l.id, l.generation) })
 }
 
 // Acquire 는 tailnet 노드의 점유권을 돌려준다. 첫 소비자면 노드를 만든다. 유예 중인
@@ -356,7 +371,8 @@ func (r *Registry) Acquire(id string) (*Lease, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tailnet %q: %w", id, err)
 		}
-		existing = &entry{node: node}
+		r.generations += 1
+		existing = &entry{node: node, generation: r.generations}
 		r.entries[id] = existing
 	}
 
@@ -367,15 +383,25 @@ func (r *Registry) Acquire(id string) (*Lease, error) {
 	}
 	existing.refs += 1
 
-	return &Lease{Node: existing.node, registry: r, id: id}, nil
+	return &Lease{
+		Node:       existing.node,
+		registry:   r,
+		id:         id,
+		generation: existing.generation,
+	}, nil
 }
 
-func (r *Registry) release(id string) {
+func (r *Registry) release(id string, generation uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	existing, ok := r.entries[id]
 	if !ok {
+		return
+	}
+	// 강제 해체된 뒤에 도착한 옛 리스다. 지금 항목은 다른 노드이므로 건드리면 안 된다 —
+	// 깎으면 쓰는 중인 새 노드가 유예에 들어가거나 내려간다.
+	if existing.generation != generation {
 		return
 	}
 	existing.refs -= 1
@@ -541,6 +567,37 @@ func (r *Registry) Reset(id string) error {
 	// 항목은 여기서 지우지 않는다. Close 가 끝나기 전에 지우면 그 사이 도착한 Acquire 가 같은
 	// 상태 디렉터리로 두 번째 노드를 만들어, 닫히는 중인 노드와 노드키를 두고 겹친다. 표시만
 	// 남기고 Close 가 끝난 뒤 지운다.
+	done := existing.beginTeardown(true)
+	node := existing.node
+	r.mu.Unlock()
+
+	err := node.Close()
+	r.endTeardownRemoving(id, existing, done)
+	return err
+}
+
+// Discard 는 노드를 닫고 항목을 버린다. 쓰는 곳이 있어도 닫는다.
+//
+// 취소가 쓰는 동작이다. 취소는 "지금 이 서버를 없앤다"는 뜻이므로 리스를 이유로 남겨 두면
+// 취소가 아니게 된다 — 노드가 그대로 살아 상태와 인증 링크를 계속 보고하고, 화면은 접은 것을
+// 접지 못한 상태로 그린다. 아직 그 tailnet 이 필요한 소비자는 다시 요청하고, 그때 새 서버가
+// 만들어져 처음부터 붙는다.
+//
+// 남아 있던 리스는 세대가 달라져 무효가 된다(그들의 Release 는 무시된다). Logout·Purge 는 하지
+// 않으므로 등록과 노드 키는 그대로다 — 컨트롤 플레인에 기기가 새로 생기지 않는다.
+func (r *Registry) Discard(id string) error {
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
+		r.mu.Unlock()
+		return nil
+	}
+	if existing.idle != nil {
+		existing.idle.Stop()
+		existing.idle = nil
+	}
+	// 남은 소비자 수는 의미가 없어진다. 항목은 Close 가 끝난 뒤 지운다(Reset 과 같은 이유 —
+	// 먼저 지우면 그 사이 도착한 Acquire 가 같은 상태 디렉터리로 두 번째 노드를 만든다).
+	existing.refs = 0
 	done := existing.beginTeardown(true)
 	node := existing.node
 	r.mu.Unlock()

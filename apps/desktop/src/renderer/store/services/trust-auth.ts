@@ -327,7 +327,14 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       }
       if (status.state === 'needsApproval') {
         report('needsApproval');
+        return;
       }
+      // 인증 관련 상태가 아니면 "연결 중" 으로 되돌린다.
+      //
+      // 이것이 없으면 마지막 인증 문구가 그대로 남는다. 만료된 노드는 재인증을 거치며 엔진이
+      // 멈추고 상태가 starting 으로 내려가는데, 그때 화면은 "인증 링크를 받는 중" 에 얼어붙어
+      // 실제로 무엇을 기다리는지와 어긋난다 — 사용자에게는 무한 대기로 보인다.
+      report('connecting');
     });
 
     try {

@@ -11,6 +11,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
+	"tailscale.com/types/empty"
 	"tailscale.com/types/key"
 )
 
@@ -225,6 +226,60 @@ func TestBringUpTurnsOnAndThenWaits(t *testing.T) {
 	}
 	if got := client.count(); got < 2 {
 		t.Errorf("Status() calls = %d, want at least 2 — 올라오기를 기다리지 않았다", got)
+	}
+}
+
+// 인증 링크는 상태에 안 실리고 버스로만 오는 경로가 있다(만료된 노드의 재인증). 그것을
+// 갈무리하지 않으면 화면이 "링크를 받는 중" 에서 영원히 갇힌다.
+func TestBusNotifyCapturesTheAuthURL(t *testing.T) {
+	node := &tsnetNode{}
+	url := "https://login.tailscale.com/a/abc123"
+
+	node.applyNotify(&ipn.Notify{BrowseToURL: &url})
+
+	if got := node.busAuthURLValue(); got != url {
+		t.Fatalf("busAuthURL = %q, want %q", got, url)
+	}
+}
+
+// 붙은 뒤에는 링크를 버려야 한다. 남겨 두면 이미 연결된 노드에 대해 낡은 링크를 계속 보고해서
+// 화면이 인증을 다시 요구하는 것처럼 보인다.
+func TestBusNotifyDropsTheAuthURLOnceLoggedIn(t *testing.T) {
+	url := "https://login.tailscale.com/a/abc123"
+	running := ipn.Running
+
+	for _, tc := range []struct {
+		name   string
+		notify *ipn.Notify
+	}{
+		{"login finished", &ipn.Notify{LoginFinished: &empty.Message{}}},
+		{"state running", &ipn.Notify{State: &running}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &tsnetNode{}
+			node.applyNotify(&ipn.Notify{BrowseToURL: &url})
+			node.applyNotify(tc.notify)
+
+			if got := node.busAuthURLValue(); got != "" {
+				t.Fatalf("busAuthURL = %q, want empty", got)
+			}
+		})
+	}
+}
+
+// 관계없는 알림은 링크를 건드리지 않아야 한다 — 사용자가 브라우저에서 로그인하는 동안 다른
+// 알림이 계속 오는데, 그때 링크가 지워지면 누를 것이 사라진다.
+func TestBusNotifyKeepsTheAuthURLWhileWaiting(t *testing.T) {
+	node := &tsnetNode{}
+	url := "https://login.tailscale.com/a/abc123"
+	starting := ipn.Starting
+
+	node.applyNotify(&ipn.Notify{BrowseToURL: &url})
+	node.applyNotify(&ipn.Notify{State: &starting})
+	node.applyNotify(&ipn.Notify{})
+
+	if got := node.busAuthURLValue(); got != url {
+		t.Fatalf("busAuthURL = %q, want it kept as %q", got, url)
 	}
 }
 

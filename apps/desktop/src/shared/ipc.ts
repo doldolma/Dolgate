@@ -355,6 +355,14 @@ export interface TailnetStatus {
    * 중인 것도 아니다 — 이 표시가 없으면 시도가 끝났는지 알 수 없다.
    */
   cancelled?: boolean;
+  /**
+   * 지금 이 tailnet 을 올리는 시도가 실제로 돌고 있는지.
+   *
+   * 상태만으로는 알 수 없다 — 인증이 필요한 노드는 아무도 손대지 않아도 계속 needsAuth 로
+   * 보고된다. 그것을 진행 중으로 그리면 화면이 거짓 진행을 보여준다(스피너와 "링크를 받는 중"
+   * 이 뜨는데 실제로는 아무 일도 일어나지 않고, 취소할 대상도 없다).
+   */
+  attempting?: boolean;
 
   /** 이 tailnet 안에서 보이는 기기들과 그 경로. 붙어 있지 않으면 비어 있다. */
   peers?: TailnetPeer[];

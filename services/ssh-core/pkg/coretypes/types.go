@@ -596,6 +596,12 @@ type TailnetStatusPayload struct {
 	// 있는데, Stopped 는 노드가 올라오기 전 진행 상태로도 나가기 때문에 상태만으로는 시도가
 	// 끝났는지 알 수 없다. 요청을 기다리는 쪽은 이 표시로 끝을 안다.
 	Cancelled bool `json:"cancelled,omitempty"`
+	// Attempting 은 지금 이 tailnet 을 올리는 시도가 실제로 돌고 있는지다.
+	//
+	// 상태만으로는 알 수 없다 — 인증이 필요한 노드는 아무도 손대지 않아도 계속 needsAuth 로
+	// 보고된다. 그것을 진행 중으로 그리면 화면이 거짓 진행을 보여준다(스피너와 "링크를 받는
+	// 중" 이 뜨는데 실제로는 아무 일도 일어나지 않고, 취소할 대상도 없다).
+	Attempting bool `json:"attempting,omitempty"`
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 그 경로다. 붙어 있지 않으면 빈 목록이다.
 	Peers []TailnetPeerPayload `json:"peers,omitempty"`

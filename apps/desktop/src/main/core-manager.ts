@@ -684,6 +684,8 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     backendState: optionalText(payload.backendState),
     keyExpiry: optionalText(payload.keyExpiry),
     cancelled: payload.cancelled === true,
+    // 진행 중인지도 코어가 판단한다. 화면이 상태로 추측하면 거짓 진행을 그린다.
+    attempting: payload.attempting === true,
     peers: toTailnetPeers(payload.peers),
     authUrl:
       typeof payload.authUrl === "string" && payload.authUrl.length > 0
@@ -4502,6 +4504,7 @@ export class CoreManager {
   private handleControlEvent(event: CoreEvent<Record<string, unknown>>): void {
     this.resolvePendingResponse(event);
     this.openTailnetAuthUrlIfNeeded(event);
+    this.broadcastTailnetStatus(event);
     if (this.resolvePendingSessionReady(event)) {
       return;
     }
@@ -4933,7 +4936,13 @@ export class CoreManager {
         // 취소도 종료다. 그것까지 running 만 보면 취소를 눌러도 요청이 한도까지 매달린다.
         isTerminal: (progress) => {
           const status = toTailnetStatus(progress);
-          return status.ready === true || status.cancelled === true;
+          // 오류도 종료다. 코어가 이유를 담아 끝을 알리는 경우(먼저 시작된 시도에 합류했는데
+          // 그것이 붙지 못하고 끝난 경우 등)에 이것이 없으면 요청이 한도까지 매달린다.
+          return (
+            status.ready === true ||
+            status.cancelled === true ||
+            (typeof status.error === "string" && status.error.length > 0)
+          );
         },
       },
     );
@@ -5066,6 +5075,31 @@ export class CoreManager {
       // 못 열었으면 다시 열 수 있도록 기록을 지운다.
       this.openedTailnetAuthUrls.delete(authUrl);
     });
+  }
+
+  /**
+   * tailnet 상태를 모든 창에 흘려보낸다.
+   *
+   * 이것이 없으면 화면은 **자기가 시작한 시도**의 진행만 볼 수 있다(그 경로는 testTailnet 의
+   * onStatus 콜백뿐이었다). 그래서 코어가 스스로 하는 일 — 만료 자동 복구, 취소로 끝난 시도의
+   * 마지막 상태 — 은 화면에 전달되지 않았다. 취소를 눌러도 코어는 제대로 접는데 화면은 낡은
+   * 상태를 계속 그려서, 사용자에게는 취소가 먹통인 것으로 보였다.
+   *
+   * 여기 한 곳에서 브로드캐스트한다. 요청에 딸린 진행 상황도 같은 이벤트라 함께 나가므로,
+   * 화면은 누가 시작한 일이든 같은 방식으로 최신 상태를 받는다.
+   */
+  private broadcastTailnetStatus(
+    event: CoreEvent<Record<string, unknown>>,
+  ): void {
+    if (event.type !== "tailnetStatus") {
+      return;
+    }
+    const status = toTailnetStatus(event.payload);
+    for (const window of this.windows) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(ipcChannels.tailnet.status, status);
+      }
+    }
   }
 
   /** 지금 살아 있는 노드들의 상태. 없는 tailnet 은 결과에 들어 있지 않다. */

@@ -70,6 +70,23 @@ describe('TailnetSettingsPanel', () => {
     storeState.localTailnetNodeName = 'dev';
   });
 
+  // 아무도 손대지 않는 노드도 계속 needsAuth 로 보고된다. 그것을 진행 중으로 그리면 스피너와
+  // "링크를 받는 중" 이 영원히 떠 있고, 접을 대상도 없는데 취소 버튼이 뜬다 — 눌러도 아무 일이
+  // 없어 사용자에게는 먹통으로 보인다. 진행 여부는 코어가 알려 주는 attempting 으로만 판단한다.
+  it('진행 중이 아니면 취소를 권하지 않는다', async () => {
+    render(<TailnetSettingsPanel />);
+    expect(await screen.findByRole('button', { name: '연결' })).toBeInTheDocument();
+
+    // 인증이 필요하지만 아무도 시도하고 있지 않다(설정에서 켜 둔 뒤 만료된 상태).
+    putStatus({ id: 'net-1', state: 'needsAuth' });
+    render(<TailnetSettingsPanel />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: '연결' }).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole('button', { name: '취소' })).not.toBeInTheDocument();
+  });
+
   // 노드를 올리는 것은 이 화면만이 아니다. 호스트에 연결하면 그 경로가 노드를 올리는데, 그때
   // 브라우저 로그인이 필요하면 사람을 기다리는 구간이 생긴다. 이 화면이 자기가 시작한 시도만
   // 본다면 그 시도는 여기 없는 것이 되고, 접을 방법도 사라진다.
@@ -77,7 +94,7 @@ describe('TailnetSettingsPanel', () => {
     render(<TailnetSettingsPanel />);
     expect(await screen.findByRole('button', { name: '연결' })).toBeInTheDocument();
 
-    putStatus({ id: 'net-1', state: 'needsAuth' });
+    putStatus({ id: 'net-1', state: 'needsAuth', attempting: true });
     act(() => {
       render(<TailnetSettingsPanel />);
     });
@@ -92,7 +109,7 @@ describe('TailnetSettingsPanel', () => {
     render(<TailnetSettingsPanel />);
     await screen.findByRole('button', { name: '연결' });
 
-    putStatus({ id: 'net-1', state: 'needsAuth' });
+    putStatus({ id: 'net-1', state: 'needsAuth', attempting: true });
     const { unmount } = render(<TailnetSettingsPanel />);
     await screen.findByRole('button', { name: '취소' });
     unmount();

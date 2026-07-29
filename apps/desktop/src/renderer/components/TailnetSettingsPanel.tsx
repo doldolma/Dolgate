@@ -65,6 +65,17 @@ function isComingUp(status: TailnetStatus | undefined): boolean {
 }
 
 /**
+ * 지금 이 tailnet 을 올리는 일이 실제로 돌고 있는가.
+ *
+ * 상태만 보면 안 된다 — 인증이 필요한 노드는 아무도 손대지 않아도 계속 needsAuth 로 보고된다.
+ * 그것을 진행 중으로 그리면 스피너와 "링크를 받는 중" 이 영원히 떠 있고, 취소할 대상도 없는데
+ * 취소 버튼이 뜬다(눌러도 아무 일이 없어 먹통으로 보인다). 진행 여부는 코어가 알려 준다.
+ */
+function isAttempting(status: TailnetStatus | undefined): boolean {
+  return status?.attempting === true;
+}
+
+/**
  * 이름이 비었을 때 대신 쓸 이름.
  *
  * 저장은 연결에 성공한 뒤에만 되므로, 그때는 컨트롤 플레인이 알려 준 tailnet 이름이 있다.
@@ -507,7 +518,7 @@ export function TailnetSettingsPanel() {
                     >
                       {translate('tailnetSettings.disconnect')}
                     </Button>
-                  ) : testingId === record.id || isComingUp(status) ? (
+                  ) : testingId === record.id || isAttempting(status) ? (
                     // 시도 중에는 접을 수 있어야 한다. 브라우저 로그인은 최대 3 분까지
                     // 사람을 기다리는데, 그동안 누를 것이 없으면 갇힌 것과 같다.
                     // 여기서 시작한 시도만 보지 않는다 — 호스트 연결이 올리는 중일 수도 있다.
@@ -713,7 +724,12 @@ function TailnetStateBadge({ status }: { status: TailnetStatus }) {
 
   // 컨트롤 플레인이 로그인 URL 을 내려주기까지 몇 초에서 십여 초 걸린다. 그동안 "인증 대기"
   // 라고 하면 사용자는 인증하려 들지만 누를 것이 없다. 무엇을 기다리는지 그대로 말한다.
-  const waitingForAuthUrl = status.state === 'needsAuth' && !status.authUrl;
+  //
+  // 단, **실제로 시도가 돌고 있을 때만** 그렇게 쓴다. 아무도 손대지 않는 노드도 계속 needsAuth
+  // 로 보고되므로, 진행 여부를 보지 않으면 "링크를 받는 중" 이 영원히 떠 있는다 — 화면이
+  // 거짓말을 하고 사용자는 무엇을 기다리는지도 모른 채 갇힌다.
+  const waitingForAuthUrl =
+    status.state === 'needsAuth' && !status.authUrl && isAttempting(status);
 
   // running 으로 보고되지만 컨트롤 플레인과 끊긴 상태가 있다. 그것을 "연결됨" 이라고 쓰면 화면이
   // 거짓말을 한다 — 판정(ready)이 아니라고 하면 그렇게 보여준다.

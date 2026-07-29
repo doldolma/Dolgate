@@ -34,16 +34,40 @@ type NodeConfig struct {
 	// os.UserConfigDir()/tsnet-<prog> 에 만들어 앱 데이터 밖에 흩어진다. tailnet 마다
 	// 달라야 하고, 노드키가 들어가므로 기기 로컬 전용이다(동기화 대상 아님).
 	Dir string
+	// OnNotify 는 백엔드가 상태 변화를 푸시했을 때 불린다(IPN 버스).
+	//
+	// 폴링 대신 이것으로 반응한다 — 만료·인증 필요·링크 발급은 모두 백엔드가 알려 주는
+	// 사건이라, 주기적으로 물어볼 이유가 없다. 버스 goroutine 에서 불리므로 오래 걸리는 일을
+	// 그 자리에서 하면 알림 수신이 밀린다. 받는 쪽이 별도 goroutine 으로 넘겨야 한다.
+	OnNotify func()
 }
 
 // tsnetNode 는 tsnet.Server 로 Node 를 구현한다.
 type tsnetNode struct {
 	server *tsnet.Server
 	dir    string
+	// onNotify 는 백엔드가 상태 변화를 푸시했을 때 알린다. 폴링을 대신한다.
+	onNotify func()
 
 	mu      sync.Mutex
 	started bool
 	closed  bool
+
+	// busAuthURL 은 IPN 버스가 푸시한 인증 링크다.
+	//
+	// 폴링만으로는 이 링크를 놓친다. 이미 떠 있는 노드의 키가 만료되면 백엔드는 링크를
+	// Notify.BrowseToURL 로만 통보하는 경로가 있고(popBrowserAuthNow → tellRecipientToBrowseToURL),
+	// 그 경우 Status 를 아무리 읽어도 빈 값이다 — 화면은 "링크를 받는 중" 에서 갇힌다.
+	// 버스를 구독해 여기 담아 두고 Status 가 합쳐서 보고한다.
+	busAuthURL string
+	busStarted bool
+	busCancel  context.CancelFunc
+
+	// reauthStarted 는 지금의 인증 대기 구간에서 이미 대화형 로그인을 개시했는지다. 표시가
+	// 노드에 붙어 있는 것이 핵심이다 — 연결 시도는 여러 번 새로 생기지만(SSH 재연결·사용자
+	// 재시도) 그때마다 개시하면 컨트롤 플레인이 새 링크를 발급하며 앞 링크를 무효화해,
+	// 브라우저에서 로그인하던 사람이 끝낼 수 없게 된다. 붙으면 Status 가 표시를 지운다.
+	reauthStarted bool
 }
 
 // ensureStarted 는 서버를 기동하고 그 사실을 기록한다.
@@ -68,8 +92,113 @@ func (n *tsnetNode) ensureStarted(ctx context.Context) error {
 	n.mu.Lock()
 	n.started = true
 	n.mu.Unlock()
+	n.startBusWatch()
 	return nil
 }
+
+// startBusWatch 는 IPN 버스 구독을 한 번 띄운다. 노드 수명과 함께 살아 있어야 한다 —
+// 연결 시도 하나에 묶으면 시도가 끝날 때 구독이 끊겨, 그 뒤에 오는 링크를 놓친다.
+func (n *tsnetNode) startBusWatch() {
+	n.mu.Lock()
+	if n.busStarted || n.closed {
+		n.mu.Unlock()
+		return
+	}
+	n.busStarted = true
+	ctx, cancel := context.WithCancel(context.Background())
+	n.busCancel = cancel
+	n.mu.Unlock()
+
+	go n.watchBus(ctx)
+}
+
+// watchBus 는 백엔드가 푸시하는 알림을 받아 인증 링크를 갈무리한다.
+//
+// 구독이 끊기면 다시 붙는다. 조용히 포기하면 폴링만 남아 이 수정이 무의미해진다.
+func (n *tsnetNode) watchBus(ctx context.Context) {
+	for ctx.Err() == nil {
+		if n.consumeBus(ctx) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(busWatchRetryInterval):
+		}
+	}
+}
+
+// consumeBus 는 구독 하나를 소비한다. 더 시도할 이유가 없으면 true 를 돌려준다.
+func (n *tsnetNode) consumeBus(ctx context.Context) (done bool) {
+	client, err := n.server.LocalClient()
+	if err != nil {
+		return false
+	}
+	watcher, err := client.WatchIPNBus(ctx, ipn.NotifyInitialState)
+	if err != nil {
+		return false
+	}
+	defer watcher.Close()
+
+	for {
+		notify, err := watcher.Next()
+		if err != nil {
+			// ctx 가 끝났으면 노드가 닫힌 것이므로 더 붙지 않는다.
+			return ctx.Err() != nil
+		}
+		n.applyNotify(&notify)
+	}
+}
+
+// applyNotify 는 알림 하나를 인증 링크 상태에 반영한다.
+//
+// 규칙을 여기 모아 둔 이유는 검증 때문이다 — 살아 있는 백엔드 없이는 버스를 흘려볼 수 없다.
+func (n *tsnetNode) applyNotify(notify *ipn.Notify) {
+	if notify == nil {
+		return
+	}
+	changed := false
+	if notify.BrowseToURL != nil {
+		n.setBusAuthURL(strings.TrimSpace(*notify.BrowseToURL))
+		changed = true
+	}
+	// 로그인이 끝났으면 링크는 쓸모가 없다. 남겨 두면 이미 붙은 노드에 대해 낡은 링크를
+	// 계속 보고해서, 화면이 인증을 다시 요구하는 것처럼 보인다.
+	if notify.LoginFinished != nil {
+		n.setBusAuthURL("")
+		changed = true
+	}
+	if notify.State != nil {
+		if *notify.State == ipn.Running {
+			n.setBusAuthURL("")
+		}
+		changed = true
+	}
+	// 넷맵·건강·오류도 판정에 영향을 준다 — 만료는 새 넷맵이 올 때 드러나고, 컨트롤 플레인과
+	// 끊기면 건강 경고로 나온다.
+	if notify.NetMap != nil || notify.Health != nil || notify.ErrMessage != nil {
+		changed = true
+	}
+
+	if changed && n.onNotify != nil {
+		n.onNotify()
+	}
+}
+
+func (n *tsnetNode) setBusAuthURL(url string) {
+	n.mu.Lock()
+	n.busAuthURL = url
+	n.mu.Unlock()
+}
+
+func (n *tsnetNode) busAuthURLValue() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.busAuthURL
+}
+
+// busWatchRetryInterval 은 끊긴 버스 구독을 다시 붙기 전 간격이다.
+const busWatchRetryInterval = time.Second
 
 // startWithCancel 은 기동을 기다리되 취소되면 그 이유로 돌아간다.
 //
@@ -111,7 +240,8 @@ func NewNode(config NodeConfig) (Node, error) {
 			AuthKey:    config.AuthKey,
 			Ephemeral:  config.Ephemeral,
 		},
-		dir: config.Dir,
+		dir:      config.Dir,
+		onNotify: config.OnNotify,
 	}, nil
 }
 
@@ -197,11 +327,60 @@ func backendHasReported(backendState string) bool {
 // 플레인 왕복에 달려 있어 촘촘히 볼 이유가 없다.
 const nodeStatusPollInterval = 150 * time.Millisecond
 
-// localClient 는 bringUp 이 쓰는 부분만 좁힌 것이다. 진짜 백엔드 없이 대기 규칙을
-// 검증할 수 있게 한다.
+// localClient 는 bringUp·startLogin 이 쓰는 부분만 좁힌 것이다. 진짜 백엔드 없이 대기
+// 규칙과 로그인 개시 규칙을 검증할 수 있게 한다.
 type localClient interface {
 	Status(ctx context.Context) (*ipnstate.Status, error)
 	EditPrefs(ctx context.Context, prefs *ipn.MaskedPrefs) (*ipn.Prefs, error)
+	StartLoginInteractive(ctx context.Context) error
+}
+
+// Reauth 는 인증이 필요한 노드의 대화형 로그인을 개시한다.
+//
+// 기동 경로와 갈리기 때문에 필요하다. 노드를 새로 기동하면 Start 가 등록을 처음부터 밟아
+// 링크가 곧 나온다. 반면 **이미 떠 있는** 노드의 키가 만료되면 backend 는 NeedsLogin 이지만
+// WantRunning 을 다시 켜는 것으로는 로그인이 시작되지 않는다 — 개시해 주지 않으면 백엔드가
+// 자기 백오프 일정으로 재로그인할 때까지(수 분) 링크가 나오지 않는다.
+//
+// 링크는 Status 에 실리지 않고 IPN 버스로만 오는 경로가 있어서, 이 호출은 버스 구독
+// (startBusWatch)과 함께여야 의미가 있다. 둘 중 하나만으로는 화면이 링크를 받지 못한다.
+func (n *tsnetNode) Reauth(ctx context.Context) error {
+	if err := n.ensureStarted(ctx); err != nil {
+		return err
+	}
+	client, err := n.server.LocalClient()
+	if err != nil {
+		return fmt.Errorf("tailnet: local client: %w", err)
+	}
+	return n.startLogin(ctx, client)
+}
+
+// startLogin 은 인증 대기 구간마다 한 번만 실제로 개시한다. 실패하면 표시를 되돌려 다음
+// 요청이 다시 시도할 수 있게 한다.
+func (n *tsnetNode) startLogin(ctx context.Context, client localClient) error {
+	n.mu.Lock()
+	if n.closed {
+		n.mu.Unlock()
+		return errors.New("tailnet: node is closed")
+	}
+	if n.reauthStarted {
+		n.mu.Unlock()
+		return nil
+	}
+	n.reauthStarted = true
+	n.mu.Unlock()
+
+	if err := client.StartLoginInteractive(ctx); err != nil {
+		n.clearReauth()
+		return fmt.Errorf("tailnet: start login: %w", err)
+	}
+	return nil
+}
+
+func (n *tsnetNode) clearReauth() {
+	n.mu.Lock()
+	n.reauthStarted = false
+	n.mu.Unlock()
 }
 
 // Status 는 등록 진행 상황을 보고한다. 설정 화면이 이걸 구독해 화면을 만든다.
@@ -222,7 +401,21 @@ func (n *tsnetNode) Status(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("tailnet: status: %w", err)
 	}
 
-	return statusFromBackend(state, time.Now()), nil
+	status := statusFromBackend(state, time.Now())
+	// 링크가 상태에 없으면 버스가 받아 둔 것을 쓴다. 만료된 노드의 재인증 링크는 이 경로로만
+	// 오는 경우가 있어서, 이 합침이 없으면 화면이 링크를 영원히 기다린다.
+	if status.AuthURL == "" {
+		if url := n.busAuthURLValue(); url != "" {
+			status.AuthURL = url
+		}
+	}
+	// 붙었으면 남은 링크와 개시 표시를 버린다(버스 알림을 놓친 경우의 안전망). 표시를 남기면
+	// 다음에 다시 만료됐을 때 아무도 재인증을 개시해 주지 못한다.
+	if status.State == StateRunning && !status.Expired {
+		n.setBusAuthURL("")
+		n.clearReauth()
+	}
+	return status, nil
 }
 
 // statusFromBackend 는 tsnet 이 보고한 상태를 우리 Status 로 옮긴다.
@@ -360,7 +553,14 @@ func (n *tsnetNode) Close() error {
 	}
 	started := n.started
 	n.closed = true
+	busCancel := n.busCancel
+	n.busCancel = nil
 	n.mu.Unlock()
+
+	// 버스 구독을 먼저 접는다. 서버를 닫는 중에 구독이 살아 있으면 무의미한 재접속을 돈다.
+	if busCancel != nil {
+		busCancel()
+	}
 
 	// 기동한 적 없으면 닫을 것도 없다 — tsnet 의 Close 는 Start 가 만든 상태를 만지므로
 	// 여기서 부르면 죽는다.

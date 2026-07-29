@@ -70,6 +70,176 @@ func (runtime *Runtime) restartNode(id string, lease **tailnet.Lease) (bool, err
 	return true, nil
 }
 
+// tailnetRecoveryDebounce 는 같은 노드의 알림이 몰려 올 때 복구 판정을 한 번으로 모으는
+// 시간이다. 로그인 한 번에도 상태·넷맵·건강 알림이 연달아 오므로, 그때마다 판정하면 같은 일을
+// 여러 번 한다.
+const tailnetRecoveryDebounce = 700 * time.Millisecond
+
+// onTailnetNotify 는 백엔드가 상태 변화를 푸시했을 때 불린다.
+//
+// 폴링하지 않는 이유가 이것이다 — 만료·인증 필요·링크 발급은 모두 백엔드가 IPN 버스로 알려
+// 주는 사건이다. 버스 goroutine 에서 불리므로 판정은 별도 goroutine 으로 넘긴다(여기서 상태를
+// 읽으면 알림 수신이 밀린다).
+func (runtime *Runtime) onTailnetNotify(id string) {
+	if runtime.tailnets == nil {
+		return
+	}
+	runtime.tailnetRecoveryMu.Lock()
+	if runtime.tailnetRecoveryPending == nil {
+		runtime.tailnetRecoveryPending = make(map[string]bool)
+	}
+	if runtime.tailnetRecoveryPending[id] {
+		runtime.tailnetRecoveryMu.Unlock()
+		return
+	}
+	runtime.tailnetRecoveryPending[id] = true
+	runtime.tailnetRecoveryMu.Unlock()
+
+	go func() {
+		// 알림 묶음이 지나가기를 기다린 뒤 한 번만 본다.
+		time.Sleep(tailnetRecoveryDebounce)
+		runtime.tailnetRecoveryMu.Lock()
+		delete(runtime.tailnetRecoveryPending, id)
+		runtime.tailnetRecoveryMu.Unlock()
+
+		runtime.recoverTailnetIfExpired(id)
+	}()
+}
+
+// awaitTailnetAttempt 는 먼저 시작된 시도의 결과를 기다려 자기 요청의 결말을 낸다.
+//
+// 노드를 다시 올리거나 만들지 않는다 — 그 일은 선행 시도가 하고 있다. 결과만 자기 requestID 로
+// 한 번 보고해서, 기다리는 쪽(데스크톱)이 끝을 볼 수 있게 한다. 선행 시도가 보내는 진행 상황은
+// 브로드캐스트로 이미 화면에 닿으므로 여기서 중복해 흘리지 않는다.
+func (runtime *Runtime) awaitTailnetAttempt(
+	ctx context.Context,
+	requestID string,
+	id string,
+	attempt *tailnetAttempt,
+) error {
+	emit := func(payload coretypes.TailnetStatusPayload) {
+		runtime.emitEvent(coretypes.Event{
+			Type:      coretypes.EventTailnetStatus,
+			RequestID: requestID,
+			Payload:   payload,
+		})
+	}
+
+	select {
+	case <-attempt.done:
+	case <-ctx.Done():
+		// 이 요청만 접힌 것이다(선행 시도는 그대로 진행될 수 있다).
+		if errors.Is(ctx.Err(), context.Canceled) {
+			emit(coretypes.TailnetStatusPayload{
+				ID:        id,
+				State:     string(tailnet.StateStopped),
+				Cancelled: true,
+			})
+			return nil
+		}
+		timeoutErr := fmt.Errorf("tailnet %q did not come up in time", id)
+		emit(coretypes.TailnetStatusPayload{
+			ID:    id,
+			State: string(tailnet.StateStopped),
+			Error: timeoutErr.Error(),
+		})
+		return timeoutErr
+	}
+
+	// 선행 시도가 끝났다. 지금 상태가 곧 결과다 — 판정은 코어 한 곳(Connected)만 본다.
+	status, ok := runtime.tailnets.StatusOf(context.Background(), id)
+	if !ok {
+		// 노드가 사라졌다 = 선행 시도가 접혔다는 뜻이다.
+		emit(coretypes.TailnetStatusPayload{
+			ID:        id,
+			State:     string(tailnet.StateStopped),
+			Cancelled: true,
+		})
+		return nil
+	}
+
+	result := runtime.tailnetStatusPayloadFor(id, status)
+	if !status.Connected() {
+		// 붙지 못한 채 끝났다. 이유를 담아 끝을 알린다 — 담지 않으면 기다리는 쪽이 한도까지 매달린다.
+		result.Error = fmt.Sprintf("tailnet %q did not come up", id)
+	}
+	emit(result)
+	if result.Error != "" {
+		return errors.New(result.Error)
+	}
+	return nil
+}
+
+// recoverTailnetIfExpired 는 만료된 노드의 복구를 시작한다.
+//
+// 복구 수단은 사용자가 "다시 시도" 로 하던 것과 같다(ForceRelogin) — 노드를 닫고 새로 만들면
+// 등록을 처음부터 밟아 인증 링크가 곧바로 나온다. 이미 검증된 경로라 새 메커니즘을 만들지 않는다.
+//
+// 세션(터미널·SFTP·포워딩)이 복구를 맡으면 같은 노드를 두고 여러 곳이 각자 복구를 시도해 인증
+// 링크가 서로를 무효화한다. 그래서 코어 한 곳에서만 한다.
+func (runtime *Runtime) recoverTailnetIfExpired(id string) {
+	// 취소는 억제 표시를 남기지 않는다. 취소가 노드를 없애므로 여기서 볼 것이 사라지고
+	// (StatusOf 가 !ok), 다시 쓰려는 소비자가 요청하면 그때 새 노드로 시작한다.
+	//
+	// 아무도 쓰지 않는 tailnet 은 복구하지 않는다.
+	//
+	// 복구의 목적은 쓰고 있는 연결을 살리는 것이다. 소비자가 없으면 지금 복구할 이유가 없고,
+	// 하면 해로운 쪽이 크다 — 복구가 리스를 잡아 유휴 타이머를 계속 되돌리므로 만료된 노드가
+	// 30분 유휴 회수에 도달하지 못하고, 한도마다 인증 링크를 새로 발급해 churn 을 만든다.
+	// 다음에 누가 쓰려 할 때 게이트가 같은 일을 한다.
+	if runtime.tailnets.Leases(id) == 0 {
+		return
+	}
+	status, ok := runtime.tailnets.StatusOf(context.Background(), id)
+	if !ok || !status.Expired {
+		return
+	}
+	// 진행 중인 시도가 있으면 건드리지 않는다. 끼어들면 그 시도가 취소되고, 사용자가
+	// 브라우저에서 쓰던 링크가 무효화된다.
+	if runtime.tailnetTests != nil && runtime.tailnetTests.active(id) {
+		return
+	}
+	config, ok := runtime.tailnetConfigs.get(id)
+	if !ok {
+		return
+	}
+
+	// requestID 가 비어 있으면 상태가 브로드캐스트로 나간다 — 설정 화면과 연결 화면이 모두
+	// 그것을 보고, 인증 링크는 메인 프로세스가 열어 준다.
+	_ = runtime.TailnetTest("", coretypes.TailnetTestPayload{
+		Config:       config,
+		ForceRelogin: true,
+	})
+}
+
+// statusWithCancel 는 상태 조회를 취소 가능하게 만든다.
+//
+// Node.Status 에는 ctx 를 존중하지 못하는 구간이 있다. 백엔드는 키가 만료되면 데이터 플레인을
+// 내리는데(popBrowserAuthNow → stopEngineAndWaitLocked) 그 동안 자기 뮤텍스를 잡고 있고,
+// status 요청은 그 뮤텍스를 기다린다 — 뮤텍스 대기는 ctx 취소로 풀리지 않는다.
+//
+// 그 안에서 기다리면 사용자가 취소를 눌러도 루프가 그것을 볼 기회를 얻지 못해, 요청이 한도까지
+// 매달리고 화면은 마지막 문구에 얼어붙는다. 조회를 goroutine 으로 보내고 여기서 ctx 와
+// 경합시켜 취소가 항상 이기게 한다. 남은 goroutine 은 조회가 끝나면 스스로 사라진다.
+func statusWithCancel(ctx context.Context, node tailnet.Node) (tailnet.Status, error) {
+	type result struct {
+		status tailnet.Status
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		status, err := node.Status(ctx)
+		done <- result{status: status, err: err}
+	}()
+
+	select {
+	case outcome := <-done:
+		return outcome.status, outcome.err
+	case <-ctx.Done():
+		return tailnet.Status{}, ctx.Err()
+	}
+}
+
 // tailnetStatusPollFor 는 현재 무엇을 기다리는지로 간격을 고른다.
 func tailnetStatusPollFor(status tailnet.Status) time.Duration {
 	if status.AuthURL == "" {
@@ -93,25 +263,41 @@ type tailnetTests struct {
 // 들고 있으면 신원 비교가 성립해서, 늦게 끝난 앞 시도가 뒤 시도의 취소를 지우는 일이 없다.
 type tailnetAttempt struct {
 	cancel context.CancelFunc
+	// done 은 이 시도가 끝나면 닫힌다. 뒤에 온 요청이 합류해 기다리는 통로다.
+	done chan struct{}
 }
 
 func newTailnetTests() *tailnetTests {
 	return &tailnetTests{byID: make(map[string]*tailnetAttempt)}
 }
 
-// begin 은 시도를 등록하고 그 신원을 돌려준다. 같은 tailnet 을 다시 시도하면 앞의 것을 접는다.
-func (t *tailnetTests) begin(id string, cancel context.CancelFunc) *tailnetAttempt {
-	attempt := &tailnetAttempt{cancel: cancel}
-
+// begin 은 시도를 등록하고 그 신원을 돌려준다.
+//
+// 이미 진행 중이면 그 시도를 그대로 돌려준다(joined=true) — 접지 않는다. 노드는 tailnet 하나에
+// 하나뿐이라, 터미널·SFTP·포트포워딩·컨테이너가 각자 시도를 만들면 서로를 취소하고, 그 과정에서
+// 노드가 닫히거나 재생성돼 사용자가 브라우저에서 쓰던 인증 링크가 죽는다. 하나만 일하고 나머지는
+// 그 결과를 받는다.
+//
+// force 는 사용자가 명시적으로 처음부터 다시 하려는 경우다(다시 시도). 그때만 앞의 것을 접는다.
+func (t *tailnetTests) begin(
+	id string,
+	cancel context.CancelFunc,
+	force bool,
+) (attempt *tailnetAttempt, joined bool) {
 	t.mu.Lock()
 	previous := t.byID[id]
-	t.byID[id] = attempt
+	if previous != nil && !force {
+		t.mu.Unlock()
+		return previous, true
+	}
+	next := &tailnetAttempt{cancel: cancel, done: make(chan struct{})}
+	t.byID[id] = next
 	t.mu.Unlock()
 
 	if previous != nil {
 		previous.cancel()
 	}
-	return attempt
+	return next, false
 }
 
 // end 는 자기 자신이 등록돼 있을 때만 지운다.
@@ -120,10 +306,22 @@ func (t *tailnetTests) begin(id string, cancel context.CancelFunc) *tailnetAttem
 // 화면에서는 취소를 눌러도 아무 일이 없는 것으로 보인다.
 func (t *tailnetTests) end(id string, attempt *tailnetAttempt) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	if t.byID[id] == attempt {
 		delete(t.byID, id)
 	}
+	t.mu.Unlock()
+
+	// 합류한 요청들을 풀어 준다. 시도를 만든 곳에서만 한 번 부르므로 두 번 닫히지 않는다.
+	close(attempt.done)
+}
+
+// active 는 이 tailnet 에 진행 중인 시도가 있는지다. 감독자가 사용자의 시도에 끼어들지
+// 않으려고 묻는다.
+func (t *tailnetTests) active(id string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	_, ok := t.byID[id]
+	return ok
 }
 
 // cancel 은 진행 중이면 접고 그 사실을 알려 준다.
@@ -149,10 +347,21 @@ type tailnetConfigs struct {
 	mu   sync.Mutex
 	root string
 	byID map[string]coretypes.TailnetConfigPayload
+	// notify 는 노드가 백엔드 알림을 받았을 때 코어에 알리는 통로다. 노드를 만들 때 심는다.
+	notify func(id string)
 }
 
 func newTailnetConfigs(root string) *tailnetConfigs {
 	return &tailnetConfigs{root: root, byID: make(map[string]coretypes.TailnetConfigPayload)}
+}
+
+// get 은 저장된 설정을 돌려준다. 감독자가 복구를 시작할 때 쓴다 — 복구는 요청 페이로드 없이
+// 코어가 스스로 하는 것이므로 설정을 여기서 읽어야 한다.
+func (c *tailnetConfigs) get(id string) (coretypes.TailnetConfigPayload, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	config, ok := c.byID[id]
+	return config, ok
 }
 
 // set 은 설정을 갈아 끼우고, 노드를 다시 만들어야 하는 변경이었는지 알려준다.
@@ -224,11 +433,21 @@ func (c *tailnetConfigs) newNode(id string) (tailnet.Node, error) {
 		hostname = defaultNodeHostname()
 	}
 
+	c.mu.Lock()
+	notify := c.notify
+	c.mu.Unlock()
+
 	return tailnet.NewNode(tailnet.NodeConfig{
 		Hostname:   hostname,
 		ControlURL: config.ControlURL,
 		AuthKey:    config.AuthKey,
 		Ephemeral:  config.Ephemeral,
+		// 백엔드가 변화를 푸시하면 코어가 복구를 판단한다. 폴링하지 않는 근거가 이것이다.
+		OnNotify: func() {
+			if notify != nil {
+				notify(id)
+			}
+		},
 		// tailnet 마다 별도 디렉터리. 노드키가 들어가므로 기기 로컬 전용이고 동기화 대상이
 		// 아니다. id 를 그대로 쓰지 않고 정제해 경로 조작을 막는다.
 		Dir: filepath.Join(root, sanitizeTailnetDir(id)),
@@ -275,7 +494,21 @@ func sanitizeTailnetDir(id string) string {
 	return cleaned
 }
 
+// tailnetStatusPayloadFor 는 상태에 "지금 시도가 돌고 있는지"를 붙여서 내보낸다. 화면이
+// 거짓 진행(아무도 손대지 않는데 스피너)을 그리지 않게 하는 유일한 근거다.
+func (runtime *Runtime) tailnetStatusPayloadFor(
+	id string,
+	status tailnet.Status,
+) coretypes.TailnetStatusPayload {
+	payload := tailnetStatusPayload(id, status)
+	if runtime.tailnetTests != nil {
+		payload.Attempting = runtime.tailnetTests.active(id)
+	}
+	return payload
+}
+
 // tailnetStatusPayload 는 노드 상태를 이벤트 페이로드로 옮긴다.
+
 func tailnetStatusPayload(id string, status tailnet.Status) coretypes.TailnetStatusPayload {
 	return coretypes.TailnetStatusPayload{
 		ID:           id,
@@ -366,9 +599,13 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 	// 실행된다.
 	cancelled := false
 	defer func() {
-		if cancelled {
-			runtime.stopUnauthenticatedNode(id)
+		if !cancelled {
+			return
 		}
+		// 별도 goroutine 으로 보낸다. 이 정리는 상태 조회를 하는데, 만료를 처리하는 백엔드는
+		// 뮤텍스를 잡고 있어 그 조회가 몇 초 갇힐 수 있다 — 여기서 기다리면 시도가 끝난 사실이
+		// 그만큼 늦게 알려져 사용자에게는 취소가 늦게 듣는 것으로 보인다. 실패는 원래 삼킨다.
+		go runtime.stopUnauthenticatedNode(id)
 	}()
 
 	// 테스트는 노드를 붙들지 않는다. 놓아도 유예 동안 살아 있으므로, 곧바로 호스트에
@@ -386,8 +623,13 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 
 	// 사용자가 중간에 그만둘 수 있어야 한다. 브라우저 로그인은 사람을 기다리는 구간이라
 	// 최대 3 분까지 가는데, 접을 방법이 없으면 그때까지 갇힌다.
+	// 이미 이 tailnet 을 올리는 중이면 그 시도에 합류한다. 각자 시도를 만들면 서로를 취소하고,
+	// 그 과정에서 노드가 닫히거나 재생성돼 브라우저에서 쓰던 인증 링크가 죽는다.
 	if runtime.tailnetTests != nil {
-		attempt := runtime.tailnetTests.begin(id, cancel)
+		attempt, joined := runtime.tailnetTests.begin(id, cancel, payload.ForceRelogin)
+		if joined {
+			return runtime.awaitTailnetAttempt(ctx, requestID, id, attempt)
+		}
 		defer runtime.tailnetTests.end(id, attempt)
 	}
 
@@ -428,14 +670,41 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 	var waitingForAuthURLSince time.Time
 	restarted := false
 
+	reauthRequested := false
+
 	for {
-		status, err := lease.Node.Status(ctx)
+		status, err := statusWithCancel(ctx, lease.Node)
 		if err != nil {
+			// 취소는 실패가 아니다. 아래 select 와 같은 결말을 내야 한다 — 그러지 않으면
+			// 기다리는 쪽이 취소를 오류로 받고, 화면에 이유 없는 실패가 뜬다.
+			if errors.Is(err, context.Canceled) {
+				cancelled = true
+				emit(coretypes.TailnetStatusPayload{
+					ID:        id,
+					State:     string(tailnet.StateStopped),
+					Cancelled: true,
+				})
+				return nil
+			}
 			emit(coretypes.TailnetStatusPayload{ID: id, State: string(tailnet.StateStopped), Error: err.Error()})
 			return err
 		}
 
-		emit(tailnetStatusPayload(id, status))
+		emit(runtime.tailnetStatusPayloadFor(id, status))
+
+		// 만료는 재인증이 필요하다는 확정 신호다. 기다릴 이유가 없으므로 바로 로그인을 개시한다.
+		//
+		// 이미 떠 있는 노드는 WantRunning 을 다시 켜도 로그인이 시작되지 않는다. 개시해 주지
+		// 않으면 백엔드가 자기 백오프 일정으로 재로그인할 때까지 링크가 나오지 않아, 화면이
+		// 수 분간 "링크를 받는 중" 에 머문다.
+		//
+		// 별도 goroutine 으로 보내는 이유는 취소 때문이다. 이 호출도 백엔드 뮤텍스를 기다릴 수
+		// 있어서, 여기서 기다리면 취소가 다시 묻힌다. 시도당 한 번만 요청하고(노드가 구간당
+		// 한 번만 실제로 개시한다) 결과는 상태 폴링으로 확인한다.
+		if status.Expired && !reauthRequested {
+			reauthRequested = true
+			go func() { _ = lease.Node.Reauth(ctx) }()
+		}
 
 		// 인증이 필요한데 링크가 오지 않는 상태로 갇힐 수 있다.
 		//
@@ -496,7 +765,7 @@ func (runtime *Runtime) TailnetTest(requestID string, payload coretypes.TailnetT
 			// 시간이 다 됐다는 것 자체가 결과다. 승인 대기나 미인증 상태로 끝났다면 마지막
 			// 상태가 이미 나가 있으므로, 화면은 무엇을 기다리는 중이었는지 보여줄 수 있다.
 			timeoutErr := fmt.Errorf("tailnet %q did not come up within %s", id, timeout)
-			timedOut := tailnetStatusPayload(id, status)
+			timedOut := runtime.tailnetStatusPayloadFor(id, status)
 			timedOut.Error = timeoutErr.Error()
 			emit(timedOut)
 			return timeoutErr
@@ -518,14 +787,20 @@ func (runtime *Runtime) TailnetCancel(requestID string, payload coretypes.Tailne
 		runtime.tailnetTests.cancel(id)
 	}
 
-	// 기다리던 요청만 접으면 노드는 인증 대기 상태로 그대로 남는다. 그러면 취소한 화면에서는
-	// 끝난 것으로 보이는데 다른 화면(설정)은 "브라우저에서 인증을 마쳐 주세요" 를 계속 보여준다 —
-	// 같은 노드를 두고 두 화면이 다른 말을 하게 된다.
+	// 서버를 닫고 없앤다. 쓰는 곳이 있어도 닫는다.
 	//
-	// 그래서 아직 붙지 못한 노드는 함께 내린다. 이미 붙어 있는 노드는 건드리지 않는다(취소가
-	// 멀쩡한 연결을 끊으면 안 된다). 쓰이는 중이면 레지스트리가 거절하는데, 그건 다른 세션이
-	// 그 인증을 기다리고 있다는 뜻이므로 그대로 둔다.
-	runtime.stopUnauthenticatedNode(id)
+	// 시도만 접으면 취소가 아니다 — 노드가 그대로 살아 상태와 인증 링크를 계속 보고하므로,
+	// 화면은 접은 것을 접지 못한 상태로 그리고 사용자는 "가리기" 를 본다. 없애면 상태 자체가
+	// 사라져서 그릴 것이 없다(첫 실행과 같은 상태다).
+	//
+	// 아직 그 tailnet 이 필요한 소비자는 스스로 다시 요청하고, 그때 새 서버가 만들어져 처음부터
+	// 붙는다. 등록·노드 키는 그대로 두므로 컨트롤 플레인에 기기가 새로 생기지 않는다.
+	//
+	// 다만 붙어서 정상 동작하는 노드는 건드리지 않는다. 취소는 "지금 붙는 중인 것" 을 접는 것이고
+	// 살아 있는 세션을 끊는 동작이 아니다.
+	if !runtime.tailnetIsHealthy(id) {
+		_ = runtime.tailnets.Discard(id)
+	}
 
 	runtime.emitEvent(coretypes.Event{
 		Type:      coretypes.EventTailnetStatus,
@@ -536,6 +811,29 @@ func (runtime *Runtime) TailnetCancel(requestID string, payload coretypes.Tailne
 		},
 	})
 	return nil
+}
+
+// tailnetCancelHealthCheck 는 취소가 "이 노드는 정상인가" 를 묻고 기다려 주는 한도다.
+const tailnetCancelHealthCheck = time.Second
+
+// tailnetIsHealthy 는 짧은 한도 안에 "붙어서 정상" 이라고 답하는지 본다.
+//
+// 대답을 못 하면 정상이 아니라고 본다. 만료를 처리하는 백엔드는 데이터 플레인을 내리는 동안
+// 자기 뮤텍스를 잡고 있어서 상태 조회가 ctx 취소로도 풀리지 않는다 — 여기서 그대로 기다리면
+// 취소 명령 자체가 갇혀 다시 "취소가 안 먹는" 상태가 된다.
+func (runtime *Runtime) tailnetIsHealthy(id string) bool {
+	answered := make(chan bool, 1)
+	go func() {
+		status, ok := runtime.tailnets.StatusOf(context.Background(), id)
+		answered <- ok && status.Connected()
+	}()
+
+	select {
+	case healthy := <-answered:
+		return healthy
+	case <-time.After(tailnetCancelHealthCheck):
+		return false
+	}
 }
 
 // stopUnauthenticatedNode 는 아직 붙지 못한 노드를 내린다. 실패는 삼킨다 — 취소는 어떤 경우에도
@@ -583,7 +881,7 @@ func (runtime *Runtime) TailnetSnapshot(requestID string) error {
 
 	statuses := make([]coretypes.TailnetStatusPayload, 0)
 	for id, status := range runtime.tailnets.Snapshot(context.Background()) {
-		statuses = append(statuses, tailnetStatusPayload(id, status))
+		statuses = append(statuses, runtime.tailnetStatusPayloadFor(id, status))
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
 
@@ -607,6 +905,8 @@ func sameTailnetProgress(a, b coretypes.TailnetStatusPayload) bool {
 		// Cancelled 를 빼면 취소가 묻힌다 — 노드가 올라오기 전에도 Stopped 가 진행 상태로
 		// 나가므로, 시도를 접었다는 마지막 이벤트가 앞의 Stopped 와 같다고 버려진다.
 		a.Cancelled == b.Cancelled &&
+		// Attempting 이 빠지면 "시도가 끝났다"는 전이가 묻힌다 — 화면이 스피너를 계속 그린다.
+		a.Attempting == b.Attempting &&
 		// Ready·Online 도 같은 이유다. 준비 여부는 State 와 따로 바뀐다 — running 으로 보고되는
 		// 동안 컨트롤 플레인과 동기화되면서 준비됨으로 넘어간다. 그 전이가 곧 시도의 끝인데,
 		// 여기서 빼면 앞의 running 과 같다고 버려져서 기다리는 쪽이 영원히 끝을 못 본다.

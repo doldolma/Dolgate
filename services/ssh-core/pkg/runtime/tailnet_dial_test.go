@@ -13,6 +13,7 @@ import (
 // dialNode 는 Dial 을 흉내내고 리스 수명을 관찰할 수 있게 하는 노드다.
 type dialNode struct {
 	ups     int
+	reauths int
 	dials   int
 	dialErr error
 	status  tailnet.Status
@@ -37,6 +38,7 @@ func (n *dialNode) Status(context.Context) (tailnet.Status, error) {
 	return n.status, nil
 }
 func (n *dialNode) Down(context.Context) error   { return nil }
+func (n *dialNode) Reauth(context.Context) error { n.reauths += 1; return nil }
 func (n *dialNode) Logout(context.Context) error { return nil }
 func (n *dialNode) Close() error                 { return nil }
 func (n *dialNode) Purge() error                 { return nil }

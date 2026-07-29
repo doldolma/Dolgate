@@ -88,6 +88,75 @@ func (n *fakeNode) gateClose() (entered <-chan struct{}, release func()) {
 	return enteredCh, func() { close(gate) }
 }
 
+// Discard 는 쓰는 곳이 있어도 서버를 닫는다. 취소가 쓰는 동작이다 — 리스를 이유로 남겨 두면
+// 노드가 계속 살아 상태와 인증 링크를 보고해서 취소가 취소가 아니게 된다.
+func TestDiscardClosesEvenWhileInUse(t *testing.T) {
+	node := &fakeNode{}
+	registry := NewRegistry(func(string) (Node, error) { return node, nil }, Options{})
+	t.Cleanup(func() { _ = registry.Close() })
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+
+	if err := registry.Discard("corp"); err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	if _, got := node.counts(); got != 1 {
+		t.Fatalf("closes = %d, want 1 — 쓰는 중이라고 닫지 않았다", got)
+	}
+
+	// 없앤 뒤에는 그 tailnet 이 레지스트리에 없어야 한다(첫 실행과 같은 상태).
+	if _, ok := registry.StatusOf(context.Background(), "corp"); ok {
+		t.Fatal("Discard 뒤에도 항목이 남아 있다")
+	}
+	lease.Release()
+}
+
+// 강제 해체 뒤 남은 옛 리스가 새 노드를 깎으면 안 된다.
+//
+// release 는 id 로만 항목을 찾으므로, 세대 표시가 없으면 옛 리스의 Release 가 나중에 만들어진
+// 노드의 refs 를 깎는다 — 쓰는 중인 노드가 유예에 들어가거나 내려간다.
+func TestStaleLeaseReleaseIgnoredAfterDiscard(t *testing.T) {
+	built := 0
+	registry := NewRegistry(func(string) (Node, error) {
+		built += 1
+		return &fakeNode{}, nil
+	}, Options{})
+	t.Cleanup(func() { _ = registry.Close() })
+
+	stale, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if err := registry.Discard("corp"); err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+
+	fresh, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("두 번째 Acquire() error = %v", err)
+	}
+	defer fresh.Release()
+	if built != 2 {
+		t.Fatalf("built = %d, want 2 — 해체 뒤에는 새 노드를 만들어야 한다", built)
+	}
+
+	stale.Release()
+
+	if got := registry.Leases("corp"); got != 1 {
+		t.Fatalf("leases = %d, want 1 — 옛 리스의 Release 가 새 노드를 깎았다", got)
+	}
+}
+
+func (n *fakeNode) Reauth(context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.ops = append(n.ops, "reauth")
+	return nil
+}
+
 func (n *fakeNode) Purge() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()

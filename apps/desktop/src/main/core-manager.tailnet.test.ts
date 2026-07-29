@@ -73,6 +73,60 @@ async function startManager() {
   return { manager, ...fake };
 }
 
+let nextWebContentsId = 1;
+
+// registerWindow 는 webContents.id 와 closed 이벤트를 쓴다. 브로드캐스트만 볼 것이므로
+// 그 두 가지만 갖춘 최소 대체물을 쓴다.
+function fakeWindow(send: ReturnType<typeof vi.fn>, destroyed: boolean) {
+  nextWebContentsId += 1;
+  return {
+    isDestroyed: () => destroyed,
+    webContents: { id: nextWebContentsId, send },
+    on: vi.fn(),
+  } as unknown as Parameters<CoreManager["registerWindow"]>[0];
+}
+
+// 코어가 스스로 하는 일(만료 자동 복구, 취소로 끝난 시도의 마지막 상태)도 화면에 닿아야 한다.
+//
+// 전에는 화면이 자기가 시작한 시도의 진행만 볼 수 있었다(testTailnet 의 onStatus 콜백뿐).
+// 그래서 취소를 눌러도 코어는 제대로 접는데 화면은 낡은 상태를 계속 그려서, 사용자에게는 취소가
+// 먹통인 것으로 보였다.
+describe("tailnet status broadcast", () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+    openExternalMock.mockClear();
+  });
+
+  it("요청과 무관한 상태도 창으로 흘려보낸다", async () => {
+    const { manager, emitControl } = await startManager();
+    const send = vi.fn();
+    manager.registerWindow(fakeWindow(send, false));
+
+    // requestID 가 없는 상태 = 코어가 스스로 시작한 복구, 또는 취소로 끝난 시도의 마지막 상태.
+    emitControl({
+      type: "tailnetStatus",
+      payload: { id: "net-1", state: "stopped", cancelled: true },
+    } as CoreEvent<Record<string, unknown>>);
+
+    const statusCalls = send.mock.calls.filter(([channel]) => channel === "tailnet:status");
+    expect(statusCalls.length).toBe(1);
+    expect(statusCalls[0]?.[1]).toMatchObject({ id: "net-1", cancelled: true });
+  });
+
+  it("닫힌 창으로는 보내지 않는다", async () => {
+    const { manager, emitControl } = await startManager();
+    const send = vi.fn();
+    manager.registerWindow(fakeWindow(send, true));
+
+    emitControl({
+      type: "tailnetStatus",
+      payload: { id: "net-1", state: "stopped" },
+    } as CoreEvent<Record<string, unknown>>);
+
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 // 인증 링크가 와도 브라우저가 열리지 않으면 사용자는 인증을 마칠 방법이 없다. 그리고 여는 곳은
 // 한 군데여야 한다 — 설정 화면과 호스트 연결 양쪽에서 열면 탭이 두 개 열리고, 설정 화면이 닫혀
 // 있으면 아무도 열지 않는다.

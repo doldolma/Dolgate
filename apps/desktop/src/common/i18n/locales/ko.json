@@ -3084,7 +3084,7 @@
     "headscaleApprovalHint": "이 서버에 OIDC 가 설정돼 있지 않으면 로그인 화면 대신 안내문과 Auth ID 가 표시됩니다. 그 경우 관리자가 승인해야 완료됩니다.",
     "state": {
       "stopped": "중지됨",
-      "needsAuth": "인증 대기",
+      "needsAuth": "인증 필요",
       "needsApproval": "관리자 승인 대기",
       "starting": "연결 중",
       "running": "연결됨",
