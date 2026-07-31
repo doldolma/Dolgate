@@ -610,6 +610,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const isEditMode = Boolean(host);
 
   const sshDraft = isSshHostDraft(draft) ? draft : null;
+  const selectedTailnetId = sshDraft?.tailnetId?.trim() ?? '';
+  const missingTailnetId =
+    selectedTailnetId && !tailnetOptions.some((option) => option.id === selectedTailnetId)
+      ? selectedTailnetId
+      : '';
   // SSH Agent 인증 선택 시 로컬 agent 상태를 조회해 설정 시점에 표시(설정 실수를 미리 잡음).
   const [agentProbe, setAgentProbe] = useState<SshAgentProbeResult | null>(null);
   const isAgentAuthDraft = sshDraft?.authType === 'agent';
@@ -2001,8 +2006,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 ) : null}
               </div>
               <SelectField
-                value={sshDraft.tailnetId ?? ''}
-                disabled={tailnetOptions.length === 0}
+                value={selectedTailnetId}
+                disabled={tailnetOptions.length === 0 && !missingTailnetId}
                 onChange={(event) =>
                   setDraft({
                     ...sshDraft,
@@ -2011,6 +2016,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 }
               >
                 <option value="">{translate('hostForm.tailnet.none')}</option>
+                {missingTailnetId ? (
+                  <option value={missingTailnetId}>
+                    {translate('hostForm.tailnet.missingOption')}
+                  </option>
+                ) : null}
                 {tailnetOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
@@ -2019,7 +2029,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </SelectField>
               {/* 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다 —
                   tailnet 은 기기마다 따로 등록해야 해서 "다른 PC 에는 있는데" 로 헷갈린다. */}
-              {tailnetOptions.length === 0 ? (
+              {missingTailnetId ? (
+                <span className="text-[0.82rem] text-[var(--danger)]">
+                  {translate('hostForm.tailnet.missing')}
+                </span>
+              ) : tailnetOptions.length === 0 ? (
                 <span className="text-[0.82rem] text-[var(--text-soft)]">
                   {translate('hostForm.tailnet.empty')}
                 </span>

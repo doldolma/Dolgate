@@ -182,14 +182,6 @@ export function isPendingConnectionSessionId(sessionId: string): boolean {
 
 export interface TailnetFailureGuidance {
   message: string;
-  /**
-   * 그 자리에서 낼 수 있는 복구 동작.
-   *
-   * 'login' 은 컨트롤 플레인에 등록을 다시 확인시키고 필요하면 브라우저 로그인까지 가는 것이다.
-   * auth key 경로에는 다시 할 로그인이 없어서 'none' 이다 — 키가 죽었다면 눌러서 될 일이 아니라
-   * 새 키가 필요하다.
-   */
-  recovery: 'login' | 'none';
 }
 
 /**
@@ -198,19 +190,21 @@ export interface TailnetFailureGuidance {
  * 만료는 Tailscale 계층이 판정해서 알려 준 것만 여기 온다 — 대상까지 못 닿았다는 사실로 만료를
  * 추측하지 않는다. 그러면 멀쩡한 등록을 다시 로그인하라고 권하게 된다.
  *
- * usesAuthKey 가 null 이면(설정을 아직 못 읽음) 브라우저 경로로 떨어진다. 그쪽이 기본이다.
+ * 복구 동작은 내밀지 않는다. 만료를 감지하고 재인증을 개시하는 것은 코어의 일이고, 화면이 그것을
+ * 대신 결정하면 판단이 두 곳으로 갈린다. 여기서는 무엇이 일어났는지와 무엇이 필요한지만 말한다.
+ *
+ * usesAuthKey 가 null 이면(설정을 아직 못 읽음) 브라우저 경로로 떨어진다. 그쪽이 기본이다 —
+ * auth key 경로는 다시 할 로그인이 없어서 새 키가 필요하다는 점이 다르다.
  */
 export function resolveTailnetFailureGuidance(
   usesAuthKey: boolean | null,
 ): TailnetFailureGuidance {
-  const recovery = usesAuthKey ? 'none' : 'login';
   return {
     message: `${t('connectFailure.tailnetExpired')} ${t(
-      recovery === 'login'
-        ? 'connectFailure.tailnetReauthHint'
-        : 'connectFailure.tailnetAuthKeyHint',
+      usesAuthKey
+        ? 'connectFailure.tailnetAuthKeyHint'
+        : 'connectFailure.tailnetReauthHint',
     )}`,
-    recovery,
   };
 }
 

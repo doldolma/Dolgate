@@ -149,8 +149,7 @@ export function buildTailnetBridge(
     list: () => ipcRenderer.invoke(ipcChannels.tailnet.list),
     save: (input) => ipcRenderer.invoke(ipcChannels.tailnet.save, input),
     remove: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.remove, id),
-    test: (config, options) =>
-      ipcRenderer.invoke(ipcChannels.tailnet.test, config, options),
+    test: (config) => ipcRenderer.invoke(ipcChannels.tailnet.test, config),
     forget: (id: string) => ipcRenderer.invoke(ipcChannels.tailnet.forget, id),
     disconnect: (id: string) =>
       ipcRenderer.invoke(ipcChannels.tailnet.disconnect, id),

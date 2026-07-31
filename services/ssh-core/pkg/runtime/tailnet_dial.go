@@ -51,7 +51,7 @@ func (runtime *Runtime) tailnetDial(route TailnetRoute) (sshconn.DialFunc, error
 
 		// 여기서 실패하면 리스를 반드시 놓아야 한다. 안 놓으면 노드가 영원히 유예에 들어가지
 		// 못해 계속 떠 있는다.
-		conn, err := dialThroughLease(ctx, lease, route.ExpectedName, network, address)
+		conn, err := runtime.dialThroughLease(ctx, id, &lease, route.ExpectedName, network, address)
 		if err != nil {
 			lease.Release()
 			return nil, err
@@ -60,21 +60,34 @@ func (runtime *Runtime) tailnetDial(route TailnetRoute) (sshconn.DialFunc, error
 	}, nil
 }
 
-func dialThroughLease(
+func (runtime *Runtime) dialThroughLease(
 	ctx context.Context,
-	lease *tailnet.Lease,
+	id string,
+	lease **tailnet.Lease,
 	expectedName string,
 	network string,
 	address string,
 ) (net.Conn, error) {
 	// 끊어 뒀거나 유휴로 내려간 노드일 수 있다. 올리지 않으면 붙지 않는 노드를 기다린다.
-	if err := lease.Node.Up(ctx); err != nil {
+	if err := (*lease).Node.Up(ctx); err != nil {
 		return nil, err
 	}
+	probeTailnetIdentity(ctx, (*lease).Node)
 
-	status, err := lease.Node.Status(ctx)
+	status, err := (*lease).Node.Status(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// 연결 준비 단계를 거치지 않고 transport dial 로 바로 들어오는 소비자도 같은 자동 복구를
+	// 받아야 한다. 이 판단은 SSH 결과가 아니라 tailnet control 상태만 사용한다.
+	if status.IdentityInvalid {
+		if _, err := runtime.replaceInvalidIdentity(ctx, id, lease); err != nil {
+			return nil, err
+		}
+		status, err = (*lease).Node.Status(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// dial 직전 안전망. 관문(Connected)과 다른 질문을 묻는다 — "확실히 막혔나".
 	//
@@ -85,8 +98,14 @@ func dialThroughLease(
 	if err := assertTailnetIdentity(status, expectedName); err != nil {
 		return nil, err
 	}
-	return lease.Node.Dial(ctx, network, address)
+	return (*lease).Node.Dial(ctx, network, address)
 }
+
+// ErrTailnetLoginRejected 는 컨트롤 플레인이 로그인을 거부했을 때다(잘못된 auth key 등).
+//
+// 다른 이유들과 성질이 다르다 — 기다리거나 다시 시도해서 풀리지 않고, 사람이 설정을 고쳐야 한다.
+// 그래서 이유를 함께 붙여 올린다.
+var ErrTailnetLoginRejected = errors.New("tailnet: the control plane rejected this login")
 
 // ErrTailnetNeedsAuth 는 노드 등록이 끝나지 않았을 때다. 호스트 연결 경로에서는 기다리지 않고
 // 곧바로 안내한다 — 인증은 설정 화면에서 해야 한다.
@@ -104,27 +123,35 @@ var ErrTailnetExpired = errors.New(
 	"tailnet: this tailnet's node registration has expired",
 )
 
-// ErrTailnetOffline 은 컨트롤 플레인과 세션이 끊겼을 때다.
-//
-// 이 상태에서는 노드가 running 으로 보고되고 기기 목록도 남아 있지만 실제로는 통하지 않는다 —
-// 낡은 값이기 때문이다. 만료가 아직 드러나지 않은 구간도 여기에 들어온다.
-var ErrTailnetOffline = errors.New(
-	"tailnet: not connected to the control plane yet",
+// ErrTailnetIdentityInvalid 는 자동 교체 뒤에도 컨트롤 플레인이 노드 identity 를 거부할 때다.
+var ErrTailnetIdentityInvalid = errors.New(
+	"tailnet: the control plane no longer recognizes this node identity",
 )
 
 // assertTailnetNotBlocked 는 확정적으로 막힌 상태면 그 이유로 끊는다.
 //
 // 판정 자체는 tailnet.Status.BlockedReason 한 곳에 있고, 여기서는 그 결과를 에러로 옮기기만 한다.
+//
+// BlockOffline 은 막지 않는다. 그것은 컨트롤 플레인 map poll 이 지금 열려 있지 않다는 뜻일 뿐이고,
+// 데이터 플레인은 이미 받아 둔 넷맵으로 계속 통한다 — tailscale 자신도 이 상태를 8분이 지나서야
+// 경고로 올리고(health 의 notInMapPoll, "peer reachability might degrade over time"), magicsock 은
+// 컨트롤과 끊기면 DERP 홈을 바꾸지 않고 **유지한다**(피어가 변경을 알 수 없으므로). 여기서 막으면
+// 실제로 통하는 연결을 시도조차 못 하게 된다.
+//
+// 낡은 넷맵으로 dial 하는 것이 위험하지도 않다 — 피어 키가 바뀌었으면 WireGuard 핸드셰이크가
+// 실패할 뿐이고, 그 뒤에 호스트 키 검증이 또 있다. 못 가면 그 실패가 그대로 이유가 된다.
 func assertTailnetNotBlocked(status tailnet.Status) error {
 	switch status.BlockedReason() {
+	case tailnet.BlockLoginFailed:
+		return fmt.Errorf("%w: %s", ErrTailnetLoginRejected, status.LoginError)
 	case tailnet.BlockNeedsAuth:
 		return ErrTailnetNeedsAuth
 	case tailnet.BlockNeedsApproval:
 		return ErrTailnetNeedsApproval
 	case tailnet.BlockExpired:
 		return ErrTailnetExpired
-	case tailnet.BlockOffline:
-		return ErrTailnetOffline
+	case tailnet.BlockIdentityInvalid:
+		return ErrTailnetIdentityInvalid
 	default:
 		return nil
 	}

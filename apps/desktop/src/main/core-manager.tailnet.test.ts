@@ -263,4 +263,33 @@ describe("tailnet test completion", () => {
     const final = await test;
     expect(final.ready).toBe(true);
   });
+
+  // 코어는 동기화가 끊긴 채로 진행하기로 결정할 수 있다(degraded). 그것이 마지막 이벤트이고 뒤로는
+  // 아무것도 오지 않으므로, 종료로 보지 않으면 통과한 요청이 한도(3분)까지 매달린다 — 화면에는
+  // 스피너만 남고, 실제로는 연결이 진행될 수 있었던 상태다.
+  it("동기화가 끊긴 채 진행하기로 한 것도 종료로 본다", async () => {
+    const { manager, child, emitControl } = await startManager();
+
+    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const requestId = await lastRequestId(child);
+
+    emitControl({
+      type: "tailnetStatus",
+      requestId,
+      payload: {
+        id: "net-1",
+        state: "running",
+        ready: false,
+        authorized: true,
+        online: false,
+        degraded: true,
+      },
+    } as CoreEvent<Record<string, unknown>>);
+
+    const final = await test;
+    expect(final.degraded).toBe(true);
+    // ready 라고 뒤집지 않는다. 다른 판정이고, 화면은 이 차이로 경고를 그린다.
+    expect(final.ready).toBe(false);
+    expect(final.authorized).toBe(true);
+  });
 });

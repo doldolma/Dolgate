@@ -675,6 +675,11 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     nodeIp: optionalText(payload.nodeIp),
     // 판정은 코어가 한다. 여기서 다시 조합하지 않고 그 결과만 옮긴다.
     ready: payload.ready === true,
+    // 등록·로그인이 끝났는지(ready 와 다른 질문이다), 그리고 동기화가 끊긴 채로 코어가 진행하기로
+    // 했는지. 둘 다 코어의 판정이고 화면·관문은 결과만 읽는다.
+    authorized: payload.authorized === true,
+    identityInvalid: payload.identityInvalid === true,
+    degraded: payload.degraded === true,
     online: payload.online === true,
     expired: payload.expired === true,
     // 백엔드가 스스로 보고하는 문제들. state 가 정상인데 통신이 안 될 때의 유일한 단서다.
@@ -686,6 +691,17 @@ function toTailnetStatus(payload: Record<string, unknown>): TailnetStatus {
     cancelled: payload.cancelled === true,
     // 진행 중인지도 코어가 판단한다. 화면이 상태로 추측하면 거짓 진행을 그린다.
     attempting: payload.attempting === true,
+    // 링크를 받으려고 코어가 노드를 다시 세운 횟수와 거절 여부. 이것이 없으면 재시작이 화면에서
+    // 보이지 않는다 — 재시작 전후의 상태가 완전히 같기 때문이다.
+    restarts: typeof payload.restarts === "number" ? payload.restarts : undefined,
+    restartRefused: payload.restartRefused === true,
+    reRegistrations:
+      typeof payload.reRegistrations === "number"
+        ? payload.reRegistrations
+        : undefined,
+    // 로그인이 거부된 이유. 이것이 있으면 기다려서 풀리는 상태가 아니다.
+    loginError: optionalText(payload.loginError),
+    backendError: optionalText(payload.backendError),
     peers: toTailnetPeers(payload.peers),
     authUrl:
       typeof payload.authUrl === "string" && payload.authUrl.length > 0
@@ -4897,7 +4913,7 @@ export class CoreManager {
   async testTailnet(
     config: TailnetConfig,
     onStatus: (status: TailnetStatus) => void,
-    options?: { timeoutMs?: number; forceRelogin?: boolean },
+    options?: { timeoutMs?: number },
   ): Promise<TailnetStatus> {
     await this.start();
 
@@ -4917,9 +4933,6 @@ export class CoreManager {
             ephemeral: config.ephemeral,
           },
           timeoutMs: coreTimeoutMs,
-          // 만료된 등록은 로컬에서 구분되지 않는다. 연결이 실패한 뒤의 확인 요청만 이걸 켜서
-          // 컨트롤 플레인에 등록을 다시 확인시킨다.
-          forceRelogin: options?.forceRelogin === true,
         },
       },
       ["tailnetStatus"],
@@ -4938,8 +4951,12 @@ export class CoreManager {
           const status = toTailnetStatus(progress);
           // 오류도 종료다. 코어가 이유를 담아 끝을 알리는 경우(먼저 시작된 시도에 합류했는데
           // 그것이 붙지 못하고 끝난 경우 등)에 이것이 없으면 요청이 한도까지 매달린다.
+          //
+          // degraded 도 종료다 — 코어가 "동기화는 끊겼지만 진행한다" 고 결정한 것이라, 그 뒤로는
+          // 아무 이벤트도 오지 않는다. 이것을 빼면 통과한 요청이 한도까지 매달린다.
           return (
             status.ready === true ||
+            status.degraded === true ||
             status.cancelled === true ||
             (typeof status.error === "string" && status.error.length > 0)
           );

@@ -1338,7 +1338,9 @@
     },
     "tailnet": {
       "none": "사용하지 않음 (일반 네트워크)",
-      "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다."
+      "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다.",
+      "missingOption": "설정에 없는 Tailnet",
+      "missing": "이 호스트가 지정한 Tailnet 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
     }
   },
   "hostTransfer": {
@@ -2274,12 +2276,11 @@
     "generic": "연결을 완료하지 못했습니다.",
     "tailnetExpired": "이 Tailnet 의 노드 등록이 만료됐습니다.",
     "tailnetAuthKeyHint": "auth key 로 등록된 Tailnet 이라 다시 로그인할 것이 없습니다. 키가 만료·소진됐다면 새 키가 필요합니다.",
-    "tailnetReauthHint": "다시 로그인하면 브라우저 인증부터 새로 진행합니다.",
+    "tailnetReauthHint": "다시 시도하면 인증부터 새로 진행합니다.",
     "tailnetAuthInFlight": "이 Tailnet 의 인증이 진행 중입니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
     "tailscaleNeedsAuth": "Tailscale 인증이 끝나지 않았습니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
     "tailscaleNeedsApproval": "이 기기가 관리자 승인을 기다리는 중입니다. 승인되면 연결할 수 있습니다.",
-    "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요.",
-    "tailscaleOffline": "Tailscale 이 컨트롤 플레인과 연결되지 않았습니다. 연결됨으로 보이지만 실제로는 통신되지 않는 상태입니다 — 다시 로그인해야 할 수 있습니다."
+    "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요."
   },
   "knownHostsIpc": {
     "noSecrets": "저장할 인증 정보가 없습니다.",
@@ -2971,7 +2972,6 @@
     "removeTag": "{{tag}} 태그 제거"
   },
   "misc": {
-    "reauthenticateTailnet": "tailnet 다시 로그인",
     "reopenBrowser": "브라우저 다시 열기",
     "tmuxPrefixDefault": "Ctrl-B (기본)",
     "secretSummary": "{{label}} · {{type}} ({{count}}개 호스트)",
@@ -2994,8 +2994,7 @@
     "ssmTunnelUnsupported": "AWS SSM 터널을 시작할 수 없습니다. 이 구성에서는 in-process SSM 터널만 지원됩니다.",
     "connectSuccess": "연결에 성공했습니다.",
     "noTerminalSession": "연결된 터미널 세션이 없어 명령을 입력할 수 없습니다.",
-    "sessionExpiredOrInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요.",
-    "restartTailnet": "다시 시도"
+    "sessionExpiredOrInvalid": "세션이 만료되었거나 로그인 정보가 유효하지 않습니다. 다시 로그인해 주세요."
   },
   "awsDiagnostic": {
     "title": {
@@ -3079,6 +3078,8 @@
     "tailscaleDefault": "Tailscale",
     "usingAuthKey": "auth key",
     "usingBrowser": "브라우저 로그인",
+    "usedByHosts": "사용 중인 호스트 {{count}}개",
+    "usedByHosts_other": "사용 중인 호스트 {{count}}개",
     "needsAuth": "브라우저에서 인증을 마쳐야 연결이 완료됩니다. 창이 열리지 않았다면 다시 열어 주세요.",
     "openBrowser": "브라우저 다시 열기",
     "headscaleApprovalHint": "이 서버에 OIDC 가 설정돼 있지 않으면 로그인 화면 대신 안내문과 Auth ID 가 표시됩니다. 그 경우 관리자가 승인해야 완료됩니다.",
@@ -3089,9 +3090,11 @@
       "starting": "연결 중",
       "running": "연결됨",
       "failed": "실패",
+      "loginRejected": "로그인 거부됨",
       "preparingAuth": "인증 링크 받는 중",
+      "reRegistering": "노드 재등록 중",
       "expired": "인증 만료",
-      "offline": "연결 끊김"
+      "syncStalled": "동기화 끊김"
     },
     "field": {
       "label": "네트워크 이름",
@@ -3105,6 +3108,8 @@
       "authKeyHint": "reusable + ephemeral 권장 — 안 쓰는 노드가 자동 정리되고, 1회용 키는 재연결에 실패합니다."
     },
     "removeConfirm": "이 네트워크 설정과 저장된 auth key 가 지워지고, 등록된 노드도 해제됩니다. 되돌릴 수 없습니다.",
+    "removeConfirmInUse": "이 네트워크 설정과 저장된 auth key 가 지워지고, 등록된 노드도 해제됩니다. 이 네트워크를 사용하는 호스트 {{count}}개의 Tailnet 설정도 해제되어 이후 일반 네트워크로 연결됩니다. 되돌릴 수 없습니다.",
+    "removeConfirmInUse_other": "이 네트워크 설정과 저장된 auth key 가 지워지고, 등록된 노드도 해제됩니다. 이 네트워크를 사용하는 호스트 {{count}}개의 Tailnet 설정도 해제되어 이후 일반 네트워크로 연결됩니다. 되돌릴 수 없습니다.",
     "disconnect": "연결 종료",
     "identity": {
       "tailnet": "Tailnet",
@@ -3131,10 +3136,13 @@
     "tailscaleHealth": "이 기기가 보고한 경고",
     "tailscaleError": "Tailscale 오류",
     "tailscaleExpiredDetail": "등록이 만료됐습니다. 다시 로그인해야 합니다.",
+    "tailscaleIdentityInvalidDetail": "관리자 페이지에서 삭제된 노드를 감지해 자동으로 다시 등록하고 있습니다.",
+    "tailscaleLoginRejectedDetail": "로그인이 거부됐습니다. 설정에서 인증 정보를 확인해 주세요.",
     "tailscaleKeyExpiryDetail": "만료 예정 {{at}}",
     "tailscaleApprovalDetail": "관리자 승인을 기다리는 중입니다.",
     "tailscaleBrowserDetail": "브라우저에서 로그인을 마쳐 주세요.",
     "tailscaleLinkDetail": "로그인 링크를 받는 중입니다.",
+    "tailscaleRestartDetail": "등록을 다시 시작했습니다({{count}}회)",
     "tailscalePeersDetail": "기기 {{count}}대가 보입니다.",
     "hostKey": "호스트 키 확인",
     "hostKeyPromptDetail": "이 호스트를 신뢰할지 확인해 주세요.",
@@ -3142,7 +3150,8 @@
     "groupTailscale": "Tailscale",
     "groupHost": "호스트",
     "tailscaleSync": "컨트롤 플레인 동기화",
-    "tailscaleStaleDetail": "연결됨으로 보이지만 동기화가 끊겼습니다.",
+    "tailscaleStaleDetail": "컨트롤 플레인과 동기화가 끊겼습니다. 돌아오기를 잠시 기다립니다.",
+    "tailscaleDegradedDetail": "동기화가 끊긴 채로 진행합니다. 기기 목록이 최신이 아닐 수 있습니다.",
     "tailscaleTarget": "{{target}} 까지 경로",
     "tailscaleTargetDirect": "직접 연결",
     "tailscaleTargetRelay": "릴레이 경유 ({{relay}})",

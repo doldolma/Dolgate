@@ -190,6 +190,7 @@ func TestShutdownDoesNotLogOut(t *testing.T) {
 // 락이 없으면 그 자체가 데이터 레이스이고, tailnet 런타임을 -race 로 검사할 수 없게 된다.
 type countingNode struct {
 	closes  int
+	purges  int
 	downs   int
 	mu      sync.Mutex
 	onClose func()
@@ -256,7 +257,12 @@ func (n *countingNode) Reauth(context.Context) error {
 	return nil
 }
 
-func (n *countingNode) Purge() error { return nil }
+func (n *countingNode) Purge() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.purges += 1
+	return nil
+}
 
 // 만료된 노드는 코어가 스스로 복구를 시작해야 한다.
 //
@@ -284,13 +290,60 @@ func TestTailnetSupervisorRecoversAnExpiredNode(t *testing.T) {
 
 	// 알림 묶음을 모으는 시간 뒤에 복구가 시작된다.
 	deadline := time.Now().Add(3 * time.Second)
+	started := false
 	for time.Now().Before(deadline) {
 		if instance.tailnetTests.active("corp") {
-			return
+			started = true
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("만료된 노드에 대해 복구 시도가 시작되지 않았다")
+	if !started {
+		t.Fatal("만료된 노드에 대해 복구 시도가 시작되지 않았다")
+	}
+
+	// 백그라운드 시도를 다음 테스트까지 남기지 않는다. 전역 테스트 유예값을 다음 테스트가
+	// 바꾸는 동안 이 goroutine 이 읽으면 race 가 되고, 실제 프로세스 종료도 늦어진다.
+	node.setStatus(tailnet.Status{State: tailnet.StateRunning, Online: true})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && instance.tailnetTests.active("corp") {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if instance.tailnetTests.active("corp") {
+		t.Fatal("복구가 끝났는데 시도가 남아 있다")
+	}
+}
+
+// 만료가 아닌 상태는 감독자가 건드리지 않는다.
+//
+// 올라오는 중이거나 인증을 기다리는 것은 "붙지 못한" 상태이고, 처리는 진행 중인 시도 안에서 한다. 감독자가 여기까지 손을 뻗으면
+// 아무도 요청하지 않은 시도가 계속 태워지고, 그 시도가 유휴 타이머를 되돌려 노드가 회수되지 않는다.
+func TestTailnetSupervisorOnlyRecoversExpiredNodes(t *testing.T) {
+	for _, status := range []tailnet.Status{
+		{State: tailnet.StateNeedsAuth},
+		{State: tailnet.StateStarting},
+		{State: tailnet.StateNeedsApproval},
+		// 단순 offline(running 이지만 컨트롤 플레인과 끊김)은 감독자가 건드리지 않는다.
+		// 삭제는 이 상태와 별개인 IdentityInvalid 로 구분된다.
+		{State: tailnet.StateRunning, Online: false},
+	} {
+		node := &countingNode{status: status}
+		instance := newTailnetTestRuntime(t, node)
+		instance.tailnetConfigs.set(coretypes.TailnetConfigPayload{ID: "corp"})
+
+		lease, err := instance.tailnets.Acquire("corp")
+		if err != nil {
+			t.Fatalf("Acquire() error = %v", err)
+		}
+
+		instance.onTailnetNotify("corp")
+		time.Sleep(tailnetRecoveryDebounce + 300*time.Millisecond)
+
+		if instance.tailnetTests.active("corp") {
+			t.Errorf("state %q: 감독자가 시도를 태웠다", status.State)
+		}
+		lease.Release()
+	}
 }
 
 // 노드는 tailnet 하나에 하나뿐이다. 터미널·SFTP·포트포워딩·컨테이너가 각자 시도를 만들면
@@ -299,13 +352,13 @@ func TestTailnetSupervisorRecoversAnExpiredNode(t *testing.T) {
 func TestTailnetTestJoinsAnInFlightAttempt(t *testing.T) {
 	tests := newTailnetTests()
 
-	first, joined := tests.begin("corp", func() {}, false)
+	first, joined := tests.begin("corp", func() {})
 	if joined {
 		t.Fatal("첫 시도가 합류로 처리됐다")
 	}
 
 	cancelled := false
-	second, joined := tests.begin("corp", func() { cancelled = true }, false)
+	second, joined := tests.begin("corp", func() { cancelled = true })
 	if !joined {
 		t.Fatal("진행 중인 시도가 있는데 새 시도를 만들었다 — 서로를 취소한다")
 	}
@@ -325,22 +378,38 @@ func TestTailnetTestJoinsAnInFlightAttempt(t *testing.T) {
 	}
 }
 
-// 사용자가 명시적으로 처음부터 다시 하려는 경우(다시 시도)에만 앞의 시도를 접는다.
-func TestTailnetTestForceReloginReplacesTheAttempt(t *testing.T) {
+// 앞의 시도를 접고 새로 시작하는 통로는 두지 않는다.
+//
+// 처음부터 다시 하려면 취소를 거쳐야 한다 — 취소가 시도와 노드를 함께 없애므로 다음 요청이
+// 자연히 새 노드로 시작한다. 그 통로를 요청 필드로 열어 두면 "강도" 를 요청하는 쪽이 정하게
+// 되고, 진행 중인 인증 링크를 남이 죽일 수 있다.
+func TestTailnetAttemptsCannotBePreempted(t *testing.T) {
 	tests := newTailnetTests()
 
 	cancelled := false
-	first, _ := tests.begin("corp", func() { cancelled = true }, false)
+	first, _ := tests.begin("corp", func() { cancelled = true })
 
-	second, joined := tests.begin("corp", func() {}, true)
-	if joined {
-		t.Fatal("force 인데 합류했다 — 처음부터 다시 하려는 요청이 무시된다")
+	second, joined := tests.begin("corp", func() {})
+	if !joined {
+		t.Fatal("진행 중인 시도를 밀어내고 새 시도를 만들었다")
 	}
-	if second == first {
-		t.Fatal("force 인데 같은 시도를 돌려줬다")
+	if second != first {
+		t.Fatal("합류인데 다른 시도를 돌려줬다")
+	}
+	if cancelled {
+		t.Fatal("뒤에 온 요청이 앞의 시도를 접었다 — 인증 링크가 죽는다")
+	}
+
+	// 취소가 그 통로다. 접고 나면 다음 요청이 새 시도를 만든다.
+	if !tests.cancel("corp") {
+		t.Fatal("진행 중인 시도를 취소하지 못했다")
 	}
 	if !cancelled {
-		t.Fatal("force 가 앞의 시도를 접지 않았다")
+		t.Fatal("취소가 시도를 접지 않았다")
+	}
+	third, joined := tests.begin("corp", func() {})
+	if joined || third == first {
+		t.Fatal("취소 뒤에도 옛 시도에 합류했다")
 	}
 }
 
@@ -467,7 +536,7 @@ func TestTailnetSupervisorLeavesAnInFlightAttemptAlone(t *testing.T) {
 	// 사용자가 시작한 시도가 이미 진행 중인 상황.
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	attempt, _ := instance.tailnetTests.begin("corp", cancel, false)
+	attempt, _ := instance.tailnetTests.begin("corp", cancel)
 	defer instance.tailnetTests.end("corp", attempt)
 
 	instance.onTailnetNotify("corp")
@@ -610,6 +679,183 @@ func TestTailnetTestStartsReauthImmediatelyWhenExpired(t *testing.T) {
 	node.mu.Unlock()
 	if reauths == 0 {
 		t.Fatal("reauths = 0 — 만료면 곧바로 로그인을 개시해야 한다")
+	}
+}
+
+// online=false 만으로는 아무것도 하지 않는다. 네트워크 장애와 control poll 재접속 구간이 모두
+// 같은 모양이고, 그때는 기존 identity 를 유지해야 한다. 삭제는 별도 IdentityInvalid 신호로 온다.
+func TestTailnetTestLeavesAnOfflineRegistrationAlone(t *testing.T) {
+	original := tailnetAuthURLGrace
+	tailnetAuthURLGrace = 10 * time.Millisecond
+	t.Cleanup(func() { tailnetAuthURLGrace = original })
+
+	var mu sync.Mutex
+	built := 0
+	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetTests = newTailnetTests()
+	var node *countingNode
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		mu.Lock()
+		built += 1
+		mu.Unlock()
+		created := &countingNode{status: tailnet.Status{
+			State:  tailnet.StateRunning,
+			Online: false,
+		}}
+		if node == nil {
+			node = created
+		}
+		return created, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+
+	// 유예를 여러 번 넘길 만큼 돈다.
+	_ = instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 1_200,
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	node.mu.Lock()
+	reauths := node.reauths
+	closes := node.closes
+	node.mu.Unlock()
+
+	if reauths != 0 {
+		t.Errorf("reauths = %d, want 0 — 삭제된 등록에 자동으로 다시 들어갔다", reauths)
+	}
+	if closes != 0 || built != 1 {
+		t.Errorf("closes = %d, built = %d — 노드를 다시 세웠다", closes, built)
+	}
+}
+
+func TestTailnetTestReRegistersAnIdentityDeletedByTheControlPlane(t *testing.T) {
+	var mu sync.Mutex
+	var nodes []*countingNode
+	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		status := tailnet.Status{State: tailnet.StateRunning, Online: true}
+		if len(nodes) == 0 {
+			status.Online = false
+			status.IdentityInvalid = true
+		}
+		node := &countingNode{status: status}
+		nodes = append(nodes, node)
+		return node, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+
+	var eventsMu sync.Mutex
+	var events []coretypes.TailnetStatusPayload
+	instance.emitEvent = func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
+			eventsMu.Lock()
+			events = append(events, payload)
+			eventsMu.Unlock()
+		}
+	}
+
+	err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp", AuthKey: "reusable-key"},
+		TimeoutMs: 2000,
+	})
+	if err != nil {
+		t.Fatalf("TailnetTest() error = %v", err)
+	}
+
+	mu.Lock()
+	if len(nodes) != 2 {
+		mu.Unlock()
+		t.Fatalf("nodes built = %d, want 2", len(nodes))
+	}
+	stale, replacement := nodes[0], nodes[1]
+	mu.Unlock()
+
+	stale.mu.Lock()
+	staleCloses, stalePurges, staleLogouts := stale.closes, stale.purges, stale.logouts
+	stale.mu.Unlock()
+	if staleCloses != 1 || stalePurges != 1 || staleLogouts != 0 {
+		t.Fatalf("stale node: closes=%d purges=%d logouts=%d, want 1/1/0",
+			staleCloses, stalePurges, staleLogouts)
+	}
+	replacement.mu.Lock()
+	replacementUps := replacement.ups
+	replacement.mu.Unlock()
+	if replacementUps == 0 {
+		t.Fatal("replacement node was not brought up")
+	}
+
+	eventsMu.Lock()
+	last := events[len(events)-1]
+	eventsMu.Unlock()
+	if !last.Ready || last.IdentityInvalid || last.ReRegistrations != 1 {
+		t.Fatalf("final status = %#v", last)
+	}
+}
+
+func TestTailnetSupervisorDiscardsADeletedIdentityWhileIdle(t *testing.T) {
+	var nodes []*countingNode
+	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		status := tailnet.Status{State: tailnet.StateRunning, Online: true}
+		if len(nodes) == 0 {
+			status.Online = false
+			status.IdentityInvalid = true
+		}
+		node := &countingNode{status: status}
+		nodes = append(nodes, node)
+		return node, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+	instance.tailnetConfigs.set(coretypes.TailnetConfigPayload{
+		ID:      "corp",
+		AuthKey: "reusable-key",
+	})
+
+	lease, err := instance.tailnets.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	lease.Release()
+	if got := instance.tailnets.Leases("corp"); got != 0 {
+		t.Fatalf("leases = %d, want idle", got)
+	}
+
+	instance.recoverTailnetIfNeeded("corp")
+
+	if len(nodes) != 1 {
+		t.Fatalf("nodes built = %d, want 1 — idle recovery must not create a control-plane node", len(nodes))
+	}
+	nodes[0].mu.Lock()
+	closes, purges, logouts := nodes[0].closes, nodes[0].purges, nodes[0].logouts
+	nodes[0].mu.Unlock()
+	if closes != 1 || purges != 1 || logouts != 0 {
+		t.Fatalf("invalid node closes=%d purges=%d logouts=%d, want 1/1/0", closes, purges, logouts)
+	}
+	if _, ok := instance.tailnets.StatusOf(context.Background(), "corp"); ok {
+		t.Fatal("discarded identity remained in the registry")
+	}
+
+	// 다음 실제 사용이 새 노드를 만든다. 삭제 이벤트 자체는 새 registration 을 만들지 않는다.
+	fresh, err := instance.tailnets.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() after discard error = %v", err)
+	}
+	defer fresh.Release()
+	if len(nodes) != 2 {
+		t.Fatalf("nodes built after next use = %d, want 2", len(nodes))
+	}
+	status, err := fresh.Node.Status(context.Background())
+	if err != nil || !status.Connected() {
+		t.Fatalf("fresh status = %#v, err=%v", status, err)
 	}
 }
 
@@ -872,10 +1118,12 @@ func TestTailnetCancelEmitsATerminalStatus(t *testing.T) {
 	}
 }
 
-// 만료를 상태로는 알 수 없다 — tsnet 은 메모리에 남은 낡은 netmap 으로 계속 running 을 보고한다.
-// 그래서 확인 요청은 노드를 닫고 다시 만들어야 한다(netmap 없이 시작해야 컨트롤 플레인의 답을
-// 받는다). 이걸 빠뜨리면 확인이 "이미 running 이네" 로 끝나서 아무것도 알아내지 못한다.
-func TestTailnetTestForceReloginDropsTheStaleNode(t *testing.T) {
+// 요청은 "강도" 를 정하지 않는다.
+//
+// 예전에는 페이로드에 forceRelogin 이 있어서, 요청하는 쪽이 "먼저 노드를 버려라" 를 지시했다.
+// 그러면 정책이 요청 필드를 타고 흐르고, 렌더러가 취소·플래그·재시도를 조립하게 된다. 지금은
+// 붙어 있는 노드가 있으면 그대로 쓰고, 다시 세울지는 코어가 링크 확보 과정에서 판단한다.
+func TestTailnetTestReusesAConnectedNode(t *testing.T) {
 	closed := 0
 	node := &countingNode{
 		status:  tailnet.Status{State: tailnet.StateRunning, Online: true},
@@ -883,25 +1131,19 @@ func TestTailnetTestForceReloginDropsTheStaleNode(t *testing.T) {
 	}
 	runtime := newTailnetTestRuntime(t, node)
 
-	// 먼저 한 번 올려서 노드가 살아 있게 만든다(확인할 대상이 있어야 한다).
-	if err := runtime.TailnetTest("req-1", coretypes.TailnetTestPayload{
-		Config: coretypes.TailnetConfigPayload{ID: "corp"},
-	}); err != nil {
-		t.Fatalf("TailnetTest: %v", err)
+	for _, requestID := range []string{"req-1", "req-2"} {
+		if err := runtime.TailnetTest(requestID, coretypes.TailnetTestPayload{
+			Config: coretypes.TailnetConfigPayload{ID: "corp"},
+		}); err != nil {
+			t.Fatalf("TailnetTest(%s): %v", requestID, err)
+		}
 	}
+
 	if closed != 0 {
-		t.Fatalf("plain test must not drop the node: closed = %d", closed)
+		t.Errorf("closed = %d, want 0 — 붙어 있는 노드를 버렸다", closed)
 	}
-
-	if err := runtime.TailnetTest("req-2", coretypes.TailnetTestPayload{
-		Config:       coretypes.TailnetConfigPayload{ID: "corp"},
-		ForceRelogin: true,
-	}); err != nil {
-		t.Fatalf("TailnetTest(forceRelogin): %v", err)
-	}
-
-	if closed != 1 {
-		t.Errorf("closed = %d, want 1 — the stale node must be dropped", closed)
+	if node.ups < 2 {
+		t.Errorf("ups = %d, want 2 이상 — 두 번째 요청이 같은 노드를 쓰지 않았다", node.ups)
 	}
 }
 
@@ -928,9 +1170,9 @@ func TestTailnetTestKeepsTheNodeByDefault(t *testing.T) {
 	}
 }
 
-// 다른 세션이 그 tailnet 을 쓰고 있으면 노드를 버릴 수 없다. 그런데 그건 등록이 살아 있다는
-// 증거이므로 확인할 것이 없다 — 실패로 만들면 멀쩡한 연결이 오류로 끝난다.
-func TestTailnetTestForceReloginProceedsWhenTheNodeIsInUse(t *testing.T) {
+// 다른 세션이 그 tailnet 을 쓰고 있어도 연결 요청은 실패가 아니다. 그 세션이 통신하고 있다는
+// 것 자체가 등록이 살아 있다는 증거다 — 실패로 만들면 멀쩡한 연결이 오류로 끝난다.
+func TestTailnetTestSucceedsWhileAnotherConsumerHoldsTheNode(t *testing.T) {
 	node := &countingNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
 	runtime := newTailnetTestRuntime(t, node)
 
@@ -942,8 +1184,7 @@ func TestTailnetTestForceReloginProceedsWhenTheNodeIsInUse(t *testing.T) {
 	defer lease.Release()
 
 	if err := runtime.TailnetTest("req-1", coretypes.TailnetTestPayload{
-		Config:       coretypes.TailnetConfigPayload{ID: "corp"},
-		ForceRelogin: true,
+		Config: coretypes.TailnetConfigPayload{ID: "corp"},
 	}); err != nil {
 		t.Errorf("in-use node must not fail the check: %v", err)
 	}
@@ -1082,11 +1323,185 @@ func TestTailnetProgressKeepsTheReadyTransition(t *testing.T) {
 	}
 }
 
+// 동기화가 끊긴 채로 넘긴다는 결정도 전이다. 상태 자체는 그 전과 완전히 같아서(running, online
+// 없음) 이 값이 유일한 차이다 — 여기서 빠지면 유일한 종료 신호가 묻히고 요청이 한도까지 매달린다.
+func TestTailnetProgressKeepsTheDegradedDecision(t *testing.T) {
+	waiting := coretypes.TailnetStatusPayload{ID: "corp", State: "running", Authorized: true}
+	passed := waiting
+	passed.Degraded = true
+
+	if sameTailnetProgress(waiting, passed) {
+		t.Error("동기화 없이 넘긴 결정을 같은 상태로 보면 종료 신호가 사라진다")
+	}
+
+	// 등록·로그인이 끝나는 전이도 마찬가지다. Expired 는 비교 목록에 없어서, Authorized 가 없으면
+	// 만료가 드러나는 전이까지 함께 묻힌다.
+	unauthorized := coretypes.TailnetStatusPayload{ID: "corp", State: "running"}
+	if sameTailnetProgress(unauthorized, waiting) {
+		t.Error("인가 여부가 바뀐 것을 같은 상태로 보면 화면이 낡은 단계를 그린다")
+	}
+}
+
+// 동기화가 끊긴 구간에 사람 로그인 예산(3분)을 쓰지 않는다.
+//
+// 이 구간에는 사람이 할 일도, 코어가 확정적으로 고칠 일도 없다(단순 offline 은 재등록 근거가 아니다).
+// 그래서 예산을 그대로 쓰면 확정적으로 3분을 태운 뒤 실패하고, 그 사이 상태가 하나도 바뀌지 않아
+// 화면은 얼어붙는다 — 실제로 사용자는 멈춘 것으로 보고 취소했다.
+//
+// 유예가 지나면 통과시킨다. 데이터 플레인은 이미 받아 둔 넷맵으로 통하고, 진짜 답은 dial 만 안다.
+func TestTailnetTestProceedsWhenTheSyncNeverComesBack(t *testing.T) {
+	original := tailnetSyncGrace
+	tailnetSyncGrace = 10 * time.Millisecond
+	t.Cleanup(func() { tailnetSyncGrace = original })
+
+	node := &countingNode{status: tailnet.Status{State: tailnet.StateRunning, Online: false}}
+	instance := newTailnetTestRuntime(t, node)
+	var mu sync.Mutex
+	var events []coretypes.TailnetStatusPayload
+	instance.emitEvent = func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
+			mu.Lock()
+			events = append(events, payload)
+			mu.Unlock()
+		}
+	}
+
+	started := time.Now()
+	if err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 3000,
+	}); err != nil {
+		t.Fatalf("TailnetTest() error = %v — 유예가 지나면 통과해야 한다", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Errorf("통과에 %s 걸렸다 — 사람 로그인 예산을 태우고 있다", elapsed)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("이벤트가 없다 — 기다리는 쪽이 끝을 알 방법이 없다")
+	}
+	last := events[len(events)-1]
+	if !last.Degraded {
+		t.Errorf("마지막 이벤트에 degraded 가 없다: %#v", last)
+	}
+	if last.Ready {
+		t.Error("동기화가 끊긴 것을 ready 라고 하면 안 된다 — 그건 다른 판정이다")
+	}
+	if !last.Authorized {
+		t.Error("등록·로그인은 끝난 상태다. authorized 가 없으면 화면이 그 단계를 되돌려 그린다")
+	}
+
+	// 노드를 다시 세우지 않는다. 일반 네트워크 장애를 재등록으로 오판하면 새 노드가 쌓인다.
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	if node.reauths != 0 || node.closes != 0 {
+		t.Errorf("reauths = %d, closes = %d — 동기화 끊김에 노드를 건드렸다", node.reauths, node.closes)
+	}
+}
+
+// 통과시킨 결정은 시도가 끝난 뒤에도 남아야 한다.
+//
+// 화면은 1 초마다 스냅샷을 다시 읽는다. 결정이 시도 안에만 있으면 그 스냅샷이 곧 지워서, 통과한
+// 단계가 다시 "대기" 로 그려지고 호스트 계층은 시작도 안 한 것처럼 보인다 — 화면이 낡은 값을 들고
+// 있는 것처럼 보이는 문제가 이 모양이었다.
+//
+// 동기화가 돌아오면 그 결정은 사라져야 한다. 남으면 멀쩡한 연결에 경고가 붙어 있다.
+func TestTailnetSnapshotKeepsTheDegradedDecision(t *testing.T) {
+	original := tailnetSyncGrace
+	tailnetSyncGrace = 10 * time.Millisecond
+	t.Cleanup(func() { tailnetSyncGrace = original })
+
+	node := &countingNode{status: tailnet.Status{State: tailnet.StateRunning, Online: false}}
+	instance := newTailnetTestRuntime(t, node)
+	var mu sync.Mutex
+	var snapshots []coretypes.TailnetSnapshotPayload
+	instance.emitEvent = func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetSnapshotPayload); ok {
+			mu.Lock()
+			snapshots = append(snapshots, payload)
+			mu.Unlock()
+		}
+	}
+
+	if err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 3000,
+	}); err != nil {
+		t.Fatalf("TailnetTest: %v", err)
+	}
+
+	if err := instance.TailnetSnapshot("req-2"); err != nil {
+		t.Fatalf("TailnetSnapshot: %v", err)
+	}
+	mu.Lock()
+	first := snapshots[len(snapshots)-1].Statuses
+	mu.Unlock()
+	if len(first) != 1 || !first[0].Degraded {
+		t.Fatalf("스냅샷이 결정을 잃었다: %#v", first)
+	}
+
+	// 동기화가 돌아오면 그냥 연결된 것이다.
+	node.setStatus(tailnet.Status{State: tailnet.StateRunning, Online: true})
+	if err := instance.TailnetSnapshot("req-3"); err != nil {
+		t.Fatalf("TailnetSnapshot: %v", err)
+	}
+	mu.Lock()
+	second := snapshots[len(snapshots)-1].Statuses
+	mu.Unlock()
+	if len(second) != 1 || second[0].Degraded || !second[0].Ready {
+		t.Fatalf("동기화가 돌아왔는데 경고가 남았다: %#v", second)
+	}
+}
+
+// 유예 안에 동기화가 돌아오면 평소처럼 통과한다 — degraded 를 달지 않는다. 그러지 않으면 잠깐 끊겼다
+// 붙은 정상 연결에까지 경고가 남는다.
+func TestTailnetTestWaitsOutABriefSyncGap(t *testing.T) {
+	original := tailnetSyncGrace
+	tailnetSyncGrace = 2 * time.Second
+	t.Cleanup(func() { tailnetSyncGrace = original })
+
+	node := &countingNode{status: tailnet.Status{State: tailnet.StateRunning, Online: false}}
+	instance := newTailnetTestRuntime(t, node)
+	var mu sync.Mutex
+	var events []coretypes.TailnetStatusPayload
+	instance.emitEvent = func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
+			mu.Lock()
+			events = append(events, payload)
+			mu.Unlock()
+		}
+	}
+
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		node.setStatus(tailnet.Status{State: tailnet.StateRunning, Online: true})
+	}()
+
+	if err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 3000,
+	}); err != nil {
+		t.Fatalf("TailnetTest: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	last := events[len(events)-1]
+	if last.Degraded {
+		t.Errorf("동기화가 돌아왔는데 degraded 를 달았다: %#v", last)
+	}
+	if !last.Ready {
+		t.Errorf("돌아온 뒤에는 ready 여야 한다: %#v", last)
+	}
+}
+
 // 컨트롤 플레인에서 노드를 지우면 디스크의 노드 키가 그쪽에 없다. 이미 떠 있던 노드는 그 죽은
 // 키로 재등록을 반복하며 백오프에 들어가고, 그 사이 로그인 링크가 나오지 않는다 — 사용자는
 // "링크를 받는 중" 에서 한도까지 갇힌다. 노드를 새로 만들면 등록을 처음부터 밟아 링크가 나온다.
 func TestTailnetTestRestartsWhenTheAuthLinkNeverArrives(t *testing.T) {
-	// 유예를 실제로 기다리면 테스트가 10 초를 쓴다. 규칙은 시간 길이가 아니라 "링크가 안 오면
+	// 유예를 실제로 기다리면 테스트가 25 초를 쓴다. 규칙은 시간 길이가 아니라 "링크가 안 오면
 	// 새로 만든다" 다.
 	original := tailnetAuthURLGrace
 	tailnetAuthURLGrace = 10 * time.Millisecond
@@ -1098,7 +1513,15 @@ func TestTailnetTestRestartsWhenTheAuthLinkNeverArrives(t *testing.T) {
 	}
 
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	var mu sync.Mutex
+	var events []coretypes.TailnetStatusPayload
+	instance := &Runtime{emitEvent: func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
+			mu.Lock()
+			events = append(events, payload)
+			mu.Unlock()
+		}
+	}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -1123,6 +1546,21 @@ func TestTailnetTestRestartsWhenTheAuthLinkNeverArrives(t *testing.T) {
 	}
 	if stuck.closes != 1 {
 		t.Errorf("갇힌 노드를 닫지 않았다 (closes=%d)", stuck.closes)
+	}
+
+	// 다시 세운 것이 상태로 나가야 한다. 나가지 않으면 화면에서는 아무 일도 없는 것과 구분되지
+	// 않는다 — 닫는 데 0.0 초가 걸리고 전후 상태가 동일해서 중복 제거가 이벤트를 버린다.
+	mu.Lock()
+	defer mu.Unlock()
+	seen := false
+	for _, event := range events {
+		if event.Restarts > 0 {
+			seen = true
+			break
+		}
+	}
+	if !seen {
+		t.Errorf("노드를 다시 세운 사실이 상태로 나가지 않았다 (이벤트 %d 개)", len(events))
 	}
 }
 
@@ -1182,33 +1620,159 @@ func TestTailnetTestWaitsOutTheGraceBeforeRestarting(t *testing.T) {
 	}
 }
 
-// 다시 만든 노드도 링크를 못 받을 수 있다. 그때 계속 다시 만들면 등록 요청이 폭주하고 컨트롤
-// 플레인에 노드가 쌓인다. 한 번만 시도하고, 나머지는 한도까지 기다린 뒤 정직하게 끝낸다.
-func TestTailnetTestRestartsOnlyOnce(t *testing.T) {
+// 다시 세운 노드도 링크를 못 받을 수 있다. 그때 한 번으로 멈추면 링크 확보를 스스로 포기하는
+// 것이다 — 그것이 Go 의 책임이므로 한도까지 계속 시도한다.
+//
+// 노드가 쌓이는 걱정은 없다. 발급만 받고 버린 등록은 기기를 만들지 않는다(노드는 사용자가 링크를
+// 방문할 때 생성된다). 요청 부하만 남고, 그 상한이 시도 전체의 한도다.
+func TestTailnetTestKeepsTryingUntilTheLinkArrives(t *testing.T) {
 	original := tailnetAuthURLGrace
 	tailnetAuthURLGrace = 10 * time.Millisecond
 	t.Cleanup(func() { tailnetAuthURLGrace = original })
 
+	var mu sync.Mutex
 	built := 0
 	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		mu.Lock()
 		built += 1
+		mu.Unlock()
 		// 어느 노드도 링크를 받지 못한다.
 		return &countingNode{status: tailnet.Status{State: tailnet.StateNeedsAuth}}, nil
 	}, tailnet.Options{})
 	t.Cleanup(func() { _ = instance.tailnets.Close() })
 
+	// 링크 없는 구간의 폴링은 250ms 다. 한도를 그 몇 배로 두어 재시도가 여러 번 들어가게 한다.
 	err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
 		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
-		TimeoutMs: 300,
+		TimeoutMs: 1_200,
 	})
 	if err == nil {
 		t.Fatal("링크를 못 받았으면 한도에서 실패로 끝나야 한다")
 	}
 
-	if built != 2 {
-		t.Errorf("built = %d, want 2 — 다시 만드는 것은 한 번뿐이다", built)
+	mu.Lock()
+	defer mu.Unlock()
+	if built < 3 {
+		t.Errorf("built = %d, want 3 이상 — 한 번 만들어 보고 포기했다", built)
+	}
+}
+
+// 로그인이 거부됐으면 기다리지도, 다시 세우지도 않는다.
+//
+// 잘못된 auth key 가 이 경우다. 상태는 링크를 기다리는 것과 똑같아서(needsAuth + 링크 없음) 예전에는
+// 화면이 "인증 링크 받는 중" 에 3 분을 앉아 있었고, 그 사이 노드를 새로 만들기까지 했다 — 같은 키를
+// 다시 쓰니 무의미한 반복이다. 사람이 설정을 고쳐야 하는 일이므로 그 이유로 즉시 끝낸다.
+func TestTailnetTestStopsWhenTheLoginWasRejected(t *testing.T) {
+	original := tailnetAuthURLGrace
+	tailnetAuthURLGrace = 10 * time.Millisecond
+	t.Cleanup(func() { tailnetAuthURLGrace = original })
+
+	var mu sync.Mutex
+	built := 0
+	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		mu.Lock()
+		built += 1
+		mu.Unlock()
+		return &countingNode{status: tailnet.Status{
+			State:      tailnet.StateNeedsAuth,
+			LoginError: "invalid key: unable to validate API key",
+		}}, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+
+	started := time.Now()
+	err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 5_000,
+	})
+	if err == nil {
+		t.Fatal("로그인이 거부됐으면 실패로 끝나야 한다")
+	}
+	if !errors.Is(err, ErrTailnetLoginRejected) {
+		t.Errorf("err = %v, want ErrTailnetLoginRejected", err)
+	}
+	// 이유가 붙어 나가야 한다. "실패했다" 만으로는 키를 고쳐야 하는지 알 수 없다.
+	if !strings.Contains(err.Error(), "unable to validate API key") {
+		t.Errorf("err = %v — 백엔드가 준 이유가 빠졌다", err)
+	}
+	// 한도(5 초)를 기다리지 않고 곧바로 끝나야 한다.
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Errorf("%.1fs 만에 끝났다 — 거부됐는데 한도까지 기다렸다", elapsed.Seconds())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if built != 1 {
+		t.Errorf("built = %d, want 1 — 같은 키로 노드를 다시 세웠다", built)
+	}
+}
+
+// 그 tailnet 을 쓰는 것이 남아 있으면 노드를 버릴 수 없다(그 거절이 세션을 지킨다). 그때 기회를
+// 소진하면 안 된다 — 쓰던 것이 정리되는 즉시 다시 세울 수 있어야 한다.
+//
+// 예전에는 거절도 한 번의 기회를 태워서, 세션이 죽은 뒤에도 그 요청에서는 다시 시도하지 않았다.
+func TestTailnetTestRetriesAfterARefusedRebuild(t *testing.T) {
+	original := tailnetAuthURLGrace
+	tailnetAuthURLGrace = 10 * time.Millisecond
+	t.Cleanup(func() { tailnetAuthURLGrace = original })
+
+	var mu sync.Mutex
+	built := 0
+	var events []coretypes.TailnetStatusPayload
+	instance := &Runtime{emitEvent: func(event coretypes.Event) {
+		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
+			mu.Lock()
+			events = append(events, payload)
+			mu.Unlock()
+		}
+	}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		mu.Lock()
+		built += 1
+		mu.Unlock()
+		return &countingNode{status: tailnet.Status{State: tailnet.StateNeedsAuth}}, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+
+	// 다른 소비자(살아 있는 세션)가 붙들고 있는 상태에서 시작한다.
+	held, err := instance.tailnets.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	// 시도가 도는 동안 그 세션이 정리된다.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		held.Release()
+	}()
+
+	if err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
+		Config:    coretypes.TailnetConfigPayload{ID: "corp"},
+		TimeoutMs: 1_500,
+	}); err == nil {
+		t.Fatal("링크를 못 받았으면 한도에서 실패로 끝나야 한다")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if built < 2 {
+		t.Errorf("built = %d, want 2 이상 — 거절이 기회를 태웠다", built)
+	}
+	refused := false
+	for _, event := range events {
+		if event.RestartRefused {
+			refused = true
+			break
+		}
+	}
+	if !refused {
+		t.Error("거절이 상태로 나가지 않았다 — 화면이 무엇을 기다리는지 알 수 없다")
 	}
 }

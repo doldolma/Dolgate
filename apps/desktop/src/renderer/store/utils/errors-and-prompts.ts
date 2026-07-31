@@ -145,14 +145,9 @@ export function resolveConnectionFailurePresentation(
     };
   }
 
-  // 컨트롤 플레인과 세션이 끊긴 상태. 노드는 연결됨으로 보고되지만 낡은 값이다.
-  if (/not connected to the control plane yet/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.tailscaleOffline'),
-      layer: "tailscale",
-    };
-  }
+  // 컨트롤 플레인과 동기화가 끊긴 것은 여기 오지 않는다. 코어가 그것으로 dial 을 막지 않기
+  // 때문이다 — 데이터 플레인은 이미 받아 둔 넷맵으로 통하고, 못 가면 그 실패(경로·타임아웃)가
+  // 아래 분류로 온다. 막았을 때는 실제로 통하는 연결을 시도조차 못 했다.
   if (/host key is not trusted yet/i.test(normalized)) {
     return {
       title: "Host Key Not Trusted",

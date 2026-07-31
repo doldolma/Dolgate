@@ -1338,7 +1338,9 @@
     },
     "tailnet": {
       "none": "Not used (plain network)",
-      "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own."
+      "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own.",
+      "missingOption": "Tailnet setting missing",
+      "missing": "The Tailnet setting selected by this host is missing. Select 'Not used' to clear it, or register the network again."
     }
   },
   "hostTransfer": {
@@ -2274,12 +2276,11 @@
     "generic": "The connection could not be completed.",
     "tailnetExpired": "This tailnet's node registration has expired.",
     "tailnetAuthKeyHint": "This tailnet registers with an auth key, so there is no login to redo. If the key has expired or been used up, a new one is needed.",
-    "tailnetReauthHint": "Logging in again starts over from the browser authorization.",
+    "tailnetReauthHint": "Retrying starts over from authorization.",
     "tailnetAuthInFlight": "This tailnet is being authenticated. Finish the browser login and the connection will continue.",
     "tailscaleNeedsAuth": "Tailscale authentication has not finished. Finish the browser login and the connection will continue.",
     "tailscaleNeedsApproval": "This device is waiting for administrator approval. You can connect once it is approved.",
-    "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in.",
-    "tailscaleOffline": "Tailscale is not connected to its control plane. It looks connected but traffic cannot flow — you may need to log in again."
+    "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in."
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -2971,7 +2972,6 @@
     "removeTag": "Remove tag {{tag}}"
   },
   "misc": {
-    "reauthenticateTailnet": "Log in to tailnet again",
     "reopenBrowser": "Reopen browser",
     "tmuxPrefixDefault": "Ctrl-B (default)",
     "secretSummary": "{{label}} · {{type}} ({{count}} hosts)",
@@ -2994,8 +2994,7 @@
     "ssmTunnelUnsupported": "The AWS SSM tunnel cannot start. This configuration supports the in-process SSM tunnel only.",
     "connectSuccess": "Connected successfully.",
     "noTerminalSession": "No terminal session is connected, so the command cannot be sent.",
-    "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again.",
-    "restartTailnet": "Try again"
+    "sessionExpiredOrInvalid": "Your session expired or the sign-in data is not valid. Sign in again."
   },
   "awsDiagnostic": {
     "title": {
@@ -3079,6 +3078,8 @@
     "tailscaleDefault": "Tailscale",
     "usingAuthKey": "auth key",
     "usingBrowser": "browser login",
+    "usedByHosts": "Used by {{count}} host",
+    "usedByHosts_other": "Used by {{count}} hosts",
     "needsAuth": "Finish authenticating in the browser. If no window opened, open it again.",
     "openBrowser": "Reopen browser",
     "headscaleApprovalHint": "If this server has no OIDC configured, the browser shows instructions and an Auth ID instead of a login page — an administrator has to approve it.",
@@ -3089,9 +3090,11 @@
       "starting": "Connecting",
       "running": "Connected",
       "failed": "Failed",
+      "loginRejected": "Login rejected",
       "preparingAuth": "Getting sign-in link",
+      "reRegistering": "Re-registering node",
       "expired": "Sign-in expired",
-      "offline": "Disconnected"
+      "syncStalled": "Sync stalled"
     },
     "field": {
       "label": "Network name",
@@ -3105,6 +3108,8 @@
       "authKeyHint": "Use a reusable + ephemeral key — unused nodes clean themselves up, and a single-use key fails on reconnect."
     },
     "removeConfirm": "This deletes the network settings and the stored auth key, and unregisters the node. It cannot be undone.",
+    "removeConfirmInUse": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} host, which will then connect over the plain network. It cannot be undone.",
+    "removeConfirmInUse_other": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} hosts, which will then connect over the plain network. It cannot be undone.",
     "disconnect": "Disconnect",
     "identity": {
       "tailnet": "Tailnet",
@@ -3131,10 +3136,13 @@
     "tailscaleHealth": "Warning reported by this device",
     "tailscaleError": "Tailscale error",
     "tailscaleExpiredDetail": "The registration has expired. You need to log in again.",
+    "tailscaleIdentityInvalidDetail": "This node was removed from the control plane and is being registered again automatically.",
+    "tailscaleLoginRejectedDetail": "The login was rejected. Check the credentials in settings.",
     "tailscaleKeyExpiryDetail": "Expires {{at}}",
     "tailscaleApprovalDetail": "Waiting for an administrator to approve this device.",
     "tailscaleBrowserDetail": "Finish the login in your browser.",
     "tailscaleLinkDetail": "Getting the login link.",
+    "tailscaleRestartDetail": "Started registration over ({{count}}x)",
     "tailscalePeersDetail": "{{count}} devices visible.",
     "hostKey": "Host key check",
     "hostKeyPromptDetail": "Confirm whether to trust this host.",
@@ -3142,7 +3150,8 @@
     "groupTailscale": "Tailscale",
     "groupHost": "Host",
     "tailscaleSync": "Control plane sync",
-    "tailscaleStaleDetail": "Looks connected but the sync is broken.",
+    "tailscaleStaleDetail": "Sync with the control plane is down. Waiting a moment for it to come back.",
+    "tailscaleDegradedDetail": "Continuing without control plane sync. The device list may be out of date.",
     "tailscaleTarget": "Path to {{target}}",
     "tailscaleTargetDirect": "Direct connection",
     "tailscaleTargetRelay": "Via relay ({{relay}})",

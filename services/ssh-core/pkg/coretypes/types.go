@@ -538,12 +538,6 @@ type TailnetTestPayload struct {
 	// TimeoutMs 가 0 이면 기본값을 쓴다. 브라우저 로그인은 사람이 개입하므로 auth key
 	// 경로보다 넉넉해야 한다.
 	TimeoutMs int `json:"timeoutMs,omitempty"`
-	// ForceRelogin 이면 기다리기 전에 컨트롤 플레인에 등록을 다시 확인시킨다.
-	//
-	// 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 Running 이고 통신만 안 된다. 그래서
-	// 연결이 실패한 뒤에 이 플래그로 다시 물어서, 인증이 필요하다는 답(authUrl)을 받거나
-	// 그대로 붙는 것을 확인한다.
-	ForceRelogin bool `json:"forceRelogin,omitempty"`
 }
 
 type TailnetForgetPayload struct {
@@ -582,12 +576,26 @@ type TailnetStatusPayload struct {
 	// Health 는 백엔드가 스스로 보고하는 문제들이다. State 가 정상으로 보이는데 통신이 안 될
 	// 때 유일하게 남는 단서다 — tailscale 은 로그아웃·로그인 오류·동기화 실패를 여기에 담는다.
 	Health []string `json:"health,omitempty"`
-	// Ready 는 이 tailnet 을 통해 실제로 통신할 수 있는지다. 판정은 코어 한 곳에서만 하고,
+	// Ready 는 이 tailnet 을 통해 **확실히** 통신할 수 있는지다. 판정은 코어 한 곳에서만 하고,
 	// 화면은 다시 판단하지 않는다 — 곳곳에서 각자 판단하면 기준이 갈린다.
 	Ready bool `json:"ready,omitempty"`
-	// Online 은 컨트롤 플레인과 세션이 살아 있는지다. Ready 의 근거이자, 상태가 정상으로
-	// 보이는데 통신이 안 되는 경우를 설명하는 값이다.
+	// Authorized 는 등록과 로그인이 끝났는지다(컨트롤 플레인이 인가했고 만료되지 않았다).
+	//
+	// Ready 와 따로 있어야 하는 이유: 이 둘은 다른 질문인데 하나로 답하면 동기화만 끊긴 상태에서
+	// 이미 끝난 등록·로그인 단계가 화면에서 "아직 안 됨" 으로 되돌아간다 — 그 아래 단계에는 체크가
+	// 떠 있어서 순서가 뒤바뀐 것처럼 보인다.
+	Authorized bool `json:"authorized,omitempty"`
+	// IdentityInvalid 는 컨트롤 플레인이 현재 노드 identity 를 더 이상 모른다고 확정했는지다.
+	// 일반적인 동기화 중단과 달리 자동 재등록을 시작할 수 있는 신호다.
+	IdentityInvalid bool `json:"identityInvalid,omitempty"`
+	// Online 은 컨트롤 플레인과 세션이 살아 있는지다(map poll 이 열려 있는지). Ready 의 근거이자,
+	// 상태가 정상으로 보이는데 통신이 안 되는 경우를 설명하는 값이다.
 	Online bool `json:"online,omitempty"`
+	// Degraded 는 컨트롤 플레인과 동기화가 끊긴 채로 관문이 통과시켰다는 표시다.
+	//
+	// Ready 가 아닌데도 진행하기로 한 결정이므로 그 사실이 밖으로 나가야 한다. 기다리는 쪽은 이
+	// 값으로 끝을 알고(없으면 한도까지 매달린다), 화면은 동기화 단계를 경고로 그린다.
+	Degraded bool `json:"degraded,omitempty"`
 	// BackendState 는 tsnet 이 보고한 원문 상태, KeyExpiry 는 노드 키 만료 시각이다.
 	// 무엇을 보고 그렇게 판단했는지 화면에서 확인할 수 있어야 한다.
 	BackendState string `json:"backendState,omitempty"`
@@ -602,6 +610,24 @@ type TailnetStatusPayload struct {
 	// 보고된다. 그것을 진행 중으로 그리면 화면이 거짓 진행을 보여준다(스피너와 "링크를 받는
 	// 중" 이 뜨는데 실제로는 아무 일도 일어나지 않고, 취소할 대상도 없다).
 	Attempting bool `json:"attempting,omitempty"`
+	// Restarts 는 인증 링크를 받으려고 이 시도가 노드를 다시 세운 횟수, RestartRefused 는
+	// 마지막 시도가 거절됐는지다(이 tailnet 을 쓰던 것이 아직 정리되지 않았다는 뜻이다).
+	//
+	// 코어가 한 일은 전부 상태로 나가야 한다. 이 두 값이 없으면 노드를 새로 세워도 화면에서는
+	// 아무 일도 없는 것과 구분되지 않는다 — 닫는 데 0.0 초가 걸리고 전후 상태가 동일해서
+	// 중복 제거가 이벤트를 버린다.
+	Restarts       int  `json:"restarts,omitempty"`
+	RestartRefused bool `json:"restartRefused,omitempty"`
+	// ReRegistrations 는 삭제된 identity 를 버리고 새 identity 로 등록을 시작한 횟수다.
+	ReRegistrations int `json:"reRegistrations,omitempty"`
+	// LoginError 는 백엔드가 확정한 로그인 실패 이유다(잘못된 auth key 등).
+	//
+	// 이 값이 있으면 기다려서 풀리는 상태가 아니다 — 설정을 고쳐야 한다. 상태만으로는 링크를
+	// 기다리는 것과 구분되지 않아서, 이것 없이는 화면이 "링크를 받는 중" 을 계속 그린다.
+	LoginError string `json:"loginError,omitempty"`
+	// BackendError 는 백엔드가 마지막으로 보고한 오류다(IPN 버스의 ErrMessage). 컨트롤 플레인이
+	// 요청을 거부한 이유가 이 경로로만 오는 경우가 있어서, 없으면 화면이 이유를 말할 수 없다.
+	BackendError string `json:"backendError,omitempty"`
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 그 경로다. 붙어 있지 않으면 빈 목록이다.
 	Peers []TailnetPeerPayload `json:"peers,omitempty"`

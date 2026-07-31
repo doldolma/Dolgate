@@ -139,8 +139,8 @@ export function createHostCoordinator(deps: {
    * 트래픽이 공개망으로 나간다. 게다가 신뢰 범위는 여전히 호스트 레코드의 tailnetId 라서,
    * 일반 네트워크에서 TOFU 로 받은 키가 그 tailnet 범위에 저장된다.
    *
-   * 설정이 사라지는 경로는 전부 평범하다: 설정에서 tailnet 삭제(호스트의 tailnetId 는 남는다),
-   * 다른 기기로 툼스톤 전파, 호스트 전송 번들 가져오기(번들은 tailnets 를 담지 않는다).
+   * 설정이 사라지는 경로는 여전히 있다: 예전 버전에서 삭제한 레코드, 다른 기기에서 내려온
+   * 불완전한 스냅샷, 호스트 전송 번들 가져오기(번들은 tailnets 를 담지 않는다).
    */
   const resolveTailnetRoute = (host: {
     tailnetId?: string | null;

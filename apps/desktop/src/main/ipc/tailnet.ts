@@ -4,7 +4,6 @@ import type {
   TailnetRecord,
   TailnetSnapshot,
   TailnetStatus,
-  TailnetTestOptions,
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
 import { t } from "../i18n";
@@ -50,10 +49,13 @@ export interface TailnetSaveInput {
 /**
  * 코어에 심을 설정 목록. auth key 를 포함하므로 렌더러로는 절대 나가지 않는다.
  *
- * ephemeral 을 여기서 다시 계산하는 이유는 연결 테스트와 같아야 하기 때문이다 — 테스트는
- * ephemeral 로 붙였는데 실제 연결이 persistent 로 붙으면 같은 tailnet 에 노드가 둘로 갈라진다.
- * 판단 기준은 auth key 유무다(키가 있으면 재등록이 자동이라 지워져도 공짜지만, 브라우저
- * 로그인은 노드가 지워질 때마다 사람이 다시 로그인해야 한다).
+ * ephemeral 은 요청하지 않는다. auth key 가 있다는 이유로 켜던 값인데, 그러면 앱을 끌 때마다
+ * 컨트롤 플레인이 노드를 지운다 — Tailscale auth key 는 기본이 1회용이라 다음 실행의 재등록이
+ * "invalid key" 로 실패하고, 그때부터 그 tailnet 은 새 키를 넣기 전까지 못 쓴다. 실기기에서
+ * 그렇게 깨졌다.
+ *
+ * 자동 정리가 필요한 사람은 ephemeral 속성이 켜진 재사용 가능한 키를 쓰면 되고, 그 경우 노드가
+ * ephemeral 이 되는지는 컨트롤 플레인이 키를 보고 정한다 — 우리가 요청하지 않아도 그렇게 된다.
  */
 function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
   return ctx.tailnets.listPayloads().map((payload) => {
@@ -62,7 +64,7 @@ function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
       id: payload.id,
       controlUrl: payload.controlUrl,
       authKey,
-      ephemeral: Boolean(authKey),
+      ephemeral: false,
     };
   });
 }
@@ -84,6 +86,10 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       const saved = ctx.tailnets.save(input.record, input.authKey);
       // 코어가 새 설정을 알아야 이 tailnet 을 지정한 호스트가 곧바로 붙는다.
       ctx.coreManager.pushTailnetConfigs();
+      // 동기화에도 알린다. 이것이 없으면 방금 저장한 레코드가 **사라진다** — 다음 기동의
+      // pull 이 서버 스냅샷으로 목록을 통째로 갈아 끼우고, 서버에 없는 것은 삭제로 취급된다.
+      // 다른 컬렉션(호스트·스니펫·포워딩 …)이 모두 저장 직후 이것을 부르는 이유가 그것이다.
+      ctx.queueSync();
       return saved;
     },
   );
@@ -110,16 +116,13 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       // 다른 기기도 지워야 한다. 동기화는 "안 보낸 것을 지운다"가 아니라 툼스톤 기반이라,
       // 여기서 기록하지 않으면 다른 기기에서 되살아난다.
       ctx.syncOutbox.upsertDeletion("tailnets", id);
+      ctx.queueSync();
     },
   );
 
   ipcMain.handle(
     ipcChannels.tailnet.test,
-    async (
-      event,
-      config: TailnetConfig,
-      options?: TailnetTestOptions,
-    ): Promise<TailnetStatus> => {
+    async (event, config: TailnetConfig): Promise<TailnetStatus> => {
       // 진행 상태는 요청한 창에만 보낸다. 다른 창이 남의 tailnet 인증 URL 을 받을 이유가
       // 없고, 창이 닫힌 뒤 보내면 예외가 난다.
       const sender = BrowserWindow.fromWebContents(event.sender);
@@ -140,15 +143,14 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
 
       return ctx.coreManager
         .testTailnet(
-        {
-          ...config,
-          authKey,
-          // 저장 때와 같은 규칙이어야 한다. 시험에서 ephemeral 로 붙였다가 저장 후
-          // persistent 로 붙으면 노드가 둘로 갈라진다.
-          ephemeral: Boolean(authKey),
-        },
-        pushStatus,
-        { forceRelogin: options?.forceRelogin },
+          {
+            ...config,
+            authKey,
+            // 저장 때와 같은 규칙이어야 한다 — 시험과 실제 연결이 다르게 붙으면 같은 tailnet 에
+            // 노드가 둘로 갈라진다. 둘 다 요청하지 않는다(위 buildTailnetConfigs 설명 참조).
+            ephemeral: false,
+          },
+          pushStatus,
         )
         .catch((cause: unknown) => {
           throw toUserFacingTailnetError(cause);

@@ -161,6 +161,32 @@ describe("tailnet readiness before connecting", () => {
     expect(tab?.connectionProgress?.stage).not.toBe("awaiting-host-trust");
   });
 
+  // 코어가 동기화 없이 진행하기로 했으면(degraded) 관문을 통과시켜야 한다.
+  //
+  // 여기서 실패로 읽으면 코어가 넘긴 연결을 화면이 되돌려 세운다 — ready 하나만 보던 때가 그랬고,
+  // 그 상태로 3분을 기다리다 실패했다. 데이터 플레인은 이미 받아 둔 넷맵으로 통하므로, 실제로 갈 수
+  // 있는지는 그 뒤의 SSH 연결이 답한다.
+  it("동기화가 끊긴 채 진행하기로 한 tailnet 은 통과시킨다", async () => {
+    const api = createTailnetApi();
+    vi.mocked(api.tailnet.test).mockResolvedValue({
+      id: "net-1",
+      state: "running",
+      ready: false,
+      authorized: true,
+      online: false,
+      degraded: true,
+    } as never);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    await flushMicrotasks();
+
+    expect(vi.mocked(api.ssh.connect)).toHaveBeenCalled();
+    const tab = store.getState().tabs.find((item) => item.hostId === "host-1");
+    expect(tab?.status).not.toBe("error");
+  });
+
   // 브라우저 로그인을 기다리다 접는 경로. 코어는 이때 실패가 아니라 "접혔다" 로 끝내는데,
   // 그 끝이 여기까지 와야 연결 시도가 멈춘다 — 오지 않으면 오버레이가 대기 문구 그대로
   // 남아서, 취소를 눌렀는데 아무 일도 없는 것으로 보인다.

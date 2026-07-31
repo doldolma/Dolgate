@@ -65,26 +65,20 @@ describe('TailnetRepository', () => {
     expect(tailnets.readAuthKey('net-1')).toBe('tskey-abc');
   });
 
-  // 인증 방식이 ephemeral 여부를 정한다. auth key 면 재등록이 자동이라 노드를 지워도
-  // 사용자가 못 느끼지만, 브라우저 로그인이면 지워질 때마다 다시 로그인해야 한다.
-  it('registers an auth-key tailnet as ephemeral', async () => {
+  // ephemeral 은 요청하지 않는다.
+  //
+  // 예전에는 auth key 가 있으면 켰다. 그러면 앱을 끌 때마다 컨트롤 플레인이 노드를 지우고,
+  // 1회용 키(Tailscale 기본)는 다음 실행의 재등록이 "invalid key" 로 실패한다 — 그 tailnet 은
+  // 새 키를 넣기 전까지 못 쓰게 된다. 실기기에서 그렇게 깨졌다.
+  it('never asks for an ephemeral registration', async () => {
     const tailnets = await loadTailnets();
 
-    expect(tailnets.save(draft(), 'tskey-abc').ephemeral).toBe(true);
-  });
-
-  it('keeps a browser-login tailnet persistent so the login lasts', async () => {
-    const tailnets = await loadTailnets();
-
-    expect(tailnets.save(draft(), '').ephemeral).toBe(false);
-  });
-
-  it('ignores whatever the renderer claimed about ephemeral', async () => {
-    const tailnets = await loadTailnets();
-
-    // 렌더러가 반대로 보내와도 저장된 키가 진실이다.
-    expect(tailnets.save(draft({ ephemeral: false }), 'tskey-abc').ephemeral).toBe(true);
-    expect(tailnets.save(draft({ id: 'net-2', ephemeral: true }), '').ephemeral).toBe(false);
+    expect(tailnets.save(draft(), 'tskey-abc').ephemeral).toBe(false);
+    expect(tailnets.save(draft({ id: 'net-2' }), '').ephemeral).toBe(false);
+    // 렌더러가 켜서 보내와도 무시한다.
+    expect(tailnets.save(draft({ id: 'net-3', ephemeral: true }), 'tskey-abc').ephemeral).toBe(
+      false,
+    );
   });
 
   it('flips to persistent when the auth key is cleared', async () => {
@@ -248,17 +242,18 @@ describe('TailnetRepository sync payloads', () => {
     expect(tailnets.readAuthKey('net-2')).toBeNull();
   });
 
-  // ephemeral 은 인증 방식이 정한다. 원격 레코드가 반대로 적혀 있어도 키 유무가 진실이다.
-  it('recomputes ephemeral from the applied key, not the remote record', async () => {
+  // 원격 레코드가 ephemeral 을 켜서 내려와도 켜지 않는다 — 다른 기기의 옛 값이 이 기기의
+  // 등록 방식을 바꾸면 안 된다. hasAuthKey 는 반대로 실제 적용된 키에서 다시 계산한다.
+  it('never turns on ephemeral from a remote record', async () => {
     const tailnets = await loadTailnets();
 
     tailnets.replaceAll([
-      { ...draft({ ephemeral: false }), authKey: 'tskey-remote' },
+      { ...draft({ ephemeral: true }), authKey: 'tskey-remote' },
       { ...draft({ id: 'net-2', ephemeral: true }) },
     ]);
 
     const [withKey, withoutKey] = tailnets.list();
-    expect(withKey.ephemeral).toBe(true);
+    expect(withKey.ephemeral).toBe(false);
     expect(withKey.hasAuthKey).toBe(true);
     expect(withoutKey.ephemeral).toBe(false);
     expect(withoutKey.hasAuthKey).toBe(false);
@@ -351,5 +346,25 @@ describe('SSH host tailnetId survives the whitelists', () => {
     const reloaded = await reload();
     const record = reloaded.getById('host-1') as { tailnetId?: string | null } | null;
     expect(record?.tailnetId ?? null).toBeNull();
+  });
+
+  it('clears the tailnet from every host when the network setting is deleted', async () => {
+    const { hosts, reload } = await loadHosts();
+    const { TailnetRepository } = await import('./database');
+    const tailnets = new TailnetRepository();
+    tailnets.save(draft({ id: 'net-a' }));
+    tailnets.save(draft({ id: 'net-b' }));
+    hosts.create('host-1', sshDraft('net-a'));
+    hosts.create('host-2', { ...sshDraft('net-a'), label: 'Staging' });
+    hosts.create('host-3', { ...sshDraft('net-b'), label: 'Other network' });
+
+    tailnets.remove('net-a');
+
+    const reloaded = await reload();
+    expect((reloaded.getById('host-1') as { tailnetId?: string | null })?.tailnetId).toBeNull();
+    expect((reloaded.getById('host-2') as { tailnetId?: string | null })?.tailnetId).toBeNull();
+    expect((reloaded.getById('host-3') as { tailnetId?: string | null })?.tailnetId).toBe(
+      'net-b',
+    );
   });
 });

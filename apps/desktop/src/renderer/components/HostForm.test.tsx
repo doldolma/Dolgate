@@ -223,6 +223,35 @@ describe('HostForm', () => {
     );
   });
 
+  it('shows and allows clearing a tailnet reference whose setting is missing', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const ref = createRef<HostFormHandle>();
+
+    render(
+      <HostForm
+        ref={ref}
+        host={createHost({ tailnetId: 'net-deleted' })}
+        keychainEntries={keychainEntries}
+        groupOptions={groupOptions}
+        tailnetOptions={[]}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const missingOption = screen.getByRole('option', { name: '설정에 없는 Tailnet' });
+    const select = missingOption.closest('select') as HTMLSelectElement;
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe('net-deleted');
+
+    fireEvent.change(select, { target: { value: '' } });
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ tailnetId: null }),
+      undefined,
+    );
+  });
+
   // 자격증명 옆 Manage 와 같은 자리다. 등록된 tailnet 이 없을 때가 오히려 여기로 갈 이유가
   // 가장 큰 순간이므로, 목록이 비어도 보여야 한다.
   it('offers a tailnet manage link even when nothing is registered', () => {

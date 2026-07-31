@@ -480,6 +480,140 @@ func TestForgetUnknownTailnetIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestReplaceInvalidIdentityClosesAndPurgesWithoutLogout(t *testing.T) {
+	registry, _, nodes := newTestRegistry(t)
+
+	stale, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	previous := nodes["corp"]
+
+	replaced, err := registry.ReplaceInvalidIdentity("corp", stale)
+	if err != nil {
+		t.Fatalf("ReplaceInvalidIdentity() error = %v", err)
+	}
+	if !replaced {
+		t.Fatal("ReplaceInvalidIdentity() did not replace the observed generation")
+	}
+	if got := previous.order(); len(got) != 2 || got[0] != "close" || got[1] != "purge" {
+		t.Fatalf("operations = %v, want [close purge]", got)
+	}
+
+	fresh, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() after replacement error = %v", err)
+	}
+	defer fresh.Release()
+	if fresh.Node == previous {
+		t.Fatal("replacement reused the invalid node")
+	}
+
+	stale.Release()
+	if got := registry.Leases("corp"); got != 1 {
+		t.Fatalf("leases = %d, want 1; stale lease touched the replacement", got)
+	}
+}
+
+func TestReplaceInvalidIdentityDoesNotReplaceANewerGeneration(t *testing.T) {
+	registry, _, nodes := newTestRegistry(t)
+
+	first, _ := registry.Acquire("corp")
+	second, _ := registry.Acquire("corp")
+	previous := nodes["corp"]
+
+	replaced, err := registry.ReplaceInvalidIdentity("corp", first)
+	if err != nil || !replaced {
+		t.Fatalf("first replacement = %v, %v", replaced, err)
+	}
+	fresh, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() replacement error = %v", err)
+	}
+	defer fresh.Release()
+	replacement := nodes["corp"]
+
+	replaced, err = registry.ReplaceInvalidIdentity("corp", second)
+	if err != nil {
+		t.Fatalf("stale replacement error = %v", err)
+	}
+	if replaced {
+		t.Fatal("stale observer replaced the newer generation")
+	}
+	if nodes["corp"] != replacement || replacement == previous {
+		t.Fatal("newer generation was not preserved")
+	}
+	if got := replacement.order(); len(got) != 0 {
+		t.Fatalf("newer generation operations = %v, want none", got)
+	}
+	second.Release()
+}
+
+func TestDiscardInvalidIdentityIfIdleClosesAndPurgesWithoutReplacement(t *testing.T) {
+	registry, _, nodes := newTestRegistry(t)
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	invalid := nodes["corp"]
+	invalid.status = Status{State: StateRunning, IdentityInvalid: true}
+	lease.Release()
+
+	discarded, err := registry.DiscardInvalidIdentityIfIdle(context.Background(), "corp")
+	if err != nil {
+		t.Fatalf("DiscardInvalidIdentityIfIdle() error = %v", err)
+	}
+	if !discarded {
+		t.Fatal("idle invalid identity was not discarded")
+	}
+	if got := invalid.order(); len(got) != 2 || got[0] != "close" || got[1] != "purge" {
+		t.Fatalf("operations = %v, want [close purge]", got)
+	}
+	if _, ok := registry.StatusOf(context.Background(), "corp"); ok {
+		t.Fatal("discarded identity remained in the registry")
+	}
+}
+
+func TestDiscardInvalidIdentityIfIdleLeavesHealthyAndInUseNodesAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status Status
+		inUse  bool
+	}{
+		{name: "healthy", status: Status{State: StateRunning}},
+		{name: "in use", status: Status{State: StateRunning, IdentityInvalid: true}, inUse: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry, _, nodes := newTestRegistry(t)
+			lease, err := registry.Acquire("corp")
+			if err != nil {
+				t.Fatalf("Acquire() error = %v", err)
+			}
+			node := nodes["corp"]
+			node.status = tc.status
+			if !tc.inUse {
+				lease.Release()
+			}
+
+			discarded, err := registry.DiscardInvalidIdentityIfIdle(context.Background(), "corp")
+			if err != nil {
+				t.Fatalf("DiscardInvalidIdentityIfIdle() error = %v", err)
+			}
+			if discarded {
+				t.Fatal("node was discarded")
+			}
+			if got := node.order(); len(got) != 0 {
+				t.Fatalf("operations = %v, want none", got)
+			}
+			if _, ok := registry.StatusOf(context.Background(), "corp"); !ok {
+				t.Fatal("node disappeared from the registry")
+			}
+			lease.Release()
+		})
+	}
+}
+
 func TestReleaseIsIdempotent(t *testing.T) {
 	registry, timer, nodes := newTestRegistry(t)
 
@@ -935,6 +1069,34 @@ func TestStatusConnectedRequiresALiveControlPlaneSession(t *testing.T) {
 	connected := Status{State: StateRunning, Online: true}
 	if !connected.Connected() {
 		t.Error("살아 있는 세션 + 인가 + 만료 아님은 연결됨이어야 한다")
+	}
+}
+
+// 등록·로그인이 끝났는지는 지금 동기화되는지와 다른 질문이다.
+//
+// 하나로 답하면 화면이 이미 끝난 단계를 되돌려 그린다 — 동기화만 끊긴 상태에서 "기기 등록 확인" 이
+// 진행 중으로, "Tailscale 로그인" 이 아직 안 한 것으로 표시됐고, 그 아래 단계에는 체크가 떠 있어서
+// 사용자는 화면이 거꾸로 진행한다고 읽었다.
+func TestStatusAuthorizedIgnoresTheControlPlaneSession(t *testing.T) {
+	stalled := Status{State: StateRunning, Online: false}
+	if !stalled.Authorized() {
+		t.Error("동기화가 끊겼을 뿐인 노드는 등록·로그인이 끝난 상태다")
+	}
+	if stalled.Connected() {
+		t.Error("그래도 '확실히 연결됨' 은 아니다 — 보고되는 값이 낡았다")
+	}
+
+	for name, status := range map[string]Status{
+		"만료":    {State: StateRunning, Online: true, Expired: true},
+		"인증 대기": {State: StateNeedsAuth, Online: true},
+		"승인 대기": {State: StateNeedsApproval, Online: true},
+		"기동 중":  {State: StateStarting, Online: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if status.Authorized() {
+				t.Errorf("%s 는 인가된 상태가 아니다: %#v", name, status)
+			}
+		})
 	}
 }
 

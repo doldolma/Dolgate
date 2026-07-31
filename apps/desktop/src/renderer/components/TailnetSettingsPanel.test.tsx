@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { TailnetRecord, TailnetStatus } from '@shared';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { HostRecord, TailnetRecord, TailnetStatus } from '@shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
@@ -9,6 +9,8 @@ const { mocks, storeState, watchMocks } = vi.hoisted(() => ({
     openExternalUrl: () => {},
     tailnetStatuses: {} as Record<string, unknown>,
     localTailnetNodeName: 'dev' as string | null,
+    hosts: [] as HostRecord[],
+    refreshHostCatalog: vi.fn(),
   },
   watchMocks: {
     acquireTailnetWatch: () => () => {},
@@ -68,6 +70,9 @@ describe('TailnetSettingsPanel', () => {
     mocks.cancelTailnet.mockResolvedValue(undefined);
     storeState.tailnetStatuses = {};
     storeState.localTailnetNodeName = 'dev';
+    storeState.hosts = [];
+    storeState.refreshHostCatalog.mockReset();
+    storeState.refreshHostCatalog.mockResolvedValue(undefined);
   });
 
   // 아무도 손대지 않는 노드도 계속 needsAuth 로 보고된다. 그것을 진행 중으로 그리면 스피너와
@@ -121,5 +126,76 @@ describe('TailnetSettingsPanel', () => {
       expect(screen.getAllByRole('button', { name: '연결' }).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole('button', { name: '취소' })).not.toBeInTheDocument();
+  });
+
+  it('shows hosts that use the network without exposing backend diagnostics', async () => {
+    storeState.hosts = [
+      {
+        id: 'host-1',
+        kind: 'ssh',
+        label: 'Production API',
+        hostname: 'api.internal',
+        port: 2222,
+        username: 'deploy',
+        authType: 'password',
+        tailnetId: 'net-1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+      {
+        id: 'host-2',
+        kind: 'ssh',
+        label: 'Other network',
+        hostname: 'other.internal',
+        port: 22,
+        username: 'root',
+        authType: 'password',
+        tailnetId: 'net-2',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+    ] as HostRecord[];
+    putStatus({
+      id: 'net-1',
+      state: 'running',
+      ready: true,
+      online: true,
+      backendState: 'Running',
+    });
+
+    render(<TailnetSettingsPanel />);
+
+    expect(await screen.findByText('사용 중인 호스트 1개')).toBeInTheDocument();
+    expect(screen.getByText('Production API')).toBeInTheDocument();
+    expect(screen.getByText('deploy@api.internal:2222')).toBeInTheDocument();
+    expect(screen.queryByText('Other network')).not.toBeInTheDocument();
+    expect(screen.queryByText(/backend=Running/)).not.toBeInTheDocument();
+  });
+
+  it('refreshes hosts after deleting a network that they use', async () => {
+    storeState.hosts = [
+      {
+        id: 'host-1',
+        kind: 'ssh',
+        label: 'Production API',
+        hostname: 'api.internal',
+        port: 22,
+        username: 'deploy',
+        authType: 'password',
+        tailnetId: 'net-1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+    ] as HostRecord[];
+
+    render(<TailnetSettingsPanel />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '삭제' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/호스트 1개의 Tailnet 설정도 해제/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+
+    await waitFor(() => expect(mocks.removeTailnet).toHaveBeenCalledWith('net-1'));
+    expect(storeState.refreshHostCatalog).toHaveBeenCalledTimes(1);
   });
 });

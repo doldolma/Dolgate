@@ -327,12 +327,33 @@ export interface TailnetStatus {
    */
   ready?: boolean;
   /**
-   * 컨트롤 플레인과 세션이 살아 있는지(map poll 중인지).
+   * 등록과 로그인이 끝났는지(`tailnet.Status.Authorized`).
+   *
+   * ready 와 나뉘어 있어야 하는 이유: 이 둘은 다른 질문이다. 등록·로그인이 끝났는지는 **지금
+   * 컨트롤 플레인과 동기화되는지와 무관하다**. 하나로 답하면 동기화만 끊긴 상태에서 이미 끝난
+   * 등록·로그인 단계가 "아직 안 됨" 으로 되돌아가고, 그 아래 단계에는 체크가 떠 있어서 화면의
+   * 순서가 뒤바뀐 것처럼 보인다 — 실제로 그렇게 보였다.
+   */
+  authorized?: boolean;
+  /** 컨트롤 플레인이 현재 노드 identity 를 더 이상 모른다고 확정했는지. */
+  identityInvalid?: boolean;
+  /**
+   * 컨트롤 플레인과 세션이 살아 있는지(map poll 롱폴이 열려 있는지).
    *
    * state 와 expired 는 끊긴 뒤에도 낡은 값으로 남는다 — 등록이 만료돼도 연결됨으로, 기기
    * 목록까지 그대로다. ready 가 false 인 이유를 설명하는 값이다.
+   *
+   * 이것이 false 라고 통신이 불가능하다는 뜻은 아니다. 데이터 플레인은 이미 받아 둔 넷맵으로
+   * 계속 통하고, 끊긴 것은 갱신 통로다 — 그래서 관문은 이 상태를 잠깐만 기다린 뒤 진행한다.
    */
   online?: boolean;
+  /**
+   * 동기화가 끊긴 채로 코어가 진행하기로 했는지.
+   *
+   * ready 가 아닌데도 통과시킨 결정이라, 이 값이 곧 "코어가 다음 단계로 넘겼다" 는 신호다.
+   * 기다리는 쪽은 ready 와 함께 이것을 종료로 보고, 화면은 동기화 단계를 경고로 그린다.
+   */
+  degraded?: boolean;
   /** 노드 키가 만료됐는지. state 가 running 이어도 true 일 수 있다. */
   expired?: boolean;
   /**
@@ -363,6 +384,31 @@ export interface TailnetStatus {
    * 이 뜨는데 실제로는 아무 일도 일어나지 않고, 취소할 대상도 없다).
    */
   attempting?: boolean;
+  /**
+   * 인증 링크를 받으려고 코어가 노드를 다시 세운 횟수와, 마지막 시도가 거절됐는지.
+   *
+   * 링크가 오지 않으면 코어가 노드를 새로 만들어 등록을 처음부터 밟는다. 그 사실이 상태로
+   * 나오지 않으면 화면에서는 아무 일도 없는 것과 구분되지 않는다 — 재시작 전후의 상태가
+   * 완전히 같기 때문이다. 거절은 이 tailnet 을 쓰던 것이 아직 정리되지 않았다는 뜻이다.
+   */
+  restarts?: number;
+  restartRefused?: boolean;
+  /** 삭제된 identity 를 버리고 새 identity 로 등록을 시작한 횟수. */
+  reRegistrations?: number;
+  /**
+   * 백엔드가 확정한 로그인 실패 이유(잘못된 auth key 등).
+   *
+   * 이 값이 있으면 **기다려서 풀리는 상태가 아니다** — 설정을 고쳐야 한다. state 만으로는 링크를
+   * 기다리는 것과 구분되지 않아서, 이것 없이는 화면이 "링크를 받는 중" 을 계속 그린다.
+   */
+  loginError?: string;
+  /**
+   * 백엔드가 마지막으로 보고한 오류(IPN 버스의 ErrMessage).
+   *
+   * 컨트롤 플레인이 요청을 거부한 이유가 이 경로로만 오는 경우가 있다. 진단용으로 그대로 보여
+   * 준다 — 이것 없이는 "왜 안 되는지" 를 화면에서 확인할 방법이 없다.
+   */
+  backendError?: string;
 
   /** 이 tailnet 안에서 보이는 기기들과 그 경로. 붙어 있지 않으면 비어 있다. */
   peers?: TailnetPeer[];
@@ -379,16 +425,12 @@ export interface TailnetSnapshot {
   localNodeName?: string;
 }
 
-/** 연결 테스트 요청 옵션. 설정이 아니라 이번 요청에만 해당하는 것들이다. */
-export interface TailnetTestOptions {
-  /**
-   * 기다리기 전에 컨트롤 플레인에 등록을 다시 확인시킨다.
-   *
-   * 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 연결됨이고 통신만 안 된다. 그래서
-   * 연결이 실패한 뒤에만 이걸 켜서, 인증이 필요하다는 답을 받거나 그대로 붙는 것을 확인한다.
-   */
-  forceRelogin?: boolean;
-}
+// 연결 요청에는 옵션이 없다.
+//
+// 예전에는 forceRelogin("기다리기 전에 노드를 버리고 다시 확인해라")이 있었다. 그러면 "강도"를
+// 요청하는 쪽이 정하게 되고, 화면이 취소·플래그·재시도를 조립하게 된다. 다시 세울지는 코어가
+// 링크를 확보하는 과정에서 판단한다. 사용자가 처음부터 다시 하려면 취소를 거치고, 취소가 노드를
+// 없애므로 다음 요청이 새 노드로 시작한다.
 
 export interface TailnetConfig {
   id: string;
@@ -1447,10 +1489,7 @@ export interface DesktopApi {
      * onStatus 로 온다 — 브라우저 로그인이면 사용자가 인증하는 구간이 있어서 응답 하나로는
      * 무엇을 기다리는지 보여줄 수 없다.
      */
-    test: (
-      config: TailnetConfig,
-      options?: TailnetTestOptions,
-    ) => Promise<TailnetStatus>;
+    test: (config: TailnetConfig) => Promise<TailnetStatus>;
     /** 노드 등록을 해제한다. tailnet 설정 자체는 남는다. */
     forget: (id: string) => Promise<void>;
     /** 노드를 지금 내린다. 등록은 남으므로 다시 연결해도 재인증이 없다. */

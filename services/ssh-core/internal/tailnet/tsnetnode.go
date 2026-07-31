@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"tailscale.com/health"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
+	"tailscale.com/tsconst"
 	"tailscale.com/tsnet"
 )
 
@@ -60,8 +62,23 @@ type tsnetNode struct {
 	// 그 경우 Status 를 아무리 읽어도 빈 값이다 — 화면은 "링크를 받는 중" 에서 갇힌다.
 	// 버스를 구독해 여기 담아 두고 Status 가 합쳐서 보고한다.
 	busAuthURL string
-	busStarted bool
-	busCancel  context.CancelFunc
+	// busLoginError 는 백엔드가 확정한 로그인 실패 이유다(health 의 login-state 경고).
+	//
+	// Status 로는 알 수 없기 때문에 버스에서 받는다. 잘못된 auth key 도 상태는 needsAuth +
+	// 링크 없음이어서, 링크를 기다리는 것과 구분할 방법이 이것뿐이다. 경고가 사라지면 함께
+	// 지운다 — 버스는 매번 현재 경고 전체를 주므로 그 판단이 여기서 가능하다.
+	busLoginError string
+	// busErrMessage 는 백엔드가 마지막으로 보고한 오류다(Notify.ErrMessage).
+	//
+	// 컨트롤 플레인이 우리 요청을 거부한 이유가 이 경로로 온다. 붙으면 지운다 — 지나간 오류를
+	// 계속 보고하면 화면이 멀쩡한 노드를 문제 있는 것으로 그린다.
+	busErrMessage string
+	// busIdentityInvalid 는 컨트롤 플레인이 이 노드 identity 를 찾을 수 없다고 구조적으로
+	// 보고했는지다. 일반적인 map poll 중단과 분리해서 자동 재등록의 유일한 근거로 쓴다.
+	busIdentityInvalid bool
+	busControlError    string
+	busStarted         bool
+	busCancel          context.CancelFunc
 
 	// reauthStarted 는 지금의 인증 대기 구간에서 이미 대화형 로그인을 개시했는지다. 표시가
 	// 노드에 붙어 있는 것이 핵심이다 — 연결 시도는 여러 번 새로 생기지만(SSH 재연결·사용자
@@ -110,6 +127,32 @@ func (n *tsnetNode) startBusWatch() {
 	n.mu.Unlock()
 
 	go n.watchBus(ctx)
+	if strings.TrimSpace(n.server.ControlURL) != "" {
+		go n.watchIdentity(ctx)
+	}
+}
+
+const (
+	identityProbeInterval = 30 * time.Second
+	identityProbeTimeout  = 5 * time.Second
+)
+
+// watchIdentity compensates for control servers that keep an old streaming map
+// response open after deleting the current node. The probe is a normal
+// non-streaming map update and cannot create another control-plane node.
+func (n *tsnetNode) watchIdentity(ctx context.Context) {
+	ticker := time.NewTicker(identityProbeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			probeCtx, cancel := context.WithTimeout(ctx, identityProbeTimeout)
+			_ = n.ProbeIdentity(probeCtx)
+			cancel()
+		}
+	}
 }
 
 // watchBus 는 백엔드가 푸시하는 알림을 받아 인증 링크를 갈무리한다.
@@ -166,23 +209,131 @@ func (n *tsnetNode) applyNotify(notify *ipn.Notify) {
 	// 계속 보고해서, 화면이 인증을 다시 요구하는 것처럼 보인다.
 	if notify.LoginFinished != nil {
 		n.setBusAuthURL("")
+		n.setBusErrMessage("")
 		changed = true
 	}
 	if notify.State != nil {
 		if *notify.State == ipn.Running {
 			n.setBusAuthURL("")
+			n.setBusErrMessage("")
 		}
 		changed = true
 	}
-	// 넷맵·건강·오류도 판정에 영향을 준다 — 만료는 새 넷맵이 올 때 드러나고, 컨트롤 플레인과
-	// 끊기면 건강 경고로 나온다.
-	if notify.NetMap != nil || notify.Health != nil || notify.ErrMessage != nil {
+	// 로그인이 확정적으로 실패했는지. 버스는 현재 경고 전체를 주므로, 경고가 없으면 지운다.
+	//
+	// 코드로 본다. 화면에 뜨는 영어 문장을 파싱하면 tailscale 문구가 바뀔 때 조용히 깨진다 —
+	// 그 문장은 이 경고의 Text 이고, 우리가 쓸 것은 Args 에 들어 있는 원인이다.
+	if notify.Health != nil {
+		if warning, ok := notify.Health.Warnings[tsconst.HealthWarnableLoginState]; ok {
+			n.setBusLoginError(strings.TrimSpace(warning.Args[health.ArgError]))
+		} else {
+			n.setBusLoginError("")
+		}
+		changed = true
+	}
+
+	// 오류는 내용을 쓴다. 예전에는 "뭔가 변했다" 로만 쓰고 버렸는데, 컨트롤 플레인이 거부한
+	// 이유가 여기로만 오는 경우가 있어서 그러면 화면이 이유를 말할 수 없다.
+	if notify.ErrMessage != nil {
+		n.setBusErrMessage(strings.TrimSpace(*notify.ErrMessage))
+		changed = true
+	}
+	if notify.ControlError != nil {
+		n.setBusControlError(
+			notify.ControlError.Kind == ipn.ControlErrorNodeNotFound,
+			strings.TrimSpace(notify.ControlError.Message),
+		)
+		changed = true
+	}
+
+	// 넷맵도 판정에 영향을 준다 — 만료는 새 넷맵이 올 때 드러난다.
+	if notify.NetMap != nil {
 		changed = true
 	}
 
 	if changed && n.onNotify != nil {
 		n.onNotify()
 	}
+}
+
+// mergeBusState 는 버스에서 받아 둔 것을 상태에 합치고, 밖으로 나갈 문장에서 키를 가린다.
+//
+// 순수 함수로 둔 이유는 검증이다 — 살아 있는 백엔드 없이는 Status 를 통째로 흘려볼 수 없어서,
+// 합치는 것을 빠뜨렸는지 가리는 것을 빠뜨렸는지 여기서만 확인할 수 있다.
+// busState 는 버스에서 받아 둔 값들이다. 인자를 늘리는 대신 묶어서, 어느 값이 어디로 가는지
+// 호출부에서 헷갈리지 않게 한다.
+type busState struct {
+	authURL         string
+	loginError      string
+	backendError    string
+	controlError    string
+	identityInvalid bool
+}
+
+func mergeBusState(status Status, bus busState, authKey string) Status {
+	// 링크가 상태에 없으면 버스가 받아 둔 것을 쓴다. 만료된 노드의 재인증 링크는 이 경로로만
+	// 오는 경우가 있어서, 이 합침이 없으면 화면이 링크를 영원히 기다린다.
+	if status.AuthURL == "" && bus.authURL != "" {
+		status.AuthURL = bus.authURL
+	}
+
+	// 로그인 실패는 버스로만 온다. Health 에는 같은 내용이 영어 문장으로 들어 있지만, 판정에 쓸
+	// 값은 원인 그대로다.
+	//
+	// 키가 틀렸다는 오류에는 컨트롤 플레인이 **키를 실어** 보낸다. 이 값과 Health 는 그대로 화면까지
+	// 올라가고 로그·스크린샷에도 남으므로, 코어 밖으로 나가는 이 자리에서 가린다.
+	status.LoginError = redactAuthKey(bus.loginError, authKey)
+	status.BackendError = redactAuthKey(bus.backendError, authKey)
+	if status.BackendError == "" {
+		status.BackendError = redactAuthKey(bus.controlError, authKey)
+	}
+	status.IdentityInvalid = bus.identityInvalid
+	if len(status.Health) > 0 {
+		// 새 슬라이스에 담는다. 원본은 백엔드가 들고 있는 것이라 제자리에서 고치면 안 된다.
+		redacted := make([]string, 0, len(status.Health))
+		for _, warning := range status.Health {
+			redacted = append(redacted, redactAuthKey(warning, authKey))
+		}
+		status.Health = redacted
+	}
+	return status
+}
+
+func (n *tsnetNode) setBusErrMessage(message string) {
+	n.mu.Lock()
+	n.busErrMessage = message
+	n.mu.Unlock()
+}
+
+func (n *tsnetNode) busErrMessageValue() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.busErrMessage
+}
+
+func (n *tsnetNode) setBusControlError(identityInvalid bool, message string) {
+	n.mu.Lock()
+	n.busIdentityInvalid = identityInvalid
+	n.busControlError = message
+	n.mu.Unlock()
+}
+
+func (n *tsnetNode) busControlErrorValue() (identityInvalid bool, message string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.busIdentityInvalid, n.busControlError
+}
+
+func (n *tsnetNode) setBusLoginError(reason string) {
+	n.mu.Lock()
+	n.busLoginError = reason
+	n.mu.Unlock()
+}
+
+func (n *tsnetNode) busLoginErrorValue() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.busLoginError
 }
 
 func (n *tsnetNode) setBusAuthURL(url string) {
@@ -245,6 +396,23 @@ func NewNode(config NodeConfig) (Node, error) {
 	}, nil
 }
 
+// ProbeIdentity asks a custom control server to validate the persisted node key
+// with a fresh map request. Network and server failures remain ordinary probe
+// errors; only a structured node-not-found response updates IdentityInvalid.
+func (n *tsnetNode) ProbeIdentity(ctx context.Context) error {
+	if strings.TrimSpace(n.server.ControlURL) == "" {
+		return nil
+	}
+	if err := n.ensureStarted(ctx); err != nil {
+		return err
+	}
+	controlErr, err := n.server.ProbeControlMap(ctx)
+	if controlErr != nil {
+		n.applyNotify(&ipn.Notify{ControlError: controlErr})
+	}
+	return err
+}
+
 func (n *tsnetNode) Dial(ctx context.Context, network, address string) (net.Conn, error) {
 	// Down 된 노드로도 여기 들어올 수 있다(유휴 유예 만료 뒤 재사용). 그대로 Dial 하면
 	// 올라오지 않는 노드를 기다리며 멈춘다.
@@ -277,8 +445,26 @@ func (n *tsnetNode) Up(ctx context.Context) error {
 // 있는 백엔드 없이 그 배선을 검증할 수 있다.
 func (n *tsnetNode) bringUp(ctx context.Context, client localClient) error {
 	if _, err := client.EditPrefs(ctx, &ipn.MaskedPrefs{
-		Prefs:          ipn.Prefs{WantRunning: true},
+		Prefs: ipn.Prefs{
+			WantRunning: true,
+			// 서브넷 라우터가 광고한 경로도 받는다(tailscale 의 --accept-routes).
+			//
+			// 이것이 없으면 tailnet 안의 기기만 닿는다. 서브넷 라우터 뒤에 있는 호스트(사내
+			// 10.x 같은 대역)는 PeerForIP 조회가 실패해서 **로컬 시스템 dialer** 로 떨어지고,
+			// 그 대역을 지금 붙어 있는 랜에서 찾다가 timeout 난다.
+			//
+			// 유저스페이스라 켜도 기기에는 영향이 없다. tsnet 은 TUN 도, OS 라우팅 테이블도,
+			// OS DNS 도 쓰지 않는다(dns.noopManager) — 이 pref 는 우리 netstack 이 어느 대역을
+			// 받아들일지만 바꾸므로, 효과가 이 노드의 Dial 안에서 끝난다. 일반 Tailscale
+			// 클라이언트의 --accept-routes 가 OS 경로를 고쳐 쓰는 것과 다른 점이다.
+			//
+			// 기본 경로(0.0.0.0/0)는 받지 않는다. routemanager 는 이 pref 를 "advertised subnet
+			// routes (non-exit routes)" 에만 적용하고, exit 경로는 exit node 로 선택된 피어에만
+			// 쓴다 — 그래서 일반 인터넷 연결이 tailnet 으로 빨려가지 않는다.
+			RouteAll: true,
+		},
 		WantRunningSet: true,
+		RouteAllSet:    true,
 	}); err != nil {
 		return fmt.Errorf("tailnet: bring up: %w", err)
 	}
@@ -401,14 +587,18 @@ func (n *tsnetNode) Status(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("tailnet: status: %w", err)
 	}
 
-	status := statusFromBackend(state, time.Now())
-	// 링크가 상태에 없으면 버스가 받아 둔 것을 쓴다. 만료된 노드의 재인증 링크는 이 경로로만
-	// 오는 경우가 있어서, 이 합침이 없으면 화면이 링크를 영원히 기다린다.
-	if status.AuthURL == "" {
-		if url := n.busAuthURLValue(); url != "" {
-			status.AuthURL = url
-		}
-	}
+	identityInvalid, controlError := n.busControlErrorValue()
+	status := mergeBusState(
+		statusFromBackend(state, time.Now()),
+		busState{
+			authURL:         n.busAuthURLValue(),
+			loginError:      n.busLoginErrorValue(),
+			backendError:    n.busErrMessageValue(),
+			controlError:    controlError,
+			identityInvalid: identityInvalid,
+		},
+		n.server.AuthKey,
+	)
 	// 붙었으면 남은 링크와 개시 표시를 버린다(버스 알림을 놓친 경우의 안전망). 표시를 남기면
 	// 다음에 다시 만료됐을 때 아무도 재인증을 개시해 주지 못한다.
 	if status.State == StateRunning && !status.Expired {

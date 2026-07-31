@@ -9,7 +9,6 @@ import { cn } from '../../lib/cn';
 import { useAppStore } from '../../store/appStore';
 import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
-import { requestTailnetRelogin } from '../../lib/tailnet-relogin';
 import {
   extractDroppedAbsolutePaths,
   hasExternalFileDrop,
@@ -78,26 +77,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   const snippets = useAppStore((state) => state.snippets);
   const openExternalUrl = useAppStore((state) => state.openExternalUrl);
 
-  /**
-   * tailnet 복구. 등록을 다시 확인하라고 표시하고 곧바로 다시 연결한다.
-   *
-   * 확인을 여기서 직접 쏘지 않는 이유: 코어는 tailnet 당 시도 하나만 유지해서, 확인과 재연결을
-   * 잇달아 쏘면 둘이 서로를 접는다. 표시만 남기면 재연결이 태우는 그 하나의 요청이 확인까지
-   * 겸하고, 진행 상황도 이 화면에 그대로 보인다.
-   *
-   * 등록을 버리지 않는다. 만료인지 알 수 없으니, 버리는 대신 컨트롤 플레인에 물어서 답을
-   * 받는다 — 만료였으면 인증이 필요하다고 답하고(브라우저가 열린다), 살아 있었으면 그대로
-   * 붙는다. 만료가 아니었을 때 멀쩡한 등록을 날리는 손해가 없다.
-   */
+  // tailnet 복구 동작은 이 화면에 없다.
+  //
+  // 만료 감지·재인증 개시·링크가 안 올 때 노드를 다시 세우는 것은 모두 코어가 한다. 여기서
+  // 조립하면(확인 표시 → 재연결, 취소 → 플래그 → 재시도) 같은 일에 대한 판단이 두 곳에 생기고,
+  // 화면이 코어보다 앞서 결정하게 된다. 이 화면은 상태를 그리고, 사용자의 의사(취소·다시 시도)만
+  // 전달한다.
   const tailnetIdOfHost =
     props.host && isSshHostRecord(props.host) ? props.host.tailnetId?.trim() : undefined;
-  const recoverTailnet = useCallback(async () => {
-    if (!tailnetIdOfHost) {
-      return;
-    }
-    requestTailnetRelogin(tailnetIdOfHost);
-    await onRetry?.();
-  }, [onRetry, tailnetIdOfHost]);
 
 
   const connectHost = useAppStore((state) => state.connectHost);
@@ -467,25 +454,6 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
    * 하나에서 온다. 세션별로 따로 들고 있으면 다른 화면이 시작한 인증을 이 화면이 모른다.
    */
   const tailnetAuthUrl = tailnetAuthInFlight ? tailnetStatus?.authUrl : undefined;
-
-  /**
-   * 인증이 필요한데 링크가 아직 없는 상태.
-   *
-   * 코어가 유예를 넘기면 노드를 새로 만들어 스스로 푼다. 그래도 안 풀리는 경우에 사용자가 할 수
-   * 있는 일이 취소뿐이면 막다른 화면이 된다 — 새 노드로 처음부터 다시 밟는 길을 준다.
-   */
-  const tailnetWaitingForLink =
-    tailnetAuthInFlight && tailnetStatus?.state === 'needsAuth' && !tailnetStatus.authUrl;
-
-  /** 노드를 버리고 처음부터 다시. 취소가 그 노드를 닫으므로 다음 시도는 새 노드로 시작한다. */
-  const restartTailnet = useCallback(async () => {
-    if (!tailnetIdOfHost) {
-      return;
-    }
-    await cancelTailnet(tailnetIdOfHost).catch(() => undefined);
-    requestTailnetRelogin(tailnetIdOfHost);
-    await onRetry?.();
-  }, [onRetry, tailnetIdOfHost]);
 
   const tailnetFailureMessage =
     tab?.status === 'error'
@@ -874,22 +842,14 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
                   void onCancelReconnect?.();
                 }}
                 secondaryActionLabel={
-                  // 이미 인증이 진행 중이면 할 일은 브라우저로 돌아가는 것뿐이다. 그 상태에서
-                  // "다시 로그인" 을 내밀면 진행 중인 인증을 버리게 된다.
-                  tailnetAuthUrl
-                    ? translate('misc.reopenBrowser')
-                    : tailnetGuidance?.recovery === 'login'
-                      ? translate('misc.reauthenticateTailnet')
-                      : undefined
+                  // 링크가 있으면 할 일은 브라우저로 돌아가는 것뿐이다. 복구 동작을 내밀지
+                  // 않는다 — 그 판단은 코어가 한다.
+                  tailnetAuthUrl ? translate('misc.reopenBrowser') : undefined
                 }
                 onSecondaryAction={
                   tailnetAuthUrl
                     ? () => void openExternalUrl(tailnetAuthUrl)
-                    : tailnetWaitingForLink
-                      ? () => void restartTailnet()
-                      : tailnetGuidance?.recovery === 'login'
-                        ? () => void recoverTailnet()
-                        : undefined
+                    : undefined
                 }
               />
             ) : null}

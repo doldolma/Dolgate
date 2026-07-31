@@ -29,6 +29,8 @@ require (
 
 replace dolssh/services/ssh-core => ../ssh-core
 
+replace tailscale.com => ../ssh-core/third_party/tailscale
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

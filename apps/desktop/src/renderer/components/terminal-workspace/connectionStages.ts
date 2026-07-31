@@ -53,8 +53,15 @@ export function resolveTailscaleStages(
   // 있어서, 그것까지 시작 완료로 쓰면 인터넷이 없는데도 ✓ 가 뜬다.
   const started =
     state === 'running' || state === 'needsAuth' || state === 'needsApproval';
-  // 코어의 판정. 표시도 관문과 같은 기준을 써야 "연결됨" 인데 못 붙는 화면이 안 생긴다.
-  const authorized = status?.ready === true;
+  // 등록·로그인이 끝났는지. 코어의 판정을 그대로 쓴다.
+  //
+  // ready(= 확실히 연결됨)를 쓰면 안 된다. 그 값에는 "지금 컨트롤 플레인과 동기화되는지" 가 섞여
+  // 있어서, 동기화만 끊기면 이미 끝난 등록·로그인이 두 줄 모두 미완료로 되돌아간다 — 그 아래
+  // 단계에는 체크가 떠 있으니 화면이 거꾸로 진행하는 것처럼 보인다. 두 질문을 코어가 나눠 답한다.
+  const authorized = status?.authorized === true;
+  const identityInvalid = status?.identityInvalid === true;
+  // 동기화가 끊긴 채로 코어가 진행하기로 했는지. 기다리는 중과 넘어간 뒤를 구분하는 값이다.
+  const degraded = status?.degraded === true;
   const expired = status?.expired === true;
   const peers = status?.peers?.length ?? 0;
 
@@ -67,17 +74,34 @@ export function resolveTailscaleStages(
     detail: status?.backendState ?? undefined,
   };
 
+  // 로그인이 거부됐는지. 이 신호가 있으면 기다려서 풀리는 상태가 아니다 — 설정을 고쳐야 한다.
+  const loginError = status?.loginError?.trim();
+
   // 2) 등록이 아직 유효한지. 만료는 상태로 드러나지 않을 때가 많아서, 드러났으면 그대로 말한다.
   const registrationStage: ConnectionStage = {
     id: 'tailscale-registration',
     group: 'tailscale',
     label: t('connectStages.tailscaleRegistration'),
-    state: expired ? 'failed' : authorized ? 'done' : started ? 'active' : 'pending',
-    detail: expired
-      ? t('connectStages.tailscaleExpiredDetail')
-      : status?.keyExpiry
-        ? t('connectStages.tailscaleKeyExpiryDetail', { at: formatExpiry(status.keyExpiry) })
-        : undefined,
+    state:
+      loginError || expired
+        ? 'failed'
+        : identityInvalid
+          ? 'active'
+          : authorized
+            ? 'done'
+            : started
+              ? 'active'
+              : 'pending',
+    detail: loginError
+      ? // 백엔드가 준 이유를 그대로 붙인다. "실패했습니다" 만으로는 키를 고쳐야 하는지 알 수 없다.
+        joinDetail(t('connectStages.tailscaleLoginRejectedDetail'), loginError)
+      : expired
+        ? t('connectStages.tailscaleExpiredDetail')
+        : identityInvalid
+          ? t('connectStages.tailscaleIdentityInvalidDetail')
+          : status?.keyExpiry
+            ? t('connectStages.tailscaleKeyExpiryDetail', { at: formatExpiry(status.keyExpiry) })
+            : undefined,
   };
 
   // 3) 사람이 해야 하는 인증. 링크가 오기까지 몇 초 걸리므로 그 사이를 따로 말한다 — "로그인
@@ -87,20 +111,35 @@ export function resolveTailscaleStages(
     group: 'tailscale',
     label: t('connectStages.tailscaleAuth'),
     state:
-      state === 'needsAuth' || state === 'needsApproval'
-        ? status?.authUrl || state === 'needsApproval'
-          ? 'blocked'
-          : 'active'
-        : authorized
-          ? 'done'
-          : 'pending',
-    detail:
-      state === 'needsApproval'
+      // 로그인이 거부됐으면 이 단계는 시작조차 못 한 것이다. 실패는 위(등록)에 붙어 있고,
+      // 여기서 "진행 중" 으로 그리면 기다리면 될 것처럼 보인다.
+      loginError
+        ? 'pending'
+        : state === 'needsAuth' || state === 'needsApproval'
+          ? status?.authUrl || state === 'needsApproval'
+            ? 'blocked'
+            : 'active'
+          : authorized
+            ? 'done'
+            : 'pending',
+    detail: loginError
+      ? undefined
+      : state === 'needsApproval'
         ? t('connectStages.tailscaleApprovalDetail')
         : state === 'needsAuth'
           ? status?.authUrl
             ? t('connectStages.tailscaleBrowserDetail')
-            : t('connectStages.tailscaleLinkDetail')
+            : // 링크가 오지 않으면 코어가 노드를 다시 세워 등록을 처음부터 밟는다. 그 사실을
+              // 여기서 말해야 한다 — 재시작 전후의 상태가 완전히 같아서, 말하지 않으면 화면은
+              // 아무 일도 없는 것처럼 보이고 사용자는 멈춘 줄 안다.
+              joinDetail(
+                t('connectStages.tailscaleLinkDetail'),
+                status?.restarts
+                  ? t('connectStages.tailscaleRestartDetail', {
+                      count: status.restarts,
+                    })
+                  : undefined,
+              )
           : undefined,
   };
 
@@ -109,17 +148,30 @@ export function resolveTailscaleStages(
   //    이것이 지금까지 화면에 없어서 "연결됨인데 통신이 안 되는" 상태를 아무도 설명할 수 없었다.
   //    등록이 만료되면 컨트롤 플레인이 이 세션을 끊는데, 노드는 연결됨으로 남고 기기 목록까지
   //    낡은 값으로 유지된다. 기기 수는 그 자체로 신뢰할 수 없으므로 참고값으로만 붙인다.
+  //
+  //    끊겼다고 실패로 그리지 않는다. 데이터 플레인은 이미 받아 둔 넷맵으로 계속 통하고, 끊긴 것은
+  //    갱신 통로다 — 코어가 잠깐 기다린 뒤 진행하기로 했으면(degraded) 그 사실을 경고로 남긴다.
+  //    "진행 중"(…)으로 두면 넘어간 뒤에도 무언가를 기다리는 것처럼 보인다.
   const networkStage: ConnectionStage = {
     id: 'tailscale-network',
     group: 'tailscale',
     label: t('connectStages.tailscaleSync'),
-    state: status?.online === true ? 'done' : started ? 'active' : 'pending',
+    state:
+      status?.online === true
+        ? 'done'
+        : degraded
+          ? 'warn'
+          : started
+            ? 'active'
+            : 'pending',
     detail:
       status?.online === true && peers > 0
         ? t('connectStages.tailscalePeersDetail', { count: peers })
-        : status?.online === false && status.state === 'running'
-          ? t('connectStages.tailscaleStaleDetail')
-          : undefined,
+        : degraded
+          ? t('connectStages.tailscaleDegradedDetail')
+          : status?.online === false && status.state === 'running'
+            ? t('connectStages.tailscaleStaleDetail')
+            : undefined,
   };
 
   const stages = [nodeStage, registrationStage, authStage, networkStage];
@@ -180,9 +232,13 @@ export function resolveConnectionStages(input: {
   const stage = tab?.connectionProgress?.stage;
   const failed = tab?.status === 'error';
   const connected = tab?.status === 'connected';
-  // Tailscale 을 쓰는 호스트는 그 계층이 확실히 연결돼야 호스트 키를 확인할 수 있다. 판정은
-  // 코어가 한 곳에서 하고(ready), 여기서 state·expired 로 다시 조합하지 않는다.
-  const tailscaleReady = !hasTailscale || tailnetStatus?.ready === true;
+  // Tailscale 을 쓰는 호스트는 그 계층을 통과해야 호스트 키를 확인할 수 있다. 판정은 코어가 한
+  // 곳에서 하고(ready·degraded), 여기서 state·expired·online 으로 다시 조합하지 않는다.
+  //
+  // degraded 를 함께 보는 이유: 코어가 동기화 없이 진행하기로 했으면 다음 관문은 실제로 진행 중이다.
+  // 그것을 "아직" 으로 그리면 코어가 넘긴 연결을 화면이 되돌려 세워 둔 것처럼 보인다.
+  const tailscaleReady =
+    !hasTailscale || tailnetStatus?.ready === true || tailnetStatus?.degraded === true;
 
   // SSH 가 실패했다는 것은 그 앞의 키 확인은 통과했다는 뜻이다. 아직 안 한 것처럼 두면 사용자는
   // 키 문제를 의심하러 간다.

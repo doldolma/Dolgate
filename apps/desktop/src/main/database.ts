@@ -1260,13 +1260,16 @@ export class TailnetRepository {
       const next: TailnetRecord = {
         ...record,
         hasAuthKey,
-        // ephemeral 여부는 인증 방식이 정한다. 렌더러가 아니라 여기서 정하는 이유는, 키가
-        // 있는지 아는 곳이 여기뿐이라 둘이 어긋날 수 없기 때문이다.
+        // ephemeral 은 요청하지 않는다.
         //
-        // auth key 면 ephemeral 이 공짜다 — 재등록이 자동이라 사용자는 못 느끼고 기기
-        // 목록도 알아서 정리된다. 브라우저 로그인이면 반대다: 노드가 지워지면 다음 실행마다
-        // 브라우저를 다시 거쳐야 한다. 그래서 그때는 노드를 남긴다.
-        ephemeral: hasAuthKey,
+        // 예전에는 auth key 가 있으면 켰다("재등록이 자동이라 공짜다"). 그 전제가 틀렸다 —
+        // Tailscale auth key 는 기본이 1회용이라 첫 등록에 소진되고, 앱을 끄면 컨트롤 플레인이
+        // ephemeral 노드를 지운 뒤 다음 실행의 재등록이 "invalid key" 로 실패한다. 그때부터
+        // 그 tailnet 은 새 키를 넣기 전까지 못 쓴다.
+        //
+        // 영속으로 등록하면 앱을 꺼도 노드가 남아 1회용 키도 문제가 되지 않는다. ephemeral 키를
+        // 쓰는 경우에는 컨트롤 플레인이 키를 보고 알아서 그렇게 처리한다.
+        ephemeral: false,
         createdAt: existing?.createdAt ?? record.createdAt ?? now,
         updatedAt: now,
       };
@@ -1280,9 +1283,23 @@ export class TailnetRepository {
   }
 
   remove(id: string): void {
+    const timestamp = nowIso();
     stateStorage.updateState((state) => {
       state.data.tailnets = state.data.tailnets.filter((item) => item.id !== id);
       delete state.secure.tailnetAuthKeysById[id];
+      // Tailnet 설정과 호스트의 경유 설정은 하나의 관계다. 설정만 지우면 호스트가 존재하지
+      // 않는 id 를 계속 가리켜 연결할 수 없으므로, 같은 저장 트랜잭션에서 일반 네트워크로
+      // 되돌린다. updatedAt 도 움직여야 이 변경이 다른 기기로 동기화된다.
+      state.data.hosts = state.data.hosts.map((host) => {
+        if (!isSshHostRecord(host) || host.tailnetId?.trim() !== id) {
+          return host;
+        }
+        return {
+          ...host,
+          tailnetId: null,
+          updatedAt: timestamp,
+        };
+      });
     });
   }
 
@@ -1302,9 +1319,8 @@ export class TailnetRepository {
   /**
    * 동기화로 내려온 것으로 전부 갈아 끼운다.
    *
-   * 순서가 계약이다 — 키를 먼저 넣고 레코드를 넣어야 한다. save() 가 ephemeral 을
-   * hasAuthKey 에서 다시 계산하므로, 반대로 하면 키 있는 tailnet 이 영속으로 저장된다.
-   * 여기서는 한 번의 updateState 로 둘을 같이 쓰므로 그 문제가 없다.
+   * 키와 레코드를 한 번의 updateState 로 같이 쓴다 — hasAuthKey 가 그 둘에서 나오므로
+   * 나눠 쓰면 그 사이에 잘못된 값이 보인다.
    */
   replaceAll(payloads: TailnetPayload[]): void {
     stateStorage.updateState((state) => {
@@ -1315,7 +1331,7 @@ export class TailnetRepository {
         if (authKey) {
           keys[record.id] = encodeSecretForStorage(authKey);
         }
-        return { ...record, hasAuthKey, ephemeral: hasAuthKey };
+        return { ...record, hasAuthKey, ephemeral: false };
       });
       state.secure.tailnetAuthKeysById = keys;
     });

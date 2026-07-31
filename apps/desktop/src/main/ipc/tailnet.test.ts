@@ -49,12 +49,13 @@ function createContext() {
     syncOutbox: {
       upsertDeletion: vi.fn(),
     },
+    queueSync: vi.fn(),
     coreManager: {
       testTailnet: vi.fn<
         (
           config: TailnetConfig,
           onStatus: (status: TailnetStatus) => void,
-          options?: { timeoutMs?: number; forceRelogin?: boolean },
+          options?: { timeoutMs?: number },
         ) => Promise<TailnetStatus>
       >(async () => ({ id: 'net-1', state: 'running' })),
       forgetTailnet: vi.fn(async (_id: string) => {}),
@@ -95,6 +96,26 @@ describe('tailnet ipc handlers', () => {
     expect(JSON.stringify(listed)).not.toContain('tskey-secret');
   });
 
+  // 저장했다고 동기화에 알리지 않으면 **그 레코드가 사라진다.**
+  //
+   // 다음 기동의 pull 이 서버 스냅샷으로 목록을 통째로 갈아 끼우고, 서버에 없는 것은 삭제로
+  // 취급된다. 실기기에서 정확히 그렇게 잃었다 — 저장한 tailnet 이 앱을 껐다 켜면 목록에서
+  // 사라졌고, 종료 전에 다른 것(호스트·스니펫 …)을 건드린 경우에만 살아남았다(그때 그쪽의
+  // queueSync 가 전체 스냅샷을 올려 준다).
+  it('저장하면 동기화 push 를 예약한다', async () => {
+    await invoke(ipcChannels.tailnet.save, { record: record(), authKey: 'tskey-new' });
+
+    expect(ctx.queueSync).toHaveBeenCalled();
+  });
+
+  // 삭제는 툼스톤을 남기지만, 그것도 올려 주지 않으면 다른 기기에서 되살아난다.
+  it('삭제하면 동기화 push 를 예약한다', async () => {
+    await invoke(ipcChannels.tailnet.remove, 'net-1');
+
+    expect(ctx.syncOutbox.upsertDeletion).toHaveBeenCalledWith('tailnets', 'net-1');
+    expect(ctx.queueSync).toHaveBeenCalled();
+  });
+
   it('reads the stored auth key on the main side when testing', async () => {
     await invoke(ipcChannels.tailnet.test, {
       id: 'net-1',
@@ -104,7 +125,6 @@ describe('tailnet ipc handlers', () => {
     expect(ctx.coreManager.testTailnet).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'net-1', authKey: 'tskey-secret' }),
       expect.any(Function),
-      expect.objectContaining({ forceRelogin: undefined }),
     );
   });
 
@@ -118,28 +138,17 @@ describe('tailnet ipc handlers', () => {
     });
   });
 
-  // 만료된 등록은 로컬에서 구분되지 않는다 — 백엔드는 연결됨이고 통신만 안 된다. 연결이 실패한
-  // 뒤의 확인 요청만 컨트롤 플레인에 등록을 다시 확인시켜야 하므로, 이 플래그가 렌더러에서
-  // 코어까지 가야 한다. 삼켜지면 확인이 "이미 연결됨" 으로 끝나서 아무것도 알아내지 못한다.
-  it('연결 실패 뒤 확인 요청이면 forceRelogin 을 코어까지 전달한다', async () => {
-    await invoke(
-      ipcChannels.tailnet.test,
-      { id: 'net-1', ephemeral: true },
-      { forceRelogin: true },
-    );
-
-    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[2]).toMatchObject({
+  // 연결 요청에는 옵션이 없다.
+  //
+  // 예전에는 forceRelogin("먼저 노드를 버리고 다시 확인해라")이 렌더러에서 코어까지 흘렀다.
+  // 그러면 "강도" 를 요청하는 쪽이 정하게 되고, 화면이 취소·플래그·재시도를 조립하게 된다.
+  // 다시 세울지는 코어가 링크를 확보하는 과정에서 판단한다.
+  it('요청 쪽이 정책을 실어 보내지 않는다', async () => {
+    await invoke(ipcChannels.tailnet.test, { id: 'net-1', ephemeral: true }, {
       forceRelogin: true,
-    });
-  });
+    } as unknown as undefined);
 
-  // 평소 테스트가 매번 다시 물으면 살아 있는 등록에도 새 노드 키를 만들 수 있다.
-  it('평소 연결 테스트에는 켜지지 않는다', async () => {
-    await invoke(ipcChannels.tailnet.test, { id: 'net-1', ephemeral: true });
-
-    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[2]).toMatchObject({
-      forceRelogin: undefined,
-    });
+    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[2]).toBeUndefined();
   });
 
   it('prefers a key typed in the form so a draft can be tested before saving', async () => {
@@ -167,22 +176,17 @@ describe('tailnet ipc handlers', () => {
     });
   });
 
-  // 시험과 저장이 다른 규칙을 쓰면 노드가 둘로 갈라진다 — 시험은 ephemeral 로 붙고 저장
-  // 뒤에는 persistent 로 붙는 식으로.
-  it('tests an auth-key tailnet as ephemeral', async () => {
+  // 시험과 실제 연결이 다른 규칙을 쓰면 같은 tailnet 에 노드가 둘로 갈라진다. 둘 다 ephemeral 을
+  // 요청하지 않는다 — 요청하면 앱 종료 때 노드가 지워지고 1회용 키는 재등록에 실패한다.
+  it('never asks for an ephemeral registration', async () => {
     await invoke(ipcChannels.tailnet.test, { id: 'net-1' });
-
     expect(ctx.coreManager.testTailnet.mock.calls[0]?.[0]).toMatchObject({
-      ephemeral: true,
+      ephemeral: false,
     });
-  });
 
-  it('tests a browser-login tailnet as persistent', async () => {
     ctx.tailnets.readAuthKey.mockReturnValue(null);
-
     await invoke(ipcChannels.tailnet.test, { id: 'net-1' });
-
-    expect(ctx.coreManager.testTailnet.mock.calls[0]?.[0]).toMatchObject({
+    expect(ctx.coreManager.testTailnet.mock.calls[1]?.[0]).toMatchObject({
       ephemeral: false,
     });
   });
@@ -313,9 +317,8 @@ describe('tailnet config push', () => {
     const provider = ctx.coreManager.setTailnetConfigProvider.mock.calls[0]?.[0];
     expect(provider).toBeTypeOf('function');
     expect(provider?.()).toEqual([
-      // ephemeral 은 auth key 유무로 다시 계산한다 — 연결 테스트와 어긋나면 같은 tailnet 에
-      // 노드가 둘로 갈라진다.
-      { id: 'net-1', controlUrl: undefined, authKey: 'tskey-secret', ephemeral: true },
+      // ephemeral 은 요청하지 않는다 — 연결 테스트와 같은 규칙이어야 노드가 둘로 갈라지지 않는다.
+      { id: 'net-1', controlUrl: undefined, authKey: 'tskey-secret', ephemeral: false },
     ]);
   });
 

@@ -2,6 +2,8 @@ module dolssh/services/ssh-core
 
 go 1.26.5
 
+replace tailscale.com => ./third_party/tailscale
+
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/creack/pty v1.1.24

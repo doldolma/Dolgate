@@ -177,8 +177,15 @@ type Runtime struct {
 	tailnetTests       *tailnetTests
 	// tailnetRecovery* 는 백엔드 알림이 몰려 올 때 복구 판정을 한 번으로 모으기 위한 것이다.
 	// 복구는 폴링이 아니라 IPN 버스 알림으로 시작된다.
-	tailnetRecoveryMu         sync.Mutex
-	tailnetRecoveryPending    map[string]bool
+	tailnetRecoveryMu      sync.Mutex
+	tailnetRecoveryPending map[string]bool
+	// tailnetDegraded* 는 동기화가 끊긴 채로 관문이 통과시킨 tailnet 들이다.
+	//
+	// 결정을 시도 안에만 두면 안 된다 — 화면은 1 초마다 스냅샷을 다시 읽으므로, 시도가 끝난 직후
+	// 그 결정이 사라지고 통과한 단계가 다시 "대기" 로 그려진다(호스트 계층은 시작도 안 한 것처럼
+	// 보인다). 결정을 노드 단위로 들고 있다가 동기화가 돌아오면 지운다.
+	tailnetDegradedMu         sync.Mutex
+	tailnetDegraded           map[string]bool
 	autocompleteMu            sync.Mutex
 	autocompleteRevisions     map[string]int
 	shellIntegrationInstalled map[string]bool

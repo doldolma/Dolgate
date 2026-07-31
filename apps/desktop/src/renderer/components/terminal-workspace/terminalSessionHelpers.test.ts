@@ -97,29 +97,30 @@ describe("terminalSessionHelpers connection error presentation", () => {
   });
 });
 
-// 만료는 Tailscale 계층이 판정해 알려 준 것만 온다. 여기서 정하는 것은 "그래서 무엇을 할 수
-// 있는가" 다 — auth key 경로에는 다시 할 로그인이 없다.
+// 만료는 Tailscale 계층이 판정해 알려 준 것만 온다. 여기서 정하는 것은 "무엇이 일어났고 무엇이
+// 필요한가" 뿐이다 — 복구 동작은 코어가 하므로 화면이 대신 결정하지 않는다.
 describe("resolveTailnetFailureGuidance", () => {
-  it("브라우저 로그인 tailnet 은 다시 로그인으로 복구한다", () => {
+  it("브라우저 로그인 tailnet 은 인증부터 다시 진행한다고 말한다", () => {
     const guidance = resolveTailnetFailureGuidance(false);
 
-    expect(guidance.recovery).toBe("login");
     expect(guidance.message).toContain(t("connectFailure.tailnetExpired"));
     expect(guidance.message).toContain(t("connectFailure.tailnetReauthHint"));
   });
 
-  // 버튼을 내밀면 눌러도 같은 키로 같은 결과다. 무엇을 확인해야 하는지 알려야 한다.
-  it("auth key tailnet 에는 복구 동작을 내주지 않는다", () => {
+  // auth key 는 다시 할 로그인이 없다. 눌러도 같은 키로 같은 결과이므로, 무엇을 확인해야
+  // 하는지를 말해야 한다.
+  it("auth key tailnet 에는 키를 확인하라고 말한다", () => {
     const guidance = resolveTailnetFailureGuidance(true);
 
-    expect(guidance.recovery).toBe("none");
     expect(guidance.message).toContain(t("connectFailure.tailnetAuthKeyHint"));
     expect(guidance.message).not.toContain(t("connectFailure.tailnetReauthHint"));
   });
 
-  // 설정을 아직 못 읽었으면 브라우저 경로로 떨어진다 — 그쪽이 기본이고 눌러 보는 값이 가장 싸다.
+  // 설정을 아직 못 읽었으면 브라우저 경로로 떨어진다 — 그쪽이 기본이다.
   it("인증 방식을 모르면 브라우저 경로로 떨어진다", () => {
-    expect(resolveTailnetFailureGuidance(null).recovery).toBe("login");
+    expect(resolveTailnetFailureGuidance(null).message).toContain(
+      t("connectFailure.tailnetReauthHint"),
+    );
   });
 });
 

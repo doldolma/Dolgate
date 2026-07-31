@@ -18,10 +18,17 @@ function createTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
   } as TerminalTab;
 }
 
-// 코어가 판정한 결과(ready)를 담는다. 화면은 state·expired 로 다시 조합하지 않으므로,
-// 픽스처도 그 계약대로 준다.
+// 코어가 판정한 결과(ready·authorized)를 담는다. 화면은 state·expired·online 으로 다시 조합하지
+// 않으므로, 픽스처도 그 계약대로 준다 — 코어에서 ready 인 상태는 반드시 authorized 이기도 하다.
 function createStatus(overrides: Partial<TailnetStatus> = {}): TailnetStatus {
-  return { id: 'n1', state: 'running', online: true, ready: true, ...overrides } as TailnetStatus;
+  return {
+    id: 'n1',
+    state: 'running',
+    online: true,
+    ready: true,
+    authorized: true,
+    ...overrides,
+  } as TailnetStatus;
 }
 
 function stateOf(stages: ReturnType<typeof resolveConnectionStages>, id: string) {
@@ -78,6 +85,60 @@ describe('resolveConnectionStages', () => {
     expect(stateOf(ready, 'tailscale-auth')).toBe('blocked');
   });
 
+  // 잘못된 auth key 는 상태가 링크 대기와 똑같다(needsAuth + 링크 없음). 그것을 "링크를 받는 중"
+  // 으로 그리면 사용자는 기다리면 될 줄 알고 3 분을 앉아 있는다 — 실제로 그렇게 보였다. 링크는
+  // 오지 않고, 고칠 것은 설정이다.
+  it('로그인이 거부되면 링크를 기다린다고 말하지 않는다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab(),
+      hasTailscale: true,
+      tailnetStatus: createStatus({
+        state: 'needsAuth',
+        ready: false,
+        loginError: 'invalid key: unable to validate API key',
+      }),
+      failureLayer: null,
+    });
+
+    const registration = stages.find((stage) => stage.id === 'tailscale-registration');
+    const auth = stages.find((stage) => stage.id === 'tailscale-auth');
+
+    // 실패는 등록 단계에 붙고, 백엔드가 준 이유가 그대로 보여야 한다.
+    expect(registration?.state).toBe('failed');
+    expect(registration?.detail).toContain('invalid key');
+    // 인증 단계는 진행 중이 아니다 — 기다려서 풀리는 것이 아니기 때문이다.
+    expect(auth?.state).toBe('pending');
+    expect(auth?.detail).toBeUndefined();
+  });
+
+  // 링크가 오지 않으면 코어가 노드를 다시 세워 등록을 처음부터 밟는다. 재시작 전후의 상태는
+  // 완전히 같아서(needsAuth·링크 없음), 이 표시가 없으면 화면은 아무 일도 없는 것처럼 보이고
+  // 사용자는 멈춘 줄 안다 — 실제로 그렇게 보였다.
+  it('링크를 기다리는 동안 코어가 노드를 다시 세운 것을 보여준다', () => {
+    const before = resolveConnectionStages({
+      tab: createTab(),
+      hasTailscale: true,
+      tailnetStatus: createStatus({ state: 'needsAuth', ready: false }),
+      failureLayer: null,
+    });
+    const after = resolveConnectionStages({
+      tab: createTab(),
+      hasTailscale: true,
+      tailnetStatus: createStatus({ state: 'needsAuth', ready: false, restarts: 2 }),
+      failureLayer: null,
+    });
+
+    const detailOf = (stages: ReturnType<typeof resolveConnectionStages>) =>
+      stages.find((stage) => stage.id === 'tailscale-auth')?.detail ?? '';
+
+    expect(detailOf(before)).toBe(t('connectStages.tailscaleLinkDetail'));
+    expect(detailOf(after)).toContain(
+      t('connectStages.tailscaleRestartDetail', { count: 2 }),
+    );
+    // 무엇을 기다리는지는 그대로 남아야 한다 — 덮어쓰면 재시작만 보이고 대기 이유가 사라진다.
+    expect(detailOf(after)).toContain(t('connectStages.tailscaleLinkDetail'));
+  });
+
   // 만료는 그 단계의 실패다. 로그인 단계에만 표시하면 "왜 또 로그인해야 하는지" 를 알 수 없다.
   it('만료는 등록 확인 단계의 실패로 붙는다', () => {
     const stages = resolveConnectionStages({
@@ -94,6 +155,27 @@ describe('resolveConnectionStages', () => {
 
     expect(stateOf(stages, 'tailscale-registration')).toBe('failed');
     expect(stages.find((stage) => stage.id === 'tailscale-registration')?.detail).toBeTruthy();
+  });
+
+  it('삭제된 identity는 동기화 장애가 아니라 자동 재등록으로 표시한다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab(),
+      hasTailscale: true,
+      tailnetStatus: createStatus({
+        state: 'running',
+        ready: false,
+        online: false,
+        authorized: false,
+        identityInvalid: true,
+      }),
+      failureLayer: null,
+    });
+
+    const registration = stages.find((stage) => stage.id === 'tailscale-registration');
+    expect(registration?.state).toBe('active');
+    expect(registration?.detail).toBe(
+      t('connectStages.tailscaleIdentityInvalidDetail'),
+    );
   });
 
   // 이 화면의 존재 이유: Tailscale 때문인지 SSH 가 거절한 것인지 구분.
@@ -195,10 +277,35 @@ describe('resolveConnectionStages', () => {
     // 알 수 없다.
     expect(sync?.detail).toBe(t('connectStages.tailscaleStaleDetail'));
 
-    // 동기화가 끊긴 상태에서 등록·로그인을 완료로 쓰면, 화면이 "다 됐는데 왜 안 되지" 가 된다.
-    // 판정은 코어의 ready 하나이고 표시도 그것을 따라야 한다.
-    expect(stateOf(stale, 'tailscale-registration')).not.toBe('done');
-    expect(stateOf(stale, 'tailscale-auth')).not.toBe('done');
+    // 끊긴 것은 이 줄 하나다. 등록·로그인은 이미 끝났고(authorized), 그것을 미완료로 되돌리면
+    // 화면이 거꾸로 진행하는 것처럼 보인다 — 아래 단계에는 체크가 떠 있는데 위가 "아직" 이었다.
+    expect(stateOf(stale, 'tailscale-registration')).toBe('done');
+    expect(stateOf(stale, 'tailscale-auth')).toBe('done');
+  });
+
+  // 동기화가 끊긴 채로 코어가 진행하기로 했으면(degraded) 그것은 경고이고 대기가 아니다.
+  //
+  // "진행 중"(…)으로 두면 이미 넘어간 뒤에도 무언가를 기다리는 것처럼 보이고, 다음 관문이 시작된
+  // 것을 화면이 부정한다 — 코어가 넘긴 연결을 화면이 되돌려 세워 두는 셈이다.
+  it("동기화 없이 진행하기로 한 것은 경고로 남긴다", () => {
+    const degraded = resolveConnectionStages({
+      tab: createTab({ status: 'connecting' }),
+      hasTailscale: true,
+      tailnetStatus: createStatus({
+        state: 'running',
+        ready: false,
+        online: false,
+        degraded: true,
+        peers: [{ direct: true }],
+      }),
+      failureLayer: null,
+    });
+    const sync = degraded.find((stage) => stage.id === 'tailscale-network');
+
+    expect(sync?.state).toBe('warn');
+    expect(sync?.detail).toBe(t('connectStages.tailscaleDegradedDetail'));
+    // 코어가 넘겼으므로 호스트 계층은 실제로 진행 중이다.
+    expect(stateOf(degraded, 'host-key')).toBe('active');
   });
 
   // 동기화가 살아 있을 때만 기기 수를 말한다. 끊긴 상태의 기기 목록은 낡은 값이라, 그것을 근거로

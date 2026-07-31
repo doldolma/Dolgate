@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"tailscale.com/health"
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
+	"tailscale.com/tsconst"
 	"tailscale.com/types/empty"
 	"tailscale.com/types/key"
 )
@@ -100,6 +102,9 @@ type fakeLocalClient struct {
 	calls    int
 	err      error
 	editCall int
+	// lastPrefs 는 마지막으로 요청한 prefs 다. 무엇을 켜 달라고 했는지까지 봐야 한다 — 호출
+	// 횟수만 세면 켜는 항목이 빠져도 테스트가 통과한다.
+	lastPrefs *ipn.MaskedPrefs
 }
 
 func (c *fakeLocalClient) StartLoginInteractive(ctx context.Context) error {
@@ -107,11 +112,18 @@ func (c *fakeLocalClient) StartLoginInteractive(ctx context.Context) error {
 	return c.loginErr
 }
 
-func (c *fakeLocalClient) EditPrefs(context.Context, *ipn.MaskedPrefs) (*ipn.Prefs, error) {
+func (c *fakeLocalClient) EditPrefs(_ context.Context, prefs *ipn.MaskedPrefs) (*ipn.Prefs, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.editCall += 1
+	c.lastPrefs = prefs
 	return nil, nil
+}
+
+func (c *fakeLocalClient) prefs() *ipn.MaskedPrefs {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastPrefs
 }
 
 func (c *fakeLocalClient) edits() int {
@@ -227,6 +239,44 @@ func TestBringUpTurnsOnAndThenWaits(t *testing.T) {
 	if got := client.count(); got < 2 {
 		t.Errorf("Status() calls = %d, want at least 2 — 올라오기를 기다리지 않았다", got)
 	}
+
+	prefs := client.prefs()
+	if prefs == nil {
+		t.Fatal("prefs 를 요청하지 않았다")
+	}
+	if !prefs.WantRunningSet || !prefs.WantRunning {
+		t.Errorf("WantRunning 을 켜지 않았다: %#v", prefs)
+	}
+}
+
+// 서브넷 라우터 뒤의 호스트로도 연결해야 한다.
+//
+// 이것이 없으면 tailnet 안의 기기만 닿는다 — 사내 10.x 같은 대역은 PeerForIP 조회가 실패해서
+// 로컬 시스템 dialer 로 떨어지고, 그 대역을 지금 붙어 있는 랜에서 찾다가 timeout 난다.
+//
+// 마스크까지 본다. 값만 켜고 마스크를 빼면 EditPrefs 가 그 항목을 무시하므로 조용히 아무 일도
+// 일어나지 않는다.
+func TestBringUpAcceptsSubnetRoutes(t *testing.T) {
+	node := &tsnetNode{}
+	client := &fakeLocalClient{states: []string{"Starting"}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := node.bringUp(ctx, client); err != nil {
+		t.Fatalf("bringUp() error = %v", err)
+	}
+
+	prefs := client.prefs()
+	if prefs == nil {
+		t.Fatal("prefs 를 요청하지 않았다")
+	}
+	if !prefs.RouteAllSet {
+		t.Error("RouteAll 마스크가 빠졌다 — EditPrefs 가 값을 무시한다")
+	}
+	if !prefs.RouteAll {
+		t.Error("RouteAll 을 켜지 않았다 — 서브넷 라우터 뒤 호스트에 닿지 못한다")
+	}
 }
 
 // 인증 링크는 상태에 안 실리고 버스로만 오는 경로가 있다(만료된 노드의 재인증). 그것을
@@ -280,6 +330,133 @@ func TestBusNotifyKeepsTheAuthURLWhileWaiting(t *testing.T) {
 
 	if got := node.busAuthURLValue(); got != url {
 		t.Fatalf("busAuthURL = %q, want it kept as %q", got, url)
+	}
+}
+
+// 로그인이 거부된 사실은 버스로만 온다.
+//
+// 잘못된 auth key 를 넣으면 상태는 needsAuth + 링크 없음인데, 그것은 링크를 기다리는 것과 똑같다.
+// 실측(v1.102.0)에서 정상 대기 중에는 이 경고가 아예 오지 않고, 키가 거부되면 2~3 초 안에 온다 —
+// 그래서 이 신호가 둘을 가르는 유일한 값이다.
+//
+// 코드로 잡고 이유는 Args 에서 꺼낸다. 화면에 뜨는 영어 문장(Text)을 파싱하면 tailscale 문구가
+// 바뀔 때 조용히 깨진다.
+func TestBusNotifyCapturesTheLoginError(t *testing.T) {
+	node := &tsnetNode{}
+
+	node.applyNotify(&ipn.Notify{Health: &health.State{
+		Warnings: map[health.WarnableCode]health.UnhealthyState{
+			tsconst.HealthWarnableLoginState: {
+				WarnableCode: tsconst.HealthWarnableLoginState,
+				Text:         "You are logged out. The last login error was: invalid key",
+				Args:         health.Args{health.ArgError: "invalid key: unable to validate API key"},
+			},
+		},
+	}})
+
+	if got := node.busLoginErrorValue(); got != "invalid key: unable to validate API key" {
+		t.Fatalf("busLoginError = %q — Args 의 원인을 꺼내지 못했다", got)
+	}
+}
+
+// 경고가 사라지면 함께 지운다. 버스는 매번 현재 경고 전체를 주므로 없는 것이 곧 정상이라는 뜻이다.
+// 남겨 두면 로그인에 성공한 뒤에도 실패로 보고해서, 붙었는데 못 붙은 화면이 된다.
+func TestBusNotifyClearsTheLoginErrorWhenHealthy(t *testing.T) {
+	node := &tsnetNode{}
+	node.setBusLoginError("invalid key: unable to validate API key")
+
+	node.applyNotify(&ipn.Notify{Health: &health.State{}})
+
+	if got := node.busLoginErrorValue(); got != "" {
+		t.Fatalf("busLoginError = %q, want empty", got)
+	}
+}
+
+// 컨트롤 플레인이 요청을 거부한 이유가 이 경로로만 오는 경우가 있다. 예전에는 알림을 받고도
+// "뭔가 변했다" 로만 쓰고 내용을 버려서, 화면이 이유를 말할 수 없었다.
+func TestBusNotifyCapturesTheBackendError(t *testing.T) {
+	node := &tsnetNode{}
+	message := "invalid key: unable to validate API key"
+
+	node.applyNotify(&ipn.Notify{ErrMessage: &message})
+
+	if got := node.busErrMessageValue(); got != message {
+		t.Fatalf("busErrMessage = %q, want %q", got, message)
+	}
+}
+
+func TestBusNotifyDistinguishesADeletedNodeFromAnOfflineNode(t *testing.T) {
+	node := &tsnetNode{}
+	node.applyNotify(&ipn.Notify{ControlError: &ipn.ControlError{
+		Kind:       ipn.ControlErrorNodeNotFound,
+		StatusCode: 400,
+		Message:    "initial fetch failed 400: node not found",
+	}})
+
+	identityInvalid, message := node.busControlErrorValue()
+	if !identityInvalid {
+		t.Fatal("node-not-found control error did not mark the identity invalid")
+	}
+	if message == "" {
+		t.Fatal("structured control error message was dropped")
+	}
+
+	status := mergeBusState(Status{State: StateRunning}, busState{
+		identityInvalid: identityInvalid,
+		controlError:    message,
+	}, "")
+	if !status.IdentityInvalid {
+		t.Fatal("IdentityInvalid was not carried into Status")
+	}
+	if status.BackendError != message {
+		t.Fatalf("BackendError = %q, want %q", status.BackendError, message)
+	}
+
+	// A successful map poll sends an empty structured error to clear the incident.
+	node.applyNotify(&ipn.Notify{ControlError: new(ipn.ControlError)})
+	identityInvalid, message = node.busControlErrorValue()
+	if identityInvalid || message != "" {
+		t.Fatalf("cleared control error remained: invalid=%v message=%q", identityInvalid, message)
+	}
+}
+
+// 붙으면 지나간 오류를 버린다. 남겨 두면 멀쩡한 노드를 문제 있는 것으로 그린다.
+func TestBusNotifyClearsTheBackendErrorOnceConnected(t *testing.T) {
+	message := "invalid key: unable to validate API key"
+	running := ipn.Running
+
+	for _, tc := range []struct {
+		name   string
+		notify *ipn.Notify
+	}{
+		{"login finished", &ipn.Notify{LoginFinished: &empty.Message{}}},
+		{"state running", &ipn.Notify{State: &running}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &tsnetNode{}
+			node.applyNotify(&ipn.Notify{ErrMessage: &message})
+			node.applyNotify(tc.notify)
+
+			if got := node.busErrMessageValue(); got != "" {
+				t.Fatalf("busErrMessage = %q, want empty", got)
+			}
+		})
+	}
+}
+
+// 다른 경고(기동 중 등)는 로그인 실패가 아니다. 그것으로 실패를 내면 정상 연결이 시작하자마자
+// 끊긴다 — 실측에서 warming-up 이 login-state 와 같이 오는 구간이 있었다.
+func TestBusNotifyIgnoresUnrelatedHealthWarnings(t *testing.T) {
+	node := &tsnetNode{}
+
+	node.applyNotify(&ipn.Notify{Health: &health.State{
+		Warnings: map[health.WarnableCode]health.UnhealthyState{
+			"warming-up": {Text: "Tailscale is starting. Please wait."},
+		},
+	}})
+
+	if got := node.busLoginErrorValue(); got != "" {
+		t.Fatalf("busLoginError = %q, want empty", got)
 	}
 }
 

@@ -45,11 +45,20 @@ const (
 // Status 는 노드가 올라오는 동안 설정 화면이 그리는 값이다.
 type Status struct {
 	State State
+	// IdentityInvalid 는 컨트롤 플레인이 현재 노드 identity 를 더 이상 모른다고 명시적으로
+	// 응답했는지다. Online=false 와 달리 네트워크 장애를 포함하지 않는 확정 신호다.
+	IdentityInvalid bool
 	// AuthURL 은 사용자가 방문해 노드를 인가해야 할 때 채워진다. 브라우저가 필요 없는
 	// auth key 등록에서는 비어 있다.
 	AuthURL string
-	// Err 는 노드가 멈췄다면 그 이유다.
-	Err string
+	// BackendError 는 백엔드가 마지막으로 보고한 오류다(IPN 버스의 ErrMessage).
+	//
+	// 컨트롤 플레인이 우리 요청을 거부하면 그 이유가 이 경로로 온다 — 잘못된 auth key 에서는
+	// "invalid key: unable to validate API key" 가 왔다. 노드가 삭제된 뒤의 poll 재시도에서도
+	// 오는지는 확인 중이고, 온다면 기다리지 않고 그 자리에서 확정할 수 있다.
+	//
+	// Status·Health 로는 안 오는 값이라 버스에서만 받을 수 있다.
+	BackendError string
 
 	// 아래는 붙은 뒤에만 채워진다. Tailscale 기본 서버로 여러 개를 등록하면 설정이 전부
 	// 같아서 화면에서 구분할 수 없다 — 누구로 어디에 붙었는지가 유일한 단서다.
@@ -81,22 +90,40 @@ type Status struct {
 	// State 는 running 으로 남는다. tailscale 은 로그아웃·마지막 로그인 오류·컨트롤 플레인과
 	// 동기화 안 됨 같은 것을 여기에 담으므로, 상태가 정상으로 보일 때 유일하게 남는 단서다.
 	Health []string
+	// LoginError 는 백엔드가 "로그인이 실패했다" 고 확정해 알려 준 이유다(비어 있으면 그런 신호가
+	// 없다는 뜻이다).
+	//
+	// 이것이 필요한 이유: auth key 를 잘못 넣은 노드도 상태는 needsAuth + 링크 없음이다 — 링크를
+	// 기다리는 중인 것과 구분되지 않는다. 그래서 화면은 "링크를 받는 중" 을 그리고, 링크가 안 온다고
+	// 보고 노드를 다시 세우기까지 한다(같은 키라 무의미하다). 실측에서 정상 대기 중에는 이 신호가
+	// 아예 오지 않고, 키가 거부되면 2~3 초 안에 온다.
+	LoginError string
 
 	// Peers 는 이 tailnet 안에서 보이는 기기들과 지금 그 기기까지 가는 경로다.
 	Peers []Peer
 }
 
-// Connected 는 이 tailnet 을 통해 실제로 통신할 수 있는 상태인지다.
+// Authorized 는 컨트롤 플레인이 이 노드를 인가했고 등록이 아직 유효한지다.
 //
-// 판정은 여기 한 곳에만 있다. 대기 관문과 dial 직전 검사, 화면 표시가 모두 이 결과를 쓴다 —
-// 곳곳에서 각자 판단하면 기준이 갈리고, 어느 하나가 반쪽 기준이면 그 틈으로 통과한다.
+// Connected 와 나뉘어 있는 이유: 이 둘은 다른 질문이고, 하나로 답하면 한쪽이 다른 쪽을 끌어내린다.
+// 등록과 로그인이 끝났는지는 **지금 컨트롤 플레인과 동기화되는지와 무관하다** — map poll 이 끊겨도
+// 등록은 그대로다. 실제로 이것을 Connected 하나로 답하다가, 동기화만 끊긴 상태에서 화면이 이미
+// 끝난 등록·로그인 단계를 "아직 안 됨" 으로 되돌려 그렸다(그 뒤의 단계에는 체크가 떠 있어서 순서가
+// 뒤바뀐 것처럼 보였다).
+func (s Status) Authorized() bool {
+	return s.State == StateRunning && !s.Expired && !s.IdentityInvalid
+}
+
+// Connected 는 이 tailnet 을 통해 **확실히** 통신할 수 있는 상태인지다.
 //
-// 세 조건이 함께여야 한다:
-//   - 컨트롤 플레인과 세션이 살아 있다(Online). 이것이 없으면 아래 둘은 낡은 값이다.
-//   - 그 세션이 우리를 인가했다(State == running).
-//   - 등록이 만료되지 않았다(!Expired).
+// 판정은 여기 한 곳에만 있다. 대기 관문과 화면 표시가 모두 이 결과를 쓴다 — 곳곳에서 각자 판단하면
+// 기준이 갈리고, 어느 하나가 반쪽 기준이면 그 틈으로 낡은 상태가 통과한다.
+//
+// 인가(Authorized) 위에 "컨트롤 플레인과 세션이 살아 있다"(Online)를 더한 것이다. Online 이 없으면
+// State·Expired·기기 목록이 모두 낡은 값이므로 "확실히" 라고 말할 수 없다. 다만 그것이 곧 통신
+// 불가는 아니다 — 그 구간을 어떻게 다룰지는 관문이 정한다(BlockOffline 참조).
 func (s Status) Connected() bool {
-	return s.State == StateRunning && !s.Expired && s.Online
+	return s.Authorized() && s.Online
 }
 
 // BlockedReason 은 지금 이 tailnet 으로 나갈 수 없는 확정적인 이유다. 없으면 빈 문자열이다.
@@ -104,13 +131,22 @@ func (s Status) Connected() bool {
 // Connected 의 반대가 아니다. 그 둘은 다른 질문이다:
 //
 //   - Connected: "확실히 연결됐다" — 연결 흐름의 관문이 묻는다. 확실할 때만 다음 단계로 넘긴다.
-//   - BlockedReason: "확실히 막혔다" — dial 직전 안전망이 묻는다. 노드가 막 올라오는 중(starting)
-//     이면 확실히 막힌 것이 아니므로 통과시킨다 — tsnet 의 Dial 이 Running 을 기다려 주고, 그
-//     경로가 실기기에서 검증된 동작이다. 여기서 막으면 기동 직후 첫 연결이 깨진다.
+//   - BlockedReason: "왜 못 나가는가" — dial 직전 안전망과 관문이 함께 묻는다. 노드가 막 올라오는
+//     중(starting)이면 확실히 막힌 것이 아니므로 통과시킨다 — tsnet 의 Dial 이 Running 을 기다려
+//     주고, 그 경로가 실기기에서 검증된 동작이다. 여기서 막으면 기동 직후 첫 연결이 깨진다.
+//
+// 이유마다 무게가 다르다. 인증·승인·만료·거부는 확정적으로 막힌 것이고, BlockOffline 은 "지금
+// 상태를 믿을 수 없다" 까지다 — 그 차이를 쓰는 곳이 판단한다.
 //
 // 판정을 이 두 함수 밖에서 다시 조합하지 않는다. 곳곳에서 각자 판단하면 기준이 갈린다.
 func (s Status) BlockedReason() BlockReason {
 	switch {
+	case s.LoginError != "":
+		// 로그인이 확정적으로 거부된 상태다. 인증을 기다리는 것보다 먼저 본다 — 상태는 똑같이
+		// needsAuth 이지만, 기다려서 풀리는 것이 아니라 설정을 고쳐야 하는 일이다.
+		return BlockLoginFailed
+	case s.IdentityInvalid:
+		return BlockIdentityInvalid
 	case s.State == StateNeedsAuth:
 		return BlockNeedsAuth
 	case s.State == StateNeedsApproval:
@@ -118,8 +154,12 @@ func (s Status) BlockedReason() BlockReason {
 	case s.Expired:
 		return BlockExpired
 	case s.State == StateRunning && !s.Online:
-		// 컨트롤 플레인과 끊긴 채 running 으로 남은 상태다. State 도 기기 목록도 낡은 값이라
-		// 정상으로 보이지만 실제로는 통하지 않는다 — 만료가 아직 드러나지 않은 구간이 여기다.
+		// 컨트롤 플레인과 끊긴 채 running 으로 남은 상태다. State 도 기기 목록도 낡은 값이므로
+		// 정상으로 보이는 것을 믿을 수 없다 — 만료가 아직 드러나지 않은 구간이 여기다.
+		//
+		// 다른 이유들과 성질이 다르다: 이것만으로는 **통신 불가가 아니다**. dial 안전망은 이것을
+		// 막지 않는다(assertTailnetNotBlocked 참조) — 데이터 플레인은 이미 받아 둔 넷맵으로 계속
+		// 통하고, 진짜 답은 dial 만 알고 있다. 관문이 이 이유를 보고 잠깐 기다릴 뿐이다.
 		return BlockOffline
 	default:
 		return ""
@@ -133,7 +173,14 @@ const (
 	BlockNeedsAuth     BlockReason = "needsAuth"
 	BlockNeedsApproval BlockReason = "needsApproval"
 	BlockExpired       BlockReason = "expired"
-	BlockOffline       BlockReason = "offline"
+	// BlockIdentityInvalid 는 컨트롤 플레인이 현재 노드 identity 를 찾을 수 없다고 확정한
+	// 상태다. 일시적인 offline 과 달리 같은 identity 로 재시도해서는 회복되지 않는다.
+	BlockIdentityInvalid BlockReason = "identityInvalid"
+	// BlockOffline 은 컨트롤 플레인과 동기화가 끊긴 것이다. 확정적으로 막힌 것이 아니라 "지금
+	// 보고되는 값을 믿을 수 없다" 는 뜻이고, 그래서 dial 을 막지 않는다.
+	BlockOffline BlockReason = "offline"
+	// BlockLoginFailed 는 기다려서 풀리지 않는 유일한 이유다 — 설정(키·계정)을 고쳐야 한다.
+	BlockLoginFailed BlockReason = "loginFailed"
 )
 
 // Peer 는 tailnet 안의 기기 하나와 그 기기까지의 현재 경로다.
@@ -176,6 +223,13 @@ type Node interface {
 	// Purge 는 노드의 로컬 상태를 지운다. 상태 파일은 Close 전까지 열려 있으므로 그
 	// 뒤에 실행된다.
 	Purge() error
+}
+
+// IdentityProber is implemented by nodes whose control plane can validate a
+// persisted identity with an explicit request. It is optional because transport
+// implementations that do not have a control plane do not need this behavior.
+type IdentityProber interface {
+	ProbeIdentity(ctx context.Context) error
 }
 
 // NodeFactory 는 레지스트리가 처음 보는 tailnet 의 노드를 만든다.
@@ -605,6 +659,84 @@ func (r *Registry) Discard(id string) error {
 	err := node.Close()
 	r.endTeardownRemoving(id, existing, done)
 	return err
+}
+
+// ReplaceInvalidIdentity 는 컨트롤 플레인이 더 이상 모르는 노드를 닫고 로컬 등록 상태를 지운다.
+// 다음 Acquire 는 새 identity 로 등록을 처음부터 시작한다.
+//
+// Logout 은 호출하지 않는다. 이 메서드의 전제 자체가 컨트롤 플레인에서 노드가 이미 사라졌다는
+// 확정 응답이고, 같은 죽은 identity 로 logout 을 보내 봐야 실패와 백오프만 더한다.
+//
+// 쓰는 곳이 있어도 교체한다. identity 가 무효인 노드 위의 새 연결은 회복될 수 없고, 남은 리스는
+// 세대가 달라져 다음 Release 때 새 노드의 refcount 를 건드리지 않는다.
+func (r *Registry) ReplaceInvalidIdentity(id string, invalid *Lease) (bool, error) {
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
+		r.mu.Unlock()
+		return false, nil
+	}
+	// 다른 goroutine 이 먼저 교체했다. 관측했던 옛 lease 로 지금의 새 노드를 다시 지우면
+	// 삭제 사건 하나가 노드를 계속 늘리는 원인이 된다.
+	if invalid == nil || invalid.registry != r || invalid.id != id ||
+		existing.generation != invalid.generation {
+		r.mu.Unlock()
+		return false, nil
+	}
+	if existing.idle != nil {
+		existing.idle.Stop()
+		existing.idle = nil
+	}
+	existing.refs = 0
+	done := existing.beginTeardown(true)
+	node := existing.node
+	r.mu.Unlock()
+
+	closeErr := node.Close()
+	purgeErr := node.Purge()
+	r.endTeardownRemoving(id, existing, done)
+	return true, errors.Join(closeErr, purgeErr)
+}
+
+// DiscardInvalidIdentityIfIdle 는 사용 중이지 않은 노드가 컨트롤 플레인에서 삭제됐는지
+// 현재 세대에서 다시 확인한 뒤, 그 노드와 로컬 등록 상태만 버린다. 새 노드는 만들지 않는다.
+// 다음 실제 소비자의 Acquire 가 새 identity 등록을 시작한다.
+//
+// 상태를 확인하는 동안 관찰자 리스 하나를 잡는다. 그래야 유휴 타이머가 노드를 닫지 않고,
+// 확인한 노드 세대를 ReplaceInvalidIdentity 에 그대로 넘겨 새로 만들어진 정상 노드를 지우지 않는다.
+func (r *Registry) DiscardInvalidIdentityIfIdle(ctx context.Context, id string) (bool, error) {
+	existing := r.lockEntrySettled(id)
+	if existing == nil || r.closed || existing.refs != 0 {
+		r.mu.Unlock()
+		return false, nil
+	}
+	if existing.idle != nil {
+		existing.idle.Stop()
+		existing.idle = nil
+	}
+	existing.refs = 1
+	observed := &Lease{
+		Node:       existing.node,
+		registry:   r,
+		id:         id,
+		generation: existing.generation,
+	}
+	r.mu.Unlock()
+
+	status, err := observed.Node.Status(ctx)
+	if err != nil {
+		observed.Release()
+		return false, err
+	}
+	if !status.IdentityInvalid {
+		observed.Release()
+		return false, nil
+	}
+
+	discarded, err := r.ReplaceInvalidIdentity(id, observed)
+	if !discarded {
+		observed.Release()
+	}
+	return discarded, err
 }
 
 // Forget 은 노드를 로그아웃시키고 버린다. 이것이 "등록 해제" 동작이다 — 컨트롤 플레인이
