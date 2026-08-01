@@ -43,7 +43,7 @@ export function ServerKeyPromptModal({
           style={[
             styles.card,
             {
-              backgroundColor: palette.surface,
+              backgroundColor: palette.surfaceSolid,
               borderColor: palette.border,
             },
           ]}

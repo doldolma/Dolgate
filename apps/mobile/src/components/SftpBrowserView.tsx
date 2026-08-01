@@ -611,7 +611,7 @@ function EntryActionModal({
         style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}
         onPress={onClose}
       >
-        <View style={[styles.modalCard, { backgroundColor: palette.surface }]}>
+        <View style={[styles.modalCard, { backgroundColor: palette.surfaceSolid }]}>
           <Text style={[styles.modalTitle, { color: palette.text }]}>
             {entry.name}
           </Text>
@@ -700,7 +700,7 @@ function PromptModal({
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onCancel}>
       <View style={[styles.modalOverlay, { backgroundColor: palette.overlay }]}>
-        <View style={[styles.promptCard, { backgroundColor: palette.surface }]}>
+        <View style={[styles.promptCard, { backgroundColor: palette.surfaceSolid }]}>
           <Text style={[styles.modalTitle, { color: palette.text }]}>
             {title}
           </Text>

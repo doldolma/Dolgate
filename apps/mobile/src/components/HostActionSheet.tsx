@@ -86,7 +86,7 @@ export function HostActionSheet({
       onRequestClose={onClose}
     >
       <Pressable
-        style={styles.backdrop}
+        style={[styles.backdrop, { backgroundColor: palette.overlay }]}
         accessibilityLabel={translate("hostActions.closeAria")}
         onPress={onClose}
       >
@@ -94,7 +94,7 @@ export function HostActionSheet({
           style={[
             styles.sheet,
             {
-              backgroundColor: palette.surface,
+              backgroundColor: palette.surfaceSolid,
               borderColor: palette.border,
             },
           ]}
@@ -164,7 +164,6 @@ export function HostActionSheet({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(8, 12, 22, 0.55)",
     justifyContent: "flex-end",
     padding: 14,
   },

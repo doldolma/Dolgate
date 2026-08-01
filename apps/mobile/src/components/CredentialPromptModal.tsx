@@ -149,7 +149,7 @@ export function CredentialPromptModal({
           style={[
             styles.sheet,
             {
-              backgroundColor: palette.surface,
+              backgroundColor: palette.surfaceSolid,
               borderColor: palette.border,
             },
           ]}
