@@ -4377,13 +4377,16 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          // 콜백 딥링크로 앱이 앞으로 나와도 로그인 시트는 그대로 떠 있다 — 교환 결과와
+          // 무관하게 먼저 닫아 이후 진행(또는 오류)을 앱에서 보게 한다. pending 여부보다
+          // 앞에서 닫는다: 브리지 페이지가 아직 떠 있는 시트에서 한 번 더 "Open Dolgate" 를
+          // 누르면 pending 이 이미 비어 있어, 아래 가드에서 돌아가면 시트가 화면에 남는다.
+          void closeInAppBrowser().catch(() => undefined);
+
           const expectedState = get().pendingBrowserLoginState;
           if (!expectedState) {
             return;
           }
-          // 콜백 딥링크로 앱이 앞으로 나와도 로그인 시트는 그대로 떠 있다 — 교환 결과와
-          // 무관하게 먼저 닫아 이후 진행(또는 오류)을 앱에서 보게 한다.
-          void closeInAppBrowser().catch(() => undefined);
           const stateValidationMessage = getAuthCallbackStateErrorMessage(
             expectedState,
             payload.state,
@@ -4468,15 +4471,14 @@ export const useMobileAppStore = create<MobileAppState>()(
             await openInAppBrowser(
               buildBrowserLoginUrl(get().settings.serverUrl, stateToken),
             );
-          } catch (error) {
+          } catch {
+            // 네이티브 reject 문구는 지역화되지 않은 진단용이라 그대로 보여주지 않는다 —
+            // 이 경로의 문구를 쓴다. 원문은 in-app-browser 가 콘솔에 남긴다.
             set({
               pendingBrowserLoginState: null,
               auth: {
                 ...createUnauthenticatedState(),
-                errorMessage:
-                  error instanceof Error
-                    ? error.message
-                    : t('store.browserLoginFailed'),
+                errorMessage: t('store.browserLoginFailed'),
               },
             });
           }
@@ -4503,14 +4505,11 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           try {
             await openAwsSsoBrowser(pending.browserUrl);
-          } catch (error) {
+          } catch {
             set(state => ({
               auth: {
                 ...state.auth,
-                errorMessage:
-                  error instanceof Error
-                    ? error.message
-                    : t('store.reopenBrowserFailed'),
+                errorMessage: t('store.reopenBrowserFailed'),
               },
             }));
           }

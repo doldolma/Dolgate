@@ -270,7 +270,9 @@ describe("SettingsScreen server save navigation", () => {
     });
   });
 
-  it("shows the app version and hides startup syncing-only copy", async () => {
+  // 30초 폴링이 syncStatus 를 ready→syncing→ready 로 돌린다. 동기화 행을 조건부로 언마운트하면
+  // 그때마다 카드 높이가 바뀌어 화면이 흔들린다 — 행은 남고 값만 바뀌어야 한다.
+  it("shows the app version and keeps the sync row mounted while syncing", async () => {
     useMobileAppStore.setState({
       auth: createAuthenticatedState(),
       syncStatus: {
@@ -285,11 +287,12 @@ describe("SettingsScreen server save navigation", () => {
     });
 
     const text = collectText(tree!.root);
-    expect(text).toContain(`Version ${APP_VERSION}`);
-    expect(text).not.toContain("동기화 상태: syncing");
-    expect(text).not.toContain(
-      "저장된 캐시를 먼저 보여주고 최신 상태를 확인하는 중입니다.",
-    );
+    // 버전은 그룹 리스트의 값 행이라 라벨과 값이 각각 그려진다.
+    expect(text).toContain("버전");
+    expect(text).toContain(APP_VERSION);
+    // 동기화 중에도 행은 그대로 있고 값만 "동기화 중" 이 된다.
+    expect(text).toContain("동기화");
+    expect(text).toContain("동기화 중");
 
     await act(async () => {
       tree!.unmount();
@@ -334,6 +337,49 @@ describe("SettingsScreen server save navigation", () => {
 
     await act(async () => {
       authTree!.unmount();
+    });
+  });
+
+  // 로그아웃은 이 기기의 시크릿·볼트 키·호스트까지 지운다. 목록 행이라 잘못 눌리기 쉬우므로
+  // 확인 없이 실행되면 안 된다.
+  it("signs out only after confirming", async () => {
+    const originalLogout = useMobileAppStore.getState().logout;
+    const logoutMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({
+      auth: createAuthenticatedState(),
+      logout: logoutMock,
+    });
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    await act(async () => {
+      findPressableByText(tree!.root, "로그아웃").props.onPress();
+    });
+
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy.mock.calls[0][0]).toBe("로그아웃할까요?");
+    expect(logoutMock).not.toHaveBeenCalled();
+
+    const confirmButton = alertSpy.mock.calls[0][2]?.find(
+      (button) => button.style === "destructive",
+    );
+    expect(confirmButton).toBeDefined();
+    await act(async () => {
+      confirmButton?.onPress?.();
+    });
+
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      useMobileAppStore.setState({ logout: originalLogout });
+      tree!.unmount();
     });
   });
 

@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import { APP_VERSION } from "../lib/app-metadata";
 import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
+import { SettingsGroup, SettingsRow } from "../components/SettingsList";
 import { openInAppBrowser } from "../lib/in-app-browser";
 import {
   DEFAULT_SERVER_URL,
@@ -29,7 +30,7 @@ import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 import { getAccountPasswordValidationMessage, getNewVaultPassphraseMessage } from '../i18n/shared-messages';
 import { useTranslation } from "react-i18next";
-import { APP_LANGUAGE_OPTIONS } from "@dolssh/shared-core";
+import { APP_LANGUAGE_OPTIONS, type AppLanguage } from "@dolssh/shared-core";
 
 interface SettingsContentProps {
   mode: "auth" | "full";
@@ -78,6 +79,7 @@ function SettingsContent({
   const [confirmAccountPasswordDraft, setConfirmAccountPasswordDraft] =
     useState("");
   const [changingAccountPassword, setChangingAccountPassword] = useState(false);
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   const [changePassphraseOpen, setChangePassphraseOpen] = useState(false);
   const [currentPassphraseDraft, setCurrentPassphraseDraft] = useState("");
   const [nextPassphraseDraft, setNextPassphraseDraft] = useState("");
@@ -126,7 +128,6 @@ function SettingsContent({
       auth.status === "offline-authenticated") &&
     Boolean(auth.session);
   const showFullSettings = mode === "full" && hasAuthenticatedSession;
-  const showSyncStatus = syncStatus.status !== "syncing";
   const canSaveServerUrl = !validationMessage && !savingServerUrl;
 
   // 정책 문서는 앱 안의 브라우저 시트에서 띄운다 — 시스템 브라우저로 나가도 규정상 문제는
@@ -134,6 +135,19 @@ function SettingsContent({
   const openPrivacyPolicy = useCallback((): void => {
     void openInAppBrowser(PRIVACY_POLICY_URL).catch(() => undefined);
   }, []);
+
+  const closeLanguagePicker = useCallback((): void => {
+    setLanguagePickerOpen(false);
+  }, []);
+
+  const currentLanguage: AppLanguage = settings.language ?? "system";
+  const languageOptionLabel = useCallback(
+    (option: AppLanguage): string =>
+      option === "system"
+        ? translate("settings.language.system")
+        : LANGUAGE_LABELS[option],
+    [translate],
+  );
 
   const handleSaveServerUrl = async (): Promise<void> => {
     if (!canSaveServerUrl) {
@@ -283,6 +297,23 @@ function SettingsContent({
     setChangePassphraseOpen(false);
   };
 
+  // 로그아웃은 이 기기의 시크릿·볼트 키·호스트까지 지운다(resetToSignedOutState). 되돌릴 수는
+  // 있지만 다시 로그인·잠금해제를 거쳐야 하므로, 목록에서 잘못 눌린 것으로 실행되게 두지 않는다.
+  const confirmLogout = (): void => {
+    Alert.alert(
+      translate("settings.account.logoutConfirmTitle"),
+      translate("settings.account.logoutConfirmBody"),
+      [
+        { text: translate("common.cancel"), style: "cancel" },
+        {
+          text: translate("settings.account.logout"),
+          style: "destructive",
+          onPress: () => void logout(),
+        },
+      ],
+    );
+  };
+
   const confirmDeleteAccount = (): void => {
     Alert.alert(
       translate("settings.deleteAccount.confirmTitle"),
@@ -333,351 +364,261 @@ function SettingsContent({
       ) : null}
 
       {showFullSettings ? (
-        <View
-          style={[
-            styles.section,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.border,
-            },
-          ]}
+        <SettingsGroup
+          header={translate("settings.sections.account")}
+          footer={
+            auth.errorMessage ??
+            syncStatus.errorMessage ??
+            (auth.status === "offline-authenticated"
+              ? translate("settings.account.offlineCache")
+              : undefined)
+          }
+          footerTone={
+            auth.errorMessage || syncStatus.errorMessage ? "danger" : "warning"
+          }
         >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            Account
-          </Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            {auth.session?.user.email ?? translate("settings.account.notSignedIn")}
-          </Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            {translate("settings.account.authStatus", { status: auth.status })}
-          </Text>
-          {showSyncStatus ? (
-            <Text style={[styles.body, { color: palette.mutedText }]}>
-              {translate("settings.account.syncStatus", { status: syncStatus.status })}
-            </Text>
+          <SettingsRow
+            icon="person-outline"
+            label={
+              auth.session?.user.email ??
+              translate("settings.account.notSignedIn")
+            }
+          />
+          <SettingsRow
+            icon="shield-checkmark-outline"
+            label={translate("settings.account.statusLabel")}
+            value={translate(`settings.account.status.${auth.status}`)}
+          />
+          {/* 30초 폴링이 status 를 ready→syncing→ready 로 돌린다. 이 행을 조건부로 빼면
+              그때마다 카드 높이가 바뀌어 화면이 위아래로 흔들린다 — 행은 항상 두고 값만
+              바꾼다. */}
+          <SettingsRow
+            icon="sync-outline"
+            label={translate("settings.account.syncLabel")}
+            value={translate(`settings.account.sync.${syncStatus.status}`)}
+          />
+          {accountPasswordState === "set" ||
+          accountPasswordState === "unset" ? (
+            <SettingsRow
+              chevron
+              icon="key-outline"
+              label={
+                accountPasswordState === "set"
+                  ? translate("settings.accountPassword.change")
+                  : translate("settings.accountPassword.set")
+              }
+              onPress={openAccountPassword}
+            />
           ) : null}
-          {auth.status === "offline-authenticated" ? (
-            <Text style={[styles.infoText, { color: palette.warning }]}>
-              {translate("settings.account.offlineCache")}
-            </Text>
-          ) : null}
-          {auth.errorMessage ? (
-            <Text style={[styles.errorText, { color: palette.danger }]}>
-              {auth.errorMessage}
-            </Text>
-          ) : null}
-          {!auth.errorMessage && syncStatus.errorMessage ? (
-            <Text style={[styles.errorText, { color: palette.danger }]}>
-              {syncStatus.errorMessage}
-            </Text>
-          ) : null}
-          <View style={styles.row}>
-            {accountPasswordState === "set" ||
-            accountPasswordState === "unset" ? (
-              <Pressable
-                onPress={openAccountPassword}
-                style={[
-                  styles.secondaryButton,
-                  {
-                    backgroundColor: palette.surfaceAlt,
-                    borderColor: palette.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.secondaryText, { color: palette.text }]}>
-                  {accountPasswordState === "set"
-                    ? translate("settings.accountPassword.change")
-                    : translate("settings.accountPassword.set")}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={() => void logout()}
-              style={[
-                styles.secondaryButton,
-                {
-                  backgroundColor: palette.surfaceAlt,
-                  borderColor: palette.border,
-                },
-              ]}
-            >
-              <Text style={[styles.secondaryText, { color: palette.text }]}>
-                {translate("settings.account.logout")}
-              </Text>
-            </Pressable>
-            {auth.status === "authenticated" ? (
-              <Pressable
-                disabled={deletingAccount}
-                onPress={confirmDeleteAccount}
-                style={[
-                  styles.secondaryButton,
-                  {
-                    backgroundColor: palette.surfaceAlt,
-                    borderColor: palette.border,
-                    opacity: deletingAccount ? 0.55 : 1,
-                  },
-                ]}
-              >
-                <Text
-                  style={[styles.secondaryText, { color: palette.danger }]}
-                >
-                  {translate(deletingAccount ? "settings.deleteAccount.deleting" : "settings.deleteAccount.action")}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
+        </SettingsGroup>
+      ) : null}
+
+      {/* 로그아웃·탈퇴는 각자 자기 카드에 둔다 — 되돌릴 수 없는 동작을 목록 안의 다른 행과
+          나란히 놓지 않는 게 이 리스트 구조의 규칙이다. */}
+      {showFullSettings ? (
+        <SettingsGroup>
+          <SettingsRow
+            align="center"
+            label={translate("settings.account.logout")}
+            tone="accent"
+            onPress={confirmLogout}
+          />
+        </SettingsGroup>
+      ) : null}
+
+      {showFullSettings && auth.status === "authenticated" ? (
+        <SettingsGroup>
+          <SettingsRow
+            align="center"
+            disabled={deletingAccount}
+            label={translate(
+              deletingAccount
+                ? "settings.deleteAccount.deleting"
+                : "settings.deleteAccount.action",
+            )}
+            tone="danger"
+            onPress={confirmDeleteAccount}
+          />
+        </SettingsGroup>
       ) : null}
 
       {showFullSettings && vault.status === "unlocked" ? (
-        <View
-          style={[
-            styles.section,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.border,
-            },
-          ]}
+        <SettingsGroup
+          header={translate("settings.vault.title")}
+          footer={translate("settings.vault.isSet")}
         >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            {translate("settings.vault.title")}
-          </Text>
-          <Text style={[styles.body, { color: palette.mutedText }]}>
-            {translate("settings.vault.isSet")}
-          </Text>
-          <Pressable
+          <SettingsRow
+            chevron
+            icon="lock-closed-outline"
+            label={translate("settings.vault.changePassphrase")}
             onPress={openChangePassphrase}
-            style={[
-              styles.secondaryButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.border,
-                alignSelf: "flex-start",
-              },
-            ]}
-          >
-            <Text style={[styles.secondaryText, { color: palette.text }]}>
-              {translate("settings.vault.changePassphrase")}
-            </Text>
-          </Pressable>
-        </View>
+          />
+        </SettingsGroup>
       ) : null}
 
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
+      <SettingsGroup
+        header={translate("settings.sections.server")}
+        footer={
+          showFullSettings
+            ? translate("settings.server.signedInHint")
+            : (validationMessage ?? undefined)
+        }
+        footerTone={showFullSettings ? "muted" : "danger"}
       >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          Server
-        </Text>
-        <TextInput
-          value={serverUrlDraft}
-          onChangeText={setServerUrlDraft}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="https://ssh.doldolma.com"
-          placeholderTextColor={palette.mutedText}
-          style={[
-            styles.input,
-            {
-              color: palette.text,
-              borderColor: palette.border,
-              backgroundColor: palette.input,
-            },
-          ]}
-        />
-        {validationMessage ? (
-          <Text style={[styles.errorText, { color: palette.danger }]}>
-            {validationMessage}
-          </Text>
-        ) : null}
-        <View style={styles.row}>
-          <Pressable
-            disabled={!canSaveServerUrl}
-            onPress={() => void handleSaveServerUrl()}
-            style={[
-              styles.secondaryButton,
-              {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.border,
-                opacity: canSaveServerUrl ? 1 : 0.55,
-              },
-            ]}
-          >
-            <Text style={[styles.secondaryText, { color: palette.text }]}>
-              {translate("settings.server.save")}
+        {showFullSettings ? (
+          // 로그인한 뒤에는 보여주기만 한다 — 세션·볼트가 이 서버에 묶여 있어서 여기서
+          // 바꾼다고 갈아탈 수 있는 게 아니다. 서버는 로그인 화면에서 고른다.
+          <SettingsRow icon="cloud-outline">
+            <Text selectable style={[styles.rowText, { color: palette.text }]}>
+              {settings.serverUrl}
             </Text>
-          </Pressable>
-          <Pressable
+          </SettingsRow>
+        ) : (
+          <SettingsRow icon="cloud-outline">
+            <TextInput
+              value={serverUrlDraft}
+              onChangeText={setServerUrlDraft}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="https://ssh.doldolma.com"
+              placeholderTextColor={palette.mutedText}
+              style={[styles.rowText, { color: palette.text }]}
+            />
+          </SettingsRow>
+        )}
+        {showFullSettings ? null : (
+          <SettingsRow
+            align="center"
+            disabled={!canSaveServerUrl}
+            label={translate("settings.server.save")}
+            tone="accent"
+            onPress={() => void handleSaveServerUrl()}
+          />
+        )}
+        {showFullSettings ? null : (
+          <SettingsRow
+            align="center"
+            label={translate("settings.server.restoreDefault")}
+            tone="accent"
             onPress={() => {
               setServerUrlDraft(DEFAULT_SERVER_URL);
               void updateSettings({ serverUrl: DEFAULT_SERVER_URL });
             }}
+          />
+        )}
+      </SettingsGroup>
+
+      {/* 언어 — 기본은 기기 언어를 따르고, 사용자가 직접 고를 수도 있다. */}
+      <SettingsGroup header={translate("settings.language.title")}>
+        <SettingsRow
+          accessibilityLabel={translate("settings.language.title")}
+          accessibilityValue={{ text: languageOptionLabel(currentLanguage) }}
+          chevron
+          icon="language-outline"
+          label={languageOptionLabel(currentLanguage)}
+          onPress={() => setLanguagePickerOpen(true)}
+        />
+      </SettingsGroup>
+
+      {/* known host 지문과 자격증명 이름을 늘어놓으면 화면 대부분이 디버그 목록이 된다 —
+          개수만 보여준다. */}
+      {showFullSettings ? (
+        <SettingsGroup header={translate("settings.sections.security")}>
+          <SettingsRow
+            icon="finger-print-outline"
+            label={translate("settings.knownHosts")}
+            value={String(knownHosts.length)}
+          />
+          <SettingsRow
+            icon="shield-outline"
+            label={translate("settings.credentials")}
+            value={String(secretMetadata.length)}
+          />
+        </SettingsGroup>
+      ) : null}
+
+      <SettingsGroup header={translate("settings.sections.app")}>
+        <SettingsRow
+          icon="information-circle-outline"
+          label={translate("settings.version")}
+          value={APP_VERSION}
+        />
+        {/* 이 그룹은 로그인 전(서버 설정) 화면에도 그려지므로, 로그인하지 않은 사용자도
+            처리방침에 닿는다 — 5.1.1(i) 이 요구하는 "앱 안에서 쉽게 접근". */}
+        <SettingsRow
+          accessibilityRole="link"
+          chevron
+          icon="document-text-outline"
+          label={translate("common.privacyPolicy")}
+          onPress={openPrivacyPolicy}
+        />
+      </SettingsGroup>
+      {languagePickerOpen ? (
+        <Modal
+          animationType="fade"
+          transparent
+          visible
+          onRequestClose={closeLanguagePicker}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={translate("common.close")}
+            onPress={closeLanguagePicker}
             style={[
-              styles.secondaryButton,
+              styles.sheetBackdrop,
               {
-                backgroundColor: palette.surfaceAlt,
-                borderColor: palette.border,
+                backgroundColor: palette.overlay,
+                // 시트는 탭바·홈 인디케이터 위로 떠야 한다 — 모달이 탭바를 덮으므로 기기
+                // 하단 여백만큼 띄우지 않으면 마지막 항목이 탭바에 맞붙어 보인다.
+                paddingBottom: Math.max(screenPadding.paddingBottom, 14),
               },
             ]}
           >
-            <Text style={[styles.secondaryText, { color: palette.text }]}>
-              {translate("settings.server.restoreDefault")}
-            </Text>
+            {/* 목록과 취소를 따로 떼어 놓는 건 iOS 액션 시트의 구성이다. */}
+            <Pressable
+              onPress={(event) => event.stopPropagation()}
+              style={styles.sheetBody}
+            >
+              <SettingsGroup solid>
+                {/* 제목은 카드 안에 넣는다 — 회색 머리글로 카드 위에 띄우면 뒤에 깔린
+                    화면 글자와 겹쳐 보인다. */}
+                <SettingsRow>
+                  <Text
+                    style={[styles.sheetHeading, { color: palette.mutedText }]}
+                  >
+                    {translate("settings.language.title")}
+                  </Text>
+                </SettingsRow>
+                {APP_LANGUAGE_OPTIONS.map((option) => {
+                  const active = currentLanguage === option;
+                  return (
+                    <SettingsRow
+                      key={option}
+                      check={active}
+                      label={languageOptionLabel(option)}
+                      tone={active ? "accent" : "default"}
+                      onPress={() => {
+                        closeLanguagePicker();
+                        if (!active) {
+                          void updateSettings({ language: option });
+                        }
+                      }}
+                    />
+                  );
+                })}
+              </SettingsGroup>
+              <SettingsGroup solid>
+                <SettingsRow
+                  align="center"
+                  label={translate("common.cancel")}
+                  tone="accent"
+                  onPress={closeLanguagePicker}
+                />
+              </SettingsGroup>
+            </Pressable>
           </Pressable>
-        </View>
-      </View>
-
-      {/* 언어 — 기본은 기기 언어를 따르고, 사용자가 직접 고를 수도 있다. */}
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
-      >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          {translate("settings.language.title")}
-        </Text>
-        <View style={styles.row}>
-          {APP_LANGUAGE_OPTIONS.map((option) => {
-            const active = (settings.language ?? "system") === option;
-            return (
-              <Pressable
-                key={option}
-                onPress={() => void updateSettings({ language: option })}
-                style={[
-                  styles.secondaryButton,
-                  {
-                    backgroundColor: active ? palette.accentSoft : palette.surfaceAlt,
-                    borderColor: active ? palette.accent : palette.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.secondaryText,
-                    { color: palette.text },
-                  ]}
-                >
-                  {option === "system"
-                    ? translate("settings.language.system")
-                    : LANGUAGE_LABELS[option]}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      {showFullSettings ? (
-        <View
-          style={[
-            styles.section,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.border,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            Known hosts ({knownHosts.length})
-          </Text>
-          {knownHosts.length === 0 ? (
-            <Text style={[styles.body, { color: palette.mutedText }]}>
-              {translate("settings.empty.knownHosts")}
-            </Text>
-          ) : (
-            knownHosts.slice(0, 8).map((record) => (
-              <View key={record.id} style={styles.listItem}>
-                <Text style={[styles.listTitle, { color: palette.text }]}>
-                  {record.host}:{record.port}
-                </Text>
-                <Text style={[styles.listBody, { color: palette.mutedText }]}>
-                  {record.algorithm}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
+        </Modal>
       ) : null}
-
-      {showFullSettings ? (
-        <View
-          style={[
-            styles.section,
-            {
-              backgroundColor: palette.surface,
-              borderColor: palette.border,
-            },
-          ]}
-        >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>
-            Stored credentials ({secretMetadata.length})
-          </Text>
-          {secretMetadata.length === 0 ? (
-            <Text style={[styles.body, { color: palette.mutedText }]}>
-              {translate("settings.empty.credentials")}
-            </Text>
-          ) : (
-            secretMetadata.slice(0, 8).map((record) => (
-              <View key={record.secretRef} style={styles.listItem}>
-                <Text style={[styles.listTitle, { color: palette.text }]}>
-                  {record.label}
-                </Text>
-                <Text style={[styles.listBody, { color: palette.mutedText }]}>
-                  {record.hasPassword ? "password " : ""}
-                  {record.hasManagedPrivateKey ? "private-key " : ""}
-                  {record.hasPassphrase ? "passphrase " : ""}
-                  • host {record.linkedHostCount}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
-      ) : null}
-
-      <View
-        style={[
-          styles.section,
-          {
-            backgroundColor: palette.surface,
-            borderColor: palette.border,
-          },
-        ]}
-      >
-        <Text style={[styles.sectionTitle, { color: palette.text }]}>
-          App
-        </Text>
-        <Text style={[styles.body, { color: palette.mutedText }]}>
-          Version {APP_VERSION}
-        </Text>
-        {/* 이 섹션은 로그인 전(서버 설정) 화면에도 그려지므로, 로그인하지 않은 사용자도
-            처리방침에 닿는다 — 5.1.1(i) 이 요구하는 "앱 안에서 쉽게 접근". */}
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel={translate("common.privacyPolicy")}
-          onPress={openPrivacyPolicy}
-          style={[
-            styles.secondaryButton,
-            {
-              backgroundColor: palette.surfaceAlt,
-              borderColor: palette.border,
-            },
-          ]}
-        >
-          <Text style={[styles.secondaryText, { color: palette.text }]}>
-            {translate("common.privacyPolicy")}
-          </Text>
-        </Pressable>
-      </View>
       {accountPasswordOpen &&
       showFullSettings &&
       (accountPasswordState === "set" || accountPasswordState === "unset") ? (
@@ -695,122 +636,131 @@ function SettingsContent({
               contentContainerStyle={styles.modalScrollContent}
               keyboardShouldPersistTaps="handled"
             >
+              {/* 폼은 목록이 아니다 — 입력칸은 테두리와 배경으로 "여기 입력한다"를 보여줘야
+                  하고, 주 동작은 채워진 버튼이어야 누를 것으로 읽힌다. */}
               <View
                 style={[
-                  styles.modalCard,
-                  {
-                    backgroundColor: palette.surface,
-                    borderColor: palette.border,
-                  },
+                  styles.formCard,
+                  { backgroundColor: palette.surfaceSolid },
                 ]}
               >
-                <View style={styles.modalHeader}>
-                  <Text style={[styles.modalTitle, { color: palette.text }]}>
+                <View style={styles.formHeader}>
+                  <Text style={[styles.formTitle, { color: palette.text }]}>
                     {translate(accountPasswordState === "set" ? "settings.accountPassword.sectionChange" : "settings.accountPassword.sectionSet")}
                   </Text>
-                  <Text style={[styles.body, { color: palette.mutedText }]}>
+                  <Text
+                    style={[styles.formDescription, { color: palette.mutedText }]}
+                  >
                     {translate("settings.accountPassword.description")}
                   </Text>
                 </View>
-                {accountPasswordState === "set" ? (
+
+                <View style={styles.formFields}>
+                  {accountPasswordState === "set" ? (
                   <TextInput
-                    value={currentAccountPasswordDraft}
-                    onChangeText={setCurrentAccountPasswordDraft}
-                    placeholder={translate("settings.accountPassword.currentPlaceholder")}
+                      value={currentAccountPasswordDraft}
+                      onChangeText={setCurrentAccountPasswordDraft}
+                      placeholder={translate("settings.accountPassword.currentPlaceholder")}
+                      placeholderTextColor={palette.mutedText}
+                      secureTextEntry
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      textContentType="password"
+                      autoComplete="current-password"
+                      style={[
+                        styles.formInput,
+                        {
+                          color: palette.text,
+                          backgroundColor: palette.input,
+                          borderColor: palette.border,
+                        },
+                      ]}
+                    />
+                  ) : null}
+                  <TextInput
+                    value={nextAccountPasswordDraft}
+                    onChangeText={setNextAccountPasswordDraft}
+                    placeholder={translate("settings.accountPassword.newPlaceholder")}
                     placeholderTextColor={palette.mutedText}
                     secureTextEntry
                     autoCapitalize="none"
                     autoCorrect={false}
-                    textContentType="password"
-                    autoComplete="current-password"
+                    textContentType="newPassword"
+                    autoComplete="new-password"
                     style={[
-                      styles.input,
+                      styles.formInput,
                       {
                         color: palette.text,
-                        borderColor: palette.border,
                         backgroundColor: palette.input,
+                        borderColor: palette.border,
                       },
                     ]}
                   />
-                ) : null}
-                <TextInput
-                  value={nextAccountPasswordDraft}
-                  onChangeText={setNextAccountPasswordDraft}
-                  placeholder={translate("settings.accountPassword.newPlaceholder")}
-                  placeholderTextColor={palette.mutedText}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  textContentType="newPassword"
-                  autoComplete="new-password"
-                  style={[
-                    styles.input,
-                    {
-                      color: palette.text,
-                      borderColor: palette.border,
-                      backgroundColor: palette.input,
-                    },
-                  ]}
-                />
-                <TextInput
-                  value={confirmAccountPasswordDraft}
-                  onChangeText={setConfirmAccountPasswordDraft}
-                  placeholder={translate("settings.accountPassword.confirmPlaceholder")}
-                  placeholderTextColor={palette.mutedText}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  textContentType="newPassword"
-                  autoComplete="new-password"
-                  style={[
-                    styles.input,
-                    {
-                      color: palette.text,
-                      borderColor: palette.border,
-                      backgroundColor: palette.input,
-                    },
-                  ]}
-                />
+                  <TextInput
+                    value={confirmAccountPasswordDraft}
+                    onChangeText={setConfirmAccountPasswordDraft}
+                    placeholder={translate("settings.accountPassword.confirmPlaceholder")}
+                    placeholderTextColor={palette.mutedText}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    textContentType="newPassword"
+                    autoComplete="new-password"
+                    style={[
+                      styles.formInput,
+                      {
+                        color: palette.text,
+                        backgroundColor: palette.input,
+                        borderColor: palette.border,
+                      },
+                    ]}
+                  />
+                </View>
+
                 {nextAccountPasswordValidationMessage ? (
-                  <Text style={[styles.errorText, { color: palette.warning }]}>
+                  <Text style={[styles.formHint, { color: palette.warning }]}>
                     {nextAccountPasswordValidationMessage}
                   </Text>
                 ) : null}
-                <View style={styles.modalActions}>
-                  <Pressable
-                    disabled={changingAccountPassword}
-                    onPress={closeAccountPassword}
-                    style={[
-                      styles.secondaryButton,
-                      {
-                        backgroundColor: palette.surfaceAlt,
-                        borderColor: palette.border,
-                        opacity: changingAccountPassword ? 0.55 : 1,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.secondaryText, { color: palette.text }]}>
-                      {translate("common.cancel")}
-                    </Text>
-                  </Pressable>
+
+                <View style={styles.formActions}>
                   <Pressable
                     disabled={!canChangeAccountPassword}
                     onPress={() => void handleChangeAccountPassword()}
                     style={[
-                      styles.secondaryButton,
+                      styles.formPrimary,
                       {
-                        backgroundColor: palette.accent,
-                        borderColor: palette.accent,
-                        opacity: canChangeAccountPassword ? 1 : 0.55,
+                        backgroundColor: !canChangeAccountPassword
+                          ? palette.surfaceAlt
+                          : palette.accent,
                       },
                     ]}
                   >
-                    <Text style={[styles.secondaryText, styles.primaryButtonText]}>
+                    <Text
+                      style={[
+                        styles.formPrimaryText,
+                        {
+                          color: !canChangeAccountPassword
+                            ? palette.tabInactive
+                            : "#FFFFFF",
+                        },
+                      ]}
+                    >
                       {changingAccountPassword
                         ? translate("settings.accountPassword.saving")
                         : accountPasswordState === "set"
                           ? translate("settings.accountPassword.change")
                           : translate("settings.accountPassword.set")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={closeAccountPassword}
+                    style={styles.formCancel}
+                  >
+                    <Text
+                      style={[styles.formCancelText, { color: palette.accent }]}
+                    >
+                      {translate("common.cancel")}
                     </Text>
                   </Pressable>
                 </View>
@@ -836,112 +786,119 @@ function SettingsContent({
               contentContainerStyle={styles.modalScrollContent}
               keyboardShouldPersistTaps="handled"
             >
+              {/* 폼은 목록이 아니다 — 입력칸은 테두리와 배경으로 "여기 입력한다"를 보여줘야
+                  하고, 주 동작은 채워진 버튼이어야 누를 것으로 읽힌다. */}
               <View
                 style={[
-                  styles.modalCard,
-                  {
-                    backgroundColor: palette.surface,
-                    borderColor: palette.border,
-                  },
+                  styles.formCard,
+                  { backgroundColor: palette.surfaceSolid },
                 ]}
               >
-                <View style={styles.modalHeader}>
-                  <Text style={[styles.modalTitle, { color: palette.text }]}>
+                <View style={styles.formHeader}>
+                  <Text style={[styles.formTitle, { color: palette.text }]}>
                     {translate("settings.vault.changeTitle")}
                   </Text>
-                  <Text style={[styles.body, { color: palette.mutedText }]}>
+                  <Text
+                    style={[styles.formDescription, { color: palette.mutedText }]}
+                  >
                     {translate("settings.vault.changeDescription")}
                   </Text>
                 </View>
-                <TextInput
-                  value={currentPassphraseDraft}
-                  onChangeText={setCurrentPassphraseDraft}
-                  placeholder={translate("settings.vault.currentPlaceholder")}
-                  placeholderTextColor={palette.mutedText}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={[
-                    styles.input,
-                    {
-                      color: palette.text,
-                      borderColor: palette.border,
-                      backgroundColor: palette.input,
-                    },
-                  ]}
-                />
-                <TextInput
-                  value={nextPassphraseDraft}
-                  onChangeText={setNextPassphraseDraft}
-                  placeholder={translate("settings.vault.newPlaceholder")}
-                  placeholderTextColor={palette.mutedText}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={[
-                    styles.input,
-                    {
-                      color: palette.text,
-                      borderColor: palette.border,
-                      backgroundColor: palette.input,
-                    },
-                  ]}
-                />
-                <TextInput
-                  value={confirmPassphraseDraft}
-                  onChangeText={setConfirmPassphraseDraft}
-                  placeholder={translate("settings.vault.confirmPlaceholder")}
-                  placeholderTextColor={palette.mutedText}
-                  secureTextEntry
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={[
-                    styles.input,
-                    {
-                      color: palette.text,
-                      borderColor: palette.border,
-                      backgroundColor: palette.input,
-                    },
-                  ]}
-                />
+
+                <View style={styles.formFields}>
+                  <TextInput
+                    value={currentPassphraseDraft}
+                    onChangeText={setCurrentPassphraseDraft}
+                    placeholder={translate("settings.vault.currentPlaceholder")}
+                    placeholderTextColor={palette.mutedText}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[
+                      styles.formInput,
+                      {
+                        color: palette.text,
+                        backgroundColor: palette.input,
+                        borderColor: palette.border,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={nextPassphraseDraft}
+                    onChangeText={setNextPassphraseDraft}
+                    placeholder={translate("settings.vault.newPlaceholder")}
+                    placeholderTextColor={palette.mutedText}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[
+                      styles.formInput,
+                      {
+                        color: palette.text,
+                        backgroundColor: palette.input,
+                        borderColor: palette.border,
+                      },
+                    ]}
+                  />
+                  <TextInput
+                    value={confirmPassphraseDraft}
+                    onChangeText={setConfirmPassphraseDraft}
+                    placeholder={translate("settings.vault.confirmPlaceholder")}
+                    placeholderTextColor={palette.mutedText}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={[
+                      styles.formInput,
+                      {
+                        color: palette.text,
+                        backgroundColor: palette.input,
+                        borderColor: palette.border,
+                      },
+                    ]}
+                  />
+                </View>
+
                 {nextPassphraseValidationMessage ? (
-                  <Text style={[styles.errorText, { color: palette.warning }]}>
+                  <Text style={[styles.formHint, { color: palette.warning }]}>
                     {nextPassphraseValidationMessage}
                   </Text>
                 ) : null}
-                <View style={styles.modalActions}>
-                  <Pressable
-                    disabled={changingPassphrase}
-                    onPress={closeChangePassphrase}
-                    style={[
-                      styles.secondaryButton,
-                      {
-                        backgroundColor: palette.surfaceAlt,
-                        borderColor: palette.border,
-                        opacity: changingPassphrase ? 0.55 : 1,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.secondaryText, { color: palette.text }]}>
-                      {translate("common.cancel")}
-                    </Text>
-                  </Pressable>
+
+                <View style={styles.formActions}>
                   <Pressable
                     disabled={!canChangePassphrase}
                     onPress={() => void handleChangePassphrase()}
                     style={[
-                      styles.secondaryButton,
+                      styles.formPrimary,
                       {
-                        backgroundColor: palette.accent,
-                        borderColor: palette.accent,
-                        opacity: canChangePassphrase ? 1 : 0.55,
+                        backgroundColor: !canChangePassphrase
+                          ? palette.surfaceAlt
+                          : palette.accent,
                       },
                     ]}
                   >
                     <Text
-                      style={[styles.secondaryText, styles.primaryButtonText]}
+                      style={[
+                        styles.formPrimaryText,
+                        {
+                          color: !canChangePassphrase
+                            ? palette.tabInactive
+                            : "#FFFFFF",
+                        },
+                      ]}
                     >
                       {translate(changingPassphrase ? "settings.vault.changing" : "settings.vault.changePassphrase")}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={closeChangePassphrase}
+                    style={styles.formCancel}
+                  >
+                    <Text
+                      style={[styles.formCancelText, { color: palette.accent }]}
+                    >
+                      {translate("common.cancel")}
                     </Text>
                   </Pressable>
                 </View>
@@ -993,59 +950,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    gap: 14,
+    gap: 18,
   },
+  // iOS large title 규격(34pt bold) — 아래 그룹 리스트와 같은 결로 맞춘다.
   title: {
-    fontSize: 28,
-    fontWeight: "900",
+    fontSize: 34,
+    fontWeight: "700",
+    letterSpacing: -0.6,
   },
-  section: {
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
-    gap: 10,
-  },
-  sectionTitle: {
+  // 그룹 행을 통째로 채우는 텍스트·입력칸 — 행이 이미 여백을 갖고 있어 자기 테두리는 없다.
+  rowText: {
+    flex: 1,
     fontSize: 17,
-    fontWeight: "800",
-  },
-  body: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  infoText: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  errorText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-  },
-  secondaryButton: {
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  secondaryText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  primaryButtonText: {
-    color: "#ffffff",
+    letterSpacing: -0.2,
+    paddingVertical: 0,
   },
   modalOverlay: {
     flex: 1,
@@ -1053,51 +971,85 @@ const styles = StyleSheet.create({
   modalScrollContent: {
     flexGrow: 1,
     justifyContent: "center",
-    padding: 24,
+    padding: 20,
   },
-  modalCard: {
+  formCard: {
     width: "100%",
     maxWidth: 460,
     alignSelf: "center",
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 18,
-    gap: 12,
+    borderRadius: 22,
+    padding: 20,
+    gap: 18,
   },
-  modalHeader: {
+  formHeader: {
     gap: 6,
-    marginBottom: 2,
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  modalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 10,
-    marginTop: 2,
-  },
-  themeChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  themeChipText: {
-    fontSize: 13,
+  formTitle: {
+    fontSize: 19,
     fontWeight: "700",
-    textTransform: "capitalize",
+    letterSpacing: -0.3,
   },
-  listItem: {
-    gap: 4,
-  },
-  listTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  listBody: {
+  formDescription: {
     fontSize: 13,
     lineHeight: 18,
+  },
+  formFields: {
+    gap: 10,
+  },
+  // 입력칸은 테두리와 배경을 갖는다 — 상자가 없으면 목록 항목처럼 읽혀 어디에 입력하는지
+  // 알 수 없다.
+  formInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  formHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "500",
+    marginTop: -6,
+  },
+  formActions: {
+    gap: 4,
+  },
+  // 주 동작은 채워진 버튼 — 글자만 두면 누를 것으로 읽히지 않는다.
+  formPrimary: {
+    minHeight: 50,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  formPrimaryText: {
+    fontSize: 16,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  formCancel: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  formCancelText: {
+    fontSize: 16,
+    fontWeight: "600",
+    letterSpacing: -0.2,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    justifyContent: "flex-end",
+    padding: 14,
+  },
+  sheetBody: {
+    gap: 12,
+  },
+  sheetHeading: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: "center",
   },
 });

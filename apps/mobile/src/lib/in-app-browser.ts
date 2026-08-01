@@ -25,7 +25,14 @@ export async function openInAppBrowser(url: string): Promise<void> {
     await Linking.openURL(url);
     return;
   }
-  await nativeModule.openBrowser(url);
+  try {
+    await nativeModule.openBrowser(url);
+  } catch (error) {
+    // 네이티브 reject 문구는 지역화되지 않은 진단용이다 — 사용자 문구는 맥락을 아는 호출부가
+    // 만들도록 그대로 다시 던지고, 원문은 여기서 콘솔에만 남긴다.
+    console.warn('[in-app-browser] Failed to open the browser sheet.', error);
+    throw error;
+  }
 }
 
 // 콜백 딥링크로 앱이 앞으로 나와도 시트는 그대로 떠 있다 — 로그인이 끝났으면(또는 취소되면)

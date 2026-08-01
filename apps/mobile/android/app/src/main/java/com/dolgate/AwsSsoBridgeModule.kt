@@ -68,6 +68,8 @@ class AwsSsoBridgeModule(
     promise.resolve(null)
   }
 
+  // 이 탭은 AWS SSO 전용이 아니라 계정 로그인·정책 문서도 함께 쓴다. 아래 문구는 지역화되지
+  // 않은 진단용이며, 사용자에게 보이는 문구는 JS 호출부가 맥락에 맞게 만든다.
   @ReactMethod
   fun openBrowser(url: String, promise: Promise) {
     try {
@@ -88,16 +90,16 @@ class AwsSsoBridgeModule(
         },
         { error ->
           promise.reject(
-            "aws_sso_browser_open_failed",
-            error.message ?: "AWS SSO 브라우저를 열지 못했습니다.",
+            "in_app_browser_open_failed",
+            error.message ?: "브라우저를 열지 못했습니다.",
             error,
           )
         },
       )
     } catch (error: Exception) {
       promise.reject(
-        "aws_sso_browser_open_failed",
-        error.message ?: "AWS SSO 브라우저를 열지 못했습니다.",
+        "in_app_browser_open_failed",
+        error.message ?: "브라우저를 열지 못했습니다.",
         error,
       )
     }

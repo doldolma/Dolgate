@@ -13,16 +13,17 @@ type pageText struct {
 	Lang string
 
 	// --- 로그인 / 회원가입 페이지 ---
-	SignInTitle        string
-	SignupTitle        string
-	LoginLede          string
-	EmailLabel         string
-	PasswordLabel      string
-	SignInSubmit       string
-	SignupSubmit       string
-	NoAccountPrompt    string
-	SignupLink         string
-	PasskeyLoginButton string
+	SignInTitle          string
+	SignupTitle          string
+	LoginLede            string
+	EmailLabel           string
+	PasswordConfirmLabel string
+	PasswordLabel        string
+	SignInSubmit         string
+	SignupSubmit         string
+	NoAccountPrompt      string
+	SignupLink           string
+	PasskeyLoginButton   string
 	// ContinueWithFormat 은 %s 에 IdP 표시 이름(Google, Okta …)이 들어간다.
 	ContinueWithFormat string
 
@@ -45,6 +46,7 @@ type pageText struct {
 	BadCredentials        string
 	SignupFailed          string
 	EmailTaken            string
+	PasswordMismatch      string
 
 	// --- 패스키 등록 페이지 ---
 	RegisterPageTitle       string
@@ -90,17 +92,18 @@ type pageText struct {
 var pageTextKo = pageText{
 	Lang: "ko",
 
-	SignInTitle:        "Dolgate 로그인",
-	SignupTitle:        "Dolgate 계정 만들기",
-	LoginLede:          "브라우저에서 로그인한 뒤 앱으로 돌아갑니다.",
-	EmailLabel:         "이메일",
-	PasswordLabel:      "비밀번호",
-	SignInSubmit:       "로그인",
-	SignupSubmit:       "계정 만들기",
-	NoAccountPrompt:    "계정이 없나요?",
-	SignupLink:         "회원가입",
-	PasskeyLoginButton: "패스키로 로그인",
-	ContinueWithFormat: "%s 계정으로 계속하기",
+	SignInTitle:          "Dolgate 로그인",
+	SignupTitle:          "Dolgate 계정 만들기",
+	LoginLede:            "브라우저에서 로그인한 뒤 앱으로 돌아갑니다.",
+	EmailLabel:           "이메일",
+	PasswordConfirmLabel: "비밀번호 확인",
+	PasswordLabel:        "비밀번호",
+	SignInSubmit:         "로그인",
+	SignupSubmit:         "계정 만들기",
+	NoAccountPrompt:      "계정이 없나요?",
+	SignupLink:           "회원가입",
+	PasskeyLoginButton:   "패스키로 로그인",
+	ContinueWithFormat:   "%s 계정으로 계속하기",
 
 	LoginIncomplete:     "서버가 로그인을 마치지 못했습니다. 잠시 후 다시 시도해 주세요.",
 	LoginFailed:         "로그인에 실패했습니다.",
@@ -119,6 +122,7 @@ var pageTextKo = pageText{
 	BadCredentials:        "이메일 또는 비밀번호가 올바르지 않습니다.",
 	SignupFailed:          "회원가입에 실패했습니다.",
 	EmailTaken:            "이미 사용 중인 이메일입니다.",
+	PasswordMismatch:      "비밀번호가 일치하지 않습니다.",
 
 	RegisterPageTitle:       "Dolgate 패스키 등록",
 	RegisterHeading:         "패스키 등록",
@@ -160,17 +164,18 @@ var pageTextKo = pageText{
 var pageTextEn = pageText{
 	Lang: "en",
 
-	SignInTitle:        "Sign in to Dolgate",
-	SignupTitle:        "Create your Dolgate account",
-	LoginLede:          "Sign in here, then return to the app.",
-	EmailLabel:         "Email",
-	PasswordLabel:      "Password",
-	SignInSubmit:       "Sign in",
-	SignupSubmit:       "Create account",
-	NoAccountPrompt:    "No account yet?",
-	SignupLink:         "Sign up",
-	PasskeyLoginButton: "Sign in with a passkey",
-	ContinueWithFormat: "Continue with %s",
+	SignInTitle:          "Sign in to Dolgate",
+	SignupTitle:          "Create your Dolgate account",
+	LoginLede:            "Sign in here, then return to the app.",
+	EmailLabel:           "Email",
+	PasswordConfirmLabel: "Confirm password",
+	PasswordLabel:        "Password",
+	SignInSubmit:         "Sign in",
+	SignupSubmit:         "Create account",
+	NoAccountPrompt:      "No account yet?",
+	SignupLink:           "Sign up",
+	PasskeyLoginButton:   "Sign in with a passkey",
+	ContinueWithFormat:   "Continue with %s",
 
 	LoginIncomplete:     "The server could not finish the sign-in. Try again in a moment.",
 	LoginFailed:         "The sign-in failed.",
@@ -189,6 +194,7 @@ var pageTextEn = pageText{
 	BadCredentials:        "The email or password is incorrect.",
 	SignupFailed:          "The sign-up failed.",
 	EmailTaken:            "That email is already in use.",
+	PasswordMismatch:      "The passwords do not match.",
 
 	RegisterPageTitle:       "Register a Dolgate passkey",
 	RegisterHeading:         "Register a passkey",

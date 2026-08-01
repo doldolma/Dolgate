@@ -652,7 +652,6 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			logAndStringError(ctx, http.StatusBadRequest, pageTextOf(ctx).BadRequest, err)
 			return
 		}
-
 		// 브라우저 폼 로그인과 동일 — 세션이 앱으로 가지 않으므로 볼트 생성을 건너뛴다.
 		user, _, err := authService.Signup(ctx.Request.Context(), form.Email, form.Password, resolveRequestOrigin(ctx), auth.VaultResolutionSkip)
 		if err != nil {
@@ -1849,6 +1848,9 @@ func applyCommonSecurityHeaders(ctx *gin.Context) {
 }
 
 func applyAuthHTMLResponseHeaders(ctx *gin.Context) {
+	// 인증 페이지는 캐시하지 않는다 — state 토큰·이메일·오류 문구가 박힌 HTML 이고, 캐시된
+	// 옛 페이지가 남으면 지금 서버가 기대하는 폼과 어긋난 요청이 올라온다.
+	ctx.Header("Cache-Control", "no-store")
 	ctx.Header(
 		"Content-Security-Policy",
 		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' http://localhost:* http://127.0.0.1:* http://[::1]:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; font-src 'self' data:",

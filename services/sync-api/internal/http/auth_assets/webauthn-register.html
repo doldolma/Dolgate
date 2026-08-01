@@ -10,7 +10,9 @@
       h1 { margin:0 0 10px; font-size:28px; line-height:1.1; }
       p { color:#9fb0d3; margin:0 0 22px; line-height:1.55; }
       label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; margin-bottom:16px; }
-      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
+      /* 16px 미만이면 iOS Safari 가 포커스 때 페이지를 자동 확대한다 — 확대되면 뷰포트보다
+         넓어져 가로 스크롤이 생기고 정렬이 어긋나 보인다. 16px 이 그 임계값이다. */
+      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:16px; }
       button.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:16px; padding:14px 18px; font-size:15px; font-weight:700; cursor:pointer; background:#5f7cff; color:#fff; width:100%; }
       .status { margin-top:16px; font-size:14px; min-height:20px; }
       .ok { color:#8be9a3; }

@@ -722,15 +722,17 @@ final class AwsSsoBridgeModule: NSObject, SFSafariViewControllerDelegate {
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
+    // 이 시트는 AWS SSO 전용이 아니라 계정 로그인·정책 문서도 함께 쓴다. 아래 문구는
+    // 지역화되지 않은 진단용이며, 사용자에게 보이는 문구는 JS 호출부가 맥락에 맞게 만든다.
     guard let url = URL(string: urlString) else {
-      reject("aws_sso_browser_invalid_url", "AWS SSO 브라우저 URL이 올바르지 않습니다.", nil)
+      reject("in_app_browser_invalid_url", "브라우저 URL이 올바르지 않습니다.", nil)
       return
     }
 
     DispatchQueue.main.async {
       let presentBrowser = {
         guard let presenter = AwsSsoBridgeModule.topViewController() else {
-          reject("aws_sso_browser_present_failed", "AWS SSO 브라우저를 표시할 화면을 찾지 못했습니다.", nil)
+          reject("in_app_browser_present_failed", "브라우저를 표시할 화면을 찾지 못했습니다.", nil)
           return
         }
 

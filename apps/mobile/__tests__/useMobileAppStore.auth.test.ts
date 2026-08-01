@@ -372,7 +372,7 @@ describe("useMobileAppStore auth and sync flows", () => {
   it("restores unauthenticated state when opening the sign-in sheet fails", async () => {
     const openUrlSpy = jest.spyOn(Linking, "openURL");
     inAppBrowserNative.openBrowser.mockRejectedValue(
-      new Error("로그인 창을 열 수 없습니다."),
+      new Error("브라우저를 표시할 화면을 찾지 못했습니다."),
     );
 
     await act(async () => {
@@ -383,8 +383,10 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(openUrlSpy).not.toHaveBeenCalled();
     expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
     expect(useMobileAppStore.getState().pendingBrowserLoginState).toBeNull();
-    expect(useMobileAppStore.getState().auth.errorMessage).toContain(
-      "로그인 창을 열 수 없습니다.",
+    // 네이티브 reject 문구는 지역화돼 있지 않고 시트를 공유하는 여러 맥락에서 오므로, 사용자는
+    // 이 경로의 문구만 봐야 한다 — 원문이 그대로 새면 영어 사용자에게 한국어가 뜬다.
+    expect(useMobileAppStore.getState().auth.errorMessage).toBe(
+      "로그인 창을 열지 못했습니다.",
     );
   });
 
@@ -536,6 +538,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.syncStatus.status).toBe("ready");
     expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
       .toEqual(["/auth/exchange", "/api/info", "/sync"]);
+    // 로그인이 성공했어도 시트는 네이티브에 그대로 떠 있다 — 딥링크가 앱을 앞으로 끌어올릴
+    // 뿐이라, 닫아주지 않으면 로그인 페이지가 홈 화면을 덮은 채 남는다.
+    expect(inAppBrowserNative.closeBrowser).toHaveBeenCalled();
   });
 
   it("refreshes an expired access token and retries sync once", async () => {

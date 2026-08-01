@@ -6,11 +6,18 @@
     <style>
       {{ template "auth-base-css" }}
       .card { max-width:420px; }
-      h1 { margin:0 0 8px; font-size:34px; line-height:1.1; }
-      p { color:#9fb0d3; margin:0 0 24px; }
+      /* 좁은 화면에서 34px 은 "Sign in to Dolgate" 가 두 줄로 접히면서 카드가 그만큼 길어진다. */
+      h1 { margin:0 0 8px; font-size:26px; line-height:1.15; }
+      p { color:#9fb0d3; margin:0 0 20px; }
+      @media (min-width:560px) {
+        h1 { font-size:34px; line-height:1.1; }
+        p { margin:0 0 24px; }
+      }
       form { display:flex; flex-direction:column; gap:14px; }
       label { display:flex; flex-direction:column; gap:8px; font-size:14px; color:#ced7eb; }
-      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:15px; }
+      /* 16px 미만이면 iOS Safari 가 포커스 때 페이지를 자동 확대한다 — 확대되면 뷰포트보다
+         넓어져 가로 스크롤이 생기고 정렬이 어긋나 보인다. 16px 이 그 임계값이다. */
+      input { border:none; border-radius:14px; background:#0d1522; color:#f5f7fb; padding:14px 16px; font-size:16px; }
       button, a.button { display:inline-flex; justify-content:center; align-items:center; border:none; border-radius:14px; padding:14px 16px; font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
       .primary { background:#5f7cff; color:white; }
       .secondary { background:#24324a; color:white; }
@@ -44,8 +51,14 @@
               <input type="email" name="email" value="{{ .Email }}" required autocomplete="username webauthn" autofocus />
             </label>
             <label>{{ .T.PasswordLabel }}
-              <input type="password" name="password" required minlength="8" />
+              <input type="password" name="password" required minlength="8" autocomplete="{{ if .IsSignup }}new-password{{ else }}current-password{{ end }}" />
             </label>
+            {{ if .IsSignup }}
+              {{/* 재설정 경로가 없어서 가입 때 오타가 나면 계정을 되살릴 수 없다 — 확인 입력을 받는다. */}}
+              <label>{{ .T.PasswordConfirmLabel }}
+                <input type="password" name="password_confirm" required minlength="8" autocomplete="new-password" />
+              </label>
+            {{ end }}
             <button class="primary" type="submit">{{ if .IsSignup }}{{ .T.SignupSubmit }}{{ else }}{{ .T.SignInSubmit }}{{ end }}</button>
           </form>
         {{ end }}
@@ -107,6 +120,14 @@
         form.addEventListener('submit', function (event) {
           if (busy) { return; }
           event.preventDefault();
+          // 확인 입력은 오타 방지다 — 서버까지 갈 필요 없이 여기서 바로 알려준다.
+          var confirmField = form.querySelector('input[name="password_confirm"]');
+          var passwordField = form.querySelector('input[name="password"]');
+          if (confirmField && passwordField && confirmField.value !== passwordField.value) {
+            showError({{ .T.PasswordMismatch }});
+            confirmField.focus();
+            return;
+          }
           busy = true;
           if (submitButton) { submitButton.disabled = true; }
           // 응답 헤더가 오는 순간 서버는 이 요청을 이미 처리한 것이다. 그 뒤의 실패

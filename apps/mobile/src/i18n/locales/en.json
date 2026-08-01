@@ -69,23 +69,46 @@
     },
     "account": {
       "notSignedIn": "Not signed in",
-      "authStatus": "Auth status: {{status}}",
-      "syncStatus": "Sync status: {{status}}",
+      "statusLabel": "Status",
+      "syncLabel": "Sync",
       "offlineCache": "Running from the offline cache.",
-      "logout": "Sign out"
+      "logout": "Sign out",
+      "logoutConfirmTitle": "Sign out?",
+      "logoutConfirmBody": "Hosts and credentials stored on this device are removed. They come back through sync when you sign in again.",
+      "status": {
+        "loading": "Checking",
+        "unauthenticated": "Signed out",
+        "authenticating": "Signing in",
+        "authenticated": "Signed in",
+        "offline-authenticated": "Offline",
+        "error": "Error"
+      },
+      "sync": {
+        "idle": "Idle",
+        "syncing": "Syncing",
+        "ready": "Up to date",
+        "paused": "Paused",
+        "error": "Error"
+      }
     },
     "server": {
       "save": "Save",
-      "restoreDefault": "Restore default"
-    },
-    "empty": {
-      "knownHosts": "No trusted host keys yet.",
-      "credentials": "No saved credentials yet."
+      "restoreDefault": "Restore default",
+      "signedInHint": "The server this session signed in to. To change it, sign out and set it on the sign-in screen."
     },
     "language": {
       "title": "Language",
       "system": "System"
-    }
+    },
+    "sections": {
+      "account": "Account",
+      "server": "Server",
+      "app": "App",
+      "security": "Security"
+    },
+    "knownHosts": "Known hosts",
+    "credentials": "Stored credentials",
+    "version": "Version"
   },
   "common": {
     "cancel": "Cancel",

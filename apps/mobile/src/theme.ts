@@ -13,6 +13,8 @@ import { useMobileAppStore } from "./store/useMobileAppStore";
 export interface MobilePalette {
   background: string;
   surface: string;
+  // 모달 위의 카드처럼 뒤가 비쳐선 안 되는 표면 — surface 는 0.96 알파라 뒤 화면 글자가 읽힌다.
+  surfaceSolid: string;
   surfaceAlt: string;
   border: string;
   text: string;
@@ -45,6 +47,7 @@ export interface MobilePalette {
 const darkPalette: MobilePalette = {
   background: "#0E1620",
   surface: "rgba(20, 28, 39, 0.96)",
+  surfaceSolid: "#141C27",
   surfaceAlt: "rgba(28, 39, 53, 0.94)",
   border: "rgba(128, 149, 178, 0.2)",
   text: "#EEF4FB",
@@ -77,6 +80,7 @@ const darkPalette: MobilePalette = {
 const lightPalette: MobilePalette = {
   background: "#E8EEF5",
   surface: "rgba(255, 255, 255, 0.96)",
+  surfaceSolid: "#FFFFFF",
   surfaceAlt: "rgba(245, 248, 252, 0.94)",
   border: "rgba(84, 104, 132, 0.12)",
   text: "#182433",
@@ -88,7 +92,9 @@ const lightPalette: MobilePalette = {
   danger: "#B54856",
   input: "#FBFDFF",
   tabInactive: "#7A8B9F",
-  overlay: "rgba(13, 18, 24, 0.18)",
+  // 모달 뒤를 가리는 스크림. 0.18 은 너무 옅어 뒤 화면 글자가 읽히고, surface 가 0.96 알파라
+  // 카드 위로도 비쳐 보였다 — 다크(0.8)와 같은 역할을 하도록 짙게 잡는다.
+  overlay: "rgba(13, 18, 24, 0.42)",
   sessionChrome: "#EEF1F6",
   sessionToolbar: "#272A3B",
   sessionToolbarBorder: "rgba(255, 255, 255, 0.08)",

@@ -69,23 +69,46 @@
     },
     "account": {
       "notSignedIn": "로그인되지 않음",
-      "authStatus": "인증 상태: {{status}}",
-      "syncStatus": "동기화 상태: {{status}}",
+      "statusLabel": "상태",
+      "syncLabel": "동기화",
       "offlineCache": "오프라인 캐시로 사용 중입니다.",
-      "logout": "로그아웃"
+      "logout": "로그아웃",
+      "logoutConfirmTitle": "로그아웃할까요?",
+      "logoutConfirmBody": "이 기기에 저장된 호스트와 자격 증명이 지워집니다. 다시 로그인하면 동기화로 복구됩니다.",
+      "status": {
+        "loading": "확인 중",
+        "unauthenticated": "로그아웃됨",
+        "authenticating": "로그인 중",
+        "authenticated": "로그인됨",
+        "offline-authenticated": "오프라인",
+        "error": "오류"
+      },
+      "sync": {
+        "idle": "대기",
+        "syncing": "동기화 중",
+        "ready": "최신",
+        "paused": "일시 중지",
+        "error": "오류"
+      }
     },
     "server": {
       "save": "저장",
-      "restoreDefault": "기본값 복원"
-    },
-    "empty": {
-      "knownHosts": "아직 신뢰된 호스트 키가 없습니다.",
-      "credentials": "아직 저장된 자격 증명이 없습니다."
+      "restoreDefault": "기본값 복원",
+      "signedInHint": "로그인에 사용한 서버입니다. 바꾸려면 로그아웃한 뒤 로그인 화면에서 설정하세요."
     },
     "language": {
       "title": "언어",
       "system": "시스템 설정"
-    }
+    },
+    "sections": {
+      "account": "계정",
+      "server": "서버",
+      "app": "앱",
+      "security": "보안"
+    },
+    "knownHosts": "저장된 호스트 키",
+    "credentials": "저장된 자격증명",
+    "version": "버전"
   },
   "common": {
     "cancel": "취소",

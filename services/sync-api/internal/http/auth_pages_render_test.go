@@ -108,6 +108,53 @@ func TestAuthPagesRenderInBothLanguages(t *testing.T) {
 	}
 }
 
+// 확인 입력은 서버가 검사하지 않는다(오타 방지용 UX). 그래서 회원가입 페이지에만 필드와
+// 대조 스크립트가 들어가는지, 로그인 페이지에는 안 들어가는지를 렌더로 확인한다.
+func TestSignupPageOnlyRendersPasswordConfirmation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	// 대조 스크립트가 selector 문자열로 name 을 갖고 있으므로, 실제 렌더된 입력칸으로 좁혀 본다.
+	const confirmInput = `<input type="password" name="password_confirm"`
+
+	signup := getPage(t, router, "/signup?client=dolgate-mobile&redirect_uri=dolgate%3A%2F%2Fauth%2Fcallback&state=s&lang=en")
+	if !strings.Contains(signup, confirmInput) {
+		t.Fatalf("signup page is missing the confirmation field: %s", signup)
+	}
+	if !strings.Contains(signup, "Confirm password") {
+		t.Fatalf("signup page is missing the confirmation label: %s", signup)
+	}
+	if !strings.Contains(signup, "The passwords do not match.") {
+		t.Fatalf("signup page is missing the mismatch message for its script: %s", signup)
+	}
+
+	login := getPage(t, router, "/login?client=dolgate-mobile&redirect_uri=dolgate%3A%2F%2Fauth%2Fcallback&state=s&lang=en")
+	if strings.Contains(login, confirmInput) {
+		t.Fatalf("login page must not ask for a confirmation: %s", login)
+	}
+	if strings.Contains(login, "Confirm password") {
+		t.Fatalf("login page must not show the confirmation label: %s", login)
+	}
+}
+
+// 인증 페이지가 캐시되면 state 토큰이 박힌 옛 HTML 이 남는다.
+func TestAuthPagesAreNotCached(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	for _, target := range []string{
+		"/login?client=dolgate-mobile&redirect_uri=dolgate%3A%2F%2Fauth%2Fcallback&state=s&lang=en",
+		"/signup?client=dolgate-mobile&redirect_uri=dolgate%3A%2F%2Fauth%2Fcallback&state=s&lang=en",
+	} {
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("GET %s Cache-Control = %q, want no-store", target, got)
+		}
+	}
+}
+
 func TestLoginPageFollowsAcceptLanguageWithoutLangParam(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := createTestRouterWithConfig(t, enabledWebAuthnConfig())
