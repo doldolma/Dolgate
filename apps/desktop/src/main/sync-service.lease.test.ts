@@ -1,4 +1,4 @@
-import { createDecipheriv } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -66,6 +66,29 @@ function decryptRecord<T>(encryptedPayload: string, keyBase64: string): T {
       decipher.final(),
     ]).toString("utf8"),
   ) as T;
+}
+
+function encryptRecord(id: string, value: unknown, keyBase64: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(
+    "aes-256-gcm",
+    Buffer.from(keyBase64, "base64"),
+    iv,
+  );
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(value), "utf8"),
+    cipher.final(),
+  ]);
+  return {
+    id,
+    encrypted_payload: JSON.stringify({
+      v: 1,
+      iv: iv.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+    }),
+    updated_at: "2026-07-16T00:00:00.000Z",
+  };
 }
 
 async function createHarness(initialContext: AuthSyncContext) {
@@ -201,6 +224,65 @@ describe("SyncService immutable lease", () => {
     await harness.service.purgeSyncedCache();
 
     expect(purgeAwsArtifacts).toHaveBeenCalledOnce();
+  });
+
+  it("keeps synced tailnet registrations persistent even when the payload is ephemeral", async () => {
+    const harness = await createHarness(oldContext);
+    const payload: SyncPayloadV2 = {
+      ...emptySyncPayload(),
+      tailnets: [
+        encryptRecord(
+          "net-1",
+          {
+            id: "net-1",
+            label: "Work",
+            ephemeral: true,
+            authKey: "tskey-once",
+            createdAt: "2026-07-16T00:00:00.000Z",
+            updatedAt: "2026-07-16T00:00:00.000Z",
+          },
+          oldContext.vaultKeyBase64,
+        ),
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        if (new URL(String(url)).pathname === "/api/info") {
+          return new Response(
+            JSON.stringify({
+              capabilities: {
+                sync: { awsProfiles: true },
+                vault: { e2ee: true },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            etag: '"2"',
+          },
+        });
+      }),
+    );
+
+    await harness.service.bootstrap();
+
+    const stateStorage = (
+      harness.service as unknown as {
+        stateStorage: { getState: () => { data: { tailnets: unknown[] } } };
+      }
+    ).stateStorage;
+    expect(stateStorage.getState().data.tailnets).toEqual([
+      expect.objectContaining({
+        id: "net-1",
+        hasAuthKey: true,
+        ephemeral: false,
+      }),
+    ]);
   });
 
   it("finishes account bookkeeping even when runtime artifact cleanup fails", async () => {

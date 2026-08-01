@@ -1684,29 +1684,7 @@ function getKnownHostStatus(
 
 function disconnectRuntimeSession(sessionId: string): void {
   const runtime = runtimeSessions.get(sessionId);
-  if (!runtime) {
-    pendingSessionConnections.delete(sessionId);
-    runtimeSessionSnapshots.delete(sessionId);
-    const pendingFlush = runtimeSnapshotFlushTimers.get(sessionId);
-    if (pendingFlush) {
-      clearTimeout(pendingFlush);
-      runtimeSnapshotFlushTimers.delete(sessionId);
-    }
-    return;
-  }
-
-  if (runtime.kind === 'ssh') {
-    try {
-      if (runtime.backgroundListenerId !== null) {
-        // This teardown is synchronous, so the detach is fired and forgotten.
-        // Leaving it unawaited is fine: the shell is going away regardless, and
-        // its ring closing ends the subscription on its own.
-        void runtime.shell
-          .unfollow(runtime.backgroundListenerId)
-          .catch(() => {});
-      }
-    } catch {}
-  } else {
+  if (runtime?.kind === 'aws-ssm') {
     try {
       runtime.socket.close();
     } catch {}
@@ -1724,29 +1702,61 @@ function disconnectRuntimeSession(sessionId: string): void {
   }
 }
 
+async function closeSshRuntimeResources(
+  connection: EngineConnection,
+  shell: EngineShell | null,
+  backgroundListenerId: number | null,
+): Promise<void> {
+  if (shell && backgroundListenerId !== null) {
+    try {
+      await shell.unfollow(backgroundListenerId);
+    } catch {}
+  }
+  if (shell) {
+    try {
+      await shell.close();
+    } catch {}
+  }
+  try {
+    await connection.disconnect();
+  } catch {}
+}
+
+async function disposeRuntimeSession(sessionId: string): Promise<void> {
+  const runtime = runtimeSessions.get(sessionId);
+  // Ownership is removed before native close calls. Their callbacks can re-enter
+  // this function, and the second call must be a no-op rather than closing twice.
+  disconnectRuntimeSession(sessionId);
+  if (runtime?.kind === 'ssh') {
+    await closeSshRuntimeResources(
+      runtime.connection,
+      runtime.shell,
+      runtime.backgroundListenerId,
+    );
+  }
+}
+
 function disconnectRuntimeSftpSession(sessionId: string): void {
   runtimeSftpSessions.delete(sessionId);
   pendingSftpConnections.delete(sessionId);
 }
 
-async function disconnectAllRuntimeSessions(): Promise<void> {
-  for (const session of [...runtimeSessions.values()]) {
-    if (session.kind === 'ssh') {
-      try {
-        await session.connection.disconnect();
-      } catch {}
-    } else {
-      try {
-        session.socket.close();
-      } catch {}
-    }
-    disconnectRuntimeSession(session.recordId);
-  }
-  for (const session of [...runtimeSftpSessions.values()]) {
+async function disposeRuntimeSftpSession(sessionId: string): Promise<void> {
+  const runtime = runtimeSftpSessions.get(sessionId);
+  disconnectRuntimeSftpSession(sessionId);
+  if (runtime) {
     try {
-      await session.connection.close();
+      await runtime.connection.close();
     } catch {}
-    disconnectRuntimeSftpSession(session.recordId);
+  }
+}
+
+async function disconnectAllRuntimeSessions(): Promise<void> {
+  for (const sessionId of [...runtimeSessions.keys()]) {
+    await disposeRuntimeSession(sessionId);
+  }
+  for (const sessionId of [...runtimeSftpSessions.keys()]) {
+    await disposeRuntimeSftpSession(sessionId);
   }
 }
 
@@ -2828,6 +2838,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           return;
         }
         pendingSftpConnections.add(sftpSessionRecord.id);
+        let pendingConnection: MobileSftpConnection | null = null;
+        let closedDuringConnect = false;
 
         try {
           if (isAwsEc2HostRecord(host)) {
@@ -2904,21 +2916,33 @@ export const useMobileAppStore = create<MobileAppState>()(
             trustedHostKeysBase64: trustedHostKeysFor(host.hostname, host.port),
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
-              disconnectRuntimeSftpSession(sftpSessionRecord.id);
+              closedDuringConnect = true;
+              if (runtimeSftpSessions.has(sftpSessionRecord.id)) {
+                void disposeRuntimeSftpSession(sftpSessionRecord.id);
+              }
               markSftpSessionState(sftpSessionRecord.id, 'closed');
             },
           });
           const connection = wrapEngineSftpConnection(engineSftp);
+          pendingConnection = connection;
+
+          if (closedDuringConnect) {
+            return;
+          }
 
           runtimeSftpSessions.set(sftpSessionRecord.id, {
             recordId: sftpSessionRecord.id,
             hostId: host.id,
             connection,
           });
+          pendingConnection = null;
 
           const listing = await connection.listDirectory(
             sftpSessionRecord.currentPath || '.',
           );
+          if (closedDuringConnect) {
+            return;
+          }
           const now = new Date().toISOString();
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
@@ -2936,7 +2960,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
         } catch (error) {
-          disconnectRuntimeSftpSession(sftpSessionRecord.id);
+          await disposeRuntimeSftpSession(sftpSessionRecord.id);
           if (isAuthExpiredError(error)) {
             await expireAuthSession();
             return;
@@ -2949,6 +2973,11 @@ export const useMobileAppStore = create<MobileAppState>()(
               : t('store.sftpConnectFailed'),
           );
         } finally {
+          if (pendingConnection) {
+            try {
+              await pendingConnection.close();
+            } catch {}
+          }
           pendingSftpConnections.delete(sftpSessionRecord.id);
         }
       };
@@ -3213,6 +3242,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         sessionRecord: MobileSessionRecord,
         host: SshHostRecord,
       ) => {
+        let pendingConnection: EngineConnection | null = null;
+        let pendingShell: EngineShell | null = null;
+        let pendingBackgroundListenerId: number | null = null;
+        let closedDuringConnect = false;
         try {
           if (
             host.authType !== 'password' &&
@@ -3273,10 +3306,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             `[mobile-ssh] engine=${engine.name} session=${sessionRecord.id}`,
           );
           const markClosed = () => {
+            closedDuringConnect = true;
             flushSessionSnapshot(sessionRecord.id, {
               markActivity: false,
             });
-            disconnectRuntimeSession(sessionRecord.id);
+            if (runtimeSessions.has(sessionRecord.id)) {
+              void disposeRuntimeSession(sessionRecord.id);
+            }
             markSessionState(sessionRecord.id, 'closed');
           };
 
@@ -3292,6 +3328,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: markClosed,
           });
+          pendingConnection = connection;
+          if (closedDuringConnect) {
+            return;
+          }
           const shell = await connection.startShell({
             // Kept at plain xterm, which is what this session flow has always
             // requested; TERM changes what remote programs emit.
@@ -3299,6 +3339,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             size: terminalSize,
             onClosed: markClosed,
           });
+          pendingShell = shell;
+          if (closedDuringConnect) {
+            return;
+          }
 
           const backgroundListenerId = await shell.follow(
             {
@@ -3318,6 +3362,10 @@ export const useMobileAppStore = create<MobileAppState>()(
               coalesceMs: 20,
             },
           );
+          pendingBackgroundListenerId = backgroundListenerId;
+          if (closedDuringConnect) {
+            return;
+          }
 
           runtimeSessions.set(sessionRecord.id, {
             kind: 'ssh',
@@ -3327,6 +3375,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             shell,
             backgroundListenerId,
           });
+          pendingConnection = null;
+          pendingShell = null;
+          pendingBackgroundListenerId = null;
 
           set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
@@ -3340,13 +3391,24 @@ export const useMobileAppStore = create<MobileAppState>()(
             }),
           }));
         } catch (error) {
-          disconnectRuntimeSession(sessionRecord.id);
-          markSessionState(
-            sessionRecord.id,
-            'error',
-            error instanceof Error ? error.message : t('store.sshConnectFailed'),
-          );
+          await disposeRuntimeSession(sessionRecord.id);
+          if (!closedDuringConnect) {
+            markSessionState(
+              sessionRecord.id,
+              'error',
+              error instanceof Error
+                ? error.message
+                : t('store.sshConnectFailed'),
+            );
+          }
         } finally {
+          if (pendingConnection) {
+            await closeSshRuntimeResources(
+              pendingConnection,
+              pendingShell,
+              pendingBackgroundListenerId,
+            );
+          }
           pendingSessionConnections.delete(sessionRecord.id);
         }
       };
@@ -5596,20 +5658,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             }),
           }));
 
-          if (runtime.kind === 'ssh') {
-            try {
-              await runtime.connection.disconnect();
-            } catch {}
-          } else {
-            try {
-              runtime.socket.close();
-            } catch {}
-          }
-
           flushSessionSnapshot(sessionId, {
             markActivity: false,
           });
-          disconnectRuntimeSession(sessionId);
+          await disposeRuntimeSession(sessionId);
           markSessionState(sessionId, 'closed');
         },
         removeSession: async (sessionId: string) => {
@@ -5644,17 +5696,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
-          disconnectRuntimeSession(sessionId);
-
-          if (runtime.kind === 'ssh') {
-            try {
-              await runtime.connection.disconnect();
-            } catch {}
-          } else {
-            try {
-              runtime.socket.close();
-            } catch {}
-          }
+          await disposeRuntimeSession(sessionId);
         },
         writeToSession: async (sessionId: string, data: string) => {
           const runtime = runtimeSessions.get(sessionId);
@@ -5832,7 +5874,6 @@ export const useMobileAppStore = create<MobileAppState>()(
           return nextSftpSession.id;
         },
         disconnectSftpSession: async (sftpSessionId: string) => {
-          const runtime = runtimeSftpSessions.get(sftpSessionId);
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
               state.sftpSessions,
@@ -5844,12 +5885,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
 
-          if (runtime) {
-            try {
-              await runtime.connection.close();
-            } catch {}
-          }
-          disconnectRuntimeSftpSession(sftpSessionId);
+          await disposeRuntimeSftpSession(sftpSessionId);
           markSftpSessionState(sftpSessionId, 'closed');
         },
         listSftpDirectory: async (sftpSessionId: string, path?: string) => {
@@ -6549,6 +6585,7 @@ export function resetMobileStoreRuntimeForTests(): void {
   for (const runtime of runtimeSessions.values()) {
     try {
       if (runtime.kind === 'ssh') {
+        void runtime.shell.close();
         void runtime.connection.disconnect();
       } else {
         runtime.socket.close();

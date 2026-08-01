@@ -236,6 +236,7 @@ class GoEngineEvents {
   private chunkHandlers = new Map<string, EngineOutputHandler>();
   private shellClosedHandlers = new Map<string, () => void>();
   private disconnectHandlers = new Map<string, () => void>();
+  private pendingShellClosedIds = new Set<string>();
 
   /**
    * Attaches on first use rather than at module load, so a build without the
@@ -251,8 +252,23 @@ class GoEngineEvents {
       this.emitter.addListener(EVENT_CHUNK, payload => this.handleChunk(payload)),
       this.emitter.addListener(EVENT_DROPPED, payload => this.handleDropped(payload)),
       this.emitter.addListener(EVENT_SHELL_CLOSED, payload => {
-        const handler = this.shellClosedHandlers.get(String(payload?.shellId));
-        handler?.();
+        const shellId = String(payload?.shellId);
+        const handler = this.shellClosedHandlers.get(shellId);
+        if (handler) {
+          this.shellClosedHandlers.delete(shellId);
+          handler();
+          return;
+        }
+        // startShell resolves with the native-generated id, so a shell that exits
+        // immediately can report closed before JS knows which handler to attach.
+        // Keep a bounded one-shot record and consume it during registration.
+        if (this.pendingShellClosedIds.size >= 128) {
+          const oldest = this.pendingShellClosedIds.values().next().value;
+          if (oldest) {
+            this.pendingShellClosedIds.delete(oldest);
+          }
+        }
+        this.pendingShellClosedIds.add(shellId);
       }),
       this.emitter.addListener(EVENT_DISCONNECTED, payload => {
         const handler = this.disconnectHandlers.get(String(payload?.connectionId));
@@ -299,6 +315,10 @@ class GoEngineEvents {
     this.chunkHandlers.delete(subscriptionToken);
   }
 
+  prepareShellClosed(): void {
+    this.ensureAttached();
+  }
+
   forgetShellTokens(tokens: Iterable<string>): void {
     for (const token of tokens) {
       this.chunkHandlers.delete(token);
@@ -307,11 +327,16 @@ class GoEngineEvents {
 
   registerShellClosed(shellId: string, handler: () => void): void {
     this.ensureAttached();
+    if (this.pendingShellClosedIds.delete(shellId)) {
+      handler();
+      return;
+    }
     this.shellClosedHandlers.set(shellId, handler);
   }
 
   forgetShell(shellId: string): void {
     this.shellClosedHandlers.delete(shellId);
+    this.pendingShellClosedIds.delete(shellId);
   }
 
   registerDisconnected(connectionId: string, handler: () => void): void {
@@ -331,6 +356,7 @@ class GoEngineEvents {
     this.chunkHandlers.clear();
     this.shellClosedHandlers.clear();
     this.disconnectHandlers.clear();
+    this.pendingShellClosedIds.clear();
   }
 }
 
@@ -433,6 +459,9 @@ class GoConnection implements EngineConnection {
       cols: options.size?.cols ?? this.defaultSize?.cols ?? 0,
     });
 
+    if (options.onClosed) {
+      events.prepareShellClosed();
+    }
     const result = await requireNative().startShell(this.id, optionsJson);
     if (options.onClosed) {
       events.registerShellClosed(result.shellId, options.onClosed);

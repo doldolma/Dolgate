@@ -1,4 +1,4 @@
-import { Linking, NativeModules } from "react-native";
+import { DeviceEventEmitter, Linking, NativeModules } from "react-native";
 import { act } from "react-test-renderer";
 import { gcm } from "@noble/ciphers/aes.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
@@ -100,6 +100,31 @@ async function trustedHostKey(
     lastSeenAt: "2026-04-13T00:00:00.000Z",
     updatedAt: "2026-04-13T00:00:00.000Z",
   };
+}
+
+async function createPasswordSshFixture(id = "host-lifecycle") {
+  const host: SshHostRecord = {
+    id,
+    kind: "ssh",
+    label: "Lifecycle SSH",
+    hostname: "lifecycle.example.com",
+    port: 22,
+    username: "deploy",
+    authType: "password",
+    secretRef: `${id}-secret`,
+    privateKeyPath: null,
+    certificatePath: null,
+    createdAt: "2026-04-13T00:00:00.000Z",
+    updatedAt: "2026-04-13T00:00:00.000Z",
+  };
+  const secret: LoadedManagedSecretPayload = {
+    secretRef: host.secretRef as string,
+    label: "Lifecycle credentials",
+    password: "super-secret",
+    updatedAt: "2026-04-13T00:00:00.000Z",
+  };
+  const knownHost = await trustedHostKey(host.hostname, host.port);
+  return { host, secret, knownHost };
 }
 
 jest.mock("@aws-sdk/client-sts", () => ({
@@ -2360,6 +2385,112 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.sessions).toHaveLength(0);
     expect(state.secretsByRef).toEqual({});
     expect(state.pendingBrowserLoginState).toBeNull();
+  });
+
+  it("releases the shell and connection when a remote SSH shell closes", async () => {
+    const { host, secret, knownHost } = await createPasswordSshFixture();
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    await act(async () => {
+      DeviceEventEmitter.emit("GoSshEngine:shellClosed", {
+        shellId: "test-shell",
+      });
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.unfollowOutput).toHaveBeenCalledWith("test-shell", 1);
+    expect(engineNative.closeShell).toHaveBeenCalledWith("test-shell");
+    expect(engineNative.disconnect).toHaveBeenCalledWith(
+      expect.stringContaining("session-"),
+    );
+    expect(useMobileAppStore.getState().sessions[0]?.status).toBe("closed");
+  });
+
+  it("rolls back the SSH connection when shell startup fails", async () => {
+    const { host, secret, knownHost } = await createPasswordSshFixture(
+      "host-shell-failure",
+    );
+    engineNative.startShell.mockRejectedValueOnce(new Error("shell refused"));
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.disconnect).toHaveBeenCalledTimes(1);
+    expect(engineNative.closeShell).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().sessions[0]?.status).toBe("error");
+  });
+
+  it("rolls back the shell and connection when output follow fails", async () => {
+    const { host, secret, knownHost } = await createPasswordSshFixture(
+      "host-follow-failure",
+    );
+    engineNative.followOutput.mockRejectedValueOnce(new Error("follow refused"));
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.closeShell).toHaveBeenCalledWith("test-shell");
+    expect(engineNative.disconnect).toHaveBeenCalledTimes(1);
+    expect(useMobileAppStore.getState().sessions[0]?.status).toBe("error");
+  });
+
+  it("closes SFTP and SSH when the initial directory listing fails", async () => {
+    const { host, secret, knownHost } = await createPasswordSshFixture(
+      "host-sftp-list-failure",
+    );
+    const sourceSession: MobileSessionRecord = {
+      id: "source-sftp-list-failure",
+      sessionId: "source-sftp-list-failure",
+      hostId: host.id,
+      title: host.label,
+      status: "connected",
+      hasReceivedOutput: true,
+      isRestorable: true,
+      lastViewportSnapshot: "",
+      lastEventAt: "2026-04-13T00:00:00.000Z",
+      lastConnectedAt: "2026-04-13T00:00:00.000Z",
+      lastDisconnectedAt: null,
+      errorMessage: null,
+    };
+    engineNative.sftpList.mockRejectedValueOnce(new Error("permission denied"));
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+        sessions: [sourceSession],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().openSftpForSession(sourceSession.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.closeSftp).toHaveBeenCalledWith("test-sftp");
+    expect(engineNative.disconnect).toHaveBeenCalledTimes(1);
+    expect(useMobileAppStore.getState().sftpSessions[0]?.status).toBe("error");
   });
 
   it("does not open a duplicate SSH connection while a session is already connecting", async () => {

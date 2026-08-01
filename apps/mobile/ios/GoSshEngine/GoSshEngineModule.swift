@@ -126,22 +126,57 @@ final class GoSshEngineModule: RCTEventEmitter {
     onWorker(resolve, reject) { [weak self] in
       guard let self else { return nil }
       let engine = try requireEngine(self.engine)
+      var disconnected = false
+      var registrationComplete = false
+      var callbackConnection: MobileConn?
 
       let connection = try engine.connect(
         requestJson,
         responder: nil,
-        onDisconnected: DisconnectedRelay { [weak self] id in
-          self?.dispatch(GoSshEngineModule.eventDisconnected, ["connectionId": id])
+        onDisconnected: DisconnectedRelay { [weak self] _ in
+          guard let self else { return }
+          self.registryLock.lock()
+          let shouldEmit: Bool
+          if !registrationComplete {
+            disconnected = true
+            shouldEmit = true
+          } else if let callbackConnection,
+                    self.connections[connectionId] === callbackConnection {
+            self.connections.removeValue(forKey: connectionId)
+            for key in self.shells.keys where key.hasPrefix("\(connectionId)#") {
+              self.shells.removeValue(forKey: key)
+            }
+            for key in self.sftpSessions.keys where key.hasPrefix("\(connectionId)~sftp") {
+              self.sftpSessions.removeValue(forKey: key)
+            }
+            shouldEmit = true
+          } else {
+            shouldEmit = false
+          }
+          self.registryLock.unlock()
+          if shouldEmit {
+            self.dispatch(GoSshEngineModule.eventDisconnected, ["connectionId": connectionId])
+          }
         }
       )
+      let info = try callReturningString { connection.infoJSON($0) }
 
       // A reconnect under the same handle must not orphan the previous one.
       self.registryLock.lock()
-      let previous = self.connections.updateValue(connection, forKey: connectionId)
+      callbackConnection = connection
+      registrationComplete = true
+      let closedBeforeRegistration = disconnected
+      let previous = closedBeforeRegistration
+        ? nil
+        : self.connections.updateValue(connection, forKey: connectionId)
       self.registryLock.unlock()
-      if let previous { try? previous.close() }
+      if closedBeforeRegistration {
+        try? connection.close()
+      } else if let previous {
+        try? previous.close()
+      }
 
-      return try callReturningString { connection.infoJSON($0) }
+      return info
     }
   }
 
@@ -189,20 +224,33 @@ final class GoSshEngineModule: RCTEventEmitter {
 
       guard let connection else { throw EngineError.missingConnection(connectionId) }
 
+      var closed = false
       let shell = try connection.startShell(
         optionsJson,
         onClosed: ShellClosedRelay { [weak self] _ in
-          self?.dispatch(GoSshEngineModule.eventShellClosed, ["shellId": shellId])
+          guard let self else { return }
+          self.registryLock.lock()
+          closed = true
+          self.shells.removeValue(forKey: shellId)
+          self.registryLock.unlock()
+          self.dispatch(GoSshEngineModule.eventShellClosed, ["shellId": shellId])
         }
       )
+      let info = try callReturningString { shell.infoJSON($0) }
 
       self.registryLock.lock()
-      self.shells[shellId] = shell
+      let closedBeforeRegistration = closed
+      if !closedBeforeRegistration {
+        self.shells[shellId] = shell
+      }
       self.registryLock.unlock()
+      if closedBeforeRegistration {
+        try? shell.close()
+      }
 
       return [
         "shellId": shellId,
-        "info": try callReturningString { shell.infoJSON($0) },
+        "info": info,
       ]
     }
   }

@@ -427,6 +427,24 @@ describe('shell output', () => {
     expect(onClosed).toHaveBeenCalledTimes(1);
   });
 
+  it('delivers a close event emitted before startShell returns', async () => {
+    mockNative.startShell.mockImplementationOnce(async () => {
+      emitNative('GoSshEngine:shellClosed', { shellId: 'conn-1#fast' });
+      return {
+        shellId: 'conn-1#fast',
+        info: JSON.stringify({ channelId: 2 }),
+      };
+    });
+    const engine = new GoSshEngineAdapter();
+    const connection = await engine.connect(baseConnectOptions());
+    const onClosed = jest.fn();
+
+    await connection.startShell({ onClosed });
+    emitNative('GoSshEngine:shellClosed', { shellId: 'conn-1#fast' });
+
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards a resize', async () => {
     const shell = await openShell();
     await shell.resize({ rows: 50, cols: 200 });

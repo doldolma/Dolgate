@@ -130,6 +130,19 @@ function normalizeTags(tags?: string[] | null): string[] {
   return normalized;
 }
 
+export function normalizeTailnetPayloadForStorage(
+  payload: TailnetPayload,
+): TailnetRecord {
+  const { authKey, ...record } = payload;
+  return {
+    ...record,
+    hasAuthKey: Boolean(authKey),
+    // Auth keys are commonly one-time keys. Persisting ephemeral=true makes the
+    // control plane remove the node on exit and leaves the key unusable next run.
+    ephemeral: false,
+  };
+}
+
 function compareHosts(left: HostRecord, right: HostRecord): number {
   const groupCompare = (left.groupName ?? '').localeCompare(right.groupName ?? '');
   if (groupCompare !== 0) {
@@ -1326,12 +1339,12 @@ export class TailnetRepository {
     stateStorage.updateState((state) => {
       const keys: Record<string, StoredEncryptedValue> = {};
       state.data.tailnets = payloads.map((payload) => {
-        const { authKey, ...record } = payload;
-        const hasAuthKey = Boolean(authKey);
+        const record = normalizeTailnetPayloadForStorage(payload);
+        const { authKey } = payload;
         if (authKey) {
           keys[record.id] = encodeSecretForStorage(authKey);
         }
-        return { ...record, hasAuthKey, ephemeral: false };
+        return record;
       });
       state.secure.tailnetAuthKeysById = keys;
     });

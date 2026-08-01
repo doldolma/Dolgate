@@ -35,6 +35,7 @@ import {
   AwsProfileRepository,
   SettingsRepository,
   SyncOutboxRepository,
+  normalizeTailnetPayloadForStorage,
   type SyncDeletionRecord
 } from './database';
 import { encodeSecretForStorage, SecretStore } from './secret-store';
@@ -1146,11 +1147,7 @@ export class SyncService {
       state.data.snippets = snippets;
       // 레코드와 auth key 를 한 커밋에서 같이 쓴다. 나눠 쓰면 그 사이에 ephemeral 판정이
       // hasAuthKey 를 잘못 보게 된다.
-      state.data.tailnets = tailnets.map((payload) => {
-        const hasAuthKey = Boolean(payload.authKey);
-        const { authKey: _authKey, ...record } = payload;
-        return { ...record, hasAuthKey, ephemeral: hasAuthKey };
-      });
+      state.data.tailnets = tailnets.map(normalizeTailnetPayloadForStorage);
       state.secure.tailnetAuthKeysById = Object.fromEntries(
         tailnets
           .filter((payload) => Boolean(payload.authKey))

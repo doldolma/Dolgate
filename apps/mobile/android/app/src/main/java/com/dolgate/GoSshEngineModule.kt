@@ -44,6 +44,7 @@ class GoSshEngineModule(
   private val shells = ConcurrentHashMap<String, Shell>()
   private val shellListeners = ConcurrentHashMap<String, MutableSet<Long>>()
   private val sftpSessions = ConcurrentHashMap<String, SFTPSession>()
+  private val registryLock = Any()
   private val nextShellSuffix = AtomicLong(0)
   private val nextSftpSuffix = AtomicLong(0)
 
@@ -80,20 +81,56 @@ class GoSshEngineModule(
   @ReactMethod
   fun connect(connectionId: String, requestJson: String, promise: Promise) {
     onWorker(promise) {
+      var disconnected = false
+      var registrationComplete = false
+      var callbackConnection: Conn? = null
       val conn =
         engine.connect(
           requestJson,
           null,
-          DisconnectedCallback { id ->
-            emit(
-              EVENT_DISCONNECTED,
-              Arguments.createMap().apply { putString("connectionId", id) },
-            )
+          DisconnectedCallback {
+            var shouldEmit = false
+            synchronized(registryLock) {
+              val ownConnection = callbackConnection
+              if (!registrationComplete) {
+                disconnected = true
+                shouldEmit = true
+              } else if (
+                ownConnection != null &&
+                  connections.remove(connectionId, ownConnection)
+              ) {
+                forgetShellsOf(connectionId)
+                shouldEmit = true
+              }
+            }
+            if (shouldEmit) {
+              emit(
+                EVENT_DISCONNECTED,
+                Arguments.createMap().apply { putString("connectionId", connectionId) },
+              )
+            }
           },
         )
-      // A reconnect under the same handle must not orphan the previous one.
-      connections.put(connectionId, conn)?.let { previous -> closeQuietly { previous.close() } }
-      conn.infoJSON()
+      val info = conn.infoJSON()
+      var previous: Conn? = null
+      val closedBeforeRegistration =
+        synchronized(registryLock) {
+          callbackConnection = conn
+          registrationComplete = true
+          if (disconnected) {
+            true
+          } else {
+            // A reconnect under the same handle must not orphan the previous one.
+            previous = connections.put(connectionId, conn)
+            false
+          }
+        }
+      if (closedBeforeRegistration) {
+        closeQuietly { conn.close() }
+      } else {
+        previous?.let { old -> closeQuietly { old.close() } }
+      }
+      info
     }
   }
 
@@ -114,22 +151,40 @@ class GoSshEngineModule(
     onWorker(promise) {
       val conn = requireConnection(connectionId)
       val shellId = "$connectionId#${nextShellSuffix.incrementAndGet()}"
+      var closed = false
       val shell =
         conn.startShell(
           optionsJson,
           ShellClosedCallback {
+            synchronized(registryLock) {
+              closed = true
+              shells.remove(shellId)
+              shellListeners.remove(shellId)
+            }
             emit(
               EVENT_SHELL_CLOSED,
               Arguments.createMap().apply { putString("shellId", shellId) },
             )
           },
         )
-      shells[shellId] = shell
-      shellListeners[shellId] = java.util.Collections.synchronizedSet(mutableSetOf())
+      val info = shell.infoJSON()
+      val closedBeforeRegistration =
+        synchronized(registryLock) {
+          if (closed) {
+            true
+          } else {
+            shells[shellId] = shell
+            shellListeners[shellId] = java.util.Collections.synchronizedSet(mutableSetOf())
+            false
+          }
+        }
+      if (closedBeforeRegistration) {
+        closeQuietly { shell.close() }
+      }
 
       Arguments.createMap().apply {
         putString("shellId", shellId)
-        putString("info", shell.infoJSON())
+        putString("info", info)
       }
     }
   }
