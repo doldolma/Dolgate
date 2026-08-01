@@ -101,6 +101,7 @@
       "system": "시스템 설정"
     },
     "sections": {
+      "title": "설정",
       "account": "계정",
       "server": "서버",
       "app": "앱",

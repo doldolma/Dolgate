@@ -360,7 +360,9 @@ function SettingsContent({
       ]}
     >
       {mode === "full" ? (
-        <Text style={[styles.title, { color: palette.text }]}>Settings</Text>
+        <Text style={[styles.title, { color: palette.text }]}>
+          {translate("settings.sections.title")}
+        </Text>
       ) : null}
 
       {showFullSettings ? (

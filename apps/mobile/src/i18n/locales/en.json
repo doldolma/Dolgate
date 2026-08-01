@@ -101,6 +101,7 @@
       "system": "System"
     },
     "sections": {
+      "title": "Settings",
       "account": "Account",
       "server": "Server",
       "app": "App",
