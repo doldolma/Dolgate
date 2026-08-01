@@ -1,7 +1,7 @@
 import { Buffer } from 'buffer';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { AppState, Linking } from 'react-native';
+import { AppState } from 'react-native';
 import type {
   AwsProfilesServerSupport,
   AwsSftpCreateSessionRequest,
@@ -111,6 +111,7 @@ import {
 } from '../lib/aws-session';
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
+import { closeInAppBrowser, openInAppBrowser } from '../lib/in-app-browser';
 import {
   resolvePtyTerminalGridSize,
   setReportedTerminalGrid,
@@ -4380,6 +4381,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!expectedState) {
             return;
           }
+          // 콜백 딥링크로 앱이 앞으로 나와도 로그인 시트는 그대로 떠 있다 — 교환 결과와
+          // 무관하게 먼저 닫아 이후 진행(또는 오류)을 앱에서 보게 한다.
+          void closeInAppBrowser().catch(() => undefined);
           const stateValidationMessage = getAuthCallbackStateErrorMessage(
             expectedState,
             payload.state,
@@ -4459,7 +4463,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           });
 
           try {
-            await Linking.openURL(
+            // 시스템 브라우저가 아니라 앱 안의 브라우저 시트에서 로그인한다 — 앱을 벗어나
+            // 로그인시키면 App Store 심사 Guideline 4.0 에 걸린다(1.8.5 리젝 사유).
+            await openInAppBrowser(
               buildBrowserLoginUrl(get().settings.serverUrl, stateToken),
             );
           } catch (error) {
@@ -4476,6 +4482,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
         },
         cancelBrowserLogin: () => {
+          // 앱에서 취소를 눌렀으면 아직 떠 있는 로그인 시트도 같이 닫는다.
+          void closeInAppBrowser().catch(() => undefined);
           set({
             pendingBrowserLoginState: null,
             auth: createUnauthenticatedState(),

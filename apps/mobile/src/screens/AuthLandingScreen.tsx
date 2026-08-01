@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import Ionicons from "react-native-vector-icons/Ionicons";
 import type { AuthStackParamList } from "../navigation/RootNavigator";
+import { openInAppBrowser } from "../lib/in-app-browser";
+import { PRIVACY_POLICY_URL } from "../lib/mobile";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -121,6 +123,22 @@ export function AuthLandingScreen({ navigation }: Props): React.JSX.Element {
             </Text>
           </Pressable>
         ) : null}
+
+        {/* 로그인해야 쓸 수 있는 앱이라 처리방침을 설정 화면에만 두면 로그인 뒤에 갇힌다.
+            로그인 전에도 보이게 여기에도 둔다. */}
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={translate("common.privacyPolicy")}
+          hitSlop={8}
+          onPress={() => {
+            void openInAppBrowser(PRIVACY_POLICY_URL).catch(() => undefined);
+          }}
+          style={styles.policyButton}
+        >
+          <Text style={[styles.policyText, { color: palette.tabInactive }]}>
+            {translate("common.privacyPolicy")}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -212,5 +230,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     letterSpacing: -0.1,
+  },
+  policyButton: {
+    alignSelf: "center",
+    paddingVertical: 4,
+  },
+  policyText: {
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: -0.1,
+    textDecorationLine: "underline",
   },
 });

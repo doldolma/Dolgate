@@ -91,7 +91,8 @@
     "cancel": "Cancel",
     "close": "Close",
     "delete": "Delete",
-    "edit": "Edit"
+    "edit": "Edit",
+    "privacyPolicy": "Privacy Policy"
   },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",
@@ -141,7 +142,7 @@
     "vaultCancelledAccountChanged": "The sync vault operation was cancelled because the account or server changed.",
     "sessionExpiredRetry": "Your session has expired. Sign in again and retry.",
     "loginExchangeFailed": "The sign-in exchange failed.",
-    "browserLoginFailed": "Could not start the browser sign-in.",
+    "browserLoginFailed": "Could not open the sign-in window.",
     "reopenBrowserFailed": "Could not reopen the browser.",
     "deleteAccountOnlineOnly": "The account can only be deleted while signed in online.",
     "passwordOnlineOnly": "A password can only be set while signed in online.",
@@ -404,7 +405,7 @@
   },
   "authLanding": {
     "serverSettingsAria": "Open the sign-in server settings",
-    "openingBrowser": "Opening the browser",
+    "openingBrowser": "Opening the sign-in window",
     "login": "Sign in"
   },
   "fileTransfer": {

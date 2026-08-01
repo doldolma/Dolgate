@@ -48,6 +48,10 @@ export const DEFAULT_SERVER_URL = 'https://ssh.doldolma.com';
 export const AUTH_REDIRECT_URI = 'dolgate://auth/callback';
 export const AUTH_CLIENT_ID = 'dolgate-mobile';
 export const AWS_SSO_APP_CALLBACK_URI = 'dolgate://aws-sso/callback';
+// 스토어 메타데이터에 등록한 것과 같은 처리방침 문서. App Store 심사 가이드라인 5.1.1(i)
+// 은 스토어 필드와 **앱 안** 양쪽에서 접근 가능해야 한다고 요구한다.
+export const PRIVACY_POLICY_URL =
+  'https://github.com/doldolma/dolgate/blob/main/PRIVACY.md';
 
 const AUTH_SESSION_SERVICE = 'dolgate.mobile.auth-session';
 const MANAGED_SECRETS_SERVICE = 'dolgate.mobile.managed-secrets';

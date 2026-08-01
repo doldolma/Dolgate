@@ -39,6 +39,16 @@ const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
 // than on a stand-in connection object.
 const engineNative = NativeModules.GoSshEngineModule as Record<string, jest.Mock>;
 
+// 계정 로그인은 앱 안의 브라우저 시트(iOS SFSafariViewController / Android Custom Tabs)에서
+// 이뤄진다. 네이티브 모듈이 없으면 시스템 브라우저로 폴백하므로, 시트를 쓰는지 자체를
+// 단정하려면 모듈이 붙어 있어야 한다.
+const inAppBrowserNative = {
+  openBrowser: jest.fn<Promise<void>, [string]>(),
+  closeBrowser: jest.fn<Promise<void>, []>(),
+};
+(NativeModules as Record<string, unknown>).AwsSsoBridgeModule =
+  inAppBrowserNative;
+
 // connect and startShell take their arguments as JSON, the same wire format the
 // desktop sends ssh-core, so a test has to decode before it can assert.
 function lastConnectRequest(): Record<string, unknown> {
@@ -339,6 +349,11 @@ describe("useMobileAppStore auth and sync flows", () => {
     fetchMock.mockReset();
     jest.clearAllMocks();
     asyncStorageMock.setItem.mockClear();
+    // 앞 테스트가 심어둔 거부/해결 구현이 남지 않게 매번 기본 성공으로 되돌린다.
+    inAppBrowserNative.openBrowser.mockReset();
+    inAppBrowserNative.openBrowser.mockResolvedValue(undefined);
+    inAppBrowserNative.closeBrowser.mockReset();
+    inAppBrowserNative.closeBrowser.mockResolvedValue(undefined);
     keychainMock.getGenericPassword.mockResolvedValue(null);
     keychainMock.setGenericPassword.mockResolvedValue(true);
     keychainMock.resetGenericPassword.mockResolvedValue(true);
@@ -354,21 +369,46 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
   });
 
-  it("restores unauthenticated state when opening the browser login fails", async () => {
-    const openUrlSpy = jest
-      .spyOn(Linking, "openURL")
-      .mockRejectedValue(new Error("브라우저를 열 수 없습니다."));
+  it("restores unauthenticated state when opening the sign-in sheet fails", async () => {
+    const openUrlSpy = jest.spyOn(Linking, "openURL");
+    inAppBrowserNative.openBrowser.mockRejectedValue(
+      new Error("로그인 창을 열 수 없습니다."),
+    );
 
     await act(async () => {
       await useMobileAppStore.getState().startBrowserLogin();
     });
 
-    expect(openUrlSpy).toHaveBeenCalledTimes(1);
+    expect(inAppBrowserNative.openBrowser).toHaveBeenCalledTimes(1);
+    expect(openUrlSpy).not.toHaveBeenCalled();
     expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
     expect(useMobileAppStore.getState().pendingBrowserLoginState).toBeNull();
     expect(useMobileAppStore.getState().auth.errorMessage).toContain(
-      "브라우저를 열 수 없습니다.",
+      "로그인 창을 열 수 없습니다.",
     );
+  });
+
+  // 시스템 브라우저로 내보내면 App Store 심사 Guideline 4.0("앱을 벗어나 로그인")에 걸린다 —
+  // 1.8.5 가 그 이유로 리젝됐으므로 시트 경로를 회귀 테스트로 못박는다.
+  it("opens the sign-in page in the in-app sheet instead of the system browser", async () => {
+    const openUrlSpy = jest.spyOn(Linking, "openURL");
+
+    await act(async () => {
+      await useMobileAppStore.getState().startBrowserLogin();
+    });
+
+    expect(openUrlSpy).not.toHaveBeenCalled();
+    expect(inAppBrowserNative.openBrowser).toHaveBeenCalledTimes(1);
+
+    const openedUrl = new URL(inAppBrowserNative.openBrowser.mock.calls[0][0]);
+    expect(openedUrl.pathname).toBe("/login");
+    expect(openedUrl.searchParams.get("redirect_uri")).toBe(
+      "dolgate://auth/callback",
+    );
+    expect(openedUrl.searchParams.get("state")).toBe(
+      useMobileAppStore.getState().pendingBrowserLoginState,
+    );
+    expect(useMobileAppStore.getState().auth.status).toBe("authenticating");
   });
 
   it("cancels a pending browser login and clears the pending state", async () => {
@@ -391,6 +431,8 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(useMobileAppStore.getState().auth.status).toBe("unauthenticated");
     expect(useMobileAppStore.getState().pendingBrowserLoginState).toBeNull();
     expect(useMobileAppStore.getState().auth.errorMessage).toBeNull();
+    // 취소했으면 떠 있던 시트도 닫혀야 한다.
+    expect(inAppBrowserNative.closeBrowser).toHaveBeenCalled();
   });
 
   it("ignores a late auth callback after browser login was cancelled", async () => {
@@ -437,6 +479,8 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(useMobileAppStore.getState().auth.errorMessage).toContain(
       "일치하지 않습니다",
     );
+    // 거부된 콜백이어도 앱으로 돌아왔으니 시트는 닫아야 오류 문구가 보인다.
+    expect(inAppBrowserNative.closeBrowser).toHaveBeenCalled();
   });
 
   it("exchanges a verified login callback and syncs hosts successfully", async () => {

@@ -17,8 +17,10 @@ import {
 } from "react-native";
 import { APP_VERSION } from "../lib/app-metadata";
 import { IosEdgeSwipeBack } from "../components/IosEdgeSwipeBack";
+import { openInAppBrowser } from "../lib/in-app-browser";
 import {
   DEFAULT_SERVER_URL,
+  PRIVACY_POLICY_URL,
   getSettingsValidationMessage,
 } from "../lib/mobile";
 import type { MainTabParamList } from "../navigation/RootNavigator";
@@ -126,6 +128,12 @@ function SettingsContent({
   const showFullSettings = mode === "full" && hasAuthenticatedSession;
   const showSyncStatus = syncStatus.status !== "syncing";
   const canSaveServerUrl = !validationMessage && !savingServerUrl;
+
+  // 정책 문서는 앱 안의 브라우저 시트에서 띄운다 — 시스템 브라우저로 나가도 규정상 문제는
+  // 없지만, 로그인과 같은 방식으로 앱 안에 머무는 편이 자연스럽다.
+  const openPrivacyPolicy = useCallback((): void => {
+    void openInAppBrowser(PRIVACY_POLICY_URL).catch(() => undefined);
+  }, []);
 
   const handleSaveServerUrl = async (): Promise<void> => {
     if (!canSaveServerUrl) {
@@ -651,6 +659,24 @@ function SettingsContent({
         <Text style={[styles.body, { color: palette.mutedText }]}>
           Version {APP_VERSION}
         </Text>
+        {/* 이 섹션은 로그인 전(서버 설정) 화면에도 그려지므로, 로그인하지 않은 사용자도
+            처리방침에 닿는다 — 5.1.1(i) 이 요구하는 "앱 안에서 쉽게 접근". */}
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={translate("common.privacyPolicy")}
+          onPress={openPrivacyPolicy}
+          style={[
+            styles.secondaryButton,
+            {
+              backgroundColor: palette.surfaceAlt,
+              borderColor: palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.secondaryText, { color: palette.text }]}>
+            {translate("common.privacyPolicy")}
+          </Text>
+        </Pressable>
       </View>
       {accountPasswordOpen &&
       showFullSettings &&

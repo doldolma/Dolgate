@@ -54,6 +54,14 @@ jest.mock("../src/lib/screen-layout", () => ({
     paddingBottom: 12,
   }),
 }));
+jest.mock("../src/lib/in-app-browser", () => ({
+  openInAppBrowser: jest.fn(async () => undefined),
+  closeInAppBrowser: jest.fn(async () => undefined),
+}));
+
+const { openInAppBrowser: openInAppBrowserMock } = jest.requireMock(
+  "../src/lib/in-app-browser",
+) as { openInAppBrowser: jest.Mock };
 
 function collectText(node: renderer.ReactTestInstance): string {
   return node.children
@@ -285,6 +293,47 @@ describe("SettingsScreen server save navigation", () => {
 
     await act(async () => {
       tree!.unmount();
+    });
+  });
+
+  // 심사 가이드라인 5.1.1(i) 은 스토어 메타데이터 URL 과 별개로 "앱 안에서 쉽게 접근"을
+  // 요구한다. 로그인해야 쓰는 앱이라 로그인 전 화면(서버 설정)에서도 닿아야 한다.
+  it("opens the privacy policy from both the settings tab and the pre-login screen", async () => {
+    useMobileAppStore.setState({ auth: createAuthenticatedState() });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SettingsScreen />);
+    });
+
+    await act(async () => {
+      findPressableByText(tree!.root, "개인정보 처리방침").props.onPress();
+    });
+
+    expect(openInAppBrowserMock).toHaveBeenCalledWith(
+      "https://github.com/doldolma/dolgate/blob/main/PRIVACY.md",
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+
+    openInAppBrowserMock.mockClear();
+    resetStore();
+
+    let authTree: renderer.ReactTestRenderer;
+    await act(async () => {
+      authTree = renderer.create(<AuthSettingsScreen />);
+    });
+
+    await act(async () => {
+      findPressableByText(authTree!.root, "개인정보 처리방침").props.onPress();
+    });
+
+    expect(openInAppBrowserMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      authTree!.unmount();
     });
   });
 
