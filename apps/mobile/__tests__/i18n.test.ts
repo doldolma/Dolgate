@@ -2,6 +2,7 @@ import i18next from 'i18next';
 
 import { applyMobileLanguage, getFormatLocale, t } from '../src/i18n';
 import { formatRelativeTime } from '../src/lib/mobile';
+import { STATUS_LABEL_KEYS } from '../src/i18n/shared-messages';
 import en from '../src/i18n/locales/en.json';
 import ko from '../src/i18n/locales/ko.json';
 
@@ -87,6 +88,18 @@ describe('번역 카탈로그', () => {
     // 그 언어로 적어야 하므로 번역 대상이 아니다.
     const leaked = flatten(en).filter((key) => /[가-힣]/.test(resolve(en, key)));
     expect(leaked).toEqual([]);
+  });
+
+  // 상태 라벨 맵은 union 으로 인덱싱해서 멤버가 빠지면 컴파일이 깨지지만, 키 오타는 잡지
+  // 못한다 — 실제 카탈로그에 문구가 있는지는 여기서 확인한다.
+  it('상태 라벨 키가 두 카탈로그에 모두 있다', () => {
+    const missing = Object.entries({ ko, en }).flatMap(([locale, catalog]) =>
+      STATUS_LABEL_KEYS.filter((key) => {
+        const resolved = resolve(catalog, key);
+        return typeof resolved !== 'string' || resolved.trim().length === 0;
+      }).map((key) => `${locale}:${key}`),
+    );
+    expect(missing).toEqual([]);
   });
 
   it('보간 변수가 두 언어에서 같다', () => {

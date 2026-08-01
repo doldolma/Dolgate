@@ -28,7 +28,12 @@ import type { MainTabParamList } from "../navigation/RootNavigator";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
-import { getAccountPasswordValidationMessage, getNewVaultPassphraseMessage } from '../i18n/shared-messages';
+import {
+  getAccountPasswordValidationMessage,
+  getAuthStatusLabel,
+  getNewVaultPassphraseMessage,
+  getSyncStatusLabel,
+} from '../i18n/shared-messages';
 import { useTranslation } from "react-i18next";
 import { APP_LANGUAGE_OPTIONS, type AppLanguage } from "@dolssh/shared-core";
 
@@ -389,7 +394,7 @@ function SettingsContent({
           <SettingsRow
             icon="shield-checkmark-outline"
             label={translate("settings.account.statusLabel")}
-            value={translate(`settings.account.status.${auth.status}`)}
+            value={getAuthStatusLabel(auth.status)}
           />
           {/* 30초 폴링이 status 를 ready→syncing→ready 로 돌린다. 이 행을 조건부로 빼면
               그때마다 카드 높이가 바뀌어 화면이 위아래로 흔들린다 — 행은 항상 두고 값만
@@ -397,7 +402,7 @@ function SettingsContent({
           <SettingsRow
             icon="sync-outline"
             label={translate("settings.account.syncLabel")}
-            value={translate(`settings.account.sync.${syncStatus.status}`)}
+            value={getSyncStatusLabel(syncStatus.status)}
           />
           {accountPasswordState === "set" ||
           accountPasswordState === "unset" ? (
