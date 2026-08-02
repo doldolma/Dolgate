@@ -93,6 +93,8 @@ module.exports = {
         target: 'deb'
       }
     ]
-  },
-  afterSign: 'scripts/notarize.cjs'
+  }
+  // afterSign 훅은 두지 않는다. 릴리스는 이미 서명·공증을 마친 .app 을 --prepackaged 로
+  // 넘기는데, 그 경우 doPack 이 곧바로 return 해서 서명 단계 자체가 없고 훅도 발화하지
+  // 않는다. 서명·공증은 electron-builder 앞단의 scripts/sign-notarize-mac.cjs 가 한다.
 };
