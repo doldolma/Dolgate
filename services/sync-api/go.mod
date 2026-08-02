@@ -29,7 +29,7 @@ require (
 
 replace dolssh/services/ssh-core => ../ssh-core
 
-replace tailscale.com => ../ssh-core/third_party/tailscale
+replace tailscale.com v1.102.0 => github.com/doldolma/tailscale v1.102.0-dolgate.1
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect

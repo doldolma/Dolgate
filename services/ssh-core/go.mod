@@ -2,7 +2,7 @@ module dolssh/services/ssh-core
 
 go 1.26.5
 
-replace tailscale.com => ./third_party/tailscale
+replace tailscale.com v1.102.0 => github.com/doldolma/tailscale v1.102.0-dolgate.1
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
