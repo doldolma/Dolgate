@@ -24,6 +24,7 @@ import type {
   SyncPayloadV2,
   SyncRecord,
   SyncStatus,
+  TailnetPayload,
   ServerInfoResponse,
   VaultKdfDescriptor,
   VaultCacheRecord,
@@ -56,6 +57,7 @@ export const PRIVACY_POLICY_URL =
 const AUTH_SESSION_SERVICE = 'dolgate.mobile.auth-session';
 const MANAGED_SECRETS_SERVICE = 'dolgate.mobile.managed-secrets';
 const MANAGED_AWS_PROFILES_SERVICE = 'dolgate.mobile.managed-aws-profiles';
+const MANAGED_TAILNETS_SERVICE = 'dolgate.mobile.managed-tailnets';
 const AWS_SSO_TOKENS_SERVICE = 'dolgate.mobile.aws-sso-tokens';
 const CLIENT_INSTALLATION_ID_SERVICE = 'dolgate.mobile.client-installation-id';
 // E2EE 볼트(v2)의 잠금해제된 DEK. 동기화 암호 입력 후 캐시해 재입력을 없앤다.
@@ -263,8 +265,8 @@ export function buildEmptySyncPayload(): SyncPayloadV2 {
     knownHosts: [],
     portForwards: [],
     dnsOverrides: [],
-    // 모바일은 tailnet 을 쓰지 않지만(스코프 밖), 페이로드 모양은 맞춰야 한다. 빈 배열을
-    // 보내는 것은 "이 kind 에 변경 없음"이라 서버의 tailnets 레코드를 건드리지 않는다.
+    // 부분 push에서 빈 배열은 "이 kind 에 변경 없음"이다. Tailnet 설정은 데스크톱에서
+    // 관리하고 모바일은 pull해서 사용하므로, 일반 모바일 mutation에는 담지 않는다.
     tailnets: [],
     preferences: [],
     awsProfiles: [],
@@ -425,6 +427,37 @@ export async function saveStoredAwsProfiles(
 export async function clearStoredAwsProfiles(): Promise<void> {
   await Keychain.resetGenericPassword({
     service: MANAGED_AWS_PROFILES_SERVICE,
+  });
+}
+
+export async function loadStoredTailnets(): Promise<TailnetPayload[]> {
+  const credentials = await Keychain.getGenericPassword({
+    service: MANAGED_TAILNETS_SERVICE,
+  });
+  if (!credentials) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(credentials.password) as unknown;
+    return Array.isArray(parsed) ? (parsed as TailnetPayload[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStoredTailnets(
+  tailnets: TailnetPayload[],
+): Promise<void> {
+  await Keychain.setGenericPassword('dolgate', JSON.stringify(tailnets), {
+    service: MANAGED_TAILNETS_SERVICE,
+    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function clearStoredTailnets(): Promise<void> {
+  await Keychain.resetGenericPassword({
+    service: MANAGED_TAILNETS_SERVICE,
   });
 }
 
@@ -1016,6 +1049,18 @@ export function decodeAwsProfiles(
   ).sort((left, right) => left.name.localeCompare(right.name));
 }
 
+export function decodeTailnets(
+  payload: SyncPayloadV2,
+  keyBase64: string,
+): TailnetPayload[] {
+  // 구버전 서버는 tailnets 필드 자체를 모른다.
+  return decodeSyncRecords<TailnetPayload>(payload.tailnets ?? [], keyBase64)
+    .filter(
+      tailnet => typeof tailnet.id === 'string' && tailnet.id.trim().length > 0,
+    )
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
 export function buildKnownHostsSyncPayload(
   knownHosts: KnownHostRecord[],
   keyBase64: string,
@@ -1075,6 +1120,7 @@ export function buildLocalStateSyncPayload(
     knownHosts: KnownHostRecord[];
     secrets: ManagedSecretPayload[];
     awsProfiles: ManagedAwsProfilePayload[];
+    tailnets: TailnetPayload[];
   },
   keyBase64: string,
 ): SyncPayloadV2 {
@@ -1105,16 +1151,24 @@ export function buildLocalStateSyncPayload(
       encrypted_payload: encodeEncryptedPayload(record, keyBase64),
       updated_at: record.updatedAt,
     })),
+    tailnets: input.tailnets.map(record => ({
+      id: record.id,
+      encrypted_payload: encodeEncryptedPayload(record, keyBase64),
+      updated_at: record.updatedAt,
+    })),
   };
 }
 
 export function buildKnownHostRecord(
   info: MobileServerPublicKeyInfo,
   existing?: KnownHostRecord | null,
+  tailnetId?: string | null,
 ): KnownHostRecord {
   const now = new Date().toISOString();
+  const normalizedTailnetId = tailnetId?.trim();
   return {
     id: existing?.id ?? createLocalId('known-host'),
+    ...(normalizedTailnetId ? { tailnetId: normalizedTailnetId } : {}),
     host: info.host,
     port: info.port,
     algorithm: info.algorithm,

@@ -19,6 +19,7 @@ final class GoSshEngineModule: RCTEventEmitter {
   private static let eventDropped = "GoSshEngine:dropped"
   private static let eventShellClosed = "GoSshEngine:shellClosed"
   private static let eventDisconnected = "GoSshEngine:disconnected"
+  private static let eventTailnet = "GoSshEngine:tailnet"
   private static let errorCode = "go_ssh_engine_error"
 
   private let engine = MobileNewEngine()
@@ -36,6 +37,9 @@ final class GoSshEngineModule: RCTEventEmitter {
   private var sftpSessions: [String: MobileSFTPSession] = [:]
   private var shellSuffix: Int64 = 0
   private var sftpSuffix: Int64 = 0
+  private lazy var tailnetEvents = TailnetEventRelay { [weak self] eventJson in
+    self?.dispatch(GoSshEngineModule.eventTailnet, ["eventJson": eventJson])
+  }
 
   override static func requiresMainQueueSetup() -> Bool { false }
 
@@ -45,6 +49,7 @@ final class GoSshEngineModule: RCTEventEmitter {
       GoSshEngineModule.eventDropped,
       GoSshEngineModule.eventShellClosed,
       GoSshEngineModule.eventDisconnected,
+      GoSshEngineModule.eventTailnet,
     ]
   }
 
@@ -63,6 +68,7 @@ final class GoSshEngineModule: RCTEventEmitter {
     for sftp in openSftp { try? sftp.close() }
     for shell in openShells { try? shell.close() }
     for connection in openConnections { try? connection.close() }
+    try? engine?.closeTailnets()
   }
 
   // MARK: - Engine level
@@ -111,6 +117,107 @@ final class GoSshEngineModule: RCTEventEmitter {
     onWorker(resolve, reject) { [weak self] in
       let engine = try requireEngine(self?.engine)
       return try callReturningString { engine.inspectCertificate(certificateText, error: $0) }
+    }
+  }
+
+  // MARK: - Tailnet runtime
+
+  @objc(configureTailnets:configsJson:resolve:reject:)
+  func configureTailnets(
+    stateScope: String,
+    configsJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let engine = try requireEngine(self.engine)
+      try engine.configureTailnets(
+        try self.tailnetStateRoot(),
+        stateScope: stateScope,
+        configsJSON: configsJson,
+        listener: self.tailnetEvents
+      )
+      return nil
+    }
+  }
+
+  @objc(startTailnet:payloadJson:resolve:reject:)
+  func startTailnet(
+    requestId: String,
+    payloadJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.startTailnet(requestId, payloadJSON: payloadJson)
+      return nil
+    }
+  }
+
+  @objc(cancelTailnet:tailnetId:resolve:reject:)
+  func cancelTailnet(
+    requestId: String,
+    tailnetId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.cancelTailnet(requestId, id_: tailnetId)
+      return nil
+    }
+  }
+
+  @objc(disconnectTailnet:tailnetId:resolve:reject:)
+  func disconnectTailnet(
+    requestId: String,
+    tailnetId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.disconnectTailnet(requestId, id_: tailnetId)
+      return nil
+    }
+  }
+
+  @objc(snapshotTailnets:resolve:reject:)
+  func snapshotTailnets(
+    requestId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.snapshotTailnets(requestId)
+      return nil
+    }
+  }
+
+  @objc(forgetTailnet:resolve:reject:)
+  func forgetTailnet(
+    tailnetId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      let engine = try requireEngine(self?.engine)
+      try engine.forgetTailnet(tailnetId)
+      return nil
+    }
+  }
+
+  @objc(closeTailnets:reject:)
+  func closeTailnets(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      try self?.engine?.closeTailnets()
+      return nil
     }
   }
 
@@ -668,6 +775,22 @@ final class GoSshEngineModule: RCTEventEmitter {
     sendEvent(withName: name, body: body)
   }
 
+  private func tailnetStateRoot() throws -> String {
+    var root = FileManager.default.urls(
+      for: .applicationSupportDirectory,
+      in: .userDomainMask
+    ).first ?? FileManager.default.temporaryDirectory
+    root.appendPathComponent("Tailnets", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: root,
+      withIntermediateDirectories: true
+    )
+    var resourceValues = URLResourceValues()
+    resourceValues.isExcludedFromBackup = true
+    try root.setResourceValues(resourceValues)
+    return root.path
+  }
+
   private func onWorker(
     _ resolve: @escaping RCTPromiseResolveBlock,
     _ reject: @escaping RCTPromiseRejectBlock,
@@ -758,4 +881,12 @@ private final class DisconnectedRelay: NSObject, MobileDisconnectedCallbackProto
   init(_ handler: @escaping (String) -> Void) { self.handler = handler }
 
   func onDisconnected(_ connectionID: String?) { handler(connectionID ?? "") }
+}
+
+private final class TailnetEventRelay: NSObject, MobileTailnetEventListenerProtocol {
+  private let handler: (String) -> Void
+
+  init(_ handler: @escaping (String) -> Void) { self.handler = handler }
+
+  func onTailnetEvent(_ eventJSON: String?) { handler(eventJSON ?? "") }
 }

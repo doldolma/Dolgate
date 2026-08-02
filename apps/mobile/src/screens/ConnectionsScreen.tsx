@@ -202,6 +202,10 @@ export function ConnectionsScreen(): React.JSX.Element {
                   <Text style={[styles.errorText, { color: palette.danger }]}>
                     {item.errorMessage}
                   </Text>
+                ) : item.connectionStatusMessage ? (
+                  <Text style={[styles.meta, { color: palette.mutedText }]}>
+                    {item.connectionStatusMessage}
+                  </Text>
                 ) : null}
               </Pressable>
             </View>

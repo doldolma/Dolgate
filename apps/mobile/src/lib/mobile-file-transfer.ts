@@ -1,5 +1,9 @@
 import { NativeModules } from 'react-native';
 import { t } from '../i18n';
+import {
+  documentPickerTypes,
+  pickLocalDocument,
+} from './document-picker';
 
 export interface PickedUploadFile {
   uri: string;
@@ -54,14 +58,6 @@ const nativeFileTransfer = NativeModules.DolsshFileTransferModule as
   | NativeFileTransferModule
   | undefined;
 
-type DocumentPickerModule =
-  typeof import('react-native-document-picker').default;
-
-function getDocumentPicker(): DocumentPickerModule {
-  return require('react-native-document-picker')
-    .default as DocumentPickerModule;
-}
-
 function getNativeFileTransfer(): NativeFileTransferModule {
   if (!nativeFileTransfer) {
     throw new Error(t('fileTransfer.nativeModuleMissing'));
@@ -70,23 +66,10 @@ function getNativeFileTransfer(): NativeFileTransferModule {
 }
 
 export async function pickUploadFile(): Promise<PickedUploadFile | null> {
-  const DocumentPicker = getDocumentPicker();
-  try {
-    const result = await DocumentPicker.pickSingle({
-      type: [DocumentPicker.types.allFiles],
-      copyTo: 'cachesDirectory',
-    });
-    return {
-      uri: result.fileCopyUri ?? result.uri,
-      name: result.name ?? 'upload',
-      size: result.size,
-    };
-  } catch (error) {
-    if (DocumentPicker.isCancel(error)) {
-      return null;
-    }
-    throw error;
-  }
+  return pickLocalDocument({
+    type: [documentPickerTypes.allFiles],
+    fallbackName: 'upload',
+  });
 }
 
 export async function pickDownloadDestination(

@@ -251,6 +251,10 @@ type AfterFunc func(d time.Duration, fn func()) Stopper
 type entry struct {
 	node Node
 	refs int
+	// retirement 는 설정이 바뀌거나 삭제되어 이 노드를 더는 새 연결에 내주면 안 될 때
+	// 설정된다. 이미 발급된 리스는 유지하고, 마지막 리스가 풀리는 즉시 유휴 유예 없이
+	// 노드를 교체하거나 등록까지 폐기한다.
+	retirement Retirement
 	// generation 은 이 항목의 일련번호다. 리스가 같은 값을 들고 다녀서, 강제 해체 뒤 남은 옛
 	// 리스의 Release 를 골라낼 수 있다.
 	generation uint64
@@ -269,6 +273,18 @@ type entry struct {
 	// (유휴 만료·Disconnect)는 노드를 남기므로 종료 때 닫아야 한다.
 	teardownCloses bool
 }
+
+// Retirement 는 사용 중인 노드를 기존 연결 아래에서 바로 닫지 않고 폐기하는 방식이다.
+type Retirement uint8
+
+const (
+	RetireForReset Retirement = iota + 1
+	RetireForForget
+)
+
+// ErrNodeRetiring 은 설정 세대가 바뀐 노드가 기존 연결의 종료를 기다리는 동안 새 리스를
+// 요청했을 때다. 이때 옛 설정으로 새 연결을 내주면 설정 변경 fence가 무너진다.
+var ErrNodeRetiring = errors.New("tailnet node is retiring after a configuration change")
 
 // beginTeardown 은 해체 중임을 표시한다. 호출자가 락을 쥔 상태여야 한다. closes 는 이 해체가
 // 노드를 Close 까지 하는지다.
@@ -419,6 +435,9 @@ func (r *Registry) Acquire(id string) (*Lease, error) {
 	if r.closed {
 		return nil, ErrClosed
 	}
+	if existing != nil && existing.retirement != 0 {
+		return nil, fmt.Errorf("%w: %q", ErrNodeRetiring, id)
+	}
 
 	if existing == nil {
 		node, err := r.newNode(id)
@@ -447,28 +466,101 @@ func (r *Registry) Acquire(id string) (*Lease, error) {
 
 func (r *Registry) release(id string, generation uint64) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	existing, ok := r.entries[id]
 	if !ok {
+		r.mu.Unlock()
 		return
 	}
 	// 강제 해체된 뒤에 도착한 옛 리스다. 지금 항목은 다른 노드이므로 건드리면 안 된다 —
 	// 깎으면 쓰는 중인 새 노드가 유예에 들어가거나 내려간다.
 	if existing.generation != generation {
+		r.mu.Unlock()
 		return
 	}
 	existing.refs -= 1
 	if existing.refs > 0 {
+		r.mu.Unlock()
 		return
 	}
 	existing.refs = 0
+
+	if existing.retirement != 0 {
+		if existing.idle != nil {
+			existing.idle.Stop()
+			existing.idle = nil
+		}
+		retirement := existing.retirement
+		done := existing.beginTeardown(true)
+		node := existing.node
+		r.mu.Unlock()
+		go r.finishRetirement(id, existing, done, node, retirement)
+		return
+	}
 
 	// 마지막 소비자가 떠났다. 지금 내리지 않고 유예를 시작한다.
 	if existing.idle != nil {
 		existing.idle.Stop()
 	}
 	existing.idle = r.afterFunc(r.idleGrace, func() { r.idleExpired(id) })
+	r.mu.Unlock()
+}
+
+// Retire 는 기존 소비자를 끊지 않으면서 노드를 현재 설정 세대에서 제외한다.
+// 반환값은 메모리에 폐기할 노드가 있었는지다. false 면 호출자가 cold-state 디렉터리를
+// 별도로 정리할 수 있다.
+func (r *Registry) Retire(id string, retirement Retirement) (bool, error) {
+	if retirement != RetireForReset && retirement != RetireForForget {
+		return false, errors.New("tailnet: invalid retirement mode")
+	}
+
+	existing := r.lockEntrySettled(id)
+	if existing == nil {
+		r.mu.Unlock()
+		return false, nil
+	}
+	if r.closed {
+		r.mu.Unlock()
+		return false, ErrClosed
+	}
+
+	// Forget 이 Reset 보다 강하다. 설정 변경 직후 삭제가 겹치면 등록을 남기는 Reset 으로
+	// 약화시키지 않는다.
+	if retirement > existing.retirement {
+		existing.retirement = retirement
+	}
+	if existing.idle != nil {
+		existing.idle.Stop()
+		existing.idle = nil
+	}
+	if existing.refs > 0 {
+		r.mu.Unlock()
+		return true, nil
+	}
+
+	retirement = existing.retirement
+	done := existing.beginTeardown(true)
+	node := existing.node
+	r.mu.Unlock()
+
+	return true, r.finishRetirement(id, existing, done, node, retirement)
+}
+
+func (r *Registry) finishRetirement(
+	id string,
+	existing *entry,
+	done chan struct{},
+	node Node,
+	retirement Retirement,
+) error {
+	var err error
+	if retirement == RetireForForget {
+		err = errors.Join(node.Logout(context.Background()), node.Close(), node.Purge())
+	} else {
+		err = node.Close()
+	}
+	r.endTeardownRemoving(id, existing, done)
+	return err
 }
 
 // idleExpired 는 유예가 지난 노드를 닫는다.
@@ -637,8 +729,9 @@ func (r *Registry) Reset(id string) error {
 // 접지 못한 상태로 그린다. 아직 그 tailnet 이 필요한 소비자는 다시 요청하고, 그때 새 서버가
 // 만들어져 처음부터 붙는다.
 //
-// 남아 있던 리스는 세대가 달라져 무효가 된다(그들의 Release 는 무시된다). Logout·Purge 는 하지
-// 않으므로 등록과 노드 키는 그대로다 — 컨트롤 플레인에 기기가 새로 생기지 않는다.
+// 남아 있던 리스는 세대가 달라져 무효가 된다(그들의 Release 는 무시된다). 보통은 Logout·Purge
+// 없이 등록과 노드 키를 보존한다. 다만 설정 삭제가 이미 RetireForForget 을 기록했다면 취소가 그
+// 강도를 약화시키지 않고 logout/close/purge 를 끝까지 수행한다.
 func (r *Registry) Discard(id string) error {
 	existing := r.lockEntrySettled(id)
 	if existing == nil {
@@ -652,10 +745,14 @@ func (r *Registry) Discard(id string) error {
 	// 남은 소비자 수는 의미가 없어진다. 항목은 Close 가 끝난 뒤 지운다(Reset 과 같은 이유 —
 	// 먼저 지우면 그 사이 도착한 Acquire 가 같은 상태 디렉터리로 두 번째 노드를 만든다).
 	existing.refs = 0
+	retirement := existing.retirement
 	done := existing.beginTeardown(true)
 	node := existing.node
 	r.mu.Unlock()
 
+	if retirement != 0 {
+		return r.finishRetirement(id, existing, done, node, retirement)
+	}
 	err := node.Close()
 	r.endTeardownRemoving(id, existing, done)
 	return err
@@ -780,7 +877,11 @@ func (r *Registry) Close() error {
 		return nil
 	}
 	r.closed = true
-	nodes := make([]Node, 0, len(r.entries))
+	type closeTarget struct {
+		node       Node
+		retirement Retirement
+	}
+	targets := make([]closeTarget, 0, len(r.entries))
 	for _, existing := range r.entries {
 		if existing.idle != nil {
 			existing.idle.Stop()
@@ -790,14 +891,27 @@ func (r *Registry) Close() error {
 		if existing.teardownCloses {
 			continue
 		}
-		nodes = append(nodes, existing.node)
+		targets = append(targets, closeTarget{
+			node:       existing.node,
+			retirement: existing.retirement,
+		})
 	}
 	r.entries = make(map[string]*entry)
 	r.mu.Unlock()
 
 	var firstErr error
-	for _, node := range nodes {
-		if err := node.Close(); err != nil && firstErr == nil {
+	for _, target := range targets {
+		var err error
+		if target.retirement == RetireForForget {
+			err = errors.Join(
+				target.node.Logout(context.Background()),
+				target.node.Close(),
+				target.node.Purge(),
+			)
+		} else {
+			err = target.node.Close()
+		}
+		if err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

@@ -366,7 +366,7 @@ export function SftpBrowserView({
         <View style={styles.loading}>
           <ActivityIndicator size="small" color={palette.accent} />
           <Text style={[styles.loadingText, { color: palette.mutedText }]}>
-            {translate("sftp.connecting")}
+            {session.connectionStatusMessage ?? translate("sftp.connecting")}
           </Text>
         </View>
       ) : (

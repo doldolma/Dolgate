@@ -89,6 +89,13 @@ export type StartShellOptions = {
   onClosed?: () => void;
 };
 
+export type EngineTailnetRoute = {
+  /** The synced Tailnet configuration this connection must use. */
+  tailnetId: string;
+  /** Refuses the connection if the local node joins a different Tailnet. */
+  tailnetName?: string;
+};
+
 export type ConnectOptions = {
   /** Caller-chosen handle, used for diagnostics and native-side bookkeeping. */
   connectionId: string;
@@ -96,6 +103,8 @@ export type ConnectOptions = {
   port: number;
   username: string;
   credential: EngineCredential;
+  /** Omitted for a normal direct-network connection. */
+  tailnet?: EngineTailnetRoute;
   /** Initial PTY geometry, applied to shells that do not override it. */
   size?: EngineTerminalSize;
   /**
@@ -197,8 +206,90 @@ export type EngineArgon2idParams = {
   outputLength: number;
 };
 
+/** Tailnet configuration accepted by the shared Go runtime. */
+export type EngineTailnetConfig = {
+  id: string;
+  hostname?: string;
+  controlUrl?: string;
+  authKey?: string;
+  ephemeral?: boolean;
+};
+
+export type EngineTailnetPeer = {
+  hostName?: string;
+  dnsName?: string;
+  ips?: string[];
+  direct: boolean;
+  relay?: string;
+  rxBytes?: number;
+  txBytes?: number;
+};
+
+export type EngineTailnetStatus = {
+  id: string;
+  state: string;
+  authUrl?: string;
+  error?: string;
+  loginName?: string;
+  tailnetName?: string;
+  nodeName?: string;
+  nodeIp?: string;
+  expired?: boolean;
+  health?: string[];
+  ready?: boolean;
+  authorized?: boolean;
+  identityInvalid?: boolean;
+  online?: boolean;
+  degraded?: boolean;
+  backendState?: string;
+  keyExpiry?: string;
+  cancelled?: boolean;
+  attempting?: boolean;
+  restarts?: number;
+  restartRefused?: boolean;
+  reRegistrations?: number;
+  loginError?: string;
+  backendError?: string;
+  peers?: EngineTailnetPeer[];
+};
+
+export type EngineTailnetEvent =
+  | {
+      type: 'tailnetStatus';
+      requestId?: string;
+      payload: EngineTailnetStatus;
+    }
+  | {
+      type: 'tailnetSnapshot';
+      requestId?: string;
+      payload: {
+        statuses: EngineTailnetStatus[];
+        localNodeName?: string;
+      };
+    };
+
 export interface MobileSshEngine {
   readonly name: string;
+  /**
+   * Applies the complete Tailnet snapshot for one server/account scope.
+   * Reusing the same scope preserves local node identities; changing it closes
+   * the previous runtime before using the new account's state directory.
+   */
+  configureTailnets(
+    stateScope: string,
+    configs: EngineTailnetConfig[],
+    onEvent: (event: EngineTailnetEvent) => void,
+  ): Promise<void>;
+  startTailnet(
+    requestId: string,
+    config: EngineTailnetConfig,
+    timeoutMs?: number,
+  ): Promise<void>;
+  cancelTailnet(requestId: string, tailnetId: string): Promise<void>;
+  disconnectTailnet(requestId: string, tailnetId: string): Promise<void>;
+  snapshotTailnets(requestId: string): Promise<void>;
+  forgetTailnet(tailnetId: string): Promise<void>;
+  closeTailnets(): Promise<void>;
   connect(options: ConnectOptions): Promise<EngineConnection>;
   /**
    * Opens a file-transfer session. This is its own connection rather than a

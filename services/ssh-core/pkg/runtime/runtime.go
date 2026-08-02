@@ -22,7 +22,7 @@ import (
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/internal/sshsession"
 	"dolssh/services/ssh-core/internal/ssmforward"
-	"dolssh/services/ssh-core/internal/tailnet"
+	"dolssh/services/ssh-core/internal/tailnetservice"
 	"dolssh/services/ssh-core/internal/tmuxsession"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
@@ -161,31 +161,18 @@ type Runtime struct {
 	ssh        sshSessionManager
 	// tmux 는 control mode 명령(SplitPane/NewWindow/…)을 위해 concrete 타입으로 둔다.
 	// sshSessionManager 인터페이스(HasSession/WriteBytes/…)도 만족하므로 라우팅에 그대로 쓰인다.
-	tmux               *tmuxsession.Manager
-	mosh               moshSessionManager
-	aws                awsSessionManager
-	local              localSessionManager
-	serial             serialSessionManager
-	sftp               sftpService
-	containers         containersService
-	forwarding         forwardingService
-	ssmForwarding      ssmForwardingService
-	probeHostKey       hostKeyProbeFunc
-	inspectCertificate certificateInspectFunc
-	tailnets           *tailnet.Registry
-	tailnetConfigs     *tailnetConfigs
-	tailnetTests       *tailnetTests
-	// tailnetRecovery* 는 백엔드 알림이 몰려 올 때 복구 판정을 한 번으로 모으기 위한 것이다.
-	// 복구는 폴링이 아니라 IPN 버스 알림으로 시작된다.
-	tailnetRecoveryMu      sync.Mutex
-	tailnetRecoveryPending map[string]bool
-	// tailnetDegraded* 는 동기화가 끊긴 채로 관문이 통과시킨 tailnet 들이다.
-	//
-	// 결정을 시도 안에만 두면 안 된다 — 화면은 1 초마다 스냅샷을 다시 읽으므로, 시도가 끝난 직후
-	// 그 결정이 사라지고 통과한 단계가 다시 "대기" 로 그려진다(호스트 계층은 시작도 안 한 것처럼
-	// 보인다). 결정을 노드 단위로 들고 있다가 동기화가 돌아오면 지운다.
-	tailnetDegradedMu         sync.Mutex
-	tailnetDegraded           map[string]bool
+	tmux                      *tmuxsession.Manager
+	mosh                      moshSessionManager
+	aws                       awsSessionManager
+	local                     localSessionManager
+	serial                    serialSessionManager
+	sftp                      sftpService
+	containers                containersService
+	forwarding                forwardingService
+	ssmForwarding             ssmForwardingService
+	probeHostKey              hostKeyProbeFunc
+	inspectCertificate        certificateInspectFunc
+	tailnetService            *tailnetservice.Service
 	autocompleteMu            sync.Mutex
 	autocompleteRevisions     map[string]int
 	shellIntegrationInstalled map[string]bool
@@ -297,14 +284,12 @@ func New(options Options) *Runtime {
 		},
 	)
 
-	// tailnet 레지스트리는 여기서만 붙인다. newRuntimeWithDeps 는 테스트가 직접 부르는
-	// 생성자라 시그니처를 늘리지 않는다.
-	instance.tailnetConfigs = newTailnetConfigs(options.TailnetStateDir)
-	instance.tailnetTests = newTailnetTests()
-	instance.tailnets = tailnet.NewRegistry(instance.tailnetConfigs.newNode, tailnet.Options{})
-	// 복구는 코어가 맡는다. 세션이 각자 하면 같은 노드를 두고 여러 곳이 복구를 시도해 인증
-	// 링크가 서로를 무효화한다. 폴링이 아니라 백엔드 알림(IPN 버스)으로 시작된다.
-	instance.tailnetConfigs.notify = instance.onTailnetNotify
+	// Tailnet orchestration은 공통 서비스가 소유한다. newRuntimeWithDeps 는 테스트가 직접
+	// 부르는 생성자라 시그니처를 늘리지 않고, 실제 New 경로에서만 서비스를 붙인다.
+	instance.tailnetService = tailnetservice.New(tailnetservice.Options{
+		StateDir:  options.TailnetStateDir,
+		EmitEvent: emitEvent,
+	})
 	// tmux 매니저는 newRuntimeWithDeps 안에서 만들어지므로 여기서 붙인다.
 	instance.tmux.SetTailnetDial(tailnetDial)
 
@@ -1040,14 +1025,4 @@ func (runtime *Runtime) Shutdown() {
 	runtime.ssmForwarding.Shutdown()
 
 	runtime.shutdownTailnets()
-}
-
-// shutdownTailnets 는 노드를 닫는다. 로그아웃은 하지 않는다 — 로그아웃하면 등록이 사라져서
-// 다음 실행 때 브라우저 로그인을 처음부터 다시 해야 한다. 닫기만 하면 컨트롤 플레인은 즉시
-// 오프라인으로 보고, ephemeral 노드는 그쪽 정책에 따라 정리된다.
-func (runtime *Runtime) shutdownTailnets() {
-	if runtime.tailnets == nil {
-		return
-	}
-	_ = runtime.tailnets.Close()
 }

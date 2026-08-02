@@ -19,7 +19,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/pkg/sftp v1.13.10
+	github.com/pkg/sftp v1.13.11
 	golang.org/x/crypto v0.54.0
 	golang.org/x/oauth2 v0.36.0
 	gorm.io/driver/mysql v1.6.0
@@ -29,7 +29,7 @@ require (
 
 replace dolssh/services/ssh-core => ../ssh-core
 
-replace tailscale.com v1.102.0 => github.com/doldolma/tailscale v1.102.0-dolgate.1
+replace tailscale.com v1.102.1 => github.com/doldolma/tailscale v1.102.1-dolgate.1
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -128,7 +128,7 @@ require (
 	github.com/unixshells/vt-go v0.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/xtaci/smux v1.5.35 // indirect
+	github.com/xtaci/smux v1.5.57 // indirect
 	go.bug.st/serial v1.7.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.7.0 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
@@ -149,5 +149,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.53.0 // indirect
-	tailscale.com v1.102.0 // indirect
+	tailscale.com v1.102.1 // indirect
 )

@@ -1046,6 +1046,130 @@ func TestForgetDoesNotLetANewNodeStartWhileTearingDown(t *testing.T) {
 	}
 }
 
+func TestRetireBlocksNewLeasesWithoutInterruptingExistingLease(t *testing.T) {
+	registry, _, built, lastNode := countingRegistry(t)
+
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	node := lastNode()
+	retired, err := registry.Retire("corp", RetireForReset)
+	if err != nil || !retired {
+		t.Fatalf("Retire() = (%v, %v), want (true, nil)", retired, err)
+	}
+
+	const attempts = 20
+	var wait sync.WaitGroup
+	errs := make(chan error, attempts)
+	for range attempts {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			_, acquireErr := registry.Acquire("corp")
+			errs <- acquireErr
+		}()
+	}
+	wait.Wait()
+	close(errs)
+	for acquireErr := range errs {
+		if !errors.Is(acquireErr, ErrNodeRetiring) {
+			t.Fatalf("Acquire() error = %v, want ErrNodeRetiring", acquireErr)
+		}
+	}
+	if got := built(); got != 1 {
+		t.Fatalf("nodes built while retiring = %d, want 1", got)
+	}
+	if _, closes := node.counts(); closes != 0 {
+		t.Fatalf("existing node closed while leased: closes = %d", closes)
+	}
+
+	lease.Release()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, closes := node.counts(); closes == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("retired node was not closed after its final lease released")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestRetireForForgetPromotesPendingResetAndPurgesOnce(t *testing.T) {
+	registry, _, _, lastNode := countingRegistry(t)
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	node := lastNode()
+
+	if _, err := registry.Retire("corp", RetireForReset); err != nil {
+		t.Fatalf("Retire(reset) error = %v", err)
+	}
+	if _, err := registry.Retire("corp", RetireForForget); err != nil {
+		t.Fatalf("Retire(forget) error = %v", err)
+	}
+	lease.Release()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if got := node.order(); len(got) == 3 {
+			if got[0] != "logout" || got[1] != "close" || got[2] != "purge" {
+				t.Fatalf("retirement order = %v", got)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("forget retirement did not finish: %v", node.order())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestDiscardPreservesPendingForgetRetirement(t *testing.T) {
+	registry, _, _, lastNode := countingRegistry(t)
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := lastNode()
+	if _, err := registry.Retire("corp", RetireForForget); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registry.Discard("corp"); err != nil {
+		t.Fatalf("Discard() error = %v", err)
+	}
+	lease.Release()
+	if got := node.order(); len(got) != 3 ||
+		got[0] != "logout" || got[1] != "close" || got[2] != "purge" {
+		t.Fatalf("discard retirement order = %v", got)
+	}
+}
+
+func TestClosePreservesPendingForgetRetirement(t *testing.T) {
+	registry, _, _, lastNode := countingRegistry(t)
+	lease, err := registry.Acquire("corp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := lastNode()
+	if _, err := registry.Retire("corp", RetireForForget); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	lease.Release()
+	if got := node.order(); len(got) != 3 ||
+		got[0] != "logout" || got[1] != "close" || got[2] != "purge" {
+		t.Fatalf("close retirement order = %v", got)
+	}
+}
+
 // 판정은 이 두 함수에만 있다. 여기가 흔들리면 관문과 dial 안전망이 동시에 흔들린다.
 func TestStatusConnectedRequiresALiveControlPlaneSession(t *testing.T) {
 	// 만료돼도 새 netmap 이 오지 않으면 running 이 그대로 남는다. 그것을 연결됨으로 읽으면

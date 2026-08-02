@@ -25,6 +25,44 @@ RCT_EXTERN_METHOD(inspectCertificate
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(configureTailnets
+                  : (NSString *)stateScope configsJson
+                  : (NSString *)configsJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(startTailnet
+                  : (NSString *)requestId payloadJson
+                  : (NSString *)payloadJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(cancelTailnet
+                  : (NSString *)requestId tailnetId
+                  : (NSString *)tailnetId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(disconnectTailnet
+                  : (NSString *)requestId tailnetId
+                  : (NSString *)tailnetId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(snapshotTailnets
+                  : (NSString *)requestId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(forgetTailnet
+                  : (NSString *)tailnetId resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(closeTailnets
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(connect
                   : (NSString *)connectionId requestJson
                   : (NSString *)requestJson resolve

@@ -1,5 +1,18 @@
 require("react-native-gesture-handler/jestSetup");
 
+jest.mock("@react-native-documents/picker", () => ({
+  pick: jest.fn(),
+  keepLocalCopy: jest.fn(),
+  isErrorWithCode: jest.fn(() => false),
+  errorCodes: {
+    OPERATION_CANCELED: "OPERATION_CANCELED",
+  },
+  types: {
+    allFiles: "*/*",
+    plainText: "text/plain",
+  },
+}));
+
 // The SSH engine's native module. Every test needs it now that the store and the
 // vault reach the engine directly — previously each file mocked the russh
 // package instead. Individual tests override these with their own behaviour.
@@ -37,6 +50,13 @@ NativeModules.GoSshEngineModule = NativeModules.GoSshEngineModule ?? {
   sftpRemove: jest.fn(async () => undefined),
   sftpStat: jest.fn(async () => "{}"),
   closeSftp: jest.fn(async () => undefined),
+  configureTailnets: jest.fn(async () => undefined),
+  startTailnet: jest.fn(async () => undefined),
+  cancelTailnet: jest.fn(async () => undefined),
+  disconnectTailnet: jest.fn(async () => undefined),
+  snapshotTailnets: jest.fn(async () => undefined),
+  forgetTailnet: jest.fn(async () => undefined),
+  closeTailnets: jest.fn(async () => undefined),
   // Deterministic per (passphrase, salt) rather than a constant: the vault tests
   // distinguish a correct passphrase from a wrong one by whether the derived key
   // unwraps the DEK, so a fixed key would make both look identical.

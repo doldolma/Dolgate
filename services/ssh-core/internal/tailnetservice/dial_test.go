@@ -1,4 +1,4 @@
-package runtime
+package tailnetservice
 
 import (
 	"context"
@@ -67,13 +67,13 @@ type fakeConn struct {
 
 func (c *fakeConn) Close() error { c.closes += 1; return nil }
 
-func leaseCount(instance *Runtime, id string) int {
+func leaseCount(instance *Service, id string) int {
 	return instance.tailnets.Leases(id)
 }
 
-func newDialRuntime(t *testing.T, node tailnet.Node) *Runtime {
+func newDialRuntime(t *testing.T, node tailnet.Node) *Service {
 	t.Helper()
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(
@@ -249,7 +249,7 @@ func TestTailnetDialAllowsWhenTheControlPlaneReportsNoName(t *testing.T) {
 }
 
 func TestTailnetDialRejectedWhenSupportIsDisabled(t *testing.T) {
-	instance := &Runtime{}
+	instance := &Service{}
 
 	if _, err := instance.tailnetDial(TailnetRoute{ID: "corp"}); err == nil {
 		t.Error("expected tailnetDial to be rejected without a registry")
@@ -361,7 +361,7 @@ func TestTailnetDialReRegistersADeletedIdentityBeforeDialing(t *testing.T) {
 	replacement := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
 	nodes := []*dialNode{invalid, replacement}
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -393,6 +393,44 @@ func TestTailnetDialReRegistersADeletedIdentityBeforeDialing(t *testing.T) {
 	}
 }
 
+func TestTailnetDialReplacesAnInvalidIdentityOnlyOncePerConfigGeneration(t *testing.T) {
+	first := &dialNode{status: tailnet.Status{
+		State: tailnet.StateRunning, IdentityInvalid: true,
+	}}
+	second := &dialNode{status: tailnet.Status{
+		State: tailnet.StateRunning, IdentityInvalid: true,
+	}}
+	nodes := []*dialNode{first, second}
+	built := 0
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
+	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
+	instance.tailnetConfigs.set(coretypes.TailnetConfigPayload{ID: "corp"})
+	instance.tailnetTests = newTailnetTests()
+	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
+		if built >= len(nodes) {
+			t.Fatal("identity retry created more than one replacement node")
+		}
+		node := nodes[built]
+		built++
+		return node, nil
+	}, tailnet.Options{})
+	t.Cleanup(func() { _ = instance.tailnets.Close() })
+
+	dial, err := instance.tailnetDial(TailnetRoute{ID: "corp"})
+	if err != nil {
+		t.Fatalf("tailnetDial: %v", err)
+	}
+	if _, err := dial(context.Background(), "tcp", "nas:22"); !errors.Is(err, ErrTailnetIdentityInvalid) {
+		t.Fatalf("first dial error = %v, want ErrTailnetIdentityInvalid", err)
+	}
+	if _, err := dial(context.Background(), "tcp", "nas:22"); !errors.Is(err, ErrTailnetIdentityInvalid) {
+		t.Fatalf("second dial error = %v, want ErrTailnetIdentityInvalid", err)
+	}
+	if built != 2 {
+		t.Fatalf("nodes built = %d, want 2", built)
+	}
+}
+
 func TestTailnetDialProbesAndReRegistersADeletedIdentityBeforeDialing(t *testing.T) {
 	stale := &identityProbeDialNode{dialNode: &dialNode{status: tailnet.Status{
 		State:  tailnet.StateRunning,
@@ -401,7 +439,7 @@ func TestTailnetDialProbesAndReRegistersADeletedIdentityBeforeDialing(t *testing
 	replacement := &dialNode{status: tailnet.Status{State: tailnet.StateRunning, Online: true}}
 	nodes := []tailnet.Node{stale, replacement}
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {

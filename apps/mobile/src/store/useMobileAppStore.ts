@@ -27,6 +27,7 @@ import type {
   SshHostRecord,
   SyncPayloadV2,
   SyncStatus,
+  TailnetPayload,
   VaultCacheOwner,
   VaultKdfDescriptor,
 } from '@dolssh/shared-core';
@@ -53,6 +54,7 @@ import {
   buildBrowserLoginUrl,
   clearStoredAwsProfiles,
   clearStoredAwsSsoTokens,
+  clearStoredTailnets,
   buildHostMutationSyncPayload,
   buildKnownHostRecord,
   buildKnownHostsSyncPayload,
@@ -70,6 +72,7 @@ import {
   decodeKnownHosts,
   decodeManagedSecrets,
   decodeSupportedHosts,
+  decodeTailnets,
   deleteRemoteAccount,
   deriveSecretMetadata,
   fetchExchangeSession,
@@ -78,6 +81,7 @@ import {
   getSettingsValidationMessage,
   clearStoredVaultDek,
   loadStoredAwsProfiles,
+  loadStoredTailnets,
   loadStoredVaultDek,
   type StoredVaultDek,
   logoutRemoteSession,
@@ -94,6 +98,7 @@ import {
   sanitizeTerminalSnapshot,
   saveStoredAuthSession,
   saveStoredAwsProfiles,
+  saveStoredTailnets,
   saveStoredSecrets,
   AsyncStorage,
   loadStoredAuthSession,
@@ -112,6 +117,18 @@ import {
 import { AwsSftpHostKeyChallengeError, connectAwsSftp } from '../lib/aws-sftp';
 import { openAwsSsoBrowser } from '../lib/aws-sso-bridge';
 import { closeInAppBrowser, openInAppBrowser } from '../lib/in-app-browser';
+import {
+  cancelSyncedTailnetStart,
+  closeSyncedTailnets,
+  configureSyncedTailnets,
+  forgetSyncedTailnets,
+  isSyncedTailnetConfigCurrent,
+  resolveSyncedTailnetRoute,
+  resetSyncedTailnetRuntimeForTests,
+  startSyncedTailnet,
+  SyncedTailnetStartError,
+  type SyncedTailnetRouteResolution,
+} from '../lib/tailnet-runtime';
 import {
   resolvePtyTerminalGridSize,
   setReportedTerminalGrid,
@@ -134,8 +151,12 @@ import {
   type EngineCredential,
   type EngineSftpConnection,
   type EngineShell,
+  type EngineTailnetStatus,
 } from '../engine';
-import { getAwsEc2SftpDisabledMessage, getNewVaultPassphraseMessage } from '../i18n/shared-messages';
+import {
+  getAwsEc2SftpDisabledMessage,
+  getNewVaultPassphraseMessage,
+} from '../i18n/shared-messages';
 import { t } from '../i18n';
 
 // shared-core 는 코드만 돌려주므로, 사용자에게 보일 문구는 이 앱에서 만들어 던진다.
@@ -151,6 +172,7 @@ const MAX_PERSISTED_SESSIONS = 24;
 const SFTP_TRANSFER_CHUNK_SIZE = 256 * 1024;
 const SESSION_SNAPSHOT_FLUSH_MS = 750;
 const STARTUP_REFRESH_TIMEOUT_MS = 3_000;
+const MOBILE_TAILNET_START_TIMEOUT_MS = 3 * 60 * 1_000;
 // 모듈 로드 시점에는 i18n 초기화 전이고 언어를 바꿔도 갱신되지 않으므로 호출 시점에 번역한다.
 function getStartupRefreshTimeoutMessage(): string {
   return t('store.serverSlow');
@@ -487,6 +509,7 @@ interface MobileAppState {
   groups: GroupRecord[];
   hosts: HostRecord[];
   awsProfiles: ManagedAwsProfilePayload[];
+  tailnets: TailnetPayload[];
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
   sessions: MobileSessionRecord[];
@@ -577,6 +600,18 @@ const runtimeSftpSessions = new Map<string, SftpRuntimeSession>();
 const terminalSubscriptionGenerations = new Map<string, number>();
 const pendingSessionConnections = new Set<string>();
 const pendingSftpConnections = new Set<string>();
+type PendingTailnetConnection = {
+  requestId: string;
+  tailnetId: string;
+  configSignature: string;
+};
+const pendingTailnetConnections = new Map<string, PendingTailnetConnection>();
+// Native in-app browsers have one presentation slot. Joined callers may share
+// the same URL, but a different Tailnet must not replace an authorization page
+// the user is already completing.
+let activeTailnetAuthorization:
+  | { requestIds: Set<string>; tailnetId: string; url: string }
+  | null = null;
 const runtimeSessionSnapshots = new Map<string, string>();
 const runtimeSnapshotFlushTimers = new Map<
   string,
@@ -609,6 +644,110 @@ let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
   | null = null;
 let pendingAwsSsoCancelHandler: (() => void) | null = null;
+let tailnetRequestCounter = 0;
+
+class TailnetPreparationCancelledError extends Error {
+  constructor() {
+    super('Tailnet preparation was cancelled.');
+    this.name = 'TailnetPreparationCancelledError';
+  }
+}
+
+class TailnetConfigurationChangedError extends Error {
+  constructor() {
+    super(t('store.tailnetConfigurationChanged'));
+    this.name = 'TailnetConfigurationChangedError';
+  }
+}
+
+class TailnetAuthorizationBusyError extends Error {
+  constructor() {
+    super(t('store.tailnetAuthorizationBusy'));
+    this.name = 'TailnetAuthorizationBusyError';
+  }
+}
+
+async function cancelPendingTailnetConnection(
+  recordId: string,
+): Promise<boolean> {
+  const pending = pendingTailnetConnections.get(recordId);
+  if (!pending) {
+    return false;
+  }
+  pendingTailnetConnections.delete(recordId);
+
+  // Go joins simultaneous attempts for one Tailnet. Cancelling the shared
+  // attempt while another tab still needs it would abort that tab too.
+  const anotherConsumer = [...pendingTailnetConnections.values()].some(
+    candidate => candidate.tailnetId === pending.tailnetId,
+  );
+  if (!anotherConsumer) {
+    await cancelSyncedTailnetStart(pending.requestId, pending.tailnetId).catch(
+      () => undefined,
+    );
+  }
+  return true;
+}
+
+async function cancelAllPendingTailnetConnections(): Promise<void> {
+  const pending = [...pendingTailnetConnections.values()];
+  pendingTailnetConnections.clear();
+  const requestByTailnet = new Map<string, string>();
+  for (const request of pending) {
+    if (!requestByTailnet.has(request.tailnetId)) {
+      requestByTailnet.set(request.tailnetId, request.requestId);
+    }
+  }
+  await Promise.allSettled(
+    [...requestByTailnet].map(([tailnetId, requestId]) =>
+      cancelSyncedTailnetStart(requestId, tailnetId),
+    ),
+  );
+  activeTailnetAuthorization = null;
+}
+
+function getTailnetProgressMessage(status: EngineTailnetStatus): string {
+  if (status.loginError) {
+    return t('store.tailnetLoginRejected');
+  }
+  if (status.state === 'needsApproval') {
+    return t('store.tailnetNeedsApproval');
+  }
+  if (status.authUrl) {
+    return t('store.tailnetAuthorizeInBrowser');
+  }
+  if (status.expired || status.identityInvalid) {
+    return t('store.tailnetReauthenticating');
+  }
+  if (status.state === 'needsAuth') {
+    return t('store.tailnetPreparingAuthorization');
+  }
+  if (status.ready || status.degraded) {
+    return t('store.tailnetReady');
+  }
+  return t('store.tailnetConnecting');
+}
+
+function getTailnetFailureMessage(
+  status: EngineTailnetStatus | undefined,
+): string {
+  if (status?.loginError) {
+    return t('store.tailnetLoginRejected');
+  }
+  if (status?.state === 'needsApproval') {
+    return t('store.tailnetNeedsApproval');
+  }
+  if (status?.identityInvalid) {
+    return t('store.tailnetIdentityInvalid');
+  }
+  if (status?.expired) {
+    return t('store.tailnetReauthFailed');
+  }
+  if (status?.state === 'needsAuth') {
+    return t('store.tailnetAuthorizationIncomplete');
+  }
+  return t('store.tailnetConnectFailed');
+}
 
 function stopSyncPolling(): void {
   if (syncPollTimer) {
@@ -655,6 +794,11 @@ function ensureSyncPollingLifecycle(): void {
         }
       } else {
         stopSyncPolling();
+        // Do not close Tailnet here. Browser authorization intentionally sends
+        // the app to the background, and live SSH/SFTP sessions hold Tailnet
+        // leases that should survive a brief app switch. The mobile Go runtime
+        // tears down only idle nodes after its shorter grace period; native
+        // module invalidation and account boundaries close everything eagerly.
       }
     });
   }
@@ -680,6 +824,7 @@ function countSyncPayloadRecords(payload: SyncPayloadV2): number {
     (payload.knownHosts?.length ?? 0) +
     (payload.portForwards?.length ?? 0) +
     (payload.dnsOverrides?.length ?? 0) +
+    (payload.tailnets?.length ?? 0) +
     (payload.preferences?.length ?? 0) +
     (payload.awsProfiles?.length ?? 0) +
     (payload.snippets?.length ?? 0)
@@ -724,9 +869,7 @@ export function sortSessionsByRecency(
 function requireLegacyVaultKey(session: AuthSession): string {
   const keyBase64 = session.vaultBootstrap.keyBase64;
   if (!keyBase64) {
-    throw new Error(
-      t('store.noVaultKey'),
-    );
+    throw new Error(t('store.noVaultKey'));
   }
   return keyBase64;
 }
@@ -1163,8 +1306,8 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
           .filter(Boolean)
           .join(' · ')
       : isSshHostRecord(host)
-      ? `${host.username}@${host.hostname}:${host.port}`
-      : host.label;
+        ? `${host.username}@${host.hostname}:${host.port}`
+        : host.label;
   return {
     id,
     sessionId: id,
@@ -1172,6 +1315,7 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
     title: host.label,
     connectionKind,
     connectionDetails,
+    connectionStatusMessage: null,
     status: 'connecting',
     hasReceivedOutput: false,
     isRestorable: true,
@@ -1196,6 +1340,7 @@ function createSftpSessionRecord(
     status: 'connecting',
     currentPath: '.',
     listing: null,
+    connectionStatusMessage: null,
     errorMessage: null,
     lastEventAt: now,
     lastConnectedAt: null,
@@ -1499,6 +1644,7 @@ function compactPersistedSessions(
     .map(session => ({
       ...session,
       lastViewportSnapshot: '',
+      connectionStatusMessage: null,
     }));
 }
 
@@ -1513,6 +1659,7 @@ function normalizePersistedSessionsForColdStart(
           ...session,
           status: 'closed',
           errorMessage: null,
+          connectionStatusMessage: null,
           lastEventAt: now,
           lastDisconnectedAt: session.lastDisconnectedAt ?? now,
         };
@@ -1606,6 +1753,7 @@ function createEmptyProtectedState(): Pick<
   | 'groups'
   | 'hosts'
   | 'awsProfiles'
+  | 'tailnets'
   | 'knownHosts'
   | 'secretMetadata'
   | 'secretsByRef'
@@ -1621,6 +1769,7 @@ function createEmptyProtectedState(): Pick<
     groups: [],
     hosts: [],
     awsProfiles: [],
+    tailnets: [],
     knownHosts: [],
     secretMetadata: [],
     secretsByRef: {},
@@ -1661,13 +1810,16 @@ function parseAuthCallbackUrl(
 function getKnownHostStatus(
   knownHosts: KnownHostRecord[],
   info: MobileServerPublicKeyInfo,
+  tailnetId?: string | null,
 ): {
   status: 'trusted' | 'untrusted' | 'mismatch';
   existing: KnownHostRecord | null;
 } {
+  const normalizedTailnetId = tailnetId?.trim() || undefined;
   const sameAlgorithm =
     knownHosts.find(
       record =>
+        (record.tailnetId?.trim() || undefined) === normalizedTailnetId &&
         record.host === info.host &&
         record.port === info.port &&
         record.algorithm === info.algorithm,
@@ -1752,6 +1904,7 @@ async function disposeRuntimeSftpSession(sessionId: string): Promise<void> {
 }
 
 async function disconnectAllRuntimeSessions(): Promise<void> {
+  await cancelAllPendingTailnetConnections();
   for (const sessionId of [...runtimeSessions.keys()]) {
     await disposeRuntimeSession(sessionId);
   }
@@ -1778,10 +1931,17 @@ export const useMobileAppStore = create<MobileAppState>()(
       const clearPersistedSecureState = async (options?: {
         clearStoredAuthSession?: boolean;
       }) => {
+        // This helper is the final account boundary for startup rejection,
+        // refresh expiry, logout, account deletion, and server changes. Keep
+        // runtime teardown here so a new caller cannot clear credentials while
+        // old-account sockets or Tailnet authorization attempts remain alive.
+        await disconnectAllRuntimeSessions();
         const tasks: Array<Promise<unknown>> = [
           clearStoredSecrets(),
           clearStoredAwsProfiles(),
           clearStoredAwsSsoTokens(),
+          clearStoredTailnets(),
+          closeSyncedTailnets(),
         ];
         if (options?.clearStoredAuthSession !== false) {
           tasks.unshift(clearStoredAuthSession());
@@ -1970,10 +2130,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               auth: {
                 status: 'offline-authenticated',
                 session,
-                offline: buildOfflineState(
-                  session,
-                  t('store.restoredOffline'),
-                ),
+                offline: buildOfflineState(session, t('store.restoredOffline')),
                 errorMessage: null,
               },
               vault: offlineVaultState,
@@ -2025,11 +2182,36 @@ export const useMobileAppStore = create<MobileAppState>()(
       ): Promise<void> => {
         const finishSecureRestoreTiming = beginStartupTiming('secure restore');
         try {
-          const [secretsByRef, awsProfiles] = await Promise.all([
+          const [secretsByRef, awsProfiles, tailnets] = await Promise.all([
             loadStoredSecrets(),
             loadStoredAwsProfiles(),
+            loadStoredTailnets(),
           ]);
-          const currentState = get();
+          let currentState = get();
+          if (
+            !isSecureStateRestoreCurrent(
+              currentRestoreVersion,
+              serverUrl,
+              currentState.auth,
+              currentState.settings.serverUrl,
+            )
+          ) {
+            return;
+          }
+
+          const currentSession = currentState.auth.session;
+          if (!currentSession) {
+            return;
+          }
+          await configureSyncedTailnets({
+            serverUrl,
+            userId: currentSession.user.id,
+            tailnets,
+          }).catch(error => {
+            console.warn('Failed to restore cached Tailnets.', error);
+          });
+
+          currentState = get();
           if (
             !isSecureStateRestoreCurrent(
               currentRestoreVersion,
@@ -2043,6 +2225,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           set(state => ({
             awsProfiles,
+            tailnets,
             secretsByRef,
             secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
             secureStateReady: true,
@@ -2233,9 +2416,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
         if (vault.status === 'legacy') {
           if (vault.migrationRequired) {
-            throw new Error(
-              t('store.vaultSetupRequired'),
-            );
+            throw new Error(t('store.vaultSetupRequired'));
           }
           return requireLegacyVaultKey(session);
         }
@@ -2402,9 +2583,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             ...state.syncStatus,
             pendingPush: true,
             status: 'error',
-            errorMessage:
-              error.message ||
-              t('store.vaultResetElsewhere'),
+            errorMessage: error.message || t('store.vaultResetElsewhere'),
           },
         }));
         return true;
@@ -2467,21 +2646,40 @@ export const useMobileAppStore = create<MobileAppState>()(
       // probing the host first. All of them rather than one: the server chooses
       // the algorithm, and a host with both Ed25519 and ECDSA on file would
       // otherwise fail whenever it picks the one that was left out.
-      const trustedHostKeysFor = (hostname: string, port: number): string[] =>
-        get()
+      const trustedHostKeysFor = (
+        hostname: string,
+        port: number,
+        tailnetId?: string | null,
+      ): string[] => {
+        const normalizedTailnetId = tailnetId?.trim() || undefined;
+        return get()
           .knownHosts.filter(
-            record => record.host === hostname && record.port === port,
+            record =>
+              (record.tailnetId?.trim() || undefined) === normalizedTailnetId &&
+              record.host === hostname &&
+              record.port === port,
           )
           .map(record => record.publicKeyBase64)
           .filter(Boolean);
+      };
 
       const resolveKnownHostTrust = async (
-        host: Pick<HostRecord, 'id' | 'label'>,
+        host: Pick<HostRecord, 'id' | 'label'> & {
+          tailnetId?: string | null;
+        },
         info: MobileServerPublicKeyInfo,
       ): Promise<boolean> => {
-        const { status, existing } = getKnownHostStatus(get().knownHosts, info);
+        const { status, existing } = getKnownHostStatus(
+          get().knownHosts,
+          info,
+          host.tailnetId,
+        );
         if (status === 'trusted') {
-          const refreshedRecord = buildKnownHostRecord(info, existing);
+          const refreshedRecord = buildKnownHostRecord(
+            info,
+            existing,
+            host.tailnetId,
+          );
           set(state => ({
             knownHosts: sortKnownHosts(
               state.knownHosts.map(record =>
@@ -2509,7 +2707,11 @@ export const useMobileAppStore = create<MobileAppState>()(
           return false;
         }
 
-        const trustedRecord = buildKnownHostRecord(info, existing);
+        const trustedRecord = buildKnownHostRecord(
+          info,
+          existing,
+          host.tailnetId,
+        );
         const nextKnownHosts = sortKnownHosts(
           get().knownHosts.filter(record => record.id !== trustedRecord.id),
         );
@@ -2724,6 +2926,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           const nextSessions = patchSessionRecord(state.sessions, sessionId, {
             status,
             errorMessage: errorMessage ?? null,
+            ...(status === 'connecting'
+              ? {}
+              : { connectionStatusMessage: null }),
             isRestorable: true,
             lastEventAt: now,
             lastDisconnectedAt:
@@ -2763,6 +2968,9 @@ export const useMobileAppStore = create<MobileAppState>()(
             {
               status,
               errorMessage: errorMessage ?? null,
+              ...(status === 'connecting'
+                ? {}
+                : { connectionStatusMessage: null }),
               lastEventAt: now,
               lastDisconnectedAt:
                 status === 'closed' || status === 'error' ? now : undefined,
@@ -2783,17 +2991,189 @@ export const useMobileAppStore = create<MobileAppState>()(
         });
       };
 
+      const setConnectionProgress = (
+        kind: 'terminal' | 'sftp',
+        recordId: string,
+        message: string | null,
+      ) => {
+        const now = new Date().toISOString();
+        if (kind === 'terminal') {
+          set(state => ({
+            sessions: patchSessionRecord(state.sessions, recordId, {
+              connectionStatusMessage: message,
+              lastEventAt: now,
+            }),
+          }));
+          return;
+        }
+        set(state => ({
+          sftpSessions: patchSftpSessionRecord(state.sftpSessions, recordId, {
+            connectionStatusMessage: message,
+            lastEventAt: now,
+          }),
+        }));
+      };
+
+      const prepareTailnetForConnection = async (input: {
+        kind: 'terminal' | 'sftp';
+        recordId: string;
+        hostId: string;
+        resolution: Extract<SyncedTailnetRouteResolution, { kind: 'tailnet' }>;
+      }): Promise<Extract<SyncedTailnetRouteResolution, { kind: 'tailnet' }>> => {
+        tailnetRequestCounter += 1;
+        const requestId = `mobile-${input.kind}-${input.recordId}-${tailnetRequestCounter}`;
+        const pendingRequest: PendingTailnetConnection = {
+          requestId,
+          tailnetId: input.resolution.tailnetId,
+          configSignature: input.resolution.configSignature,
+        };
+        pendingTailnetConnections.set(input.recordId, pendingRequest);
+        const browserOpenTasks: Promise<void>[] = [];
+        let browserOpenError: unknown;
+
+        setConnectionProgress(
+          input.kind,
+          input.recordId,
+          t('store.tailnetConnecting'),
+        );
+
+        try {
+          await startSyncedTailnet({
+            requestId,
+            tailnetId: input.resolution.tailnetId,
+            tailnets: get().tailnets,
+            timeoutMs: MOBILE_TAILNET_START_TIMEOUT_MS,
+            onStatus: status => {
+              setConnectionProgress(
+                input.kind,
+                input.recordId,
+                getTailnetProgressMessage(status),
+              );
+              const authUrl = status.authUrl?.trim();
+              if (!authUrl) {
+                return;
+              }
+              if (
+                activeTailnetAuthorization?.url === authUrl &&
+                activeTailnetAuthorization.tailnetId ===
+                  input.resolution.tailnetId
+              ) {
+                activeTailnetAuthorization.requestIds.add(requestId);
+                return;
+              }
+              if (activeTailnetAuthorization) {
+                browserOpenError = new TailnetAuthorizationBusyError();
+                void getEngine()
+                  .cancelTailnet(requestId, input.resolution.tailnetId)
+                  .catch(() => undefined);
+                return;
+              }
+              activeTailnetAuthorization = {
+                requestIds: new Set([requestId]),
+                tailnetId: input.resolution.tailnetId,
+                url: authUrl,
+              };
+              // Keep Tailnet authorization in the same browser sheet used by
+              // account and AWS login. The user closes it manually after the
+              // provider confirms approval; completion does not rely on a
+              // Headscale redirect because the Go runtime polls readiness.
+              browserOpenTasks.push(
+                openInAppBrowser(authUrl).catch(error => {
+                  browserOpenError = error;
+                  void getEngine()
+                    .cancelTailnet(requestId, input.resolution.tailnetId)
+                    .catch(() => undefined);
+                }),
+              );
+            },
+          });
+          await Promise.all(browserOpenTasks);
+
+          if (
+            pendingTailnetConnections.get(input.recordId) !== pendingRequest
+          ) {
+            throw new TailnetPreparationCancelledError();
+          }
+          if (browserOpenError) {
+            if (browserOpenError instanceof TailnetAuthorizationBusyError) {
+              throw browserOpenError;
+            }
+            throw new Error(t('store.tailnetBrowserOpenFailed'));
+          }
+          const currentHost = get().hosts.find(host => host.id === input.hostId);
+          const currentResolution = currentHost
+            ? resolveSyncedTailnetRoute(
+                {
+                  tailnetId:
+                    'tailnetId' in currentHost
+                      ? currentHost.tailnetId
+                      : undefined,
+                },
+                get().tailnets,
+              )
+            : { kind: 'missing' as const, tailnetId: input.resolution.tailnetId };
+          if (
+            !isSyncedTailnetConfigCurrent(
+              input.resolution.tailnetId,
+              input.resolution.configSignature,
+            ) ||
+            currentResolution.kind !== 'tailnet' ||
+            currentResolution.tailnetId !== input.resolution.tailnetId ||
+            currentResolution.configSignature !== input.resolution.configSignature
+          ) {
+            throw new TailnetConfigurationChangedError();
+          }
+          return currentResolution;
+        } catch (error) {
+          if (
+            error instanceof TailnetPreparationCancelledError ||
+            pendingTailnetConnections.get(input.recordId) !== pendingRequest
+          ) {
+            throw new TailnetPreparationCancelledError();
+          }
+          if (error instanceof TailnetConfigurationChangedError) {
+            throw error;
+          }
+          if (error instanceof TailnetAuthorizationBusyError) {
+            throw error;
+          }
+          if (browserOpenError) {
+            console.warn(
+              '[mobile-tailnet] Failed to open the authorization URL.',
+              browserOpenError,
+            );
+            throw new Error(t('store.tailnetBrowserOpenFailed'));
+          }
+          const status =
+            error instanceof SyncedTailnetStartError ? error.status : undefined;
+          console.warn(
+            '[mobile-tailnet] Failed to prepare the network.',
+            error,
+          );
+          throw new Error(getTailnetFailureMessage(status));
+        } finally {
+          if (
+            pendingTailnetConnections.get(input.recordId) === pendingRequest
+          ) {
+            pendingTailnetConnections.delete(input.recordId);
+          }
+          if (activeTailnetAuthorization?.requestIds.has(requestId)) {
+            activeTailnetAuthorization.requestIds.delete(requestId);
+            if (activeTailnetAuthorization.requestIds.size === 0) {
+              activeTailnetAuthorization = null;
+            }
+          }
+          setConnectionProgress(input.kind, input.recordId, null);
+        }
+      };
+
       const refreshSftpDirectory = async (
         sessionId: string,
         path?: string,
       ): Promise<void> => {
         const runtime = runtimeSftpSessions.get(sessionId);
         if (!runtime) {
-          markSftpSessionState(
-            sessionId,
-            'error',
-            t('store.sftpNotFound'),
-          );
+          markSftpSessionState(sessionId, 'error', t('store.sftpNotFound'));
           return;
         }
 
@@ -2820,9 +3200,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSftpSessionState(
             sessionId,
             'error',
-            error instanceof Error
-              ? error.message
-              : t('store.sftpListFailed'),
+            error instanceof Error ? error.message : t('store.sftpListFailed'),
           );
         }
       };
@@ -2891,6 +3269,20 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          const tailnetResolution = resolveSyncedTailnetRoute(
+            host,
+            get().tailnets,
+          );
+          if (tailnetResolution.kind === 'missing') {
+            markSftpSessionState(
+              sftpSessionRecord.id,
+              'error',
+              t('store.tailnetMissing'),
+            );
+            return;
+          }
+          let tailnet: { tailnetId: string; tailnetName?: string } | undefined;
+
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
               state.sftpSessions,
@@ -2898,10 +3290,26 @@ export const useMobileAppStore = create<MobileAppState>()(
               {
                 status: 'connecting',
                 errorMessage: null,
+                connectionStatusMessage: null,
                 lastEventAt: new Date().toISOString(),
               },
             ),
           }));
+
+          if (tailnetResolution.kind === 'tailnet') {
+            const prepared = await prepareTailnetForConnection({
+              kind: 'sftp',
+              recordId: sftpSessionRecord.id,
+              hostId: host.id,
+              resolution: tailnetResolution,
+            });
+            tailnet = {
+              tailnetId: prepared.tailnetId,
+              ...(prepared.tailnetName
+                ? { tailnetName: prepared.tailnetName }
+                : {}),
+            };
+          }
 
           const engine = getEngine();
           console.info(
@@ -2913,7 +3321,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             port: host.port,
             username: host.username,
             credential: security,
-            trustedHostKeysBase64: trustedHostKeysFor(host.hostname, host.port),
+            ...(tailnet ? { tailnet } : {}),
+            trustedHostKeysBase64: trustedHostKeysFor(
+              host.hostname,
+              host.port,
+              host.tailnetId,
+            ),
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: () => {
               closedDuringConnect = true;
@@ -2953,6 +3366,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 currentPath: listing.path,
                 listing,
                 errorMessage: null,
+                connectionStatusMessage: null,
                 lastEventAt: now,
                 lastConnectedAt: now,
                 title: `${host.label} SFTP`,
@@ -2961,6 +3375,9 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
         } catch (error) {
           await disposeRuntimeSftpSession(sftpSessionRecord.id);
+          if (error instanceof TailnetPreparationCancelledError) {
+            return;
+          }
           if (isAuthExpiredError(error)) {
             await expireAuthSession();
             return;
@@ -3034,8 +3451,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSftpSessionState(
             sftpSessionRecord.id,
             'error',
-            host.awsSshMetadataError ||
-              t('store.awsSftpUsernameRequired'),
+            host.awsSshMetadataError || t('store.awsSftpUsernameRequired'),
           );
           return;
         }
@@ -3287,16 +3703,46 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          const tailnetResolution = resolveSyncedTailnetRoute(
+            host,
+            get().tailnets,
+          );
+          if (tailnetResolution.kind === 'missing') {
+            markSessionState(
+              sessionRecord.id,
+              'error',
+              t('store.tailnetMissing'),
+            );
+            return;
+          }
+          let tailnet: { tailnetId: string; tailnetName?: string } | undefined;
+
           const connectionStartedAt = new Date().toISOString();
           set(state => ({
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
               status: 'connecting',
               errorMessage: null,
+              connectionStatusMessage: null,
               lastEventAt: connectionStartedAt,
               connectionKind: 'ssh',
               connectionDetails: `${host.username}@${host.hostname}:${host.port}`,
             }),
           }));
+
+          if (tailnetResolution.kind === 'tailnet') {
+            const prepared = await prepareTailnetForConnection({
+              kind: 'terminal',
+              recordId: sessionRecord.id,
+              hostId: host.id,
+              resolution: tailnetResolution,
+            });
+            tailnet = {
+              tailnetId: prepared.tailnetId,
+              ...(prepared.tailnetName
+                ? { tailnetName: prepared.tailnetName }
+                : {}),
+            };
+          }
 
           const engine = getEngine();
           // Names the engine in the device log. With one engine left this reads
@@ -3323,8 +3769,13 @@ export const useMobileAppStore = create<MobileAppState>()(
             port: host.port,
             username: host.username,
             credential: security,
+            ...(tailnet ? { tailnet } : {}),
             size: terminalSize,
-            trustedHostKeysBase64: trustedHostKeysFor(host.hostname, host.port),
+            trustedHostKeysBase64: trustedHostKeysFor(
+              host.hostname,
+              host.port,
+              host.tailnetId,
+            ),
             onServerKey: async info => resolveKnownHostTrust(host, info),
             onDisconnected: markClosed,
           });
@@ -3383,6 +3834,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             sessions: patchSessionRecord(state.sessions, sessionRecord.id, {
               status: 'connected',
               errorMessage: null,
+              connectionStatusMessage: null,
               lastEventAt: new Date().toISOString(),
               lastConnectedAt: new Date().toISOString(),
               title: host.label,
@@ -3392,7 +3844,10 @@ export const useMobileAppStore = create<MobileAppState>()(
           }));
         } catch (error) {
           await disposeRuntimeSession(sessionRecord.id);
-          if (!closedDuringConnect) {
+          if (
+            !closedDuringConnect &&
+            !(error instanceof TailnetPreparationCancelledError)
+          ) {
             markSessionState(
               sessionRecord.id,
               'error',
@@ -3849,8 +4304,8 @@ export const useMobileAppStore = create<MobileAppState>()(
                 serverInfo?.capabilities.vault?.e2ee === true
                   ? 'supported'
                   : serverInfo
-                  ? 'unsupported'
-                  : 'unknown',
+                    ? 'unsupported'
+                    : 'unknown',
             };
             const authenticatedAuth: AuthState = {
               status: 'authenticated',
@@ -3863,6 +4318,22 @@ export const useMobileAppStore = create<MobileAppState>()(
             // 리비전을 bump 하므로 304 면 볼트도 안 바뀐 것 — 로컬/볼트를 그대로 두고
             // 동기화 상태만 갱신한다(전체 복호화·적용 생략).
             if (snapshot.notModified) {
+              if (isStaleSync()) {
+                return;
+              }
+              const currentState = get();
+              if (currentState.secureStateReady) {
+                if (isStaleSync()) {
+                  return;
+                }
+                await configureSyncedTailnets({
+                  serverUrl: currentState.settings.serverUrl,
+                  userId: currentSession.user.id,
+                  tailnets: currentState.tailnets,
+                }).catch(error => {
+                  console.warn('Failed to restore synced Tailnets.', error);
+                });
+              }
               if (isStaleSync()) {
                 return;
               }
@@ -3921,6 +4392,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             let nextHosts: ReturnType<typeof sortHosts>;
             let nextGroups: GroupRecord[];
             let nextAwsProfiles: ManagedAwsProfilePayload[];
+            let nextTailnets: TailnetPayload[];
             let nextKnownHosts: KnownHostRecord[];
             let nextSecretsByRef: Record<string, LoadedManagedSecretPayload>;
             try {
@@ -3929,6 +4401,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               );
               nextGroups = sortGroups(decodeGroups(payload, vaultKeyBase64));
               nextAwsProfiles = decodeAwsProfiles(payload, vaultKeyBase64);
+              nextTailnets = decodeTailnets(payload, vaultKeyBase64);
               nextKnownHosts = decodeKnownHosts(payload, vaultKeyBase64);
               nextSecretsByRef = decodeManagedSecrets(payload, vaultKeyBase64);
             } catch (decodeError) {
@@ -3973,8 +4446,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                   syncStatus: {
                     ...readySyncStatus,
                     status: 'error',
-                    errorMessage:
-                      t('store.syncDecryptFailed'),
+                    errorMessage: t('store.syncDecryptFailed'),
                   },
                 });
                 return;
@@ -3989,8 +4461,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                 syncStatus: {
                   ...readySyncStatus,
                   status: 'error',
-                  errorMessage:
-                    t('store.vaultResetElsewhere'),
+                  errorMessage: t('store.vaultResetElsewhere'),
                 },
               });
               return;
@@ -4012,6 +4483,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               localState.groups.length > 0 ||
               localState.knownHosts.length > 0 ||
               localState.awsProfiles.length > 0 ||
+              localState.tailnets.length > 0 ||
               Object.keys(localState.secretsByRef).length > 0;
             if (
               countSyncPayloadRecords(payload) === 0 &&
@@ -4027,6 +4499,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                     knownHosts: localState.knownHosts,
                     secrets: Object.values(localState.secretsByRef),
                     awsProfiles: localState.awsProfiles,
+                    tailnets: localState.tailnets,
                   },
                   vaultKeyBase64,
                 ),
@@ -4052,14 +4525,31 @@ export const useMobileAppStore = create<MobileAppState>()(
               return;
             }
 
-            // 성공적으로 복호화·적용했으니 이제서야 revision 을 저장한다
-            // (실제 적용 후에만 — C1 빈 워크스페이스 방지).
-            if (snapshotEtag) {
-              lastSyncRevision = snapshotEtag;
+            if (isStaleSync()) {
+              return;
             }
-
             await updateSecretsState(nextSecretsByRef, nextHosts);
+            if (isStaleSync()) {
+              return;
+            }
             await saveStoredAwsProfiles(nextAwsProfiles);
+            if (isStaleSync()) {
+              return;
+            }
+            await saveStoredTailnets(nextTailnets);
+            if (isStaleSync()) {
+              return;
+            }
+            await configureSyncedTailnets({
+              serverUrl: get().settings.serverUrl,
+              userId: currentSession.user.id,
+              tailnets: nextTailnets,
+            }).catch(error => {
+              console.warn('Failed to configure synced Tailnets.', error);
+            });
+            if (isStaleSync()) {
+              return;
+            }
             // v1(레거시) 키를 DEK 캐시에 선저장(pre-seeding) — 나중에 이 계정이 어느
             // 기기에서든 E2EE 로 전환돼도(DEK 동일 → verifier 일치) 이 기기는 암호
             // 재입력 없이 잠금이 풀린 상태로 이어진다.
@@ -4076,11 +4566,17 @@ export const useMobileAppStore = create<MobileAppState>()(
               groups: nextGroups,
               hosts: nextHosts,
               awsProfiles: nextAwsProfiles,
+              tailnets: nextTailnets,
               knownHosts: sortKnownHosts(nextKnownHosts),
               secureStateReady: true,
               auth: authenticatedAuth,
               syncStatus: readySyncStatus,
             });
+            // Keychain과 runtime 구성까지 적용된 뒤에만 revision을 저장한다. 중간 저장이
+            // 실패했는데 304로 가려지면 해당 보안 설정을 다시 받을 기회가 사라진다.
+            if (snapshotEtag) {
+              lastSyncRevision = snapshotEtag;
+            }
             // 인증 + 동기화 성공 — 포그라운드 폴링을 시작한다(잠금해제 상태에서만 pull).
             if (
               vaultState.status === 'unlocked' ||
@@ -4196,9 +4692,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           session.user.id !== context.userId ||
           normalizeServerUrl(get().settings.serverUrl) !== context.serverUrl
         ) {
-          throw new Error(
-            t('store.vaultCancelledAccountChanged'),
-          );
+          throw new Error(t('store.vaultCancelledAccountChanged'));
         }
       };
 
@@ -4256,9 +4750,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             if (operationContext) {
               assertVaultOperationContext(operationContext);
             }
-            throw new Error(
-              t('store.sessionExpiredRetry'),
-            );
+            throw new Error(t('store.sessionExpiredRetry'));
           }
           set({
             auth: {
@@ -4302,11 +4794,15 @@ export const useMobileAppStore = create<MobileAppState>()(
 
       // 로그아웃·회원 탈퇴가 공유하는 로컬 정리 — keychain 자격증명과 메모리 상태를 모두 비운다.
       const resetToSignedOutState = async () => {
-        await clearStoredAuthSession();
-        await clearStoredSecrets();
-        await clearStoredAwsProfiles();
-        await clearStoredAwsSsoTokens();
-        await clearStoredVaultDek();
+        await Promise.allSettled([
+          clearStoredAuthSession(),
+          clearStoredSecrets(),
+          clearStoredAwsProfiles(),
+          clearStoredAwsSsoTokens(),
+          clearStoredTailnets(),
+          clearStoredVaultDek(),
+          closeSyncedTailnets(),
+        ]);
         set({
           auth: createUnauthenticatedState(),
           vault: { status: 'none' },
@@ -4314,6 +4810,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           groups: [],
           hosts: [],
           awsProfiles: [],
+          tailnets: [],
           knownHosts: [],
           secretMetadata: [],
           secretsByRef: {},
@@ -4353,6 +4850,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         groups: [],
         hosts: [],
         awsProfiles: [],
+        tailnets: [],
         knownHosts: [],
         secretMetadata: [],
         sessions: [],
@@ -4597,12 +5095,11 @@ export const useMobileAppStore = create<MobileAppState>()(
         // 않고 에러를 그대로 올려 UI에서 안내한다.
         deleteAccount: async () => {
           if (get().auth.status !== 'authenticated' || !get().auth.session) {
-            throw new Error(
-              t('store.deleteAccountOnlineOnly'),
-            );
+            throw new Error(t('store.deleteAccountOnlineOnly'));
           }
 
           // access 토큰 만료(401/403) 시 refresh 후 1회 재시도는 공통 래퍼가 처리한다.
+          const tailnetsToForget = get().tailnets;
           await callWithFreshAccessToken(accessToken =>
             deleteRemoteAccount(get().settings.serverUrl, accessToken),
           );
@@ -4615,6 +5112,13 @@ export const useMobileAppStore = create<MobileAppState>()(
           clearPrompts();
           await disconnectAllRuntimeSessions();
 
+          // Account deletion is the one local lifecycle that also removes
+          // control-plane nodes and persisted identities. Logout and server
+          // switching deliberately preserve them for cheap reuse.
+          await forgetSyncedTailnets(tailnetsToForget).catch(error => {
+            console.warn('Failed to forget account Tailnets.', error);
+          });
+
           await resetToSignedOutState();
         },
         changeAccountPassword: async (
@@ -4624,9 +5128,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const auth = get().auth;
           const session = auth.session;
           if (auth.status !== 'authenticated' || !session) {
-            throw new Error(
-              t('store.passwordOnlineOnly'),
-            );
+            throw new Error(t('store.passwordOnlineOnly'));
           }
           const userID = session.user.id;
           const serverUrl = normalizeServerUrl(get().settings.serverUrl);
@@ -4653,9 +5155,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             currentSession.user.id !== userID ||
             normalizeServerUrl(get().settings.serverUrl) !== serverUrl
           ) {
-            throw new Error(
-              t('store.cancelledAccountOrServerChanged'),
-            );
+            throw new Error(t('store.cancelledAccountOrServerChanged'));
           }
           const updatedSession: AuthSession = {
             ...currentSession,
@@ -4747,8 +5247,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               auth: {
                 ...state.auth,
-                errorMessage:
-                  t('store.vaultKeyStoreFailed'),
+                errorMessage: t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -4766,6 +5265,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             local.groups.length > 0 ||
             local.knownHosts.length > 0 ||
             local.awsProfiles.length > 0 ||
+            local.tailnets.length > 0 ||
             Object.keys(local.secretsByRef).length > 0;
           if (hasLocalData) {
             try {
@@ -4781,6 +5281,7 @@ export const useMobileAppStore = create<MobileAppState>()(
                         knownHosts: local.knownHosts,
                         secrets: Object.values(local.secretsByRef),
                         awsProfiles: local.awsProfiles,
+                        tailnets: local.tailnets,
                       },
                       dekBase64,
                     ),
@@ -4873,9 +5374,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             vault.dekVerifierBase64 !== dekVerifierBase64
           ) {
             await refreshSessionAndResolveVault().catch(() => undefined);
-            throw new Error(
-              t('store.vaultKeyVerifyFailed'),
-            );
+            throw new Error(t('store.vaultKeyVerifyFailed'));
           }
           // 볼트 세대의 경계 — 이전 세대의 ETag 로 304 를 받아 새 스냅샷을 놓치지 않게
           // 리셋하고, in-flight sync 가 잠긴 상태를 되살리지 못하게 세대를 올린다.
@@ -4904,8 +5403,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               auth: {
                 ...state.auth,
-                errorMessage:
-                  t('store.vaultKeyStoreFailed'),
+                errorMessage: t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -4979,9 +5477,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               // pre-seeding 된 DEK 캐시가 verifier 검증을 통과해 곧바로 unlocked 로
               // 이어진다.
               await refreshSessionAndResolveVault();
-              throw new Error(
-                t('store.vaultSetElsewhere'),
-              );
+              throw new Error(t('store.vaultSetElsewhere'));
             }
             throw error;
           }
@@ -5015,8 +5511,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               auth: {
                 ...state.auth,
-                errorMessage:
-                  t('store.vaultKeyStoreFailed'),
+                errorMessage: t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -5060,7 +5555,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           const expectedEpoch =
             'epoch' in currentVault
               ? currentVault.epoch
-              : get().auth.session?.vaultBootstrap.epoch ?? 0;
+              : (get().auth.session?.vaultBootstrap.epoch ?? 0);
           let mutation;
           try {
             mutation = await callWithFreshAccessToken(
@@ -5145,9 +5640,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           assertVaultOperationContext(operationContext);
           if (fromByteArray(unwrappedDek) !== vault.dekBase64) {
-            throw new Error(
-              t('store.vaultCacheMismatch'),
-            );
+            throw new Error(t('store.vaultCacheMismatch'));
           }
 
           const nextKdf = createVaultKdfDescriptor();
@@ -5215,8 +5708,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             set(state => ({
               auth: {
                 ...state.auth,
-                errorMessage:
-                  t('store.vaultKeyStoreFailed'),
+                errorMessage: t('store.vaultKeyStoreFailed'),
               },
             }));
           });
@@ -5265,11 +5757,15 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
 
           if (serverChanged) {
-            await clearStoredAuthSession();
-            await clearStoredSecrets();
-            await clearStoredAwsProfiles();
-            await clearStoredAwsSsoTokens();
-            await clearStoredVaultDek();
+            await Promise.allSettled([
+              clearStoredAuthSession(),
+              clearStoredSecrets(),
+              clearStoredAwsProfiles(),
+              clearStoredAwsSsoTokens(),
+              clearStoredTailnets(),
+              clearStoredVaultDek(),
+              closeSyncedTailnets(),
+            ]);
             set({
               auth: {
                 ...createUnauthenticatedState(),
@@ -5282,6 +5778,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               groups: [],
               hosts: [],
               awsProfiles: [],
+              tailnets: [],
               knownHosts: [],
               secretMetadata: [],
               secretsByRef: {},
@@ -5333,25 +5830,21 @@ export const useMobileAppStore = create<MobileAppState>()(
             credentialMode === 'preserve' &&
             (!existingSsh?.secretRef || existingSsh.authType !== input.authType)
           ) {
-            throw new Error(
-              t('store.authChangeNeedsCredential'),
-            );
+            throw new Error(t('store.authChangeNeedsCredential'));
           }
           if (
             existingSsh?.secretRef &&
             credentialMode === 'replace' &&
             !hasReplacementCredential
           ) {
-            throw new Error(
-              t('store.replaceOrUnlink'),
-            );
+            throw new Error(t('store.replaceOrUnlink'));
           }
           const secretRef =
             credentialMode === 'preserve'
               ? existingSsh?.secretRef
               : credentialMode === 'replace' && hasReplacementCredential
-              ? existingSsh?.secretRef ?? createLocalId('secret')
-              : undefined;
+                ? (existingSsh?.secretRef ?? createLocalId('secret'))
+                : undefined;
           const record: SshHostRecord = {
             ...(existingSsh ?? {}),
             id: existingSsh?.id ?? createLocalId('host'),
@@ -5629,6 +6122,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               {
                 status: 'connecting',
                 errorMessage: null,
+                connectionStatusMessage: null,
                 lastEventAt: new Date().toISOString(),
               },
             );
@@ -5645,6 +6139,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return session.id;
         },
         disconnectSession: async (sessionId: string) => {
+          await cancelPendingTailnetConnection(sessionId);
           const runtime = runtimeSessions.get(sessionId);
           if (!runtime) {
             markSessionState(sessionId, 'closed');
@@ -5665,6 +6160,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           markSessionState(sessionId, 'closed');
         },
         removeSession: async (sessionId: string) => {
+          await cancelPendingTailnetConnection(sessionId);
           const runtime = runtimeSessions.get(sessionId);
 
           set(state => {
@@ -5807,16 +6303,16 @@ export const useMobileAppStore = create<MobileAppState>()(
             runtime.replayChunks.length > 0
               ? runtime.replayChunks
               : sessionId
-              ? [
-                  Uint8Array.from(
-                    Buffer.from(
-                      get().sessions.find(item => item.id === sessionId)
-                        ?.lastViewportSnapshot ?? '',
-                      'utf8',
+                ? [
+                    Uint8Array.from(
+                      Buffer.from(
+                        get().sessions.find(item => item.id === sessionId)
+                          ?.lastViewportSnapshot ?? '',
+                        'utf8',
+                      ),
                     ),
-                  ),
-                ]
-              : [],
+                  ]
+                : [],
           );
           const subscriptionId = `aws-sub-${runtimeSubscriptionCounter++}`;
           runtime.subscribers.set(subscriptionId, handlers);
@@ -5874,6 +6370,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           return nextSftpSession.id;
         },
         disconnectSftpSession: async (sftpSessionId: string) => {
+          await cancelPendingTailnetConnection(sftpSessionId);
           set(state => ({
             sftpSessions: patchSftpSessionRecord(
               state.sftpSessions,
@@ -6260,9 +6757,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             await refreshSftpDirectory(sftpSessionId, sftpSession.currentPath);
           } catch (error) {
             const message =
-              error instanceof Error
-                ? error.message
-                : t('store.uploadFailed');
+              error instanceof Error ? error.message : t('store.uploadFailed');
             set(state => ({
               sftpTransfers: patchSftpTransferRecord(
                 state.sftpTransfers,
@@ -6561,6 +7056,7 @@ export const useMobileAppStore = create<MobileAppState>()(
 );
 
 export function resetMobileStoreRuntimeForTests(): void {
+  resetSyncedTailnetRuntimeForTests();
   initializePromise = null;
   syncPromise = null;
   syncPromiseGeneration = 0;
@@ -6601,6 +7097,9 @@ export function resetMobileStoreRuntimeForTests(): void {
   runtimeSftpSessions.clear();
   pendingSessionConnections.clear();
   pendingSftpConnections.clear();
+  pendingTailnetConnections.clear();
+  activeTailnetAuthorization = null;
+  tailnetRequestCounter = 0;
   runtimeSessionSnapshots.clear();
   for (const timer of runtimeSnapshotFlushTimers.values()) {
     clearTimeout(timer);

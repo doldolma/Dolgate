@@ -1092,6 +1092,32 @@ export function SessionScreen(): React.JSX.Element {
         </Pressable>
       </Modal>
 
+      {activeSession?.status === 'connecting' &&
+      activeSession.connectionStatusMessage ? (
+        <View
+          style={[
+            styles.inlineBanner,
+            {
+              backgroundColor: palette.surface,
+              borderColor: palette.sessionStatusWarning,
+              marginHorizontal: 4,
+            },
+          ]}
+        >
+          <ActivityIndicator size="small" color={palette.accent} />
+          <View style={styles.inlineBannerCopy}>
+            <Text style={[styles.inlineBannerTitle, { color: palette.text }]}>
+              {activeSession.title}
+            </Text>
+            <Text
+              style={[styles.inlineBannerText, { color: palette.mutedText }]}
+            >
+              {activeSession.connectionStatusMessage}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       {activeSession?.errorMessage ? (
         <View
           style={[
@@ -1247,7 +1273,8 @@ export function SessionScreen(): React.JSX.Element {
                         { color: palette.mutedText },
                       ]}
                     >
-                      {translate("session.loadingScreen")}
+                      {activeSession?.connectionStatusMessage ??
+                        translate("session.loadingScreen")}
                     </Text>
                   </View>
                 ) : null}

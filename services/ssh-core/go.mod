@@ -2,21 +2,21 @@ module dolssh/services/ssh-core
 
 go 1.26.5
 
-replace tailscale.com v1.102.0 => github.com/doldolma/tailscale v1.102.0-dolgate.1
+replace tailscale.com v1.102.1 => github.com/doldolma/tailscale v1.102.1-dolgate.1
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/pkg/sftp v1.13.10
+	github.com/pkg/sftp v1.13.11
 	github.com/unixshells/mosh-go v0.5.2
-	github.com/xtaci/smux v1.5.35
+	github.com/xtaci/smux v1.5.57
 	go.bug.st/serial v1.7.1
 	golang.org/x/crypto v0.54.0
-	golang.org/x/mobile v0.0.0-20260709172247-6129f5bee9d5
+	golang.org/x/mobile v0.0.0-20260730202154-c700fe717e6e
 	golang.org/x/sys v0.47.0
-	tailscale.com v1.102.0
+	tailscale.com v1.102.1
 )
 
 require (

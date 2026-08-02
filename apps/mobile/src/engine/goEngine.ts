@@ -17,6 +17,8 @@ import {
   type EngineReadResult,
   type EngineShell,
   type EngineTerminalSize,
+  type EngineTailnetConfig,
+  type EngineTailnetEvent,
   type MobileSshEngine,
   type ServerPublicKeyInfo,
   type StartShellOptions,
@@ -38,6 +40,7 @@ const EVENT_CHUNK = 'GoSshEngine:chunk';
 const EVENT_DROPPED = 'GoSshEngine:dropped';
 const EVENT_SHELL_CLOSED = 'GoSshEngine:shellClosed';
 const EVENT_DISCONNECTED = 'GoSshEngine:disconnected';
+const EVENT_TAILNET = 'GoSshEngine:tailnet';
 
 const DEFAULT_TERM = 'xterm-256color';
 
@@ -114,6 +117,13 @@ type GoSshEngineNativeModule = NativeModule & {
     parallelism: number,
     outputLength: number,
   ): Promise<string>;
+  configureTailnets(stateScope: string, configsJson: string): Promise<void>;
+  startTailnet(requestId: string, payloadJson: string): Promise<void>;
+  cancelTailnet(requestId: string, tailnetId: string): Promise<void>;
+  disconnectTailnet(requestId: string, tailnetId: string): Promise<void>;
+  snapshotTailnets(requestId: string): Promise<void>;
+  forgetTailnet(tailnetId: string): Promise<void>;
+  closeTailnets(): Promise<void>;
 };
 
 function nativeModule(): GoSshEngineNativeModule | null {
@@ -198,6 +208,14 @@ function connectPayload(
     host: options.host,
     port: options.port,
     username: options.username,
+    ...(options.tailnet
+      ? {
+          tailnetId: options.tailnet.tailnetId,
+          ...(options.tailnet.tailnetName
+            ? { tailnetName: options.tailnet.tailnetName }
+            : {}),
+        }
+      : {}),
     trustedHostKeyBase64,
     // ssh-core takes the plural list in preference to the single key, and
     // accepts the connection if the presented key matches any entry. Omitted
@@ -236,6 +254,7 @@ class GoEngineEvents {
   private chunkHandlers = new Map<string, EngineOutputHandler>();
   private shellClosedHandlers = new Map<string, () => void>();
   private disconnectHandlers = new Map<string, () => void>();
+  private tailnetHandler: ((event: EngineTailnetEvent) => void) | null = null;
   private pendingShellClosedIds = new Set<string>();
 
   /**
@@ -273,6 +292,17 @@ class GoEngineEvents {
       this.emitter.addListener(EVENT_DISCONNECTED, payload => {
         const handler = this.disconnectHandlers.get(String(payload?.connectionId));
         handler?.();
+      }),
+      this.emitter.addListener(EVENT_TAILNET, payload => {
+        if (!this.tailnetHandler) {
+          return;
+        }
+        try {
+          this.tailnetHandler(JSON.parse(String(payload?.eventJson ?? '')) as EngineTailnetEvent);
+        } catch {
+          // A malformed native event is ignored; the request promise still
+          // carries operation failures and a later snapshot repairs UI state.
+        }
       }),
     ];
   }
@@ -348,6 +378,17 @@ class GoEngineEvents {
     this.disconnectHandlers.delete(connectionId);
   }
 
+  registerTailnet(handler: (event: EngineTailnetEvent) => void): void {
+    this.ensureAttached();
+    this.tailnetHandler = handler;
+  }
+
+  forgetTailnet(handler?: (event: EngineTailnetEvent) => void): void {
+    if (!handler || this.tailnetHandler === handler) {
+      this.tailnetHandler = null;
+    }
+  }
+
   /** Test seam: drops every subscription and handler. */
   reset(): void {
     this.subscriptions.forEach(subscription => subscription.remove());
@@ -356,6 +397,7 @@ class GoEngineEvents {
     this.chunkHandlers.clear();
     this.shellClosedHandlers.clear();
     this.disconnectHandlers.clear();
+    this.tailnetHandler = null;
     this.pendingShellClosedIds.clear();
   }
 }
@@ -531,6 +573,49 @@ class GoSftp implements EngineSftpConnection {
 
 export class GoSshEngineAdapter implements MobileSshEngine {
   readonly name = 'go' as const;
+
+  async configureTailnets(
+    stateScope: string,
+    configs: EngineTailnetConfig[],
+    onEvent: (event: EngineTailnetEvent) => void,
+  ): Promise<void> {
+    events.registerTailnet(onEvent);
+    try {
+      await requireNative().configureTailnets(stateScope, JSON.stringify({ configs }));
+    } catch (error) {
+      events.forgetTailnet(onEvent);
+      throw error;
+    }
+  }
+
+  async startTailnet(
+    requestId: string,
+    config: EngineTailnetConfig,
+    timeoutMs = 0,
+  ): Promise<void> {
+    await requireNative().startTailnet(requestId, JSON.stringify({ config, timeoutMs }));
+  }
+
+  async cancelTailnet(requestId: string, tailnetId: string): Promise<void> {
+    await requireNative().cancelTailnet(requestId, tailnetId);
+  }
+
+  async disconnectTailnet(requestId: string, tailnetId: string): Promise<void> {
+    await requireNative().disconnectTailnet(requestId, tailnetId);
+  }
+
+  async snapshotTailnets(requestId: string): Promise<void> {
+    await requireNative().snapshotTailnets(requestId);
+  }
+
+  async forgetTailnet(tailnetId: string): Promise<void> {
+    await requireNative().forgetTailnet(tailnetId);
+  }
+
+  async closeTailnets(): Promise<void> {
+    events.forgetTailnet();
+    await requireNative().closeTailnets();
+  }
 
   /**
    * Connects, asking about the host key only when it has to.

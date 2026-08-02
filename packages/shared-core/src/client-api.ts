@@ -58,6 +58,8 @@ export interface MobileSessionRecord {
   status: TerminalTab["status"];
   connectionKind?: SessionConnectionKind;
   connectionDetails?: string | null;
+  /** Ephemeral connection progress shown while the session is opening. */
+  connectionStatusMessage?: string | null;
   hasReceivedOutput: boolean;
   isRestorable: boolean;
   lastViewportSnapshot: string;
@@ -92,6 +94,8 @@ export interface MobileSftpSessionRecord {
   status: MobileSftpSessionStatus;
   currentPath: string;
   listing?: DirectoryListing | null;
+  /** Ephemeral connection progress shown while the SFTP session is opening. */
+  connectionStatusMessage?: string | null;
   errorMessage?: string | null;
   lastEventAt: string;
   lastConnectedAt?: string | null;

@@ -18,6 +18,13 @@ const mockNative = {
   getCurrentSeq: jest.fn(),
   followOutput: jest.fn(),
   unfollowOutput: jest.fn(),
+  configureTailnets: jest.fn(),
+  startTailnet: jest.fn(),
+  cancelTailnet: jest.fn(),
+  disconnectTailnet: jest.fn(),
+  snapshotTailnets: jest.fn(),
+  forgetTailnet: jest.fn(),
+  closeTailnets: jest.fn(),
   addListener: jest.fn(),
   removeListeners: jest.fn(),
 };
@@ -153,6 +160,30 @@ describe('connect', () => {
     expect(payload.trustedHostKeysBase64).toBeUndefined();
   });
 
+  it('uses the same Tailnet route for the host-key probe and connection', async () => {
+    const engine = new GoSshEngineAdapter();
+    await engine.connect(
+      baseConnectOptions({
+        tailnet: { tailnetId: 'corp', tailnetName: 'example.com' },
+      }),
+    );
+
+    const probe = JSON.parse(mockNative.probeHostKey.mock.calls[0][0]);
+    const connect = JSON.parse(mockNative.connect.mock.calls[0][1]);
+    expect(probe).toEqual(
+      expect.objectContaining({
+        tailnetId: 'corp',
+        tailnetName: 'example.com',
+      }),
+    );
+    expect(connect).toEqual(
+      expect.objectContaining({
+        tailnetId: 'corp',
+        tailnetName: 'example.com',
+      }),
+    );
+  });
+
   // A host that presents something outside the list has to reach the prompt, not
   // hand the caller a bare mismatch error: it may have rotated its key, dropped
   // the algorithm on file, or be an impostor, and only the caller can tell.
@@ -247,6 +278,72 @@ describe('connect', () => {
 
     expect(onDisconnected).not.toHaveBeenCalled();
     expect(mockNative.disconnect).toHaveBeenCalledWith('conn-1');
+  });
+});
+
+describe('tailnet runtime', () => {
+  it('configures an account scope and routes native status events', async () => {
+    const engine = new GoSshEngineAdapter();
+    const onEvent = jest.fn();
+
+    await engine.configureTailnets(
+      'https://sync.example.test|user-1',
+      [{ id: 'corp', controlUrl: 'https://control.example.test' }],
+      onEvent,
+    );
+    expect(mockNative.configureTailnets).toHaveBeenCalledWith(
+      'https://sync.example.test|user-1',
+      JSON.stringify({
+        configs: [{ id: 'corp', controlUrl: 'https://control.example.test' }],
+      }),
+    );
+
+    emitNative('GoSshEngine:tailnet', {
+      eventJson: JSON.stringify({
+        type: 'tailnetStatus',
+        requestId: 'start-1',
+        payload: { id: 'corp', state: 'Running', ready: true },
+      }),
+    });
+    expect(onEvent).toHaveBeenCalledWith({
+      type: 'tailnetStatus',
+      requestId: 'start-1',
+      payload: { id: 'corp', state: 'Running', ready: true },
+    });
+  });
+
+  it('serializes start and lifecycle commands without changing their ids', async () => {
+    const engine = new GoSshEngineAdapter();
+
+    await engine.startTailnet('start-1', { id: 'corp', authKey: 'tskey-secret' }, 12_000);
+    expect(mockNative.startTailnet).toHaveBeenCalledWith(
+      'start-1',
+      JSON.stringify({
+        config: { id: 'corp', authKey: 'tskey-secret' },
+        timeoutMs: 12_000,
+      }),
+    );
+
+    await engine.cancelTailnet('cancel-1', 'corp');
+    await engine.disconnectTailnet('disconnect-1', 'corp');
+    await engine.snapshotTailnets('snapshot-1');
+    await engine.forgetTailnet('corp');
+    await engine.closeTailnets();
+
+    expect(mockNative.cancelTailnet).toHaveBeenCalledWith('cancel-1', 'corp');
+    expect(mockNative.disconnectTailnet).toHaveBeenCalledWith('disconnect-1', 'corp');
+    expect(mockNative.snapshotTailnets).toHaveBeenCalledWith('snapshot-1');
+    expect(mockNative.forgetTailnet).toHaveBeenCalledWith('corp');
+    expect(mockNative.closeTailnets).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores malformed native Tailnet events', async () => {
+    const engine = new GoSshEngineAdapter();
+    const onEvent = jest.fn();
+    await engine.configureTailnets('scope', [], onEvent);
+
+    emitNative('GoSshEngine:tailnet', { eventJson: '{bad' });
+    expect(onEvent).not.toHaveBeenCalled();
   });
 });
 

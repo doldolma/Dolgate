@@ -10,13 +10,16 @@ import {
   TextInput,
   View,
 } from "react-native";
-import DocumentPicker from "react-native-document-picker";
 import type {
   HostSecretInput,
 } from "@dolssh/shared-core";
 import type { PendingCredentialPromptState } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
 import { t } from "../i18n";
+import {
+  documentPickerTypes,
+  pickLocalDocument,
+} from "../lib/document-picker";
 
 interface CredentialPromptModalProps {
   prompt: PendingCredentialPromptState | null;
@@ -55,19 +58,17 @@ export function CredentialPromptModal({
 
   const handleImportPrivateKey = async () => {
     try {
-      const result = await DocumentPicker.pickSingle({
-        type: [DocumentPicker.types.plainText, DocumentPicker.types.allFiles],
-        copyTo: "cachesDirectory",
+      const result = await pickLocalDocument({
+        type: [documentPickerTypes.plainText, documentPickerTypes.allFiles],
+        fallbackName: "private-key",
       });
-      const nextText = await readPickedFileText(
-        result.fileCopyUri ?? result.uri,
-      );
+      if (!result) {
+        return;
+      }
+      const nextText = await readPickedFileText(result.uri);
       setPrivateKeyPem(nextText.trim());
       setErrorMessage(null);
     } catch (error) {
-      if (DocumentPicker.isCancel(error)) {
-        return;
-      }
       const message =
         error instanceof Error
           ? error.message
@@ -79,17 +80,17 @@ export function CredentialPromptModal({
 
   const handleImportCertificate = async () => {
     try {
-      const result = await DocumentPicker.pickSingle({
-        type: [DocumentPicker.types.plainText, DocumentPicker.types.allFiles],
-        copyTo: "cachesDirectory",
+      const result = await pickLocalDocument({
+        type: [documentPickerTypes.plainText, documentPickerTypes.allFiles],
+        fallbackName: "certificate",
       });
-      const nextText = await readPickedFileText(result.fileCopyUri ?? result.uri);
+      if (!result) {
+        return;
+      }
+      const nextText = await readPickedFileText(result.uri);
       setCertificateText(nextText.trim());
       setErrorMessage(null);
     } catch (error) {
-      if (DocumentPicker.isCancel(error)) {
-        return;
-      }
       const message =
         error instanceof Error
           ? error.message

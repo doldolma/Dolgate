@@ -1,4 +1,9 @@
-import { DeviceEventEmitter, Linking, NativeModules } from "react-native";
+import {
+  AppState,
+  DeviceEventEmitter,
+  Linking,
+  NativeModules,
+} from "react-native";
 import { act } from "react-test-renderer";
 import { gcm } from "@noble/ciphers/aes.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
@@ -14,6 +19,7 @@ import type {
   SshHostRecord,
   SyncPayloadV2,
   SyncRecord,
+  TailnetPayload,
 } from "@dolssh/shared-core";
 import { fromByteArray, toByteArray } from "base64-js";
 import { Buffer } from "buffer";
@@ -27,6 +33,7 @@ import {
   resetReportedTerminalGridForTests,
   setReportedTerminalGrid,
 } from "../src/lib/terminal-size";
+import { configureSyncedTailnets } from "../src/lib/tailnet-runtime";
 import {
   resetMobileStoreRuntimeForTests,
   useMobileAppStore,
@@ -37,7 +44,10 @@ const REPORTED_TEST_GRID = { cols: 57, rows: 46 };
 // The SSH engine's native module, installed once by jest.setup.js. The store
 // reaches the engine through it, so connection assertions are made here rather
 // than on a stand-in connection object.
-const engineNative = NativeModules.GoSshEngineModule as Record<string, jest.Mock>;
+const engineNative = NativeModules.GoSshEngineModule as Record<
+  string,
+  jest.Mock
+>;
 
 // 계정 로그인은 앱 안의 브라우저 시트(iOS SFSafariViewController / Android Custom Tabs)에서
 // 이뤄진다. 네이티브 모듈이 없으면 시스템 브라우저로 폴백하므로, 시트를 쓰는지 자체를
@@ -79,6 +89,7 @@ function lastStartShellOptions(): Record<string, unknown> {
 async function trustedHostKey(
   hostname: string,
   port: number,
+  tailnetId?: string,
 ): Promise<KnownHostRecord> {
   const probed = JSON.parse(
     (await engineNative.probeHostKey("{}")) as string,
@@ -91,6 +102,7 @@ async function trustedHostKey(
 
   return {
     id: `known-host-${hostname}-${port}`,
+    ...(tailnetId ? { tailnetId } : {}),
     host: hostname,
     port,
     algorithm: probed.algorithm,
@@ -168,9 +180,7 @@ const asyncStorageMock = jest.requireMock(
   clear: jest.Mock;
 };
 
-function createAuthSession(
-  overrides?: Partial<AuthSession>,
-): AuthSession {
+function createAuthSession(overrides?: Partial<AuthSession>): AuthSession {
   return {
     user: {
       id: "user-1",
@@ -219,8 +229,7 @@ function createJsonResponse(
         name.toLowerCase() === "etag" ? (etag ?? null) : null,
     },
     json: async () => body,
-    text: async () =>
-      typeof body === "string" ? body : JSON.stringify(body),
+    text: async () => (typeof body === "string" ? body : JSON.stringify(body)),
   } as unknown as Response;
 }
 
@@ -236,6 +245,7 @@ function resetStore(
       | "groups"
       | "hosts"
       | "awsProfiles"
+      | "tailnets"
       | "knownHosts"
       | "secretMetadata"
       | "sessions"
@@ -261,6 +271,7 @@ function resetStore(
     groups: [],
     hosts: [],
     awsProfiles: [],
+    tailnets: [],
     knownHosts: [],
     secretMetadata: [],
     sessions: [],
@@ -280,14 +291,12 @@ function mockStoredCredentials(input?: {
   session?: AuthSession | null;
   secretsByRef?: Record<string, LoadedManagedSecretPayload> | null;
   awsProfiles?: ManagedAwsProfilePayload[] | null;
+  tailnets?: TailnetPayload[] | null;
 }): void {
   const values = new Map<string, string>();
 
   if (input?.session) {
-    values.set(
-      "dolgate.mobile.auth-session",
-      JSON.stringify(input.session),
-    );
+    values.set("dolgate.mobile.auth-session", JSON.stringify(input.session));
   }
   if (input?.secretsByRef) {
     values.set(
@@ -299,6 +308,12 @@ function mockStoredCredentials(input?: {
     values.set(
       "dolgate.mobile.managed-aws-profiles",
       JSON.stringify(input.awsProfiles),
+    );
+  }
+  if (input?.tailnets) {
+    values.set(
+      "dolgate.mobile.managed-tailnets",
+      JSON.stringify(input.tailnets),
     );
   }
 
@@ -355,7 +370,10 @@ function createEncryptedRecord<T>(
 
 describe("useMobileAppStore auth and sync flows", () => {
   const originalFetch = globalThis.fetch;
-  const fetchMock = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
+  const fetchMock = jest.fn<
+    Promise<Response>,
+    [RequestInfo | URL, RequestInit?]
+  >();
 
   beforeAll(() => {
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
@@ -379,6 +397,8 @@ describe("useMobileAppStore auth and sync flows", () => {
     inAppBrowserNative.openBrowser.mockResolvedValue(undefined);
     inAppBrowserNative.closeBrowser.mockReset();
     inAppBrowserNative.closeBrowser.mockResolvedValue(undefined);
+    (Linking.openURL as jest.Mock).mockResolvedValue(undefined);
+    engineNative.startTailnet.mockResolvedValue(undefined);
     keychainMock.getGenericPassword.mockResolvedValue(null);
     keychainMock.setGenericPassword.mockResolvedValue(true);
     keychainMock.resetGenericPassword.mockResolvedValue(true);
@@ -512,7 +532,7 @@ describe("useMobileAppStore auth and sync flows", () => {
 
   it("exchanges a verified login callback and syncs hosts successfully", async () => {
     const session = createAuthSession();
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/api/info") {
         return createJsonResponse({
@@ -561,8 +581,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.auth.session?.tokens.accessToken).toBe("access-token");
     expect(state.pendingBrowserLoginState).toBeNull();
     expect(state.syncStatus.status).toBe("ready");
-    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/auth/exchange", "/api/info", "/sync"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/auth/exchange", "/api/info", "/sync"]);
     // 로그인이 성공했어도 시트는 네이티브에 그대로 떠 있다 — 딥링크가 앱을 앞으로 끌어올릴
     // 뿐이라, 닫아주지 않으면 로그인 페이지가 홈 화면을 덮은 채 남는다.
     expect(inAppBrowserNative.closeBrowser).toHaveBeenCalled();
@@ -579,7 +600,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
     let syncAttemptCount = 0;
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/api/info") {
         return createJsonResponse({
@@ -621,8 +642,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.auth.status).toBe("authenticated");
     expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
     expect(state.syncStatus.status).toBe("ready");
-    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/api/info", "/sync", "/auth/refresh", "/sync"]);
   });
 
   it("changes the account password and persists the updated password state", async () => {
@@ -694,6 +716,14 @@ describe("useMobileAppStore auth and sync flows", () => {
       resetStore({
         auth: createAuthenticatedState(session),
         hosts: [host],
+        tailnets: [
+          {
+            id: "tailnet-work",
+            label: "Work",
+            createdAt: "2026-04-13T00:00:00.000Z",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        ],
       });
     });
 
@@ -705,6 +735,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.auth.status).toBe("unauthenticated");
     expect(state.auth.session).toBeNull();
     expect(state.hosts).toEqual([]);
+    expect(state.tailnets).toEqual([]);
+    expect(engineNative.forgetTailnet).toHaveBeenCalledWith("tailnet-work");
+    expect(engineNative.closeTailnets).toHaveBeenCalledTimes(1);
     expect(
       fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
     ).toEqual(["/auth/account"]);
@@ -713,6 +746,7 @@ describe("useMobileAppStore auth and sync flows", () => {
       "dolgate.mobile.managed-secrets",
       "dolgate.mobile.managed-aws-profiles",
       "dolgate.mobile.aws-sso-tokens",
+      "dolgate.mobile.managed-tailnets",
     ]) {
       expect(keychainMock.resetGenericPassword).toHaveBeenCalledWith({
         service,
@@ -734,9 +768,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/account") {
-        const headers = init?.headers as
-          | Record<string, string>
-          | undefined;
+        const headers = init?.headers as Record<string, string> | undefined;
         deleteAuthHeaders.push(headers?.authorization);
         if (deleteAuthHeaders.length === 1) {
           return createJsonResponse({ error: "expired" }, 401);
@@ -771,7 +803,7 @@ describe("useMobileAppStore auth and sync flows", () => {
 
   it("keeps the current session when account deletion fails on the server", async () => {
     const session = createAuthSession();
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/account") {
         return createJsonResponse({ error: "서버 오류가 발생했습니다." }, 500);
@@ -785,9 +817,9 @@ describe("useMobileAppStore auth and sync flows", () => {
       });
     });
 
-    await expect(
-      useMobileAppStore.getState().deleteAccount(),
-    ).rejects.toThrow("서버 오류가 발생했습니다.");
+    await expect(useMobileAppStore.getState().deleteAccount()).rejects.toThrow(
+      "서버 오류가 발생했습니다.",
+    );
 
     const state = useMobileAppStore.getState();
     expect(state.auth.status).toBe("authenticated");
@@ -811,9 +843,9 @@ describe("useMobileAppStore auth and sync flows", () => {
       });
     });
 
-    await expect(
-      useMobileAppStore.getState().deleteAccount(),
-    ).rejects.toThrow("온라인 로그인 상태에서만 회원 탈퇴할 수 있습니다.");
+    await expect(useMobileAppStore.getState().deleteAccount()).rejects.toThrow(
+      "온라인 로그인 상태에서만 회원 탈퇴할 수 있습니다.",
+    );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(useMobileAppStore.getState().auth.status).toBe(
       "offline-authenticated",
@@ -856,6 +888,17 @@ describe("useMobileAppStore auth and sync flows", () => {
         updatedAt: "2026-04-13T00:00:00.000Z",
       },
     ];
+    const storedTailnets: TailnetPayload[] = [
+      {
+        id: "tailnet-work",
+        label: "Work",
+        controlUrl: "https://control.example.com",
+        authKey: "tskey-cached",
+        hasAuthKey: true,
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
     let resolveStoredSecrets: (
       value: {
         username: string;
@@ -878,14 +921,20 @@ describe("useMobileAppStore auth and sync flows", () => {
           };
         }
         if (service === "dolgate.mobile.managed-secrets") {
-          return await new Promise((resolve) => {
+          return await new Promise(resolve => {
             resolveStoredSecrets = resolve;
           });
         }
         if (service === "dolgate.mobile.managed-aws-profiles") {
-          return await new Promise((resolve) => {
+          return await new Promise(resolve => {
             resolveStoredAwsProfiles = resolve;
           });
+        }
+        if (service === "dolgate.mobile.managed-tailnets") {
+          return {
+            username: "dolgate",
+            password: JSON.stringify(storedTailnets),
+          };
         }
         return null;
       },
@@ -893,10 +942,10 @@ describe("useMobileAppStore auth and sync flows", () => {
     let resolveRefresh: ((response: Response) => void) | null = null;
     let resolveSyncSnapshot: ((response: Response) => void) | null = null;
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/refresh") {
-        return await new Promise<Response>((resolve) => {
+        return await new Promise<Response>(resolve => {
           resolveRefresh = resolve;
         });
       }
@@ -914,7 +963,7 @@ describe("useMobileAppStore auth and sync flows", () => {
         });
       }
       if (path === "/sync") {
-        return await new Promise<Response>((resolve) => {
+        return await new Promise<Response>(resolve => {
           resolveSyncSnapshot = resolve;
         });
       }
@@ -939,8 +988,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.awsProfiles).toEqual([]);
     expect(state.secretsByRef).toEqual({});
     expect(NativeModules.GoSshEngineModule.connect).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/auth/refresh"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/auth/refresh"]);
 
     await act(async () => {
       resolveStoredSecrets({
@@ -956,6 +1006,20 @@ describe("useMobileAppStore auth and sync flows", () => {
 
     expect(useMobileAppStore.getState().secureStateReady).toBe(true);
     expect(useMobileAppStore.getState().awsProfiles[0]?.name).toBe("prod");
+    expect(useMobileAppStore.getState().tailnets[0]?.id).toBe("tailnet-work");
+    expect(engineNative.configureTailnets).toHaveBeenCalledWith(
+      "https://ssh.doldolma.com\nuser-1",
+      JSON.stringify({
+        configs: [
+          {
+            id: "tailnet-work",
+            controlUrl: "https://control.example.com",
+            authKey: "tskey-cached",
+            ephemeral: false,
+          },
+        ],
+      }),
+    );
     expect(
       useMobileAppStore.getState().secretsByRef["secret-1"]?.password,
     ).toBe("super-secret");
@@ -968,8 +1032,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(useMobileAppStore.getState().auth.session?.tokens.accessToken).toBe(
       "fresh-access-token",
     );
-    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/auth/refresh", "/api/info", "/sync"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/auth/refresh", "/api/info", "/sync"]);
 
     await act(async () => {
       resolveSyncSnapshot?.(createJsonResponse(buildEmptySyncPayload()));
@@ -1159,8 +1224,9 @@ describe("useMobileAppStore auth and sync flows", () => {
       expect(state.auth.offline).toBeNull();
       expect(state.syncStatus.status).toBe("ready");
       expect(state.syncStatus.errorMessage).toBeNull();
-      expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-        .toEqual(["/auth/refresh", "/auth/refresh", "/api/info", "/sync"]);
+      expect(
+        fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+      ).toEqual(["/auth/refresh", "/auth/refresh", "/api/info", "/sync"]);
     } finally {
       jest.useRealTimers();
     }
@@ -1259,14 +1325,15 @@ describe("useMobileAppStore auth and sync flows", () => {
       expect(state.auth.status).toBe("authenticated");
       expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
       expect(state.syncStatus.status).toBe("ready");
-      expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-        .toEqual([
-          "/auth/refresh",
-          "/auth/refresh",
-          "/auth/refresh",
-          "/api/info",
-          "/sync",
-        ]);
+      expect(
+        fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+      ).toEqual([
+        "/auth/refresh",
+        "/auth/refresh",
+        "/auth/refresh",
+        "/api/info",
+        "/sync",
+      ]);
     } finally {
       jest.useRealTimers();
     }
@@ -1292,7 +1359,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
     let syncAttempt = 0;
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/refresh") {
         return createJsonResponse(refreshedSession);
@@ -1342,14 +1409,9 @@ describe("useMobileAppStore auth and sync flows", () => {
       expect(state.auth.status).toBe("authenticated");
       expect(state.auth.session?.tokens.accessToken).toBe("fresh-access-token");
       expect(state.syncStatus.status).toBe("ready");
-      expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-        .toEqual([
-          "/api/info",
-          "/sync",
-          "/auth/refresh",
-          "/api/info",
-          "/sync",
-        ]);
+      expect(
+        fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+      ).toEqual(["/api/info", "/sync", "/auth/refresh", "/api/info", "/sync"]);
     } finally {
       jest.useRealTimers();
     }
@@ -1400,7 +1462,7 @@ describe("useMobileAppStore auth and sync flows", () => {
       ],
     });
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/auth/refresh") {
         return createJsonResponse({ error: "expired" }, 401);
@@ -1470,6 +1532,15 @@ describe("useMobileAppStore auth and sync flows", () => {
             updatedAt: "2026-04-13T00:00:00.000Z",
           },
         ],
+        tailnets: [
+          {
+            id: "tailnet-secret",
+            label: "Secret Tailnet",
+            authKey: "tskey-must-not-enter-async-storage",
+            createdAt: "2026-04-13T00:00:00.000Z",
+            updatedAt: "2026-04-13T00:00:00.000Z",
+          },
+        ],
         sessions: [
           {
             id: "session-1",
@@ -1496,11 +1567,16 @@ describe("useMobileAppStore auth and sync flows", () => {
     const persistedPayload = JSON.parse(lastPersistCall?.[1] as string) as {
       state: {
         secretMetadata?: unknown;
+        tailnets?: unknown;
         sessions: Array<{ lastViewportSnapshot: string }>;
       };
     };
 
     expect(persistedPayload.state.secretMetadata).toBeUndefined();
+    expect(persistedPayload.state.tailnets).toBeUndefined();
+    expect(lastPersistCall?.[1]).not.toContain(
+      "tskey-must-not-enter-async-storage",
+    );
     expect(persistedPayload.state.sessions[0]?.lastViewportSnapshot).toBe("");
   });
 
@@ -1545,13 +1621,13 @@ describe("useMobileAppStore auth and sync flows", () => {
     };
     const payload: SyncPayloadV2 = {
       ...buildEmptySyncPayload(),
-      groups: groups.map((group) =>
+      groups: groups.map(group =>
         createEncryptedRecord(group.id, group, keyBase64),
       ),
       hosts: [createEncryptedRecord(host.id, host, keyBase64)],
     };
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/api/info") {
         return createJsonResponse({
@@ -1583,7 +1659,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     const state = useMobileAppStore.getState();
-    expect(state.groups.map((group) => group.path)).toEqual([
+    expect(state.groups.map(group => group.path)).toEqual([
       "Servers",
       "Servers/NAS",
     ]);
@@ -1630,7 +1706,7 @@ describe("useMobileAppStore auth and sync flows", () => {
       ],
     };
 
-    fetchMock.mockImplementation(async (input) => {
+    fetchMock.mockImplementation(async input => {
       const path = new URL(String(input)).pathname;
       if (path === "/api/info") {
         return createJsonResponse({
@@ -1668,6 +1744,79 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.awsProfiles[0]?.name).toBe("prod");
     expect(state.syncStatus.awsProfilesServerSupport).toBe("supported");
     expect(state.syncStatus.awsSsmServerSupport).toBe("supported");
+  });
+
+  it("hydrates Tailnet settings into Keychain and the account-scoped native runtime", async () => {
+    const keyBase64 = Buffer.from(
+      "12345678901234567890123456789012",
+      "utf8",
+    ).toString("base64");
+    const session = createAuthSession({
+      vaultBootstrap: { keyBase64 },
+    });
+    const tailnet: TailnetPayload = {
+      id: "tailnet-corp",
+      label: "Corp",
+      controlUrl: " https://control.example.com ",
+      authKey: " tskey-secret ",
+      ephemeral: true,
+      hasAuthKey: true,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const payload: SyncPayloadV2 = {
+      ...buildEmptySyncPayload(),
+      tailnets: [createEncryptedRecord(tailnet.id, tailnet, keyBase64)],
+    };
+
+    fetchMock.mockImplementation(async input => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/info") {
+        return createJsonResponse({
+          serverVersion: "test",
+          capabilities: {
+            sync: { awsProfiles: true },
+            sessions: { awsSsm: true },
+          },
+        });
+      }
+      if (path === "/sync") {
+        return createJsonResponse(payload, 200, '"12"');
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(session) });
+      await useMobileAppStore.getState().syncNow();
+    });
+
+    expect(useMobileAppStore.getState().tailnets).toEqual([tailnet]);
+    expect(keychainMock.setGenericPassword).toHaveBeenCalledWith(
+      "dolgate",
+      JSON.stringify([tailnet]),
+      expect.objectContaining({ service: "dolgate.mobile.managed-tailnets" }),
+    );
+    expect(engineNative.configureTailnets).toHaveBeenCalledWith(
+      "https://ssh.doldolma.com\nuser-1",
+      JSON.stringify({
+        configs: [
+          {
+            id: "tailnet-corp",
+            controlUrl: "https://control.example.com",
+            authKey: "tskey-secret",
+            ephemeral: false,
+          },
+        ],
+      }),
+    );
+
+    const appStateListener = (AppState.addEventListener as jest.Mock).mock
+      .calls[0]?.[1] as ((state: string) => void) | undefined;
+    expect(appStateListener).toBeDefined();
+    appStateListener?.("background");
+    expect(engineNative.cancelTailnet).not.toHaveBeenCalled();
+    expect(engineNative.closeTailnets).not.toHaveBeenCalled();
   });
 
   it("reconnects an existing live host tab instead of only focusing stale state", async () => {
@@ -1774,7 +1923,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     const session = useMobileAppStore
       .getState()
-      .sessions.find((item) => item.id === sessionId);
+      .sessions.find(item => item.id === sessionId);
     expect(session?.connectionKind).toBe("aws-ssm");
     expect(session?.status).toBe("error");
     expect(session?.errorMessage).toContain("지원하지 않습니다");
@@ -1880,12 +2029,431 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(engineNative.probeHostKey).not.toHaveBeenCalled();
+    expect(engineNative.startTailnet).not.toHaveBeenCalled();
     expect(engineNative.connect).toHaveBeenCalledTimes(1);
     // The key on file is what the connect is checked against.
     expect(lastConnectRequest().trustedHostKeysBase64).toEqual([
       knownHost.publicKeyBase64,
     ]);
     expect(useMobileAppStore.getState().pendingServerKeyPrompt).toBeNull();
+  });
+
+  it("routes SSH through its synced Tailnet and only trusts keys from that scope", async () => {
+    const host: SshHostRecord = {
+      id: "host-tailnet",
+      kind: "ssh",
+      label: "Tailnet SSH",
+      tailnetId: "corp",
+      hostname: "shared-name",
+      port: 22,
+      username: "deploy",
+      authType: "password",
+      secretRef: "secret-tailnet",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const secret: LoadedManagedSecretPayload = {
+      secretRef: "secret-tailnet",
+      label: "Tailnet SSH credentials",
+      password: "super-secret",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const scopedKey = await trustedHostKey(host.hostname, host.port, "corp");
+    const directKey: KnownHostRecord = {
+      ...scopedKey,
+      id: "known-host-direct",
+      tailnetId: undefined,
+      publicKeyBase64: "DIRECT-NETWORK-KEY",
+    };
+    const tailnet: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      tailnetName: "example.com",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [tailnet],
+        knownHosts: [directKey, scopedKey],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.probeHostKey).not.toHaveBeenCalled();
+    expect(engineNative.startTailnet).toHaveBeenCalledTimes(1);
+    expect(engineNative.startTailnet.mock.invocationCallOrder[0]).toBeLessThan(
+      engineNative.connect.mock.invocationCallOrder[0],
+    );
+    expect(lastConnectRequest()).toEqual(
+      expect.objectContaining({
+        tailnetId: "corp",
+        tailnetName: "example.com",
+        trustedHostKeysBase64: [scopedKey.publicKeyBase64],
+      }),
+    );
+  });
+
+  it("opens Tailnet authorization and continues the SSH connection after it becomes ready", async () => {
+    const { host, secret } =
+      await createPasswordSshFixture("host-tailnet-auth");
+    host.tailnetId = "corp";
+    const knownHost = await trustedHostKey(host.hostname, host.port, "corp");
+    const tailnet: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await configureSyncedTailnets({
+      serverUrl: "https://sync.example.com",
+      userId: "user-1",
+      tailnets: [tailnet],
+    });
+    let finishTailnet: (() => void) | undefined;
+    engineNative.startTailnet.mockImplementationOnce(
+      requestId =>
+        new Promise<void>(resolve => {
+          finishTailnet = resolve;
+          DeviceEventEmitter.emit("GoSshEngine:tailnet", {
+            eventJson: JSON.stringify({
+              type: "tailnetStatus",
+              requestId,
+              payload: {
+                id: "corp",
+                state: "needsAuth",
+                authUrl: "https://login.tailscale.com/a/mobile",
+              },
+            }),
+          });
+        }),
+    );
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [tailnet],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(inAppBrowserNative.openBrowser).toHaveBeenCalledWith(
+      "https://login.tailscale.com/a/mobile",
+    );
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    expect(
+      useMobileAppStore
+        .getState()
+        .sessions.find(session => session.id === sessionId)
+        ?.connectionStatusMessage,
+    ).toContain("브라우저");
+    expect(engineNative.connect).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishTailnet?.();
+      await flushAsyncWorkDeep();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(record => record.id === sessionId);
+    expect(engineNative.connect).toHaveBeenCalledTimes(1);
+    expect(session?.status).toBe("connected");
+    expect(session?.connectionStatusMessage).toBeNull();
+    expect(inAppBrowserNative.closeBrowser).not.toHaveBeenCalled();
+  });
+
+  it("cancels Tailnet preparation when its SSH tab is closed", async () => {
+    const { host, secret } = await createPasswordSshFixture(
+      "host-tailnet-cancel",
+    );
+    host.tailnetId = "corp";
+    const knownHost = await trustedHostKey(host.hostname, host.port, "corp");
+    const tailnet: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    let finishTailnet: (() => void) | undefined;
+    engineNative.startTailnet.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishTailnet = resolve;
+        }),
+    );
+    engineNative.cancelTailnet.mockImplementationOnce(async () => {
+      finishTailnet?.();
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [tailnet],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+    expect(sessionId).not.toBeNull();
+    expect(engineNative.startTailnet).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await useMobileAppStore.getState().disconnectSession(sessionId as string);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.cancelTailnet).toHaveBeenCalledWith(
+      expect.stringContaining("mobile-terminal-"),
+      "corp",
+    );
+    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(
+      useMobileAppStore
+        .getState()
+        .sessions.find(record => record.id === sessionId)?.status,
+    ).toBe("closed");
+  });
+
+  it("keeps a second Tailnet authorization from replacing the active browser", async () => {
+    const firstFixture = await createPasswordSshFixture("host-tailnet-first");
+    const secondFixture = await createPasswordSshFixture("host-tailnet-second");
+    firstFixture.host.tailnetId = "corp";
+    secondFixture.host.tailnetId = "personal";
+    const tailnets: TailnetPayload[] = [
+      {
+        id: "corp",
+        label: "Corp",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+      {
+        id: "personal",
+        label: "Personal",
+        createdAt: "2026-04-13T00:00:00.000Z",
+        updatedAt: "2026-04-13T00:00:00.000Z",
+      },
+    ];
+    const finishes = new Map<string, () => void>();
+    engineNative.startTailnet.mockImplementation(
+      (requestId: string, payloadJson: string) =>
+        new Promise<void>(resolve => {
+          finishes.set(requestId, resolve);
+          const payload = JSON.parse(payloadJson) as {
+            config: { id: string };
+          };
+          DeviceEventEmitter.emit("GoSshEngine:tailnet", {
+            eventJson: JSON.stringify({
+              type: "tailnetStatus",
+              requestId,
+              payload: {
+                id: payload.config.id,
+                state: "needsAuth",
+                authUrl: `https://login.tailscale.com/a/${payload.config.id}`,
+              },
+            }),
+          });
+        }),
+    );
+    engineNative.cancelTailnet.mockImplementation(async requestId => {
+      finishes.get(requestId)?.();
+    });
+
+    let firstSessionId: string | null = null;
+    let secondSessionId: string | null = null;
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [firstFixture.host, secondFixture.host],
+        tailnets,
+        secretsByRef: {
+          [firstFixture.secret.secretRef]: firstFixture.secret,
+          [secondFixture.secret.secretRef]: secondFixture.secret,
+        },
+      });
+      firstSessionId = await useMobileAppStore
+        .getState()
+        .connectToHost(firstFixture.host.id);
+      await flushAsyncWorkDeep();
+      secondSessionId = await useMobileAppStore
+        .getState()
+        .connectToHost(secondFixture.host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    expect(inAppBrowserNative.openBrowser).toHaveBeenCalledTimes(1);
+    expect(inAppBrowserNative.openBrowser).toHaveBeenCalledWith(
+      "https://login.tailscale.com/a/corp",
+    );
+    expect(
+      useMobileAppStore
+        .getState()
+        .sessions.find(record => record.id === secondSessionId)?.errorMessage,
+    ).toContain("다른 Tailnet 인증");
+
+    await act(async () => {
+      await useMobileAppStore
+        .getState()
+        .disconnectSession(firstSessionId as string);
+      await flushAsyncWorkDeep();
+    });
+  });
+
+  it("does not open SSH with a stale Tailnet route after synced settings change", async () => {
+    const { host, secret } = await createPasswordSshFixture(
+      "host-tailnet-generation",
+    );
+    host.tailnetId = "corp";
+    const knownHost = await trustedHostKey(host.hostname, host.port, "corp");
+    const original: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      authKey: "old-key",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const changed: TailnetPayload = {
+      ...original,
+      authKey: "new-key",
+      updatedAt: "2026-04-14T00:00:00.000Z",
+    };
+
+    await configureSyncedTailnets({
+      serverUrl: "https://sync.example.com",
+      userId: "user-1",
+      tailnets: [original],
+    });
+    let finishTailnet: (() => void) | undefined;
+    engineNative.startTailnet.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          finishTailnet = resolve;
+        }),
+    );
+    engineNative.cancelTailnet.mockImplementationOnce(async () => {
+      finishTailnet?.();
+    });
+
+    let sessionId: string | null = null;
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [original],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      sessionId = await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    await act(async () => {
+      // Model the narrow sync window: the runtime has received the new
+      // generation, but Zustand has not committed the decoded snapshot yet.
+      await configureSyncedTailnets({
+        serverUrl: "https://sync.example.com",
+        userId: "user-1",
+        tailnets: [changed],
+      });
+      await flushAsyncWorkDeep();
+    });
+
+    expect(engineNative.cancelTailnet).toHaveBeenCalledWith(
+      expect.stringContaining("mobile-terminal-"),
+      "corp",
+    );
+    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(
+      useMobileAppStore
+        .getState()
+        .sessions.find(record => record.id === sessionId)?.errorMessage,
+    ).toContain("변경");
+  });
+
+  it("normalizes a Tailnet administrator approval timeout", async () => {
+    const { host, secret } = await createPasswordSshFixture(
+      "host-tailnet-approval",
+    );
+    host.tailnetId = "corp";
+    const knownHost = await trustedHostKey(host.hostname, host.port, "corp");
+    const tailnet: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+
+    await configureSyncedTailnets({
+      serverUrl: "https://sync.example.com",
+      userId: "user-1",
+      tailnets: [tailnet],
+    });
+    engineNative.startTailnet.mockImplementationOnce(async requestId => {
+      DeviceEventEmitter.emit("GoSshEngine:tailnet", {
+        eventJson: JSON.stringify({
+          type: "tailnetStatus",
+          requestId,
+          payload: { id: "corp", state: "needsApproval" },
+        }),
+      });
+      throw new Error("native timeout detail");
+    });
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [tailnet],
+        knownHosts: [knownHost],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWorkDeep();
+    });
+
+    const session = useMobileAppStore.getState().sessions[0];
+    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toContain("관리자");
+    expect(session?.errorMessage).not.toContain("native timeout detail");
+  });
+
+  it("refuses a Tailnet host when its synced network configuration is missing", async () => {
+    const { host, secret } = await createPasswordSshFixture(
+      "host-missing-tailnet",
+    );
+    host.tailnetId = "deleted-tailnet";
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        tailnets: [],
+        secretsByRef: { [secret.secretRef]: secret },
+      });
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    expect(engineNative.probeHostKey).not.toHaveBeenCalled();
+    expect(engineNative.connect).not.toHaveBeenCalled();
+    expect(useMobileAppStore.getState().sessions[0]?.errorMessage).toContain(
+      "Tailnet",
+    );
   });
 
   // The other side of that skip: nothing on file means the user still decides,
@@ -2001,6 +2569,7 @@ describe("useMobileAppStore auth and sync flows", () => {
       id: "host-cert-sftp",
       kind: "ssh",
       label: "Cert SFTP",
+      tailnetId: "corp",
       hostname: "host.example.com",
       port: 22,
       username: "deploy",
@@ -2033,12 +2602,20 @@ describe("useMobileAppStore auth and sync flows", () => {
       lastDisconnectedAt: null,
       errorMessage: null,
     };
-    const knownHost = await trustedHostKey(host.hostname, host.port);
+    const knownHost = await trustedHostKey(host.hostname, host.port, "corp");
+    const tailnet: TailnetPayload = {
+      id: "corp",
+      label: "Corp",
+      tailnetName: "example.com",
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
 
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
         hosts: [host],
+        tailnets: [tailnet],
         knownHosts: [knownHost],
         sessions: [session],
         secretsByRef: {
@@ -2056,6 +2633,10 @@ describe("useMobileAppStore auth and sync flows", () => {
     });
 
     expect(sftpSessionId).not.toBeNull();
+    expect(engineNative.startTailnet).toHaveBeenCalledTimes(1);
+    expect(engineNative.startTailnet.mock.invocationCallOrder[0]).toBeLessThan(
+      engineNative.connect.mock.invocationCallOrder[0],
+    );
     expect(lastConnectRequest()).toEqual(
       expect.objectContaining({
         host: host.hostname,
@@ -2065,6 +2646,8 @@ describe("useMobileAppStore auth and sync flows", () => {
         privateKeyPem: "PRIVATE KEY",
         certificateText: "SSH CERTIFICATE",
         passphrase: "cert-passphrase",
+        tailnetId: "corp",
+        tailnetName: "example.com",
       }),
     );
     // A file-transfer tab rides its own connection, so the subsystem is opened
@@ -2154,9 +2737,7 @@ describe("useMobileAppStore auth and sync flows", () => {
           201,
         );
       }
-      if (
-        url.pathname === "/api/aws-sftp/sessions/aws-sftp-session-1/list"
-      ) {
+      if (url.pathname === "/api/aws-sftp/sessions/aws-sftp-session-1/list") {
         return createJsonResponse({
           path: "/home/ec2-user",
           entries: [
@@ -2231,7 +2812,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     );
     const sftpSession = useMobileAppStore
       .getState()
-      .sftpSessions.find((item) => item.id === sftpSessionId);
+      .sftpSessions.find(item => item.id === sftpSessionId);
     expect(sftpSession?.status).toBe("connected");
     expect(sftpSession?.listing?.entries[0]?.name).toBe("app.log");
   });
@@ -2319,8 +2900,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(state.hosts).toEqual([]);
     expect(state.sessions).toEqual([]);
     expect(state.sftpSessions).toEqual([]);
-    expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname))
-      .toEqual(["/api/aws-sftp/sessions", "/auth/refresh"]);
+    expect(
+      fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname),
+    ).toEqual(["/api/aws-sftp/sessions", "/auth/refresh"]);
   });
 
   it("disconnects live runtime sessions and clears synced state when the server changes", async () => {
@@ -2416,9 +2998,8 @@ describe("useMobileAppStore auth and sync flows", () => {
   });
 
   it("rolls back the SSH connection when shell startup fails", async () => {
-    const { host, secret, knownHost } = await createPasswordSshFixture(
-      "host-shell-failure",
-    );
+    const { host, secret, knownHost } =
+      await createPasswordSshFixture("host-shell-failure");
     engineNative.startShell.mockRejectedValueOnce(new Error("shell refused"));
     await act(async () => {
       resetStore({
@@ -2440,7 +3021,9 @@ describe("useMobileAppStore auth and sync flows", () => {
     const { host, secret, knownHost } = await createPasswordSshFixture(
       "host-follow-failure",
     );
-    engineNative.followOutput.mockRejectedValueOnce(new Error("follow refused"));
+    engineNative.followOutput.mockRejectedValueOnce(
+      new Error("follow refused"),
+    );
     await act(async () => {
       resetStore({
         auth: createAuthenticatedState(),
@@ -2521,7 +3104,7 @@ describe("useMobileAppStore auth and sync flows", () => {
     let resolveConnect: (() => void) | null = null;
     engineNative.connect.mockImplementationOnce(
       async () =>
-        await new Promise<void>((resolve) => {
+        await new Promise<void>(resolve => {
           resolveConnect = () => resolve();
         }),
     );

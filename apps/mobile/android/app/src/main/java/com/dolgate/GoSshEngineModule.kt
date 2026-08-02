@@ -20,6 +20,7 @@ import mobile.Mobile
 import mobile.SFTPSession
 import mobile.Shell
 import mobile.ShellClosedCallback
+import mobile.TailnetEventListener
 
 /**
  * Bridges the Go SSH engine (services/ssh-core/mobile, bound with gomobile) to JS.
@@ -47,6 +48,13 @@ class GoSshEngineModule(
   private val registryLock = Any()
   private val nextShellSuffix = AtomicLong(0)
   private val nextSftpSuffix = AtomicLong(0)
+  private val tailnetEvents =
+    TailnetEventListener { eventJson ->
+      emit(
+        EVENT_TAILNET,
+        Arguments.createMap().apply { putString("eventJson", eventJson) },
+      )
+    }
 
   override fun getName(): String = NAME
 
@@ -76,6 +84,69 @@ class GoSshEngineModule(
   @ReactMethod
   fun inspectCertificate(certificateText: String, promise: Promise) {
     onWorker(promise) { engine.inspectCertificate(certificateText) }
+  }
+
+  // MARK: - Tailnet runtime
+
+  @ReactMethod
+  fun configureTailnets(stateScope: String, configsJson: String, promise: Promise) {
+    onWorker(promise) {
+      engine.configureTailnets(
+        reactContext.filesDir.resolve("tailnets").absolutePath,
+        stateScope,
+        configsJson,
+        tailnetEvents,
+      )
+      null
+    }
+  }
+
+  @ReactMethod
+  fun startTailnet(requestId: String, payloadJson: String, promise: Promise) {
+    onWorker(promise) {
+      engine.startTailnet(requestId, payloadJson)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun cancelTailnet(requestId: String, tailnetId: String, promise: Promise) {
+    onWorker(promise) {
+      engine.cancelTailnet(requestId, tailnetId)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun disconnectTailnet(requestId: String, tailnetId: String, promise: Promise) {
+    onWorker(promise) {
+      engine.disconnectTailnet(requestId, tailnetId)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun snapshotTailnets(requestId: String, promise: Promise) {
+    onWorker(promise) {
+      engine.snapshotTailnets(requestId)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun forgetTailnet(tailnetId: String, promise: Promise) {
+    onWorker(promise) {
+      engine.forgetTailnet(tailnetId)
+      null
+    }
+  }
+
+  @ReactMethod
+  fun closeTailnets(promise: Promise) {
+    onWorker(promise) {
+      engine.closeTailnets()
+      null
+    }
   }
 
   @ReactMethod
@@ -431,6 +502,7 @@ class GoSshEngineModule(
     connections.keys.toList().forEach { connectionId ->
       connections.remove(connectionId)?.let { conn -> closeQuietly { conn.close() } }
     }
+    closeQuietly { engine.closeTailnets() }
     executor.shutdownNow()
   }
 
@@ -538,5 +610,6 @@ class GoSshEngineModule(
     private const val EVENT_DROPPED = "GoSshEngine:dropped"
     private const val EVENT_SHELL_CLOSED = "GoSshEngine:shellClosed"
     private const val EVENT_DISCONNECTED = "GoSshEngine:disconnected"
+    private const val EVENT_TAILNET = "GoSshEngine:tailnet"
   }
 }

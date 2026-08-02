@@ -1,4 +1,4 @@
-package runtime
+package tailnetservice
 
 import (
 	"context"
@@ -42,6 +42,58 @@ func TestSanitizeTailnetDirKeepsStateInsideTheRoot(t *testing.T) {
 		if !strings.HasPrefix(filepath.Clean(full), filepath.Clean(root)+string(filepath.Separator)) {
 			t.Errorf("id %q produced %q, which escapes %q", testCase.id, full, root)
 		}
+	}
+}
+
+func TestIdentityReplacementBudgetResetsOnlyAfterAuthorizationOrConfigChange(t *testing.T) {
+	instance := &Service{tailnetConfigs: newTailnetConfigs(t.TempDir())}
+	instance.tailnetConfigs.set(coretypes.TailnetConfigPayload{ID: "corp", AuthKey: "old"})
+	firstGeneration, _ := instance.tailnetConfigs.generation("corp")
+
+	if !instance.claimTailnetIdentityReplacement("corp", firstGeneration) {
+		t.Fatal("first replacement claim was rejected")
+	}
+	if instance.claimTailnetIdentityReplacement("corp", firstGeneration) {
+		t.Fatal("same configuration generation received a second replacement budget")
+	}
+	instance.markTailnetIdentityAuthorized("corp", tailnet.Status{State: tailnet.StateRunning})
+	if !instance.claimTailnetIdentityReplacement("corp", firstGeneration) {
+		t.Fatal("authorized replacement did not restore the retry budget")
+	}
+
+	instance.tailnetConfigs.set(coretypes.TailnetConfigPayload{ID: "corp", AuthKey: "new"})
+	secondGeneration, _ := instance.tailnetConfigs.generation("corp")
+	if secondGeneration == firstGeneration {
+		t.Fatal("configuration change did not advance the generation")
+	}
+	if !instance.claimTailnetIdentityReplacement("corp", secondGeneration) {
+		t.Fatal("new configuration generation inherited the old replacement budget")
+	}
+}
+
+func TestTailnetConfigurePurgesRemovedColdIdentityWithoutStartingANode(t *testing.T) {
+	root := t.TempDir()
+	instance := New(Options{StateDir: root})
+	t.Cleanup(func() { _ = instance.Close() })
+	if err := instance.TailnetConfigure(coretypes.TailnetConfigurePayload{
+		Configs: []coretypes.TailnetConfigPayload{{ID: "corp"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	identityDir := filepath.Join(root, "corp")
+	if err := os.MkdirAll(identityDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(identityDir, "tailscaled.state"), []byte("state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := instance.TailnetConfigure(coretypes.TailnetConfigurePayload{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(identityDir); !os.IsNotExist(err) {
+		t.Fatalf("removed cold identity remains on disk: %v", err)
 	}
 }
 
@@ -117,7 +169,7 @@ func TestRemoveDropsTheConfiguration(t *testing.T) {
 
 // tailnet 지원이 꺼진 런타임은 명확히 거절해야 한다.
 func TestTailnetCommandsRejectedWhenDisabled(t *testing.T) {
-	instance := &Runtime{}
+	instance := &Service{}
 
 	if err := instance.TailnetTest("req-1", coretypes.TailnetTestPayload{
 		Config: coretypes.TailnetConfigPayload{ID: "corp"},
@@ -141,7 +193,7 @@ func statDir(path string) (bool, error) {
 // Shutdown 이 레지스트리를 건드리지 않아서, 앱을 꺼도 노드가 연결 상태로 보였다.
 func TestShutdownClosesTailnetNodes(t *testing.T) {
 	closed := 0
-	instance := &Runtime{}
+	instance := &Service{}
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
 		return &countingNode{onClose: func() { closed += 1 }}, nil
 	}, tailnet.Options{})
@@ -161,7 +213,7 @@ func TestShutdownClosesTailnetNodes(t *testing.T) {
 
 // tailnet 이 꺼진 빌드/환경에서도 종료가 터지면 안 된다.
 func TestShutdownWithoutTailnetRegistryIsSafe(t *testing.T) {
-	instance := &Runtime{}
+	instance := &Service{}
 	instance.shutdownTailnets()
 }
 
@@ -169,7 +221,7 @@ func TestShutdownWithoutTailnetRegistryIsSafe(t *testing.T) {
 // 처음부터 다시 해야 한다.
 func TestShutdownDoesNotLogOut(t *testing.T) {
 	node := &countingNode{}
-	instance := &Runtime{}
+	instance := &Service{}
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
 		return node, nil
 	}, tailnet.Options{})
@@ -453,7 +505,7 @@ func TestTailnetCancelDiscardsTheNode(t *testing.T) {
 // 그 뒤로는 아무도 그 tailnet 을 쓸 수 없다.
 func TestTailnetCancelAllowsAFreshStart(t *testing.T) {
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -691,7 +743,7 @@ func TestTailnetTestLeavesAnOfflineRegistrationAlone(t *testing.T) {
 
 	var mu sync.Mutex
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	var node *countingNode
@@ -734,7 +786,7 @@ func TestTailnetTestLeavesAnOfflineRegistrationAlone(t *testing.T) {
 func TestTailnetTestReRegistersAnIdentityDeletedByTheControlPlane(t *testing.T) {
 	var mu sync.Mutex
 	var nodes []*countingNode
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -801,7 +853,7 @@ func TestTailnetTestReRegistersAnIdentityDeletedByTheControlPlane(t *testing.T) 
 
 func TestTailnetSupervisorDiscardsADeletedIdentityWhileIdle(t *testing.T) {
 	var nodes []*countingNode
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -909,9 +961,9 @@ func TestTailnetTestReportsAFailureToBringTheNodeUp(t *testing.T) {
 	}
 }
 
-func newTailnetTestRuntime(t *testing.T, node tailnet.Node) *Runtime {
+func newTailnetTestRuntime(t *testing.T, node tailnet.Node) *Service {
 	t.Helper()
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(
@@ -1515,7 +1567,7 @@ func TestTailnetTestRestartsWhenTheAuthLinkNeverArrives(t *testing.T) {
 	built := 0
 	var mu sync.Mutex
 	var events []coretypes.TailnetStatusPayload
-	instance := &Runtime{emitEvent: func(event coretypes.Event) {
+	instance := &Service{emitEvent: func(event coretypes.Event) {
 		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
 			mu.Lock()
 			events = append(events, payload)
@@ -1632,7 +1684,7 @@ func TestTailnetTestKeepsTryingUntilTheLinkArrives(t *testing.T) {
 
 	var mu sync.Mutex
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -1672,7 +1724,7 @@ func TestTailnetTestStopsWhenTheLoginWasRejected(t *testing.T) {
 
 	var mu sync.Mutex
 	built := 0
-	instance := &Runtime{emitEvent: func(coretypes.Event) {}}
+	instance := &Service{emitEvent: func(coretypes.Event) {}}
 	instance.tailnetConfigs = newTailnetConfigs(t.TempDir())
 	instance.tailnetTests = newTailnetTests()
 	instance.tailnets = tailnet.NewRegistry(func(string) (tailnet.Node, error) {
@@ -1725,7 +1777,7 @@ func TestTailnetTestRetriesAfterARefusedRebuild(t *testing.T) {
 	var mu sync.Mutex
 	built := 0
 	var events []coretypes.TailnetStatusPayload
-	instance := &Runtime{emitEvent: func(event coretypes.Event) {
+	instance := &Service{emitEvent: func(event coretypes.Event) {
 		if payload, ok := event.Payload.(coretypes.TailnetStatusPayload); ok {
 			mu.Lock()
 			events = append(events, payload)

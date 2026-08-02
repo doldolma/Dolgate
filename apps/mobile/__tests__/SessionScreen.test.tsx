@@ -33,18 +33,6 @@ jest.mock('@react-navigation/native', () => ({
   }),
 }));
 jest.mock('react-native-vector-icons/Ionicons', () => 'Ionicons');
-jest.mock('react-native-document-picker', () => ({
-  __esModule: true,
-  default: {
-    pickSingle: jest.fn(),
-    isCancel: jest.fn(() => false),
-    types: {
-      allFiles: '*/*',
-      plainText: 'text/plain',
-    },
-  },
-}));
-
 let mockCapturedXtermProps: Record<string, unknown> | null = null;
 let mockNativeTerminalInputHandle: {
   focus: jest.Mock;

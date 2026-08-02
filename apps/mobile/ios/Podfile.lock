@@ -22,7 +22,7 @@ PODS:
     - ReactNativeDependencies
     - Yoga
   - FBLazyVector (0.85.0)
-  - GoSshEngine (1.8.5):
+  - GoSshEngine (1.8.6):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1406,7 +1406,7 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-  - react-native-document-picker (9.3.1):
+  - react-native-document-picker (12.0.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2083,7 +2083,7 @@ DEPENDENCIES:
   - React-logger (from `../../../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../../../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../../../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
-  - react-native-document-picker (from `../../../node_modules/react-native-document-picker`)
+  - "react-native-document-picker (from `../../../node_modules/@react-native-documents/picker`)"
   - react-native-get-random-values (from `../../../node_modules/react-native-get-random-values`)
   - react-native-safe-area-context (from `../../../node_modules/react-native-safe-area-context`)
   - react-native-webview (from `../../../node_modules/react-native-webview`)
@@ -2210,7 +2210,7 @@ EXTERNAL SOURCES:
   React-microtasksnativemodule:
     :path: "../../../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-document-picker:
-    :path: "../../../node_modules/react-native-document-picker"
+    :path: "../../../node_modules/@react-native-documents/picker"
   react-native-get-random-values:
     :path: "../../../node_modules/react-native-get-random-values"
   react-native-safe-area-context:
@@ -2299,7 +2299,7 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   AsyncStorage: 857a13f3c66a30d6b02efa09babba3d457e8e8ca
   FBLazyVector: c00c20551d40126351a6783c47ce75f5b374851b
-  GoSshEngine: 1cfcffa5d9f8c3fdabf62017f90ef390d4c0872c
+  GoSshEngine: 3d10d0b8c909d4be531afed77a6b454685489225
   hermes-engine: ac28dd3cded3ef2df39edcd48760b814a871bfbc
   RCTDeprecation: 3bb167081b134461cfeb875ff7ae1945f8635257
   RCTRequired: 74839f55d5058a133a0bc4569b0afec750957f64
@@ -2337,7 +2337,7 @@ SPEC CHECKSUMS:
   React-logger: ee47d5f3b59a46a006c65038ed5d0b1143e37510
   React-Mapbuffer: 7f8bfbe3fcb2203db4ccb3975414af8cabe4bcd0
   React-microtasksnativemodule: ca1f33f7c98b76d923f550d39631eb4e05fa9aec
-  react-native-document-picker: dbb2852adc7e2fcbd522268006aa71ebbe542e24
+  react-native-document-picker: c3a7536f3ee52525b4714c3720537f941d0cb094
   react-native-get-random-values: 68792987aef40e8aa72dc448d97e009d1f440c88
   react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
   react-native-webview: 2da09bdea1aeb6c46e27dd94632e21059cade6c1

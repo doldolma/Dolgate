@@ -79,7 +79,10 @@ type ShellClosedCallback interface {
 }
 
 // Engine is the entry point the app holds for the lifetime of the process.
-type Engine struct{}
+type Engine struct {
+	tailnetMu      sync.Mutex
+	tailnetRuntime *mobileTailnetRuntime
+}
 
 // NewEngine returns an engine.
 func NewEngine() *Engine { return &Engine{} }
@@ -117,13 +120,17 @@ func (e *Engine) ProbeHostKey(requestJSON string) (string, error) {
 	}
 
 	payload := request.ConnectPayload
+	config, err := e.dialConfig(request)
+	if err != nil {
+		return "", err
+	}
 	result, err := sshconn.ProbeHostKey(
 		context.Background(),
 		payload.Host,
 		payload.Port,
 		sshconn.JumpTargetFromCore(payload.Jump),
 		payload.WSProxy,
-		dialConfig(request),
+		config,
 	)
 	if err != nil {
 		return "", err
@@ -188,7 +195,7 @@ func (e *Engine) InspectCertificate(certificateText string) (string, error) {
 }
 
 // dialConfig builds the dialer config shared by Connect and ProbeHostKey.
-func dialConfig(request connectRequest) sshconn.Config {
+func (e *Engine) dialConfig(request connectRequest) (sshconn.Config, error) {
 	config := sshconn.DefaultConfig
 	if request.DialTimeoutMs > 0 {
 		config.TCPDialTimeout = time.Duration(request.DialTimeoutMs) * time.Millisecond
@@ -198,7 +205,13 @@ func dialConfig(request connectRequest) sshconn.Config {
 	}
 	config.AuthAgentEndpointKind = request.AuthAgentEndpointKind
 	config.AuthAgentEndpoint = request.AuthAgentEndpoint
-	return config
+
+	dial, err := e.resolveTailnetDial(request.TailnetID, request.TailnetName)
+	if err != nil {
+		return sshconn.Config{}, err
+	}
+	config.Dial = dial
+	return config, nil
 }
 
 // Connect establishes an SSH connection. responder and onDisconnected may each
@@ -214,6 +227,10 @@ func (e *Engine) Connect(
 	}
 
 	payload := request.ConnectPayload
+	config, err := e.dialConfig(request)
+	if err != nil {
+		return nil, err
+	}
 	target := sshconn.Target{
 		Host:                  payload.Host,
 		Port:                  payload.Port,
@@ -232,7 +249,7 @@ func (e *Engine) Connect(
 	opts := session.DialOptions{
 		ID:        request.ID,
 		Target:    target,
-		Config:    dialConfig(request),
+		Config:    config,
 		Responder: bridgeResponder(responder),
 	}
 	if onDisconnected != nil {
