@@ -165,18 +165,19 @@ describe("OpenSSH import dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "보이는 항목 모두 선택" }));
     fireEvent.click(screen.getByRole("button", { name: "가져오기" }));
 
+    // onImported/onClose 는 importSelection 이 resolve 된 뒤에 불린다.
     await waitFor(() =>
-      expect(api.openssh.importSelection).toHaveBeenCalledWith({
-        snapshotId: appendedProbeResult.snapshotId,
-        selectedHostKeys: ["host-1", "host-2"],
-        groupPath: "Servers/Prod",
+      expect(onImported).toHaveBeenCalledWith({
+        createdHostCount: 2,
+        createdSecretCount: 1,
+        skippedHostCount: 0,
+        warnings: [],
       }),
     );
-    expect(onImported).toHaveBeenCalledWith({
-      createdHostCount: 2,
-      createdSecretCount: 1,
-      skippedHostCount: 0,
-      warnings: [],
+    expect(api.openssh.importSelection).toHaveBeenCalledWith({
+      snapshotId: appendedProbeResult.snapshotId,
+      selectedHostKeys: ["host-1", "host-2"],
+      groupPath: "Servers/Prod",
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -240,9 +241,8 @@ describe("OpenSSH import dialog", () => {
       />,
     );
 
-    await waitFor(() => expect(api.openssh.probeDefault).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByRole("button", { name: "파일 불러오기" }));
+    // 버튼은 첫 스냅샷이 도착한 뒤에 그려진다.
+    fireEvent.click(await screen.findByRole("button", { name: "파일 불러오기" }));
 
     await waitFor(() =>
       expect(api.openssh.addFileToSnapshot).toHaveBeenCalled(),

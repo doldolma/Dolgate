@@ -1589,7 +1589,11 @@ describe("AwsEcsWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "쉘 접속" }));
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "쉘 접속" })[1]);
+    // 다이얼로그의 확인 버튼은 처음부터 있지만 액션 컨텍스트가 도착해 태스크·컨테이너가
+    // 정해질 때까지 disabled 다 — 존재만 확인하고 누르면 클릭이 조용히 무시된다.
+    const shellSubmit = screen.getAllByRole("button", { name: "쉘 접속" })[1];
+    await waitFor(() => expect(shellSubmit).toBeEnabled());
+    fireEvent.click(shellSubmit);
 
     await waitFor(() => {
       expect(onOpenEcsExecShell).toHaveBeenCalledWith(
@@ -1735,6 +1739,10 @@ describe("AwsEcsWorkspace", () => {
       });
     });
 
+    // start 가 resolve 되며 runtime 이 상태에 들어간 뒤에야 아래 런타임 이벤트가 이 패널의
+    // 것으로 연결된다 — 호출만 기다리면 이벤트가 버려지고 주소가 끝까지 나오지 않는다.
+    expect(await screen.findByText("127.0.0.1:4200")).toBeInTheDocument();
+
     act(() => {
       portForwardListener?.({
         runtime: {
@@ -1838,6 +1846,9 @@ describe("AwsEcsWorkspace", () => {
     await waitFor(() => {
       expect(awsApi.startEcsServiceTunnel).toHaveBeenCalledTimes(1);
     });
+
+    // 위와 같은 이유 — runtime 이 상태에 들어간 뒤에 이벤트를 넣어야 연결된다.
+    expect(await screen.findByText("127.0.0.1:4200")).toBeInTheDocument();
 
     act(() => {
       portForwardListener?.({

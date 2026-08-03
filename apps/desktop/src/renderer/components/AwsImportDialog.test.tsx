@@ -461,8 +461,9 @@ describe('AwsImportDialog', () => {
       />,
     );
 
-    await waitFor(() => expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2'));
-    expect(screen.getByText('web-1')).toBeInTheDocument();
+    // 호출이 아니라 그 결과가 목록에 그려졌는지로 기다린다.
+    expect(await screen.findByText('web-1')).toBeInTheDocument();
+    expect(api.aws.listEc2Instances).toHaveBeenCalledWith('default', 'ap-northeast-2');
   });
 
   it('loads only regions when no configured region exists and waits for manual selection', async () => {
@@ -511,8 +512,8 @@ describe('AwsImportDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'ECS' }));
 
-    await waitFor(() => expect(api.aws.listEcsClusters).toHaveBeenCalledWith('default', 'ap-northeast-2'));
-    expect(screen.getByText('prod')).toBeInTheDocument();
+    expect(await screen.findByText('prod')).toBeInTheDocument();
+    expect(api.aws.listEcsClusters).toHaveBeenCalledWith('default', 'ap-northeast-2');
 
     fireEvent.click(screen.getByRole('button', { name: '클러스터 추가' }));
 

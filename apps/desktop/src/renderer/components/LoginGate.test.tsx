@@ -237,6 +237,10 @@ describe('LoginGate', () => {
       expect(onReopenBrowserLogin).toHaveBeenCalledTimes(1);
     });
 
+    // 취소는 재열기가 끝날 때까지 disabled 다 — 호출만 기다리면 눌리지 않는 버튼을 누른다.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '취소' })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
     await waitFor(() => {
       expect(onCancelBrowserLogin).toHaveBeenCalledTimes(1);

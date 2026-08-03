@@ -910,13 +910,16 @@ describe("SftpWorkspace column resizing", () => {
     const breadcrumb = screen.getByLabelText("Local path for left pane");
     fireEvent.click(within(breadcrumb).getByRole("button", { name: "D:" }));
 
-    await waitFor(() => expect(onListLocalRoots).toHaveBeenCalledTimes(1));
-
-    const driveMenu = screen.getByLabelText("Local drive selector for left pane");
-    expect(within(driveMenu).getByRole("menuitem", { name: "C:" })).toBeTruthy();
+    // 메뉴 컨테이너는 먼저 뜨고 항목은 onListLocalRoots 가 resolve 된 뒤에 채워진다 —
+    // 호출만 기다리면 빈 메뉴에서 항목을 찾게 된다.
+    const driveMenu = await screen.findByLabelText(
+      "Local drive selector for left pane",
+    );
     expect(
-      within(driveMenu).getByRole("menuitem", { name: "D:" }),
+      await within(driveMenu).findByRole("menuitem", { name: "C:" }),
     ).toBeTruthy();
+    expect(within(driveMenu).getByRole("menuitem", { name: "D:" })).toBeTruthy();
+    expect(onListLocalRoots).toHaveBeenCalledTimes(1);
 
     fireEvent.click(within(driveMenu).getByRole("menuitem", { name: "C:" }));
 
@@ -961,7 +964,10 @@ describe("SftpWorkspace column resizing", () => {
     const driveMenu = await screen.findByLabelText(
       "Local drive selector for left pane",
     );
-    fireEvent.click(within(driveMenu).getByRole("menuitem", { name: "D:" }));
+    // 컨테이너만 기다리면 항목이 아직 없다 — 항목 자체를 기다려야 한다.
+    fireEvent.click(
+      await within(driveMenu).findByRole("menuitem", { name: "D:" }),
+    );
 
     await waitFor(() =>
       expect(onNavigateBreadcrumb).toHaveBeenCalledWith("left", "D:\\"),

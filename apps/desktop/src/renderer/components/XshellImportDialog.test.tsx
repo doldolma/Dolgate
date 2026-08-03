@@ -221,10 +221,11 @@ describe('Xshell import dialog', () => {
     const onImported = vi.fn().mockResolvedValue(undefined);
     render(<XshellImportDialog open onClose={onClose} onImported={onImported} />);
 
-    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
-
+    // probe 가 "호출됐다"는 것만으로는 스냅샷이 화면에 반영됐다는 보장이 없다 — 호출은
+    // 마운트 이펙트에서 동기적으로 일어나고 목록은 그 promise 가 resolve 된 뒤에 그려진다.
+    expect(await screen.findByText('세션 소스 1개')).toBeInTheDocument();
+    expect(api.xshell.probeDefault).toHaveBeenCalled();
     expect(screen.getByText('Xshell 가져오기')).toBeInTheDocument();
-    expect(screen.getByText('세션 소스 1개')).toBeInTheDocument();
     expect(screen.getByText('주의 사항 1건, 저장된 비밀번호 포함')).toBeInTheDocument();
     expect(screen.getByText('root-host')).toBeInTheDocument();
     expect(screen.getByText('루트 세션')).toBeInTheDocument();
@@ -250,19 +251,21 @@ describe('Xshell import dialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
 
+    // onImported/onClose 는 importSelection 이 resolve 된 뒤에 불린다 — 호출만 기다리면
+    // 아직 불리지 않은 상태에서 단정하게 된다.
     await waitFor(() =>
-      expect(api.xshell.importSelection).toHaveBeenCalledWith({
-        snapshotId: appendedProbeResult.snapshotId,
-        selectedGroupPaths: ['Servers'],
-        selectedHostKeys: ['host-root']
+      expect(onImported).toHaveBeenCalledWith({
+        createdGroupCount: 4,
+        createdHostCount: 3,
+        createdSecretCount: 1,
+        skippedHostCount: 0,
+        warnings: []
       })
     );
-    expect(onImported).toHaveBeenCalledWith({
-      createdGroupCount: 4,
-      createdHostCount: 3,
-      createdSecretCount: 1,
-      skippedHostCount: 0,
-      warnings: []
+    expect(api.xshell.importSelection).toHaveBeenCalledWith({
+      snapshotId: appendedProbeResult.snapshotId,
+      selectedGroupPaths: ['Servers'],
+      selectedHostKeys: ['host-root']
     });
     expect(onClose).toHaveBeenCalled();
   });
@@ -271,9 +274,9 @@ describe('Xshell import dialog', () => {
     const api = installMockApi();
     render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
-
-    const disclosure = screen.getByText('주의 사항 1건, 저장된 비밀번호 포함').closest('details') as HTMLDetailsElement;
+    const warningSummary = await screen.findByText('주의 사항 1건, 저장된 비밀번호 포함');
+    expect(api.xshell.probeDefault).toHaveBeenCalled();
+    const disclosure = warningSummary.closest('details') as HTMLDetailsElement;
     expect(disclosure).not.toHaveAttribute('open');
 
     fireEvent.click(screen.getByText('주의 사항 1건, 저장된 비밀번호 포함'));
@@ -287,9 +290,7 @@ describe('Xshell import dialog', () => {
     const api = installMockApi();
     render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
-
-    fireEvent.click(screen.getByRole('button', { name: '세션 폴더 선택' }));
+    fireEvent.click(await screen.findByRole('button', { name: '세션 폴더 선택' }));
 
     await waitFor(() => expect(api.shell.pickXshellSessionFolder).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText('세션 소스 2개')).toBeInTheDocument());
@@ -305,9 +306,7 @@ describe('Xshell import dialog', () => {
     const api = installMockApi();
     render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
-
-    fireEvent.change(screen.getByPlaceholderText('그룹, 호스트, 사용자명, 경로 검색'), {
+    fireEvent.change(await screen.findByPlaceholderText('그룹, 호스트, 사용자명, 경로 검색'), {
       target: { value: 'Empty' }
     });
     fireEvent.click(screen.getByRole('button', { name: '보이는 항목 선택' }));
@@ -338,11 +337,11 @@ describe('Xshell import dialog', () => {
     const api = installMockApi();
     render(<XshellImportDialog open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    await waitFor(() => expect(api.xshell.probeDefault).toHaveBeenCalled());
-
+    // 트리는 스냅샷이 도착한 뒤에 생긴다 — 구조를 보기 전에 그것부터 기다린다.
+    const tree = await screen.findByRole('tree', { name: 'Xshell 가져오기 항목' });
+    expect(api.xshell.probeDefault).toHaveBeenCalled();
     const dialog = screen.getByRole('dialog', { name: 'Xshell 가져오기' });
     const body = dialog.children.item(1);
-    const tree = screen.getByRole('tree', { name: 'Xshell 가져오기 항목' });
 
     expect(dialog).toHaveClass('flex', 'flex-col', 'overflow-hidden', 'max-h-[calc(100vh-7rem)]');
     expect(body).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');

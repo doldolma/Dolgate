@@ -183,6 +183,10 @@ describe('VaultGateShell', () => {
       ),
     );
 
+    // "나중에"는 migrate 가 끝날 때까지 disabled 다 — 호출만 기다리면 클릭이 무시된다.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '나중에' })).toBeEnabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: '나중에' }));
     expect(onDefer).toHaveBeenCalledTimes(1);
   });
