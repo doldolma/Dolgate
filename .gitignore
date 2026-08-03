@@ -31,3 +31,6 @@ services/sync-api/=busy_timeout*
 .tmp
 /tmp/
 /data.json
+
+# 랜딩페이지 영어판 — web/build-en.mjs 가 배포 때 생성한다.
+web/en/

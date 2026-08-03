@@ -31,6 +31,11 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
+      # 영어 페이지는 web/index.html + web/i18n.en.json 에서 생성한다. 커밋하지 않으므로
+      # 업로드 전에 여기서 만든다 — 키가 어긋나면 스크립트가 종료 코드 1 로 배포를 세운다.
+      - name: Build English page
+        run: node web/build-en.mjs
+
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v5
         with:

@@ -7,6 +7,10 @@
   <meta name="description" content="Windows · macOS · Linux · iOS · Android에서 쓰는 오픈소스 SSH 워크스페이스. 터미널·SFTP·포트 포워딩·tmux를 한 앱에서 다루고, 호스트·키·스니펫은 종단간 암호화로 동기화합니다. 동기화 서버 self-host 지원." />
   <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
   <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <link rel="canonical" href="https://doldolma.github.io/Dolgate/" />
+  <link rel="alternate" hreflang="ko" href="https://doldolma.github.io/Dolgate/" />
+  <link rel="alternate" hreflang="en" href="https://doldolma.github.io/Dolgate/en/" />
+  <link rel="alternate" hreflang="x-default" href="https://doldolma.github.io/Dolgate/" />
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e18" />
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb" />
   <meta property="og:title" content="Dolgate — 오픈소스 SSH 워크스페이스" />
@@ -101,12 +105,23 @@
     .btn:hover { border-color: var(--line-strong); background: var(--panel); }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn-primary:hover { background: #3f89ff; border-color: #3f89ff; transform: translateY(-1px); }
-    .btn-sm { padding: 7px 14px; font-size: .88rem; }
-    .theme-toggle {
-      width: 36px; height: 36px; padding: 0; justify-content: center;
-      font-size: 1rem; line-height: 1; cursor: pointer;
-      background: transparent; font-family: var(--mono);
+    /* 내비 액션은 셋이 한 묶음으로 읽혀야 한다 — nav-inner 의 28px 은 링크 묶음과
+       이 묶음을 떼는 데만 쓰고, 안쪽은 좁게 붙인다. 높이도 셋을 같게 맞춘다
+       (btn 의 line-height 1.6 을 그대로 두면 텍스트 버튼만 혼자 커진다). */
+    .nav-actions { display: flex; align-items: center; gap: 8px; }
+    /* nowrap 없으면 좁은 화면에서 "GitHub ↗" 가 두 줄로 접히며 이 버튼만 다시 커진다. */
+    .nav-actions .btn { height: 36px; line-height: 1; white-space: nowrap; }
+    .btn-sm { padding: 0 14px; font-size: .88rem; }
+    /* 토글 둘은 테두리를 지워 뒤로 물리고 GitHub 만 테두리를 갖는다 — 작은 유틸리티 둘 +
+       실제 링크 하나로 위계가 생긴다. border 를 없애는 대신 색만 투명으로 둔다:
+       border-width 가 유지돼야 GitHub 버튼과 높이·정렬이 어긋나지 않는다. */
+    .icon-btn {
+      width: 36px; padding: 0; justify-content: center;
+      font-size: .82rem; cursor: pointer;
+      background: transparent; font-family: var(--mono); letter-spacing: .02em;
+      border-color: transparent; color: var(--text-soft);
     }
+    .icon-btn:hover { border-color: transparent; background: var(--panel-2); color: var(--text); }
 
     /* ── hero ── */
     .hero { padding: 88px 0 40px; text-align: center; position: relative; overflow: hidden; }
@@ -221,6 +236,8 @@
       .nav-links { display: none; }
     }
     @media (max-width: 560px) {
+      /* 링크가 숨은 뒤엔 브랜드와 액션만 남는다 — 28px 은 과해서 액션이 밀려난다. */
+      .nav-inner { gap: 12px; }
       .grid { grid-template-columns: 1fr; }
       .dl-grid { grid-template-columns: 1fr; }
       section { padding: 60px 0; }
@@ -240,21 +257,24 @@
   <div class="wrap nav-inner">
     <a class="brand" href="#"><img src="./assets/icon-192.png" alt="" />Dolgate</a>
     <div class="nav-links">
-      <a href="#features">기능</a>
-      <a href="#security">보안</a>
-      <a href="#selfhost">Self-host</a>
-      <a href="#download">다운로드</a>
+      <a href="#features" data-i18n="nav.features">기능</a>
+      <a href="#security" data-i18n="nav.security">보안</a>
+      <a href="#selfhost" data-i18n="nav.selfhost">Self-host</a>
+      <a href="#download" data-i18n="nav.download">다운로드</a>
     </div>
     <div class="nav-spacer"></div>
-    <button class="btn theme-toggle" id="theme-toggle" type="button" title="테마 전환" aria-label="테마 전환">◐</button>
-    <a class="btn btn-sm" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub ↗</a>
+    <div class="nav-actions">
+      <a class="btn icon-btn" id="lang-link" href="./en/" hreflang="en" title="English" aria-label="English">EN</a>
+      <button class="btn icon-btn" id="theme-toggle" type="button" data-i18n-title="theme.button" title="테마 전환" aria-label="테마 전환">◐</button>
+      <a class="btn btn-sm" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
   </div>
 </nav>
 
 <header class="hero">
   <div class="wrap">
-    <h1>오픈소스 SSH 워크스페이스,<br /><span class="accent">데스크톱에서 모바일로 끊김 없이.</span></h1>
-    <p class="sub">
+    <h1 data-i18n="hero.h1">오픈소스 SSH 워크스페이스,<br /><span class="accent">데스크톱에서 모바일로 끊김 없이.</span></h1>
+    <p class="sub" data-i18n="hero.sub">
       일반 SSH부터 EC2 SSM, tmux, SFTP, 포트 포워딩까지 한 앱에서.
       호스트·키·스니펫은 종단간 암호화(E2EE)로 동기화되고, 동기화 서버도 직접 띄울 수 있습니다.
     </p>
@@ -262,14 +282,14 @@
       <span>Windows</span><span>macOS</span><span>Linux</span><span>iOS</span><span>Android</span>
     </div>
     <div class="cta">
-      <a class="btn btn-primary" id="hero-download" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">⬇ 최신 버전 다운로드</a>
-      <a class="btn" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">소스 보기 — MIT 오픈소스</a>
+      <a class="btn btn-primary" id="hero-download" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener" data-i18n="hero.dlLatest">⬇ 최신 버전 다운로드</a>
+      <a class="btn" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener" data-i18n="hero.source">소스 보기 — MIT 오픈소스</a>
     </div>
 
     <figure class="shot-frame">
       <picture class="theme-shot">
         <source data-theme-image="dark" srcset="./assets/hosts-workspace-dark.png" media="(prefers-color-scheme: dark)" />
-        <img src="./assets/hosts-workspace.png" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
+        <img src="./assets/hosts-workspace.png" data-i18n-alt="hero.shotAlt" alt="Dolgate 호스트/워크스페이스 화면" loading="eager" />
       </picture>
     </figure>
   </div>
@@ -278,36 +298,32 @@
 <section id="features">
   <div class="wrap">
     <div class="sec-label">Features</div>
-    <h2>터미널에서 필요한 것들, 한 앱에</h2>
-    <p class="sec-sub">일반 SSH부터 AWS SSM, 컨테이너, tmux까지 — 서버 작업의 전 과정을 하나의 워크스페이스로 다룹니다.</p>
+    <h2 data-i18n="feat.h2">터미널에서 필요한 것들, 한 앱에</h2>
+    <p class="sec-sub" data-i18n="feat.sub">일반 SSH부터 AWS SSM, 컨테이너, tmux까지 — 서버 작업의 전 과정을 하나의 워크스페이스로 다룹니다.</p>
 
     <div class="grid">
-      <div class="card"><div class="ico">🖥️</div><h3>SSH / SSM 워크스페이스</h3>
-        <p>일반 SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서. SSH Agent 인증과 Agent Forwarding 지원.</p></div>
-      <div class="card"><div class="ico">🪟</div><h3>tmux control mode</h3>
-        <p>원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로. 탭을 닫아도 detach라 세션이 살아 있고, 다시 붙으면 이어집니다.</p></div>
-      <div class="card"><div class="ico">🤖</div><h3>AI 어시스턴트</h3>
-        <p>현재 세션의 호스트 정보와 터미널 출력을 바탕으로 질문하고, 조회는 자동·변경은 승인 후 실행. OpenAI 호환 · Claude · Codex 지원.</p></div>
-      <div class="card"><div class="ico">🎬</div><h3>세션 녹화 · 재생</h3>
-        <p>종료된 터미널 세션을 타임라인으로 다시 봅니다. 녹화는 로컬에만 저장되고 서버로 전송되지 않습니다.</p></div>
-      <div class="card"><div class="ico">🔁</div><h3>E2EE 동기화, self-host로</h3>
-        <p>호스트·시크릿·스니펫을 종단간 암호화로 데스크톱↔모바일 동기화. 동기화 서버(sync-api)는 Docker 한 줄로 직접 띄울 수도 있습니다.</p></div>
-      <div class="card"><div class="ico">👥</div><h3>세션 공유 &amp; 협업</h3>
-        <p>실행 중인 세션을 브라우저 viewer 링크로 공유하고, 실시간 채팅으로 함께 봅니다.</p></div>
+      <div class="card"><div class="ico">🖥️</div><h3 data-i18n="card.ssh.t">SSH / SSM 워크스페이스</h3>
+        <p data-i18n="card.ssh.d">일반 SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서. SSH Agent 인증과 Agent Forwarding 지원.</p></div>
+      <div class="card"><div class="ico">🪟</div><h3 data-i18n="card.tmux.t">tmux control mode</h3>
+        <p data-i18n="card.tmux.d">원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로. 탭을 닫아도 detach라 세션이 살아 있고, 다시 붙으면 이어집니다.</p></div>
+      <div class="card"><div class="ico">🤖</div><h3 data-i18n="card.ai.t">AI 어시스턴트</h3>
+        <p data-i18n="card.ai.d">현재 세션의 호스트 정보와 터미널 출력을 바탕으로 질문하고, 조회는 자동·변경은 승인 후 실행. OpenAI 호환 · Claude · Codex 지원.</p></div>
+      <div class="card"><div class="ico">🎬</div><h3 data-i18n="card.record.t">세션 녹화 · 재생</h3>
+        <p data-i18n="card.record.d">종료된 터미널 세션을 타임라인으로 다시 봅니다. 녹화는 로컬에만 저장되고 서버로 전송되지 않습니다.</p></div>
+      <div class="card"><div class="ico">🔁</div><h3 data-i18n="card.sync.t">E2EE 동기화, self-host로</h3>
+        <p data-i18n="card.sync.d">호스트·시크릿·스니펫을 종단간 암호화로 데스크톱↔모바일 동기화. 동기화 서버(sync-api)는 Docker 한 줄로 직접 띄울 수도 있습니다.</p></div>
+      <div class="card"><div class="ico">🌐</div><h3 data-i18n="card.tailnet.t">Tailscale 내장</h3>
+        <p data-i18n="card.tailnet.d">앱 자체가 tailnet 노드로 참여합니다. Tailscale 클라이언트도 VPN 권한도 없이 tailnet 안의 호스트에 붙고, OS의 라우팅·DNS는 건드리지 않습니다.</p></div>
     </div>
 
     <div class="chips">
-      <span class="chip">명령어 자동완성 (Fig 스펙 + 동적 값)</span>
-      <span class="chip">스니펫 {{변수}}</span>
-      <span class="chip">듀얼 패널 SFTP + 드래그 업로드</span>
-      <span class="chip">ZMODEM(sz) 다운로드</span>
-      <span class="chip">원격 파일 인앱 편집 · sudo 저장</span>
-      <span class="chip">점프 호스트(ProxyJump)</span>
-      <span class="chip">Local / Remote / Dynamic 포워딩</span>
-      <span class="chip">Docker · Podman 모니터링/터널</span>
-      <span class="chip">mosh</span>
-      <span class="chip">명령 완료 OS 알림</span>
-      <span class="chip">OpenSSH · Xshell · Termius 가져오기</span>
+      <span class="chip" data-i18n="chip.1">명령어 자동완성</span>
+      <span class="chip" data-i18n="chip.2">스니펫</span>
+      <span class="chip" data-i18n="chip.3">듀얼 패널 SFTP</span>
+      <span class="chip" data-i18n="chip.4">원격 파일 편집</span>
+      <span class="chip" data-i18n="chip.5">Docker · Podman 모니터링</span>
+      <span class="chip" data-i18n="chip.6">mosh</span>
+      <span class="chip" data-i18n="chip.7">OpenSSH · Xshell · Termius 가져오기</span>
     </div>
   </div>
 </section>
@@ -316,8 +332,8 @@
   <div class="wrap split">
     <div>
       <div class="sec-label">Network</div>
-      <h2>포트 포워딩과 터널을 눈으로</h2>
-      <p class="sec-sub">
+      <h2 data-i18n="net.h2">포트 포워딩과 터널을 눈으로</h2>
+      <p class="sec-sub" data-i18n="net.sub">
         Local / Remote / Dynamic 포워딩과 SSM 포워딩, 컨테이너 터널을 목록으로 관리합니다.
         점프 호스트를 거치는 연결도 저장된 호스트를 ProxyJump로 지정하면 끝.
       </p>
@@ -325,7 +341,7 @@
     <figure class="shot-frame">
       <picture class="theme-shot">
         <source data-theme-image="dark" srcset="./assets/port-forwarding-dark.png" media="(prefers-color-scheme: dark)" />
-        <img src="./assets/port-forwarding.png" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
+        <img src="./assets/port-forwarding.png" data-i18n-alt="net.shotAlt" alt="Dolgate 포트 포워딩 화면" loading="lazy" />
       </picture>
     </figure>
   </div>
@@ -334,25 +350,25 @@
 <section id="security">
   <div class="wrap">
     <div class="sec-label">Security</div>
-    <h2>비밀번호와 키를 맡길 수 있게</h2>
-    <p class="sec-sub">SSH 클라이언트의 기본기는 비밀 관리입니다. Dolgate의 원칙은 단순합니다 — 비밀값은 평문으로 어디에도 남지 않습니다. 자세한 설계는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/data-protection.md" target="_blank" rel="noopener">데이터 보호 문서</a>에 공개되어 있습니다.</p>
+    <h2 data-i18n="sec.h2">비밀번호와 키를 맡길 수 있게</h2>
+    <p class="sec-sub" data-i18n="sec.sub">SSH 클라이언트의 기본기는 비밀 관리입니다. Dolgate의 원칙은 단순합니다 — 비밀값은 평문으로 어디에도 남지 않습니다. 자세한 설계는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/data-protection.md" target="_blank" rel="noopener">데이터 보호 문서</a>에 공개되어 있습니다.</p>
 
     <div class="sec-list">
       <div class="sec-item"><div class="mark">✓</div><div>
-        <b>OS 보안 저장소에만 저장</b>
-        <span>비밀번호·개인키·API 키는 macOS Keychain / Windows DPAPI / iOS Keychain / Android Keystore 기반으로 암호화됩니다. 안전한 저장소가 없으면 평문 폴백 없이 저장을 거부합니다.</span>
+        <b data-i18n="sec.item1.t">OS 보안 저장소에만 저장</b>
+        <span data-i18n="sec.item1.d">비밀번호·개인키·API 키는 macOS Keychain / Windows DPAPI / iOS Keychain / Android Keystore 기반으로 암호화됩니다. 안전한 저장소가 없으면 평문 폴백 없이 저장을 거부합니다.</span>
       </div></div>
       <div class="sec-item"><div class="mark">✓</div><div>
-        <b>종단간 암호화(E2EE) 동기화</b>
-        <span>동기화 데이터는 업로드 전에 기기에서 AES-256-GCM으로 암호화되고, 암호화 키는 이용자가 설정한 동기화 암호로만 열립니다. 관리형 서버든 자체 호스팅이든, 운영자는 원문을 복호화할 수 없습니다.</span>
+        <b data-i18n="sec.item2.t">종단간 암호화(E2EE) 동기화</b>
+        <span data-i18n="sec.item2.d">동기화 데이터는 업로드 전에 기기에서 AES-256-GCM으로 암호화되고, 암호화 키는 이용자가 설정한 동기화 암호로만 열립니다. 관리형 서버든 자체 호스팅이든, 운영자는 원문을 복호화할 수 없습니다.</span>
       </div></div>
       <div class="sec-item"><div class="mark">✓</div><div>
-        <b>필요한 것만 동기화</b>
-        <span>터미널 출력, 세션 녹화, 활동 로그, AI API 키는 서버로 전송되지 않고 기기에만 남습니다.</span>
+        <b data-i18n="sec.item3.t">필요한 것만 동기화</b>
+        <span data-i18n="sec.item3.d">터미널 출력, 세션 녹화, 활동 로그, AI API 키는 서버로 전송되지 않고 기기에만 남습니다.</span>
       </div></div>
       <div class="sec-item"><div class="mark">✓</div><div>
-        <b>신뢰를 강요하지 않음</b>
-        <span>전체 코드가 공개되어 있어 직접 검증할 수 있고, 동기화 서버까지 본인 인프라에 직접 호스팅할 수 있습니다.</span>
+        <b data-i18n="sec.item4.t">신뢰를 강요하지 않음</b>
+        <span data-i18n="sec.item4.d">전체 코드가 공개되어 있어 직접 검증할 수 있고, 동기화 서버까지 본인 인프라에 직접 호스팅할 수 있습니다.</span>
       </div></div>
     </div>
   </div>
@@ -361,43 +377,43 @@
 <section id="selfhost">
   <div class="wrap">
     <div class="sec-label">Self-host</div>
-    <h2>동기화 서버를 내 손에</h2>
-    <p class="sec-sub">
+    <h2 data-i18n="self.h2">동기화 서버를 내 손에</h2>
+    <p class="sec-sub" data-i18n="self.sub">
       브라우저 로그인과 동기화를 담당하는 <code style="font-family:var(--mono)">sync-api</code>는 단일 컨테이너입니다.
       띄운 뒤 앱 로그인 화면에서 서버 주소만 바꾸면 됩니다.
     </p>
     <pre><span class="k">docker run</span> -d --name dolgate-sync-api \
   -p <span class="s">8080:8080</span> -v <span class="s">dolgate-sync-api-data:/app/data</span> \
   <span class="s">ghcr.io/doldolma/dolgate-sync-api</span></pre>
-    <p class="note">상세 설정은 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/sync-api-self-hosting.md" target="_blank" rel="noopener">자체 호스팅 가이드</a>를 참고하세요.</p>
+    <p class="note" data-i18n="self.note">상세 설정은 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/sync-api-self-hosting.md" target="_blank" rel="noopener">자체 호스팅 가이드</a>를 참고하세요.</p>
   </div>
 </section>
 
 <section id="download">
   <div class="wrap">
     <div class="sec-label">Download</div>
-    <h2>지금 시작하기</h2>
-    <p class="sec-sub">모든 플랫폼이 하나의 버전으로 함께 릴리즈되고, 데스크톱 앱은 자동 업데이트를 지원합니다. <span class="latest-version" style="font-family:var(--mono); color:var(--accent)"></span></p>
+    <h2 data-i18n="dl.h2">지금 시작하기</h2>
+    <p class="sec-sub" data-i18n="dl.sub">모든 플랫폼이 하나의 버전으로 함께 릴리즈되고, 데스크톱 앱은 자동 업데이트를 지원합니다. <span class="latest-version" style="font-family:var(--mono); color:var(--accent)"></span></p>
 
     <div class="dl-grid">
       <a class="dl" data-dl="mac" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
-        <div class="os">🍎</div><b>macOS</b><span>.dmg · Apple Silicon/Intel</span>
+        <div class="os">🍎</div><b>macOS</b><span data-i18n="dl.mac">.dmg · Apple Silicon/Intel</span>
       </a>
       <a class="dl" data-dl="win" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
-        <div class="os">🪟</div><b>Windows</b><span>NSIS 설치본 · x64</span>
+        <div class="os">🪟</div><b>Windows</b><span data-i18n="dl.win">NSIS 설치본 · x64</span>
       </a>
       <a class="dl" data-dl="linux" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
-        <div class="os">🐧</div><b>Linux</b><span>AppImage · x86_64</span>
+        <div class="os">🐧</div><b>Linux</b><span data-i18n="dl.linux">AppImage · x86_64</span>
       </a>
       <a class="dl" data-dl="android" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
-        <div class="os">🤖</div><b>Android</b><span>APK · arm64</span>
+        <div class="os">🤖</div><b>Android</b><span data-i18n="dl.android">APK · arm64</span>
       </a>
       <a class="dl" href="https://apps.apple.com/app/id6793122325" target="_blank" rel="noopener">
-        <div class="os">📱</div><b>iOS</b><span>App Store · iPhone</span>
+        <div class="os">📱</div><b>iOS</b><span data-i18n="dl.ios">App Store · iPhone</span>
       </a>
     </div>
 
-    <p class="note">
+    <p class="note" data-i18n="dl.note">
       Linux <code>deb</code> 패키지와 ARM64 빌드는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 받을 수 있습니다.
     </p>
   </div>
@@ -405,14 +421,28 @@
 
 <footer>
   <div class="wrap foot">
-    <span>© 2026 doldolma · MIT License</span>
+    <span data-i18n="foot.license">© 2026 doldolma · MIT License</span>
     <div class="spacer"></div>
     <a href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://github.com/doldolma/dolgate/tree/main/docs" target="_blank" rel="noopener">문서</a>
-    <a href="https://github.com/doldolma/dolgate/releases" target="_blank" rel="noopener">릴리즈</a>
-    <a href="https://github.com/doldolma/dolgate/blob/main/PRIVACY.md" target="_blank" rel="noopener">개인정보 처리방침</a>
+    <a href="https://github.com/doldolma/dolgate/tree/main/docs" target="_blank" rel="noopener" data-i18n="foot.docs">문서</a>
+    <a href="https://github.com/doldolma/dolgate/releases" target="_blank" rel="noopener" data-i18n="foot.releases">릴리즈</a>
+    <a href="https://github.com/doldolma/dolgate/blob/main/PRIVACY.md" target="_blank" rel="noopener" data-i18n="foot.privacy">개인정보 처리방침</a>
   </div>
 </footer>
+
+<script>
+  // 테마 툴팁과 다운로드 버튼 문구는 JS 가 만들어서 마크업에 없다 — data-i18n 으로 못 잡으므로
+  // 이 객체만 영어 페이지 빌드에서 통째로 갈아끼운다(web/build-en.mjs).
+  window.dolgateStrings = {
+    themePrefix: "테마",
+    themeHint: "클릭해서 전환",
+    themeAuto: "시스템 설정 따름",
+    themeLight: "라이트",
+    themeDark: "다크",
+    dlFor: "⬇ {os}용 다운로드",
+    dlAppStore: "⬇ App Store에서 받기",
+  };
+</script>
 
 <script>
   // 테마 토글: 시스템(auto) → 라이트 → 다크 순환. 수동 선택만 localStorage 에 기억.
@@ -424,7 +454,8 @@
     const darkImages = document.querySelectorAll('source[data-theme-image="dark"]');
     const COLORS = { dark: "#0b0e18", light: "#f6f7fb" };
     const ICONS = { auto: "◐", light: "☀", dark: "☾" };
-    const LABELS = { auto: "시스템 설정 따름", light: "라이트", dark: "다크" };
+    const S = window.dolgateStrings;
+    const LABELS = { auto: S.themeAuto, light: S.themeLight, dark: S.themeDark };
     const ORDER = ["auto", "light", "dark"];
     const current = () => {
       const t = localStorage.getItem(KEY);
@@ -443,7 +474,7 @@
           : mode === "dark" ? "all" : "not all";
       });
       btn.textContent = ICONS[mode];
-      btn.title = `테마: ${LABELS[mode]} (클릭해서 전환)`;
+      btn.title = `${S.themePrefix}: ${LABELS[mode]} (${S.themeHint})`;
       btn.setAttribute("aria-label", btn.title);
     };
     btn.addEventListener("click", () => {
@@ -469,9 +500,11 @@
 
   // 앱스토어 링크는 GitHub 릴리스와 무관하다 — 아래 API 조회가 실패해도(rate limit·오프라인)
   // iOS 방문자는 스토어로 보내야 하므로 fetch 밖에서 먼저 배선한다.
+  // iOS 방문자는 GitHub 릴리스와 무관하게 스토어로 보낸다 — 아래 fetch 가 실패해도(rate
+  // limit·오프라인) 이 배선은 살아 있어야 하므로 여기서 먼저 한다.
   if (hero && isIos) {
     hero.href = IOS_APP_STORE_URL;
-    hero.textContent = "⬇ App Store에서 받기";
+    hero.textContent = window.dolgateStrings.dlAppStore;
   }
 
   // 나머지 플랫폼은 최신 릴리스의 실제 파일 URL로 배선한다.
@@ -501,13 +534,6 @@
         }
       });
 
-      // 버전 표기
-      if (rel.tag_name) {
-        document.querySelectorAll(".latest-version").forEach((el) => {
-          el.textContent = rel.tag_name;
-        });
-      }
-
       // 히어로 버튼: 방문자 OS 감지해서 그 파일을 바로 다운로드(iOS 는 위에서 이미 처리)
       const os = isIos ? null
         : /Android/i.test(ua) ? "android"
@@ -515,11 +541,18 @@
         : /Win/i.test(ua) ? "win"
         : /Linux/i.test(ua) ? "linux"
         : null;
+      const NAMES = { mac: "macOS", win: "Windows", linux: "Linux", android: "Android" };
+
+      if (rel.tag_name) {
+        document.querySelectorAll(".latest-version").forEach((el) => {
+          el.textContent = rel.tag_name;
+        });
+      }
       if (hero && os && urls[os]) {
-        const NAMES = { mac: "macOS", win: "Windows", linux: "Linux", android: "Android" };
         hero.href = urls[os];
-        hero.removeAttribute("target");
-        hero.textContent = `⬇ ${NAMES[os]}용 다운로드 ${rel.tag_name || ""}`.trimEnd();
+        hero.removeAttribute("target"); // 직다운로드는 새 탭 불필요
+        const template = window.dolgateStrings.dlFor;
+        hero.textContent = `${template.replace("{os}", NAMES[os])} ${rel.tag_name || ""}`.trimEnd();
       }
     } catch {
       /* 폴백: 릴리스 페이지 링크 유지 */
