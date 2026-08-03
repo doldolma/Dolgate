@@ -438,6 +438,7 @@ export function HomeShell({
       <div className="relative min-h-0 flex-1">
         {homeViewModel.homeSection === 'hosts' ? (
           <HostBrowser
+            active={active}
             hostEditor={hostEditor}
             tmuxPrefixKey={settingsViewModel.settings.tmuxPrefixKey}
             desktopPlatform={desktopPlatform}

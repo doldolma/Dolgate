@@ -25,6 +25,7 @@ import {
 } from './HostBrowser';
 import { resolveResponsiveCardGridLayout } from '../lib/responsive-card-grid';
 import {
+  getHostNavigationStep,
   HOME_BROWSER_CARD_GAP_PX,
   HOME_BROWSER_HOST_CARD_MAX_WIDTH_PX,
   HOME_BROWSER_HOST_CARD_MIN_WIDTH_PX,
@@ -210,6 +211,7 @@ interface RenderBrowserOptions {
   searchQuery?: string;
   hostViewMode?: 'grid' | 'list';
   selectedHostId?: string | null;
+  active?: boolean;
   activityLogs?: ActivityLogRecord[];
   onClearHostSelection?: ReturnType<typeof vi.fn>;
   onSelectHost?: ReturnType<typeof vi.fn>;
@@ -252,6 +254,7 @@ function renderBrowser({
   searchQuery = '',
   hostViewMode = 'grid',
   selectedHostId = null,
+  active = true,
   activityLogs = [],
   onClearHostSelection = vi.fn(),
   onSelectHost = vi.fn(),
@@ -294,6 +297,7 @@ function renderBrowser({
       searchQuery={searchQuery}
       hostViewMode={hostViewMode}
       selectedHostId={selectedHostId}
+      active={active}
       activityLogs={activityLogs}
       onSearchChange={vi.fn()}
       onHostViewModeChange={onHostViewModeChange}
@@ -570,6 +574,103 @@ describe('HostBrowser helpers', () => {
 
     fireEvent.click(screen.getByRole('option', { name: /DB 연결/i }));
     expect(onConnectHost).toHaveBeenCalledWith('host-2');
+  });
+
+  // 호스트를 고치면 audit 로그가 남고 그것도 metadata.hostId 를 갖는다 — 종류를 가리지 않으면
+  // 이름만 바꿔도 "최근 접속"이 방금으로 올라가고 최근순 정렬이 뒤바뀐다.
+  it('ignores host edit audit logs when ranking hosts by last connection', () => {
+    const onConnectHost = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({
+      onConnectHost,
+      activityLogs: [
+        {
+          id: 'log-connect-host-2',
+          level: 'info',
+          category: 'session',
+          kind: 'session-lifecycle',
+          message: 'connected',
+          metadata: { hostId: 'host-2' },
+          createdAt: '2025-01-02T00:00:00.000Z',
+        },
+        {
+          id: 'log-edit-host-1',
+          level: 'info',
+          category: 'audit',
+          message: 'host updated',
+          metadata: { hostId: 'host-1' },
+          createdAt: '2025-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const input = screen.getByLabelText('Search hosts');
+    fireEvent.focus(input);
+
+    // 재접속 제안은 접속한 적 있는 호스트만 담는다. host-2 만 세션 로그가 있으므로, 더 나중에
+    // 수정된 host-1 이 목록에 끼면 편집을 접속으로 읽은 것이다.
+    expect(screen.getByRole('option', { name: /DB 연결/i })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /App 연결/i })).not.toBeInTheDocument();
+  });
+
+  // 정렬·그룹에 따라 보이는 순서가 달라지므로 화면에 그려진 순서를 읽어 그 다음 항목을 기대한다.
+  function visibleHostIdsInDom(): string[] {
+    return Array.from(document.querySelectorAll('[data-host-id]')).map(
+      (element) => element.getAttribute('data-host-id') ?? '',
+    );
+  }
+
+  it('moves the selected host with the arrow keys', () => {
+    const onSelectHost = vi.fn();
+    renderBrowser({ onSelectHost, selectedHostId: 'host-1' });
+
+    const ids = visibleHostIdsInDom();
+    const index = ids.indexOf('host-1');
+    expect(index).toBeGreaterThanOrEqual(0);
+    const next = ids[index + 1];
+    expect(next).toBeTruthy();
+
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(onSelectHost).toHaveBeenCalledWith(next);
+  });
+
+  it('stops at the ends instead of wrapping around', () => {
+    const probe = renderBrowser({});
+    const [first] = visibleHostIdsInDom();
+    probe.unmount();
+
+    const onSelectHost = vi.fn();
+    renderBrowser({ onSelectHost, selectedHostId: first });
+    fireEvent.keyDown(window, { key: 'ArrowUp' });
+    expect(onSelectHost).not.toHaveBeenCalled();
+  });
+
+  // 검색 입력에서는 팔레트가 화살표를 쓴다 — 여기서 선택까지 움직이면 두 곳이 동시에 반응한다.
+  it('leaves the arrow keys to the command palette while typing a search', () => {
+    const onSelectHost = vi.fn();
+    renderBrowser({ onSelectHost, selectedHostId: 'host-1' });
+
+    fireEvent.keyDown(screen.getByLabelText('Search hosts'), { key: 'ArrowDown' });
+    expect(onSelectHost).not.toHaveBeenCalled();
+  });
+
+  // 격자에서 위아래는 한 칸이 아니라 한 줄만큼 움직인다. jsdom 은 폭을 재지 못해 열 수가 항상
+  // 1 이므로, 열 수에 따른 계산은 여기서 직접 확인한다.
+  it('moves by a full row in a multi-column grid', () => {
+    expect(getHostNavigationStep('ArrowDown', 3)).toBe(3);
+    expect(getHostNavigationStep('ArrowUp', 3)).toBe(-3);
+    expect(getHostNavigationStep('ArrowRight', 3)).toBe(1);
+    expect(getHostNavigationStep('ArrowLeft', 3)).toBe(-1);
+    expect(getHostNavigationStep('Enter', 3)).toBeNull();
+  });
+
+  // 홈 셸은 세션 탭이 활성일 때도 마운트된 채 숨겨지기만 한다 — 그때 창 전역 화살표가
+  // 살아 있으면 터미널을 쓰는 중에 보이지 않는 목록의 선택이 움직인다.
+  it('ignores the arrow keys while the home shell is not the active view', () => {
+    const onSelectHost = vi.fn();
+    renderBrowser({ onSelectHost, selectedHostId: 'host-1', active: false });
+
+    fireEvent.keyDown(window, { key: 'ArrowDown' });
+    expect(onSelectHost).not.toHaveBeenCalled();
   });
 
   it('runs the first host palette result with Enter', () => {

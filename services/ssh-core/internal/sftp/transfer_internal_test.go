@@ -17,6 +17,20 @@ import (
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
+// tailnet 경유 전송이 끊기면 OS 소켓 문구가 아니라 tsnet 의 사용자 공간 스택(gvisor
+// netstack) 문구로 온다 — "connection aborted". 놓치면 unknown 으로 분류돼 화면이 단절을
+// 단절로 알려 주지 못한다.
+func TestClassifyTransferErrorRecognizesNetstackDrops(t *testing.T) {
+	for _, message := range []string{
+		"sftp: write packet: connection aborted",
+		"sftp: read packet: connection reset by peer",
+	} {
+		if got := classifyTransferError(errors.New(message)); got != transferErrorConnectionLost {
+			t.Fatalf("classifyTransferError(%q) = %q, want %q", message, got, transferErrorConnectionLost)
+		}
+	}
+}
+
 func TestTransferProgressReporterEmitsImmediatelyForItemChangesAndThrottlesSamples(t *testing.T) {
 	now := time.Unix(0, 0)
 	current := now

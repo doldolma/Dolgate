@@ -245,6 +245,84 @@ describe("useMobileAppStore host mutations", () => {
     ).toBe(1);
   });
 
+  // 인증서 인증은 개인 키와 인증서를 한 시크릿에 함께 담아야 한다 — 엔진이 둘을 같이 받는다.
+  it("stores a certificate credential with its private key", async () => {
+    const pushedPayloads: SyncPayloadV2[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        pushedPayloads.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState() });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        label: "Cert host",
+        hostname: "cert.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "certificate",
+        credentials: {
+          privateKeyPem: "-----BEGIN OPENSSH PRIVATE KEY-----",
+          certificateText: "ssh-ed25519-cert-v01@openssh.com AAAA",
+          passphrase: "pass",
+        },
+      });
+    });
+
+    const payload = pushedPayloads[0];
+    const pushedHost = decryptRecord<SshHostRecord>(
+      payload.hosts[0].encrypted_payload,
+    );
+    expect(pushedHost.authType).toBe("certificate");
+    const pushedSecret = decryptRecord<LoadedManagedSecretPayload>(
+      payload.secrets[0].encrypted_payload,
+    );
+    expect(pushedSecret.privateKeyPem).toBe(
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+    );
+    expect(pushedSecret.certificateText).toBe(
+      "ssh-ed25519-cert-v01@openssh.com AAAA",
+    );
+    expect(pushedSecret.passphrase).toBe("pass");
+    expect(
+      useMobileAppStore
+        .getState()
+        .secretMetadata.find(
+          (entry) => entry.secretRef === pushedHost.secretRef,
+        )?.hasCertificate,
+    ).toBe(true);
+  });
+
+  // 인증서 없이 개인 키만 오면 자격 증명이 성립하지 않는다 — 반쪽 시크릿을 만들지 않는다.
+  it("rejects a certificate credential that is missing the certificate", async () => {
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState() });
+    });
+
+    await expect(
+      useMobileAppStore.getState().saveHost({
+        hostId: undefined,
+        label: "Cert host",
+        hostname: "cert.example.com",
+        port: 22,
+        username: "ubuntu",
+        authType: "certificate",
+        credentialMode: "replace",
+        credentials: {
+          privateKeyPem: "-----BEGIN OPENSSH PRIVATE KEY-----",
+        },
+      }),
+    ).rejects.toThrow();
+    expect(useMobileAppStore.getState().hosts).toHaveLength(0);
+  });
+
   it("keeps local state untouched when the push fails", async () => {
     fetchMock.mockImplementation(async (input) => {
       const path = new URL(String(input)).pathname;

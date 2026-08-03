@@ -1,4 +1,5 @@
 import React from "react";
+import { Pressable, Text } from "react-native";
 import { useTranslation } from "react-i18next";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
@@ -47,6 +48,30 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 export const MAIN_TAB_INITIAL_ROUTE = "Home";
 export const MAIN_TAB_BACK_BEHAVIOR = "fullHistory";
+
+function HeaderTextButton({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}): React.JSX.Element {
+  const palette = useMobilePalette();
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={12}>
+      <Text
+        style={{
+          color: palette.accent,
+          fontSize: 17,
+          fontWeight: "600",
+          letterSpacing: -0.2,
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
 
 function getTabIconName(
   routeName: keyof MainTabParamList,
@@ -196,7 +221,7 @@ function AuthenticatedNavigator(): React.JSX.Element {
       <RootStack.Screen
         name="HostForm"
         component={HostFormScreen}
-        options={({ route }) => ({
+        options={({ navigation, route }) => ({
           presentation: "modal",
           headerShown: true,
           headerStyle: {
@@ -205,6 +230,15 @@ function AuthenticatedNavigator(): React.JSX.Element {
           headerTintColor: colors.text,
           headerShadowVisible: false,
           title: route.params?.hostId ? translate("nav.hostEdit") : translate("nav.hostAdd"),
+          // 모달에는 back chevron 이 없다 — 이게 없으면 화면을 벗어나는 유일한 길이 아래로
+          // 스와이프하는 제스처뿐이고, 그건 보이지 않는 경로다. 저장하지 않은 내용이 있으면
+          // 화면 쪽 beforeRemove 가드가 확인을 받으므로 여기서는 그냥 나가기만 요청한다.
+          headerLeft: () => (
+            <HeaderTextButton
+              label={translate("common.cancel")}
+              onPress={() => navigation.goBack()}
+            />
+          ),
         })}
       />
     </RootStack.Navigator>

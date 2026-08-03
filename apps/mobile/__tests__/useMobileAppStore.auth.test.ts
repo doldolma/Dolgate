@@ -1989,6 +1989,48 @@ describe("useMobileAppStore auth and sync flows", () => {
     expect(engineNative.startShell).toHaveBeenCalledTimes(1);
   });
 
+  // 데스크톱에서 agent 인증으로 설정한 호스트. 모바일에는 ssh-agent 가 없어 연결할 수 없다.
+  // 예전에는 "이 인증 방식은 지원하지 않습니다"만 떠서 무엇을 바꿔야 하는지 알 수 없었다.
+  it("explains why an ssh-agent host cannot connect from mobile", async () => {
+    const host: SshHostRecord = {
+      id: "host-agent",
+      kind: "ssh",
+      label: "Agent SSH",
+      hostname: "agent.example.com",
+      port: 22,
+      username: "deploy",
+      authType: "agent",
+      secretRef: null,
+      privateKeyPath: null,
+      certificatePath: null,
+      createdAt: "2026-04-13T00:00:00.000Z",
+      updatedAt: "2026-04-13T00:00:00.000Z",
+    };
+    const knownHost = await trustedHostKey(host.hostname, host.port);
+
+    await act(async () => {
+      resetStore({
+        auth: createAuthenticatedState(),
+        hosts: [host],
+        knownHosts: [knownHost],
+      });
+    });
+
+    await act(async () => {
+      await useMobileAppStore.getState().connectToHost(host.id);
+      await flushAsyncWork();
+    });
+
+    const session = useMobileAppStore
+      .getState()
+      .sessions.find(entry => entry.hostId === host.id);
+    expect(session?.status).toBe("error");
+    expect(session?.errorMessage).toContain("SSH Agent");
+    // 무엇을 바꿔야 하는지까지 말해 준다 — "지원하지 않습니다"만으로는 알 수 없다.
+    expect(session?.errorMessage).toContain("데스크톱");
+    expect(engineNative.connect).not.toHaveBeenCalled();
+  });
+
   // Probing costs a whole extra TCP connection and key exchange, so a host that
   // was approved once must not pay for it again.
   it("connects without probing when the host key is already on file", async () => {

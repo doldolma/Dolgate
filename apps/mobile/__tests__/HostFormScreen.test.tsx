@@ -1,6 +1,7 @@
 import React from "react";
 import renderer, { act } from "react-test-renderer";
-import { TextInput } from "react-native";
+import { Alert, TextInput } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import type { SshHostRecord } from "@dolssh/shared-core";
 import {
   createDefaultMobileSettings,
@@ -11,12 +12,26 @@ import { HostFormScreen } from "../src/screens/HostFormScreen";
 import { useMobileAppStore } from "../src/store/useMobileAppStore";
 
 const mockGoBack = jest.fn();
+const mockDispatch = jest.fn();
 let mockRouteParams: { hostId?: string } | undefined;
+// 화면이 beforeRemove 로 나가기를 가로챈다 — 등록된 콜백을 잡아 두고 테스트에서 직접 부른다.
+let beforeRemoveListener: ((event: unknown) => void) | null = null;
 
 jest.mock("@react-navigation/native", () => ({
   useNavigation: () => ({
     goBack: mockGoBack,
     navigate: jest.fn(),
+    dispatch: mockDispatch,
+    addListener: (name: string, listener: (event: unknown) => void) => {
+      if (name === "beforeRemove") {
+        beforeRemoveListener = listener;
+      }
+      return () => {
+        if (name === "beforeRemove") {
+          beforeRemoveListener = null;
+        }
+      };
+    },
   }),
   useRoute: () => ({ params: mockRouteParams }),
 }));
@@ -51,6 +66,19 @@ function createExistingHost(): SshHostRecord {
   };
 }
 
+const SAFE_AREA_METRICS = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 59, left: 0, right: 0, bottom: 34 },
+};
+
+function renderForm(): renderer.ReactTestRenderer {
+  return renderer.create(
+    <SafeAreaProvider initialMetrics={SAFE_AREA_METRICS}>
+      <HostFormScreen />
+    </SafeAreaProvider>,
+  );
+}
+
 function resetStore(hosts: SshHostRecord[] = []): void {
   useMobileAppStore.setState({
     hydrated: true,
@@ -74,19 +102,25 @@ function resetStore(hosts: SshHostRecord[] = []): void {
   });
 }
 
-function findInputByPlaceholder(
+// placeholder 는 예시 값("10.0.0.1")이라 칸을 가리키지 못한다 — 라벨이 칸의 이름이고,
+// 스크린리더가 읽는 것과 같은 값으로 찾는다.
+function findInput(
   root: renderer.ReactTestInstance,
-  placeholderPrefix: string,
+  label: string,
 ): renderer.ReactTestInstance {
   const match = root
     .findAllByType(TextInput)
-    .find((node) =>
-      String(node.props.placeholder ?? "").startsWith(placeholderPrefix),
-    );
+    .find((node) => node.props.accessibilityLabel === label);
   if (!match) {
-    throw new Error(`input not found: ${placeholderPrefix}`);
+    throw new Error(`input not found: ${label}`);
   }
   return match;
+}
+
+function hasInput(root: renderer.ReactTestInstance, label: string): boolean {
+  return root
+    .findAllByType(TextInput)
+    .some((node) => node.props.accessibilityLabel === label);
 }
 
 function findSaveButton(
@@ -123,6 +157,8 @@ function findActionByLabel(
 describe("HostFormScreen", () => {
   beforeEach(async () => {
     mockGoBack.mockReset();
+    mockDispatch.mockReset();
+    beforeRemoveListener = null;
     mockRouteParams = undefined;
     await act(async () => {
       resetStore();
@@ -135,24 +171,24 @@ describe("HostFormScreen", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HostFormScreen />);
+      tree = renderForm();
     });
 
     await act(async () => {
-      findInputByPlaceholder(tree!.root, "이름").props.onChangeText(
+      findInput(tree!.root, "이름").props.onChangeText(
         "New host",
       );
-      findInputByPlaceholder(tree!.root, "호스트 주소").props.onChangeText(
+      findInput(tree!.root, "호스트").props.onChangeText(
         "new.example.com",
       );
-      findInputByPlaceholder(tree!.root, "포트").props.onChangeText("2222");
-      findInputByPlaceholder(tree!.root, "사용자 이름").props.onChangeText(
+      findInput(tree!.root, "포트").props.onChangeText("2222");
+      findInput(tree!.root, "사용자").props.onChangeText(
         "deploy",
       );
-      findInputByPlaceholder(tree!.root, "그룹").props.onChangeText(
+      findInput(tree!.root, "그룹").props.onChangeText(
         "work/aws",
       );
-      findInputByPlaceholder(tree!.root, "비밀번호").props.onChangeText(
+      findInput(tree!.root, "비밀번호").props.onChangeText(
         "hunter2",
       );
     });
@@ -176,6 +212,7 @@ describe("HostFormScreen", () => {
         password: "hunter2",
         privateKeyPem: undefined,
         passphrase: undefined,
+        certificateText: undefined,
       },
     });
     expect(mockGoBack).toHaveBeenCalledTimes(1);
@@ -185,21 +222,204 @@ describe("HostFormScreen", () => {
     });
   });
 
-  it("disables saving while the port is invalid", async () => {
+  // 인증서 인증은 런타임(엔진·자격 증명 프롬프트)에는 이미 있었고 폼에만 없었다.
+  it("collects a certificate credential as a key and certificate pair", async () => {
+    const saveHostMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveHost: saveHostMock });
+
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HostFormScreen />);
+      tree = renderForm();
     });
 
     await act(async () => {
-      findInputByPlaceholder(tree!.root, "이름").props.onChangeText("Host");
-      findInputByPlaceholder(tree!.root, "호스트 주소").props.onChangeText(
-        "example.com",
+      findInput(tree!.root, "이름").props.onChangeText("Cert host");
+      findInput(tree!.root, "호스트").props.onChangeText(
+        "cert.example.com",
       );
-      findInputByPlaceholder(tree!.root, "사용자 이름").props.onChangeText(
+      findInput(tree!.root, "사용자").props.onChangeText(
         "ubuntu",
       );
-      findInputByPlaceholder(tree!.root, "포트").props.onChangeText("99999");
+      findActionByLabel(tree!.root, "인증서").props.onPress();
+    });
+
+    await act(async () => {
+      findInput(tree!.root, "개인 키").props.onChangeText(
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+      );
+    });
+
+    // 한쪽만 채운 상태에서는 저장을 막는다 — 시크릿이 조용히 버려지는 걸 방지한다.
+    expect(findSaveButton(tree!.root, "호스트 추가").props.disabled).toBe(true);
+
+    await act(async () => {
+      findInput(tree!.root, "인증서").props.onChangeText(
+        "ssh-ed25519-cert-v01@openssh.com AAAA",
+      );
+    });
+
+    const saveButton = findSaveButton(tree!.root, "호스트 추가");
+    expect(saveButton.props.disabled).toBe(false);
+    await act(async () => {
+      saveButton.props.onPress();
+    });
+
+    expect(saveHostMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authType: "certificate",
+        credentials: {
+          password: undefined,
+          privateKeyPem: "-----BEGIN OPENSSH PRIVATE KEY-----",
+          passphrase: "",
+          certificateText: "ssh-ed25519-cert-v01@openssh.com AAAA",
+        },
+      }),
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 데스크톱에서 agent 로 설정한 호스트는 모바일에서 값을 바꾸지 않고 그대로 실어 보내야
+  // 한다 — password 로 떨어뜨리면 이름만 고쳐 저장해도 데스크톱에서 그 호스트가 깨진다.
+  it("preserves a desktop-only auth type instead of rewriting it", async () => {
+    const host = { ...createExistingHost(), authType: "agent" as const, secretRef: null };
+    await act(async () => {
+      resetStore([host]);
+    });
+    mockRouteParams = { hostId: host.id };
+    const saveHostMock = jest.fn(async () => undefined);
+    await act(async () => {
+      useMobileAppStore.setState({ saveHost: saveHostMock });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    // 무엇으로 설정돼 있는지는 보여 주고, 고르는 칩은 감춘다.
+    expect(
+      tree!.root.findAll((node) => node.props?.children === "SSH Agent"),
+    ).not.toHaveLength(0);
+    expect(
+      tree!.root.findAll((node) => node.props?.children === "비밀번호"),
+    ).toHaveLength(0);
+
+    await act(async () => {
+      findInput(tree!.root, "이름").props.onChangeText("Renamed");
+    });
+    await act(async () => {
+      findSaveButton(tree!.root, "변경 사항 저장").props.onPress();
+    });
+
+    expect(saveHostMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "Renamed",
+        authType: "agent",
+        credentialMode: undefined,
+        credentials: null,
+      }),
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 모달에는 back chevron 이 없어 헤더의 취소와 아래로 스와이프하는 제스처가 유일한 출구다.
+  // 둘 다 beforeRemove 를 지나므로, 저장하지 않은 입력은 어느 쪽으로 나가도 확인을 받는다.
+  it("guards an exit with unsaved edits and lets the user discard", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    // 아무것도 고치지 않았으면 막지 않는다.
+    const untouched = { preventDefault: jest.fn(), data: { action: { type: "POP" } } };
+    await act(async () => {
+      beforeRemoveListener?.(untouched);
+    });
+    expect(untouched.preventDefault).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findInput(tree!.root, "이름").props.onChangeText("Half typed");
+    });
+
+    const dirty = { preventDefault: jest.fn(), data: { action: { type: "POP" } } };
+    await act(async () => {
+      beforeRemoveListener?.(dirty);
+    });
+    expect(dirty.preventDefault).toHaveBeenCalledTimes(1);
+
+    // "버리기"를 고르면 원래 가려던 곳으로 보낸다.
+    const buttons = alertSpy.mock.calls[0][2] as Array<{
+      text: string;
+      onPress?: () => void;
+    }>;
+    const discard = buttons.find((button) => button.text === "버리기");
+    expect(discard).toBeTruthy();
+    await act(async () => {
+      discard?.onPress?.();
+    });
+    expect(mockDispatch).toHaveBeenCalledWith({ type: "POP" });
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  // 저장에 성공해 스스로 닫을 때는 물어보지 않는다.
+  it("does not guard the exit after a successful save", async () => {
+    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => {});
+    useMobileAppStore.setState({ saveHost: jest.fn(async () => undefined) });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+    await act(async () => {
+      findInput(tree!.root, "이름").props.onChangeText("Saved host");
+      findInput(tree!.root, "호스트").props.onChangeText("saved.example.com");
+      findInput(tree!.root, "사용자").props.onChangeText("ubuntu");
+    });
+    await act(async () => {
+      findSaveButton(tree!.root, "호스트 추가").props.onPress();
+    });
+    expect(mockGoBack).toHaveBeenCalledTimes(1);
+
+    const afterSave = { preventDefault: jest.fn(), data: { action: { type: "POP" } } };
+    await act(async () => {
+      beforeRemoveListener?.(afterSave);
+    });
+    expect(afterSave.preventDefault).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("disables saving while the port is invalid", async () => {
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    await act(async () => {
+      findInput(tree!.root, "이름").props.onChangeText("Host");
+      findInput(tree!.root, "호스트").props.onChangeText(
+        "example.com",
+      );
+      findInput(tree!.root, "사용자").props.onChangeText(
+        "ubuntu",
+      );
+      findInput(tree!.root, "포트").props.onChangeText("99999");
     });
 
     expect(findSaveButton(tree!.root, "호스트 추가").props.disabled).toBe(
@@ -207,7 +427,7 @@ describe("HostFormScreen", () => {
     );
 
     await act(async () => {
-      findInputByPlaceholder(tree!.root, "포트").props.onChangeText("22");
+      findInput(tree!.root, "포트").props.onChangeText("22");
     });
     expect(findSaveButton(tree!.root, "호스트 추가").props.disabled).toBe(
       false,
@@ -231,27 +451,23 @@ describe("HostFormScreen", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HostFormScreen />);
+      tree = renderForm();
     });
 
-    expect(findInputByPlaceholder(tree!.root, "이름").props.value).toBe(
+    expect(findInput(tree!.root, "이름").props.value).toBe(
       host.label,
     );
-    expect(findInputByPlaceholder(tree!.root, "호스트 주소").props.value).toBe(
+    expect(findInput(tree!.root, "호스트").props.value).toBe(
       host.hostname,
     );
-    expect(findInputByPlaceholder(tree!.root, "포트").props.value).toBe(
+    expect(findInput(tree!.root, "포트").props.value).toBe(
       "2200",
     );
-    expect(findInputByPlaceholder(tree!.root, "사용자 이름").props.value).toBe(
+    expect(findInput(tree!.root, "사용자").props.value).toBe(
       host.username,
     );
     expect(findActionByLabel(tree!.root, "기존 유지")).toBeTruthy();
-    expect(
-      tree!.root.findAllByType(TextInput).some((node) =>
-        String(node.props.placeholder ?? "").startsWith("개인 키 붙여넣기"),
-      ),
-    ).toBe(false);
+    expect(hasInput(tree!.root, "개인 키")).toBe(false);
 
     const saveButton = findSaveButton(tree!.root, "변경 사항 저장");
     await act(async () => {
@@ -284,14 +500,12 @@ describe("HostFormScreen", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HostFormScreen />);
+      tree = renderForm();
     });
     await act(async () => {
       findActionByLabel(tree!.root, "교체").props.onPress();
     });
-    expect(
-      findInputByPlaceholder(tree!.root, "개인 키 붙여넣기"),
-    ).toBeTruthy();
+    expect(hasInput(tree!.root, "개인 키")).toBe(true);
 
     await act(async () => {
       findActionByLabel(tree!.root, "연결 해제").props.onPress();
@@ -317,7 +531,7 @@ describe("HostFormScreen", () => {
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<HostFormScreen />);
+      tree = renderForm();
     });
     await act(async () => {
       findActionByLabel(tree!.root, "비밀번호").props.onPress();
@@ -327,17 +541,13 @@ describe("HostFormScreen", () => {
         (node) => node.props?.children === "기존 유지",
       ),
     ).toHaveLength(0);
-    expect(findInputByPlaceholder(tree!.root, "비밀번호")).toBeTruthy();
+    expect(findInput(tree!.root, "비밀번호")).toBeTruthy();
 
     await act(async () => {
       findActionByLabel(tree!.root, "개인 키").props.onPress();
     });
     expect(findActionByLabel(tree!.root, "기존 유지")).toBeTruthy();
-    expect(
-      tree!.root.findAllByType(TextInput).some((node) =>
-        String(node.props.placeholder ?? "").startsWith("개인 키 붙여넣기"),
-      ),
-    ).toBe(false);
+    expect(hasInput(tree!.root, "개인 키")).toBe(false);
 
     await act(async () => {
       findSaveButton(tree!.root, "변경 사항 저장").props.onPress();

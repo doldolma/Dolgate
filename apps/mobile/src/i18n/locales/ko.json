@@ -101,7 +101,6 @@
       "system": "시스템 설정"
     },
     "sections": {
-      "title": "설정",
       "account": "계정",
       "server": "서버",
       "app": "앱",
@@ -138,6 +137,8 @@
     "passwordRequired": "비밀번호가 필요합니다.",
     "keyAndCertRequired": "개인키 PEM과 SSH 인증서가 필요합니다.",
     "keyRequired": "개인키 PEM이 필요합니다.",
+    "agentAuthUnsupported": "이 호스트는 SSH Agent 인증을 쓰도록 설정돼 있습니다. 모바일에는 ssh-agent 가 없어 연결할 수 없습니다 — 데스크톱 앱에서 개인 키나 인증서 인증으로 바꿔 주세요.",
+    "keyboardInteractiveUnsupported": "이 호스트는 키보드 인터랙티브 인증을 쓰도록 설정돼 있습니다. 모바일에서는 지원하지 않습니다 — 데스크톱 앱에서 연결해 주세요.",
     "keyFormatOrPassphrase": "개인키 형식 또는 passphrase를 확인해 주세요.",
     "certFormat": "SSH 인증서 형식을 확인해 주세요.",
     "noVaultKey": "볼트 키가 없습니다. 앱을 최신 버전으로 업데이트해 주세요.",
@@ -173,7 +174,7 @@
     "enterKeyAndCert": "개인키 PEM과 SSH 인증서를 입력하거나 파일에서 가져와 주세요.",
     "sftpNotFound": "SFTP 연결을 찾지 못했습니다.",
     "sftpListFailed": "SFTP 폴더 목록을 불러오지 못했습니다.",
-    "sftpAuthLimited": "SFTP는 모바일 v1에서 비밀번호, 개인키, 인증서 인증만 지원합니다.",
+    "sftpAuthLimited": "SFTP는 비밀번호, 개인 키, 인증서 인증만 지원합니다.",
     "sftpCancelled": "SFTP 연결이 취소되었습니다.",
     "sftpConnectFailed": "SFTP 연결에 실패했습니다.",
     "awsSftpUnsupported": "이 서버는 AWS SFTP를 지원하지 않습니다.",
@@ -181,7 +182,7 @@
     "awsSftpAzRequired": "AWS SFTP에 사용할 Availability Zone 정보가 필요합니다.",
     "awsSftpHostKeyFailed": "AWS SFTP 호스트 키를 확인하지 못했습니다.",
     "hostKindUnsupported": "이 호스트 종류는 모바일에서 아직 지원하지 않습니다.",
-    "authKindUnsupported": "이 인증 방식은 모바일 v1에서 아직 지원하지 않습니다.",
+    "authKindUnsupported": "모바일에서 지원하지 않는 인증 방식입니다.",
     "connectCancelled": "연결이 취소되었습니다.",
     "sshConnectFailed": "SSH 연결에 실패했습니다.",
     "ssmUnsupported": "이 서버는 AWS SSM 세션을 지원하지 않습니다.",
@@ -286,24 +287,29 @@
   "hostForm": {
     "auth": {
       "password": "비밀번호",
-      "privateKey": "개인 키"
+      "privateKey": "개인 키",
+      "certificate": "인증서",
+      "agent": "SSH Agent",
+      "keyboardInteractive": "키보드 인터랙티브",
+      "lockedHint": "이 인증 방식은 데스크톱 앱에서만 설정할 수 있습니다. 저장해도 그대로 유지됩니다."
     },
     "validation": {
       "name": "이름을 입력해 주세요.",
       "host": "호스트 주소를 입력해 주세요.",
       "port": "포트는 1~65535 사이의 숫자여야 합니다.",
-      "username": "사용자 이름을 입력해 주세요."
+      "username": "사용자 이름을 입력해 주세요.",
+      "certificatePair": "인증서 인증은 개인 키와 인증서를 함께 입력해야 합니다."
     },
     "editFailedTitle": "호스트 수정 실패",
     "addFailedTitle": "호스트 추가 실패",
     "saveFailed": "호스트를 저장하지 못했습니다.",
     "basicSection": "기본 정보",
-    "authSection": "인증",
-    "namePlaceholder": "이름 (예: 개발 서버)",
-    "hostPlaceholder": "호스트 주소 (예: 10.0.0.1, example.com)",
-    "portPlaceholder": "포트",
-    "usernamePlaceholder": "사용자 이름",
-    "groupPlaceholder": "그룹 (선택, 예: work/aws)",
+    "authSection": "인증 방식",
+    "namePlaceholder": "개발 서버",
+    "hostPlaceholder": "10.0.0.1",
+    "portPlaceholder": "22",
+    "usernamePlaceholder": "ubuntu",
+    "groupPlaceholder": "work/aws",
     "credential": {
       "preserve": "기존 유지",
       "replace": "교체",
@@ -311,13 +317,31 @@
       "preserveHint": "저장된 자격 증명을 변경하지 않습니다.",
       "removeHint": "이 호스트와의 연결만 해제하며 저장된 자격 증명은 삭제하지 않습니다."
     },
-    "passwordPlaceholder": "비밀번호 (비워두면 저장하지 않음)",
-    "privateKeyPlaceholder": "개인 키 붙여넣기 (비워두면 저장하지 않음)\n-----BEGIN OPENSSH PRIVATE KEY-----",
-    "passphrasePlaceholder": "키 암호 (선택)",
+    "passwordPlaceholder": "비워두면 저장하지 않음",
+    "privateKeyPlaceholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "certificatePlaceholder": "ssh-ed25519-cert-v01@openssh.com AAAA...",
+    "passphrasePlaceholder": "선택 사항",
     "syncHint": "입력한 자격 증명은 암호화되어 다른 기기와 동기화됩니다.",
     "saving": "저장 중...",
     "saveChanges": "변경 사항 저장",
-    "addHost": "호스트 추가"
+    "addHost": "호스트 추가",
+    "fields": {
+      "name": "이름",
+      "host": "호스트",
+      "port": "포트",
+      "username": "사용자",
+      "group": "그룹",
+      "password": "비밀번호",
+      "privateKey": "개인 키",
+      "certificate": "인증서",
+      "passphrase": "키 암호"
+    },
+    "groupHint": "선택 사항입니다. work/aws 처럼 / 로 하위 그룹을 만듭니다.",
+    "credentialSection": "저장된 자격 증명",
+    "discardTitle": "변경 사항을 버릴까요?",
+    "discardBody": "저장하지 않은 내용이 있습니다.",
+    "discardConfirm": "버리기",
+    "keepEditing": "계속 편집"
   },
   "home": {
     "favorites": "즐겨찾기",

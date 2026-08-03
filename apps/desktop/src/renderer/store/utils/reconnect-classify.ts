@@ -34,8 +34,12 @@ const PERMANENT_ERROR_PATTERNS: RegExp[] = [
 
 // 일시적 오류(재연결 대상). aws-ssm-ssh-retry.ts의 TRANSIENT_ERROR_PATTERNS +
 // keepalive/원격 단절 메시지를 보강.
+// tailnet 경유 세션은 OS 소켓이 아니라 tsnet 의 사용자 공간 스택(gvisor netstack)에서
+// 끊기므로 문구가 다르다 — "connection was refused", "host is down",
+// "machine is not on the network". 여기서 놓치면 일시적 단절인데 unknown 으로 떨어져
+// 재연결을 몇 번만 시도하고 포기한다(connection aborted 는 이미 아래에 있다).
 const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
-  /connection refused/i,
+  /connection (was )?refused/i,
   /connection reset/i,
   /reset by peer/i,
   /broken pipe/i,
@@ -51,6 +55,8 @@ const TRANSIENT_ERROR_PATTERNS: RegExp[] = [
   /keepalive/i,
   /network is unreachable/i,
   /no route to host/i,
+  /host is down/i,
+  /machine is not on the network/i,
   /connection aborted/i,
   /use of closed network connection/i,
 ];

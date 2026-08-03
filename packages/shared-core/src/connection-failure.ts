@@ -3,6 +3,11 @@
 //
 // 코어가 올려 보내는 오류는 대부분 Go 원문이다. 분류하지 않으면 "context deadline exceeded"
 // 같은 문장이 그대로 화면에 뜬다.
+//
+// 문구가 두 계통으로 온다는 점이 중요하다. OS 소켓으로 나간 dial 은 Go 의 표준 문구
+// ("connection refused")를 주지만, tailnet 을 경유하면 tsnet 의 사용자 공간 네트워크
+// 스택(gvisor netstack)이 자기 문구를 준다 — 같은 원인인데 "connection was refused" 다.
+// 그래서 각 분류가 두 표현을 모두 받아야 한다.
 
 export type ConnectionFailureCode =
   | "agent-unreachable"
@@ -69,8 +74,14 @@ const RULES: Array<{
       /error when retrieving token from sso|token has expired|refresh failed|sso session.*expired|unable to locate credentials|expiredtoken|security token included in the request is invalid/i,
     code: "aws-auth",
   },
-  { pattern: /network is unreachable|no route to host/i, code: "no-route" },
-  { pattern: /connection refused/i, code: "refused" },
+  {
+    // "host is down", "machine is not on the network" 는 gvisor netstack 쪽 표현이다.
+    pattern:
+      /network is unreachable|no route to host|host is down|machine is not on the network/i,
+    code: "no-route",
+  },
+  // gvisor 는 "connection was refused" 다 — "was" 때문에 예전 패턴이 통째로 새어 나갔다.
+  { pattern: /connection (was )?refused/i, code: "refused" },
   // context deadline exceeded 는 Go 의 ctx 만료가 그대로 올라온 것이다(tailnet 경유 dial 이
   // 예산을 다 쓴 경우 등). 분류하지 않으면 원문이 화면에 뜬다.
   {
@@ -79,7 +90,8 @@ const RULES: Array<{
     code: "timeout",
     layer: "ssh",
   },
-  { pattern: /connection reset|\bEOF\b/i, code: "reset" },
+  // "connection aborted" 도 gvisor 쪽 표현이다.
+  { pattern: /connection (reset|aborted)|\bEOF\b/i, code: "reset" },
 ];
 
 export function getConnectionFailureReason(

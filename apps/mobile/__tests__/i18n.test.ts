@@ -136,6 +136,10 @@ describe('연결 실패 문구', () => {
     const target = 'root@nas.example.com:22';
     for (const raw of [
       'context deadline exceeded',
+      // tailnet 경유 dial 은 gvisor netstack 문구로 온다 — OS 문구와 표현이 다르다.
+      'connect tcp 100.112.69.93:9989: connection was refused',
+      'dial tcp 100.64.0.2:22: connection aborted',
+      'dial tcp 100.64.0.2:22: host is down',
       'dial tcp 10.0.0.2:22: i/o timeout',
       'dial tcp 10.0.0.2:22: connect: connection refused',
       'read tcp: connection reset by peer',

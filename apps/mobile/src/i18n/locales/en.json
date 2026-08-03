@@ -101,7 +101,6 @@
       "system": "System"
     },
     "sections": {
-      "title": "Settings",
       "account": "Account",
       "server": "Server",
       "app": "App",
@@ -138,6 +137,8 @@
     "passwordRequired": "A password is required.",
     "keyAndCertRequired": "A private key PEM and an SSH certificate are required.",
     "keyRequired": "A private key PEM is required.",
+    "agentAuthUnsupported": "This host is set to use SSH Agent authentication. There is no ssh-agent on mobile, so it cannot connect — switch it to private key or certificate auth in the desktop app.",
+    "keyboardInteractiveUnsupported": "This host is set to use keyboard-interactive authentication, which mobile does not support — connect from the desktop app.",
     "keyFormatOrPassphrase": "Check the private key format or the passphrase.",
     "certFormat": "Check the SSH certificate format.",
     "noVaultKey": "There is no vault key. Update the app to the latest version.",
@@ -173,7 +174,7 @@
     "enterKeyAndCert": "Enter a private key PEM and an SSH certificate, or import them from files.",
     "sftpNotFound": "The SFTP connection was not found.",
     "sftpListFailed": "Could not load the SFTP directory listing.",
-    "sftpAuthLimited": "On mobile v1, SFTP supports password, private key, and certificate authentication only.",
+    "sftpAuthLimited": "SFTP supports password, private key, and certificate authentication only.",
     "sftpCancelled": "The SFTP connection was cancelled.",
     "sftpConnectFailed": "The SFTP connection failed.",
     "awsSftpUnsupported": "This server does not support AWS SFTP.",
@@ -181,7 +182,7 @@
     "awsSftpAzRequired": "Availability zone information is required for AWS SFTP.",
     "awsSftpHostKeyFailed": "Could not verify the AWS SFTP host key.",
     "hostKindUnsupported": "This host kind is not supported on mobile yet.",
-    "authKindUnsupported": "This authentication method is not supported on mobile v1 yet.",
+    "authKindUnsupported": "This authentication method is not supported on mobile.",
     "connectCancelled": "The connection was cancelled.",
     "sshConnectFailed": "The SSH connection failed.",
     "ssmUnsupported": "This server does not support AWS SSM sessions.",
@@ -286,24 +287,29 @@
   "hostForm": {
     "auth": {
       "password": "Password",
-      "privateKey": "Private key"
+      "privateKey": "Private key",
+      "certificate": "Certificate",
+      "agent": "SSH Agent",
+      "keyboardInteractive": "Keyboard interactive",
+      "lockedHint": "This method can only be configured in the desktop app. Saving leaves it unchanged."
     },
     "validation": {
       "name": "Enter a name.",
       "host": "Enter the host address.",
       "port": "The port must be a number between 1 and 65535.",
-      "username": "Enter a username."
+      "username": "Enter a username.",
+      "certificatePair": "Certificate auth needs both the private key and the certificate."
     },
     "editFailedTitle": "Could not update the host",
     "addFailedTitle": "Could not add the host",
     "saveFailed": "Could not save the host.",
     "basicSection": "Basics",
     "authSection": "Authentication",
-    "namePlaceholder": "Name (e.g. Dev server)",
-    "hostPlaceholder": "Host address (e.g. 10.0.0.1, example.com)",
-    "portPlaceholder": "Port",
-    "usernamePlaceholder": "Username",
-    "groupPlaceholder": "Group (optional, e.g. work/aws)",
+    "namePlaceholder": "Dev server",
+    "hostPlaceholder": "10.0.0.1",
+    "portPlaceholder": "22",
+    "usernamePlaceholder": "ubuntu",
+    "groupPlaceholder": "work/aws",
     "credential": {
       "preserve": "Keep existing",
       "replace": "Replace",
@@ -311,13 +317,31 @@
       "preserveHint": "Leaves the saved credential unchanged.",
       "removeHint": "Unlinks it from this host only — the saved credential is not deleted."
     },
-    "passwordPlaceholder": "Password (leave empty to skip saving)",
-    "privateKeyPlaceholder": "Paste a private key (leave empty to skip saving)\n-----BEGIN OPENSSH PRIVATE KEY-----",
-    "passphrasePlaceholder": "Key passphrase (optional)",
+    "passwordPlaceholder": "Leave empty to skip saving",
+    "privateKeyPlaceholder": "-----BEGIN OPENSSH PRIVATE KEY-----",
+    "certificatePlaceholder": "ssh-ed25519-cert-v01@openssh.com AAAA…",
+    "passphrasePlaceholder": "Optional",
     "syncHint": "Credentials you enter are encrypted and synced to your other devices.",
     "saving": "Saving…",
     "saveChanges": "Save changes",
-    "addHost": "Add host"
+    "addHost": "Add host",
+    "fields": {
+      "name": "Name",
+      "host": "Host",
+      "port": "Port",
+      "username": "User",
+      "group": "Group",
+      "password": "Password",
+      "privateKey": "Private key",
+      "certificate": "Certificate",
+      "passphrase": "Passphrase"
+    },
+    "groupHint": "Optional. Use / to nest, like work/aws.",
+    "credentialSection": "Saved credential",
+    "discardTitle": "Discard changes?",
+    "discardBody": "You have unsaved changes.",
+    "discardConfirm": "Discard",
+    "keepEditing": "Keep editing"
   },
   "home": {
     "favorites": "Favorites",

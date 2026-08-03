@@ -46,6 +46,27 @@ describe("resolveConnectionFailurePresentation", () => {
     ).toBe("127.0.0.1:60050에서 연결을 거부했습니다.");
   });
 
+  // tailnet 을 경유한 dial 은 OS 소켓이 아니라 tsnet 의 사용자 공간 스택(gvisor netstack)을
+  // 지나므로 문구가 다르다 — "connection was refused". "was" 하나 때문에 예전 패턴이 통째로
+  // 새어 나가 원문이 화면에 그대로 떴다.
+  it("presents netstack wording from tailnet-routed dials", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        'host-key probe failed for "test-mosh" [ubuntu:9989]: connect tcp 100.112.69.93:9989: connection was refused',
+      ).message,
+    ).not.toContain("connection was refused");
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial tcp 100.64.0.2:22: connection aborted",
+      ).message,
+    ).not.toContain("connection aborted");
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial tcp 100.64.0.2:22: host is down",
+      ).message,
+    ).not.toContain("host is down");
+  });
+
   it("presents timeout errors without raw Go wording", () => {
     expect(
       resolveConnectionFailurePresentation(

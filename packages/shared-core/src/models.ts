@@ -683,7 +683,8 @@ export function inferAwsSftpDiagnosticReasonCode(
   }
   if (
     stage === 'connecting-sftp' &&
-    /authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51|connection refused|timed out/.test(
+    // "connection was refused" 는 tailnet 경유 dial(gvisor netstack) 문구다.
+    /authentication failed|unable to authenticate|permission denied|ssh handshake|unexpected message type 51|connection (was )?refused|timed out/.test(
       normalized,
     )
   ) {

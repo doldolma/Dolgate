@@ -10,6 +10,7 @@ import type {
   AwsSsmSessionServerMessage,
   AuthSession,
   AuthState,
+  AuthType,
   DirectoryListing,
   FileEntry,
   GroupRecord,
@@ -338,6 +339,23 @@ function buildEngineCredential(
   return null;
 }
 
+// 이 기기에서 성립하지 않는 인증 방식을 왜 못 쓰는지까지 말해 준다. "지원하지 않습니다"만
+// 보여 주면 사용자가 무엇을 바꿔야 하는지 알 수 없다 — 'agent' 는 서명을 로컬 ssh-agent
+// 소켓에 위임하는 방식이라 그 프로세스가 없는 iOS·Android 에서는 성립할 수 없고, 데스크톱
+// 앱에서 인증 방식을 바꾸는 것이 유일한 해결이다.
+function getUnsupportedAuthTypeMessage(
+  host: SshHostRecord,
+  fallbackKey: string,
+): string {
+  if (host.authType === 'agent') {
+    return t('store.agentAuthUnsupported');
+  }
+  if (host.authType === 'keyboardInteractive') {
+    return t('store.keyboardInteractiveUnsupported');
+  }
+  return t(fallbackKey);
+}
+
 function getMissingCredentialMessage(host: SshHostRecord): string {
   if (host.authType === 'password') {
     return t('store.passwordRequired');
@@ -482,13 +500,18 @@ export interface MobileHostDraftInput {
   hostname: string;
   port: number;
   username: string;
-  authType: 'password' | 'privateKey';
+  // 폼이 직접 고를 수 있는 건 password·privateKey·certificate 뿐이다. 'agent' 는 서명을
+  // 로컬 ssh-agent 소켓에 위임하는 방식이라 그 프로세스가 없는 iOS·Android 에서는 성립하지
+  // 않는다. 그래도 타입을 좁히지 않는다 — 데스크톱에서 설정된 방식을 모바일에서 편집할 때
+  // 그대로 되돌려 보내야 하고, 좁히면 password 로 덮어써 데스크톱에서도 호스트가 깨진다.
+  authType: AuthType;
   groupName?: string | null;
   credentialMode?: 'preserve' | 'replace' | 'remove';
   credentials?: {
     password?: string;
     privateKeyPem?: string;
     passphrase?: string;
+    certificateText?: string;
   } | null;
 }
 
@@ -3229,7 +3252,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSftpSessionState(
               sftpSessionRecord.id,
               'error',
-              t('store.sftpAuthLimited'),
+              getUnsupportedAuthTypeMessage(host, 'store.sftpAuthLimited'),
             );
             return;
           }
@@ -3672,7 +3695,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             markSessionState(
               sessionRecord.id,
               'error',
-              t('store.authKindUnsupported'),
+              getUnsupportedAuthTypeMessage(host, 'store.authKindUnsupported'),
             );
             return;
           }
@@ -5832,7 +5855,14 @@ export const useMobileAppStore = create<MobileAppState>()(
           const privateKeyPem =
             input.credentials?.privateKeyPem?.trim() || undefined;
           const passphrase = input.credentials?.passphrase || undefined;
-          const hasReplacementCredential = Boolean(password || privateKeyPem);
+          const certificateText =
+            input.credentials?.certificateText?.trim() || undefined;
+          // 인증서 인증은 개인 키와 인증서가 한 쌍으로 있어야 성립한다 — 한쪽만으로
+          // 시크릿을 만들면 연결 시점에 자격 증명이 없는 것과 같다.
+          const hasReplacementCredential =
+            input.authType === 'certificate'
+              ? Boolean(privateKeyPem && certificateText)
+              : Boolean(password || privateKeyPem);
           const credentialMode =
             input.credentialMode ??
             (existingSsh?.secretRef ? 'preserve' : 'replace');
@@ -5879,7 +5909,9 @@ export const useMobileAppStore = create<MobileAppState>()(
                     `${record.label} credentials`,
                   ...(input.authType === 'password'
                     ? { password }
-                    : { privateKeyPem, passphrase }),
+                    : input.authType === 'certificate'
+                      ? { privateKeyPem, passphrase, certificateText }
+                      : { privateKeyPem, passphrase }),
                   updatedAt: now,
                 }
               : null;

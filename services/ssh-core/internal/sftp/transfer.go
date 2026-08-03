@@ -396,9 +396,11 @@ func classifyTransferError(err error) string {
 		strings.Contains(message, "unsupported") ||
 		strings.Contains(message, "ssh_fx_op_unsupported"):
 		return transferErrorOperationUnsupported
+	// "connection aborted" 는 tailnet 경유 전송이 끊길 때 gvisor netstack 이 주는 문구다.
 	case strings.Contains(message, "connection lost") ||
 		strings.Contains(message, "no connection") ||
 		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "connection aborted") ||
 		strings.Contains(message, "use of closed network connection"):
 		return transferErrorConnectionLost
 	default:

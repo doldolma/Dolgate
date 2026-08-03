@@ -364,12 +364,6 @@ function SettingsContent({
         },
       ]}
     >
-      {mode === "full" ? (
-        <Text style={[styles.title, { color: palette.text }]}>
-          {translate("settings.sections.title")}
-        </Text>
-      ) : null}
-
       {showFullSettings ? (
         <SettingsGroup
           header={translate("settings.sections.account")}
@@ -958,12 +952,6 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: 18,
-  },
-  // iOS large title 규격(34pt bold) — 아래 그룹 리스트와 같은 결로 맞춘다.
-  title: {
-    fontSize: 34,
-    fontWeight: "700",
-    letterSpacing: -0.6,
   },
   // 그룹 행을 통째로 채우는 텍스트·입력칸 — 행이 이미 여백을 갖고 있어 자기 테두리는 없다.
   rowText: {

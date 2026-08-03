@@ -52,6 +52,7 @@ export function HostListCard({
   return (
     <article
       data-host-card="true"
+      data-host-id={host.id}
       data-host-card-state={selected ? 'selected' : 'idle'}
       className={cn(
         'flex h-full min-h-[7.75rem] cursor-pointer flex-col gap-[0.4rem] overflow-hidden rounded-[10px] border bg-[var(--surface-elevated)] px-[0.9rem] py-[0.7rem] text-left transition-[background-color,border-color,box-shadow] duration-150',

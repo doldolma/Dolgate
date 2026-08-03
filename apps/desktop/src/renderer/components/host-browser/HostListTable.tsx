@@ -115,6 +115,7 @@ export function HostListTable({ hb }: HostListTableProps) {
             <div
               key={host.id}
               data-host-card="true"
+              data-host-id={host.id}
               data-host-card-state={isSelected ? 'selected' : 'idle'}
               role="button"
               tabIndex={0}

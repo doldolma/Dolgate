@@ -185,6 +185,30 @@ export function isAdditiveSelectionEvent(
   return event.ctrlKey || event.metaKey;
 }
 
+function cssEscape(value: string): string {
+  return typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+    ? CSS.escape(value)
+    : value.replace(/["\\]/g, '\\$&');
+}
+
+export function getHostNavigationStep(
+  key: string,
+  columns: number,
+): number | null {
+  switch (key) {
+    case 'ArrowLeft':
+      return -1;
+    case 'ArrowRight':
+      return 1;
+    case 'ArrowUp':
+      return -columns;
+    case 'ArrowDown':
+      return columns;
+    default:
+      return null;
+  }
+}
+
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLInputElement ||
@@ -317,6 +341,11 @@ export interface UseHostBrowserParams {
   groups: GroupRecord[];
   keychainEntries: SecretMetadataRecord[];
   currentGroupPath: string | null;
+  /**
+   * 홈의 호스트 화면이 지금 보이는 화면인지. 홈 셸은 세션 탭이 활성일 때도 마운트된 채
+   * 숨겨지기만 하므로, 창 전역 키 처리는 이 값을 봐야 터미널을 쓰는 중에 끼어들지 않는다.
+   */
+  active?: boolean;
   searchQuery: string;
   hostViewMode?: HostViewMode;
   selectedHostId: string | null;
@@ -520,6 +549,11 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const lastConnectedByHostId = useMemo(() => {
     const map = new Map<string, number>();
     for (const log of params.activityLogs ?? []) {
+      // 'audit' 은 이름 변경·자격 증명 저장 같은 편집 기록이고 그것도 metadata.hostId 를
+      // 갖는다. 종류를 가리지 않으면 호스트를 고치기만 해도 "최근 접속"이 오늘로 바뀐다.
+      if (log.category !== 'session') {
+        continue;
+      }
       const metadata = log.metadata as { hostId?: string } | null;
       const hostId = metadata?.hostId;
       if (!hostId) {
@@ -682,7 +716,12 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     );
   }, [visibleHostIds]);
 
+  const keyboardActive = params.active !== false;
+
   useEffect(() => {
+    if (!keyboardActive) {
+      return;
+    }
     const handleSelectAllHosts = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -705,7 +744,85 @@ export function useHostBrowser(params: UseHostBrowserParams) {
 
     window.addEventListener('keydown', handleSelectAllHosts);
     return () => window.removeEventListener('keydown', handleSelectAllHosts);
-  }, [visibleHostIds]);
+  }, [keyboardActive, visibleHostIds]);
+
+  // 선택된 호스트를 화살표로 옮긴다. 카드가 DOM 포커스를 갖고 있지 않아도 동작해야 한다 —
+  // 사용자가 보고 있는 것은 "선택된 호스트"이고, 클릭 외에 커맨드 팔레트·정렬 변경으로도
+  // 선택이 생긴다. 가드는 위 전체 선택(Cmd+A) 핸들러와 같은 규칙이다: 검색 입력에서는
+  // 팔레트가 화살표를 쓰므로 넘기고, 모달이 떠 있으면 관여하지 않는다.
+  useEffect(() => {
+    if (!keyboardActive) {
+      return;
+    }
+    const handleArrowNavigation = (event: KeyboardEvent) => {
+      const step = getHostNavigationStep(
+        event.key,
+        // 목록(테이블)은 한 줄에 하나뿐이라 좌우로 옮길 자리가 없다.
+        viewMode === 'list' ? 1 : Math.max(1, hostGridLayout.columns),
+      );
+      if (
+        step === null ||
+        event.defaultPrevented ||
+        event.altKey ||
+        event.shiftKey ||
+        event.metaKey ||
+        event.ctrlKey ||
+        isEditableKeyboardTarget(event.target) ||
+        document.querySelector('[role="dialog"][aria-modal="true"]')
+      ) {
+        return;
+      }
+      // 여러 개를 고른 상태에서 화살표를 누르면 무엇을 기준으로 옮길지 정할 수 없다 —
+      // 선택을 하나로 줄여 버리는 대신 아무것도 하지 않는다.
+      if (selectedGroupPaths.length > 0 || selectedHostIds.length > 1) {
+        return;
+      }
+      const currentHostId = selectedHostIds[0] ?? selectedHostId;
+      if (!currentHostId) {
+        return;
+      }
+      const currentIndex = visibleHostIds.indexOf(currentHostId);
+      if (currentIndex < 0) {
+        return;
+      }
+      // 끝에서는 멈춘다 — 순환시키면 목록 반대편으로 튀어 어디로 갔는지 놓친다.
+      const nextIndex = Math.min(
+        Math.max(currentIndex + step, 0),
+        visibleHostIds.length - 1,
+      );
+      event.preventDefault();
+      if (nextIndex === currentIndex) {
+        return;
+      }
+      const nextHostId = visibleHostIds[nextIndex];
+      selectSingleHost(nextHostId);
+      // 다음 칠 때까지 기다린 뒤 화면 안으로 끌어오고 포커스를 옮긴다. 스크롤이 없으면
+      // 목록을 벗어난 순간 선택이 어디로 갔는지 보이지 않고, 포커스를 옮기지 않으면
+      // Enter(연결)가 여전히 이전 카드로 간다.
+      requestAnimationFrame(() => {
+        const element = document.querySelector<HTMLElement>(
+          `[data-host-id="${cssEscape(nextHostId)}"]`,
+        );
+        // jsdom 에는 scrollIntoView 가 없다 — 테스트에서 rAF 안에서 터지면 실행 뒤에
+        // 잡히지 않는 예외가 된다.
+        element?.scrollIntoView?.({ block: 'nearest' });
+        element?.focus?.({ preventScroll: true });
+      });
+    };
+
+    window.addEventListener('keydown', handleArrowNavigation);
+    return () => window.removeEventListener('keydown', handleArrowNavigation);
+    // selectSingleHost 는 매 렌더 새로 만들어지므로 목록에 넣어도 재등록 빈도는 같다.
+    // 핸들러가 읽는 값만 적어 무엇에 의존하는지 드러낸다.
+  }, [
+    hostGridLayout.columns,
+    keyboardActive,
+    selectedGroupPaths,
+    selectedHostId,
+    selectedHostIds,
+    viewMode,
+    visibleHostIds,
+  ]);
 
   useEffect(() => {
     setSelectedGroupPaths((current) =>
