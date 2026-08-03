@@ -8,7 +8,6 @@ WORKDIR /src
 
 COPY services/sync-api/go.mod services/sync-api/go.sum /src/services/sync-api/
 COPY services/ssh-core/go.mod services/ssh-core/go.sum /src/services/ssh-core/
-COPY services/ssh-core/third_party/tailscale/go.mod /src/services/ssh-core/third_party/tailscale/go.mod
 
 RUN cd /src/services/sync-api && go mod download
 RUN cd /src/services/ssh-core && go mod download

@@ -71,7 +71,7 @@ func TestWindowsConPTYRunnerRoutesOutputInputAndResize(t *testing.T) {
 		waitResult <- exit
 	}()
 
-	waitForOutputContains(t, output, "FAKE LOCAL SHELL READY", waitResult, waitErr)
+	waitForOutputContainsWithin(t, output, "FAKE LOCAL SHELL READY", promptStartupTimeout, waitResult, waitErr)
 	waitForOutputContains(t, output, "SIZE:120x32", waitResult, waitErr)
 
 	if err := runner.Write([]byte("hello-from-conpty\r\n")); err != nil {
@@ -333,8 +333,8 @@ func TestWindowsConPTYRunnerSupportsInteractivePowerShell(t *testing.T) {
 	// render the gap after the prompt as a cursor-forward escape (ESC [ 1 C)
 	// instead of a literal space, so waiting for "> " times out on a local
 	// Windows 11 console even though the prompt is already interactive.
-	waitForOutputContains(t, output, "PS ", waitResult, waitErr)
-	waitForOutputContains(t, output, ">", waitResult, waitErr)
+	waitForOutputContainsWithin(t, output, "PS ", promptStartupTimeout, waitResult, waitErr)
+	waitForOutputContainsWithin(t, output, ">", promptStartupTimeout, waitResult, waitErr)
 
 	if err := runner.Write([]byte("Write-Output READY_FROM_TEST\r\n")); err != nil {
 		t.Fatalf("write failed: %v", err)
@@ -395,9 +395,23 @@ func copyReaderOutput(output *capturedOutput, reader io.Reader) {
 	}
 }
 
+// 셸이 첫 출력을 내기까지는 프로세스 시작·프로필 로딩·모듈 자동 로드가 끝나야 한다. 공용
+// CI 러너에서 PowerShell 콜드 스타트는 5초를 넘기는 일이 흔해서, 첫 프롬프트를 기다리는 데는
+// 넉넉한 예산이 필요하다. 반면 이미 살아 있는 셸이 명령을 되돌려 주는 건 빠르므로, 두 경우를
+// 같은 값으로 재면 둘 중 하나는 반드시 틀린 값이 된다.
+const (
+	promptStartupTimeout = 60 * time.Second
+	outputEchoTimeout    = 5 * time.Second
+)
+
 func waitForOutputContains(t *testing.T, output *capturedOutput, expected string, waitResult <-chan sessionExit, waitErr <-chan error) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	waitForOutputContainsWithin(t, output, expected, outputEchoTimeout, waitResult, waitErr)
+}
+
+func waitForOutputContainsWithin(t *testing.T, output *capturedOutput, expected string, timeout time.Duration, waitResult <-chan sessionExit, waitErr <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if strings.Contains(output.snapshot(), expected) {
 			return
@@ -411,5 +425,5 @@ func waitForOutputContains(t *testing.T, output *capturedOutput, expected string
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %q in output:\n%s", expected, output.snapshot())
+	t.Fatalf("timed out waiting for %q after %s in output:\n%s", expected, timeout, output.snapshot())
 }
