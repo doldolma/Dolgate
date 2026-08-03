@@ -2,6 +2,7 @@ export * from "./account-password";
 export * from "./api";
 export * from "./base64";
 export * from "./client-api";
+export * from "./connection-failure";
 export * from "./group-paths";
 export * from "./locale";
 export * from "./models";

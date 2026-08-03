@@ -155,6 +155,7 @@ import {
 } from '../engine';
 import {
   getAwsEc2SftpDisabledMessage,
+  getConnectFailureMessage,
   getNewVaultPassphraseMessage,
 } from '../i18n/shared-messages';
 import { t } from '../i18n';
@@ -548,6 +549,7 @@ interface MobileAppState {
   updateSettings: (input: Partial<MobileSettings>) => Promise<void>;
   connectToHost: (hostId: string) => Promise<string | null>;
   saveHost: (input: MobileHostDraftInput) => Promise<void>;
+  toggleHostFavorite: (hostId: string) => Promise<void>;
   deleteHost: (hostId: string) => Promise<void>;
   duplicateSession: (sessionId: string) => Promise<string | null>;
   setActiveConnectionTab: (tab: MobileConnectionTabRef | null) => void;
@@ -1138,14 +1140,6 @@ function getLiveSessions(
   return sessions.filter(isLiveSession);
 }
 
-function sortSftpSessions(
-  sftpSessions: MobileSftpSessionRecord[],
-): MobileSftpSessionRecord[] {
-  return [...sftpSessions].sort((left, right) =>
-    right.lastEventAt.localeCompare(left.lastEventAt),
-  );
-}
-
 function isLiveSftpSession(session: MobileSftpSessionRecord): boolean {
   return session.status !== 'closed';
 }
@@ -1153,7 +1147,7 @@ function isLiveSftpSession(session: MobileSftpSessionRecord): boolean {
 function getLiveSftpSessions(
   sftpSessions: MobileSftpSessionRecord[],
 ): MobileSftpSessionRecord[] {
-  return sortSftpSessions(sftpSessions).filter(isLiveSftpSession);
+  return sftpSessions.filter(isLiveSftpSession);
 }
 
 function normalizeActiveConnectionTab(
@@ -1218,15 +1212,15 @@ function resolveActiveSessionTabId(
   return liveSessions[0]?.id ?? null;
 }
 
+// 터미널 세션과 같은 규칙 — 제자리에서 갱신하고 순서는 건드리지 않는다. 예전에는 갱신마다
+// lastEventAt 순으로 다시 정렬해서, 파일 목록을 한 번 새로 읽을 때마다 탭이 앞으로 튀었다.
 function patchSftpSessionRecord(
   sftpSessions: MobileSftpSessionRecord[],
   sessionId: string,
   patch: Partial<MobileSftpSessionRecord>,
 ): MobileSftpSessionRecord[] {
-  return sortSftpSessions(
-    sftpSessions.map(session =>
-      session.id === sessionId ? { ...session, ...patch } : session,
-    ),
+  return sftpSessions.map(session =>
+    session.id === sessionId ? { ...session, ...patch } : session,
   );
 }
 
@@ -1238,12 +1232,12 @@ function upsertSftpSessionRecord(
     session => session.id === nextRecord.id,
   );
   if (existingIndex === -1) {
-    return sortSftpSessions([nextRecord, ...sftpSessions]);
+    return [...sftpSessions, nextRecord];
   }
 
   const nextSessions = [...sftpSessions];
   nextSessions[existingIndex] = nextRecord;
-  return sortSftpSessions(nextSessions);
+  return nextSessions;
 }
 
 function patchSftpTransferRecord(
@@ -1310,6 +1304,7 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
         : host.label;
   return {
     id,
+    openedAt: now,
     sessionId: id,
     hostId: host.id,
     title: host.label,
@@ -1336,6 +1331,7 @@ function createSftpSessionRecord(
     id: createLocalId('sftp'),
     hostId: host.id,
     sourceSessionId: sourceSession.id,
+    openedAt: now,
     title: `${host.label} SFTP`,
     status: 'connecting',
     currentPath: '.',
@@ -3386,7 +3382,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             sftpSessionRecord.id,
             'error',
             error instanceof Error
-              ? error.message
+              ? getConnectFailureMessage(
+                  error.message,
+                  isSshHostRecord(host)
+                    ? `${host.username}@${host.hostname}:${host.port}`
+                    : host.label,
+                )
               : t('store.sftpConnectFailed'),
           );
         } finally {
@@ -3848,11 +3849,17 @@ export const useMobileAppStore = create<MobileAppState>()(
             !closedDuringConnect &&
             !(error instanceof TailnetPreparationCancelledError)
           ) {
+            // 코어가 올려 보내는 Go 원문("context deadline exceeded" 등)을 그대로 띄우지
+            // 않는다 — 데스크톱과 같은 분류를 써서 사람이 읽는 문구로 바꾼다. 분류되지
+            // 않은 오류는 원문을 남긴다(유일한 단서다).
             markSessionState(
               sessionRecord.id,
               'error',
               error instanceof Error
-                ? error.message
+                ? getConnectFailureMessage(
+                    error.message,
+                    `${host.username}@${host.hostname}:${host.port}`,
+                  )
                 : t('store.sshConnectFailed'),
             );
           }
@@ -4195,7 +4202,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             sessionRecord.id,
             'error',
             error instanceof Error
-              ? error.message
+              ? getConnectFailureMessage(
+                  error.message,
+                  host.awsInstanceName?.trim() || host.awsInstanceId,
+                )
               : t('store.ssmConnectFailed'),
           );
         } finally {
@@ -5912,6 +5922,49 @@ export const useMobileAppStore = create<MobileAppState>()(
           } else {
             await updateSecretsState(get().secretsByRef, nextHosts);
           }
+        },
+        // 즐겨찾기 토글 — 데스크톱과 같은 host.favorite 필드를 뒤집는다. saveHost 와 같은
+        // 경로(push 성공 뒤 로컬 반영)를 쓴다: 먼저 로컬만 바꿔 두면 push 가 실패했을 때
+        // 이 기기만 다른 상태로 남는다. 시크릿은 건드리지 않으므로 호스트만 실어 보낸다.
+        toggleHostFavorite: async (hostId: string) => {
+          const host = get().hosts.find(item => item.id === hostId);
+          if (!host) {
+            throw new Error(t('store.hostToEditNotFound'));
+          }
+          const record: HostRecord = {
+            ...host,
+            favorite: host.favorite === true ? false : true,
+            updatedAt: new Date().toISOString(),
+          };
+
+          try {
+            await callWithFreshAccessToken(async accessToken => {
+              const currentSession = get().auth.session;
+              if (!currentSession) {
+                throw new Error(t('store.onlineOnly'));
+              }
+              const pushedRevision = await postSyncSnapshot(
+                get().settings.serverUrl,
+                accessToken,
+                buildHostMutationSyncPayload(
+                  { hosts: [record], secrets: [] },
+                  resolveVaultKeyForPush(currentSession),
+                ),
+                resolveVaultEpochForPush(),
+              );
+              storePushedRevision(pushedRevision);
+            });
+          } catch (error) {
+            await handleVaultDekMismatchError(error);
+            throw error;
+          }
+
+          set({
+            hosts: sortHosts([
+              ...get().hosts.filter(item => item.id !== record.id),
+              record,
+            ]),
+          });
         },
         // 호스트 삭제 — tombstone push 성공 후 로컬에서 제거. 연결된 시크릿은 다른
         // 호스트와 공유될 수 있으므로 남긴다. 라이브 세션도 유지된다(목록에는

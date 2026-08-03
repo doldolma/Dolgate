@@ -118,6 +118,20 @@
     "edit": "수정",
     "privacyPolicy": "개인정보 처리방침"
   },
+  "connectFailure": {
+    "agentUnreachable": "ssh-agent 에 연결할 수 없습니다. 데스크톱에서 agent 를 확인해 주세요.",
+    "awsAuth": "AWS 인증이 만료되었습니다. 데스크톱에서 다시 로그인한 뒤 시도해 주세요.",
+    "hostKeyUntrusted": "이 호스트의 키를 아직 신뢰하지 않았습니다.",
+    "noRoute": "{{target}} 에 가는 경로가 없습니다. 네트워크를 확인해 주세요.",
+    "refused": "{{target}} 이 연결을 거부했습니다. 포트와 서버 상태를 확인해 주세요.",
+    "reset": "{{target}} 과의 연결이 끊겼습니다.",
+    "timeout": "{{target}} 이 응답하지 않습니다. 주소·포트와 네트워크를 확인해 주세요.",
+    "tailnetExpired": "tailnet 노드 등록이 만료되었습니다. 데스크톱에서 다시 인증해 주세요.",
+    "tailnetNeedsAuth": "이 tailnet 이 아직 연결되지 않았습니다. 데스크톱에서 인증해 주세요.",
+    "tailnetNeedsApproval": "tailnet 관리자 승인을 기다리고 있습니다.",
+    "tailnetMismatch": "설정과 다른 tailnet 에 연결되어 있습니다.",
+    "targetHost": "호스트"
+  },
   "store": {
     "serverSlow": "서버 응답이 지연되고 있습니다. 다시 시도해 주세요.",
     "restoringSecrets": "저장된 보안 정보를 복구하는 중입니다. 잠시 후 다시 시도해 주세요.",
@@ -306,6 +320,8 @@
     "addHost": "호스트 추가"
   },
   "home": {
+    "favorites": "즐겨찾기",
+    "openFavorites": "즐겨찾기 열기",
     "folderCount": "{{count}}개 폴더",
     "emptySearchTitle": "검색 결과가 없습니다.",
     "emptySearchBody": "다른 이름이나 주소로 다시 검색해보세요.",
@@ -428,7 +444,11 @@
   "hostActions": {
     "connect": "연결",
     "sftp": "SFTP 연결",
-    "closeAria": "액션 시트 닫기"
+    "closeAria": "액션 시트 닫기",
+    "favoriteAdd": "즐겨찾기에 추가",
+    "favoriteRemove": "즐겨찾기에서 제거",
+    "favoriteFailedTitle": "즐겨찾기를 바꾸지 못했습니다",
+    "favoriteFailed": "즐겨찾기 변경에 실패했습니다."
   },
   "engine": {
     "nativeModuleMissing": "Go SSH 엔진 네이티브 모듈을 찾을 수 없습니다.",

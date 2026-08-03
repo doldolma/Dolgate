@@ -8,6 +8,7 @@ import {
   getNewVaultPassphraseIssue,
   getServerUrlIssue,
   type AuthStatus,
+  getConnectionFailureReason,
   type HostSubtitleLabels,
   type SyncBootstrapStatus,
 } from '@dolssh/shared-core';
@@ -100,4 +101,42 @@ export function getAuthStatusLabel(status: AuthStatus): string {
 
 export function getSyncStatusLabel(status: SyncBootstrapStatus): string {
   return i18next.t(SYNC_STATUS_KEYS[status]);
+}
+
+// 코어가 올려 보내는 연결 실패는 대부분 Go 원문("context deadline exceeded" 등)이다. 분류는
+// shared-core 가 하고(데스크톱과 같은 규칙) 문구만 여기서 붙인다.
+const CONNECT_FAILURE_KEYS = {
+  "agent-unreachable": "connectFailure.agentUnreachable",
+  "aws-auth": "connectFailure.awsAuth",
+  "host-key-untrusted": "connectFailure.hostKeyUntrusted",
+  "no-route": "connectFailure.noRoute",
+  refused: "connectFailure.refused",
+  reset: "connectFailure.reset",
+  timeout: "connectFailure.timeout",
+  "tailnet-expired": "connectFailure.tailnetExpired",
+  "tailnet-needs-auth": "connectFailure.tailnetNeedsAuth",
+  "tailnet-needs-approval": "connectFailure.tailnetNeedsApproval",
+  "tailnet-mismatch": "connectFailure.tailnetMismatch",
+} as const;
+
+export const CONNECT_FAILURE_MESSAGE_KEYS: readonly string[] = [
+  ...Object.values(CONNECT_FAILURE_KEYS),
+];
+
+/**
+ * 분류되지 않은 오류는 원문을 그대로 돌려준다 — 알 수 없는 실패를 뭉뚱그린 문구로 덮으면
+ * 무엇이 잘못됐는지 알 수 있는 유일한 단서가 사라진다.
+ */
+export function getConnectFailureMessage(
+  rawMessage: string,
+  target?: string | null,
+): string {
+  const normalized = rawMessage.trim();
+  const reason = getConnectionFailureReason(normalized);
+  if (reason.code === "unknown") {
+    return normalized;
+  }
+  return i18next.t(CONNECT_FAILURE_KEYS[reason.code], {
+    target: target?.trim() || i18next.t("connectFailure.targetHost"),
+  });
 }

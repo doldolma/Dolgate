@@ -257,8 +257,11 @@ export function SessionScreen(): React.JSX.Element {
     [sftpSessions],
   );
 
-  const connectionTabs = useMemo(
-    () => [
+  // 탭은 연 순서로 늘어서고 그 뒤로 움직이지 않는다. 터미널·SFTP 를 종류별로 이어 붙이면
+  // 터미널 다음에 SFTP 를 열고 또 터미널을 열었을 때 새 터미널이 SFTP 앞으로 끼어든다 —
+  // 두 종류를 openedAt 하나로 섞어 정렬한다(lastEventAt 은 활동마다 바뀌어 기준이 못 된다).
+  const connectionTabs = useMemo(() => {
+    const tabs = [
       ...liveSessions.map(session => ({
         kind: 'terminal' as const,
         id: session.id,
@@ -269,9 +272,22 @@ export function SessionScreen(): React.JSX.Element {
         id: session.id,
         session,
       })),
-    ],
-    [liveSessions, liveSftpSessions],
-  );
+    ];
+    // openedAt 이 없던 버전의 레코드는 순서를 바꾸지 않도록 제자리에 둔다.
+    return tabs
+      .map((tab, index) => ({ tab, index }))
+      .sort((left, right) => {
+        const leftOpenedAt = left.tab.session.openedAt;
+        const rightOpenedAt = right.tab.session.openedAt;
+        if (!leftOpenedAt || !rightOpenedAt) {
+          return left.index - right.index;
+        }
+        return (
+          leftOpenedAt.localeCompare(rightOpenedAt) || left.index - right.index
+        );
+      })
+      .map(entry => entry.tab);
+  }, [liveSessions, liveSftpSessions]);
 
   useEffect(() => {
     const tabStillExists =

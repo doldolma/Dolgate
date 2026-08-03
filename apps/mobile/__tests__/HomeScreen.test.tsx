@@ -291,6 +291,52 @@ describe("HomeScreen group browsing", () => {
     });
   });
 
+  // 즐겨찾기는 데스크톱과 같이 최상단에 고정된 하나의 그룹이다 — 누르면 일반 그룹처럼
+  // 호스트 목록으로 들어간다. 데스크톱에서 켠 host.favorite 이 동기화로 넘어온 값이다.
+  it("pins favorites as the first group and opens it like a folder", async () => {
+    act(() => {
+      useMobileAppStore.setState({
+        hosts: hosts.map((host) =>
+          // 그룹 안에 있는 호스트를 즐겨찾기로 — 루트에는 원래 안 보이던 것이다.
+          host.id === "host-servers" ? { ...host, favorite: true } : host,
+        ),
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    // 루트: 즐겨찾기 카드가 첫 그룹보다 앞. 호스트 자체는 아직 목록에 없다.
+    const rootText = collectText(tree!.toJSON()).join(" | ");
+    expect(rootText.indexOf("즐겨찾기")).toBeGreaterThanOrEqual(0);
+    expect(rootText.indexOf("즐겨찾기")).toBeLessThan(rootText.indexOf("Servers"));
+    expect(rootText).not.toContain("Server Jump");
+
+    // 열면 그룹처럼 호스트 목록이 나온다.
+    await act(async () => {
+      tree!.root
+        .findByProps({ accessibilityLabel: "즐겨찾기 열기" })
+        .props.onPress();
+    });
+
+    const favoritesText = collectText(tree!.toJSON()).join(" | ");
+    expect(favoritesText).toContain("Server Jump");
+    // 고정 카드는 루트에만 — 즐겨찾기 화면 안에 또 있으면 자기 자신으로 들어가는 카드가 된다.
+    expect(() =>
+      tree!.root.findByProps({ accessibilityLabel: "즐겨찾기 열기" }),
+    ).toThrow();
+    // 다른 그룹의 호스트나 하위 그룹은 섞이지 않는다.
+    expect(favoritesText).not.toContain("Root Host");
+    expect(favoritesText).not.toContain("Lab Node");
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
   it("does not show a banner while startup sync is only running in the background", async () => {
     act(() => {
       useMobileAppStore.setState({
@@ -559,6 +605,59 @@ describe("HomeScreen group browsing", () => {
       offset: 0,
       animated: true,
     });
+
+    await act(async () => {
+      jest.runOnlyPendingTimers();
+      tree!.unmount();
+    });
+  });
+
+  // 즐겨찾기는 목록 화면 말고 호스트 꾹 누르기에서도 켜고 끌 수 있어야 한다. 라벨은 현재
+  // 상태에 따라 바뀌고, 실패하면(오프라인 등) 조용히 넘기지 않고 알린다.
+  it("toggles the favorite from the long-press sheet", async () => {
+    const toggleMock = jest.fn(async () => undefined);
+    act(() => {
+      useMobileAppStore.setState({ toggleHostFavorite: toggleMock });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<HomeScreen />);
+    });
+
+    // 루트에 호스트는 Root Host 하나뿐이다(나머지는 그룹 안).
+    const hostCard = tree!.root.findAll(
+      (node) => typeof node.props.onLongPress === "function",
+    )[0];
+    await act(async () => {
+      hostCard.props.onLongPress();
+    });
+
+    const findSheetAction = (label: string) =>
+      tree!.root.findAll(
+        (node) =>
+          node.props.accessibilityLabel === label &&
+          typeof node.props.onPress === "function",
+      )[0];
+
+    // 즐겨찾기가 아닌 호스트 → "추가".
+    await act(async () => {
+      findSheetAction("즐겨찾기에 추가").props.onPress();
+    });
+    expect(toggleMock).toHaveBeenCalledWith("host-root");
+
+    // 이미 즐겨찾기인 호스트 → "제거".
+    act(() => {
+      useMobileAppStore.setState({
+        hosts: hosts.map((host) =>
+          host.id === "host-root" ? { ...host, favorite: true } : host,
+        ),
+      });
+    });
+    await act(async () => {
+      hostCard.props.onLongPress();
+    });
+    expect(() => findSheetAction("즐겨찾기에서 제거")).not.toThrow();
 
     await act(async () => {
       jest.runOnlyPendingTimers();

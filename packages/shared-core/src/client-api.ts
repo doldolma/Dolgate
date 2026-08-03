@@ -63,6 +63,12 @@ export interface MobileSessionRecord {
   hasReceivedOutput: boolean;
   isRestorable: boolean;
   lastViewportSnapshot: string;
+  /**
+   * 탭이 열린 시각. 정렬 기준으로만 쓰며 한 번 정해지면 바뀌지 않는다 — lastEventAt 은
+   * 활동마다 갱신돼서 탭 순서 기준으로 쓸 수 없다. 이 필드가 없던 버전에서 저장된
+   * 레코드는 undefined 다(콜드 스타트가 세션을 모두 닫으므로 탭에는 나타나지 않는다).
+   */
+  openedAt?: string;
   lastEventAt: string;
   lastConnectedAt?: string | null;
   lastDisconnectedAt?: string | null;
@@ -97,6 +103,8 @@ export interface MobileSftpSessionRecord {
   /** Ephemeral connection progress shown while the SFTP session is opening. */
   connectionStatusMessage?: string | null;
   errorMessage?: string | null;
+  /** 터미널 탭과 같은 기준으로 섞어 정렬하기 위한 값. MobileSessionRecord.openedAt 참고. */
+  openedAt?: string;
   lastEventAt: string;
   lastConnectedAt?: string | null;
   lastDisconnectedAt?: string | null;

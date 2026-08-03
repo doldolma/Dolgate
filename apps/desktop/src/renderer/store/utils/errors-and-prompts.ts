@@ -1,4 +1,8 @@
 import type { TerminalConnectionProgress } from "@shared";
+import {
+  getConnectionFailureReason,
+  type ConnectionFailureCode,
+} from "@dolssh/shared-core";
 import { t } from '../../i18n';
 
 export function normalizeRemoteInvokeErrorMessage(message: string): string {
@@ -105,96 +109,42 @@ export function resolveConnectionFailurePresentation(
         t('connectFailure.agentUnreachable'),
     };
   }
-  // tailnet 을 거치지 않는 실패는 대상까지 가는 길이나 SSH 자체의 문제다. 아래 분류들이 그
-  // 계층을 정하고, 화면은 그 계층의 단계에 실패를 붙인다.
-  // --- Tailscale 계층이 직접 알려 주는 실패들 ---
-  //
-  // 이것들은 그 계층에서 판정된 것이라 원인이 확실하다. 사용자가 할 일도 정해져 있다.
-
-  // 등록 만료. 다시 로그인해야 붙는다.
-  if (/node registration has expired/i.test(normalized)) {
+  // 여기부터의 분류는 shared-core 의 getConnectionFailureReason 이 한다 — 모바일도 같은
+  // 규칙을 써야 해서 코드만 돌려받고 문구는 이 앱이 붙인다. 규칙을 두 벌로 두면 한쪽만
+  // 고쳐진다.
+  const reason = getConnectionFailureReason(normalized);
+  const MESSAGES: Record<
+    Exclude<ConnectionFailureCode, "unknown">,
+    () => string
+  > = {
+    "agent-unreachable": () => t('connectFailure.agentUnreachable'),
+    "tailnet-expired": () => t('connectFailure.tailnetExpired'),
+    "tailnet-needs-auth": () => t('connectFailure.tailscaleNeedsAuth'),
+    "tailnet-needs-approval": () => t('connectFailure.tailscaleNeedsApproval'),
+    "tailnet-mismatch": () => t('connectFailure.tailscaleMismatch'),
+    "host-key-untrusted": () => t('connectFailure.hostKeyUntrusted'),
+    "aws-auth": () => t('connectFailure.awsAuthFailed'),
+    "no-route": () => t('connectFailure.noRoute', { target }),
+    refused: () => t('connectFailure.refused', { target }),
+    timeout: () => t('connectFailure.timeout', { target }),
+    reset: () => t('connectFailure.reset', { target }),
+  };
+  // 제목은 기존 표기를 그대로 유지한다 — 두 분류만 전용 제목을 쓴다.
+  const TITLES: Partial<Record<ConnectionFailureCode, string>> = {
+    "host-key-untrusted": "Host Key Not Trusted",
+    "aws-auth": "AWS Authentication Required",
+  };
+  if (reason.code !== "unknown") {
     return {
-      title: "Connection Failed",
-      message: t('connectFailure.tailnetExpired'),
-      kind: "tailscale-expired",
-      layer: "tailscale",
-    };
-  }
-  // 인증이 아직 안 끝났다. 이미 진행 중일 수 있으므로 새 로그인을 걸지 않고 브라우저로 보낸다.
-  if (/this tailnet is not connected yet/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.tailscaleNeedsAuth'),
-      kind: "tailscale-auth",
-      layer: "tailscale",
-    };
-  }
-  if (/waiting for administrator approval/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.tailscaleNeedsApproval'),
-      layer: "tailscale",
-    };
-  }
-  // 설정이 가리키는 tailnet 이 아닌 곳에 붙었다. 사용자가 계정을 바꿔 로그인한 경우다.
-  if (/connected to a different tailnet/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.tailscaleMismatch'),
-      layer: "tailscale",
-    };
-  }
-
-  // 컨트롤 플레인과 동기화가 끊긴 것은 여기 오지 않는다. 코어가 그것으로 dial 을 막지 않기
-  // 때문이다 — 데이터 플레인은 이미 받아 둔 넷맵으로 통하고, 못 가면 그 실패(경로·타임아웃)가
-  // 아래 분류로 온다. 막았을 때는 실제로 통하는 연결을 시도조차 못 했다.
-  if (/host key is not trusted yet/i.test(normalized)) {
-    return {
-      title: "Host Key Not Trusted",
-      message:
-        t('connectFailure.hostKeyUntrusted'),
-      layer: "hostKey",
-    };
-  }
-  if (
-    /error when retrieving token from sso|token has expired|refresh failed|sso session.*expired|unable to locate credentials|expiredtoken|security token included in the request is invalid/i.test(
-      normalized,
-    )
-  ) {
-    return {
-      title: "AWS Authentication Required",
-      message: t('connectFailure.awsAuthFailed'),
-    };
-  }
-  if (/network is unreachable|no route to host/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.noRoute', { target }),
-    };
-  }
-  if (/connection refused/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.refused', { target }),
-    };
-  }
-  // context deadline exceeded 도 여기다 — tailnet 경유 dial 이 예산을 다 쓰면 Go 의 ctx 만료가
-  // 그대로 올라온다. 그것을 분류하지 않으면 원문이 화면에 뜨고, 실패한 단계도 표시되지 않는다.
-  if (
-    /i\/o timeout|timed out|operation timed out|context deadline exceeded|deadline exceeded/i.test(
-      normalized,
-    )
-  ) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.timeout', { target }),
-      layer: "ssh",
-    };
-  }
-  if (/connection reset|\bEOF\b/i.test(normalized)) {
-    return {
-      title: "Connection Failed",
-      message: t('connectFailure.reset', { target }),
+      title: TITLES[reason.code] ?? "Connection Failed",
+      message: MESSAGES[reason.code](),
+      ...(reason.code === "tailnet-expired"
+        ? { kind: "tailscale-expired" as const }
+        : {}),
+      ...(reason.code === "tailnet-needs-auth"
+        ? { kind: "tailscale-auth" as const }
+        : {}),
+      ...(reason.layer ? { layer: reason.layer } : {}),
     };
   }
   return {

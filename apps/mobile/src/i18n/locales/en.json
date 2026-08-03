@@ -118,6 +118,20 @@
     "edit": "Edit",
     "privacyPolicy": "Privacy Policy"
   },
+  "connectFailure": {
+    "agentUnreachable": "Could not reach ssh-agent. Check the agent on your desktop.",
+    "awsAuth": "The AWS sign-in expired. Sign in again on your desktop and retry.",
+    "hostKeyUntrusted": "This host's key is not trusted yet.",
+    "noRoute": "There is no route to {{target}}. Check your network.",
+    "refused": "{{target}} refused the connection. Check the port and whether the server is up.",
+    "reset": "The connection to {{target}} was interrupted.",
+    "timeout": "{{target}} did not respond. Check the address, port and your network.",
+    "tailnetExpired": "The tailnet node registration expired. Authenticate again on your desktop.",
+    "tailnetNeedsAuth": "This tailnet is not connected yet. Authenticate on your desktop.",
+    "tailnetNeedsApproval": "Waiting for tailnet administrator approval.",
+    "tailnetMismatch": "You are connected to a different tailnet than the one configured.",
+    "targetHost": "the host"
+  },
   "store": {
     "serverSlow": "The server is slow to respond. Try again.",
     "restoringSecrets": "Restoring the stored security data. Try again in a moment.",
@@ -306,6 +320,8 @@
     "addHost": "Add host"
   },
   "home": {
+    "favorites": "Favorites",
+    "openFavorites": "Open favorites",
     "folderCount": "{{count}} folders",
     "emptySearchTitle": "No search results.",
     "emptySearchBody": "Try a different name or address.",
@@ -428,7 +444,11 @@
   "hostActions": {
     "connect": "Connect",
     "sftp": "Connect with SFTP",
-    "closeAria": "Close the action sheet"
+    "closeAria": "Close the action sheet",
+    "favoriteAdd": "Add to favorites",
+    "favoriteRemove": "Remove from favorites",
+    "favoriteFailedTitle": "Could not change the favorite",
+    "favoriteFailed": "Changing the favorite failed."
   },
   "engine": {
     "nativeModuleMissing": "The Go SSH engine native module was not found.",

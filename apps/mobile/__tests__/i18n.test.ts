@@ -2,7 +2,11 @@ import i18next from 'i18next';
 
 import { applyMobileLanguage, getFormatLocale, t } from '../src/i18n';
 import { formatRelativeTime } from '../src/lib/mobile';
-import { STATUS_LABEL_KEYS } from '../src/i18n/shared-messages';
+import {
+  CONNECT_FAILURE_MESSAGE_KEYS,
+  STATUS_LABEL_KEYS,
+  getConnectFailureMessage,
+} from '../src/i18n/shared-messages';
 import en from '../src/i18n/locales/en.json';
 import ko from '../src/i18n/locales/ko.json';
 
@@ -102,6 +106,18 @@ describe('번역 카탈로그', () => {
     expect(missing).toEqual([]);
   });
 
+  it('연결 실패 문구 키가 두 카탈로그에 모두 있다', () => {
+    const missing = Object.entries({ ko, en }).flatMap(([locale, catalog]) =>
+      [...CONNECT_FAILURE_MESSAGE_KEYS, 'connectFailure.targetHost']
+        .filter((key) => {
+          const resolved = resolve(catalog, key);
+          return typeof resolved !== 'string' || resolved.trim().length === 0;
+        })
+        .map((key) => `${locale}:${key}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
   it('보간 변수가 두 언어에서 같다', () => {
     const placeholders = (value: string) =>
       [...value.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]).sort();
@@ -111,5 +127,32 @@ describe('번역 카탈로그', () => {
         placeholders(resolve(en, key)).join(','),
     );
     expect(mismatched).toEqual([]);
+  });
+});
+
+describe('연결 실패 문구', () => {
+  // 코어가 올려 보내는 Go 원문이 화면에 그대로 뜨는 것을 막는 것이 이 매핑의 목적이다.
+  it('Go 원문을 사람이 읽는 문구로 바꾼다', () => {
+    const target = 'root@nas.example.com:22';
+    for (const raw of [
+      'context deadline exceeded',
+      'dial tcp 10.0.0.2:22: i/o timeout',
+      'dial tcp 10.0.0.2:22: connect: connection refused',
+      'read tcp: connection reset by peer',
+      'network is unreachable',
+      'ssh: host key is not trusted yet',
+      'node registration has expired',
+    ]) {
+      const message = getConnectFailureMessage(raw, target);
+      expect(message).not.toContain(raw);
+      expect(message.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  // 분류되지 않은 실패를 뭉뚱그린 문구로 덮으면 유일한 단서가 사라진다.
+  it('분류되지 않은 오류는 원문을 그대로 남긴다', () => {
+    expect(getConnectFailureMessage('some brand new failure', 'host')).toBe(
+      'some brand new failure',
+    );
   });
 });

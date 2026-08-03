@@ -376,6 +376,78 @@ describe('SessionScreen', () => {
     });
   });
 
+  // 탭은 연 순서로 늘어서고 그 뒤로 움직이지 않아야 한다. 종류별로 이어 붙이면 SFTP 뒤에 연
+  // 터미널이 SFTP 앞으로 끼어들고, SFTP 를 활동 순으로 재정렬하면 목록을 새로 읽을 때마다
+  // 탭이 튄다 — 두 경우 모두 여기서 막는다.
+  it('orders tabs by the time they were opened, mixing terminal and SFTP', async () => {
+    const openedAt = (offsetMs: number) =>
+      new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + offsetMs).toISOString();
+    act(() => {
+      useMobileAppStore.setState({
+        sessions: [
+          { ...session, id: 'session-1', title: 'First', openedAt: openedAt(0) },
+          // 나중에 연 터미널 — SFTP 보다 뒤에 와야 한다.
+          {
+            ...secondSession,
+            id: 'session-2',
+            title: 'Third',
+            openedAt: openedAt(2000),
+          },
+        ],
+        sftpSessions: [
+          {
+            id: 'sftp-1',
+            hostId: 'host-1',
+            sourceSessionId: 'session-1',
+            title: 'Second SFTP',
+            status: 'connected',
+            currentPath: '.',
+            listing: null,
+            connectionStatusMessage: null,
+            errorMessage: null,
+            openedAt: openedAt(1000),
+            // 활동이 가장 최근이다 — 활동 순으로 정렬하면 이 탭이 앞으로 튄다.
+            lastEventAt: openedAt(9000),
+            lastConnectedAt: null,
+            lastDisconnectedAt: null,
+          },
+          {
+            id: 'sftp-2',
+            hostId: 'host-2',
+            sourceSessionId: 'session-2',
+            title: 'Fourth SFTP',
+            status: 'connected',
+            currentPath: '.',
+            listing: null,
+            connectionStatusMessage: null,
+            errorMessage: null,
+            openedAt: openedAt(3000),
+            lastEventAt: openedAt(1000),
+            lastConnectedAt: null,
+            lastDisconnectedAt: null,
+          },
+        ],
+        activeSessionTabId: 'session-1',
+        activeConnectionTab: { kind: 'terminal', id: 'session-1' },
+      });
+    });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<SessionScreen />);
+    });
+
+    const text = collectText(tree!.toJSON());
+    expect(text.indexOf('First')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('First')).toBeLessThan(text.indexOf('Second SFTP'));
+    expect(text.indexOf('Second SFTP')).toBeLessThan(text.indexOf('Third'));
+    expect(text.indexOf('Third')).toBeLessThan(text.indexOf('Fourth SFTP'));
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('uses iOS edge-swipe to return to the previous tab without closing sessions', async () => {
     let tree: renderer.ReactTestRenderer;
     await act(async () => {

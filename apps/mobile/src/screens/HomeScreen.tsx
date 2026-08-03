@@ -40,7 +40,16 @@ import { useMobilePalette } from "../theme";
 import { hostSubtitleLabels } from '../i18n/shared-messages';
 import { useTranslation } from "react-i18next";
 
+// 즐겨찾기는 데스크톱과 같이 최상단에 고정된 하나의 그룹으로 다룬다 — 누르면 일반 그룹처럼
+// 호스트 목록으로 들어간다. 실제 그룹 경로와 겹칠 수 없는 값이어야 해서 NUL 을 앞에 붙인다
+// (사용자가 만드는 그룹 이름에는 들어갈 수 없는 문자다).
+const FAVORITES_GROUP_PATH = "\u0000favorites";
+
 type HomeListItem =
+  | {
+      kind: "favorites";
+      hostCount: number;
+    }
   | {
       kind: "group";
       group: GroupCardView;
@@ -75,6 +84,9 @@ export function HomeScreen(): React.JSX.Element {
     (state) => state.openSftpForSession,
   );
   const deleteHost = useMobileAppStore((state) => state.deleteHost);
+  const toggleHostFavorite = useMobileAppStore(
+    (state) => state.toggleHostFavorite,
+  );
   const [actionSheetHost, setActionSheetHost] = useState<HostRecord | null>(
     null,
   );
@@ -106,14 +118,26 @@ export function HomeScreen(): React.JSX.Element {
     return map;
   }, [groups]);
 
+  // 이 두 값은 정렬(sortHosts)에 의존하지 않으므로 앞에서 구한다 — 아래 경로 정리 로직이
+  // 즐겨찾기 목적지를 모르면 화면을 되돌려 보낸다.
+  const isFavoritesView = currentGroupPath === FAVORITES_GROUP_PATH;
+  const hasFavorites = useMemo(
+    () => hosts.some((host) => host.favorite === true),
+    [hosts],
+  );
+
   const availableGroupPaths = useMemo(
     () => collectGroupPaths(groups, hosts),
     [groups, hosts],
   );
-  const availableGroupPathSet = useMemo(
-    () => new Set(availableGroupPaths),
-    [availableGroupPaths],
-  );
+  // 즐겨찾기 경로도 유효한 목적지로 넣는다 — 아래 정리 로직이 모르는 경로를 되돌려 보낸다.
+  const availableGroupPathSet = useMemo(() => {
+    const paths = new Set(availableGroupPaths);
+    if (hasFavorites) {
+      paths.add(FAVORITES_GROUP_PATH);
+    }
+    return paths;
+  }, [availableGroupPaths, hasFavorites]);
 
   useEffect(() => {
     const sanitizedHistory = groupHistory.filter(
@@ -208,11 +232,24 @@ export function HomeScreen(): React.JSX.Element {
     if (isSearching) {
       return [];
     }
+    if (isFavoritesView) {
+      return [];
+    }
     return buildVisibleGroups(groups, hosts, currentGroupPath);
-  }, [currentGroupPath, groups, hosts, isSearching]);
+  }, [currentGroupPath, groups, hosts, isFavoritesView, isSearching]);
+
+  // 즐겨찾기는 호스트 레코드의 favorite 필드에서 파생된다 — 데스크톱과 같은 출처이고
+  // 동기화로 넘어온다.
+  const favoriteHosts = useMemo(
+    () => sortHosts(hosts.filter((host) => host.favorite === true)),
+    [hosts, recentActivityByHostId],
+  );
 
   const filteredHosts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
+    if (isFavoritesView) {
+      return favoriteHosts;
+    }
     const nextHosts = isSearching
       ? hosts.filter((host) =>
           getHostSearchText(host)
@@ -225,7 +262,15 @@ export function HomeScreen(): React.JSX.Element {
         );
 
     return sortHosts(nextHosts);
-  }, [currentGroupPath, hosts, isSearching, query, recentActivityByHostId]);
+  }, [
+    currentGroupPath,
+    favoriteHosts,
+    hosts,
+    isFavoritesView,
+    isSearching,
+    query,
+    recentActivityByHostId,
+  ]);
 
   const listData = useMemo<HomeListItem[]>(() => {
     if (isSearching) {
@@ -237,6 +282,11 @@ export function HomeScreen(): React.JSX.Element {
     }
 
     return [
+      // 루트에서만 고정한다 — 그룹 안(즐겨찾기 화면 포함)에 또 띄우면 자기 자신으로 들어가는
+      // 카드가 남는다.
+      ...(currentGroupPath === null && favoriteHosts.length > 0
+        ? [{ kind: "favorites" as const, hostCount: favoriteHosts.length }]
+        : []),
       ...visibleGroups.map((group) => ({
         kind: "group" as const,
         group,
@@ -244,17 +294,28 @@ export function HomeScreen(): React.JSX.Element {
       ...filteredHosts.map((host) => ({
         kind: "host" as const,
         host,
-        showGroupMeta: false,
+        showGroupMeta: isFavoritesView,
       })),
     ];
-  }, [filteredHosts, isSearching, visibleGroups]);
+  }, [
+    currentGroupPath,
+    favoriteHosts,
+    filteredHosts,
+    isFavoritesView,
+    isSearching,
+    visibleGroups,
+  ]);
 
-  const currentGroupTitle = currentGroupPath
-    ? groupNameByPath.get(currentGroupPath) ?? getGroupLabel(currentGroupPath)
-    : "All Hosts";
-  const currentGroupSubtitle = currentGroupPath
-    ? currentGroupPath
-    : translate("home.folderCount", { count: visibleGroups.length });
+  const currentGroupTitle = isFavoritesView
+    ? translate("home.favorites")
+    : currentGroupPath
+      ? groupNameByPath.get(currentGroupPath) ?? getGroupLabel(currentGroupPath)
+      : "All Hosts";
+  const currentGroupSubtitle = isFavoritesView
+    ? translate("home.groupHostCount", { count: filteredHosts.length })
+    : currentGroupPath
+      ? currentGroupPath
+      : translate("home.folderCount", { count: visibleGroups.length });
 
   const emptyState = useMemo(() => {
     if (isSearching) {
@@ -306,6 +367,21 @@ export function HomeScreen(): React.JSX.Element {
       navigation.navigate("HostForm", { hostId: host.id });
     },
     [navigation],
+  );
+
+  const handleToggleFavorite = useCallback(
+    (host: HostRecord) => {
+      setActionSheetHost(null);
+      void toggleHostFavorite(host.id).catch((error) => {
+        Alert.alert(
+          translate("hostActions.favoriteFailedTitle"),
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : translate("hostActions.favoriteFailed"),
+        );
+      });
+    },
+    [toggleHostFavorite, translate],
   );
 
   const handleDeleteHost = useCallback(
@@ -494,9 +570,11 @@ export function HomeScreen(): React.JSX.Element {
           style={styles.list}
           data={listData}
           keyExtractor={(item) =>
-            item.kind === "group"
-              ? `group:${item.group.path}`
-              : `host:${item.host.id}`
+            item.kind === "favorites"
+              ? "favorites"
+              : item.kind === "group"
+                ? `group:${item.group.path}`
+                : `host:${item.host.id}`
           }
           initialNumToRender={12}
           maxToRenderPerBatch={12}
@@ -525,6 +603,54 @@ export function HomeScreen(): React.JSX.Element {
             </View>
           }
           renderItem={({ item }) => {
+            if (item.kind === "favorites") {
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={translate("home.openFavorites")}
+                  onPress={() => {
+                    openGroup(FAVORITES_GROUP_PATH);
+                  }}
+                  style={[
+                    styles.groupCard,
+                    {
+                      backgroundColor: palette.surface,
+                      borderColor: palette.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.groupIcon,
+                      { backgroundColor: palette.accentSoft },
+                    ]}
+                  >
+                    <Ionicons name="star" size={17} color={palette.accent} />
+                  </View>
+                  <View style={styles.groupCardCopy}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.groupCardTitle, { color: palette.text }]}
+                    >
+                      {translate("home.favorites")}
+                    </Text>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.groupCardMeta, { color: palette.mutedText }]}
+                    >
+                      {translate("home.groupHostCount", {
+                        count: item.hostCount,
+                      })}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={palette.tabInactive}
+                  />
+                </Pressable>
+              );
+            }
             if (item.kind === "group") {
               return (
                 <Pressable
@@ -642,6 +768,7 @@ export function HomeScreen(): React.JSX.Element {
           onConnectSftp={(host) => void handleConnectSftp(host)}
           onEdit={handleEditHost}
           onDelete={handleDeleteHost}
+          onToggleFavorite={handleToggleFavorite}
         />
       </View>
     </IosEdgeSwipeBack>

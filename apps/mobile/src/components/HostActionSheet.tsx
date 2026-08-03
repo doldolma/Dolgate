@@ -18,6 +18,7 @@ interface HostActionSheetProps {
   onConnectSftp: (host: HostRecord) => void;
   onEdit: (host: HostRecord) => void;
   onDelete: (host: HostRecord) => void;
+  onToggleFavorite: (host: HostRecord) => void;
 }
 
 interface SheetAction {
@@ -38,6 +39,7 @@ export function HostActionSheet({
   onConnectSftp,
   onEdit,
   onDelete,
+  onToggleFavorite,
 }: HostActionSheetProps): React.JSX.Element {
   const palette = useMobilePalette();
   const { t: translate } = useTranslation();
@@ -60,6 +62,15 @@ export function HostActionSheet({
       label: translate("hostActions.sftp"),
       disabledReason: sftpDisabledReason,
       onPress: () => onConnectSftp(host),
+    });
+    const isFavorite = host.favorite === true;
+    actions.push({
+      key: "favorite",
+      icon: isFavorite ? "star" : "star-outline",
+      label: translate(
+        isFavorite ? "hostActions.favoriteRemove" : "hostActions.favoriteAdd",
+      ),
+      onPress: () => onToggleFavorite(host),
     });
     if (isSshHostRecord(host)) {
       actions.push({
