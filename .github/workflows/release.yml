@@ -65,7 +65,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: services/ssh-core/go.mod
 
       - name: Run ssh-core tests
         working-directory: services/ssh-core
@@ -119,7 +119,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: services/ssh-core/go.mod
 
       - name: Install dependencies
         run: npm ci
@@ -176,7 +176,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25.0"
+          go-version-file: services/ssh-core/go.mod
 
       # 러너 번들 npm 이 codex 도입 후의 lock 그래프에서 hoist 된 7zip-bin 바이너리를
       # 누락 설치할 수 있어, 로컬에서 이 lock 을 올바르게 설치함을 검증한 npm 으로 고정한다.
@@ -246,7 +246,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25.0"
+          go-version-file: services/ssh-core/go.mod
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(win/x64/7za.exe)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -306,7 +306,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25.0"
+          go-version-file: services/ssh-core/go.mod
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(linux/x64/7za)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -382,7 +382,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.26.5"
+          go-version-file: services/ssh-core/go.mod
 
       - name: Set up Java
         uses: actions/setup-java@v5
