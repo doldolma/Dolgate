@@ -146,11 +146,19 @@ func (m *Manager) InstallShellIntegration(sessionID string) error {
 	if err != nil {
 		return err
 	}
+	// 기동 인자로 이미 넣었으면 여기서 하지 않는다. stdin 으로 다시 쓰면 셸이 그 줄을 echo 하고,
+	// 그것을 화면에서 걷어내는 과정에서 줄바꿈까지 사라져 conhost 와 화면의 커서가 어긋난다.
+	if preinstalled, ok := session.runner.(shellIntegrationPreinstaller); ok &&
+		preinstalled.ShellIntegrationPreinstalled() {
+		return nil
+	}
 	command, ok := autocomplete.ShellIntegrationInitCommandForShell(session.runner.ShellKind())
 	if !ok {
 		return nil
 	}
-	session.handshake.Arm(false)
+	// 걷어낼 echo 는 **지금 주입하는** 명령이다. Arm 은 bash/zsh 스크립트를 가정하므로, 로컬
+	// PowerShell 에서는 마커 뒤의 프롬프트 재출력이 그대로 남아 첫 줄에 프롬프트가 두 번 찍혔다.
+	session.handshake.ArmForCommand(false, command)
 	return session.runner.Write([]byte(command))
 }
 

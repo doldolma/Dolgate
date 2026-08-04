@@ -38,6 +38,25 @@ import { t } from '../../i18n';
 type StoreSetter = SliceDeps["set"];
 type StoreGetter = SliceDeps["get"];
 
+/**
+ * pane 의 크기 보고를 기다리는 프레임 한도.
+ *
+ * pane 은 마운트 다음 프레임에 fit 하고 보고하므로 한두 프레임이면 충분하다. 넉넉히 잡지 않는
+ * 이유는 이 대기가 로컬 셸 시작을 늦추기 때문이다 — 못 받으면 씨앗 크기로 시작하고, 붙은 뒤
+ * 컨트롤러가 정정한다.
+ */
+const PENDING_SIZE_MEASURE_FRAMES = 4;
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== "function") {
+      setTimeout(resolve, 16);
+      return;
+    }
+    requestAnimationFrame(() => resolve());
+  });
+}
+
 export function createSessionServices(deps: SliceDeps) {
   const { api } = deps;
   const {
@@ -618,6 +637,30 @@ export function createSessionServices(deps: SliceDeps) {
     }
   };
 
+  /**
+   * pane 이 씨앗 크기를 실제 측정값으로 바꿀 때까지 몇 프레임만 기다린다.
+   *
+   * best-effort 다. 창이 숨어 있으면 프레임이 오지 않으므로 한도를 두고 그냥 진행한다 — 그때는
+   * 예전과 같이 씨앗 크기로 시작하고, 붙은 뒤 컨트롤러가 크기를 정정한다.
+   */
+  const awaitMeasuredPendingSize = async (
+    get: StoreGetter,
+    sessionId: string,
+    seed: { cols: number; rows: number },
+  ) => {
+    for (let frame = 0; frame < PENDING_SIZE_MEASURE_FRAMES; frame += 1) {
+      const attempt = findPendingConnectionAttempt(get(), sessionId);
+      // 탭이 사라졌으면(사용자가 닫았다) 기다릴 이유가 없다.
+      if (!attempt) {
+        return;
+      }
+      if (attempt.latestCols !== seed.cols || attempt.latestRows !== seed.rows) {
+        return;
+      }
+      await nextAnimationFrame();
+    }
+  };
+
   const startPendingLocalSessionConnect = async (
     set: StoreSetter,
     get: StoreGetter,
@@ -859,6 +902,15 @@ export function createSessionServices(deps: SliceDeps) {
       resolveLocalStartingProgress(),
       reuseSessionId,
     );
+
+    // 셸을 띄우기 전에 pane 이 실제 크기를 보고할 틈을 준다.
+    //
+    // 셸은 처음 받은 크기로 프롬프트를 그린다. 씨앗값으로 시작하면 곧 도착하는 실제 크기에 맞춰
+    // conhost 가 리플로우하면서 그 프롬프트가 화면에 남는다 — 실기기에서 첫 줄에 프롬프트가 두 번
+    // 찍히고 첫 입력이 엉뚱한 열에서 시작했다(cls 를 하면 사라졌다).
+    //
+    // 여기서 한두 프레임 기다리면 pane 이 이미 측정을 마쳐서 셸이 처음부터 올바른 폭으로 시작한다.
+    await awaitMeasuredPendingSize(get, sessionId, { cols, rows });
 
     try {
       await startPendingLocalSessionConnect(set, get, sessionId);

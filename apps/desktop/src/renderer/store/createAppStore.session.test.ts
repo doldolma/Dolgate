@@ -745,6 +745,32 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().activeWorkspaceTab).toBe("session:local-session-1");
   });
 
+  // 셸은 처음 받은 크기로 프롬프트를 그린다. 씨앗값으로 시작하면 곧 도착하는 실제 크기에 맞춰
+  // conhost 가 리플로우하며 그 프롬프트가 화면에 남는다 — 실기기에서 첫 줄에 프롬프트가 두 번
+  // 찍히고 첫 입력이 엉뚱한 열에서 시작했다. pane 이 측정을 마칠 틈을 주면 그 잔상이 없어진다.
+  it("starts the local shell with the size the pane measured, not the seed", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+
+    const openPromise = store.getState().openLocalTerminal(120, 32);
+    await flushMicrotasks();
+
+    const pendingSessionId = store.getState().tabs[0]?.sessionId;
+    if (!pendingSessionId?.startsWith("pending:")) {
+      throw new Error(`expected a pending local tab, got ${pendingSessionId}`);
+    }
+    // pane 이 마운트되며 실제 격자를 보고한 것과 같은 경로.
+    store.getState().updatePendingConnectionSize(pendingSessionId, 203, 55);
+
+    await openPromise;
+
+    expect(api.ssh.connectLocal).toHaveBeenCalledWith(
+      expect.objectContaining({ cols: 203, rows: 55 }),
+    );
+  });
+
   it("retries a failed local session in the same tab context", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

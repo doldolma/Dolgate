@@ -605,6 +605,25 @@ export function useTerminalSessionViewController({
     }
   }, [tmuxCell?.cols, tmuxCell?.rows]);
 
+  // 세션이 붙었거나 세션 id 가 바뀌면 크기를 한 번 다시 보낸다.
+  //
+  // 보내는 대상이 바뀌었는데 스케줄러는 그것을 모르기 때문이다. 연결 전 보고는 pending 세션 id
+  // 로 가고(updatePendingConnectionSize), 붙은 뒤에는 실제 id 로 가야 하는데, 스케줄러는 마지막
+  // 으로 보낸 **크기**만 기억한다(lastSentSize) — 크기가 그대로면 새 id 로는 한 번도 보내지 않는다.
+  //
+  // 실제로 이렇게 깨졌다: 로컬 터미널이 씨앗 크기(120x32)로 열린 뒤 아무도 정정하지 않아,
+  // PowerShell 은 120 칸 기준으로 줄바꿈·커서를 계산하는데 화면은 그보다 넓어서 새 출력이 옛
+  // 내용을 덮어썼다. 창을 한 번 조절하면 크기가 달라져 보고가 나가고 정상으로 돌아왔다.
+  //
+  // 재연결(같은 pane, 새 세션 id)도 같은 구멍이라 id 도 함께 본다.
+  useEffect(() => {
+    if (tab?.status !== 'connected') {
+      return;
+    }
+    resizeSchedulerRef.current?.reset();
+    resizeSchedulerRef.current?.request();
+  }, [tab?.status, sessionId]);
+
   useEffect(() => {
     liveOnResizeSessionRef.current = onResizeSession;
   }, [onResizeSession]);

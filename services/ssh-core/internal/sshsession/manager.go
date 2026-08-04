@@ -761,7 +761,9 @@ func (m *Manager) installShellIntegration(sessionID string, session *sessionHand
 		return false, nil
 	}
 
-	session.handshake.Arm(true)
+	// 걷어낼 echo 는 지금 주입하는 명령이다 — 셸에 따라 스크립트가 다르므로(fish·pwsh) bash 를
+	// 가정하면 마커 뒤의 프롬프트 재출력이 화면에 남는다.
+	session.handshake.ArmForCommand(true, command)
 	if _, err := session.writeStdin([]byte(command)); err != nil {
 		flushed := session.handshake.Flush()
 		session.shellIntegrationState = shellIntegrationUnknown

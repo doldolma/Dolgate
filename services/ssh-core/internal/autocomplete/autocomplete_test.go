@@ -388,3 +388,57 @@ func TestHandshakeFilterWithoutPreserveMotdDropsEverythingBeforeMarker(t *testin
 		t.Fatalf("forward should start at the marker, got %q", forward)
 	}
 }
+
+// 셸마다 주입하는 스크립트가 다르므로 걷어낼 echo 도 달라야 한다.
+//
+// 실기기에서 이렇게 깨졌다: 로컬 PowerShell 에는 pwsh 스크립트를 주입하는데 필터는 bash 문자열을
+// 찾아서, 마커 뒤에 오는 프롬프트 재출력이 그대로 화면에 남았다 — 첫 줄에 프롬프트가 두 번 찍히고
+// 첫 입력이 엉뚱한 열에서 시작했다.
+func TestHandshakeScrubsTheEchoOfTheCommandItArmedWith(t *testing.T) {
+	command, ok := ShellIntegrationInitCommandForShell("powershell")
+	if !ok {
+		t.Fatal("powershell 통합 명령이 없다")
+	}
+	visible := string(visibleInjectedEcho(command))
+
+	var handshake Handshake
+	handshake.ArmForCommand(false, command)
+	handshake.Filter([]byte("noise" + PromptStartMarker))
+
+	// 마커 뒤에 프롬프트가 명령을 다시 그리는 경우(PSReadLine 재출력).
+	forwarded := string(handshake.Filter([]byte("PS /home/user> " + visible + "\r\n")))
+	if strings.Contains(forwarded, visible) {
+		t.Errorf("주입 명령의 재출력이 화면으로 나갔다: %q", forwarded)
+	}
+	if !strings.Contains(forwarded, "PS /home/user> ") {
+		t.Errorf("프롬프트까지 지웠다: %q", forwarded)
+	}
+}
+
+// 기본 경로(bash/zsh)는 그대로 동작해야 한다 — Arm 은 기본 echo 를 쓴다.
+func TestHandshakeKeepsScrubbingTheDefaultEcho(t *testing.T) {
+	var handshake Handshake
+	handshake.Arm(false)
+	handshake.Filter([]byte(PromptStartMarker))
+
+	visible := string(injectedCommandEcho)
+	forwarded := string(handshake.Filter([]byte("user@host:~$ " + visible + "\r\n")))
+	if strings.Contains(forwarded, visible) {
+		t.Errorf("bash 주입 echo 가 화면으로 나갔다: %q", forwarded)
+	}
+}
+
+// pwsh 로 무장한 필터가 bash echo 를 지우려 들면 안 된다(반대 방향 회귀).
+func TestHandshakeDoesNotScrubAnotherShellsEcho(t *testing.T) {
+	command, _ := ShellIntegrationInitCommandForShell("powershell")
+
+	var handshake Handshake
+	handshake.ArmForCommand(false, command)
+	handshake.Filter([]byte(PromptStartMarker))
+
+	bashEcho := string(injectedCommandEcho)
+	forwarded := string(handshake.Filter([]byte(bashEcho)))
+	if !strings.Contains(forwarded, bashEcho) {
+		t.Error("pwsh 로 무장했는데 bash 텍스트를 지웠다")
+	}
+}
