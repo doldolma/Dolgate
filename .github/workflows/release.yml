@@ -66,6 +66,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Run ssh-core tests
         working-directory: services/ssh-core
@@ -120,9 +121,28 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 바이너리(플랫폼당 100MB대)는 @electron/get 이 npm 캐시와 다른 디렉터리로
+      # 내려받으므로 setup-node 의 cache: npm 으로는 덮이지 않는다. 경로가 OS 별로 다르고
+      # actions/cache 는 없는 경로를 조용히 넘기므로 세 개를 함께 적는다.
+      #
+      # 키는 lockfile 해시로 잡고 restore-keys 로 이전 캐시를 물려받는다 — @electron/get 이
+      # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
+      # 재사용되고 바뀐 것만 새로 내려받는다.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
 
       - name: Ensure Electron binary is installed
         # Electron 42+ 는 --version 검증에서도 Chromium 샌드박스를 초기화하는데,
@@ -177,6 +197,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       # 러너 번들 npm 이 codex 도입 후의 lock 그래프에서 hoist 된 7zip-bin 바이너리를
       # 누락 설치할 수 있어, 로컬에서 이 lock 을 올바르게 설치함을 검증한 npm 으로 고정한다.
@@ -188,6 +209,24 @@ jobs:
 
       # npm ci 가 성공해도 7zip-bin/mac/arm64/7za 가 빠진 채 남는 사례가 있어(lock 해시별
       # npm 캐시와 결합해 같은 커밋에서 결정적으로 재발) electron-builder 전에 존재를 보장한다.
+      # Electron 바이너리(플랫폼당 100MB대)는 @electron/get 이 npm 캐시와 다른 디렉터리로
+      # 내려받으므로 setup-node 의 cache: npm 으로는 덮이지 않는다. 경로가 OS 별로 다르고
+      # actions/cache 는 없는 경로를 조용히 넘기므로 세 개를 함께 적는다.
+      #
+      # 키는 lockfile 해시로 잡고 restore-keys 로 이전 캐시를 물려받는다 — @electron/get 이
+      # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
+      # 재사용되고 바뀐 것만 새로 내려받는다.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
+
       - name: Verify packaging binaries (7zip-bin self-heal)
         shell: bash
         run: |
@@ -247,6 +286,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(win/x64/7za.exe)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -255,6 +295,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 바이너리(플랫폼당 100MB대)는 @electron/get 이 npm 캐시와 다른 디렉터리로
+      # 내려받으므로 setup-node 의 cache: npm 으로는 덮이지 않는다. 경로가 OS 별로 다르고
+      # actions/cache 는 없는 경로를 조용히 넘기므로 세 개를 함께 적는다.
+      #
+      # 키는 lockfile 해시로 잡고 restore-keys 로 이전 캐시를 물려받는다 — @electron/get 이
+      # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
+      # 재사용되고 바뀐 것만 새로 내려받는다.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
 
       - name: Verify packaging binaries (7zip-bin self-heal)
         shell: bash
@@ -307,6 +365,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(linux/x64/7za)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -315,6 +374,24 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 바이너리(플랫폼당 100MB대)는 @electron/get 이 npm 캐시와 다른 디렉터리로
+      # 내려받으므로 setup-node 의 cache: npm 으로는 덮이지 않는다. 경로가 OS 별로 다르고
+      # actions/cache 는 없는 경로를 조용히 넘기므로 세 개를 함께 적는다.
+      #
+      # 키는 lockfile 해시로 잡고 restore-keys 로 이전 캐시를 물려받는다 — @electron/get 이
+      # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
+      # 재사용되고 바뀐 것만 새로 내려받는다.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
 
       - name: Verify packaging binaries (7zip-bin self-heal)
         shell: bash
@@ -383,6 +460,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Set up Java
         uses: actions/setup-java@v5

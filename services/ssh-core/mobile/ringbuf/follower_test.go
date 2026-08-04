@@ -258,56 +258,85 @@ func TestFollowReportsQueueOverflow(t *testing.T) {
 		appendPayload()
 	}
 
+	// 검증 대상은 여기까지 쓴 범위로 못박는다. 아래 폴링 루프가 넣는 payload 는 갭을 관측
+	// 가능하게 만들기 위한 자극이고, 그 중 마지막 것들은 스냅샷 시점에 아직 큐나 코얼레싱
+	// 배치에 남아 있는 것이 정상이다.
+	burstWritten := written
+
 	close(rec.gate)
 
-	// A gap is only observable once something after it arrives.
+	// "드롭이 보고됐다" 를 신호로 삼아 곧바로 스냅샷을 찍으면 안 된다. OnDropped 은 admit()
+	// 안에서 갭을 발견한 즉시 불리는데, OnChunk 은 코얼레싱 윈도우가 닫힌 뒤 batch.flush()
+	// 에서만 불린다 — 그래서 갭을 유발한 chunk 가 아직 전달되지 않은 중간 상태가 존재한다.
+	// 부하가 큰 러너(CI Windows)에서 이 창이 벌어져 "전달도 드롭도 아닌 payload" 로 실패했다.
+	//
+	// 신호와 단정을 같은 조건으로 맞춘다 — 버스트 범위가 전부 계정되고 드롭도 최소 한 건
+	// 보고될 때까지 기다린다. 계정 규칙 위반(중복 전달, 전달과 드롭 동시)은 매 회 확인한다.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, _, dropped := rec.snapshot()
-		if len(dropped) > 0 {
-			break
+		got, _, dropped := rec.snapshot()
+		seen, err := accountForPayloads(got, dropped)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		missing, incomplete := firstUnaccountedPayload(seen, burstWritten)
+		if len(dropped) > 0 && !incomplete {
+			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("queue overflow was never reported as a drop")
+			if len(dropped) == 0 {
+				t.Fatal("queue overflow was never reported as a drop")
+			}
+			t.Fatalf("payload %d was neither delivered nor reported dropped", missing)
 		}
 		appendPayload()
 		time.Sleep(2 * time.Millisecond)
 	}
+}
 
-	// Everything written is either delivered or accounted for as dropped, with
-	// no index claimed twice.
-	got, _, dropped := rec.snapshot()
-
+// accountForPayloads 는 전달된 바이트와 드롭 보고를 합쳐 payload 인덱스별 계정을 만든다.
+// 같은 인덱스를 두 번 주장하면(중복 전달, 또는 전달과 드롭 동시) 에러다 — 둘 다 화면에 글자가
+// 겹쳐 보이거나 사라지는 실제 증상으로 이어진다.
+func accountForPayloads(
+	delivered []byte,
+	dropped []DroppedRange,
+) (map[int]bool, error) {
 	seen := map[int]bool{}
-	for _, match := range payloadPattern.FindAllSubmatch(got, -1) {
+	for _, match := range payloadPattern.FindAllSubmatch(delivered, -1) {
 		index, err := strconv.Atoi(string(match[1]))
 		if err != nil {
-			t.Fatalf("unparseable payload %q", match[1])
+			return nil, fmt.Errorf("unparseable payload %q", match[1])
 		}
 		if seen[index] {
-			t.Fatalf("payload %d was delivered twice", index)
+			return nil, fmt.Errorf("payload %d was delivered twice", index)
 		}
 		seen[index] = true
 	}
 
-	// Each payload is exactly one chunk, so index and sequence number match.
+	// 각 payload 는 정확히 한 chunk 이므로 인덱스와 시퀀스 번호가 같다.
 	for _, gap := range dropped {
 		for seq := gap.FromSeq; seq <= gap.ToSeq; seq++ {
 			if seen[int(seq)] {
-				t.Fatalf("payload %d was both delivered and reported dropped", seq)
+				return nil, fmt.Errorf(
+					"payload %d was both delivered and reported dropped",
+					seq,
+				)
 			}
 			seen[int(seq)] = true
 		}
 	}
+	return seen, nil
+}
 
-	for i := 0; i < written; i++ {
+// firstUnaccountedPayload 는 [0, count) 에서 아직 계정되지 않은 첫 인덱스를 돌려준다.
+func firstUnaccountedPayload(seen map[int]bool, count int) (index int, found bool) {
+	for i := 0; i < count; i++ {
 		if !seen[i] {
-			t.Fatalf("payload %d was neither delivered nor reported dropped", i)
+			return i, true
 		}
 	}
-	if len(dropped) == 0 {
-		t.Error("expected at least one drop report")
-	}
+	return 0, false
 }
 
 func TestFollowerStopIsIdempotentAndQuiesces(t *testing.T) {

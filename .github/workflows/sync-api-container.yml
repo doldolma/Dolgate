@@ -52,6 +52,9 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: |
+            services/sync-api/go.sum
+            services/ssh-core/go.sum
 
       - name: Run sync-api tests
         working-directory: services/sync-api

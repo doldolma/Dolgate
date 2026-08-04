@@ -92,6 +92,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/sync-api/go.sum
 
       - name: Run sync-api tests
         working-directory: services/sync-api
@@ -119,6 +120,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Run ssh-core tests
         working-directory: services/ssh-core
@@ -192,9 +194,28 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron 바이너리(플랫폼당 100MB대)는 @electron/get 이 npm 캐시와 다른 디렉터리로
+      # 내려받으므로 setup-node 의 cache: npm 으로는 덮이지 않는다. 경로가 OS 별로 다르고
+      # actions/cache 는 없는 경로를 조용히 넘기므로 세 개를 함께 적는다.
+      #
+      # 키는 lockfile 해시로 잡고 restore-keys 로 이전 캐시를 물려받는다 — @electron/get 이
+      # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
+      # 재사용되고 바뀐 것만 새로 내려받는다.
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            electron-${{ runner.os }}-
 
       - name: Ensure Electron binary is installed
         # Electron 42+ 는 --version 검증에서도 Chromium 샌드박스를 초기화하는데,
@@ -245,6 +266,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: services/ssh-core/go.mod
+          cache-dependency-path: services/ssh-core/go.sum
 
       - name: Set up Java
         uses: actions/setup-java@v5
