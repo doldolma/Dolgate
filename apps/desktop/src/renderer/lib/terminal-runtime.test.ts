@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { IDisposable, ILinkProvider } from 'xterm';
+import type { IDisposable } from '@xterm/xterm';
 import { createTerminalRuntime, type TerminalRuntimeAppearance } from './terminal-runtime';
 
 function createAppearance(): TerminalRuntimeAppearance {
@@ -22,7 +22,6 @@ function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
   const dataListeners: Array<(value: string) => void> = [];
   const binaryListeners: Array<(value: string) => void> = [];
   const writes: Array<{ value: string | Uint8Array; callback?: () => void }> = [];
-  let registeredLinkProvider: ILinkProvider | null = null;
 
   const terminal = {
     options: {},
@@ -39,12 +38,14 @@ function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
       }
     },
     loadAddon: vi.fn(),
-    registerLinkProvider: vi.fn((provider: ILinkProvider) => {
-      registeredLinkProvider = provider;
-      return {
-        dispose: vi.fn()
-      } satisfies IDisposable;
-    }),
+    // 링크 탐지는 @xterm/addon-web-links 가 activate 안에서 등록한다. 테스트는 애드온을 주입해
+    // 대체하므로 여기까지 오지 않지만, 실제 Terminal 의 API 표면은 유지해 둔다.
+    registerLinkProvider: vi.fn(
+      () =>
+        ({
+          dispose: vi.fn()
+        }) satisfies IDisposable
+    ),
     open: vi.fn(),
     dispose: vi.fn(),
     refresh: vi.fn(),
@@ -69,7 +70,6 @@ function createFakeTerminal(lineText = 'visit https://example.com/docs now') {
   return {
     terminal,
     writes,
-    getRegisteredLinkProvider: () => registeredLinkProvider,
     triggerWriteCallback(index = writes.length - 1) {
       writes[index]?.callback?.();
     }
@@ -501,11 +501,16 @@ describe('terminal-runtime', () => {
     expect(terminal.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('registers clickable links that open externally', () => {
-    const { terminal, getRegisteredLinkProvider } = createFakeTerminal('visit https://example.com/docs now');
+  // URL 탐지와 버퍼 좌표 매핑은 @xterm/addon-web-links 의 몫이므로 여기서 재검증하지 않는다.
+  // 우리 계약은 두 가지다 — 애드온을 실제로 로드하는가, 그리고 링크 활성화가 main 의 스킴
+  // 검증을 거치는 openExternal 로 흘러가는가(애드온 기본 동작인 window.open 이 아니라).
+  it('loads the web links addon and routes activation through openExternal', () => {
+    const { terminal } = createFakeTerminal();
     const openExternal = vi.fn().mockResolvedValue(undefined);
+    const webLinksAddon = { activate: vi.fn(), dispose: vi.fn() };
+    const createWebLinksAddon = vi.fn((_handler: (event: MouseEvent, uri: string) => void) => webLinksAddon);
 
-    createTerminalRuntime({
+    const runtime = createTerminalRuntime({
       container: document.createElement('div'),
       appearance: createAppearance(),
       onData: vi.fn(),
@@ -522,20 +527,20 @@ describe('terminal-runtime', () => {
           clearActiveDecoration: vi.fn()
         })) as never,
         createUnicode11Addon: (() => ({ activate: vi.fn(), dispose: vi.fn() })) as never,
+        createWebLinksAddon: createWebLinksAddon as never,
         openExternal
       }
     });
 
-    const provider = getRegisteredLinkProvider();
-    expect(provider).not.toBeNull();
+    expect(terminal.loadAddon).toHaveBeenCalledWith(webLinksAddon);
 
-    const callback = vi.fn();
-    provider?.provideLinks(1, callback);
-    const links = callback.mock.calls[0]?.[0];
-    expect(links).toHaveLength(1);
-    expect(links[0]?.text).toBe('https://example.com/docs');
-    links[0]?.activate(new MouseEvent('click'), links[0].text);
+    const activateLink = createWebLinksAddon.mock.calls[0]?.[0];
+    expect(activateLink).toBeTypeOf('function');
+    activateLink?.(new MouseEvent('click'), 'https://example.com/docs');
     expect(openExternal).toHaveBeenCalledWith('https://example.com/docs');
+
+    runtime.dispose();
+    expect(webLinksAddon.dispose).toHaveBeenCalledTimes(1);
   });
 
   it('attaches WebGL when enabled and disposes it when later disabled', async () => {

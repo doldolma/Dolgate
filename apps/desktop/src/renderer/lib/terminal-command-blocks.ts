@@ -7,7 +7,7 @@
 // store 에 두지 않는 이유는 terminal-cwd-registry 와 같다 — 컨트롤러는 refs 기반이고,
 // 명령마다 전역 리렌더를 유발할 이유가 없다.
 
-import type { IDecoration, IMarker, Terminal } from 'xterm';
+import type { IDecoration, IMarker, Terminal } from '@xterm/xterm';
 
 export type TerminalCommandBlockState = 'running' | 'ok' | 'failed';
 

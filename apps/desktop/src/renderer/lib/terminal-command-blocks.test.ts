@@ -1,4 +1,4 @@
-import { Terminal } from 'xterm';
+import { Terminal } from '@xterm/xterm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   beginCommandBlock,

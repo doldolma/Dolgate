@@ -13,8 +13,8 @@
 // 청크의 시각을 보게 된다 — 청크마다 await 할 필요가 없다. (예전엔 OSC 가 든 청크만 await
 // 했는데, 마커가 청크 경계로 쪼개지면 시각이 녹화 끝으로 튀는 버그가 있었다.)
 
-import { Terminal } from 'xterm-headless';
-import type { IMarker } from 'xterm-headless';
+import { Terminal } from '@xterm/headless';
+import type { IMarker } from '@xterm/headless';
 import type { SessionReplayRecording } from '@shared';
 import { readCommandTextFromBuffer } from './terminal-command-blocks';
 

@@ -2,7 +2,7 @@
 // 행 끝에 못 들어갈 때 xterm 이 남는 칸을 어떻게 채우는지는 실제 구현에만 있다.
 // 그래서 이 파일은 진짜 터미널에 문자열을 흘려 넣고 읽어낸 명령을 확인한다.
 
-import { Terminal } from 'xterm-headless';
+import { Terminal } from '@xterm/headless';
 import { describe, expect, it } from 'vitest';
 import { readCommandTextFromBuffer } from './terminal-command-blocks';
 

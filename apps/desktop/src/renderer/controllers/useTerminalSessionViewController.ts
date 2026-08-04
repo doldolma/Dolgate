@@ -7,7 +7,7 @@ import {
 } from 'react';
 import type React from 'react';
 import type { SessionShareSnapshotInput, TerminalTab } from '@shared';
-import type { Terminal } from 'xterm';
+import type { Terminal } from '@xterm/xterm';
 import {
   createTerminalRuntime,
   type TerminalRuntime,
@@ -1087,12 +1087,16 @@ export function useTerminalSessionViewController({
     const handlePointerActivate = () => {
       liveOnFocusRef.current?.();
       resizeSchedulerRef.current?.request();
+    };
+    // mousedown 에서는 refreshViewport() 를 부르지 않는다. refresh 는 DOM 렌더러의 행 요소를
+    // 다시 만드는데, 그것이 mousedown 과 click 사이에 끼면 xterm 링크 처리기가 잡고 있던 현재
+    // 링크가 무효화돼 activate 가 끝내 불리지 않는다 — hover 밑줄은 보이는데 클릭이 먹지 않는
+    // 증상이 이것이었다. 포커스 전환(focusin/focusout)에서는 그대로 다시 그린다.
+    const handleFocusIn = () => {
+      handlePointerActivate();
       requestAnimationFrame(() => {
         refreshViewport();
       });
-    };
-    const handleFocusIn = () => {
-      handlePointerActivate();
     };
     const handleFocusOut = () => {
       requestAnimationFrame(() => {

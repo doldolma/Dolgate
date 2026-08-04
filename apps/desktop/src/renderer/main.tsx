@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import 'xterm/css/xterm.css';
+import '@xterm/xterm/css/xterm.css';
 import 'uplot/dist/uPlot.min.css';
 import './styles/tokens.css';
 import './styles/tailwind.css';
