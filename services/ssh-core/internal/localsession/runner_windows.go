@@ -3,6 +3,7 @@
 package localsession
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
@@ -26,7 +28,10 @@ const (
 )
 
 type windowsConPTYRunner struct {
-	shellKind     string
+	shellKind string
+	// shellIntegrationPreinstalled 는 기동 인자로 통합을 넣었는지다. 매니저가 이것을 보고 stdin
+	// 주입을 건너뛴다.
+	shellIntegrationPreinstalled bool
 	process       windows.Handle
 	pseudoConsole windows.Handle
 	inputWriter   *os.File
@@ -175,8 +180,9 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 	cleanupOnError = false
 
 	return &windowsConPTYRunner{
-		shellKind:     runtime.shellKind,
-		process:       processInfo.Process,
+		shellKind:                    runtime.shellKind,
+		shellIntegrationPreinstalled: runtime.shellIntegrationPreinstalled,
+		process:                      processInfo.Process,
 		pseudoConsole: pseudoConsole,
 		inputWriter:   inputWriter,
 		outputReader:  outputReader,
@@ -216,14 +222,61 @@ func resolveLocalRuntime(payload protocol.LocalConnectPayload) (localCommandRunt
 		return localCommandRuntime{}, err
 	}
 
+	// 셸 통합을 기동 인자로 넣는다(가능한 셸에서만). stdin 으로 타이핑하면 셸이 그 줄을 echo 하고,
+	// 그것을 화면에서 걷어내는 과정에서 줄바꿈까지 사라져 conhost 와 화면의 커서가 어긋난다.
+	args, preinstalled := withShellIntegrationArgs(shellRuntime.kind, shellRuntime.args)
+
 	return localCommandRuntime{
-		shellKind:        shellRuntime.kind,
-		executablePath:   shellRuntime.executablePath,
-		args:             append([]string(nil), shellRuntime.args...),
-		env:              buildWindowsLocalShellEnv(os.Environ(), shellRuntime),
-		wrapperPath:      wrapperPath,
-		workingDirectory: resolveUserHomeDirectory(),
+		shellKind:                    shellRuntime.kind,
+		executablePath:               shellRuntime.executablePath,
+		args:                         args,
+		env:                          buildWindowsLocalShellEnv(os.Environ(), shellRuntime),
+		wrapperPath:                  wrapperPath,
+		workingDirectory:             resolveUserHomeDirectory(),
+		shellIntegrationPreinstalled: preinstalled,
 	}, nil
+}
+
+// withShellIntegrationArgs 는 PowerShell 기동 인자 뒤에 셸 통합 스크립트를 붙인다.
+//
+// -EncodedCommand 를 쓰는 이유는 인용 때문이다. 스크립트에는 따옴표·중괄호·$ 가 섞여 있어서
+// 명령줄로 그대로 넘기면 Windows 인용 규칙에 걸린다. base64(UTF-16LE) 는 영숫자뿐이라 안전하다.
+//
+// -NoExit 이 함께 있어야 스크립트 실행 후 대화형 셸로 남는다. -EncodedCommand 는 마지막에 온다
+// (그 뒤의 인자는 전부 명령으로 취급된다).
+//
+// 사용자가 직접 지정한 실행 파일에는 적용하지 않는다(호출부에서 갈린다) — 그 인자 구성을 우리가
+// 모르기 때문이다. 그 경로에서는 예전처럼 stdin 주입으로 간다.
+func withShellIntegrationArgs(kind string, base []string) ([]string, bool) {
+	if kind != windowsShellKindPwsh && kind != windowsShellKindPowerShell {
+		return append([]string(nil), base...), false
+	}
+	encoded, err := encodePowerShellCommand(autocomplete.PowerShellIntegrationScript())
+	if err != nil {
+		// 인코딩이 실패하면 통합 없이 셸을 띄우고, 예전 경로(stdin 주입)가 맡는다.
+		return append([]string(nil), base...), false
+	}
+	args := append([]string(nil), base...)
+	args = append(args, "-NoExit", "-EncodedCommand", encoded)
+	return args, true
+}
+
+// encodePowerShellCommand 는 -EncodedCommand 가 받는 형식(UTF-16LE base64)으로 바꾼다.
+func encodePowerShellCommand(script string) (string, error) {
+	encoded, err := utf16LittleEndianBytes(script)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(encoded), nil
+}
+
+func utf16LittleEndianBytes(value string) ([]byte, error) {
+	units := utf16.Encode([]rune(value))
+	out := make([]byte, 0, len(units)*2)
+	for _, unit := range units {
+		out = append(out, byte(unit), byte(unit>>8))
+	}
+	return out, nil
 }
 
 func resolveWindowsShellRuntime() (windowsShellRuntime, error) {
@@ -584,6 +637,11 @@ func (r *windowsConPTYRunner) Wait() (sessionExit, error) {
 
 func (r *windowsConPTYRunner) ShellKind() string {
 	return r.shellKind
+}
+
+// ShellIntegrationPreinstalled 는 기동 인자로 셸 통합이 이미 들어갔는지다.
+func (r *windowsConPTYRunner) ShellIntegrationPreinstalled() bool {
+	return r.shellIntegrationPreinstalled
 }
 
 func ensureConPTYSupport() error {

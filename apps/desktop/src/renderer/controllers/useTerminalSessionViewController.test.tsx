@@ -441,4 +441,34 @@ describe('useTerminalSessionViewController', () => {
 
     expect(onResizeSession).toHaveBeenCalledWith('session-1', 80, 24);
   });
+
+  // 붙기 전에 보낸 크기는 버려진다 — 코어의 리사이즈 라우팅이 아직 등록되지 않은 세션을 어느
+  // 매니저도 모르므로 ssh 로 떨어뜨린다. 스케줄러는 같은 크기를 두 번 보내지 않으니, 붙은 뒤에
+  // 다시 요청하지 않으면 셸은 연결 시점의 기본값(120x32)을 끝까지 믿는다. 실제로 로컬 PowerShell
+  // 이 그 폭으로 줄바꿈·커서를 계산해 화면이 깨졌다.
+  it('clears the dedupe and re-requests the size once the session connects', async () => {
+    const view = renderController(
+      createProps({ tab: { ...baseTab, status: 'connecting' } }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const record = mocks.schedulerRecords.at(-1);
+    if (!record) {
+      throw new Error('resize scheduler was not created');
+    }
+    const resetsBefore = record.scheduler.reset.mock.calls.length;
+    const requestsBefore = record.scheduler.request.mock.calls.length;
+
+    await act(async () => {
+      view.rerenderWithProps(
+        createProps({ tab: { ...baseTab, status: 'connected' } }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(record.scheduler.reset.mock.calls.length).toBeGreaterThan(resetsBefore);
+    expect(record.scheduler.request.mock.calls.length).toBeGreaterThan(requestsBefore);
+  });
 });

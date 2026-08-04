@@ -364,6 +364,18 @@ func PowerShellIntegrationInitCommand() string {
 	return " " + powerShellIntegrationScript + "\r"
 }
 
+// PowerShellIntegrationScript 는 기동 인자(-EncodedCommand)로 넘길 순수 스크립트다. stdin 으로
+// 타이핑하는 경로와 달리 앞 공백·끝 CR 이 없다.
+//
+// 이 경로가 필요한 이유는 커서 어긋남이다. stdin 으로 넣으면 셸이 그 줄을 echo 하고 우리가 그것을
+// 화면에서 걷어내는데, 걷어낸 바이트에는 줄바꿈도 들어 있어서 conhost 의 커서만 내려가고 화면의
+// 커서는 그대로 남는다. 이 스크립트는 1385 바이트라 200 칸 화면에서 7 행을 차지하므로 어긋남이
+// 그만큼 커진다 — 실기기에서 첫 프롬프트가 두 번 찍히고 첫 입력이 7 행 아래에 찍혔다. PSReadLine
+// 은 절대 좌표로 입력줄을 다시 그리기 때문에 이 어긋남이 스스로 낫지 않는다.
+func PowerShellIntegrationScript() string {
+	return powerShellIntegrationScript
+}
+
 func ShellIntegrationInitCommandForShell(shell string) (string, bool) {
 	switch NormalizeShellIntegrationShell(shell) {
 	case "bash", "zsh":
@@ -384,15 +396,33 @@ func ShellIntegrationInitCommandForShell(shell string) (string, bool) {
 // 133;A marker — so the handshake's "drop everything before the marker" rule
 // can't hide that second copy. We strip this text from every forwarded path
 // instead, so the injection never reaches the screen regardless of timing.
-var injectedCommandEcho = []byte(
-	strings.TrimSuffix(strings.TrimPrefix(ShellIntegrationInitCommand(), " "), "\r"),
-)
+var injectedCommandEcho = visibleInjectedEcho(ShellIntegrationInitCommand())
 
-func stripInjectedEcho(data []byte) []byte {
-	if len(data) == 0 || len(injectedCommandEcho) == 0 {
+// visibleInjectedEcho 는 주입 명령에서 화면에 보이는 부분만 남긴다(앞 공백·끝 CR 제거).
+func visibleInjectedEcho(command string) []byte {
+	return []byte(strings.TrimSuffix(strings.TrimPrefix(command, " "), "\r"))
+}
+
+// echoText 는 이 필터가 걷어낼 echo 다. 무장할 때 실제로 주입한 명령을 받지 못했으면 bash/zsh
+// 스크립트로 되돌아간다(그 셸이 기본 경로다).
+//
+// 셸마다 주입하는 스크립트가 다르기 때문에 필터가 이것을 알아야 한다. 실제로 그렇게 깨졌다:
+// 로컬 PowerShell 에는 pwsh 스크립트를 주입하는데 걷어내는 쪽은 bash 문자열을 찾아서, 마커
+// 뒤에 오는 프롬프트 재출력이 그대로 화면에 남았다 — 첫 줄에 프롬프트가 두 번 찍히고 첫 입력이
+// 엉뚱한 열에서 시작했다.
+func (f *HandshakeFilter) echoText() []byte {
+	if len(f.echo) > 0 {
+		return f.echo
+	}
+	return injectedCommandEcho
+}
+
+func (f *HandshakeFilter) stripInjectedEcho(data []byte) []byte {
+	echo := f.echoText()
+	if len(data) == 0 || len(echo) == 0 {
 		return data
 	}
-	return bytes.ReplaceAll(data, injectedCommandEcho, nil)
+	return bytes.ReplaceAll(data, echo, nil)
 }
 
 // HandshakeFilter hides the injected shell-integration command's echo: it
@@ -401,6 +431,8 @@ func stripInjectedEcho(data []byte) []byte {
 // If the marker never arrives within the byte budget (or on Flush after a
 // timeout), the buffered bytes are released so no real output is lost.
 type HandshakeFilter struct {
+	// echo 는 이 세션에 실제로 주입한 명령의 보이는 텍스트다. 비어 있으면 bash/zsh 기본값을 쓴다.
+	echo []byte
 	// preserveMotd가 true면 주입 echo가 찍힌 프롬프트 줄 "이전" 출력(로그인 motd 등)은
 	// 흘려보내고, echo 줄 시작 ~ 첫 133;A 마커만 버린다. false면 Arm~133;A 전부 버린다(기존
 	// 동작). SSH 로그인 셸에서 motd를 보존하면서 통합 프롬프트만 1개로 보이게 하는 용도다.
@@ -417,7 +449,7 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 	if f.done {
 		// After the handshake, still scrub a late injected-command echo (prompt
 		// redraw) so it never reaches the screen.
-		return stripInjectedEcho(chunk), false
+		return f.stripInjectedEcho(chunk), false
 	}
 	f.buffer = append(f.buffer, chunk...)
 
@@ -427,7 +459,7 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 	// motd가 이후 append에 덮이지 않도록 남은 버퍼는 새 백킹으로 복사한다.
 	var motd []byte
 	if f.preserveMotd && !f.motdSeen {
-		if echoIdx := bytes.Index(f.buffer, injectedCommandEcho); echoIdx >= 0 {
+		if echoIdx := bytes.Index(f.buffer, f.echoText()); echoIdx >= 0 {
 			lineStart := bytes.LastIndexByte(f.buffer[:echoIdx], '\n') + 1
 			motd = f.buffer[:lineStart]
 			f.buffer = append([]byte(nil), f.buffer[lineStart:]...)
@@ -439,7 +471,7 @@ func (f *HandshakeFilter) Filter(chunk []byte) (forward []byte, handshakeDone bo
 		f.done = true
 		// Forward motd (preserveMotd) then everything from the marker on, dropping
 		// the injected echo that the prompt line may redraw right after the marker.
-		out := append(append([]byte(nil), motd...), stripInjectedEcho(f.buffer[idx:])...)
+		out := append(append([]byte(nil), motd...), f.stripInjectedEcho(f.buffer[idx:])...)
 		f.buffer = nil
 		return out, true
 	}
@@ -462,7 +494,7 @@ func (f *HandshakeFilter) Flush() []byte {
 	f.done = true
 	// Marker never arrived (slow/incompatible host): release the real output but
 	// scrub the injected command echo so it isn't left on the screen.
-	out := stripInjectedEcho(f.buffer)
+	out := f.stripInjectedEcho(f.buffer)
 	f.buffer = nil
 	return out
 }
@@ -489,6 +521,20 @@ type Handshake struct {
 func (h *Handshake) Arm(preserveMotd bool) {
 	h.mu.Lock()
 	h.filter = &HandshakeFilter{preserveMotd: preserveMotd}
+	h.mu.Unlock()
+}
+
+// ArmForCommand 는 Arm 과 같지만, 걷어낼 echo 를 **실제로 주입하는 명령**으로 지정한다.
+//
+// 셸마다 주입 스크립트가 다른 경로(ShellIntegrationInitCommandForShell)에서는 이것을 써야 한다.
+// Arm 은 bash/zsh 스크립트를 가정하므로, pwsh·fish 세션에서는 마커 뒤에 오는 프롬프트 재출력이
+// 걸러지지 않고 화면에 남는다.
+func (h *Handshake) ArmForCommand(preserveMotd bool, command string) {
+	h.mu.Lock()
+	h.filter = &HandshakeFilter{
+		preserveMotd: preserveMotd,
+		echo:         visibleInjectedEcho(command),
+	}
 	h.mu.Unlock()
 }
 

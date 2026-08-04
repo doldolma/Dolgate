@@ -16,6 +16,13 @@ const (
 	defaultRows = 32
 )
 
+// shellIntegrationPreinstaller 는 기동 시 이미 셸 통합을 설치한 러너다. 선택적 인터페이스로 둔
+// 이유는 이 방식이 Windows 로컬 셸에만 있기 때문이다 — sessionRunner 를 넓히면 모든 러너가 아무
+// 의미 없는 메서드를 들고 있어야 한다.
+type shellIntegrationPreinstaller interface {
+	ShellIntegrationPreinstalled() bool
+}
+
 type sessionRunner interface {
 	Write(data []byte) error
 	Resize(cols, rows int) error
@@ -33,6 +40,9 @@ type sessionExit struct {
 
 type localCommandRuntime struct {
 	shellKind        string
+	// shellIntegrationPreinstalled 는 기동 인자로 셸 통합을 이미 넣었는지다. true 면 stdin 으로
+	// 다시 쓰지 않는다 — 그 echo 를 화면에서 걷어내는 과정이 커서를 어긋나게 한다.
+	shellIntegrationPreinstalled bool
 	executablePath   string
 	args             []string
 	env              []string

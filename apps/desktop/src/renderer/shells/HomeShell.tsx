@@ -25,6 +25,7 @@ import { PortForwardingPanel } from '../components/PortForwardingPanel';
 import { SnippetsPanel } from '../components/SnippetsPanel';
 import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
 import { SettingsPanel } from '../components/SettingsPanel';
+import { BOOTSTRAP_TERMINAL_SIZE } from '../components/terminal-resize';
 import { TermiusImportDialog } from '../components/TermiusImportDialog';
 import { WarpgateImportDialog } from '../components/WarpgateImportDialog';
 import { XshellImportDialog } from '../components/XshellImportDialog';
@@ -456,13 +457,20 @@ export function HomeShell({
             onOpenLocalTerminal={() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);
-              void homeViewModel.openLocalTerminal(120, 32).catch((error) => {
-                setHostBrowserError(
-                  error instanceof Error
-                    ? error.message
-                    : translate('home.error.localTerminalFailed'),
-                );
-              });
+              // 씨앗 크기로 연다 — 여기는 pane 이 없어 실제 격자를 모른다. 정정은
+              // BOOTSTRAP_TERMINAL_SIZE 주석에 적힌 두 경로가 맡는다.
+              void homeViewModel
+                .openLocalTerminal(
+                  BOOTSTRAP_TERMINAL_SIZE.cols,
+                  BOOTSTRAP_TERMINAL_SIZE.rows,
+                )
+                .catch((error) => {
+                  setHostBrowserError(
+                    error instanceof Error
+                      ? error.message
+                      : translate('home.error.localTerminalFailed'),
+                  );
+                });
             }}
             onCreateHost={() => {
               resetHostBrowserMessages();
