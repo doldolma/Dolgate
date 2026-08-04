@@ -157,8 +157,7 @@ func TestLoadDiscoversConfigFileInConfigDirectory(t *testing.T) {
 	if err := os.MkdirAll("config", 0o700); err != nil {
 		t.Fatalf("os.MkdirAll() error = %v", err)
 	}
-	configPath := filepath.Join("config", "config.json")
-	if err := os.WriteFile(configPath, []byte(`{"server":{"port":"9311"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join("config", "config.json"), []byte(`{"server":{"port":"9311"}}`), 0o600); err != nil {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
 
@@ -166,8 +165,13 @@ func TestLoadDiscoversConfigFileInConfigDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if source != configPath {
-		t.Fatalf("source = %q, want %q", source, configPath)
+	// 기대값은 filepath.Join 이 아니라 슬래시 리터럴이어야 한다. Load() 가 돌려주는 source 는
+	// configSearchPaths 항목을 그대로 쓴 진단용 라벨이고(파일을 못 찾으면 "defaults+env" 가
+	// 들어간다), 그 목록은 컨테이너 마운트 지점을 뜻하는 슬래시 형태 상수다. filepath.Join 으로
+	// 만들면 Windows 에서만 백슬래시가 되어 정상 동작인데도 실패한다.
+	const wantSource = "config/config.json"
+	if source != wantSource {
+		t.Fatalf("source = %q, want %q", source, wantSource)
 	}
 	if cfg.Server.Port != "9311" {
 		t.Fatalf("cfg.Server.Port = %q, want 9311", cfg.Server.Port)

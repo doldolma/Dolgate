@@ -1151,6 +1151,11 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	if !strings.Contains(viewerRecorder.Header().Get("Content-Security-Policy"), "style-src 'self' 'unsafe-inline'") {
 		t.Fatalf("expected viewer CSP to allow inline styles for xterm rendering, got %q", viewerRecorder.Header().Get("Content-Security-Policy"))
 	}
+	// 이 지시어가 빠지면 inline image 애드온의 Sixel 디코더(WASM 컴파일)가 브라우저에서 막히고,
+	// viewer.js 의 try/catch 가 그 실패를 흡수해 이미지만 조용히 사라진다.
+	if !strings.Contains(viewerRecorder.Header().Get("Content-Security-Policy"), "script-src 'self' 'wasm-unsafe-eval'") {
+		t.Fatalf("expected viewer CSP to allow wasm compilation for the inline image addon, got %q", viewerRecorder.Header().Get("Content-Security-Policy"))
+	}
 	if !strings.Contains(viewerRecorder.Body.String(), `data-share-id="`) {
 		t.Fatalf("expected viewer page html to contain share metadata: %s", viewerRecorder.Body.String())
 	}
@@ -1159,6 +1164,9 @@ func TestSessionShareCreateAndViewerPage(t *testing.T) {
 	}
 	if !strings.Contains(viewerRecorder.Body.String(), `/share/assets/vendor/xterm-addon-search.js?v=`) {
 		t.Fatalf("expected viewer page html to contain versioned search addon asset url: %s", viewerRecorder.Body.String())
+	}
+	if !strings.Contains(viewerRecorder.Body.String(), `/share/assets/vendor/xterm-addon-image.js?v=`) {
+		t.Fatalf("expected viewer page html to contain versioned image addon asset url: %s", viewerRecorder.Body.String())
 	}
 	if !strings.Contains(viewerRecorder.Body.String(), `id="viewer-search-input"`) {
 		t.Fatalf("expected viewer page html to contain search overlay markup: %s", viewerRecorder.Body.String())

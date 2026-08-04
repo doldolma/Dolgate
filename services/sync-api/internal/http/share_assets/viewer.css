@@ -159,11 +159,16 @@ body {
 }
 
 .viewer-terminal {
-  box-sizing: border-box;
+  /* content-box 여야 한다. viewer.js 의 setStageDimensions() 가 여기에 세션 주인의 터미널
+     픽셀 크기를 그대로 넣는데, border-box 로 두면 아래 1px 테두리가 위아래로 2px 을 먹어
+     xterm 이 주인과 같은 행 수를 그릴 공간이 부족해진다. overflow: hidden 과 겹쳐 마지막
+     행이 조용히 잘린다 — 테두리는 장식이므로 콘텐츠 박스 밖에 둔다. */
+  box-sizing: content-box;
   width: 100%;
   height: 100%;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  /* viewer.js 가 Terminal 에 넘기는 theme.background 와 같은 값이어야 한다. */
   background: #0f1726;
   overflow: hidden;
 }
@@ -171,6 +176,29 @@ body {
 .viewer-terminal .xterm {
   height: 100%;
   padding: 0;
+}
+
+/* 인라인 이미지 애드온은 .xterm-screen 에 캔버스(.xterm-image-layer)를 붙이고, xterm 코어 CSS
+   가 그것을 position: absolute 로 배치한다. 반면 DOM 렌더러의 텍스트(.xterm-rows)는 흐름 안
+   (static)이라, 절대 배치된 캔버스가 항상 텍스트보다 위에 그려진다.
+
+   캔버스가 투명하면 글자가 비쳐야 정상이고, 그렇게 만드는 실제 수정은 viewer.js 에서 애드온의
+   desynchronized 플래그를 떼는 것이다(거기 주석 참고). 이 규칙은 그 위의 안전망이다 — 애드온이
+   캔버스 생성 순서를 바꿔 그 패치가 헛돌더라도 글자는 읽을 수 있어야 한다. 증상이 "터미널이
+   통째로 검게 변함" 이라 조용히 넘어가면 안 되는 종류다.
+
+   z-index 1 은 목적을 달성하는 최소값이다 — 캔버스와 .xterm-selection(둘 다 z-index auto)
+   위로만 올라가고, 검색 데코레이션(6)·helpers(5)·.xterm-decoration-top(2) 의 상대 순서는
+   그대로 둔다. */
+.viewer-terminal .xterm-rows {
+  position: relative;
+  z-index: 1;
+}
+
+/* 히트 테스트에서 빼낸다 — 캔버스가 텍스트 영역 전체를 덮고 있어서, 그대로 두면 이미지 위에서
+   텍스트 선택·드래그가 막힌다. 이 레이어는 순수 출력이다. */
+.viewer-terminal .xterm-image-layer {
+  pointer-events: none;
 }
 
 .viewer-chat-panel {
