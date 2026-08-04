@@ -1860,9 +1860,18 @@ func applyAuthHTMLResponseHeaders(ctx *gin.Context) {
 func applyShareViewerResponseHeaders(ctx *gin.Context) {
 	// The browser share viewer embeds xterm.js, which relies on runtime inline
 	// styles for accurate terminal sizing and cell layout.
+	//
+	// 'wasm-unsafe-eval' 은 인라인 이미지 애드온(xterm-addon-image) 때문에 필요하다 — Sixel
+	// 디코더가 번들에 박힌 WASM 바이트를 new WebAssembly.Module() 로 컴파일하는데, 이 지시어가
+	// 없으면 브라우저가 그 컴파일을 막는다. 'unsafe-eval' 과 달리 WASM 컴파일만 허용하고 JS
+	// 문자열 평가는 계속 금지하며, WASM 바이트는 'self' 에서 받은 애드온 파일 안에 있으므로
+	// 원격 코드 경로가 새로 열리지는 않는다.
+	//
+	// img-src 에 blob: 은 넣지 않는다. 애드온이 createObjectURL 을 쓰는 경로는
+	// createImageBitmap 이 없는 구형 브라우저용 폴백뿐이다.
 	ctx.Header(
 		"Content-Security-Policy",
-		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:",
+		"default-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; font-src 'self' data:",
 	)
 }
 

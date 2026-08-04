@@ -89,6 +89,7 @@ class MockTerminal {
   readonly reset = vi.fn();
   private onDataListener: ((data: string) => void) | null = null;
   private onBinaryListener: ((data: string) => void) | null = null;
+  private onRenderListener: (() => void) | null = null;
 
   constructor(_options: unknown) {
     MockTerminal.instances.push(this);
@@ -100,6 +101,12 @@ class MockTerminal {
 
   onBinary(listener: (data: string) => void) {
     this.onBinaryListener = listener;
+  }
+
+  // viewer.js 는 렌더 프레임마다 .xterm-screen 크기를 재서 stage 스케일을 자기교정한다.
+  // 여기서는 등록만 받아둔다 — onData/onBinary 와 같이, 이 목은 이벤트를 발화시키지 않는다.
+  onRender(listener: () => void) {
+    this.onRenderListener = listener;
   }
 }
 

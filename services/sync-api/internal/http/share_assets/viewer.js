@@ -177,6 +177,31 @@
     return;
   }
 
+  // 인라인 이미지 애드온은 출력 캔버스의 2d 컨텍스트를 desynchronized: true(저지연 캔버스)로
+  // 만든다. 그러면 브라우저가 그 캔버스를 오버레이 합성 평면으로 승격시키고, 그 평면은 캔버스
+  // 비트맵만 표시하면서 아래 레이어를 가려버린다 — 투명 픽셀(RGBA 0,0,0,0)이어도 마찬가지다.
+  // 이미지가 뜨는 순간 터미널 전체가 검게 보이는 원인이 이것이다.
+  //
+  // CSS 로는 되돌릴 수 없다. isolation: isolate, mix-blend-mode, 캔버스 요소에 배경색 지정
+  // 모두 실패했다(요소의 CSS 배경은 가려지는 쪽 레이어에 그려진다). 그래서 플래그 자체를 뗀다.
+  //
+  // 데스크톱 앱이 멀쩡한 이유는 버전이 아니라 렌더러다 — 거기는 WebGL 렌더러가 기본이라
+  // 텍스트도 .xterm-screen 안의 캔버스이고, 애드온이 설계된 환경이다. 뷰어는 DOM 렌더러라
+  // 텍스트가 흐름 안의 div 이므로 오버레이에 가려진다. 뷰어는 transform: scale() 로 확대하기
+  // 때문에 캔버스 렌더러를 쓰면 글자가 흐려져서, 렌더러를 바꾸는 대신 이 플래그를 떼는 쪽을
+  // 택했다.
+  //
+  // 애드온이 클래스를 먼저 붙이고 getContext 를 부르므로(ImageRenderer.insertLayerToDom) 그
+  // 캔버스만 정확히 겨냥할 수 있다. desynchronized 는 지연 최적화 힌트일 뿐이라 떼도 기능은
+  // 같다.
+  const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (contextType, options) {
+    if (options?.desynchronized && this.classList?.contains("xterm-image-layer")) {
+      return nativeGetContext.call(this, contextType, { ...options, desynchronized: false });
+    }
+    return nativeGetContext.call(this, contextType, options);
+  };
+
   const term = new window.Terminal({
     allowProposedApi: true,
     cursorBlink: false,
@@ -589,6 +614,32 @@
     terminalNode.style.height = `${height}px`;
   }
 
+  // 주인이 보내는 viewportPx 는 주인 쪽 렌더러가 계산한 픽셀 크기다. 뷰어 브라우저는 폰트
+  // 가용성과 devicePixelRatio 가 달라 같은 fontSize/lineHeight 로도 셀 크기를 다르게 잡을 수
+  // 있고, 그러면 rows 를 다 그리는 데 필요한 높이가 주인의 값보다 커진다. 컨테이너에
+  // overflow: hidden 이 걸려 있어 그 초과분은 마지막 행이 잘리는 형태로만 드러난다.
+  //
+  // xterm 은 .xterm-screen 에 그리드의 실제 픽셀 크기(dimensions.css.canvas)를 명시적으로
+  // 넣으므로 그 값을 재서 하한으로 쓴다. offsetWidth/offsetHeight 를 쓰는 이유는 이 요소가
+  // transform: scale() 된 stage 안에 있어서 getBoundingClientRect() 는 축소된 값을 주기
+  // 때문이다 — offset* 은 변환 전 레이아웃 픽셀을 돌려준다.
+  //
+  // 뷰어는 fit 애드온을 쓰지 않고 그리드가 term.resize(cols, rows) 로만 정해지므로, 컨테이너를
+  // 키워도 그리드가 다시 바뀌지 않는다(되먹임 없음).
+  function measureRenderedGridPx() {
+    const screen = terminalNode.querySelector(".xterm-screen");
+    if (!screen) {
+      return null;
+    }
+
+    const width = screen.offsetWidth;
+    const height = screen.offsetHeight;
+    if (!(width > 0) || !(height > 0)) {
+      return null;
+    }
+    return { width, height };
+  }
+
   function applyTerminalAppearance(appearance) {
     const normalized = normalizeTerminalAppearance(appearance);
     if (!normalized) {
@@ -616,12 +667,17 @@
       return;
     }
 
-    setStageDimensions(baseViewport.width, baseViewport.height);
+    // 주인이 보고한 크기와 뷰어가 실제로 그린 그리드 크기 중 큰 쪽을 쓴다 — 작은 쪽을 쓰면
+    // 그 차이만큼 마지막 행/열이 잘린다.
+    const renderedGrid = measureRenderedGridPx();
+    const stageWidth = Math.max(baseViewport.width, renderedGrid?.width ?? 0);
+    const stageHeight = Math.max(baseViewport.height, renderedGrid?.height ?? 0);
+    setStageDimensions(stageWidth, stageHeight);
 
     const safeWidth = Math.max(0, availableWidth - VIEWPORT_SAFE_GUTTER_PX);
     const safeHeight = Math.max(0, availableHeight - VIEWPORT_SAFE_GUTTER_PX);
-    const widthScale = safeWidth / baseViewport.width;
-    const heightScale = safeHeight / baseViewport.height;
+    const widthScale = safeWidth / stageWidth;
+    const heightScale = safeHeight / stageHeight;
     const scale = Math.min(widthScale, heightScale, 1) * VIEWPORT_SAFE_SCALE_FACTOR;
     stageNode.style.transform = `scale(${Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_FALLBACK_SCALE})`;
   }
@@ -767,10 +823,43 @@
       searchAddon = null;
       safeWarn("Search addon unavailable, continuing without in-terminal search support.", error);
     }
+
+    try {
+      // 인라인 이미지(Sixel + iTerm2 IIP). 라이브 공유는 원시 바이트를 그대로 흘리므로 이
+      // 애드온이 없으면 주인 화면에 뜬 이미지가 뷰어에서는 조용히 사라진다. storageLimit 은
+      // 데스크톱(terminal-runtime.ts)과 같은 값이어야 같은 이미지가 같게 보인다.
+      //
+      // Sixel 디코더가 인라인 WASM 을 컴파일하기 때문에 공유 뷰어 CSP 의 script-src 에
+      // 'wasm-unsafe-eval' 이 있어야 동작한다(applyShareViewerResponseHeaders 참고).
+      if (window.ImageAddon?.ImageAddon) {
+        term.loadAddon(new window.ImageAddon.ImageAddon({ storageLimit: 128 }));
+      }
+    } catch (error) {
+      safeWarn("Image addon unavailable, continuing without inline image (sixel/iip) support.", error);
+    }
   }
 
   term.open(terminalNode);
   initializeAddons();
+
+  // 렌더러가 .xterm-screen 크기를 반영하는 시점은 term.resize() 호출 프레임보다 늦을 수 있어서,
+  // resize 직후의 scheduleScaleSync() 는 아직 옛 크기를 잴 수 있다. 그리드 픽셀 크기가 실제로
+  // 바뀐 프레임에서만 다시 맞춰 그 지연을 자기교정한다 — 값이 안정되면 더 이상 일하지 않는다.
+  let lastRenderedGridKey = "";
+  term.onRender(() => {
+    const renderedGrid = measureRenderedGridPx();
+    if (!renderedGrid) {
+      return;
+    }
+
+    const gridKey = `${renderedGrid.width}x${renderedGrid.height}`;
+    if (gridKey === lastRenderedGridKey) {
+      return;
+    }
+    lastRenderedGridKey = gridKey;
+    scheduleScaleSync();
+  });
+
   chatNicknameNode.value = resolveInitialChatNickname();
   renderChatMessages();
   setChatStatus(TEXT.chatStatusConnecting);
