@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
-import type { Terminal } from 'xterm';
+import type { Terminal } from '@xterm/xterm';
 import {
   getCommandBlockAtLine,
   getCommandBlocks,

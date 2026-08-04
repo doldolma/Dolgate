@@ -1,22 +1,19 @@
-import { FitAddon } from 'xterm-addon-fit/lib/xterm-addon-fit.js';
-import { SearchAddon } from 'xterm-addon-search/lib/xterm-addon-search.js';
-import { SerializeAddon, type ISerializeOptions } from 'xterm-addon-serialize/lib/xterm-addon-serialize.js';
-import { Unicode11Addon } from 'xterm-addon-unicode11/lib/xterm-addon-unicode11.js';
-import { ImageAddon } from 'xterm-addon-image/lib/xterm-addon-image.js';
+import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { SerializeAddon, type ISerializeOptions } from '@xterm/addon-serialize';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { ImageAddon } from '@xterm/addon-image';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import {
   Terminal,
-  type IBufferRange,
   type IDisposable,
-  type ILink,
-  type ILinkProvider,
   type ITerminalAddon,
   type ITerminalOptions,
   type ITheme
-} from 'xterm';
+} from '@xterm/xterm';
 import { openTerminalExternalUrl } from '../services/desktop/terminal';
 
 const WRITE_FLUSH_THRESHOLD_BYTES = 64 * 1024;
-const URL_PATTERN = /https?:\/\/[^\s<>"']+/g;
 
 export interface TerminalRuntimeAppearance {
   theme: ITheme;
@@ -74,6 +71,7 @@ interface CreateTerminalRuntimeDependencies {
   createSearchAddon?: () => SearchAddon;
   createSerializeAddon?: () => SerializeAddon;
   createUnicode11Addon?: () => Unicode11Addon;
+  createWebLinksAddon?: (handler: (event: MouseEvent, uri: string) => void) => WebLinksAddon;
   loadWebglAddonModule?: () => Promise<WebglAddonModuleLike>;
   scheduleAnimationFrame?: (callback: FrameRequestCallback) => number;
   cancelScheduledAnimationFrame?: (handle: number) => void;
@@ -105,7 +103,7 @@ let webglAddonModulePromise: Promise<WebglAddonModuleLike> | null = null;
 
 function loadDefaultWebglAddonModule(): Promise<WebglAddonModuleLike> {
   if (!webglAddonModulePromise) {
-    webglAddonModulePromise = import('xterm-addon-webgl/lib/xterm-addon-webgl.js') as Promise<WebglAddonModuleLike>;
+    webglAddonModulePromise = import('@xterm/addon-webgl') as Promise<WebglAddonModuleLike>;
   }
   return webglAddonModulePromise as Promise<WebglAddonModuleLike>;
 }
@@ -216,57 +214,21 @@ function mergeQueuedChunks(chunks: QueuedTerminalChunk[]): string | Uint8Array {
   return merged;
 }
 
-function createTerminalLinkProvider(
-  terminal: Terminal,
+// 링크 탐지는 공식 애드온에 맡긴다. 직접 구현하던 버전은 두 가지를 놓쳤다 — 문자열 인덱스를
+// 버퍼 열로 그대로 써서 URL 앞에 와이드 문자(한글·CJK)가 있으면 밑줄/클릭 범위가 어긋났고,
+// 한 줄만 조회해서 줄바꿈으로 감싸진 URL 을 잡지 못했다. 애드온은 문자열 인덱스를 버퍼 좌표로
+// 역매핑하고(_mapStrIdx) wrap 연속 줄을 이어붙여 처리하며, new URL() 로 오탐도 걸러낸다.
+//
+// 여는 동작만 우리가 잡는다 — main 프로세스가 스킴을 http(s) 로 제한해 검증하기 때문에
+// 애드온 기본 동작(window.open) 대신 이 핸들러를 통과시켜야 한다.
+function createLinkActivationHandler(
   openExternal: (url: string) => void | Promise<void>,
   logger: Pick<Console, 'warn'>
-): ILinkProvider {
-  return {
-    provideLinks(bufferLineNumber, callback) {
-      const line = terminal.buffer.active.getLine(bufferLineNumber - 1);
-      if (!line) {
-        callback(undefined);
-        return;
-      }
-
-      const text = line.translateToString(true);
-      const links: ILink[] = [];
-
-      for (const match of text.matchAll(URL_PATTERN)) {
-        const url = match[0];
-        const startIndex = match.index ?? -1;
-        if (!url || startIndex < 0) {
-          continue;
-        }
-
-        const range: IBufferRange = {
-          start: {
-            x: startIndex + 1,
-            y: bufferLineNumber
-          },
-          end: {
-            x: startIndex + url.length,
-            y: bufferLineNumber
-          }
-        };
-
-        links.push({
-          text: url,
-          range,
-          decorations: {
-            underline: true,
-            pointerCursor: true
-          },
-          activate: (_event, linkText) => {
-            Promise.resolve(openExternal(linkText)).catch((error: unknown) => {
-              logger.warn?.('Failed to open terminal link.', error);
-            });
-          }
-        });
-      }
-
-      callback(links.length > 0 ? links : undefined);
-    }
+): (event: MouseEvent, uri: string) => void {
+  return (_event, uri) => {
+    Promise.resolve(openExternal(uri)).catch((error: unknown) => {
+      logger.warn?.('Failed to open terminal link.', error);
+    });
   };
 }
 
@@ -408,10 +370,15 @@ export function createTerminalRuntime({
   }
   terminal.open(container);
   fitAddon.fit();
-  let linkProviderDisposable: IDisposable | null = null;
+  // terminal.open() 뒤에 로드한다 — 애드온이 activate 에서 링크 프로바이더를 등록하려면
+  // 터미널이 DOM 에 붙어 있어야 한다.
+  let webLinksAddon: WebLinksAddon | null = null;
   try {
-    linkProviderDisposable = terminal.registerLinkProvider(createTerminalLinkProvider(terminal, openExternal, logger));
+    const activateLink = createLinkActivationHandler(openExternal, logger);
+    webLinksAddon = (dependencies.createWebLinksAddon ?? ((handler) => new WebLinksAddon(handler)))(activateLink);
+    terminal.loadAddon(webLinksAddon);
   } catch (error) {
+    webLinksAddon = null;
     safeWarn(logger, 'Link detection unavailable, continuing without clickable terminal links.', error);
   }
 
@@ -769,7 +736,7 @@ export function createTerminalRuntime({
       queuedChunks.length = 0;
       queuedSize = 0;
       clearWebglAddon();
-      linkProviderDisposable?.dispose();
+      webLinksAddon?.dispose();
       shellIntegrationDisposable?.dispose();
       cwdDisposable?.dispose();
       disposeBinarySubscription.dispose();
