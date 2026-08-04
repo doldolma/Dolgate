@@ -70,7 +70,10 @@ func (e *Engine) SetAndroidNetworkProvider(provider AndroidNetworkProvider) {
 		// 안드로이드의 defaultRoute() 는 이 값만 돌려주므로(net/netmon/interfaces_android.go)
 		// 넣어 주지 않으면 기본 경로가 영원히 빈 값이다. 진입점을 목록 조회와 하나로 묶어 두면
 		// 둘이 어긋나지 않는다 — 목록을 물어보는 시점이 곧 링크가 바뀌었을 수 있는 시점이다.
-		netmon.UpdateLastKnownDefaultRouteInterface(strings.TrimSpace(provider.DefaultRouteInterface()))
+		//
+		// 갱신 자체는 플랫폼마다 갈린다(android_defaultroute.go) — tailscale 이 그 값을 들고
+		// 있는 플랫폼이 android·darwin·ios 뿐이다.
+		updateDefaultRouteInterface(strings.TrimSpace(provider.DefaultRouteInterface()))
 		return parseAndroidInterfaces(provider.Interfaces())
 	})
 }

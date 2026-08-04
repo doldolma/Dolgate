@@ -138,6 +138,12 @@ func TestSetAndroidNetworkProviderFeedsTailscale(t *testing.T) {
 		t.Fatalf("list = %#v", list)
 	}
 
+	if !defaultRouteTracked {
+		// tailscale 이 이 플랫폼에서는 기본 경로를 들고 있지 않다
+		// (android_defaultroute_stub.go). 여기서 DefaultRouteInterface 를 물으면 OS 의 실제
+		// 경로가 오므로 단정할 것이 없다.
+		return
+	}
 	route, err := netmon.DefaultRouteInterface()
 	if err != nil {
 		t.Fatalf("DefaultRouteInterface() error = %v", err)
