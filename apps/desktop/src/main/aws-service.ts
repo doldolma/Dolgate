@@ -102,6 +102,7 @@ import {
   listAwsProfileNames,
   loadAwsProfileDocuments,
   removeAwsProfileKeyFromDocuments,
+  resolveAwsSsoChain,
   setAwsProfileKeyValueInDocuments,
   setAwsSsoSessionKeyValueInDocuments,
   writeAwsProfileDocuments,
@@ -3068,6 +3069,20 @@ export class AwsService {
     }
   }
 
+  // 프로필(과 source_profile 체인)에서 SSO 로그인을 담당하는 설정을 찾는다. 문서를 못 읽으면
+  // readConfigValue 와 같이 조용히 null 로 떨어뜨린다 — 상태 조회가 예외로 끊기지 않게 한다.
+  private async resolveSsoChainFromRoot(
+    profileName: string,
+    awsRootDir: string,
+  ): Promise<ReturnType<typeof resolveAwsSsoChain>> {
+    try {
+      const documents = await loadAwsProfileDocuments(awsRootDir);
+      return resolveAwsSsoChain(documents, profileName);
+    } catch {
+      return null;
+    }
+  }
+
   private async getProfileStatusFromRoot(
     profileName: string,
     awsRootDir: string,
@@ -3106,12 +3121,15 @@ export class AwsService {
     }
 
 
-    const [ssoStartUrl, ssoSession, configuredRegion] = await Promise.all([
-      this.readConfigValue(profileName, "sso_start_url", awsRootDir),
-      this.readConfigValue(profileName, "sso_session", awsRootDir),
+    // isSsoProfile 은 source_profile 체인까지 따라가서 판정한다. assume role 프로필은 SSO 설정을
+    // 자기 섹션이 아니라 source_profile 쪽에 두기 때문에, 자기 값만 보면 static 자격 증명
+    // 프로필로 오판해 브라우저 로그인 경로가 통째로 건너뛰어진다. 이 플래그를 보고 분기하는
+    // 곳이 네 군데다 — SSH 연결(trust-auth), SFTP, 포트포워딩, DNS.
+    const [ssoChain, configuredRegion] = await Promise.all([
+      this.resolveSsoChainFromRoot(profileName, awsRootDir),
       this.readConfigValue(profileName, "region", awsRootDir),
     ]);
-    const isSsoProfile = Boolean(ssoStartUrl || ssoSession);
+    const isSsoProfile = ssoChain !== null;
 
     try {
       const identity = await this.stsGetCallerIdentityFromRoot(
@@ -3384,25 +3402,20 @@ export class AwsService {
       );
     }
 
+    // assume role 프로필은 SSO 설정이 source_profile 쪽에 있으므로 체인을 따라가 찾는다.
+    // 토큰 캐시는 start URL·세션명으로 키가 잡히니, 체인 끝(실제 SSO 프로필)의 값으로 로그인해야
+    // 이 프로필이 role 을 assume 할 때 쓰는 소스 자격 증명이 갱신된다.
     const documents = await loadAwsProfileDocuments(this.awsProfileRootDir);
-    const values = inspectAwsProfileDocuments(documents, profileName).mergedValues;
-    const ssoSession = values.sso_session?.trim() || null;
-    const sessionValues = ssoSession
-      ? getAwsSsoSessionValues(documents, ssoSession)
-      : {};
-    const startUrl =
-      values.sso_start_url?.trim() || sessionValues.sso_start_url?.trim() || "";
-    const ssoRegion =
-      values.sso_region?.trim() || sessionValues.sso_region?.trim() || "";
-    if (!startUrl || !ssoRegion) {
+    const ssoChain = resolveAwsSsoChain(documents, profileName);
+    if (!ssoChain?.startUrl || !ssoChain.ssoRegion) {
       throw new Error(t('aws.sso.configMissing'));
     }
 
     try {
       await this.performSsoLoginForRoot({
-        startUrl,
-        ssoRegion,
-        sessionName: ssoSession,
+        startUrl: ssoChain.startUrl,
+        ssoRegion: ssoChain.ssoRegion,
+        sessionName: ssoChain.ssoSessionName,
         awsRootDir: this.awsProfileRootDir,
       });
     } catch (error) {
