@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { initRendererI18n } from '../i18n';
 import {
   TMUX_PREFIX_BYTE,
   mapPrefixKey,
   resolveSiblingWindowId,
   tmuxPrefixByteFromKey,
   tmuxPrefixKeyLabels,
+  tmuxPrefixKeyOptions,
   type TmuxPrefixResolverContext,
 } from './tmux-prefix';
 
@@ -229,5 +231,44 @@ describe('tmuxPrefixByteFromKey', () => {
     // 미인식·미설정은 기본 프리픽스로 안내한다(tmuxPrefixByteFromKey 와 같은 규칙).
     expect(tmuxPrefixKeyLabels(undefined)).toEqual(['Ctrl', 'B']);
     expect(tmuxPrefixKeyLabels('nonsense')).toEqual(['Ctrl', 'B']);
+  });
+});
+
+describe('tmuxPrefixKeyOptions', () => {
+  // 테스트 전체는 vitest.setup.ts 에서 한국어로 고정된다. 여기서만 바꾸고 되돌린다.
+  afterAll(() => {
+    initRendererI18n('ko');
+  });
+
+  // 라벨을 모듈 최상위 상수로 되돌리면 이 테스트가 깨진다.
+  //
+  // 실제 앱에서는 그 상수가 initRendererI18n() 보다 먼저 평가돼 기본 항목 라벨이 빈
+  // 문자열이었다(설정 드롭다운의 첫 항목이 공백으로 보였다). 그런데 테스트 환경은
+  // vitest.setup.ts 가 i18n 을 먼저 켜므로 "라벨이 비어 있지 않다" 로는 그 회귀를 잡을 수
+  // 없다 — 그래서 언어 전환에 반응하는지로 대신 고정한다.
+  it('translates the default label at call time so a language change takes effect', () => {
+    initRendererI18n('ko');
+    expect(tmuxPrefixKeyOptions()[0]?.label).toBe('Ctrl-B (기본)');
+
+    initRendererI18n('en-US');
+    expect(tmuxPrefixKeyOptions()[0]?.label).toBe('Ctrl-B (default)');
+  });
+
+  it('keeps the default first and formats the rest through tmuxPrefixKeyLabels', () => {
+    const options = tmuxPrefixKeyOptions();
+
+    expect(options.map((option) => option.value)).toEqual([
+      'C-b',
+      'C-a',
+      'C-Space',
+      'C-g',
+      'C-o',
+      'C-q',
+    ]);
+    // 단축키 안내와 드롭다운 표기가 갈리지 않아야 한다.
+    for (const option of options.slice(1)) {
+      expect(option.label).toBe(tmuxPrefixKeyLabels(option.value).join('-'));
+    }
+    expect(options.map((option) => option.label)).not.toContain('');
   });
 });

@@ -11,20 +11,42 @@ import { t } from '../i18n';
 
 export const TMUX_PREFIX_BYTE = '\x02'; // Ctrl-b (기본)
 
-// 설정에서 고를 수 있는 prefix 키 목록. value 는 저장 토큰("C-<letter>"/"C-Space").
-export const TMUX_PREFIX_KEY_OPTIONS: ReadonlyArray<{
-  value: string;
-  label: string;
-}> = [
-  { value: 'C-b', label: t('misc.tmuxPrefixDefault') },
-  { value: 'C-a', label: 'Ctrl-A' },
-  { value: 'C-Space', label: 'Ctrl-Space' },
-  { value: 'C-g', label: 'Ctrl-G' },
-  { value: 'C-o', label: 'Ctrl-O' },
-  { value: 'C-q', label: 'Ctrl-Q' },
+export const DEFAULT_TMUX_PREFIX_KEY = 'C-b';
+
+// 설정에서 고를 수 있는 prefix 키. 저장 토큰("C-<letter>"/"C-Space")이며 이 순서가 드롭다운
+// 순서다. 기본값을 맨 앞에 둔다.
+const TMUX_PREFIX_KEY_VALUES: readonly string[] = [
+  DEFAULT_TMUX_PREFIX_KEY,
+  'C-a',
+  'C-Space',
+  'C-g',
+  'C-o',
+  'C-q',
 ];
 
-export const DEFAULT_TMUX_PREFIX_KEY = 'C-b';
+/**
+ * tmuxPrefixKeyOptions 는 설정 드롭다운에 쓸 (값, 라벨) 목록을 만든다.
+ *
+ * 라벨을 모듈 최상위 상수로 만들어 두면 안 된다 — t() 가 initRendererI18n() 보다 먼저
+ * 평가돼 빈 문자열이 되고(기본 항목이 공백으로 보이던 원인), 언어를 바꿔도 갱신되지 않는다.
+ * i18n.ts 의 getFormatLocale() 과 같은 규칙이다. 호출부(SettingsPanel)는 useTranslation 을
+ * 쓰므로 언어가 바뀌면 다시 그려지며 이 함수도 다시 평가된다.
+ *
+ * 기본값만 "(기본)" 안내가 붙고, 나머지는 tmuxPrefixKeyLabels 로 만든다 — 단축키 안내에
+ * 찍히는 표기와 드롭다운 표기가 갈리지 않게 한 곳에서 포맷한다.
+ */
+export function tmuxPrefixKeyOptions(): ReadonlyArray<{
+  value: string;
+  label: string;
+}> {
+  return TMUX_PREFIX_KEY_VALUES.map((value) => ({
+    value,
+    label:
+      value === DEFAULT_TMUX_PREFIX_KEY
+        ? t('misc.tmuxPrefixDefault')
+        : tmuxPrefixKeyLabels(value).join('-')
+  }));
+}
 
 /**
  * tmuxPrefixByteFromKey 는 설정 토큰("C-b"/"C-Space")을 실제 입력 바이트로 바꾼다.
