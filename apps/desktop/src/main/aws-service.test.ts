@@ -256,6 +256,7 @@ describe('AwsService.getProfileStatus', () => {
   it('includes the configured region when the profile is authenticated', async () => {
     const service = new AwsService() as unknown as {
       readConfigValue: ReturnType<typeof vi.fn>;
+      resolveSsoChainFromRoot: ReturnType<typeof vi.fn>;
       stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
@@ -263,11 +264,11 @@ describe('AwsService.getProfileStatus', () => {
       }>;
     };
 
-    service.readConfigValue = vi
-      .fn()
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('ap-northeast-2');
+    // 키로 답하게 해서 호출 순서에 묶이지 않게 한다.
+    service.readConfigValue = vi.fn(async (_profileName: string, key: string) =>
+      key === 'region' ? 'ap-northeast-2' : '',
+    );
+    service.resolveSsoChainFromRoot = vi.fn().mockResolvedValue(null);
     service.stsGetCallerIdentityFromRoot = vi.fn().mockResolvedValue({
       account: '123456789012',
       arn: 'arn:aws:iam::123456789012:user/test',
@@ -287,6 +288,7 @@ describe('AwsService.getProfileStatus', () => {
   it('returns null configuredRegion when the profile has no default region', async () => {
     const service = new AwsService() as unknown as {
       readConfigValue: ReturnType<typeof vi.fn>;
+      resolveSsoChainFromRoot: ReturnType<typeof vi.fn>;
       stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
       getProfileStatus: (profileName: string) => Promise<{
         configuredRegion?: string | null;
@@ -294,11 +296,8 @@ describe('AwsService.getProfileStatus', () => {
       }>;
     };
 
-    service.readConfigValue = vi
-      .fn()
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('')
-      .mockResolvedValueOnce('');
+    service.readConfigValue = vi.fn().mockResolvedValue('');
+    service.resolveSsoChainFromRoot = vi.fn().mockResolvedValue(null);
     service.stsGetCallerIdentityFromRoot = vi
       .fn()
       .mockRejectedValue(new Error('credential missing'));
@@ -306,6 +305,80 @@ describe('AwsService.getProfileStatus', () => {
     await expect(service.getProfileStatus('default')).resolves.toMatchObject({
       isAuthenticated: false,
       configuredRegion: null,
+    });
+  });
+
+  // isSsoProfile 은 브라우저 로그인을 시도할지 결정하는 유일한 플래그다 — SSH 연결(trust-auth),
+  // SFTP, 포트포워딩, DNS 네 경로가 모두 이 값만 보고 분기한다. assume role 프로필은 SSO 설정을
+  // source_profile 쪽에 두므로, 자기 섹션만 보면 false 가 되어 로그인 시도 없이 "저장된 자격
+  // 증명으로 인증 실패" 로 끝났다.
+  it('marks an assume-role profile as SSO when the source profile owns the login', async () => {
+    const service = new AwsService() as unknown as {
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
+      getProfileStatusFromRoot: (
+        profileName: string,
+        awsRootDir: string,
+      ) => Promise<{ isAuthenticated: boolean; isSsoProfile: boolean }>;
+    };
+    service.stsGetCallerIdentityFromRoot = vi
+      .fn()
+      .mockRejectedValue(new Error('The SSO session has expired'));
+
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: `
+[profile prod]
+role_arn = arn:aws:iam::123456789012:role/Admin
+source_profile = sso-base
+
+[profile sso-base]
+sso_session = corp
+
+[sso-session corp]
+sso_start_url = https://corp.awsapps.com/start
+sso_region = us-east-1
+`,
+    });
+
+    await expect(
+      service.getProfileStatusFromRoot('prod', rootDir),
+    ).resolves.toMatchObject({
+      isAuthenticated: false,
+      isSsoProfile: true,
+    });
+  });
+
+  it('keeps an assume-role profile backed by static keys out of the browser login path', async () => {
+    const service = new AwsService() as unknown as {
+      stsGetCallerIdentityFromRoot: ReturnType<typeof vi.fn>;
+      getProfileStatusFromRoot: (
+        profileName: string,
+        awsRootDir: string,
+      ) => Promise<{ isAuthenticated: boolean; isSsoProfile: boolean }>;
+    };
+    service.stsGetCallerIdentityFromRoot = vi
+      .fn()
+      .mockRejectedValue(new Error('InvalidClientTokenId'));
+
+    const rootDir = await createTempAwsProfileDir();
+    await writeAwsProfileFiles(rootDir, {
+      config: `
+[profile prod]
+role_arn = arn:aws:iam::123456789012:role/Admin
+source_profile = keys
+`,
+      credentials: `
+[keys]
+aws_access_key_id = AKIAEXAMPLE
+aws_secret_access_key = secret
+`,
+    });
+
+    await expect(
+      service.getProfileStatusFromRoot('prod', rootDir),
+    ).resolves.toMatchObject({
+      isAuthenticated: false,
+      isSsoProfile: false,
     });
   });
 });

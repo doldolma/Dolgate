@@ -746,6 +746,71 @@ export function getAwsSsoSessionValues(
   );
 }
 
+export interface AwsSsoChainResolution {
+  /** SSO 설정을 실제로 들고 있는 프로필. 요청한 프로필 자신일 수 있다. */
+  profileName: string;
+  /** sso_session 이름. 레거시(프로필에 sso_start_url 직접 지정)면 null. */
+  ssoSessionName: string | null;
+  /** 설정이 불완전하면 빈 문자열일 수 있다 — 판정은 declaresSso 로 하고 값 검증은 호출부가 한다. */
+  startUrl: string;
+  ssoRegion: string;
+  /** source_profile 을 몇 번 따라갔는지. 0 이면 요청한 프로필 자신이 SSO 다. */
+  hopCount: number;
+}
+
+// source_profile 체인은 AWS 가 중첩을 허용하므로 상한을 둔다. visited 로 순환도 막지만,
+// 상한이 있으면 비정상적으로 긴 체인에서 조용히 오래 도는 일이 없다.
+const MAX_SOURCE_PROFILE_HOPS = 8;
+
+/**
+ * resolveAwsSsoChain 은 프로필에서 시작해 source_profile 을 따라가며 실제로 SSO 로그인을
+ * 담당하는 프로필을 찾는다. 없으면 null.
+ *
+ * assume role 프로필은 sso_session/sso_start_url 을 자기 섹션에 두지 않고 source_profile 쪽에
+ * 둔다. inspectAwsProfileDocuments 의 mergedValues 는 같은 이름의 config+credentials 만 합치고
+ * 체인을 따라가지 않으므로, 그 값만 보면 SSO 프로필을 static 자격 증명 프로필로 오판한다.
+ * 그러면 브라우저 로그인 경로가 통째로 건너뛰어지고 "저장된 자격 증명으로 인증 실패" 로 끝난다.
+ *
+ * SSO "의사 표시"(sso_session 또는 sso_start_url)가 있으면 거기서 멈추고, 값이 불완전해도 그대로
+ * 돌려준다 — 그래야 호출부가 static 프로필로 오판하지 않고 설정 누락으로 안내할 수 있다.
+ * 반대로 체인 끝이 static key·credential_process 면 null 이라 기존 동작이 유지된다.
+ */
+export function resolveAwsSsoChain(
+  documents: AwsProfileDocuments,
+  profileName: string,
+): AwsSsoChainResolution | null {
+  const visited = new Set<string>();
+  let current = profileName.trim();
+
+  for (let hop = 0; hop <= MAX_SOURCE_PROFILE_HOPS; hop += 1) {
+    if (!current || visited.has(current)) {
+      return null;
+    }
+    visited.add(current);
+
+    const values = inspectAwsProfileDocuments(documents, current).mergedValues;
+    const ssoSessionName = values.sso_session?.trim() || null;
+    const inlineStartUrl = values.sso_start_url?.trim() || "";
+    if (ssoSessionName || inlineStartUrl) {
+      const sessionValues = ssoSessionName
+        ? getAwsSsoSessionValues(documents, ssoSessionName)
+        : {};
+      return {
+        profileName: current,
+        ssoSessionName,
+        startUrl: inlineStartUrl || sessionValues.sso_start_url?.trim() || "",
+        ssoRegion:
+          values.sso_region?.trim() || sessionValues.sso_region?.trim() || "",
+        hopCount: hop,
+      };
+    }
+
+    current = values.source_profile?.trim() || "";
+  }
+
+  return null;
+}
+
 export function copyAwsProfileConfigSectionBetweenDocuments(
   sourceDocuments: AwsProfileDocuments,
   targetDocuments: AwsProfileDocuments,
