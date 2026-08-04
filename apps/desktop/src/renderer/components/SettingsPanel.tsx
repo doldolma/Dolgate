@@ -25,7 +25,7 @@ import { APP_LANGUAGE_OPTIONS } from '../../common/i18n/locale';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SettingsSection } from '../store/createAppStore';
 import { terminalFontOptions, terminalThemePresets } from '../lib/terminal-presets';
-import { TMUX_PREFIX_KEY_OPTIONS } from '../lib/tmux-prefix';
+import { tmuxPrefixKeyOptions } from '../lib/tmux-prefix';
 import { DialogBackdrop } from './DialogBackdrop';
 import { KeychainPanel } from './KeychainPanel';
 import { KnownHostsPanel } from './KnownHostsPanel';
@@ -821,7 +821,7 @@ export function SettingsPanel({
                     handleChangeTmuxPrefixKey(event.target.value)
                   }
                 >
-                  {TMUX_PREFIX_KEY_OPTIONS.map((option) => (
+                  {tmuxPrefixKeyOptions().map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
