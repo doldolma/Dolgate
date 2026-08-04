@@ -87,6 +87,12 @@ func (e *Engine) ConfigureTailnets(
 	if err != nil {
 		return err
 	}
+	// 노드가 뜨기 전에 tailscale 의 로그 상태 자리를 정해 준다. 안드로이드에서는 이것이 없으면
+	// 첫 기동에서 앱이 죽는다(android_logdir.go). 못 만들면 여기서 오류로 돌린다 — 기능 하나가
+	// 막히는 편이 나중에 프로세스가 사라지는 것보다 낫다.
+	if err := configureAndroidTailnetLogsDir(stateRoot); err != nil {
+		return err
+	}
 
 	var payload coretypes.TailnetConfigurePayload
 	if err := json.Unmarshal([]byte(configsJSON), &payload); err != nil {

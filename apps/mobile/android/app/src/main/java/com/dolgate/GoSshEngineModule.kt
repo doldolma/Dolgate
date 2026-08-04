@@ -39,7 +39,18 @@ class GoSshEngineModule(
 ) : ReactContextBaseJavaModule(reactContext) {
 
   private val executor: ExecutorService = Executors.newCachedThreadPool()
-  private val engine: Engine by lazy { Mobile.newEngine() }
+
+  /**
+   * The engine, with Android's network facts wired in before anything can use it.
+   *
+   * The wiring has to happen here rather than at the first Tailnet call: Go cannot enumerate
+   * interfaces on Android (SELinux blocks the netlink socket net.Interfaces() needs), and tsnet
+   * reads that list while starting. Register late and the first start still fails with
+   * "route ip+net: netlinkrib: permission denied".
+   */
+  private val engine: Engine by lazy {
+    Mobile.newEngine().apply { setAndroidNetworkProvider(AndroidNetworkFacts(reactContext)) }
+  }
 
   private val connections = ConcurrentHashMap<String, Conn>()
   private val shells = ConcurrentHashMap<String, Shell>()

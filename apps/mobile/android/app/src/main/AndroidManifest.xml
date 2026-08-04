@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Tailnet 이 지금 어느 링크로 나가는지 알아야 한다. Go 는 안드로이드에서 인터페이스를
+         스스로 조회할 수 없어(SELinux 가 netlink 를 막는다) 앱이 넣어 준다 — 그 조회에
+         ConnectivityManager 가 필요하다. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
       android:name=".MainApplication"
