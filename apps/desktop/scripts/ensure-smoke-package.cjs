@@ -308,6 +308,14 @@ async function ensureSmokePackage({
 
   runCommand(process.execPath, ["./scripts/generate-icons.cjs"]);
   runCommand(process.execPath, ["./scripts/sync-runtime-deps.cjs"]);
+  // forge 는 패키징일 때 ssh-core(bin)와 codex-cli 둘 다를 요구한다. ssh-core 는 위쪽
+  // prepare:ssh-core:dev 가 만들지만 codex-cli 는 아무도 만들지 않아, 스모크가 패키징
+  // 단계에서 그대로 죽었다(CI 가 스모크를 돌지 않아 오래 드러나지 않았다).
+  runCommand(process.execPath, [
+    "./scripts/prepare-codex-runtime.cjs",
+    resourceTarget.platform,
+    resourceTarget.arch,
+  ]);
 
   const forgeArgs = ["package"];
   if (targetPlatform) {

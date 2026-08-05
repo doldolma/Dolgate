@@ -84,7 +84,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/hashes": "^2.2.0",
-    "@openai/codex-sdk": "^0.144.4",
+    "@openai/codex-sdk": "^0.146.0",
     "@uiw/codemirror-theme-vscode": "^4.25.10",
     "@uiw/react-codemirror": "^4.25.10",
     "@vscode/sudo-prompt": "^9.3.2",
