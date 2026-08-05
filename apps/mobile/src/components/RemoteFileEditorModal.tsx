@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -196,16 +195,16 @@ export function RemoteFileEditorModal(): React.JSX.Element | null {
             </Text>
           </View>
         ) : (
-          <ScrollView
-            style={styles.body}
-            contentContainerStyle={styles.bodyContent}
-            keyboardShouldPersistTaps="handled"
-          >
+          // 입력칸이 남은 공간을 채우고 스스로 스크롤한다. ScrollView 로 감싸면 스크롤
+          // 제스처가 입력칸으로 전달돼 커서가 잡히고 키보드가 올라와, 한 화면을 넘는
+          // 파일을 읽을 수 없다.
+          <View style={styles.body}>
             <TextInput
               accessibilityLabel={translate("sftpEditor.title")}
               value={editor.content}
               onChangeText={setContent}
               multiline
+              scrollEnabled
               autoCapitalize="none"
               autoCorrect={false}
               spellCheck={false}
@@ -214,7 +213,7 @@ export function RemoteFileEditorModal(): React.JSX.Element | null {
                 { color: palette.text, backgroundColor: palette.surfaceSolid },
               ]}
             />
-          </ScrollView>
+          </View>
         )}
       </KeyboardAvoidingView>
     </Modal>
@@ -276,13 +275,11 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-  },
-  bodyContent: {
     padding: 12,
   },
   // 코드·설정 파일이 대상이라 고정폭이 아니면 들여쓰기가 어긋나 보인다.
   editor: {
-    minHeight: 320,
+    flex: 1,
     borderRadius: 12,
     padding: 12,
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
