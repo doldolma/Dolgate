@@ -126,9 +126,10 @@ function verifyArtifacts() {
 
   requireDistFile(files, /-linux-amd64\.deb$/);
   requireDistFile(files, /-linux-arm64\.deb$/);
-  // rpm 은 arch 를 x86_64/aarch64 로 적는다(deb 의 amd64/arm64 와 다르다).
-  requireDistFile(files, /\.x86_64\.rpm$/);
-  requireDistFile(files, /\.aarch64\.rpm$/);
+  // rpm 은 arch 를 x86_64/aarch64 로 적는다(deb 의 amd64/arm64 와 다르다). 파일명 골격은
+  // artifactName(-${os}-${arch}.${ext}) 을 따르므로 arch 앞은 deb 과 같이 하이픈이다.
+  requireDistFile(files, /-linux-x86_64\.rpm$/);
+  requireDistFile(files, /-linux-aarch64\.rpm$/);
 
   const debFiles = files.filter((name) => name.endsWith('.deb'));
   for (const fileName of debFiles) {
