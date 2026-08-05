@@ -134,7 +134,7 @@ jobs:
       # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
       # 재사용되고 바뀐 것만 새로 내려받는다.
       - name: Cache Electron binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/electron
@@ -217,7 +217,7 @@ jobs:
       # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
       # 재사용되고 바뀐 것만 새로 내려받는다.
       - name: Cache Electron binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/electron
@@ -304,7 +304,7 @@ jobs:
       # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
       # 재사용되고 바뀐 것만 새로 내려받는다.
       - name: Cache Electron binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/electron
@@ -383,7 +383,7 @@ jobs:
       # 캐시를 버전·플랫폼별로 다시 키잉하므로, 낡은 항목이 섞여 있어도 버전이 그대로면
       # 재사용되고 바뀐 것만 새로 내려받는다.
       - name: Cache Electron binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/electron
@@ -407,6 +407,15 @@ jobs:
             rm -f 7zip-bin-5.2.0.tgz
             check
           fi
+
+      # fpm 은 rpm 타겟에 rpmbuild 를 요구하고, 데비안계열에서 그 바이너리는 rpm 패키지가
+      # 제공한다. 지금 ubuntu-latest 이미지에는 rpm 이 들어 있어 없어도 통과하지만, 그건
+      # 러너 이미지 내용에 기댄 암묵적 전제다 — 이미지가 바뀌면 태그를 밀고 나서야 알게 되니
+      # 명시한다. 이미 있으면 몇 초에 끝난다.
+      - name: Install rpm build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
 
       - name: Build Linux release artifacts
         run: npm run release:dist:linux --workspace @dolssh/desktop
