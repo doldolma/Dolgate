@@ -9,6 +9,8 @@ import {
   type EngineDirectoryListing,
   type EngineSftpConnection,
   type EngineSftpEntry,
+  type EngineSftpTextFile,
+  type EngineSftpWriteTextFile,
   type EngineSftpReadChunk,
   type EngineConnection,
   type EngineCursor,
@@ -108,6 +110,8 @@ type GoSshEngineNativeModule = NativeModule & {
   sftpChmod(sftpId: string, path: string, mode: number): Promise<void>;
   sftpRemove(sftpId: string, path: string): Promise<void>;
   sftpStat(sftpId: string, path: string): Promise<string>;
+  sftpReadTextFile(sftpId: string, path: string): Promise<string>;
+  sftpWriteTextFile(sftpId: string, requestJson: string): Promise<void>;
   closeSftp(sftpId: string): Promise<void>;
   deriveArgon2idKey(
     passphraseBase64: string,
@@ -557,6 +561,15 @@ class GoSftp implements EngineSftpConnection {
   async stat(path: string): Promise<EngineSftpEntry> {
     const raw = await requireNative().sftpStat(this.id, path);
     return JSON.parse(raw) as EngineSftpEntry;
+  }
+
+  async readTextFile(path: string): Promise<EngineSftpTextFile> {
+    const raw = await requireNative().sftpReadTextFile(this.id, path);
+    return JSON.parse(raw) as EngineSftpTextFile;
+  }
+
+  async writeTextFile(request: EngineSftpWriteTextFile): Promise<void> {
+    await requireNative().sftpWriteTextFile(this.id, JSON.stringify(request));
   }
 
   /** Closes the session and the connection it was opened on. */

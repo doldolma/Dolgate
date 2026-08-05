@@ -695,7 +695,7 @@ describe("HomeScreen group browsing", () => {
     const connectMock = jest.fn(async (hostId: string) => `session:${hostId}`);
     useMobileAppStore.setState({
       deleteHost: deleteHostMock,
-      openSftpForSession: openSftpMock,
+      openSftpForHost: openSftpMock,
       connectToHost: connectMock,
     });
     const alertSpy = jest
@@ -731,17 +731,16 @@ describe("HomeScreen group browsing", () => {
       expect.objectContaining({ hostId: expect.any(String) }),
     );
 
-    // 다시 열어 SFTP 연결 → 세션 연결 후 SFTP 탭 열고 Sessions 로 이동.
+    // 다시 열어 SFTP 연결 → SFTP 탭만 열고 Sessions 로 이동. 터미널 탭은 만들지 않는다 —
+    // 예전에는 연결부터 만들어서 탭이 둘 생겼다.
     await act(async () => {
       hostCard.props.onLongPress();
     });
     await act(async () => {
       findSheetAction("SFTP 연결").props.onPress();
     });
-    expect(connectMock).toHaveBeenCalled();
-    expect(openSftpMock).toHaveBeenCalledWith(
-      `session:${connectMock.mock.calls[0][0]}`,
-    );
+    expect(openSftpMock).toHaveBeenCalledWith(expect.any(String));
+    expect(connectMock).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith("Sessions");
 
     // 다시 열어 삭제 → 확인 Alert 를 거쳐 deleteHost 호출.

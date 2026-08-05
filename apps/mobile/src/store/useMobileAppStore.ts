@@ -258,7 +258,50 @@ interface MobileSftpConnection {
   rename: (sourcePath: string, targetPath: string) => Promise<void>;
   chmod: (path: string, permissions: number) => Promise<void>;
   delete: (path: string) => Promise<void>;
+  /**
+   * 내장 편집기용 읽기/쓰기. AWS SFTP 는 sync-api 브로커를 지나며 이 연산이 없어서
+   * 옵셔널이다 — 없는 세션에서는 편집 동작을 내보내지 않는다.
+   */
+  readTextFile?: (path: string) => Promise<MobileSftpTextFile>;
+  writeTextFile?: (request: MobileSftpWriteTextFile) => Promise<void>;
   close: () => Promise<void>;
+}
+
+/** 편집기가 연 파일. size·mtime 은 저장 시 원격이 바뀌었는지 대조하는 기준이다. */
+interface MobileSftpTextFile {
+  content: string;
+  size: number;
+  mtime: string;
+  mode: number;
+}
+
+interface MobileSftpWriteTextFile {
+  path: string;
+  content: string;
+  expectedSize?: number | null;
+  expectedMtime?: string | null;
+  mode?: number;
+  force?: boolean;
+}
+
+/**
+ * 열려 있는 원격 파일 편집기. 화면 상태라 persist 하지 않는다(partialize 는 명시 목록이다).
+ * size·mtime 은 열었을 때의 값으로, 저장할 때 원격이 바뀌었는지 판정하는 기준이 된다.
+ */
+export interface MobileSftpEditorState {
+  sftpSessionId: string;
+  path: string;
+  fileName: string;
+  content: string;
+  originalContent: string;
+  size: number;
+  mtime: string;
+  mode: number;
+  isLoading: boolean;
+  isSaving: boolean;
+  /** 원격이 바뀌어 저장이 막힌 상태 — 다시 불러오기/덮어쓰기를 물어야 한다. */
+  conflict: boolean;
+  errorMessage: string | null;
 }
 
 interface SshRuntimeSession {
@@ -538,6 +581,8 @@ interface MobileAppState {
   secretMetadata: SecretMetadataRecord[];
   sessions: MobileSessionRecord[];
   sftpSessions: MobileSftpSessionRecord[];
+  /** 열려 있는 원격 파일 편집기. 한 번에 하나만 띄운다. */
+  sftpEditor: MobileSftpEditorState | null;
   sftpTransfers: MobileSftpTransferRecord[];
   sftpCopyBuffer: SftpCopyBuffer | null;
   activeSessionTabId: string | null;
@@ -590,6 +635,17 @@ interface MobileAppState {
   submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
   cancelCredentialPrompt: () => void;
   openSftpForSession: (sessionId: string) => Promise<string | null>;
+  /**
+   * 터미널 탭을 만들지 않고 호스트에서 바로 SFTP 를 연다. 호스트 메뉴의 SFTP 가 쓰는
+   * 경로다 — SFTP 는 자기 연결을 여니 터미널 세션을 먼저 띄울 이유가 없다.
+   */
+  openSftpForHost: (hostId: string) => Promise<string | null>;
+  openSftpEditor: (sftpSessionId: string, remotePath: string) => Promise<void>;
+  setSftpEditorContent: (content: string) => void;
+  /** force 는 충돌을 알고도 덮어쓰기를 고른 경우다. */
+  saveSftpEditor: (options?: { force?: boolean }) => Promise<boolean>;
+  reloadSftpEditor: () => Promise<void>;
+  closeSftpEditor: () => void;
   disconnectSftpSession: (sftpSessionId: string) => Promise<void>;
   listSftpDirectory: (sftpSessionId: string, path?: string) => Promise<void>;
   downloadSftpFile: (
@@ -1345,15 +1401,58 @@ function createSessionRecord(host: HostRecord): MobileSessionRecord {
   };
 }
 
+// 저장·불러오기는 await 를 지나므로, 결과를 상태에 쓰기 전에 사용자가 아직 그 파일을 보고
+// 있는지 확인해야 한다. 확인하지 않으면 느린 저장이 끝난 뒤 그 사이 열린 다른 파일의 기준을
+// 덮어써, 그 파일이 수정되지 않은 것처럼 보이거나 거짓 충돌을 낸다.
+function isSameEditorTarget(
+  current: MobileSftpEditorState | null,
+  target: Pick<MobileSftpEditorState, 'sftpSessionId' | 'path'>,
+): current is MobileSftpEditorState {
+  return (
+    current !== null &&
+    current.sftpSessionId === target.sftpSessionId &&
+    current.path === target.path
+  );
+}
+
+// 원격이 재는 크기는 바이트다. JS 문자열 length 는 UTF-16 단위라 한글·주석이 있는 파일에서
+// 어긋나고, 그 값을 충돌 기준으로 두면 다음 저장이 거짓 충돌을 낸다.
+function utf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8');
+}
+
+// 편집기 제목에 쓸 파일 이름. 원격 경로는 항상 '/' 구분이라 basename 만 떼면 된다.
+function remoteFileName(remotePath: string): string {
+  const trimmed = remotePath.replace(/\/+$/, '');
+  const slashIndex = trimmed.lastIndexOf('/');
+  return slashIndex >= 0 ? trimmed.slice(slashIndex + 1) : trimmed;
+}
+
+// 엔진(sftpedit)이 "원격이 바뀌었다"를 이 접두어로 알려 준다 — 일반 실패와 구분해
+// 다시 불러오기/덮어쓰기를 물어야 하기 때문이다.
+const SFTP_WRITE_CONFLICT_PREFIX = 'sftp-conflict:';
+
+function isSftpWriteConflictError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes(SFTP_WRITE_CONFLICT_PREFIX);
+}
+
+function getSftpEditorErrorMessage(error: unknown): string {
+  const message = (
+    error instanceof Error ? error.message : String(error ?? '')
+  ).trim();
+  return message || t('sftpEditor.failed');
+}
+
 function createSftpSessionRecord(
-  sourceSession: MobileSessionRecord,
   host: SshHostRecord | AwsEc2HostRecord,
+  sourceSessionId?: string | null,
 ): MobileSftpSessionRecord {
   const now = new Date().toISOString();
   return {
     id: createLocalId('sftp'),
     hostId: host.id,
-    sourceSessionId: sourceSession.id,
+    sourceSessionId: sourceSessionId ?? null,
     openedAt: now,
     title: `${host.label} SFTP`,
     status: 'connecting',
@@ -1399,6 +1498,8 @@ function wrapEngineSftpConnection(
     rename: (sourcePath, targetPath) => sftp.rename(sourcePath, targetPath),
     chmod: (path, permissions) => sftp.chmod(path, permissions),
     delete: path => sftp.remove(path),
+    readTextFile: path => sftp.readTextFile(path),
+    writeTextFile: request => sftp.writeTextFile(request),
     close: () => sftp.close(),
   };
 }
@@ -3224,6 +3325,53 @@ export const useMobileAppStore = create<MobileAppState>()(
         }
       };
 
+      // SFTP 는 자격 증명·호스트 키·연결을 자기 것으로 여니 터미널 세션이 필요 없다.
+      // 터미널 탭에서 열었을 때만 어디서 열렸는지를 sourceSessionId 로 남긴다.
+      const openSftpForHostId = async (
+        hostId: string,
+        sourceSessionId?: string,
+      ): Promise<string | null> => {
+        const host = get().hosts.find(item => item.id === hostId);
+        if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
+          return null;
+        }
+
+        // 같은 호스트에 살아 있는 SFTP 탭이 있으면 그걸 활성화한다 — 탭이 겹쳐 쌓이지 않게.
+        const existing = get().sftpSessions.find(
+          session => session.hostId === host.id && isLiveSftpSession(session),
+        );
+        if (existing) {
+          get().setActiveConnectionTab({ kind: 'sftp', id: existing.id });
+          if (
+            existing.status === 'error' &&
+            !runtimeSftpSessions.has(existing.id) &&
+            !pendingSftpConnections.has(existing.id)
+          ) {
+            void connectSftpSessionRecord(existing, host);
+          }
+          return existing.id;
+        }
+
+        const nextSftpSession = createSftpSessionRecord(host, sourceSessionId);
+        set(state => {
+          const nextSftpSessions = upsertSftpSessionRecord(
+            state.sftpSessions,
+            nextSftpSession,
+          );
+          return {
+            sftpSessions: nextSftpSessions,
+            activeConnectionTab: normalizeActiveConnectionTab(
+              state.sessions,
+              nextSftpSessions,
+              state.activeConnectionTab,
+              { kind: 'sftp', id: nextSftpSession.id },
+            ),
+          };
+        });
+        void connectSftpSessionRecord(nextSftpSession, host);
+        return nextSftpSession.id;
+      };
+
       const connectSftpSessionRecord = async (
         sftpSessionRecord: MobileSftpSessionRecord,
         host: SshHostRecord | AwsEc2HostRecord,
@@ -4849,6 +4997,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           secretsByRef: {},
           sessions: [],
           sftpSessions: [],
+          sftpEditor: null,
           sftpTransfers: [],
           sftpCopyBuffer: null,
           activeSessionTabId: null,
@@ -4888,6 +5037,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         secretMetadata: [],
         sessions: [],
         sftpSessions: [],
+        sftpEditor: null,
         sftpTransfers: [],
         sftpCopyBuffer: null,
         activeSessionTabId: null,
@@ -5817,6 +5967,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               secretsByRef: {},
               sessions: [],
               sftpSessions: [],
+          sftpEditor: null,
               sftpTransfers: [],
               sftpCopyBuffer: null,
               activeSessionTabId: null,
@@ -6412,47 +6563,203 @@ export const useMobileAppStore = create<MobileAppState>()(
           if (!sourceSession) {
             return null;
           }
-
-          const host = get().hosts.find(
-            item => item.id === sourceSession.hostId,
-          );
-          if (!host || (!isSshHostRecord(host) && !isAwsEc2HostRecord(host))) {
-            return null;
+          return openSftpForHostId(sourceSession.hostId, sourceSession.id);
+        },
+        openSftpForHost: async (hostId: string) => openSftpForHostId(hostId),
+        openSftpEditor: async (sftpSessionId: string, remotePath: string) => {
+          const runtime = runtimeSftpSessions.get(sftpSessionId);
+          const read = runtime?.connection.readTextFile;
+          if (!read) {
+            // AWS SFTP 는 sync-api 브로커를 지나 이 연산이 없다. 여기까지 오지 않게 UI 가
+            // 동작을 감추지만, 세션 종류가 바뀌는 경합도 있으니 이유를 남긴다.
+            set({
+              sftpEditor: {
+                sftpSessionId,
+                path: remotePath,
+                fileName: remoteFileName(remotePath),
+                content: '',
+                originalContent: '',
+                size: 0,
+                mtime: '',
+                mode: 0,
+                isLoading: false,
+                isSaving: false,
+                conflict: false,
+                errorMessage: t('sftpEditor.unsupported'),
+              },
+            });
+            return;
           }
 
-          const existing = get().sftpSessions.find(
-            session => session.hostId === host.id && isLiveSftpSession(session),
-          );
-          if (existing) {
-            get().setActiveConnectionTab({ kind: 'sftp', id: existing.id });
-            if (
-              existing.status === 'error' &&
-              !runtimeSftpSessions.has(existing.id) &&
-              !pendingSftpConnections.has(existing.id)
-            ) {
-              void connectSftpSessionRecord(existing, host);
-            }
-            return existing.id;
-          }
-
-          const nextSftpSession = createSftpSessionRecord(sourceSession, host);
-          set(state => {
-            const nextSftpSessions = upsertSftpSessionRecord(
-              state.sftpSessions,
-              nextSftpSession,
-            );
-            return {
-              sftpSessions: nextSftpSessions,
-              activeConnectionTab: normalizeActiveConnectionTab(
-                state.sessions,
-                nextSftpSessions,
-                state.activeConnectionTab,
-                { kind: 'sftp', id: nextSftpSession.id },
-              ),
-            };
+          set({
+            sftpEditor: {
+              sftpSessionId,
+              path: remotePath,
+              fileName: remoteFileName(remotePath),
+              content: '',
+              originalContent: '',
+              size: 0,
+              mtime: '',
+              mode: 0,
+              isLoading: true,
+              isSaving: false,
+              conflict: false,
+              errorMessage: null,
+            },
           });
-          void connectSftpSessionRecord(nextSftpSession, host);
-          return nextSftpSession.id;
+
+          try {
+            const loaded = await read(remotePath);
+            set(state =>
+              // 불러오는 동안 사용자가 닫았거나 다른 파일을 열었으면 버린다.
+              isSameEditorTarget(state.sftpEditor, { sftpSessionId, path: remotePath })
+                ? {
+                    sftpEditor: {
+                      ...state.sftpEditor,
+                      content: loaded.content,
+                      originalContent: loaded.content,
+                      size: loaded.size,
+                      mtime: loaded.mtime,
+                      mode: loaded.mode,
+                      isLoading: false,
+                    },
+                  }
+                : state,
+            );
+          } catch (error) {
+            set(state =>
+              isSameEditorTarget(state.sftpEditor, { sftpSessionId, path: remotePath })
+                ? {
+                    sftpEditor: {
+                      ...state.sftpEditor,
+                      isLoading: false,
+                      errorMessage: getSftpEditorErrorMessage(error),
+                    },
+                  }
+                : state,
+            );
+          }
+        },
+        setSftpEditorContent: (content: string) => {
+          set(state =>
+            state.sftpEditor
+              ? {
+                  sftpEditor: {
+                    ...state.sftpEditor,
+                    content,
+                    // 내용을 고치면 이전 실패는 지운다 — 사용자가 이미 반응한 것이다.
+                    errorMessage: null,
+                    conflict: false,
+                  },
+                }
+              : state,
+          );
+        },
+        saveSftpEditor: async (options?: { force?: boolean }) => {
+          const editor = get().sftpEditor;
+          if (!editor || editor.isSaving || editor.isLoading) {
+            return false;
+          }
+          const runtime = runtimeSftpSessions.get(editor.sftpSessionId);
+          const write = runtime?.connection.writeTextFile;
+          if (!write) {
+            set(state =>
+              state.sftpEditor
+                ? {
+                    sftpEditor: {
+                      ...state.sftpEditor,
+                      errorMessage: t('sftpEditor.unsupported'),
+                    },
+                  }
+                : state,
+            );
+            return false;
+          }
+
+          set(state =>
+            state.sftpEditor
+              ? {
+                  sftpEditor: {
+                    ...state.sftpEditor,
+                    isSaving: true,
+                    errorMessage: null,
+                    conflict: false,
+                  },
+                }
+              : state,
+          );
+
+          const saved = editor.content;
+          try {
+            await write({
+              path: editor.path,
+              content: saved,
+              // 덮어쓰기를 고른 경우엔 기준을 보내지 않는다 — 엔진이 force 로 검사를 건너뛴다.
+              expectedSize: options?.force ? null : editor.size,
+              expectedMtime: options?.force ? null : editor.mtime,
+              mode: editor.mode || undefined,
+              force: options?.force ?? false,
+            });
+          } catch (error) {
+            const conflict = isSftpWriteConflictError(error);
+            set(state =>
+              isSameEditorTarget(state.sftpEditor, editor)
+                ? {
+                    sftpEditor: {
+                      ...state.sftpEditor,
+                      isSaving: false,
+                      conflict,
+                      errorMessage: conflict
+                        ? t('sftpEditor.conflictBody')
+                        : getSftpEditorErrorMessage(error),
+                    },
+                  }
+                : state,
+            );
+            return false;
+          }
+
+          // 저장한 내용이 새 기준이 된다. 방금 쓴 파일을 다시 stat 해 size·mtime 을 맞춘다 —
+          // 그러지 않으면 이어서 저장할 때 우리가 만든 변경을 충돌로 읽는다.
+          let nextSize = utf8ByteLength(saved);
+          let nextMtime = editor.mtime;
+          try {
+            const restated = await runtime?.connection.readTextFile?.(editor.path);
+            if (restated) {
+              nextSize = restated.size;
+              nextMtime = restated.mtime;
+            }
+          } catch {
+            // 다시 읽지 못하면 방금 쓴 내용의 바이트 길이와 이전 mtime 을 남긴다. 그러면
+            // 다음 저장이 충돌로 걸려 사용자에게 묻는다 — 조용히 덮어쓰는 쪽보다 안전하다.
+            // (mtime 을 비우면 검사가 꺼지는 게 아니라 크기 검사만 남는다.)
+          }
+
+          set(state =>
+            isSameEditorTarget(state.sftpEditor, editor)
+              ? {
+                  sftpEditor: {
+                    ...state.sftpEditor,
+                    isSaving: false,
+                    originalContent: saved,
+                    size: nextSize,
+                    mtime: nextMtime,
+                  },
+                }
+              : state,
+          );
+          await refreshSftpDirectory(editor.sftpSessionId);
+          return true;
+        },
+        reloadSftpEditor: async () => {
+          const editor = get().sftpEditor;
+          if (!editor) {
+            return;
+          }
+          await get().openSftpEditor(editor.sftpSessionId, editor.path);
+        },
+        closeSftpEditor: () => {
+          set({ sftpEditor: null });
         },
         disconnectSftpSession: async (sftpSessionId: string) => {
           await cancelPendingTailnetConnection(sftpSessionId);
@@ -7125,6 +7432,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             hydrated: true,
             sessions: nextSessions,
             sftpSessions: [],
+            sftpEditor: null,
             sftpTransfers: [],
             sftpCopyBuffer: null,
             activeSessionTabId: resolveActiveSessionTabId(nextSessions, null),
@@ -7139,6 +7447,18 @@ export const useMobileAppStore = create<MobileAppState>()(
     },
   ),
 );
+
+/**
+ * 테스트에서 SFTP 런타임을 심는다. 편집기 동작(충돌 판정·저장 후 기준 갱신)은 이 런타임의
+ * 연결을 지나므로, 실제 엔진을 띄우지 않고 검증하려면 주입할 자리가 필요하다.
+ */
+export function registerSftpRuntimeForTests(
+  recordId: string,
+  hostId: string,
+  connection: MobileSftpConnection,
+): void {
+  runtimeSftpSessions.set(recordId, { recordId, hostId, connection });
+}
 
 export function resetMobileStoreRuntimeForTests(): void {
   resetSyncedTailnetRuntimeForTests();

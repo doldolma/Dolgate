@@ -80,8 +80,8 @@ export function HomeScreen(): React.JSX.Element {
   const sessions = useMobileAppStore((state) => state.sessions);
   const syncStatus = useMobileAppStore((state) => state.syncStatus);
   const connectToHost = useMobileAppStore((state) => state.connectToHost);
-  const openSftpForSession = useMobileAppStore(
-    (state) => state.openSftpForSession,
+  const openSftpForHost = useMobileAppStore(
+    (state) => state.openSftpForHost,
   );
   const deleteHost = useMobileAppStore((state) => state.deleteHost);
   const toggleHostFavorite = useMobileAppStore(
@@ -347,18 +347,18 @@ export function HomeScreen(): React.JSX.Element {
     [connectToHost, navigation],
   );
 
-  // SFTP 는 라이브 세션 위에 열린다 — 세션이 없으면 먼저 연결부터 만든다.
+  // SFTP 만 열고 터미널 탭은 만들지 않는다 — SFTP 세션은 자기 연결을 따로 열기 때문에
+  // 터미널을 먼저 띄울 이유가 없었다(예전에는 그래서 탭이 둘 생겼다).
   const handleConnectSftp = useCallback(
     async (host: HostRecord) => {
       setActionSheetHost(null);
-      const sessionId = await connectToHost(host.id);
-      if (!sessionId) {
+      const sftpSessionId = await openSftpForHost(host.id);
+      if (!sftpSessionId) {
         return;
       }
-      await openSftpForSession(sessionId);
       navigation.navigate("Sessions");
     },
-    [connectToHost, navigation, openSftpForSession],
+    [navigation, openSftpForHost],
   );
 
   const handleEditHost = useCallback(

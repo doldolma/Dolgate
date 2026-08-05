@@ -194,6 +194,18 @@ RCT_EXTERN_METHOD(sftpStat
                   : (RCTPromiseResolveBlock)resolve reject
                   : (RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(sftpReadTextFile
+                  : (NSString *)sftpId path
+                  : (NSString *)path resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(sftpWriteTextFile
+                  : (NSString *)sftpId requestJson
+                  : (NSString *)requestJson resolve
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(closeSftp
                   : (NSString *)sftpId resolve
                   : (RCTPromiseResolveBlock)resolve reject

@@ -282,7 +282,8 @@
     "rename": "이름 변경",
     "chmod": "권한 변경",
     "namePlaceholder": "이름",
-    "confirm": "확인"
+    "confirm": "확인",
+    "edit": "편집"
   },
   "hostForm": {
     "auth": {
@@ -502,5 +503,24 @@
   },
   "appRoot": {
     "preparing": "앱을 준비하고 있습니다."
+  },
+  "sftpEditor": {
+    "title": "파일 편집",
+    "loading": "불러오는 중...",
+    "save": "저장",
+    "saving": "저장 중...",
+    "revert": "되돌리기",
+    "reload": "다시 불러오기",
+    "overwrite": "덮어쓰기",
+    "saved": "저장했습니다.",
+    "failed": "파일을 처리하지 못했습니다.",
+    "unsupported": "이 세션에서는 파일 편집을 지원하지 않습니다.",
+    "conflictTitle": "원격 파일이 바뀌었습니다",
+    "conflictBody": "이 파일을 연 뒤 원격에서 내용이 바뀌었습니다. 다시 불러오면 지금 편집한 내용이 사라지고, 덮어쓰면 원격의 변경이 사라집니다.",
+    "discardTitle": "편집을 버릴까요?",
+    "discardBody": "저장하지 않은 내용이 있습니다.",
+    "discardConfirm": "버리기",
+    "keepEditing": "계속 편집",
+    "conflictAction": "눌러서 다시 불러오기 또는 덮어쓰기"
   }
 }

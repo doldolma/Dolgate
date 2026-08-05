@@ -41,6 +41,8 @@ interface SftpBrowserViewProps {
   onRename: (sourcePath: string, nextName: string) => Promise<void>;
   onChmod: (path: string, mode: string) => Promise<void>;
   onDelete: (paths: string[]) => Promise<void>;
+  /** 내장 편집기로 열기. 지원하지 않는 세션(AWS SFTP)에서는 넘기지 않아 항목이 숨는다. */
+  onEdit?: (path: string) => void;
   copyBufferCount: number;
   onCopy: (paths: string[]) => void;
   onPaste: () => Promise<void>;
@@ -56,6 +58,7 @@ export function SftpBrowserView({
   onUpload,
   onDownload,
   onDownloadEntries,
+  onEdit,
   onMkdir,
   onRename,
   onChmod,
@@ -465,6 +468,13 @@ export function SftpBrowserView({
             ),
           );
         }}
+        onEdit={
+          onEdit
+            ? entry => {
+                runAfterActionModalClose(() => onEdit(entry.path));
+              }
+            : undefined
+        }
         onRename={entry => {
           runAfterActionModalClose(() =>
             setPrompt({ kind: 'rename', entry, value: entry.name }),
@@ -582,6 +592,7 @@ function EntryActionModal({
   onClose,
   onDismiss,
   onDownload,
+  onEdit,
   onRename,
   onChmod,
   onDelete,
@@ -591,6 +602,7 @@ function EntryActionModal({
   onClose: () => void;
   onDismiss: () => void;
   onDownload: (entry: FileEntry) => void;
+  onEdit?: (entry: FileEntry) => void;
   onRename: (entry: FileEntry) => void;
   onChmod: (entry: FileEntry) => void;
   onDelete: (entry: FileEntry) => void;
@@ -618,25 +630,33 @@ function EntryActionModal({
           <ActionRow
             palette={palette}
             icon="cloud-download-outline"
-            label="Download"
+            label={translate("sftp.download")}
             onPress={() => onDownload(entry)}
           />
+          {onEdit && !entry.isDirectory ? (
+            <ActionRow
+              palette={palette}
+              icon="create-outline"
+              label={translate("sftp.edit")}
+              onPress={() => onEdit(entry)}
+            />
+          ) : null}
           <ActionRow
             palette={palette}
             icon="pencil"
-            label="Rename"
+            label={translate("sftp.rename")}
             onPress={() => onRename(entry)}
           />
           <ActionRow
             palette={palette}
             icon="key-outline"
-            label="Chmod"
+            label={translate("sftp.chmod")}
             onPress={() => onChmod(entry)}
           />
           <ActionRow
             palette={palette}
             icon="trash-outline"
-            label="Delete"
+            label={translate("sftp.delete")}
             destructive
             onPress={() => onDelete(entry)}
           />

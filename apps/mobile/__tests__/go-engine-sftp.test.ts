@@ -13,6 +13,8 @@ const mockNative = {
   sftpChmod: jest.fn(),
   sftpRemove: jest.fn(),
   sftpStat: jest.fn(),
+  sftpReadTextFile: jest.fn(),
+  sftpWriteTextFile: jest.fn(),
   closeSftp: jest.fn(),
   deriveArgon2idKey: jest.fn(),
   addListener: jest.fn(),
@@ -162,6 +164,51 @@ describe('file operations', () => {
     expect(mockNative.sftpRename).toHaveBeenCalledWith('sftp-conn-1~sftp1', '/a', '/b');
     expect(mockNative.sftpChmod).toHaveBeenCalledWith('sftp-conn-1~sftp1', '/f', 0o600);
     expect(mockNative.sftpRemove).toHaveBeenCalledWith('sftp-conn-1~sftp1', '/f');
+  });
+
+  // 편집기 왕복 — 규칙은 엔진(sftpedit)이 갖고, 이 층은 JSON 을 옮기는 일만 한다.
+  it('decodes a text file read for the editor', async () => {
+    const sftp = await openSftp();
+    mockNative.sftpReadTextFile.mockResolvedValue(
+      JSON.stringify({ content: 'a=1\n', size: 4, mtime: '2026-08-04T00:00:00Z', mode: 0o644 }),
+    );
+
+    const file = await sftp.readTextFile('/etc/app.conf');
+    expect(mockNative.sftpReadTextFile).toHaveBeenCalledWith(
+      'sftp-conn-1~sftp1',
+      '/etc/app.conf',
+    );
+    expect(file).toEqual({
+      content: 'a=1\n',
+      size: 4,
+      mtime: '2026-08-04T00:00:00Z',
+      mode: 0o644,
+    });
+  });
+
+  // 저장 요청은 JSON 으로 넘어간다. expectedSize/expectedMtime 이 빠지면 엔진이 충돌을
+  // 검사할 근거를 잃으므로 그대로 실려야 한다.
+  it('sends the editor save request with its conflict basis', async () => {
+    const sftp = await openSftp();
+
+    await sftp.writeTextFile({
+      path: '/etc/app.conf',
+      content: 'a=2\n',
+      expectedSize: 4,
+      expectedMtime: '2026-08-04T00:00:00Z',
+      mode: 0o644,
+    });
+
+    expect(mockNative.sftpWriteTextFile).toHaveBeenCalledWith(
+      'sftp-conn-1~sftp1',
+      JSON.stringify({
+        path: '/etc/app.conf',
+        content: 'a=2\n',
+        expectedSize: 4,
+        expectedMtime: '2026-08-04T00:00:00Z',
+        mode: 0o644,
+      }),
+    );
   });
 
   it('decodes a stat entry', async () => {

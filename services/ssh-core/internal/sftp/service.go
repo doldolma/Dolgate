@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"sort"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"dolssh/services/ssh-core/internal/protocol"
+	"dolssh/services/ssh-core/internal/sftpedit"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
 )
@@ -505,25 +505,8 @@ func (s *Service) Delete(endpointID, requestID string, payload protocol.SFTPDele
 	return nil
 }
 
-const (
-	maxEditableFileBytes = 16 * 1024 * 1024 // hard cap; the renderer enforces a smaller, configurable limit
-	binarySniffBytes     = 8 * 1024
-	writeConflictPrefix  = "sftp-conflict:"
-	sudoRequiredPrefix   = "sftp-sudo-required:"
-)
-
-func looksBinary(content []byte) bool {
-	sniff := content
-	if len(sniff) > binarySniffBytes {
-		sniff = sniff[:binarySniffBytes]
-	}
-	for _, b := range sniff {
-		if b == 0x00 {
-			return true
-		}
-	}
-	return false
-}
+// 편집기 규칙은 sftpedit 한 곳에 있다 — 모바일 바인드도 같은 함수를 호출한다.
+const sudoRequiredPrefix = "sftp-sudo-required:"
 
 // ReadFile loads a small text file into memory for the built-in editor. It
 // rejects directories, oversized files, and binary content so the renderer
@@ -537,32 +520,9 @@ func (s *Service) ReadFile(endpointID, requestID string, payload protocol.SFTPRe
 		return fmt.Errorf("path is required")
 	}
 
-	info, err := handle.sftp.Stat(payload.Path)
+	loaded, err := sftpedit.ReadTextFile(handle.sftp, payload.Path)
 	if err != nil {
 		return err
-	}
-	if info.IsDir() {
-		return fmt.Errorf("cannot edit a directory")
-	}
-	if info.Size() > maxEditableFileBytes {
-		return fmt.Errorf("file is too large to edit (%d bytes)", info.Size())
-	}
-
-	file, err := handle.sftp.Open(payload.Path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(io.LimitReader(file, maxEditableFileBytes+1))
-	if err != nil {
-		return err
-	}
-	if int64(len(content)) > maxEditableFileBytes {
-		return fmt.Errorf("file is too large to edit")
-	}
-	if looksBinary(content) {
-		return fmt.Errorf("file appears to be binary and cannot be edited as text")
 	}
 
 	s.emit(protocol.Event{
@@ -571,10 +531,10 @@ func (s *Service) ReadFile(endpointID, requestID string, payload protocol.SFTPRe
 		EndpointID: endpointID,
 		Payload: protocol.SFTPFileReadPayload{
 			Path:    payload.Path,
-			Content: string(content),
-			Size:    info.Size(),
-			Mtime:   info.ModTime().UTC().Format(time.RFC3339),
-			Mode:    int(info.Mode().Perm()),
+			Content: loaded.Content,
+			Size:    loaded.Size,
+			Mtime:   loaded.Mtime,
+			Mode:    loaded.Mode,
 		},
 	})
 	return nil
@@ -596,26 +556,19 @@ func (s *Service) WriteFile(endpointID, requestID string, payload protocol.SFTPW
 	content := []byte(payload.Content)
 	info, statErr := handle.sftp.Stat(payload.Path)
 
-	if statErr == nil && !payload.Force {
-		if payload.ExpectedSize != nil && info.Size() != *payload.ExpectedSize {
-			return fmt.Errorf("%s remote file changed since it was opened", writeConflictPrefix)
-		}
-		if payload.ExpectedMtime != "" && info.ModTime().UTC().Format(time.RFC3339) != payload.ExpectedMtime {
-			return fmt.Errorf("%s remote file changed since it was opened", writeConflictPrefix)
-		}
+	if err := sftpedit.CheckConflict(info, statErr, sftpedit.ConflictCheck{
+		ExpectedSize:  payload.ExpectedSize,
+		ExpectedMtime: payload.ExpectedMtime,
+		Force:         payload.Force,
+	}); err != nil {
+		return err
 	}
 
-	mode := os.FileMode(0o644)
-	switch {
-	case payload.Mode != 0:
-		mode = os.FileMode(payload.Mode).Perm()
-	case statErr == nil:
-		mode = info.Mode().Perm()
-	}
+	mode := sftpedit.ResolveMode(payload.Mode, info, statErr)
 
 	// Without an explicit sudo password, try a direct unprivileged atomic write.
 	if strings.TrimSpace(payload.SudoPassword) == "" {
-		writeErr := atomicRemoteWrite(handle.sftp, payload.Path, content, mode, payload.PreserveMtime, info, statErr)
+		writeErr := sftpedit.AtomicWrite(handle.sftp, payload.Path, content, mode, payload.PreserveMtime, info, statErr)
 		if writeErr == nil {
 			s.emit(protocol.Event{
 				Type:       protocol.EventSFTPAck,
@@ -653,48 +606,6 @@ func (s *Service) WriteFile(endpointID, requestID string, payload protocol.SFTPW
 // atomicRemoteWrite writes content to a sibling temp file then renames it over
 // the target, so an interrupted write never truncates the original. It needs
 // only directory write permission.
-func atomicRemoteWrite(
-	client *sftppkg.Client,
-	targetPath string,
-	content []byte,
-	mode os.FileMode,
-	preserveMtime bool,
-	info os.FileInfo,
-	statErr error,
-) error {
-	dir := path.Dir(targetPath)
-	tmpPath := path.Join(dir, "."+path.Base(targetPath)+".dolgate-tmp")
-	_ = client.Remove(tmpPath)
-
-	file, err := client.Create(tmpPath)
-	if err != nil {
-		return err
-	}
-	if _, err := file.Write(content); err != nil {
-		_ = file.Close()
-		_ = client.Remove(tmpPath)
-		return err
-	}
-	if err := file.Close(); err != nil {
-		_ = client.Remove(tmpPath)
-		return err
-	}
-	if err := client.Chmod(tmpPath, mode); err != nil {
-		_ = client.Remove(tmpPath)
-		return err
-	}
-	if preserveMtime && statErr == nil {
-		_ = client.Chtimes(tmpPath, time.Now(), info.ModTime())
-	}
-	if err := client.PosixRename(tmpPath, targetPath); err != nil {
-		// Servers without the posix-rename extension: best-effort fallback.
-		if renameErr := client.Rename(tmpPath, targetPath); renameErr != nil {
-			_ = client.Remove(tmpPath)
-			return renameErr
-		}
-	}
-	return nil
-}
 
 // sudoRemoteWrite stages content in a user-writable temp via SFTP (no
 // privilege), then installs it into place with sudo. The sudo password travels

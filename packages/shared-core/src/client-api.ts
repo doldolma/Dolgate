@@ -95,7 +95,11 @@ export type MobileSftpSessionStatus =
 export interface MobileSftpSessionRecord {
   id: string;
   hostId: string;
-  sourceSessionId: string;
+  /**
+   * 이 SFTP 탭을 띄운 터미널 세션(있을 때만). SFTP 는 자기 연결을 따로 열기 때문에 전송
+   * 통로가 아니라 어디서 열렸는지만 남기는 역참조다 — 호스트에서 바로 연 경우에는 없다.
+   */
+  sourceSessionId?: string | null;
   title: string;
   status: MobileSftpSessionStatus;
   currentPath: string;

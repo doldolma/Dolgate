@@ -31,6 +31,7 @@ import {
   TerminalInputView,
   type TerminalInputViewHandle,
 } from '../components/TerminalInputView';
+import { RemoteFileEditorModal } from '../components/RemoteFileEditorModal';
 import { SftpBrowserView } from '../components/SftpBrowserView';
 import { useScreenPadding } from '../lib/screen-layout';
 import {
@@ -183,6 +184,7 @@ export function SessionScreen(): React.JSX.Element {
   const resumeSession = useMobileAppStore(state => state.resumeSession);
   const disconnectSession = useMobileAppStore(state => state.disconnectSession);
   const duplicateSession = useMobileAppStore(state => state.duplicateSession);
+  const openSftpEditor = useMobileAppStore(state => state.openSftpEditor);
   const openSftpForSession = useMobileAppStore(
     state => state.openSftpForSession,
   );
@@ -339,6 +341,14 @@ export function SessionScreen(): React.JSX.Element {
     activeTab?.kind === 'sftp'
       ? (liveSftpSessions.find(session => session.id === activeTab.id) ?? null)
       : null;
+  // 내장 편집기는 엔진 SFTP 에만 있다 — AWS SFTP 는 sync-api 브로커를 지나며 파일
+  // 읽기/쓰기 연산이 없어 편집 항목을 내보내지 않는다.
+  const activeSftpHost = activeSftpSession
+    ? hosts.find(host => host.id === activeSftpSession.hostId)
+    : undefined;
+  const canEditSftpFiles = Boolean(
+    activeSftpHost && isSshHostRecord(activeSftpHost),
+  );
   const [rememberedTerminalSessionId, setRememberedTerminalSessionId] =
     useState<string | null>(() => {
       if (activeTab?.kind === 'terminal') {
@@ -1352,6 +1362,11 @@ export function SessionScreen(): React.JSX.Element {
                 onDelete={paths =>
                   deleteSftpEntries(activeSftpSession.id, paths)
                 }
+                onEdit={
+                  canEditSftpFiles
+                    ? path => void openSftpEditor(activeSftpSession.id, path)
+                    : undefined
+                }
                 copyBufferCount={
                   sftpCopyBuffer?.sftpSessionId === activeSftpSession.id
                     ? sftpCopyBuffer.entries.length
@@ -1536,6 +1551,8 @@ export function SessionScreen(): React.JSX.Element {
         ) : null}
       </View>
       </View>
+      {/* 편집기는 전체화면 모달이라 SFTP 브라우저 위에 얹는다 — 열려 있을 때만 렌더된다. */}
+      <RemoteFileEditorModal />
     </IosEdgeSwipeBack>
   );
 }

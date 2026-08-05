@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"dolssh/services/ssh-core/internal/sshconn"
@@ -42,6 +43,129 @@ func newSFTP(t *testing.T) (*SFTP, string) {
 	t.Cleanup(func() { _ = sftp.Close() })
 
 	return sftp, t.TempDir()
+}
+
+// 앱은 SFTP 를 "." 으로 열고 돌려받은 Path 를 현재 경로로 쓴다. 그게 상대 경로로 남으면
+// 홈에서 상위로 올라갈 수 없다(앱의 상위 버튼이 "." 을 최상단으로 취급한다).
+func TestSFTPListResolvesRelativePathToAbsolute(t *testing.T) {
+	sftp, _ := newSFTP(t)
+
+	listing, err := sftp.List(".")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.HasPrefix(listing.Path, "/") {
+		t.Fatalf(`List(".") Path = %q, want an absolute path`, listing.Path)
+	}
+}
+
+// 편집기 왕복 — 규칙은 sftpedit 에 있고, 여기서는 모바일 표면이 그걸 제대로 부르는지 본다.
+func TestSFTPReadTextFileRejectsWhatCannotBeEdited(t *testing.T) {
+	sftp, dir := newSFTP(t)
+
+	binaryPath := filepath.Join(dir, "blob.bin")
+	if err := os.WriteFile(binaryPath, []byte{'a', 0x00, 'b'}, 0o644); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+	if _, err := sftp.ReadTextFile(binaryPath); err == nil {
+		t.Fatal("binary content should not be editable")
+	}
+	if _, err := sftp.ReadTextFile(dir); err == nil {
+		t.Fatal("a directory should not be editable")
+	}
+}
+
+func TestSFTPWriteTextFileSavesAtomicallyAndKeepsMode(t *testing.T) {
+	sftp, dir := newSFTP(t)
+
+	target := filepath.Join(dir, "config.conf")
+	if err := os.WriteFile(target, []byte("original\n"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	loaded, err := sftp.ReadTextFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if loaded.Content != "original\n" {
+		t.Fatalf("content = %q, want the file's text", loaded.Content)
+	}
+
+	if err := sftp.WriteTextFile(WriteTextFileRequest{
+		Path:          target,
+		Content:       "edited\n",
+		ExpectedSize:  &loaded.Size,
+		ExpectedMtime: loaded.Mtime,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	saved, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(saved) != "edited\n" {
+		t.Fatalf("saved = %q, want the edited text", string(saved))
+	}
+	// 임시 파일 + rename 이므로 원본 권한이 유지돼야 한다.
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o, want the original 600", info.Mode().Perm())
+	}
+	// 임시 파일이 남지 않아야 한다.
+	if _, err := os.Stat(filepath.Join(dir, ".config.conf.dolgate-tmp")); !os.IsNotExist(err) {
+		t.Fatal("the temp file should be gone after a successful save")
+	}
+}
+
+// 다른 곳에서 파일이 바뀌었으면 조용히 덮어쓰지 않고 충돌로 알린다.
+func TestSFTPWriteTextFileReportsConflict(t *testing.T) {
+	sftp, dir := newSFTP(t)
+
+	target := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(target, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	loaded, err := sftp.ReadTextFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	if err := os.WriteFile(target, []byte("changed elsewhere\n"), 0o644); err != nil {
+		t.Fatalf("modify file: %v", err)
+	}
+
+	err = sftp.WriteTextFile(WriteTextFileRequest{
+		Path:          target,
+		Content:       "mine\n",
+		ExpectedSize:  &loaded.Size,
+		ExpectedMtime: loaded.Mtime,
+	})
+	if err == nil {
+		t.Fatal("a changed remote should report a conflict")
+	}
+	if !strings.Contains(err.Error(), "sftp-conflict:") {
+		t.Fatalf("error = %v, want the sftp-conflict prefix", err)
+	}
+
+	// "덮어쓰기"를 고른 경우 — Force 로 통과한다.
+	if err := sftp.WriteTextFile(WriteTextFileRequest{
+		Path:    target,
+		Content: "mine\n",
+		Force:   true,
+	}); err != nil {
+		t.Fatalf("forced write: %v", err)
+	}
+	saved, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(saved) != "mine\n" {
+		t.Fatalf("saved = %q, want the forced text", string(saved))
+	}
 }
 
 func TestSFTPListReportsEntries(t *testing.T) {

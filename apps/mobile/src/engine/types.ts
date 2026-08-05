@@ -195,7 +195,30 @@ export interface EngineSftpConnection {
   chmod(path: string, mode: number): Promise<void>;
   remove(path: string): Promise<void>;
   stat(path: string): Promise<EngineSftpEntry>;
+  /** 내장 편집기용 읽기. 크기·바이너리·디렉터리 판정은 엔진(sftpedit)이 한다. */
+  readTextFile(path: string): Promise<EngineSftpTextFile>;
+  writeTextFile(request: EngineSftpWriteTextFile): Promise<void>;
   close(): Promise<void>;
+}
+
+/** 편집기가 연 파일. size·mtime 은 저장할 때 원격이 바뀌었는지 대조하는 기준이다. */
+export interface EngineSftpTextFile {
+  content: string;
+  size: number;
+  mtime: string;
+  mode: number;
+}
+
+export interface EngineSftpWriteTextFile {
+  path: string;
+  content: string;
+  /** 열었을 때의 값. 함께 넘기지 않으면 조건 없이 덮어쓴다. */
+  expectedSize?: number | null;
+  expectedMtime?: string | null;
+  mode?: number;
+  preserveMtime?: boolean;
+  /** 충돌을 무시하고 덮어쓴다 — 사용자가 "덮어쓰기"를 고른 경우. */
+  force?: boolean;
 }
 
 /** Cost parameters for the vault KDF, plus the key length to produce. */

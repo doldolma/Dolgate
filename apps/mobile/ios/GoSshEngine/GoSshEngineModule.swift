@@ -680,6 +680,35 @@ final class GoSshEngineModule: RCTEventEmitter {
     }
   }
 
+  @objc(sftpReadTextFile:path:resolve:reject:)
+  func sftpReadTextFile(
+    sftpId: String,
+    path: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let sftp = try self.requireSftp(sftpId)
+      return try callReturningString { sftp.readTextFileJSON(path, error: $0) }
+    }
+  }
+
+  @objc(sftpWriteTextFile:requestJson:resolve:reject:)
+  func sftpWriteTextFile(
+    sftpId: String,
+    requestJson: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    onWorker(resolve, reject) { [weak self] in
+      guard let self else { return nil }
+      let sftp = try self.requireSftp(sftpId)
+      try sftp.writeTextFile(requestJson)
+      return nil
+    }
+  }
+
   @objc(sftpStat:path:resolve:reject:)
   func sftpStat(
     sftpId: String,

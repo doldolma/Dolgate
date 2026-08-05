@@ -460,6 +460,19 @@ class GoSshEngineModule(
   }
 
   @ReactMethod
+  fun sftpReadTextFile(sftpId: String, path: String, promise: Promise) {
+    onWorker(promise) { requireSftp(sftpId).readTextFileJSON(path) }
+  }
+
+  @ReactMethod
+  fun sftpWriteTextFile(sftpId: String, requestJson: String, promise: Promise) {
+    onWorker(promise) {
+      requireSftp(sftpId).writeTextFile(requestJson)
+      null
+    }
+  }
+
+  @ReactMethod
   fun closeSftp(sftpId: String, promise: Promise) {
     onWorker(promise) {
       sftpSessions.remove(sftpId)?.close()

@@ -282,7 +282,8 @@
     "rename": "Rename",
     "chmod": "Change permissions",
     "namePlaceholder": "Name",
-    "confirm": "OK"
+    "confirm": "OK",
+    "edit": "Edit"
   },
   "hostForm": {
     "auth": {
@@ -502,5 +503,24 @@
   },
   "appRoot": {
     "preparing": "Preparing the app."
+  },
+  "sftpEditor": {
+    "title": "Edit file",
+    "loading": "Loading…",
+    "save": "Save",
+    "saving": "Saving…",
+    "revert": "Revert",
+    "reload": "Reload",
+    "overwrite": "Overwrite",
+    "saved": "Saved.",
+    "failed": "Could not handle the file.",
+    "unsupported": "This session does not support editing files.",
+    "conflictTitle": "The remote file changed",
+    "conflictBody": "The file changed on the remote after you opened it. Reloading discards your edits; overwriting discards the remote change.",
+    "discardTitle": "Discard your edits?",
+    "discardBody": "You have unsaved changes.",
+    "discardConfirm": "Discard",
+    "keepEditing": "Keep editing",
+    "conflictAction": "Tap to reload or overwrite"
   }
 }

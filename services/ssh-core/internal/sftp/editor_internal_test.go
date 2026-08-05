@@ -7,18 +7,6 @@ import (
 	"dolssh/services/ssh-core/internal/protocol"
 )
 
-func TestLooksBinary(t *testing.T) {
-	if looksBinary([]byte("plain text\nwith lines\n")) {
-		t.Fatal("text content should not be flagged as binary")
-	}
-	if !looksBinary([]byte{'a', 'b', 0x00, 'c'}) {
-		t.Fatal("content with a NUL byte should be flagged as binary")
-	}
-	if looksBinary(nil) {
-		t.Fatal("empty content should not be flagged as binary")
-	}
-}
-
 func TestBuildSudoInstallCommand(t *testing.T) {
 	got := buildSudoInstallCommand("sudo -S -p ''", "0644", "/tmp/.dolgate-edit-1.tmp", "/etc/nginx/nginx.conf")
 	want := "sudo -S -p '' install -m 0644 -- '/tmp/.dolgate-edit-1.tmp' '/etc/nginx/nginx.conf'"

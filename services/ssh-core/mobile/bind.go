@@ -457,6 +457,54 @@ func (s *SFTPSession) WriteChunk(remotePath string, offset int64, data []byte) e
 	return s.sftp.WriteChunk(remotePath, offset, data)
 }
 
+// ReadTextFileJSON loads a file for the built-in editor as
+// {"content","size","mtime","mode"}. The identity fields come back so a later
+// save can tell the remote changed underneath the editor.
+//
+// gomobile only crosses a narrow set of types, so this follows ListJSON and
+// hands the payload over as JSON rather than a bound struct.
+func (s *SFTPSession) ReadTextFileJSON(remotePath string) (string, error) {
+	loaded, err := s.sftp.ReadTextFile(remotePath)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(loaded)
+	if err != nil {
+		return "", fmt.Errorf("encode file: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// WriteTextFile saves editor content. The request arrives as JSON matching
+// session.WriteTextFileRequest — expectedSize/expectedMtime are optional and
+// omitting both turns the save into an unconditional overwrite.
+//
+// A conflict comes back as an error carrying the "sftp-conflict:" prefix so the
+// app can offer reload-or-overwrite instead of a generic failure.
+func (s *SFTPSession) WriteTextFile(requestJSON string) error {
+	var request struct {
+		Path          string `json:"path"`
+		Content       string `json:"content"`
+		ExpectedSize  *int64 `json:"expectedSize"`
+		ExpectedMtime string `json:"expectedMtime"`
+		Mode          int    `json:"mode"`
+		PreserveMtime bool   `json:"preserveMtime"`
+		Force         bool   `json:"force"`
+	}
+	if err := json.Unmarshal([]byte(requestJSON), &request); err != nil {
+		return fmt.Errorf("decode write request: %w", err)
+	}
+	return s.sftp.WriteTextFile(session.WriteTextFileRequest{
+		Path:          request.Path,
+		Content:       request.Content,
+		ExpectedSize:  request.ExpectedSize,
+		ExpectedMtime: request.ExpectedMtime,
+		Mode:          request.Mode,
+		PreserveMtime: request.PreserveMtime,
+		Force:         request.Force,
+	})
+}
+
 // Mkdir creates a directory.
 func (s *SFTPSession) Mkdir(dir string) error { return s.sftp.Mkdir(dir) }
 

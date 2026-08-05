@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
 	sftppkg "github.com/pkg/sftp"
 
+	"dolssh/services/ssh-core/internal/sftpedit"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
@@ -53,6 +55,14 @@ func (s *SFTP) List(dir string) (coretypes.SFTPListedPayload, error) {
 	client, err := s.use()
 	if err != nil {
 		return coretypes.SFTPListedPayload{}, err
+	}
+
+	// 앱은 홈을 "." 으로 열고, 돌려준 Path 를 그대로 현재 경로로 삼는다. 풀어 주지 않으면
+	// 홈이 계속 "." 으로 남아 상위 폴더로 올라갈 수 없다 — 데스크톱(internal/sftp)은 같은
+	// 자리에서 RealPath 로 풀기 때문에 그 증상이 없었다. 실패하면 받은 경로로 계속한다:
+	// 목록 자체는 상대 경로로도 나오므로 여기서 실패를 오류로 올릴 이유가 없다.
+	if resolved, resolveErr := client.RealPath(dir); resolveErr == nil && resolved != "" {
+		dir = resolved
 	}
 
 	items, err := client.ReadDir(dir)
@@ -199,6 +209,66 @@ func (s *SFTP) Stat(remotePath string) (coretypes.SFTPFileEntry, error) {
 		return coretypes.SFTPFileEntry{}, fmt.Errorf("stat %s: %w", remotePath, err)
 	}
 	return toFileEntry(path.Dir(remotePath), info), nil
+}
+
+// ReadTextFile loads a file for the built-in editor. The rules (size cap, binary
+// sniffing, directory rejection) live in sftpedit so this and the desktop
+// service cannot drift apart about what is editable.
+func (s *SFTP) ReadTextFile(remotePath string) (sftpedit.TextFile, error) {
+	client, err := s.use()
+	if err != nil {
+		return sftpedit.TextFile{}, err
+	}
+	return sftpedit.ReadTextFile(client, remotePath)
+}
+
+// WriteTextFileRequest is one editor save. ExpectedSize/ExpectedMtime are what
+// the editor saw when it opened the file; leaving them set is what turns a
+// concurrent remote change into a conflict instead of a silent overwrite.
+type WriteTextFileRequest struct {
+	Path          string
+	Content       string
+	ExpectedSize  *int64
+	ExpectedMtime string
+	Mode          int
+	PreserveMtime bool
+	Force         bool
+}
+
+// WriteTextFile saves editor content back, atomically (temp + rename) so an
+// interrupted save never truncates the original.
+//
+// Unlike the desktop service there is no sudo escalation here — the mobile
+// engine tracks no sudo state, so a write the login user cannot make surfaces as
+// a permission error for the app to explain.
+func (s *SFTP) WriteTextFile(request WriteTextFileRequest) error {
+	client, err := s.use()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(request.Path) == "" {
+		return fmt.Errorf("path is required")
+	}
+
+	info, statErr := client.Stat(request.Path)
+	if err := sftpedit.CheckConflict(info, statErr, sftpedit.ConflictCheck{
+		ExpectedSize:  request.ExpectedSize,
+		ExpectedMtime: request.ExpectedMtime,
+		Force:         request.Force,
+	}); err != nil {
+		return err
+	}
+
+	mode := sftpedit.ResolveMode(request.Mode, info, statErr)
+	return sftpedit.AtomicWrite(
+		client,
+		request.Path,
+		[]byte(request.Content),
+		mode,
+		request.PreserveMtime,
+		info,
+		statErr,
+	)
 }
 
 // Close ends the SFTP session. It is idempotent.
