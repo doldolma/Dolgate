@@ -274,7 +274,7 @@ describe('AwsImportDialog', () => {
       screen.queryByText('SSO 로그인과 account/role 조회가 모두 성공한 경우에만 저장합니다.'),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Role' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Assume role' }));
 
     expect(screen.queryByText('Role profile 생성')).not.toBeInTheDocument();
     expect(
@@ -358,7 +358,7 @@ describe('AwsImportDialog', () => {
     await waitFor(() => expect(screen.getByLabelText('Profile')).toHaveValue('default'));
 
     fireEvent.click(screen.getByRole('button', { name: '프로필 생성' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Role' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Assume role' }));
 
     fireEvent.change(screen.getByLabelText('Role 프로필명'), {
       target: { value: 'prod-admin' },

@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, Text } from "react-native";
+import { Pressable } from "react-native";
 import { useTranslation } from "react-i18next";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import {
@@ -49,7 +49,11 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 export const MAIN_TAB_INITIAL_ROUTE = "Home";
 export const MAIN_TAB_BACK_BEHAVIOR = "fullHistory";
 
-function HeaderTextButton({
+// 모달 헤더의 닫기. 글자("취소")로 두면 두 플랫폼에서 각각 다르게 망가진다 — iOS 26 은 바
+// 버튼에 둥근 배경을 깔아 짧은 글자 주위에 원이 생기고, Android 는 제목이 왼쪽 정렬이라
+// 글자끼리 붙는다. 아이콘은 크기가 일정해 어느 쪽에서도 자리를 지키고, 언어에 따라 폭이
+// 바뀌지도 않는다(취소/Cancel).
+function HeaderCloseButton({
   label,
   onPress,
 }: {
@@ -58,17 +62,13 @@ function HeaderTextButton({
 }): React.JSX.Element {
   const palette = useMobilePalette();
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={12}>
-      <Text
-        style={{
-          color: palette.accent,
-          fontSize: 17,
-          fontWeight: "600",
-          letterSpacing: -0.2,
-        }}
-      >
-        {label}
-      </Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      hitSlop={12}
+    >
+      <Ionicons name="close" size={24} color={palette.accent} />
     </Pressable>
   );
 }
@@ -229,12 +229,14 @@ function AuthenticatedNavigator(): React.JSX.Element {
           },
           headerTintColor: colors.text,
           headerShadowVisible: false,
+          // 지정하지 않으면 iOS 는 가운데, Android 는 왼쪽으로 갈려 같은 화면이 다르게 보인다.
+          headerTitleAlign: "center",
           title: route.params?.hostId ? translate("nav.hostEdit") : translate("nav.hostAdd"),
           // 모달에는 back chevron 이 없다 — 이게 없으면 화면을 벗어나는 유일한 길이 아래로
           // 스와이프하는 제스처뿐이고, 그건 보이지 않는 경로다. 저장하지 않은 내용이 있으면
           // 화면 쪽 beforeRemove 가드가 확인을 받으므로 여기서는 그냥 나가기만 요청한다.
           headerLeft: () => (
-            <HeaderTextButton
+            <HeaderCloseButton
               label={translate("common.cancel")}
               onPress={() => navigation.goBack()}
             />

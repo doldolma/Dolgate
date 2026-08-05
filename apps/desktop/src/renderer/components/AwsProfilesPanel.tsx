@@ -141,7 +141,9 @@ function formatAwsProfileKind(kind: AwsProfileDetails['kind']): string {
     case 'sso':
       return 'SSO'
     case 'role':
-      return 'Role'
+      // AWS 문서의 표현은 "assume role" 이다. 그냥 "Role" 로 두면 SSO 가 발급하는
+      // 역할 이름(ssoRoleName, 아래 "SSO Role" 필드)과 같은 것으로 읽힌다.
+      return 'Assume role'
     case 'credential-process':
       return 'Credential Process'
     default:

@@ -276,7 +276,9 @@ export function AwsProfileCreateWizard({
           disabled={isSubmitting}
           onClick={() => handleKindChange('role')}
         >
-          Role
+          {/* AWS 용어는 sts:AssumeRole 이다. 그냥 "Role" 이면 아래 "SSO Role"(SSO 가
+              발급하는 역할 이름)과 같은 것으로 읽힌다. */}
+          Assume role
         </TabButton>
       </Tabs>
 
