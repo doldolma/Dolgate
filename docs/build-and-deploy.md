@@ -149,13 +149,14 @@ Windows x64:
 npm run release:dist:win
 ```
 
-Linux x64/arm64 (AppImage, deb):
+Linux x64/arm64 (deb, rpm):
 
 ```bash
 npm run release:dist:linux
 ```
 
-deb는 리눅스 호스트에서만 생성됩니다(macOS의 `ar`가 deb 아카이브를 깨뜨려서, 로컬 macOS 빌드는 AppImage만 만듭니다). 정식 deb는 릴리즈 태그 푸시 시 GitHub Actions가 빌드합니다.
+리눅스 설치 패키지는 리눅스 호스트에서만 생성됩니다 — macOS의 `ar`가 deb 아카이브를 깨뜨리고(fpm은 성공으로 처리해 96바이트짜리 빈 아카이브가 조용히 나온다), rpm도 별도 도구가 필요합니다. 다른 호스트에서 이 명령을 돌리면 오류로 멈춥니다. 정식 패키지는 릴리즈 태그 푸시 시 GitHub Actions가 빌드합니다.
+
 
 GitHub Release 업로드:
 

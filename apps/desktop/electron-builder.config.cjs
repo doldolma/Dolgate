@@ -75,22 +75,28 @@ module.exports = {
     perMachine: false,
     allowToChangeInstallationDirectory: false
   },
+  // deb·rpm 이 같은 after-install 을 쓴다 — chrome-sandbox 를 항상 SUID(4755)로 설치한다.
   deb: {
-    // Ubuntu 23.10+ AppArmor userns 제한 대응: chrome-sandbox 를 항상 SUID(4755)로 설치한다.
-    afterInstall: path.resolve(__dirname, 'build/linux/deb-after-install.sh')
+    afterInstall: path.resolve(__dirname, 'build/linux/after-install.sh')
+  },
+  rpm: {
+    afterInstall: path.resolve(__dirname, 'build/linux/after-install.sh')
   },
   linux: {
     icon: path.resolve(__dirname, 'build/icons/dolssh.png'),
     category: 'Development',
     executableName: 'dolgate',
     // 실제 타겟/arch는 scripts/build-linux-installers.cjs 가 CLI로 지정한다.
-    // (deb는 macOS ar가 아카이브를 깨뜨려서 리눅스 호스트에서만 빌드 가능)
+    //
+    // AppImage 는 배포하지 않는다. 다운로드한 파일에는 실행 비트가 없어 사용자가 chmod 를
+    // 해야 하고, 읽기 전용 FUSE 마운트라 chrome-sandbox 에 setuid 를 걸 수 없어 샌드박스도
+    // 못 쓴다. 설치형(deb·rpm)은 둘 다 해결된다.
     target: [
       {
-        target: 'AppImage'
+        target: 'deb'
       },
       {
-        target: 'deb'
+        target: 'rpm'
       }
     ]
   }

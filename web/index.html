@@ -403,7 +403,7 @@
         <div class="os">🪟</div><b>Windows</b><span data-i18n="dl.win">NSIS 설치본 · x64</span>
       </a>
       <a class="dl" data-dl="linux" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
-        <div class="os">🐧</div><b>Linux</b><span data-i18n="dl.linux">AppImage · x86_64</span>
+        <div class="os">🐧</div><b>Linux</b><span data-i18n="dl.linux">.deb · x86_64</span>
       </a>
       <a class="dl" data-dl="android" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
         <div class="os">🤖</div><b>Android</b><span data-i18n="dl.android">APK · arm64</span>
@@ -414,7 +414,7 @@
     </div>
 
     <p class="note" data-i18n="dl.note">
-      Linux <code>deb</code> 패키지와 ARM64 빌드는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 받을 수 있습니다.
+      Linux <code>rpm</code>(Fedora·RHEL)과 ARM64 빌드는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 받을 수 있습니다.
     </p>
   </div>
 </section>
@@ -521,7 +521,7 @@
       const urls = {
         mac: find(/mac-universal\.dmg$/),
         win: find(/win-x64\.exe$/),
-        linux: find(/linux-x86_64\.AppImage$/),
+        linux: find(/linux-amd64\.deb$/),
         android: find(/^Dolgate-android-.*\.apk$/),
       };
 

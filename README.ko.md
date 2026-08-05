@@ -34,7 +34,7 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 
 ### 다운로드
 
-[**다운로드 페이지**](https://doldolma.github.io/Dolgate/#download)에서 쓰는 OS에 맞는 설치 파일을 바로 받을 수 있습니다 — Windows(exe), macOS(dmg), Linux(AppImage), Android(APK). iOS(AppStore)
+[**다운로드 페이지**](https://doldolma.github.io/Dolgate/#download)에서 쓰는 OS에 맞는 설치 파일을 바로 받을 수 있습니다 — Windows(exe), macOS(dmg), Linux(deb/rpm), Android(APK). iOS(AppStore)
 
 Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dolgate/releases)에 있습니다.
 

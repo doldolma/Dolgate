@@ -6,20 +6,25 @@ const desktopRoot = path.resolve(__dirname, '..');
 const distDirectory = path.join(desktopRoot, 'release', 'dist');
 const ARCHES = ['x64', 'arm64'];
 
-// macOS의 ar(ranlib)는 mach-o가 아닌 아카이브 멤버(debian-binary 등)를 경고만 내고 버린 뒤
-// exit 0을 반환해서, fpm 기반 deb가 96바이트짜리 빈 아카이브로 조용히 깨진다(fpm도 성공 처리).
-// 그래서 deb는 리눅스 호스트(CI)에서만 빌드하고, 다른 호스트는 AppImage만 빌드한다.
-function resolveLinuxTargets() {
-  if (process.platform === 'linux') {
-    return ['AppImage', 'deb'];
-  }
+// deb·rpm 은 fpm 이 만들고, macOS의 ar(ranlib)는 mach-o가 아닌 아카이브 멤버(debian-binary
+// 등)를 경고만 내고 버린 뒤 exit 0을 반환해서 deb가 96바이트짜리 빈 아카이브로 조용히
+// 깨진다(fpm도 성공 처리). rpm 도 rpmbuild 계열 도구가 필요하다. 그래서 리눅스 호스트에서만
+// 빌드한다 — 예전에는 다른 호스트에서 AppImage 로 대신했지만 이제 AppImage 는 배포하지
+// 않으므로, 여기서 만들 수 있는 것이 없다는 걸 분명히 알린다.
+const LINUX_TARGETS = ['deb', 'rpm'];
 
-  console.warn('[linux-dist] deb는 리눅스 호스트에서만 빌드할 수 있어 이 호스트에서는 AppImage만 생성합니다.');
-  return ['AppImage'];
+function assertLinuxHost() {
+  if (process.platform === 'linux') {
+    return;
+  }
+  throw new Error(
+    `리눅스 설치 패키지(${LINUX_TARGETS.join('/')})는 리눅스 호스트에서만 빌드할 수 있습니다. ` +
+      '릴리즈 태그를 푸시하면 GitHub Actions 가 빌드합니다.',
+  );
 }
 
 // electron-packager는 mkdtemp(0700)로 스테이징한 디렉터리를 out/으로 그대로 옮기므로
-// prepackaged 디렉터리 최상위가 0700이 된다. fpm(deb)과 squashfs(AppImage)는 이 모드를
+// prepackaged 디렉터리 최상위가 0700이 된다. fpm(deb·rpm)은 이 모드를
 // 그대로 보존해서 /opt/Dolgate 가 일반 사용자에게 접근 불가가 되므로, 패킹 전에 정규화한다.
 function normalizePrepackagedPermissions(arch) {
   const prepackagedDir = path.join(desktopRoot, 'out', `dolgate-linux-${arch}`);
@@ -113,19 +118,19 @@ function verifyDebArtifact(fileName) {
   }
 }
 
-function verifyArtifacts(expectDeb) {
+function verifyArtifacts() {
   const files = listDistFiles();
 
-  requireDistFile(files, /-linux-x86_64\.AppImage$/);
-  requireDistFile(files, /-linux-arm64\.AppImage$/);
   requireDistFile(files, /^latest-linux\.yml$/);
   requireDistFile(files, /^latest-linux-arm64\.yml$/);
 
+  requireDistFile(files, /-linux-amd64\.deb$/);
+  requireDistFile(files, /-linux-arm64\.deb$/);
+  // rpm 은 arch 를 x86_64/aarch64 로 적는다(deb 의 amd64/arm64 와 다르다).
+  requireDistFile(files, /\.x86_64\.rpm$/);
+  requireDistFile(files, /\.aarch64\.rpm$/);
+
   const debFiles = files.filter((name) => name.endsWith('.deb'));
-  if (expectDeb) {
-    requireDistFile(files, /-linux-amd64\.deb$/);
-    requireDistFile(files, /-linux-arm64\.deb$/);
-  }
   for (const fileName of debFiles) {
     verifyDebArtifact(fileName);
     verifyDebDirectoryModes(fileName);
@@ -135,12 +140,12 @@ function verifyArtifacts(expectDeb) {
 }
 
 function main() {
-  const targets = resolveLinuxTargets();
+  assertLinuxHost();
   for (const arch of ARCHES) {
     normalizePrepackagedPermissions(arch);
-    runElectronBuilder(targets, arch);
+    runElectronBuilder(LINUX_TARGETS, arch);
   }
-  verifyArtifacts(targets.includes('deb'));
+  verifyArtifacts();
 }
 
 main();

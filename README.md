@@ -36,7 +36,7 @@ The whole repository is released together under a single `vX.Y.Z` version.
 
 ### Download
 
-Grab the installer for your OS from the [**download page**](https://doldolma.github.io/Dolgate/#download) — Windows (exe), macOS (dmg), Linux (AppImage), Android (APK). iOS is on the App Store.
+Grab the installer for your OS from the [**download page**](https://doldolma.github.io/Dolgate/#download) — Windows (exe), macOS (dmg), Linux (deb/rpm), Android (APK). iOS is on the App Store.
 
 Linux `deb` and ARM64 builds are on [GitHub Releases](https://github.com/doldolma/dolgate/releases).
 
