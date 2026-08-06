@@ -50,6 +50,15 @@ import {
   TERMINAL_GRID_REPORT_SCRIPT,
   parseReportedTerminalGrid,
 } from '../lib/terminal-size';
+import {
+  TERMINAL_GESTURE_SCRIPT,
+  TERMINAL_SCROLL_TO_BOTTOM_SEQUENCE,
+  arrowSequence,
+  parseTerminalGestureEvent,
+  terminalPasteSequence,
+  type TerminalGestureEvent,
+} from '../lib/terminal-gestures';
+import Clipboard from '@react-native-clipboard/clipboard';
 import type { MainTabParamList } from '../navigation/RootNavigator';
 import {
   sortSessionsByRecency,
@@ -66,6 +75,12 @@ const TERMINAL_RESET_BYTES = Uint8Array.from(
 // 터미널 준비 워치독 파라미터 — initialized 신호 유실 시 WebView 리마운트 간격/횟수.
 const TERMINAL_READY_RETRY_DELAY_MS = 2000;
 const TERMINAL_READY_RETRY_LIMIT = 4;
+
+// 입력할 때마다 터미널에 흘려보내는 "맨 아래로" 신호. 주입 스크립트의 OSC 핸들러가 잡아
+// 화면에는 아무것도 남기지 않는다.
+const TERMINAL_SCROLL_TO_BOTTOM_BYTES = Uint8Array.from(
+  Buffer.from(TERMINAL_SCROLL_TO_BOTTOM_SEQUENCE, 'utf8'),
+);
 
 function resetTerminalViewport(terminal: XtermWebViewHandle) {
   terminal.write(TERMINAL_RESET_BYTES);
@@ -417,6 +432,44 @@ export function SessionScreen(): React.JSX.Element {
   const canOpenSftpFromMenu = Boolean(
     menuHost && (isSshHostRecord(menuHost) || isAwsEc2HostRecord(menuHost)),
   );
+  const handleTerminalGesture = useCallback(
+    (gesture: TerminalGestureEvent) => {
+      if (gesture.type === 'copy') {
+        // 선택 UI 는 WebView 안에 있고(RN→웹 채널이 없다), 클립보드만 네이티브를 쓴다.
+        Clipboard.setString(gesture.text);
+        return;
+      }
+      if (gesture.type === 'paste') {
+        // 클립보드는 네이티브에만 있다. 읽어서 base64 OSC 로 웹에 되돌려주면
+        // xterm 의 paste() 가 bracketed paste 까지 알아서 처리한다.
+        void Clipboard.getString().then(text => {
+          if (!text) {
+            return;
+          }
+          terminalRef.current?.write(
+            Uint8Array.from(Buffer.from(terminalPasteSequence(text), 'utf8')),
+          );
+        });
+        return;
+      }
+      if (gesture.type === 'trace') {
+        // 웹 쪽 판정 트레이스 — 시뮬레이션 검증용 채널이라 UI 에는 띄우지 않는다.
+        return;
+      }
+      if (gesture.type === 'key') {
+        sendDirectTerminalInput('\t');
+        return;
+      }
+      // 방향키는 하단 바의 Left/Right 와 같은 시퀀스다. 다만 맨 아래로 튕기지는 않는다.
+      sendSessionInput(arrowSequence(gesture.direction, gesture.count), {
+        scrollToBottom: false,
+      });
+    },
+    // sendDirectTerminalInput 은 ref 만 읽으므로 재생성되지 않아도 된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // logger 는 릴리스에서도 항상 넘긴다 — xterm 이 실제로 fit 한 그리드가 이 채널로
   // 오고(TERMINAL_GRID_REPORT_SCRIPT), 그 값이 원격 PTY 크기의 기준이 된다.
   const terminalLogger = useMemo(
@@ -435,6 +488,11 @@ export function SessionScreen(): React.JSX.Element {
           }
           return;
         }
+        const gesture = parseTerminalGestureEvent(args);
+        if (gesture) {
+          handleTerminalGesture(gesture);
+          return;
+        }
         if (__DEV__) {
           console.log('[xterm-webview]', ...args);
         }
@@ -450,7 +508,7 @@ export function SessionScreen(): React.JSX.Element {
         }
       },
     }),
-    [reportTerminalGrid],
+    [reportTerminalGrid, handleTerminalGesture],
   );
   const keyboardToggleActive = isAndroid
     ? keyboardVisible || keyboardRequestedVisible
@@ -839,10 +897,21 @@ export function SessionScreen(): React.JSX.Element {
     setNativeInputClearToken(value => value + 1);
   };
 
-  const sendSessionInput = (value: string) => {
+  const sendSessionInput = (
+    value: string,
+    // 제스처 방향키는 false 다. 타이핑이 아니라 화면을 다루는 동작이라, 매 방향키마다 맨
+    // 아래로 튕기면 스크롤과 싸우는 것처럼 보인다.
+    options?: { scrollToBottom?: boolean },
+  ) => {
     const inputState = terminalInputStateRef.current;
     if (!value || !inputState.terminalVisible || !inputState.sessionId) {
       return;
+    }
+    // 스크롤백을 올려다본 상태에서 뭔가 입력하면 커서 위치로 돌아오는 것이 터미널의 기본
+    // 동작이다. xterm 의 scrollOnUserInput 은 xterm 이 키를 직접 받을 때만 발동하는데 이 앱은
+    // 네이티브 입력 오버레이를 쓰므로, 입력과 함께 신호를 흘려보내 같은 효과를 낸다.
+    if (options?.scrollToBottom !== false) {
+      terminalRef.current?.write(TERMINAL_SCROLL_TO_BOTTOM_BYTES);
     }
     void writeToSession(inputState.sessionId, value);
   };
@@ -1290,9 +1359,13 @@ export function SessionScreen(): React.JSX.Element {
                   logger={terminalLogger}
                   webViewOptions={{
                     hideKeyboardAccessoryView: true,
+                    // 스크롤은 주입 스크립트가 term.scrollLines 로 직접 굴린다. WebView 자체
+                    // 스크롤뷰를 켜 두면 방향키 제스처와 동시에 돌아 화면이 두 번 움직인다.
+                    // CSS(touch-action·overflow)만으로는 네이티브 스크롤뷰를 막지 못한다.
+                    scrollEnabled: false,
                     // 실제 fit 된 그리드를 보고받아 PTY 크기를 맞춘다. onMessage 는
                     // 넘기면 안 된다 — 패키지 핸들러를 덮어써 입출력이 끊긴다.
-                    injectedJavaScript: TERMINAL_GRID_REPORT_SCRIPT,
+                    injectedJavaScript: `${TERMINAL_GRID_REPORT_SCRIPT}\n${TERMINAL_GESTURE_SCRIPT}`,
                   }}
                   onInitialized={() => setTerminalReady(true)}
                   onData={data => {
