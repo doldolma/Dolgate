@@ -103,6 +103,8 @@
       transition: border-color .15s, background .15s, transform .15s;
     }
     .btn:hover { border-color: var(--line-strong); background: var(--panel); }
+    /* 아이콘은 글자와 함께 줄어들지 않아야 한다(좁은 화면에서 라벨만 줄바꿈되게). */
+    .btn .icon-dl { flex: 0 0 auto; width: 15px; height: 15px; }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     .btn-primary:hover { background: #3f89ff; border-color: #3f89ff; transform: translateY(-1px); }
     /* 내비 액션은 셋이 한 묶음으로 읽혀야 한다 — nav-inner 의 28px 은 링크 묶음과
@@ -146,6 +148,37 @@
     }
     .platforms span::before { content: "▸ "; color: var(--green); }
     .cta { margin-top: 30px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* 다운로드 스플릿 버튼.
+       주 버튼은 감지한 기본값(리눅스는 .deb + 감지된 아키텍처)이고, 캐럿은 나머지 패키지다.
+       아키텍처는 감지할 수 있지만 배포판은 브라우저가 알려주지 않으므로 deb/rpm 은 사람이 고른다.
+       캐럿은 대안이 실제로 있을 때만(리눅스 + 릴리스 조회 성공) 보인다. */
+    .dl-split { position: relative; display: inline-flex; }
+    /* hidden 속성이 실제로 숨기게 만든다.
+       [hidden] 의 display:none 은 UA 스타일시트에 있어서, .btn 의 display:inline-flex 같은
+       작성자 규칙 하나에 그냥 밀린다 — 이게 없으면 캐럿이 mac·Windows 에서도 보이고,
+       리스너는 붙지 않은 상태라 눌러도 아무 일이 없다. */
+    .dl-split [hidden] { display: none; }
+    /* 오른쪽 라운드는 캐럿이 실제로 붙을 때만 없앤다(has-more 는 캐럿을 켤 때 JS 가 붙인다).
+       무조건 없애면 캐럿이 없는 mac·Windows 에서 한쪽만 각진 비대칭 버튼이 된다. */
+    .dl-split.has-more #hero-download { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    .dl-caret {
+      border-left: 1px solid rgba(255,255,255,.3);
+      border-top-left-radius: 0; border-bottom-left-radius: 0;
+      padding: 9px 12px; cursor: pointer; font-size: .78rem;
+    }
+    .dl-menu {
+      position: absolute; top: calc(100% + 6px); right: 0; z-index: 20;
+      min-width: 190px; padding: 6px; text-align: left;
+      border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel); box-shadow: var(--shadow);
+    }
+    .dl-menu a {
+      display: block; padding: 8px 10px; border-radius: 7px;
+      font-size: .9rem; color: var(--text); white-space: nowrap;
+    }
+    .dl-menu a:hover, .dl-menu a:focus-visible { background: var(--panel-2); outline: none; }
+    .dl-menu hr { margin: 6px 4px; border: 0; border-top: 1px solid var(--line); }
 
     .shot-frame {
       margin: 56px auto 0; max-width: 960px;
@@ -282,8 +315,24 @@
       <span>Windows</span><span>macOS</span><span>Linux</span><span>iOS</span><span>Android</span>
     </div>
     <div class="cta">
-      <a class="btn btn-primary" id="hero-download" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener" data-i18n="hero.dlLatest">⬇ 최신 버전 다운로드</a>
-      <a class="btn" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener" data-i18n="hero.source">소스 보기 — MIT 오픈소스</a>
+      <div class="dl-split">
+        <!-- 아이콘은 문자가 아니라 SVG 다. ⬇(U+2B07)는 iOS 가 Apple Color Emoji 로 대체해서
+             파란 사각형 안 화살표로 나온다 — 버튼 안에서 혼자 색을 갖고 크기도 튄다.
+             SVG 는 currentColor 를 따르므로 라이트·다크·호버에서 글자와 같이 움직인다.
+             라벨은 별도 span 이어야 한다: JS 가 텍스트를 갈아끼우는데 anchor 에 직접 쓰면
+             아이콘까지 지워진다. -->
+        <a class="btn btn-primary" id="hero-download" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">
+          <svg class="icon-dl" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M8 2.4v7.2m0 0 3-3m-3 3-3-3" />
+            <path d="M2.6 13.2h10.8" />
+          </svg>
+          <span id="hero-download-label" data-i18n="hero.dlLatest">최신 버전 다운로드</span>
+        </a>
+        <button class="btn btn-primary dl-caret" id="hero-download-more" type="button" hidden
+                aria-haspopup="menu" aria-expanded="false" aria-controls="hero-download-menu"
+                data-i18n-title="hero.dlOther" title="다른 패키지" aria-label="다른 패키지">▾</button>
+        <div class="dl-menu" id="hero-download-menu" role="menu" hidden></div>
+      </div>
     </div>
 
     <figure class="shot-frame">
@@ -414,7 +463,7 @@
     </div>
 
     <p class="note" data-i18n="dl.note">
-      Linux <code>rpm</code>(Fedora·RHEL)과 ARM64 빌드는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 받을 수 있습니다.
+      Linux 는 <code>.deb</code>·<code>.rpm</code> 을 x86_64·arm64 로 제공합니다. 위 버튼의 <code>▾</code> 에서 고르거나 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/releases/latest" target="_blank" rel="noopener">릴리스 페이지</a>에서 전체 목록을 볼 수 있습니다.
     </p>
   </div>
 </section>
@@ -439,8 +488,10 @@
     themeAuto: "시스템 설정 따름",
     themeLight: "라이트",
     themeDark: "다크",
-    dlFor: "⬇ {os}용 다운로드",
-    dlAppStore: "⬇ App Store에서 받기",
+    dlFor: "{os}용 다운로드",
+    dlLinuxFor: "Linux {pkg} · {arch} 다운로드",
+    dlAppStore: "App Store에서 받기",
+    dlAllReleases: "모든 릴리스 →",
   };
 </script>
 
@@ -497,14 +548,129 @@
     /iPhone|iPad|iPod/i.test(ua) ||
     (/Mac/i.test(ua) && navigator.maxTouchPoints > 1);
   const hero = document.getElementById("hero-download");
+  const heroLabel = document.getElementById("hero-download-label");
+  const heroMore = document.getElementById("hero-download-more");
+  const heroMenu = document.getElementById("hero-download-menu");
+
+  const os = isIos ? null
+    : /Android/i.test(ua) ? "android"
+    : /Mac/i.test(ua) ? "mac"
+    : /Win/i.test(ua) ? "win"
+    : /Linux/i.test(ua) ? "linux"
+    : null;
+
+  // 리눅스 아키텍처 추정.
+  //
+  // Chromium 은 UA 문자열의 아키텍처를 못 믿게 축소했고(UA reduction) 대신 Client Hints 를
+  // 준다 — 그래서 그것을 먼저 본다. Firefox 는 그 API 가 없지만 UA 에 aarch64 가 그대로 남는다.
+  // 둘 다 아니면 x86_64 로 둔다: 다수이고, 틀려도 캐럿에서 한 번에 바꿀 수 있다.
+  //
+  // 배포판(deb/rpm)은 추정하지 않는다. UA 에 자기를 밝히는 것은 Ubuntu 계열뿐이고 rpm 계열은
+  // 밝히지 않아서, "Fedora 면 rpm" 같은 규칙은 사실상 항상 deb 로 떨어진다 — 없는 신호를 읽는
+  // 코드는 오해만 남긴다. 그래서 형식은 사람이 고른다.
+  const detectLinuxArch = async () => {
+    const hints = navigator.userAgentData;
+    if (hints && typeof hints.getHighEntropyValues === "function") {
+      try {
+        const { architecture, bitness } = await hints.getHighEntropyValues(["architecture", "bitness"]);
+        if (bitness === "64" && architecture === "arm") return "arm64";
+        if (bitness === "64" && architecture === "x86") return "x64";
+      } catch {
+        /* 미지원·권한 거부: 아래 UA 문자열로 내려간다 */
+      }
+    }
+    return /aarch64|arm64/i.test(ua) ? "arm64" : "x64";
+  };
+
+  // 리눅스 패키지 4종. deb 는 amd64/arm64, rpm 은 x86_64/aarch64 로 표기가 갈린다
+  // (electron-builder 의 타깃별 관행) — 라벨은 그 파일 이름을 그대로 쓴다.
+  const LINUX_PACKAGES = [
+    { id: "deb-x64",   re: /linux-amd64\.deb$/,   pkg: ".deb", arch: "x86_64"  },
+    { id: "deb-arm64", re: /linux-arm64\.deb$/,   pkg: ".deb", arch: "arm64"   },
+    { id: "rpm-x64",   re: /linux-x86_64\.rpm$/,  pkg: ".rpm", arch: "x86_64"  },
+    { id: "rpm-arm64", re: /linux-aarch64\.rpm$/, pkg: ".rpm", arch: "aarch64" },
+  ];
+
+  // 캐럿 메뉴.
+  //
+  // 항목이 곧 다운로드 링크여야 해서 <select> 를 못 쓴다. 그래서 열기·닫기·Esc·바깥 클릭·
+  // 화살표 이동을 손으로 붙인다.
+  //
+  // 용량은 넣지 않는다. 이 메뉴가 묻는 것은 "어느 형식·아키텍처냐" 이고 그 답은 사용자의
+  // 배포판과 CPU 가 정한다 — 용량으로 고를 일이 없는데 숫자를 나란히 놓으면 더 작은 것이
+  // 가벼운 것이라는 오해만 생긴다. 용량은 릴리스 페이지에 있다.
+  const buildDownloadMenu = (builds, primary, releasesUrl) => {
+    const addItem = (href, text) => {
+      const item = document.createElement("a");
+      item.setAttribute("role", "menuitem");
+      item.href = href;
+      item.tabIndex = -1; // 메뉴 안 이동은 화살표로 한다(탭 순서에는 캐럿만 남긴다)
+      item.textContent = text;
+      heroMenu.append(item);
+      return item;
+    };
+
+    heroMenu.replaceChildren();
+    for (const entry of builds) {
+      const item = addItem(entry.asset.browser_download_url, `${entry.pkg} · ${entry.arch}`);
+      if (entry === primary) item.setAttribute("aria-current", "true");
+    }
+    if (releasesUrl) {
+      heroMenu.append(document.createElement("hr"));
+      const all = addItem(releasesUrl, window.dolgateStrings.dlAllReleases);
+      all.target = "_blank";
+      all.rel = "noopener";
+    }
+
+    const items = () => [...heroMenu.querySelectorAll("a")];
+    const setOpen = (open) => {
+      heroMenu.hidden = !open;
+      heroMore.setAttribute("aria-expanded", String(open));
+      if (open) items()[0]?.focus();
+    };
+    const move = (from, step) => {
+      const list = items();
+      list[(from + step + list.length) % list.length]?.focus();
+    };
+
+    heroMore.hidden = false;
+    heroMore.closest(".dl-split")?.classList.add("has-more"); // 주 버튼의 오른쪽 라운드를 없앤다
+    heroMore.addEventListener("click", () => setOpen(heroMenu.hidden));
+    heroMore.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" && heroMenu.hidden) {
+        event.preventDefault();
+        setOpen(true);
+      }
+    });
+    heroMenu.addEventListener("keydown", (event) => {
+      const list = items();
+      const at = list.indexOf(document.activeElement);
+      if (event.key === "ArrowDown") { event.preventDefault(); move(at, 1); }
+      else if (event.key === "ArrowUp") { event.preventDefault(); move(at, -1); }
+      else if (event.key === "Home") { event.preventDefault(); list[0]?.focus(); }
+      else if (event.key === "End") { event.preventDefault(); list[list.length - 1]?.focus(); }
+    });
+    // Esc 와 바깥 클릭은 문서에서 받는다 — 메뉴 안에 포커스가 없을 때도 닫혀야 한다.
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !heroMenu.hidden) {
+        setOpen(false);
+        heroMore.focus();
+      }
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!heroMenu.hidden && !heroMenu.contains(event.target) && event.target !== heroMore) {
+        setOpen(false);
+      }
+    });
+  };
 
   // 앱스토어 링크는 GitHub 릴리스와 무관하다 — 아래 API 조회가 실패해도(rate limit·오프라인)
   // iOS 방문자는 스토어로 보내야 하므로 fetch 밖에서 먼저 배선한다.
   // iOS 방문자는 GitHub 릴리스와 무관하게 스토어로 보낸다 — 아래 fetch 가 실패해도(rate
   // limit·오프라인) 이 배선은 살아 있어야 하므로 여기서 먼저 한다.
-  if (hero && isIos) {
+  if (hero && heroLabel && isIos) {
     hero.href = IOS_APP_STORE_URL;
-    hero.textContent = window.dolgateStrings.dlAppStore;
+    heroLabel.textContent = window.dolgateStrings.dlAppStore;
   }
 
   // 나머지 플랫폼은 최신 릴리스의 실제 파일 URL로 배선한다.
@@ -517,11 +683,23 @@
       if (!res.ok) return;
       const rel = await res.json();
       const assets = rel.assets || [];
-      const find = (re) => assets.find((a) => re.test(a.name))?.browser_download_url;
+      const findAsset = (re) => assets.find((a) => re.test(a.name));
+      const find = (re) => findAsset(re)?.browser_download_url;
+
+      // 리눅스는 실제로 올라온 것만 남긴다 — 어떤 릴리스에 arm64 가 빠져도 없는 항목을
+      // 메뉴에 그리지 않는다.
+      const linuxBuilds = LINUX_PACKAGES
+        .map((entry) => ({ ...entry, asset: findAsset(entry.re) }))
+        .filter((entry) => entry.asset);
+      const linuxArch = os === "linux" ? await detectLinuxArch() : null;
+      // 기본은 .deb + 감지된 아키텍처. 그게 없으면 남은 것 중 첫 번째.
+      const linuxPrimary =
+        linuxBuilds.find((entry) => entry.id === `deb-${linuxArch}`) ?? linuxBuilds[0];
+
       const urls = {
         mac: find(/mac-universal\.dmg$/),
         win: find(/win-x64\.exe$/),
-        linux: find(/linux-amd64\.deb$/),
+        linux: linuxPrimary?.asset.browser_download_url,
         android: find(/^Dolgate-android-.*\.apk$/),
       };
 
@@ -533,14 +711,13 @@
           el.removeAttribute("target"); // 직다운로드는 새 탭 불필요
         }
       });
+      // 리눅스 타일 설명은 감지 결과를 따라간다 — ".deb · x86_64" 로 고정해 두면 arm64
+      // 방문자에게 틀린 것을 사실처럼 보여준다.
+      if (linuxPrimary) {
+        const tile = document.querySelector('[data-dl="linux"] span');
+        if (tile) tile.textContent = `${linuxPrimary.pkg} · ${linuxPrimary.arch}`;
+      }
 
-      // 히어로 버튼: 방문자 OS 감지해서 그 파일을 바로 다운로드(iOS 는 위에서 이미 처리)
-      const os = isIos ? null
-        : /Android/i.test(ua) ? "android"
-        : /Mac/i.test(ua) ? "mac"
-        : /Win/i.test(ua) ? "win"
-        : /Linux/i.test(ua) ? "linux"
-        : null;
       const NAMES = { mac: "macOS", win: "Windows", linux: "Linux", android: "Android" };
 
       if (rel.tag_name) {
@@ -548,11 +725,22 @@
           el.textContent = rel.tag_name;
         });
       }
-      if (hero && os && urls[os]) {
+      // 히어로 버튼: 방문자 OS 의 파일을 바로 다운로드(iOS 는 위에서 이미 처리)
+      if (hero && heroLabel && os && urls[os]) {
         hero.href = urls[os];
         hero.removeAttribute("target"); // 직다운로드는 새 탭 불필요
-        const template = window.dolgateStrings.dlFor;
-        hero.textContent = `${template.replace("{os}", NAMES[os])} ${rel.tag_name || ""}`.trimEnd();
+        const S = window.dolgateStrings;
+        // 리눅스는 형식·아키텍처를 라벨에 드러낸다. 감지가 틀렸을 때 사용자가 알아볼 수 있어야
+        // 캐럿을 누를 이유가 생긴다 — "Linux" 만 쓰면 잘못 받은 줄도 모른다.
+        const label = os === "linux" && linuxPrimary
+          ? S.dlLinuxFor.replace("{pkg}", linuxPrimary.pkg).replace("{arch}", linuxPrimary.arch)
+          : S.dlFor.replace("{os}", NAMES[os]);
+        heroLabel.textContent = `${label} ${rel.tag_name || ""}`.trimEnd();
+      }
+
+      // 캐럿: 고를 것이 둘 이상일 때만 붙인다.
+      if (os === "linux" && heroMore && heroMenu && linuxBuilds.length > 1) {
+        buildDownloadMenu(linuxBuilds, linuxPrimary, rel.html_url);
       }
     } catch {
       /* 폴백: 릴리스 페이지 링크 유지 */
