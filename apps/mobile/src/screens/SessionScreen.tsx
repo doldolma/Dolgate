@@ -21,7 +21,11 @@ import {
 import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { isAwsEc2HostRecord, isSshHostRecord } from '@dolssh/shared-core';
+import {
+  isAwsEc2HostRecord,
+  isSshHostRecord,
+  type MobileSessionRecord,
+} from '@dolssh/shared-core';
 import {
   XtermJsWebView,
   type XtermWebViewHandle,
@@ -79,7 +83,21 @@ function restoreTerminalSnapshot(
   terminal.write(Uint8Array.from(Buffer.from(snapshot, 'utf8')));
 }
 
-function getSessionStatusMeta(status: string, palette: MobilePalette) {
+function getSessionStatusMeta(
+  status: string,
+  palette: MobilePalette,
+  // 밖에서 끊긴 세션은 상태가 'error' 지만 사용자에게 오류가 아니다 — 앱을 전환했거나 네트워크가
+  // 끊긴 것뿐이다. "Error" 로 붉게 보여주면 무언가 잘못된 것처럼 읽히므로 중립으로 표시한다.
+  disconnectReason?: MobileSessionRecord['disconnectReason'],
+) {
+  // 상태를 함께 본다. 이유만 보면 다시 붙는 중이거나 이미 붙은 탭까지 "Disconnected" 로
+  // 표시된다 — 표시가 실제 상태보다 오래 남는 쪽이 훨씬 나쁜 거짓말이다.
+  if (disconnectReason === 'dropped' && status === 'error') {
+    return {
+      label: 'Disconnected',
+      color: palette.sessionStatusMuted,
+    };
+  }
   switch (status) {
     case 'connected':
       return {
@@ -953,7 +971,14 @@ export function SessionScreen(): React.JSX.Element {
           {connectionTabs.map(tab => {
             const isTerminal = tab.kind === 'terminal';
             const session = tab.session;
-            const tabStatus = getSessionStatusMeta(session.status, palette);
+            const droppedReason = isTerminal
+              ? (session as MobileSessionRecord).disconnectReason
+              : undefined;
+            const tabStatus = getSessionStatusMeta(
+              session.status,
+              palette,
+              droppedReason,
+            );
             const isActive =
               activeTab.kind === tab.kind && activeTab.id === tab.id;
             const title = isTerminal ? session.title : session.title;
@@ -965,7 +990,15 @@ export function SessionScreen(): React.JSX.Element {
                 accessibilityState={{ selected: isActive }}
                 onPress={() => {
                   if (isTerminal) {
-                    setActiveSessionTab(session.id);
+                    // 밖에서 끊긴 탭은 탭하면 다시 붙인다. 전에는 전환만 되어 빈 화면을
+                    // 보게 됐고, 재연결하려면 오류 배너나 "최근 세션" 까지 가야 했다.
+                    // 표시와 같은 조건을 쓴다 — 이미 붙는 중인 탭을 탭했다고 재연결을
+                    // 다시 걸지 않는다.
+                    if (droppedReason === 'dropped' && session.status === 'error') {
+                      void resumeSession(session.id);
+                    } else {
+                      setActiveSessionTab(session.id);
+                    }
                   } else {
                     setActiveConnectionTab({ kind: tab.kind, id: session.id });
                   }

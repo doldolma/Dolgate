@@ -112,6 +112,16 @@ import {
 } from '../lib/auth-flow';
 import { nativeArgon2idDerive } from '../lib/vault';
 import {
+  createStartupCommandFlusher,
+  resolveStartupCommand,
+  type StartupCommandFlusher,
+} from '../lib/startup-command';
+import {
+  isLiveSession,
+  normalizePersistedSessionsForColdStart,
+  resumeDroppedActiveSession,
+} from '../lib/session-resume';
+import {
   type AwsSsoBrowserLoginPrompt,
   resolveAwsSessionForHost,
 } from '../lib/aws-session';
@@ -873,6 +883,7 @@ function ensureSyncPollingLifecycle(): void {
           startSyncPolling();
           void state.syncNow().catch(() => undefined);
         }
+        resumeDroppedActiveSession(state);
       } else {
         stopSyncPolling();
         // Do not close Tailnet here. Browser authorization intentionally sends
@@ -1209,9 +1220,6 @@ async function resolveStoredVaultState(
   );
 }
 
-function isLiveSession(session: MobileSessionRecord): boolean {
-  return session.status !== 'closed';
-}
 
 function getLiveSessions(
   sessions: MobileSessionRecord[],
@@ -1766,29 +1774,6 @@ function compactPersistedSessions(
       lastViewportSnapshot: '',
       connectionStatusMessage: null,
     }));
-}
-
-function normalizePersistedSessionsForColdStart(
-  sessions: MobileSessionRecord[],
-): MobileSessionRecord[] {
-  const now = new Date().toISOString();
-  return sessions.map(session => {
-    const normalizedSession: MobileSessionRecord = !isLiveSession(session)
-      ? session
-      : {
-          ...session,
-          status: 'closed',
-          errorMessage: null,
-          connectionStatusMessage: null,
-          lastEventAt: now,
-          lastDisconnectedAt: session.lastDisconnectedAt ?? now,
-        };
-
-    return {
-      ...normalizedSession,
-      lastViewportSnapshot: '',
-    };
-  });
 }
 
 function isSecureStateRestoreCurrent(
@@ -2350,6 +2335,16 @@ export const useMobileAppStore = create<MobileAppState>()(
             secretMetadata: deriveSecretMetadata(state.hosts, secretsByRef),
             secureStateReady: true,
           }));
+
+          // 여기서 콜드스타트 자동 재연결을 시도했다가 되돌렸다. 교착이 생긴다:
+          // 접속은 resolvePtyTerminalGridSize() 로 터미널 그리드를 기다리는데, 화면은 세션이
+          // 'connecting' 이면 터미널 대신 로딩 상태를 그려서 그리드가 측정되지 않는다. 실측에서
+          // "Preparing the terminal" 에 4분 이상 머물렀다.
+          //
+          // 콜드스타트에서 필요한 것(탭이 남는 것)은 normalizePersistedSessionsForColdStart 가
+          // 이미 한다. 사용자가 그 탭을 누르면 그때는 터미널 뷰가 살아 있어 정상적으로 붙는다.
+          // 자동 재연결은 AppState 전환(포그라운드 복귀)에만 걸어 둔다 — 그 경로는 화면이 이미
+          // 마운트돼 있어 이 교착이 없고, 원래 보고된 증상이기도 하다.
         } finally {
           finishSecureRestoreTiming?.();
         }
@@ -3040,6 +3035,10 @@ export const useMobileAppStore = create<MobileAppState>()(
         sessionId: string,
         status: MobileSessionRecord['status'],
         errorMessage?: string | null,
+        // 밖에서 끊긴 경우에만 'dropped' 를 넘긴다(client-api.ts 의 disconnectReason 참고).
+        // 넘기지 않으면 patch 가 undefined 로 덮어써 표시가 자동으로 원복된다 — 재연결에
+        // 성공한 세션이 "Disconnected" 로 남지 않게 하는 것이 이 기본값의 목적이다.
+        disconnectReason?: MobileSessionRecord['disconnectReason'],
       ) => {
         const now = new Date().toISOString();
         set(state => {
@@ -3053,6 +3052,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             lastEventAt: now,
             lastDisconnectedAt:
               status === 'closed' || status === 'error' ? now : undefined,
+            disconnectReason,
           });
           return {
             sessions: nextSessions,
@@ -3833,6 +3833,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         let pendingConnection: EngineConnection | null = null;
         let pendingShell: EngineShell | null = null;
         let pendingBackgroundListenerId: number | null = null;
+        let pendingStartupFlusher: StartupCommandFlusher | null = null;
         let closedDuringConnect = false;
         try {
           if (
@@ -3923,13 +3924,44 @@ export const useMobileAppStore = create<MobileAppState>()(
           console.info(
             `[mobile-ssh] engine=${engine.name} session=${sessionRecord.id}`,
           );
-          const markClosed = () => {
+          // 끊김을 두 갈래로 나눈다. 전에는 한 핸들러가 두 콜백에 걸려 있어서 구분이 없었고,
+          // 그래서 밖에서 끊긴 세션이 사용자가 끝낸 세션과 같은 'closed' 가 되어 탭에서 사라졌다.
+          //
+          //   onDisconnected — 전송이 죽었다. iOS 가 백그라운드에서 프로세스를 정지시킨 경우가
+          //     이 경로다. 사용자 의도가 아니므로 탭을 남기고 자동 재연결 대상이 된다.
+          //   onClosed — 셸 채널이 끝났다. 원격에서 `exit` 를 친 경우가 이 경로다. 의도된
+          //     종료이므로 지금처럼 'closed' 다 — 여기서 자동 재연결하면 exit 한 셸이 되살아난다.
+          const teardownRuntime = () => {
             closedDuringConnect = true;
+            // 세션이 끝났으면 startup command 감시 타이머도 접는다. 안 그러면 이미 닫힌 셸에
+            // 쓰기를 시도한다.
+            pendingStartupFlusher?.dispose();
+            pendingStartupFlusher = null;
             flushSessionSnapshot(sessionRecord.id, {
               markActivity: false,
             });
             if (runtimeSessions.has(sessionRecord.id)) {
               void disposeRuntimeSession(sessionRecord.id);
+            }
+          };
+          const markDropped = () => {
+            teardownRuntime();
+            markSessionState(
+              sessionRecord.id,
+              'error',
+              t('store.sessionDropped'),
+              'dropped',
+            );
+          };
+          const markClosed = () => {
+            teardownRuntime();
+            // 전송이 먼저 죽으면 채널 종료가 뒤따라 올 수 있다. 그때 'closed' 로 덮으면
+            // 방금 남긴 dropped 표시가 지워지므로, 이미 dropped 면 그대로 둔다.
+            const current = get().sessions.find(
+              item => item.id === sessionRecord.id,
+            );
+            if (current?.disconnectReason === 'dropped') {
+              return;
             }
             markSessionState(sessionRecord.id, 'closed');
           };
@@ -3949,7 +3981,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               host.tailnetId,
             ),
             onServerKey: async info => resolveKnownHostTrust(host, info),
-            onDisconnected: markClosed,
+            onDisconnected: markDropped,
           });
           pendingConnection = connection;
           if (closedDuringConnect) {
@@ -3967,10 +3999,25 @@ export const useMobileAppStore = create<MobileAppState>()(
             return;
           }
 
+          // 호스트에 startup command 가 설정돼 있으면 프롬프트가 뜬 뒤에 타이핑한다. 판단은
+          // startup-command.ts 가 하고 여기서는 출력을 넘겨 주기만 한다.
+          const startupCommand = resolveStartupCommand(host);
+          const startupFlusher = startupCommand
+            ? createStartupCommandFlusher(() => {
+                void shell
+                  .sendData(
+                    Uint8Array.from(Buffer.from(`${startupCommand}\r`, 'utf8')),
+                  )
+                  .catch(() => undefined);
+              })
+            : null;
+          pendingStartupFlusher = startupFlusher;
+
           const backgroundListenerId = await shell.follow(
             {
               onChunk: chunk => {
                 const text = Buffer.from(chunk.bytes).toString('utf8');
+                startupFlusher?.noteOutput(text);
                 const currentSnapshot =
                   runtimeSessionSnapshots.get(sessionRecord.id) ?? '';
                 runtimeSessionSnapshots.set(
@@ -6359,6 +6406,10 @@ export const useMobileAppStore = create<MobileAppState>()(
                 status: 'connecting',
                 errorMessage: null,
                 connectionStatusMessage: null,
+                // 끊김 표시를 반드시 지운다. patch 는 명시한 키만 덮으므로 이걸 빼면 다시
+                // 붙는 동안에도(그리고 붙은 뒤에도) 탭이 "Disconnected" 로 남고, 그 상태로
+                // 탭하면 재연결이 또 걸린다.
+                disconnectReason: undefined,
                 lastEventAt: new Date().toISOString(),
               },
             );
@@ -7427,6 +7478,8 @@ export const useMobileAppStore = create<MobileAppState>()(
           }
           const nextSessions = normalizePersistedSessionsForColdStart(
             useMobileAppStore.getState().sessions,
+            new Date().toISOString(),
+            t('store.sessionDropped'),
           );
           useMobileAppStore.setState(state => ({
             hydrated: true,

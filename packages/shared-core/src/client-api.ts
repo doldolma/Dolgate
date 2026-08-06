@@ -73,6 +73,20 @@ export interface MobileSessionRecord {
   lastConnectedAt?: string | null;
   lastDisconnectedAt?: string | null;
   errorMessage?: string | null;
+  /**
+   * 이 세션이 왜 끊겼는지. 'dropped' 는 사용자가 끊은 것이 아니라 밖에서 끊긴 것이다 —
+   * iOS 가 백그라운드에서 프로세스를 정지시킨 경우, 네트워크가 사라진 경우, 앱이 재시작된
+   * 경우. 상태는 'error' 로 두어 탭이 남지만(isLiveSession 은 'closed' 만 제외한다) 표시와
+   * 취급을 진짜 오류와 구분해야 해서 이유를 따로 남긴다:
+   *
+   * - 탭 라벨을 "Disconnected"(중립)로 — 앱 전환 한 번에 "Error" 는 과하다
+   * - **자동 재연결을 이 값에만 적용한다.** 비밀번호 오류·호스트키 불일치 같은 진짜 실패를
+   *   포그라운드 복귀마다 무한히 재시도하지 않으려면 이 구분이 필요하다
+   *
+   * 상태 유니온(TerminalTab["status"])에 값을 더하지 않은 이유는 그것이 데스크톱과 공유되기
+   * 때문이다. 이 필드는 MobileSessionRecord 에만 있어 데스크톱에 파급이 없다.
+   */
+  disconnectReason?: "dropped";
 }
 
 export type MobileConnectionTabRef =

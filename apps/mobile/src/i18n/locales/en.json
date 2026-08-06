@@ -219,6 +219,7 @@
     "authChangeNeedsCredential": "Changing the authentication method requires new credentials or unlinking.",
     "replaceOrUnlink": "Enter replacement credentials, or choose to unlink.",
     "sessionHostNotFound": "The host for this session was not found.",
+    "sessionDropped": "The connection dropped. Tap to reconnect.",
     "downloadFailed": "The file download failed.",
     "saveFailed": "Saving failed.",
     "uploadFailed": "The file upload failed.",
