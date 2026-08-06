@@ -1337,7 +1337,7 @@
       "description": "Injected into the shell on connect (SetEnv with an export fallback). Values are encrypted like passwords when stored and synced."
     },
     "tailnet": {
-      "none": "Not used (plain network)",
+      "none": "Not used (regular network)",
       "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own.",
       "missingOption": "Tailnet setting missing",
       "missing": "The Tailnet setting selected by this host is missing. Select 'Not used' to clear it, or register the network again."
@@ -2110,7 +2110,7 @@
     "jumpChainSelf": "A jump host chain cannot include the host itself.",
     "jumpHostMissing": "The jump host was not found. Choose it again in the host settings.",
     "tailnetMissing": "The tailnet connection failed. This host is set to connect through a tailnet, but that network is not registered on this device. Add it in Settings → Network and try again.",
-    "jumpHostMustBeSsh": "The jump host must be a plain SSH host."
+    "jumpHostMustBeSsh": "The jump host must be a direct SSH host."
   },
   "hostsOverride": {
     "permissionCancelled": "The DNS override permission prompt was cancelled.",
@@ -3108,8 +3108,8 @@
       "authKeyHint": "Use a reusable + ephemeral key — unused nodes clean themselves up, and a single-use key fails on reconnect."
     },
     "removeConfirm": "This deletes the network settings and the stored auth key, and unregisters the node. It cannot be undone.",
-    "removeConfirmInUse": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} host, which will then connect over the plain network. It cannot be undone.",
-    "removeConfirmInUse_other": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} hosts, which will then connect over the plain network. It cannot be undone.",
+    "removeConfirmInUse": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} host, which will then connect over the regular network. It cannot be undone.",
+    "removeConfirmInUse_other": "This deletes the network settings and stored auth key, and unregisters the node. It also clears the Tailnet setting from {{count}} hosts, which will then connect over the regular network. It cannot be undone.",
     "disconnect": "Disconnect",
     "identity": {
       "tailnet": "Tailnet",
