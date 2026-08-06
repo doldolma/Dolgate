@@ -20,6 +20,7 @@ import type {
   LoadedManagedSecretPayload,
   ManagedSecretPayload,
   SecretMetadataRecord,
+  SnippetRecord,
   SshHostRecord,
   SyncPayloadV2,
   SyncRecord,
@@ -1059,6 +1060,17 @@ export function decodeTailnets(
       tailnet => typeof tailnet.id === 'string' && tailnet.id.trim().length > 0,
     )
     .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+export function decodeSnippets(
+  payload: SyncPayloadV2,
+  keyBase64: string,
+): SnippetRecord[] {
+  // 구버전 서버는 snippets 필드 자체를 모른다.
+  return decodeSyncRecords<SnippetRecord>(
+    payload.snippets ?? [],
+    keyBase64,
+  ).sort((left, right) => left.label.localeCompare(right.label));
 }
 
 export function buildKnownHostsSyncPayload(

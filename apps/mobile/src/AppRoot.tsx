@@ -13,6 +13,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { CredentialPromptModal } from "./components/CredentialPromptModal";
+import { StartupVarsPromptModal } from "./components/StartupVarsPromptModal";
 import { AwsSsoWaitingModal } from "./components/AwsSsoWaitingModal";
 import { ServerKeyPromptModal } from "./components/ServerKeyPromptModal";
 import { recordAwsSsoCallbackUrl } from "./lib/aws-session";
@@ -58,6 +59,15 @@ export function AppRoot(): React.JSX.Element {
   );
   const cancelCredentialPrompt = useMobileAppStore(
     (state) => state.cancelCredentialPrompt,
+  );
+  const pendingStartupCommandPrompt = useMobileAppStore(
+    (state) => state.pendingStartupCommandPrompt,
+  );
+  const submitStartupCommandPrompt = useMobileAppStore(
+    (state) => state.submitStartupCommandPrompt,
+  );
+  const cancelStartupCommandPrompt = useMobileAppStore(
+    (state) => state.cancelStartupCommandPrompt,
   );
   const cancelAwsSsoLogin = useMobileAppStore(
     (state) => state.cancelAwsSsoLogin,
@@ -157,6 +167,11 @@ export function AppRoot(): React.JSX.Element {
           prompt={pendingCredentialPrompt}
           onCancel={cancelCredentialPrompt}
           onSubmit={(value) => void submitCredentialPrompt(value)}
+        />
+        <StartupVarsPromptModal
+          prompt={pendingStartupCommandPrompt}
+          onCancel={cancelStartupCommandPrompt}
+          onSubmit={submitStartupCommandPrompt}
         />
         <AwsSsoWaitingModal
           prompt={pendingAwsSsoLogin}

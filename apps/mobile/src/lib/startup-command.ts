@@ -10,7 +10,12 @@
 import {
   MAX_HOST_STARTUP_COMMAND_LENGTH,
   type HostRecord,
+  type SnippetRecord,
 } from '@dolssh/shared-core';
+import {
+  parseSnippetVariables,
+  type SnippetVariable,
+} from './snippet-variables';
 
 // 접속 직후엔 셸이 아직 프롬프트(PS1)를 안 찍었을 수 있다. 그때 보내면 커널 tty(cooked, echo on)와
 // readline(raw)이 입력을 두 번 echo 한다. 그래서 "출력이 잠잠해졌고 + 꼬리가 프롬프트처럼 보일
@@ -51,25 +56,72 @@ export function normalizeStartupCommand(value: string | undefined): string | nul
 }
 
 /**
- * 이 호스트에 보낼 startup command. 없으면 null.
+ * 접속 시 startup command 를 어떻게 처리할지.
  *
- * `{type:'snippet'}` 은 건너뛴다 — 모바일에는 스니펫 상태가 없어서(동기화 payload 에서 개수만
- * 센다) id 를 명령으로 풀 수 없다. 조용히 넘기는 편이 낫다: 오류를 띄우면 데스크톱에서 스니펫을
- * 지정한 사용자가 모바일에서 접속할 때마다 경고를 보게 된다.
+ * 문자열 하나가 아니라 종류를 돌려주는 이유는 스니펫 때문이다 — 변수가 있으면 값을 받아야
+ * 하고, 연결된 스니펫이 사라졌으면 건너뛰되 그 사실을 호출부가 구분할 수 있어야 한다.
  */
-export function resolveStartupCommand(host: HostRecord): string | null {
+export type StartupCommandPlan =
+  | { kind: 'none' }
+  /** 그대로 보낸다. */
+  | { kind: 'command'; command: string }
+  /** 값을 받아 치환한 뒤 보낸다. */
+  | {
+      kind: 'variables';
+      snippetId: string;
+      command: string;
+      variables: SnippetVariable[];
+    }
+  /** 연결된 스니펫을 찾지 못했다. 접속은 그대로 진행하고 명령만 건너뛴다. */
+  | { kind: 'missingSnippet' };
+
+/**
+ * 이 호스트에 보낼 startup command 를 정한다.
+ *
+ * `{type:'snippet'}` 은 snippets 에서 찾아 푼다. 찾지 못하면 `missingSnippet` 이다 — 접속
+ * 자체를 막지는 않는다. 데스크톱에서 스니펫을 지정한 사용자가 모바일에서 접속할 때마다
+ * 오류를 보는 것보다, 조용히 건너뛰고 폼에서 알려 주는 편이 낫다.
+ *
+ * `{type:'command'}` 의 변수는 풀지 않는다 — 데스크톱도 스니펫 경로에서만 묻는다
+ * (apps/desktop/src/renderer/store/slices/sessionSlice.ts).
+ */
+export function resolveStartupCommand(
+  host: HostRecord,
+  snippets: readonly SnippetRecord[] = [],
+): StartupCommandPlan {
   if (!STARTUP_COMMAND_HOST_KINDS.has(host.kind)) {
-    return null;
+    return { kind: 'none' };
   }
   // 종류로 걸러도 타입은 좁혀지지 않는다 — aws-ecs 레코드에는 이 필드가 아예 없다.
   if (!('startupCommand' in host)) {
-    return null;
+    return { kind: 'none' };
   }
   const configured = host.startupCommand;
-  if (configured?.type !== 'command') {
-    return null;
+  if (!configured) {
+    return { kind: 'none' };
   }
-  return normalizeStartupCommand(configured.command);
+
+  if (configured.type === 'command') {
+    const command = normalizeStartupCommand(configured.command);
+    return command ? { kind: 'command', command } : { kind: 'none' };
+  }
+
+  if (configured.type === 'snippet') {
+    const snippet = snippets.find(entry => entry.id === configured.snippetId);
+    if (!snippet) {
+      return { kind: 'missingSnippet' };
+    }
+    const command = normalizeStartupCommand(snippet.command);
+    if (!command) {
+      return { kind: 'none' };
+    }
+    const variables = parseSnippetVariables(command);
+    return variables.length > 0
+      ? { kind: 'variables', snippetId: snippet.id, command, variables }
+      : { kind: 'command', command };
+  }
+
+  return { kind: 'none' };
 }
 
 export interface StartupCommandFlusher {

@@ -115,6 +115,7 @@ function createExistingHost(): SshHostRecord {
     jumpHostIds: ["jump-1"],
     env: [{ key: "FOO", value: "bar" }],
     favorite: true,
+    startupCommand: { type: "command", command: "cd /srv" },
     createdAt: "2026-07-01T00:00:00.000Z",
     updatedAt: "2026-07-01T00:00:00.000Z",
   };
@@ -394,6 +395,11 @@ describe("useMobileAppStore host mutations", () => {
     expect(pushedHost.jumpHostIds).toEqual(["jump-1"]);
     expect(pushedHost.env).toEqual([{ key: "FOO", value: "bar" }]);
     expect(pushedHost.favorite).toBe(true);
+    // 필드를 생략하면 보존이다. undefined 를 그대로 쓰면 직렬화에서 키가 빠져 지워진다.
+    expect(pushedHost.startupCommand).toEqual({
+      type: "command",
+      command: "cd /srv",
+    });
     // 자격증명을 안 넣었으니 시크릿은 push 되지 않는다.
     expect(pushedPayloads[0].secrets).toHaveLength(0);
 
@@ -631,5 +637,75 @@ describe("useMobileAppStore host mutations", () => {
       }),
     ).rejects.toThrow("온라인 로그인 상태에서만 사용할 수 있습니다.");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("sets and clears the startup command", async () => {
+    const pushedPayloads: SyncPayloadV2[] = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/sync" && init?.method === "POST") {
+        pushedPayloads.push(JSON.parse(String(init.body)) as SyncPayloadV2);
+        return createJsonResponse("", 202);
+      }
+      throw new Error(`unexpected fetch path: ${path}`);
+    });
+
+    const existing = createExistingHost();
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState(), hosts: [existing] });
+    });
+
+    const base = {
+      hostId: existing.id,
+      label: "Existing host",
+      hostname: "old.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password" as const,
+      groupName: "work",
+    };
+
+    // 스니펫으로 바꾼다.
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        ...base,
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      });
+    });
+    expect(
+      decryptRecord<SshHostRecord>(pushedPayloads[0].hosts[0].encrypted_payload)
+        .startupCommand,
+    ).toEqual({ type: "snippet", snippetId: "snippet-1" });
+
+    // null 은 해제다 — 보존(생략)과 구분돼야 한다.
+    await act(async () => {
+      await useMobileAppStore.getState().saveHost({
+        ...base,
+        startupCommand: null,
+      });
+    });
+    expect(
+      decryptRecord<SshHostRecord>(pushedPayloads[1].hosts[0].encrypted_payload)
+        .startupCommand,
+    ).toBeNull();
+  });
+
+  it("rejects a startup command over the length limit", async () => {
+    await act(async () => {
+      resetStore({ auth: createAuthenticatedState() });
+    });
+
+    await expect(
+      useMobileAppStore.getState().saveHost({
+        label: "Host",
+        hostname: "example.com",
+        port: 22,
+        username: "root",
+        authType: "password",
+        startupCommand: {
+          type: "command",
+          command: "x".repeat(32 * 1024 + 1),
+        },
+      }),
+    ).rejects.toThrow();
   });
 });

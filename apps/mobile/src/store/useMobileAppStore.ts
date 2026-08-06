@@ -24,7 +24,9 @@ import type {
   MobileSettings,
   MobileSftpSessionRecord,
   MobileSftpTransferRecord,
+  HostStartupCommand,
   SecretMetadataRecord,
+  SnippetRecord,
   SshHostRecord,
   SyncPayloadV2,
   SyncStatus,
@@ -45,6 +47,7 @@ import {
   getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
   isSshHostRecord,
+  MAX_HOST_STARTUP_COMMAND_LENGTH,
   normalizeServerUrl,
   resolveVaultDescriptorState,
   unwrapVaultDek,
@@ -72,6 +75,7 @@ import {
   decodeGroups,
   decodeKnownHosts,
   decodeManagedSecrets,
+  decodeSnippets,
   decodeSupportedHosts,
   decodeTailnets,
   deleteRemoteAccount,
@@ -116,6 +120,10 @@ import {
   resolveStartupCommand,
   type StartupCommandFlusher,
 } from '../lib/startup-command';
+import {
+  resolveSnippetCommand,
+  type SnippetVariable,
+} from '../lib/snippet-variables';
 import {
   isLiveSession,
   normalizePersistedSessionsForColdStart,
@@ -233,6 +241,22 @@ interface PendingCredentialPromptState {
   authType: 'password' | 'privateKey' | 'certificate';
   message?: string | null;
   initialValue: HostSecretInput;
+}
+
+/**
+ * startup command 로 지정한 스니펫에 `{{변수}}` 가 있을 때 값을 받는 프롬프트.
+ *
+ * 데스크톱은 접속을 시작하기 전에 묻지만(sessionSlice.ts) 모바일은 셸이 열린 뒤에 묻는다.
+ * 여기서는 startup command 해석 자체가 셸 오픈 뒤에 일어나고, 그 앞으로 옮기면 cols·rows·
+ * secrets 를 미리 만들어야 해서 접속 경로를 크게 흔든다. 셸이 이미 떠 있어도 명령은 프롬프트가
+ * 감지된 뒤에 타이핑되므로 사용자가 보는 결과는 같다.
+ */
+interface PendingStartupCommandPromptState {
+  sessionId: string;
+  hostLabel: string;
+  snippetId: string;
+  command: string;
+  variables: SnippetVariable[];
 }
 
 type PendingAwsSsoLoginState = AwsSsoBrowserLoginPrompt;
@@ -566,6 +590,12 @@ export interface MobileHostDraftInput {
     passphrase?: string;
     certificateText?: string;
   } | null;
+  /**
+   * 세 가지 상태를 구분한다 — 값이면 설정, `null` 이면 해제, **생략(`undefined`)이면 보존**.
+   * 보존이 기본값이어야 한다: 이 필드를 모르는 화면이 호스트를 저장할 때 데스크톱에서 넣은
+   * 값이 사라지면 안 된다.
+   */
+  startupCommand?: HostStartupCommand | null;
 }
 
 interface MobileAppState {
@@ -587,6 +617,11 @@ interface MobileAppState {
   hosts: HostRecord[];
   awsProfiles: ManagedAwsProfilePayload[];
   tailnets: TailnetPayload[];
+  /**
+   * pull 로만 채운다 — 모바일에서 스니펫을 만들거나 고치지 않는다. 호스트의 startup command 가
+   * 가리키는 스니펫을 풀고, 폼에서 고를 목록을 주기 위해서만 있다.
+   */
+  snippets: SnippetRecord[];
   knownHosts: KnownHostRecord[];
   secretMetadata: SecretMetadataRecord[];
   sessions: MobileSessionRecord[];
@@ -602,6 +637,7 @@ interface MobileAppState {
   pendingAwsSsoLogin: PendingAwsSsoLoginState | null;
   pendingServerKeyPrompt: PendingServerKeyPromptState | null;
   pendingCredentialPrompt: PendingCredentialPromptState | null;
+  pendingStartupCommandPrompt: PendingStartupCommandPromptState | null;
   initializeApp: () => Promise<void>;
   handleAuthCallbackUrl: (url: string) => Promise<void>;
   startBrowserLogin: () => Promise<void>;
@@ -632,7 +668,11 @@ interface MobileAppState {
   duplicateSession: (sessionId: string) => Promise<string | null>;
   setActiveConnectionTab: (tab: MobileConnectionTabRef | null) => void;
   setActiveSessionTab: (sessionId: string | null) => void;
-  resumeSession: (sessionId: string) => Promise<string | null>;
+  /** auto 는 포그라운드 복귀 자동 재연결이다 — startup 변수 값을 묻지 않는다. */
+  resumeSession: (
+    sessionId: string,
+    options?: { auto?: boolean },
+  ) => Promise<string | null>;
   disconnectSession: (sessionId: string) => Promise<void>;
   removeSession: (sessionId: string) => Promise<void>;
   writeToSession: (sessionId: string, data: string) => Promise<void>;
@@ -644,6 +684,9 @@ interface MobileAppState {
   rejectServerKeyPrompt: () => Promise<void>;
   submitCredentialPrompt: (input: HostSecretInput) => Promise<void>;
   cancelCredentialPrompt: () => void;
+  submitStartupCommandPrompt: (values: Record<string, string>) => void;
+  /** 취소하면 startup command 없이 접속을 그대로 쓴다. */
+  cancelStartupCommandPrompt: () => void;
   openSftpForSession: (sessionId: string) => Promise<string | null>;
   /**
    * 터미널 탭을 만들지 않고 호스트에서 바로 SFTP 를 연다. 호스트 메뉴의 SFTP 가 쓰는
@@ -734,6 +777,14 @@ let pendingServerKeyResolver: ((accepted: boolean) => void) | null = null;
 let pendingCredentialResolver:
   | ((value: HostSecretInput | null) => void)
   | null = null;
+let pendingStartupCommandResolver:
+  | ((values: Record<string, string> | null) => void)
+  | null = null;
+/**
+ * 세션별로 마지막에 입력한 startup 변수 값. 자동 재연결이 재사용한다 — 홈→복귀 때마다 모달이
+ * 뜨면 쓸 수 없다. 메모리에만 두고 persist 하지 않는다(명령에 비밀이 섞일 수 있다).
+ */
+const startupVarsBySession = new Map<string, Record<string, string>>();
 let pendingAwsSsoCancelHandler: (() => void) | null = null;
 let tailnetRequestCounter = 0;
 
@@ -883,7 +934,13 @@ function ensureSyncPollingLifecycle(): void {
           startSyncPolling();
           void state.syncNow().catch(() => undefined);
         }
-        resumeDroppedActiveSession(state);
+        resumeDroppedActiveSession({
+          sessions: state.sessions,
+          activeSessionTabId: state.activeSessionTabId,
+          // 포그라운드 복귀는 자동이다 — startup 변수 모달을 띄우지 않는다.
+          resumeSession: sessionId =>
+            state.resumeSession(sessionId, { auto: true }),
+        });
       } else {
         stopSyncPolling();
         // Do not close Tailnet here. Browser authorization intentionally sends
@@ -1859,6 +1916,7 @@ function createEmptyProtectedState(): Pick<
   | 'hosts'
   | 'awsProfiles'
   | 'tailnets'
+  | 'snippets'
   | 'knownHosts'
   | 'secretMetadata'
   | 'secretsByRef'
@@ -1875,6 +1933,7 @@ function createEmptyProtectedState(): Pick<
     hosts: [],
     awsProfiles: [],
     tailnets: [],
+    snippets: [],
     knownHosts: [],
     secretMetadata: [],
     secretsByRef: {},
@@ -2084,6 +2143,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingStartupCommandPrompt: null,
         });
       };
 
@@ -2114,6 +2174,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingStartupCommandPrompt: null,
         });
       };
 
@@ -3797,7 +3858,15 @@ export const useMobileAppStore = create<MobileAppState>()(
       const connectSessionRecord = async (
         sessionRecord: MobileSessionRecord,
         host: HostRecord,
+        options?: {
+          /**
+           * startup command 스니펫에 변수가 있을 때 값을 물어도 되는지. 자동 재연결에서는
+           * false 다 — 홈에서 돌아올 때마다 모달이 뜨면 쓸 수 없다.
+           */
+          promptForStartupVars?: boolean;
+        },
       ) => {
+        const promptForStartupVars = options?.promptForStartupVars ?? true;
         if (
           runtimeSessions.has(sessionRecord.id) ||
           pendingSessionConnections.has(sessionRecord.id)
@@ -3815,7 +3884,11 @@ export const useMobileAppStore = create<MobileAppState>()(
           return;
         }
         if (isSshHostRecord(host)) {
-          void connectSshSessionRecord(sessionRecord, host);
+          void connectSshSessionRecord(
+            sessionRecord,
+            host,
+            promptForStartupVars,
+          );
           return;
         }
         markSessionState(
@@ -3829,6 +3902,8 @@ export const useMobileAppStore = create<MobileAppState>()(
       const connectSshSessionRecord = async (
         sessionRecord: MobileSessionRecord,
         host: SshHostRecord,
+        /** false 면 startup command 스니펫 변수를 묻지 않는다(자동 재연결). */
+        promptForStartupVars = true,
       ) => {
         let pendingConnection: EngineConnection | null = null;
         let pendingShell: EngineShell | null = null;
@@ -4001,17 +4076,62 @@ export const useMobileAppStore = create<MobileAppState>()(
 
           // 호스트에 startup command 가 설정돼 있으면 프롬프트가 뜬 뒤에 타이핑한다. 판단은
           // startup-command.ts 가 하고 여기서는 출력을 넘겨 주기만 한다.
-          const startupCommand = resolveStartupCommand(host);
-          const startupFlusher = startupCommand
-            ? createStartupCommandFlusher(() => {
-                void shell
-                  .sendData(
-                    Uint8Array.from(Buffer.from(`${startupCommand}\r`, 'utf8')),
-                  )
-                  .catch(() => undefined);
-              })
-            : null;
-          pendingStartupFlusher = startupFlusher;
+          //
+          // flusher 를 나중에 만들 수 있게 let 으로 둔다 — 스니펫 변수를 물어야 하면 값이
+          // 들어온 뒤에야 보낼 명령이 정해진다. 그 사이 도착한 출력은 아래 onChunk 가
+          // startupFlusher 를 매번 다시 읽으므로 그냥 흘려보내면 된다. 감시가 늦게 시작해도
+          // createStartupCommandFlusher 의 최대 대기 타이머가 전송을 보장한다.
+          let startupFlusher: StartupCommandFlusher | null = null;
+          const beginStartupCommand = (command: string) => {
+            startupFlusher = createStartupCommandFlusher(() => {
+              void shell
+                .sendData(Uint8Array.from(Buffer.from(`${command}\r`, 'utf8')))
+                .catch(() => undefined);
+            });
+            pendingStartupFlusher = startupFlusher;
+          };
+
+          const startupPlan = resolveStartupCommand(host, get().snippets);
+          if (startupPlan.kind === 'command') {
+            beginStartupCommand(startupPlan.command);
+          } else if (startupPlan.kind === 'variables') {
+            const cached = startupVarsBySession.get(sessionRecord.id);
+            if (cached) {
+              // 자동 재연결(및 이전 값이 있는 재접속)은 묻지 않는다.
+              beginStartupCommand(
+                resolveSnippetCommand(startupPlan.command, cached),
+              );
+            } else if (promptForStartupVars) {
+              // 사용자가 직접 시작한 접속에서만 묻는다. 값을 받는 동안에도 셸 출력은 계속
+              // 흘러간다 — 모달이 접속을 막지는 않는다.
+              void (async () => {
+                const values = await new Promise<Record<string, string> | null>(
+                  resolve => {
+                    pendingStartupCommandResolver = resolve;
+                    set({
+                      pendingStartupCommandPrompt: {
+                        sessionId: sessionRecord.id,
+                        hostLabel: host.label,
+                        snippetId: startupPlan.snippetId,
+                        command: startupPlan.command,
+                        variables: startupPlan.variables,
+                      },
+                    });
+                  },
+                );
+                // 취소하면 startup command 없이 그대로 쓴다.
+                if (!values || closedDuringConnect) {
+                  return;
+                }
+                startupVarsBySession.set(sessionRecord.id, values);
+                beginStartupCommand(
+                  resolveSnippetCommand(startupPlan.command, values),
+                );
+              })();
+            }
+          }
+          // kind 가 'missingSnippet'·'none' 이면 아무것도 보내지 않는다. 스니펫이 사라진 것은
+          // 접속을 막을 일이 아니고, 폼에서 경고로 알린다.
 
           const backgroundListenerId = await shell.follow(
             {
@@ -4621,6 +4741,7 @@ export const useMobileAppStore = create<MobileAppState>()(
             let nextGroups: GroupRecord[];
             let nextAwsProfiles: ManagedAwsProfilePayload[];
             let nextTailnets: TailnetPayload[];
+            let nextSnippets: SnippetRecord[];
             let nextKnownHosts: KnownHostRecord[];
             let nextSecretsByRef: Record<string, LoadedManagedSecretPayload>;
             try {
@@ -4630,6 +4751,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               nextGroups = sortGroups(decodeGroups(payload, vaultKeyBase64));
               nextAwsProfiles = decodeAwsProfiles(payload, vaultKeyBase64);
               nextTailnets = decodeTailnets(payload, vaultKeyBase64);
+              nextSnippets = decodeSnippets(payload, vaultKeyBase64);
               nextKnownHosts = decodeKnownHosts(payload, vaultKeyBase64);
               nextSecretsByRef = decodeManagedSecrets(payload, vaultKeyBase64);
             } catch (decodeError) {
@@ -4795,6 +4917,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               hosts: nextHosts,
               awsProfiles: nextAwsProfiles,
               tailnets: nextTailnets,
+              snippets: nextSnippets,
               knownHosts: sortKnownHosts(nextKnownHosts),
               secureStateReady: true,
               auth: authenticatedAuth,
@@ -5039,6 +5162,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           hosts: [],
           awsProfiles: [],
           tailnets: [],
+          snippets: [],
           knownHosts: [],
           secretMetadata: [],
           secretsByRef: {},
@@ -5054,6 +5178,7 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingAwsSsoLogin: null,
           pendingServerKeyPrompt: null,
           pendingCredentialPrompt: null,
+          pendingStartupCommandPrompt: null,
         });
       };
 
@@ -5080,6 +5205,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         hosts: [],
         awsProfiles: [],
         tailnets: [],
+        snippets: [],
         knownHosts: [],
         secretMetadata: [],
         sessions: [],
@@ -5094,6 +5220,7 @@ export const useMobileAppStore = create<MobileAppState>()(
         pendingAwsSsoLogin: null,
         pendingServerKeyPrompt: null,
         pendingCredentialPrompt: null,
+        pendingStartupCommandPrompt: null,
         initializeApp: async () => {
           if (initializePromise) {
             return initializePromise;
@@ -6009,6 +6136,7 @@ export const useMobileAppStore = create<MobileAppState>()(
               hosts: [],
               awsProfiles: [],
               tailnets: [],
+              snippets: [],
               knownHosts: [],
               secretMetadata: [],
               secretsByRef: {},
@@ -6036,6 +6164,13 @@ export const useMobileAppStore = create<MobileAppState>()(
         saveHost: async (input: MobileHostDraftInput) => {
           if (!get().secureStateReady) {
             throw new Error(getSecureStateLoadingMessage());
+          }
+          if (
+            input.startupCommand?.type === 'command' &&
+            input.startupCommand.command.length >
+              MAX_HOST_STARTUP_COMMAND_LENGTH
+          ) {
+            throw new Error(t('store.startupCommandTooLong'));
           }
 
           const now = new Date().toISOString();
@@ -6094,6 +6229,12 @@ export const useMobileAppStore = create<MobileAppState>()(
             authType: input.authType,
             groupName: input.groupName?.trim() ? input.groupName.trim() : null,
             secretRef,
+            // 조건부 스프레드여야 한다. `startupCommand: input.startupCommand` 로 두면
+            // 생략했을 때 값이 undefined 로 덮이고, 직렬화에서 키가 통째로 빠져 데스크톱에서
+            // 넣은 값이 지워진다. 위 `...(existingSsh ?? {})` 가 보존하는 것을 되돌리는 셈이다.
+            ...(input.startupCommand !== undefined
+              ? { startupCommand: input.startupCommand }
+              : {}),
             createdAt: existingSsh?.createdAt ?? now,
             updatedAt: now,
           };
@@ -6371,7 +6512,10 @@ export const useMobileAppStore = create<MobileAppState>()(
             ),
           }));
         },
-        resumeSession: async (sessionId: string) => {
+        resumeSession: async (
+          sessionId: string,
+          options?: { auto?: boolean },
+        ) => {
           const session = get().sessions.find(item => item.id === sessionId);
           if (!session) {
             return null;
@@ -6422,7 +6566,9 @@ export const useMobileAppStore = create<MobileAppState>()(
               ),
             };
           });
-          void connectSessionRecord(session, host);
+          void connectSessionRecord(session, host, {
+            promptForStartupVars: !options?.auto,
+          });
           return session.id;
         },
         disconnectSession: async (sessionId: string) => {
@@ -7447,6 +7593,16 @@ export const useMobileAppStore = create<MobileAppState>()(
           pendingCredentialResolver = null;
           set({ pendingCredentialPrompt: null });
         },
+        submitStartupCommandPrompt: (values: Record<string, string>) => {
+          pendingStartupCommandResolver?.(values);
+          pendingStartupCommandResolver = null;
+          set({ pendingStartupCommandPrompt: null });
+        },
+        cancelStartupCommandPrompt: () => {
+          pendingStartupCommandResolver?.(null);
+          pendingStartupCommandResolver = null;
+          set({ pendingStartupCommandPrompt: null });
+        },
       };
     },
     {
@@ -7458,6 +7614,12 @@ export const useMobileAppStore = create<MobileAppState>()(
         syncStatus: state.syncStatus,
         groups: state.groups,
         hosts: state.hosts,
+        // 콜드스타트 첫 접속에도 스니펫이 필요하다 — pull 이 끝나기 전에 붙으면 startup
+        // command 가 미해결로 건너뛰어진다.
+        //
+        // 명령 문자열이 AsyncStorage 에 평문으로 남는다. 노출 수준은 이미 persist 되는
+        // 호스트의 startupCommand 와 같고, secrets 는 여전히 persist 하지 않는다.
+        snippets: state.snippets,
         knownHosts: state.knownHosts,
         sessions: compactPersistedSessions(state.sessions),
         activeSessionTabId: resolveActiveSessionTabId(
@@ -7535,6 +7697,8 @@ export function resetMobileStoreRuntimeForTests(): void {
   offlineRecoveryKey = null;
   pendingServerKeyResolver = null;
   pendingCredentialResolver = null;
+  pendingStartupCommandResolver = null;
+  startupVarsBySession.clear();
   pendingAwsSsoCancelHandler = null;
   for (const runtime of runtimeSessions.values()) {
     try {
@@ -7569,4 +7733,5 @@ export type {
   MobileAppState,
   PendingCredentialPromptState,
   PendingServerKeyPromptState,
+  PendingStartupCommandPromptState,
 };

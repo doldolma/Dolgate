@@ -13,9 +13,11 @@ import {
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NavigationProp, RouteProp } from "@react-navigation/native";
 import { isSshHostRecord } from "@dolssh/shared-core";
-import type { AuthType } from "@dolssh/shared-core";
+import type { AuthType, HostStartupCommand } from "@dolssh/shared-core";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { SettingsGroup, SettingsRow } from "../components/SettingsList";
+import { StartupSnippetPickerModal } from "../components/StartupSnippetPickerModal";
+import { hasSnippetVariables } from "../lib/snippet-variables";
 import { useScreenPadding } from "../lib/screen-layout";
 import { useMobileAppStore } from "../store/useMobileAppStore";
 import { useMobilePalette } from "../theme";
@@ -25,6 +27,35 @@ import { useTranslation } from "react-i18next";
 // 소켓에 위임하는 방식이라 그 프로세스가 없는 iOS·Android 에서는 성립하지 않는다.
 type HostAuthType = "password" | "privateKey" | "certificate";
 type CredentialMode = "preserve" | "replace" | "remove";
+
+type StartupMode = "none" | "command" | "snippet";
+
+const STARTUP_MODE_OPTIONS: Array<{ value: StartupMode; labelKey: string }> = [
+  { value: "none", labelKey: "hostForm.startup.modeNone" },
+  { value: "command", labelKey: "hostForm.startup.modeCommand" },
+  { value: "snippet", labelKey: "hostForm.startup.modeSnippet" },
+];
+
+/**
+ * 폼 상태를 저장 payload 로 바꾼다.
+ *
+ * 항상 값이나 `null` 을 돌려준다 — `undefined`(보존)는 이 화면이 쓸 일이 없다. 사용자가
+ * "사용 안 함"을 골랐으면 그건 해제를 뜻하므로 `null` 이어야 한다.
+ */
+function buildStartupCommandPayload(input: {
+  mode: StartupMode;
+  command: string;
+  snippetId: string | null;
+}): HostStartupCommand | null {
+  if (input.mode === "command") {
+    const command = input.command.trim();
+    return command ? { type: "command", command: input.command } : null;
+  }
+  if (input.mode === "snippet" && input.snippetId) {
+    return { type: "snippet", snippetId: input.snippetId };
+  }
+  return null;
+}
 
 const AUTH_TYPE_OPTIONS: Array<{ value: HostAuthType; labelKey: string }> = [
   { value: "password", labelKey: "hostForm.auth.password" },
@@ -235,6 +266,37 @@ export function HostFormScreen(): React.JSX.Element {
     useState<CredentialMode>(initialCredentialMode);
   const [saving, setSaving] = useState(false);
 
+  const snippets = useMobileAppStore((state) => state.snippets);
+  const initialStartup = existing?.startupCommand ?? null;
+  const initialStartupMode: StartupMode =
+    initialStartup?.type === "command"
+      ? "command"
+      : initialStartup?.type === "snippet"
+        ? "snippet"
+        : "none";
+  const [startupMode, setStartupMode] =
+    useState<StartupMode>(initialStartupMode);
+  const [startupCommand, setStartupCommand] = useState(
+    initialStartup?.type === "command" ? initialStartup.command : "",
+  );
+  const [startupSnippetId, setStartupSnippetId] = useState<string | null>(
+    initialStartup?.type === "snippet" ? initialStartup.snippetId : null,
+  );
+  const [snippetPickerOpen, setSnippetPickerOpen] = useState(false);
+
+  const selectedSnippet = useMemo(
+    () =>
+      startupSnippetId
+        ? (snippets.find((entry) => entry.id === startupSnippetId) ?? null)
+        : null,
+    [snippets, startupSnippetId],
+  );
+  // 데스크톱에서 스니펫을 지운 경우. 접속은 건너뛰고 여기서만 알린다.
+  const startupSnippetMissing = Boolean(startupSnippetId && !selectedSnippet);
+  const startupHasVariables = Boolean(
+    selectedSnippet && hasSnippetVariables(selectedSnippet.command),
+  );
+
   // 저장에 성공해 스스로 닫는 경우와 사용자가 도중에 나가는 경우를 구분한다 — 구분하지 않으면
   // 저장 직후에도 "변경 사항을 버릴까요?"가 뜬다.
   const savedRef = useRef(false);
@@ -246,6 +308,12 @@ export function HostFormScreen(): React.JSX.Element {
     groupName !== (existing?.groupName ?? "") ||
     authType !== initialAuthType ||
     credentialMode !== initialCredentialMode ||
+    // startup 항목을 빠뜨리면 그것만 고치고 나갈 때 확인 없이 입력이 사라진다.
+    startupMode !== initialStartupMode ||
+    startupCommand !==
+      (initialStartup?.type === "command" ? initialStartup.command : "") ||
+    startupSnippetId !==
+      (initialStartup?.type === "snippet" ? initialStartup.snippetId : null) ||
     Boolean(password || privateKeyPem || certificateText || passphrase);
 
   // 헤더의 취소와 아래로 스와이프하는 모달 제스처가 같은 곳을 지나게 한다 — 한쪽만 확인을
@@ -341,6 +409,11 @@ export function HostFormScreen(): React.JSX.Element {
               certificateText:
                 authType === "certificate" ? certificateText : undefined,
             },
+        startupCommand: buildStartupCommandPayload({
+          mode: startupMode,
+          command: startupCommand,
+          snippetId: startupSnippetId,
+        }),
       });
       savedRef.current = true;
       navigation.goBack();
@@ -505,6 +578,57 @@ export function HostFormScreen(): React.JSX.Element {
           </SettingsGroup>
         ) : null}
 
+        <View style={styles.authSection}>
+          <Text style={[styles.sectionHeader, { color: palette.text }]}>
+            {translate("hostForm.startupSection")}
+          </Text>
+          <Segmented
+            options={STARTUP_MODE_OPTIONS.map((option) => ({
+              value: option.value,
+              label: translate(option.labelKey),
+            }))}
+            selected={startupMode}
+            onSelect={setStartupMode}
+          />
+          <Text style={[styles.startupHint, { color: palette.tabInactive }]}>
+            {translate("hostForm.startup.description")}
+          </Text>
+        </View>
+
+        {startupMode === "command" ? (
+          <SettingsGroup>
+            <PasteField
+              label={translate("hostForm.startup.modeCommand")}
+              value={startupCommand}
+              placeholder={translate("hostForm.startup.commandPlaceholder")}
+              onChangeText={setStartupCommand}
+            />
+          </SettingsGroup>
+        ) : null}
+
+        {startupMode === "snippet" ? (
+          <SettingsGroup
+            footer={
+              startupSnippetMissing
+                ? translate("hostForm.startup.missing")
+                : startupHasVariables
+                  ? translate("hostForm.startup.varsHint")
+                  : translate("hostForm.startup.snippetOnlyOnDesktop")
+            }
+          >
+            <SettingsRow
+              icon="terminal-outline"
+              label={
+                selectedSnippet
+                  ? selectedSnippet.label
+                  : translate("hostForm.startup.selectPlaceholder")
+              }
+              tone={startupSnippetMissing ? "danger" : "default"}
+              onPress={() => setSnippetPickerOpen(true)}
+            />
+          </SettingsGroup>
+        ) : null}
+
         {validationMessage && (label || hostname || username) ? (
           <Text style={[styles.errorText, { color: palette.warning }]}>
             {validationMessage}
@@ -531,6 +655,16 @@ export function HostFormScreen(): React.JSX.Element {
           </Text>
         </Pressable>
       </ScrollView>
+      <StartupSnippetPickerModal
+        visible={snippetPickerOpen}
+        snippets={snippets}
+        selectedSnippetId={startupSnippetId}
+        onSelect={(snippet) => {
+          setStartupSnippetId(snippet.id);
+          setSnippetPickerOpen(false);
+        }}
+        onClose={() => setSnippetPickerOpen(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -543,6 +677,11 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   // 그룹 머리글과 같은 결 — 카드 밖에서 조용히 구획만 나눈다(SettingsList 와 동일 규격).
+  startupHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    paddingHorizontal: 4,
+  },
   sectionHeader: {
     fontSize: 13,
     fontWeight: "600",

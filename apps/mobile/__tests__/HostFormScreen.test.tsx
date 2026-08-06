@@ -214,6 +214,8 @@ describe("HostFormScreen", () => {
         passphrase: undefined,
         certificateText: undefined,
       },
+      // 새 호스트는 startup command 를 고르지 않았으므로 명시적 해제다.
+      startupCommand: null,
     });
     expect(mockGoBack).toHaveBeenCalledTimes(1);
 
@@ -558,5 +560,118 @@ describe("HostFormScreen", () => {
         credentialMode: "preserve",
       }),
     );
+  });
+  it("shows the existing startup command and can switch it to a snippet", async () => {
+    const existing = {
+      ...createExistingHost(),
+      startupCommand: { type: "command" as const, command: "cd /srv" },
+    };
+    mockRouteParams = { hostId: existing.id };
+    resetStore([existing]);
+    useMobileAppStore.setState({
+      snippets: [
+        {
+          id: "snippet-1",
+          label: "Deploy",
+          command: "deploy {{env}}",
+          createdAt: "2026-07-01T00:00:00.000Z",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const saveHostMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveHost: saveHostMock });
+
+    let tree: renderer.ReactTestRenderer | null = null;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    // 기존 명령이 그대로 보인다.
+    expect(findInput(tree!.root, "명령").props.value).toBe("cd /srv");
+
+    // 스니펫 모드로 바꾸고 목록에서 고른다.
+    await act(async () => {
+      findActionByLabel(tree!.root, "스니펫").props.onPress();
+    });
+    await act(async () => {
+      findActionByLabel(tree!.root, "스니펫 선택").props.onPress();
+    });
+    await act(async () => {
+      tree!.root
+        .findAll((node) => node.props?.testID === "startup-snippet-snippet-1")[0]
+        .props.onPress();
+    });
+
+    await act(async () => {
+      findSaveButton(tree!.root, "변경 사항 저장").props.onPress();
+    });
+
+    expect(saveHostMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startupCommand: { type: "snippet", snippetId: "snippet-1" },
+      }),
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("clears the startup command when the mode goes back to none", async () => {
+    const existing = {
+      ...createExistingHost(),
+      startupCommand: { type: "command" as const, command: "cd /srv" },
+    };
+    mockRouteParams = { hostId: existing.id };
+    resetStore([existing]);
+    const saveHostMock = jest.fn(async () => undefined);
+    useMobileAppStore.setState({ saveHost: saveHostMock });
+
+    let tree: renderer.ReactTestRenderer | null = null;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    await act(async () => {
+      findActionByLabel(tree!.root, "사용 안 함").props.onPress();
+    });
+    await act(async () => {
+      findSaveButton(tree!.root, "변경 사항 저장").props.onPress();
+    });
+
+    expect(saveHostMock).toHaveBeenCalledWith(
+      expect.objectContaining({ startupCommand: null }),
+    );
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it("warns when the linked snippet is gone", async () => {
+    const existing = {
+      ...createExistingHost(),
+      startupCommand: { type: "snippet" as const, snippetId: "gone" },
+    };
+    mockRouteParams = { hostId: existing.id };
+    resetStore([existing]);
+    useMobileAppStore.setState({ snippets: [] });
+
+    let tree: renderer.ReactTestRenderer | null = null;
+    await act(async () => {
+      tree = renderForm();
+    });
+
+    const warning = tree!.root.findAll(
+      (node) =>
+        typeof node.props?.children === "string" &&
+        node.props.children.includes("찾을 수 없습니다"),
+    );
+    expect(warning.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      tree!.unmount();
+    });
   });
 });

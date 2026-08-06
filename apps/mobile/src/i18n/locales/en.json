@@ -224,7 +224,8 @@
     "saveFailed": "Saving failed.",
     "uploadFailed": "The file upload failed.",
     "deleteFailed": "Deleting failed.",
-    "copyFailed": "Copying failed."
+    "copyFailed": "Copying failed.",
+    "startupCommandTooLong": "The startup command is too long."
   },
   "vaultGate": {
     "switchAccount": "Sign in with a different account (sign out)",
@@ -300,7 +301,8 @@
       "host": "Enter the host address.",
       "port": "The port must be a number between 1 and 65535.",
       "username": "Enter a username.",
-      "certificatePair": "Certificate auth needs both the private key and the certificate."
+      "certificatePair": "Certificate auth needs both the private key and the certificate.",
+      "startupCommandTooLong": "The startup command is too long."
     },
     "editFailedTitle": "Could not update the host",
     "addFailedTitle": "Could not add the host",
@@ -343,7 +345,21 @@
     "discardTitle": "Discard changes?",
     "discardBody": "You have unsaved changes.",
     "discardConfirm": "Discard",
-    "keepEditing": "Keep editing"
+    "keepEditing": "Keep editing",
+    "startupSection": "Startup",
+    "startup": {
+      "description": "Sends the command plus Enter automatically right after connecting.",
+      "modeNone": "None",
+      "modeCommand": "Command",
+      "modeSnippet": "Snippet",
+      "commandPlaceholder": "e.g. tmux new-session -A -s work",
+      "selectPlaceholder": "Choose a snippet",
+      "searchPlaceholder": "Search name, keyword, command",
+      "emptyText": "No snippet available.",
+      "missing": "The selected snippet could not be found. The startup command is skipped on connect.",
+      "varsHint": "You will be asked for variable values when connecting.",
+      "snippetOnlyOnDesktop": "Snippets are created and edited on desktop."
+    }
   },
   "home": {
     "favorites": "Favorites",
@@ -523,5 +539,11 @@
     "discardConfirm": "Discard",
     "keepEditing": "Keep editing",
     "conflictAction": "Tap to reload or overwrite"
+  },
+  "startupVars": {
+    "title": "Enter startup command variables",
+    "confirm": "Connect",
+    "cancel": "Skip",
+    "subtitle": "Connecting to {{host}}."
   }
 }

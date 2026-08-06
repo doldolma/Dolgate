@@ -1,4 +1,4 @@
-import type { HostRecord } from '@dolssh/shared-core';
+import type { HostRecord, SnippetRecord } from '@dolssh/shared-core';
 import {
   createStartupCommandFlusher,
   looksLikeShellPrompt,
@@ -73,24 +73,66 @@ describe('normalizeStartupCommand', () => {
 });
 
 describe('resolveStartupCommand', () => {
+  const snippet = (over: Partial<SnippetRecord> = {}): SnippetRecord => ({
+    id: 'snippet-1',
+    label: 'Deploy',
+    command: 'cd /srv && ls',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+
   it('command 타입을 그대로 돌려준다', () => {
     const host = sshHost({
       startupCommand: { type: 'command', command: 'tmux new-session -A -s work' },
     } as Partial<HostRecord>);
-    expect(resolveStartupCommand(host)).toBe('tmux new-session -A -s work');
+    expect(resolveStartupCommand(host)).toEqual({
+      kind: 'command',
+      command: 'tmux new-session -A -s work',
+    });
   });
 
-  it('snippet 타입은 건너뛴다', () => {
-    // 모바일에는 스니펫 상태가 없어 id 를 명령으로 풀 수 없다. 오류를 내지 않고 넘긴다 —
-    // 데스크톱에서 스니펫을 지정한 사용자가 접속마다 경고를 보지 않게.
+  it('snippet 을 명령으로 푼다', () => {
     const host = sshHost({
       startupCommand: { type: 'snippet', snippetId: 'snippet-1' },
     } as Partial<HostRecord>);
-    expect(resolveStartupCommand(host)).toBeNull();
+    expect(resolveStartupCommand(host, [snippet()])).toEqual({
+      kind: 'command',
+      command: 'cd /srv && ls',
+    });
   });
 
-  it('설정이 없으면 null', () => {
-    expect(resolveStartupCommand(sshHost())).toBeNull();
+  it('변수가 있는 snippet 은 값을 받아야 한다고 알린다', () => {
+    const host = sshHost({
+      startupCommand: { type: 'snippet', snippetId: 'snippet-1' },
+    } as Partial<HostRecord>);
+    expect(
+      resolveStartupCommand(host, [
+        snippet({ command: 'ssh {{user}}@{{host=example.com}}' }),
+      ]),
+    ).toEqual({
+      kind: 'variables',
+      snippetId: 'snippet-1',
+      command: 'ssh {{user}}@{{host=example.com}}',
+      variables: [
+        { name: 'user', defaultValue: '' },
+        { name: 'host', defaultValue: 'example.com' },
+      ],
+    });
+  });
+
+  it('연결된 snippet 이 사라졌으면 missingSnippet', () => {
+    // 접속 자체를 막지는 않는다 — 명령만 건너뛰고 폼에서 경고한다.
+    const host = sshHost({
+      startupCommand: { type: 'snippet', snippetId: 'gone' },
+    } as Partial<HostRecord>);
+    expect(resolveStartupCommand(host, [snippet()])).toEqual({
+      kind: 'missingSnippet',
+    });
+  });
+
+  it('설정이 없으면 none', () => {
+    expect(resolveStartupCommand(sshHost())).toEqual({ kind: 'none' });
   });
 
   it.each(['aws-ec2', 'warpgate-ssh'])('%s 에도 적용한다', kind => {
@@ -98,7 +140,10 @@ describe('resolveStartupCommand', () => {
       kind,
       startupCommand: { type: 'command', command: 'cd /srv' },
     } as unknown as Partial<HostRecord>);
-    expect(resolveStartupCommand(host)).toBe('cd /srv');
+    expect(resolveStartupCommand(host)).toEqual({
+      kind: 'command',
+      command: 'cd /srv',
+    });
   });
 
   it.each(['aws-ecs', 'serial'])('%s 은 대화형 로그인 셸이 아니라 제외한다', kind => {
@@ -106,7 +151,7 @@ describe('resolveStartupCommand', () => {
       kind,
       startupCommand: { type: 'command', command: 'cd /srv' },
     } as unknown as Partial<HostRecord>);
-    expect(resolveStartupCommand(host)).toBeNull();
+    expect(resolveStartupCommand(host)).toEqual({ kind: 'none' });
   });
 });
 
