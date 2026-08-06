@@ -457,7 +457,11 @@ export function SessionScreen(): React.JSX.Element {
         return;
       }
       if (gesture.type === 'key') {
-        sendDirectTerminalInput('\t');
+        // sendDirectTerminalInput 이 아니라 sendSessionInput 이다. 전자는 xterm 자체
+        // 키 에코용 경로라 소프트 키보드가 떠 있으면 이중 입력 방지로 통째로 막힌다
+        // (directTerminalInputSuppressedRef) — 제스처로 만든 Tab 까지 함께 사라진다.
+        // 이건 사용자 입력이므로 타이핑과 같이 맨 아래로 되돌린다.
+        sendSessionInput('\t');
         return;
       }
       // 방향키는 하단 바의 Left/Right 와 같은 시퀀스다. 다만 맨 아래로 튕기지는 않는다.
