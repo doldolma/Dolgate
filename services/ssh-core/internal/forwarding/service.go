@@ -190,7 +190,7 @@ func (s *Service) startWithClient(
 
 	switch payload.Mode {
 	case "local", "dynamic":
-		listener, listenErr := net.Listen("tcp", fmt.Sprintf("%s:%d", bindAddress, payload.BindPort))
+		listener, listenErr := net.Listen("tcp", net.JoinHostPort(bindAddress, strconv.Itoa(payload.BindPort)))
 		if listenErr != nil {
 			cancel()
 			_ = client.Close()
@@ -198,7 +198,7 @@ func (s *Service) startWithClient(
 		}
 		handle.listener = listener
 	case "remote":
-		listener, listenErr := client.Listen("tcp", fmt.Sprintf("%s:%d", bindAddress, payload.BindPort))
+		listener, listenErr := client.Listen("tcp", net.JoinHostPort(bindAddress, strconv.Itoa(payload.BindPort)))
 		if listenErr != nil {
 			cancel()
 			_ = client.Close()

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,15 @@ import (
 )
 
 var errHostKeyProbed = errors.New("host key probed")
+
+// dialAddress 는 Dial 에 넘길 "host:port" 를 만든다.
+//
+// 직접 이어붙이면 안 된다 — IPv6 리터럴은 대괄호로 감싸야 하므로 "2001:db8::1" 과 22 를
+// "%s:%d" 로 붙이면 "2001:db8::1:22" 가 되고, net.Dial 이 "too many colons" 로 거부한다.
+// 호스트 입력은 비어 있는지만 검사하므로 사용자가 IPv6 리터럴을 그대로 넣을 수 있다.
+func dialAddress(host string, port int) string {
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
 
 // Target는 SSH, SFTP, 포트 포워딩이 공통으로 쓰는 접속 대상 정보다.
 type Target struct {
@@ -270,7 +280,7 @@ func DialClient(
 		Timeout:         config.TCPDialTimeout,
 	}
 
-	addr := fmt.Sprintf("%s:%d", target.Host, target.Port)
+	addr := dialAddress(target.Host, target.Port)
 	hopLabel := fmt.Sprintf("%s@%s:%d", target.Username, target.Host, target.Port)
 	reportProgress := func(stage ProgressStage) {
 		if config.Progress != nil {
@@ -382,7 +392,7 @@ func ProbeHostKey(
 		config.TCPKeepAliveInterval = DefaultConfig.TCPKeepAliveInterval
 	}
 
-	addr := fmt.Sprintf("%s:%d", host, port)
+	addr := dialAddress(host, port)
 
 	// 최종 대상(점프 뒤의 타깃) 홉은 DialClient 밖에서 열리므로(점프 클라이언트의 Dial),
 	// 그 홉의 connecting/connected/failed를 config.Progress로 직접 보고한다. 이래야 "점프까지는
