@@ -84,6 +84,12 @@ function signOfflineLease(
   };
 }
 
+// DEK 캐시 키는 계정별이다. 문자열을 테스트에 흩어 두면 키가 바뀔 때마다 전부 깨지므로
+// 여기 한 곳에서 만든다.
+function dekAccount(userId = "user-1"): string {
+  return `auth:vault-dek:${userId}`;
+}
+
 function createSession(serverUrl: string, userId = "user-1"): AuthSession {
   return {
     user: {
@@ -743,6 +749,40 @@ describe("AuthService E2EE vault", () => {
     parallelism: 1,
   };
 
+  // 계정별 키에 들어가는 값은 항상 owner 를 갖는다 — 그것이 이 캐시의 불변식이다.
+  //
+  // descriptor 필드(wrappedDekBase64·kdf·dekVerifierBase64)는 전부 있거나 전부 없어야 한다.
+  // 파서가 부분 조합을 손상으로 보고 레코드를 버린다.
+  function dekCacheRecord(
+    serverUrl: string,
+    vault: {
+      dekBase64: string;
+      wrappedDekBase64?: string;
+      dekVerifierBase64?: string;
+    },
+    options: { epoch: number; wrapRevision?: number; userId?: string },
+  ): string {
+    const withDescriptor =
+      vault.wrappedDekBase64 !== undefined && vault.dekVerifierBase64 !== undefined;
+    return JSON.stringify({
+      version: 2,
+      owner: {
+        serverUrl: `${serverUrl}/`,
+        userId: options.userId ?? "user-1",
+      },
+      dekBase64: vault.dekBase64,
+      epoch: options.epoch,
+      wrapRevision: options.wrapRevision ?? 0,
+      ...(withDescriptor
+        ? {
+            wrappedDekBase64: vault.wrappedDekBase64,
+            dekVerifierBase64: vault.dekVerifierBase64,
+            kdf: VAULT_TEST_KDF,
+          }
+        : {}),
+    });
+  }
+
   async function buildWrappedDek(passphrase: string): Promise<{
     wrappedDekBase64: string;
     dekBase64: string;
@@ -851,11 +891,11 @@ describe("AuthService E2EE vault", () => {
     expect(service.getState().vault?.status).toBe("unlocked");
     expect(service.isVaultReadyForSync()).toBe(true);
     expect(service.getVaultKeyBase64()).toBe(dekBase64);
-    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+    expect(cachedDekOf(await secretStore.load(dekAccount()))).toBe(
       dekBase64,
     );
     expect(
-      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+      JSON.parse((await secretStore.load(dekAccount())) as string),
     ).toMatchObject({
       owner: { serverUrl: `${serverUrl}/`, userId: session.user.id },
       wrapRevision: 0,
@@ -880,7 +920,7 @@ describe("AuthService E2EE vault", () => {
       "동기화 볼트의 키 검증에 실패했습니다.",
     );
     expect(service.getState().vault?.status).toBe("locked");
-    await expect(secretStore.load("auth:vault-dek")).resolves.toBeNull();
+    await expect(secretStore.load(dekAccount())).resolves.toBeNull();
   });
 
   it("keeps the unlocked memory state when secure cache persistence fails", async () => {
@@ -899,7 +939,7 @@ describe("AuthService E2EE vault", () => {
     const originalSave = secretStore.save.bind(secretStore);
     vi.spyOn(secretStore, "save").mockImplementation(
       async (account: string, value: string) => {
-        if (account === "auth:vault-dek") {
+        if (account === dekAccount()) {
           throw new Error("secure storage unavailable");
         }
         return originalSave(account, value);
@@ -925,7 +965,7 @@ describe("AuthService E2EE vault", () => {
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
     await secretStore.save(
-      "auth:vault-dek",
+      dekAccount(),
       JSON.stringify({
         version: 2,
         owner: { serverUrl: `${serverUrl}/`, userId: "other-user" },
@@ -942,7 +982,7 @@ describe("AuthService E2EE vault", () => {
     const state = await service.bootstrap();
 
     expect(state.vault?.status).toBe("locked");
-    await expect(secretStore.load("auth:vault-dek")).resolves.toBeNull();
+    await expect(secretStore.load(dekAccount())).resolves.toBeNull();
   });
 
   it("blocks legacy sync when the server requires E2EE migration", async () => {
@@ -1021,9 +1061,15 @@ describe("AuthService E2EE vault", () => {
     });
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
-    // 이전 포맷(base64 원문, epoch 없음) 캐시 — verifier 일치가 곧 증명이므로
-    // 재입력 없이 unlocked 로 복원되고 epoch 이 채택된다.
-    await secretStore.save("auth:vault-dek", dekBase64);
+    // 캐시된 DEK 가 서버 verifier 와 일치하면 재입력 없이 unlocked 로 복원된다.
+    await secretStore.save(
+      dekAccount(),
+      dekCacheRecord(
+        serverUrl,
+        { dekBase64, wrappedDekBase64, dekVerifierBase64 },
+        { epoch: 1 },
+      ),
+    );
     stubSessionRefresh(session);
 
     const state = await service.bootstrap();
@@ -1032,7 +1078,7 @@ describe("AuthService E2EE vault", () => {
     expect(service.getVaultEpoch()).toBe(1);
     // verifier가 확인된 descriptor와 함께 coherent v2 cache로 승격된다.
     expect(
-      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+      JSON.parse((await secretStore.load(dekAccount())) as string),
     ).toMatchObject({
       version: 2,
       dekBase64,
@@ -1061,7 +1107,10 @@ describe("AuthService E2EE vault", () => {
       "auth:refresh-token",
       corruptSession.tokens.refreshToken,
     );
-    await secretStore.save("auth:vault-dek", cachedVault.dekBase64);
+    await secretStore.save(
+      dekAccount(),
+      dekCacheRecord(serverUrl, cachedVault, { epoch: 2 }),
+    );
     stubSessionRefresh(corruptSession);
     await service.bootstrap();
 
@@ -1119,7 +1168,7 @@ describe("AuthService E2EE vault", () => {
       expectedDekVerifierBase64: vault.dekVerifierBase64,
     });
     expect(
-      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+      JSON.parse((await secretStore.load(dekAccount())) as string),
     ).toMatchObject({
       epoch: 2,
       wrapRevision: 4,
@@ -1185,8 +1234,8 @@ describe("AuthService E2EE vault", () => {
       oldSession.tokens.refreshToken,
     );
     await secretStore.save(
-      "auth:vault-dek",
-      JSON.stringify({ dekBase64: oldVault.dekBase64, epoch: 1 }),
+      dekAccount(),
+      dekCacheRecord(serverUrl, oldVault, { epoch: 1 }),
     );
     stubSessionRefresh(oldSession);
 
@@ -1204,7 +1253,7 @@ describe("AuthService E2EE vault", () => {
 
     expect(service.getState().vault?.status).toBe("locked");
     expect(service.isVaultReadyForSync()).toBe(false);
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    expect(await secretStore.load(dekAccount())).toBeNull();
   });
 
   it("does not destroy the DEK cache when handleVaultDekRejected cannot refresh (non-destructive)", async () => {
@@ -1222,8 +1271,8 @@ describe("AuthService E2EE vault", () => {
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
     await secretStore.save(
-      "auth:vault-dek",
-      JSON.stringify({ dekBase64: vault.dekBase64, epoch: 1 }),
+      dekAccount(),
+      dekCacheRecord(serverUrl, vault, { epoch: 1 }),
     );
     stubSessionRefresh(session);
     await service.bootstrap();
@@ -1238,7 +1287,7 @@ describe("AuthService E2EE vault", () => {
     );
     await service.handleVaultDekRejected();
 
-    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+    expect(cachedDekOf(await secretStore.load(dekAccount()))).toBe(
       vault.dekBase64,
     );
   });
@@ -1260,7 +1309,7 @@ describe("AuthService E2EE vault", () => {
     );
     // 다른 기기의 초기화 이전에 캐시된 옛 DEK(옛 세대 epoch 1).
     await secretStore.save(
-      "auth:vault-dek",
+      dekAccount(),
       JSON.stringify({ dekBase64: staleVault.dekBase64, epoch: 1 }),
     );
     stubSessionRefresh(freshSession);
@@ -1269,7 +1318,7 @@ describe("AuthService E2EE vault", () => {
     expect(state.vault?.status).toBe("locked");
     expect(service.isVaultReadyForSync()).toBe(false);
     // 옛 DEK 로 push 하지 못하도록 캐시가 비워져야 한다.
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    expect(await secretStore.load(dekAccount())).toBeNull();
   });
 
   it("keeps the freshly unlocked state when a later session descriptor epoch lags (own re-setup)", async () => {
@@ -1308,7 +1357,7 @@ describe("AuthService E2EE vault", () => {
     await service.refreshSession();
     expect(service.getState().vault?.status).toBe("unlocked");
     expect(service.getVaultKeyBase64()).toBe(currentVault.dekBase64);
-    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+    expect(cachedDekOf(await secretStore.load(dekAccount()))).toBe(
       currentVault.dekBase64,
     );
   });
@@ -1404,7 +1453,7 @@ describe("AuthService E2EE vault", () => {
 
     expect(service.getState().vault?.status).toBe("unlocked");
     const cache = JSON.parse(
-      (await secretStore.load("auth:vault-dek")) as string,
+      (await secretStore.load(dekAccount())) as string,
     ) as { wrappedDekBase64: string; wrapRevision: number };
     expect(cache).toMatchObject({
       wrappedDekBase64: currentVault.wrappedDekBase64,
@@ -1419,7 +1468,9 @@ describe("AuthService E2EE vault", () => {
     });
   });
 
-  it("verifies a pre-epoch cache against the descriptor verifier and adopts the epoch", async () => {
+  // 업데이트 직후가 이 코드의 존재 이유다. 옮기지 않으면 이미 로그인된 앱을 켰을 때 갑자기
+  // 동기화 암호를 묻게 되고, 그건 사용자가 보안 사고로 오해하는 순간이다.
+  it("migrates the legacy shared cache to the per-account key on first launch", async () => {
     const serverUrl = "https://ssh.doldolma.com";
     const { service, secretStore } = await createService(serverUrl);
     const vault = await buildWrappedDek("any-passphrase");
@@ -1429,26 +1480,66 @@ describe("AuthService E2EE vault", () => {
     });
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
-    // epoch 도입 이전 빌드가 캐시한 DEK(base64 원문) — verifier 일치가 곧 암호학적
-    // 증명이므로 임시 신뢰(adopt) 같은 중간 상태 없이 곧바로 unlocked 다.
+    // 계정 구분이 없던 빌드가 남긴 값(owner 없음, base64 원문).
     await secretStore.save("auth:vault-dek", vault.dekBase64);
     stubSessionRefresh(session);
 
     const state = await service.bootstrap();
+
+    // 재입력 없이 열리고, 값은 계정별 키로 옮겨진다.
     expect(state.vault?.status).toBe("unlocked");
     expect(service.getVaultKeyBase64()).toBe(vault.dekBase64);
-    expect(service.getVaultEpoch()).toBe(2);
     expect(
-      JSON.parse((await secretStore.load("auth:vault-dek")) as string),
+      JSON.parse((await secretStore.load(dekAccount())) as string),
     ).toMatchObject({
       version: 2,
+      owner: { userId: "user-1", serverUrl: `${serverUrl}/` },
       dekBase64: vault.dekBase64,
       epoch: 2,
-      wrappedDekBase64: vault.wrappedDekBase64,
-      dekVerifierBase64: vault.dekVerifierBase64,
     });
+    // 옛 슬롯은 비운다 — 아무도 읽지 않는 DEK 를 남기지 않는다.
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
   });
 
+  // 증명되지 않는 값은 옮기지 않는다. 옛 슬롯의 값이 이 계정 것이라는 보장이 없기 때문이다.
+  it("drops a legacy cache it cannot prove belongs to this account", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const foreignVault = await buildWrappedDek("foreign-pass");
+    const myVault = await buildWrappedDek("my-pass");
+    const session = createV2Session(serverUrl, myVault.wrappedDekBase64, {
+      epoch: 2,
+      dekVerifierBase64: myVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save("auth:vault-dek", foreignVault.dekBase64);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+
+    expect(state.vault?.status).toBe("locked");
+    expect(await secretStore.load(dekAccount())).toBeNull();
+    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+  });
+  it("discards an owner-less cache and asks for the passphrase again", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const vault = await buildWrappedDek("any-passphrase");
+    const session = createV2Session(serverUrl, vault.wrappedDekBase64, {
+      epoch: 2,
+      dekVerifierBase64: vault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    // DEK 자체는 서버 verifier 와 일치한다 — 그래도 owner 가 없으면 버린다.
+    await secretStore.save(dekAccount(), vault.dekBase64);
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("locked");
+    expect(await secretStore.load(dekAccount())).toBeNull();
+  });
   it("restores unlocked from the cache when the stored descriptor lags the cached epoch (cold boot)", async () => {
     // 재설정 성공 직후 descriptor refresh 가 실패한 채 재시작한 경우: 저장 세션의
     // descriptor 는 옛 세대(epoch 1)인데 캐시는 새 세대(epoch 3)다. epoch 규칙이
@@ -1472,7 +1563,7 @@ describe("AuthService E2EE vault", () => {
       staleSession.tokens.refreshToken,
     );
     await secretStore.save(
-      "auth:vault-dek",
+      dekAccount(),
       JSON.stringify({
         version: 2,
         owner: { serverUrl: `${serverUrl}/`, userId: staleSession.user.id },
@@ -1491,7 +1582,7 @@ describe("AuthService E2EE vault", () => {
     expect(service.getVaultKeyBase64()).toBe(freshVault.dekBase64);
     expect(service.getVaultEpoch()).toBe(3);
     // 캐시(새 세대)는 파괴되지 않는다.
-    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+    expect(cachedDekOf(await secretStore.load(dekAccount()))).toBe(
       freshVault.dekBase64,
     );
     // 최신 캐시의 wrapper/KDF도 함께 복원되어 낡은 descriptor와 섞이지 않는다.
@@ -1514,12 +1605,15 @@ describe("AuthService E2EE vault", () => {
     });
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
-    await secretStore.save("auth:vault-dek", deadVault.dekBase64);
+    await secretStore.save(
+      dekAccount(),
+      dekCacheRecord(serverUrl, deadVault, { epoch: 2 }),
+    );
     stubSessionRefresh(session);
 
     const state = await service.bootstrap();
     expect(state.vault?.status).toBe("locked");
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    expect(await secretStore.load(dekAccount())).toBeNull();
   });
 
   it("sets up a new vault for a version-0 session and uploads the wrapped DEK", async () => {
@@ -1657,7 +1751,7 @@ describe("AuthService E2EE vault", () => {
       "로그인 계정 또는 서버가 변경되어 동기화 볼트 작업을 취소했습니다.",
     );
     expect(service.getState().vault?.status).toBe("setup-required");
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    expect(await secretStore.load(dekAccount())).toBeNull();
   });
 
   it("persists the reset epoch as a version-0 descriptor before the next refresh", async () => {
@@ -1671,7 +1765,7 @@ describe("AuthService E2EE vault", () => {
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
     await secretStore.save(
-      "auth:vault-dek",
+      dekAccount(),
       JSON.stringify({ dekBase64: vault.dekBase64, epoch: 5 }),
     );
     let resetExpectedEpoch: number | undefined;
@@ -1713,21 +1807,105 @@ describe("AuthService E2EE vault", () => {
       version: 0,
       epoch: 6,
     });
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    expect(await secretStore.load(dekAccount())).toBeNull();
     const offlineCache = JSON.parse(
       (await secretStore.load("auth:offline-session-cache")) as string,
     ) as { vaultBootstrap: AuthSession["vaultBootstrap"] };
     expect(offlineCache.vaultBootstrap).toEqual({ version: 0, epoch: 6 });
   });
 
-  it("keeps legacy v1 sessions untouched and clears the DEK on logout", async () => {
+  // 이 두 테스트가 계정별 키의 이유다. 키가 하나였을 때는 B 로 로그인하면 A 의 DEK 가 덮여,
+  // A 로 돌아올 때 동기화 암호를 다시 물었다.
+  it("does not touch another account's cached DEK", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const otherVault = await buildWrappedDek("other-pass");
+    const myVault = await buildWrappedDek("my-pass");
+    const session = createV2Session(serverUrl, myVault.wrappedDekBase64, {
+      epoch: 1,
+      dekVerifierBase64: myVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      dekAccount("user-2"),
+      dekCacheRecord(serverUrl, otherVault, { epoch: 1, userId: "user-2" }),
+    );
+    await secretStore.save(
+      dekAccount(),
+      dekCacheRecord(serverUrl, myVault, { epoch: 1 }),
+    );
+    stubSessionRefresh(session);
+
+    const state = await service.bootstrap();
+    expect(state.vault?.status).toBe("unlocked");
+    expect(service.getVaultKeyBase64()).toBe(myVault.dekBase64);
+    // 남의 캐시는 읽지도 지우지도 않는다.
+    expect(await secretStore.load(dekAccount("user-2"))).not.toBeNull();
+  });
+
+  it("keeps the cached DEK across logout so re-login needs no passphrase", async () => {
+    const serverUrl = "https://ssh.doldolma.com";
+    const { service, secretStore } = await createService(serverUrl);
+    const otherVault = await buildWrappedDek("other-pass");
+    const myVault = await buildWrappedDek("my-pass");
+    const session = createV2Session(serverUrl, myVault.wrappedDekBase64, {
+      epoch: 1,
+      dekVerifierBase64: myVault.dekVerifierBase64,
+    });
+
+    await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
+    await secretStore.save(
+      dekAccount("user-2"),
+      dekCacheRecord(serverUrl, otherVault, { epoch: 1, userId: "user-2" }),
+    );
+    await secretStore.save(
+      dekAccount(),
+      dekCacheRecord(serverUrl, myVault, { epoch: 1 }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const pathname = new URL(String(input)).pathname;
+        if (pathname === "/auth/refresh") {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: async () => session,
+            text: async () => JSON.stringify(session),
+          } as Response;
+        }
+        if (pathname === "/auth/logout") {
+          return {
+            ok: true,
+            status: 204,
+            headers: new Headers(),
+            json: async () => ({}),
+            text: async () => "",
+          } as Response;
+        }
+        throw new Error(`unexpected fetch: ${pathname}`);
+      }),
+    );
+
+    await service.bootstrap();
+    await service.logout();
+
+    // 한 번 동기화한 기기는 같은 계정·같은 볼트로 돌아오므로 캐시를 남긴다.
+    expect(await secretStore.load(dekAccount())).not.toBeNull();
+    expect(await secretStore.load(dekAccount("user-2"))).not.toBeNull();
+  });
+
+  it("keeps legacy v1 sessions untouched and drops the legacy shared cache on logout", async () => {
     const serverUrl = "https://ssh.doldolma.com";
     const { service, secretStore, setServerUrl } =
       await createService(serverUrl);
     const session = createSession(serverUrl);
 
     await secretStore.save("auth:refresh-token", session.tokens.refreshToken);
-    await secretStore.save("auth:vault-dek", "stale-dek");
+    // 이 계정 것이라는 증거가 없는 캐시(owner 없음) — 채택되지 않아야 v1 세션이 legacy 로 남는다.
+    await secretStore.save(dekAccount(), "stale-dek");
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const pathname = new URL(String(input)).pathname;
       if (pathname === "/auth/refresh") {
@@ -1772,7 +1950,8 @@ describe("AuthService E2EE vault", () => {
 
     await service.logout();
     expect(service.getState().vault ?? null).toBeNull();
-    expect(await secretStore.load("auth:vault-dek")).toBeNull();
+    // 캐시는 남는다 — 같은 계정으로 다시 로그인할 때 동기화 암호를 다시 묻지 않는다.
+    expect(await secretStore.load(dekAccount())).not.toBeNull();
   });
 
   it("pre-seeds the legacy key and migrates the vault by wrapping the same DEK", async () => {
@@ -1834,7 +2013,7 @@ describe("AuthService E2EE vault", () => {
     expect(state.vault?.status).toBe("legacy");
     // pre-seeding — v1 키가 DEK 캐시에 선저장된다(비동기라 한 틱 대기).
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(cachedDekOf(await secretStore.load("auth:vault-dek"))).toBe(
+    expect(cachedDekOf(await secretStore.load(dekAccount()))).toBe(
       legacyKeyBase64,
     );
 

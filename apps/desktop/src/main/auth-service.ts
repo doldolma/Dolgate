@@ -52,9 +52,20 @@ import { logMessage } from "./activity-log-message";
 const REFRESH_TOKEN_ACCOUNT = "auth:refresh-token";
 const OFFLINE_SESSION_CACHE_ACCOUNT = "auth:offline-session-cache";
 // E2EE 볼트(v2)의 잠금해제된 DEK 캐시 — 동기화 암호 입력 후 저장해 재입력을 없앤다.
-// v2 값은 DEK/epoch/wrapper/KDF/verifier 를 한 JSON 레코드로 저장한다. 이전 포맷
-// ({dekBase64, epoch} 또는 base64 원문)도 읽어 점진적으로 마이그레이션한다.
-const VAULT_DEK_ACCOUNT = "auth:vault-dek";
+// 값은 DEK/epoch/wrapper/KDF/verifier 와 owner 를 한 JSON 레코드로 담는다.
+//
+// owner 가 없는 옛 포맷은 더 이상 채택하지 않는다. 그런 값은 계정 구분이 없던 단일 키에만
+// 있었고 그 키는 읽지 않으므로, 이 계정 것이라는 증거가 없는 값을 신뢰할 근거가 없다.
+// 계정별 DEK 캐시 키. userId 만 쓴다 — serverUrl 은 정규화가 어긋나면 키가 달라져
+// "조용히 다시 묻는" 실패가 되고, 그 대조는 어차피 값 안의 owner 가 한다. 키는 찾기 위한
+// 것이고 증명은 값이 한다.
+function vaultDekAccount(userId: string): string {
+  return `auth:vault-dek:${userId}`;
+}
+
+// 계정 구분이 없던 시절의 단일 슬롯. 더 이상 읽지 않고 지우기만 한다 — 남겨 두면 아무도
+// 쓰지 않는 DEK 가 디스크에 영구히 남는다.
+const LEGACY_SHARED_VAULT_DEK_ACCOUNT = "auth:vault-dek";
 // dekId 시절의 잔재 엔트리 — 더 이상 쓰지 않으므로 발견 시 지운다.
 const LEGACY_VAULT_DEK_ID_ACCOUNT = "auth:vault-dek-id";
 const LOOPBACK_CALLBACK_HOST = "127.0.0.1";
@@ -155,7 +166,7 @@ function hasCoherentVaultDescriptor(
   );
 }
 
-// VAULT_DEK_ACCOUNT 캐시 값 파싱 — JSON {dekBase64, epoch} 또는 이전 포맷(base64 원문).
+// DEK 캐시 값 파싱 — JSON {dekBase64, epoch} 또는 이전 포맷(base64 원문).
 // base64 는 "{" 로 시작할 수 없으므로 구분이 안전하다.
 function parseStoredVaultDek(raw: string | null): StoredVaultDek | null {
   if (!raw) {
@@ -1452,7 +1463,12 @@ export class AuthService {
       throw error;
     }
     this.assertVaultOperationContext(operationContext);
-    await this.secretStore.remove(VAULT_DEK_ACCOUNT).catch(() => undefined);
+    const resetUserId = this.state.session?.user.id;
+    if (resetUserId) {
+      await this.secretStore
+        .remove(vaultDekAccount(resetUserId))
+        .catch(() => undefined);
+    }
     this.assertVaultOperationContext(operationContext);
     const session = this.state.session;
     const previousEpoch = session?.vaultBootstrap.epoch ?? 0;
@@ -1726,7 +1742,7 @@ export class AuthService {
         : {}),
     } satisfies VaultCacheRecord);
     try {
-      await this.secretStore.save(VAULT_DEK_ACCOUNT, serialized);
+      await this.secretStore.save(vaultDekAccount(owner.userId), serialized);
     } catch (error) {
       this.log({
         level: "warn",
@@ -1738,9 +1754,12 @@ export class AuthService {
         },
       });
     }
-    // dekId 시절의 잔재 엔트리 정리(더 이상 읽지 않는다).
+    // 계정 구분이 없던 시절의 잔재 정리(둘 다 더 이상 읽지 않는다).
     await this.secretStore
       .remove(LEGACY_VAULT_DEK_ID_ACCOUNT)
+      .catch(() => undefined);
+    await this.secretStore
+      .remove(LEGACY_SHARED_VAULT_DEK_ACCOUNT)
       .catch(() => undefined);
   }
 
@@ -1873,10 +1892,11 @@ export class AuthService {
         reason: "account-changed",
         purgeSyncedCache: true,
       });
-      // 이전 계정의 DEK 가 새 계정으로 흘러가지 않게 지운다 — 저장 캐시와 메모리 모두.
-      // (메모리를 남기면 아래 판정의 hot-path/floor 가 이전 계정의 DEK 를 새 계정
-      // 세션에 결합시킬 수 있다.)
-      await this.secretStore.remove(VAULT_DEK_ACCOUNT).catch(() => undefined);
+      // 이전 계정의 DEK 캐시는 지우지 않는다 — 키가 계정별이라 새 계정이 볼 수 없고,
+      // 남겨 두면 그 계정으로 돌아올 때 동기화 암호를 다시 묻지 않는다.
+      //
+      // 메모리는 반드시 비운다. 남기면 아래 판정의 hot-path/floor 가 이전 계정의 DEK 를
+      // 새 계정 세션에 결합시킬 수 있다.
       this.vaultState = { status: "none" };
     }
 
@@ -1999,29 +2019,55 @@ export class AuthService {
                 : {}),
             }
           : null;
+      const cacheAccount = vaultDekAccount(owner.userId);
       let cached =
         local ??
         parseStoredVaultDek(
-          await this.secretStore.load(VAULT_DEK_ACCOUNT).catch(() => null),
+          await this.secretStore.load(cacheAccount).catch(() => null),
         );
 
-      if (cached?.owner && !vaultCacheOwnersEqual(cached.owner, owner)) {
-        await this.secretStore.remove(VAULT_DEK_ACCOUNT).catch(() => undefined);
-        cached = null;
-      } else if (cached && !cached.owner) {
-        const ownerProven =
-          (descriptor.kind === "legacy" &&
-            descriptor.keyBase64 === cached.dekBase64) ||
-          (descriptor.kind === "e2ee" &&
-            Boolean(descriptor.dekVerifierBase64) &&
-            descriptor.dekVerifierBase64 ===
-              verifierOfCachedDek(cached.dekBase64));
-        if (!ownerProven) {
+      // 계정 구분이 없던 단일 슬롯에서 한 번 옮긴다.
+      //
+      // 옮기지 않으면 업데이트 후 **첫 실행에서** 동기화 암호를 묻는다 — 로그인처럼 사용자가
+      // 예상하는 순간이 아니라, 이미 로그인된 앱을 켰을 때 갑자기 묻는 것이라 보안 사고로
+      // 오해된다. 그것을 없애기 위한 코드다.
+      //
+      // 옛 값에는 owner 가 없으므로 이 계정 것임을 따로 증명해야 한다. 서버가 준 verifier 와
+      // DEK 가 맞으면 그것이 곧 증명이다. 증명되면 owner 를 붙여 채택하고, 아래 unlocked
+      // 분기가 새 키로 다시 저장한다. 못하면 버린다.
+      //
+      // 옛 슬롯은 옮겼든 못 옮겼든 비운다 — 더 이상 읽지 않는 DEK 를 남길 이유가 없다.
+      if (!cached) {
+        const legacyCached = parseStoredVaultDek(
           await this.secretStore
-            .remove(VAULT_DEK_ACCOUNT)
+            .load(LEGACY_SHARED_VAULT_DEK_ACCOUNT)
+            .catch(() => null),
+        );
+        if (legacyCached) {
+          const provenForThisAccount = legacyCached.owner
+            ? vaultCacheOwnersEqual(legacyCached.owner, owner)
+            : (descriptor.kind === "legacy" &&
+                descriptor.keyBase64 === legacyCached.dekBase64) ||
+              (descriptor.kind === "e2ee" &&
+                Boolean(descriptor.dekVerifierBase64) &&
+                descriptor.dekVerifierBase64 ===
+                  verifierOfCachedDek(legacyCached.dekBase64));
+          if (provenForThisAccount) {
+            cached = { ...legacyCached, owner };
+          }
+          await this.secretStore
+            .remove(LEGACY_SHARED_VAULT_DEK_ACCOUNT)
             .catch(() => undefined);
-          cached = null;
         }
+      }
+
+      // 키가 계정별이어도 값의 owner 를 다시 대조한다 — 키 계산이 틀려도 남의 DEK 를 쓰지
+      // 않게 막는 이중 안전장치다.
+      if (!cached?.owner || !vaultCacheOwnersEqual(cached.owner, owner)) {
+        if (cached) {
+          await this.secretStore.remove(cacheAccount).catch(() => undefined);
+        }
+        cached = null;
       }
 
       if (
@@ -2066,9 +2112,7 @@ export class AuthService {
       if (descriptor.kind === "setup-required") {
         // 같은/높은 epoch 의 v0는 실제 reset 상태다. 옛 DEK 캐시를 지우고 재설정한다.
         if (cached) {
-          await this.secretStore
-            .remove(VAULT_DEK_ACCOUNT)
-            .catch(() => undefined);
+          await this.secretStore.remove(cacheAccount).catch(() => undefined);
         }
         return { status: "setup-required", epoch: descriptor.epoch ?? 0 };
       }
@@ -2096,9 +2140,7 @@ export class AuthService {
           if (cached) {
             // verifier 불일치 = DEK 세대 교체(다른 기기의 초기화+재설정). 옛 캐시를
             // 버리고 새 암호를 받는다.
-            await this.secretStore
-              .remove(VAULT_DEK_ACCOUNT)
-              .catch(() => undefined);
+            await this.secretStore.remove(cacheAccount).catch(() => undefined);
           }
           return {
             status: "locked",
@@ -2192,17 +2234,36 @@ export class AuthService {
         .remove(OFFLINE_SESSION_CACHE_ACCOUNT)
         .catch(() => undefined);
     }
-    // 잠금해제된 DEK 는 명시적 이탈(로그아웃·탈퇴·계정 교체)에서만 지운다.
-    // 세션 만료(auth-invalid)는 재로그인 시 같은 계정이므로 캐시를 유지해
-    // 동기화 암호 재입력을 피한다.
+    // DEK 캐시는 계정이 사라질 때만 지운다.
+    //
+    // 로그아웃에서는 지우지 않는다 — 한 번 동기화한 기기라면 다시 로그인할 때 같은 계정의
+    // 같은 볼트로 돌아오는 것이므로, 동기화 암호를 다시 물을 이유가 없다. 계정 교체도
+    // 마찬가지다: 키가 계정별이라 새 계정이 남의 캐시를 볼 수 없고, 남겨 두면 원래 계정으로
+    // 돌아올 때도 묻지 않는다.
+    //
+    // 그 대가는 명시적이다 — 로그아웃 뒤 재로그인이 계정 인증만으로 통과하므로, 이 기기를
+    // 얻은 사람이 계정 비밀번호를 알면 자격증명까지 열린다. 볼트를 이 기기에서 지우려면
+    // 동기화 초기화를 쓴다(resetVault 는 지운다).
+    //
+    // 옛 단일 키 잔재는 어느 이탈에서든 정리한다. 더 이상 읽지 않는 값이라 남길 이유가 없다.
+    if (options.reason === "account-deleted") {
+      const leavingUserId = this.state.session?.user.id;
+      if (leavingUserId) {
+        await this.secretStore
+          .remove(vaultDekAccount(leavingUserId))
+          .catch(() => undefined);
+      }
+    }
     if (
       options.reason === "logout" ||
       options.reason === "account-deleted" ||
       options.reason === "account-changed"
     ) {
-      await this.secretStore.remove(VAULT_DEK_ACCOUNT).catch(() => undefined);
       await this.secretStore
         .remove(LEGACY_VAULT_DEK_ID_ACCOUNT)
+        .catch(() => undefined);
+      await this.secretStore
+        .remove(LEGACY_SHARED_VAULT_DEK_ACCOUNT)
         .catch(() => undefined);
     }
     this.vaultState = { status: "none" };
