@@ -877,6 +877,11 @@
       "secrets": "credentials",
       "portForwards": "port forwards",
       "awsProfiles": "AWS profiles",
+      "tailnets": "tailnet",
+      "tailnetId": "tailnet ID",
+      "tailnetLabel": "tailnet name",
+      "tailnetCreatedAt": "tailnet creation time",
+      "tailnetUpdatedAt": "tailnet update time",
       "exportedAt": "export time"
     },
     "error": {
@@ -886,6 +891,8 @@
       "invalidGroup": "The group data in the Dolgate file is not valid.",
       "invalidGroupPath": "The group path in the Dolgate file is not valid.",
       "invalidHost": "The host data in the Dolgate file is not valid.",
+      "invalidTailnet": "The tailnet data in the Dolgate file is not valid.",
+      "tailnetMissing": "{{label}}: the tailnet this host uses is not in the file. Add the tailnet to connect.",
       "invalidSecret": "The credential data in the Dolgate file is not valid.",
       "invalidSecretId": "The credential ID in the Dolgate file is not valid.",
       "invalidAwsProfile": "The AWS profile data in the Dolgate file is not valid.",
@@ -1346,6 +1353,7 @@
   },
   "hostTransfer": {
     "kind": {
+      "tailnets": "tailnets",
       "hosts": "hosts",
       "groups": "groups",
       "secrets": "credentials",

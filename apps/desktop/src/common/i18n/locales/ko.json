@@ -877,6 +877,11 @@
       "secrets": "자격증명",
       "portForwards": "포트 포워딩",
       "awsProfiles": "AWS 프로필",
+      "tailnets": "Tailnet",
+      "tailnetId": "Tailnet ID",
+      "tailnetLabel": "Tailnet 이름",
+      "tailnetCreatedAt": "Tailnet 생성 시각",
+      "tailnetUpdatedAt": "Tailnet 수정 시각",
       "exportedAt": "내보내기 시각"
     },
     "error": {
@@ -886,6 +891,8 @@
       "invalidGroup": "Dolgate 파일의 그룹 정보가 올바르지 않습니다.",
       "invalidGroupPath": "Dolgate 파일의 그룹 경로가 올바르지 않습니다.",
       "invalidHost": "Dolgate 파일의 호스트 정보가 올바르지 않습니다.",
+      "invalidTailnet": "Dolgate 파일의 Tailnet 정보가 올바르지 않습니다.",
+      "tailnetMissing": "{{label}}: 이 호스트가 쓰는 Tailnet 설정이 파일에 없습니다. Tailnet을 등록해야 연결됩니다.",
       "invalidSecret": "Dolgate 파일의 자격증명 정보가 올바르지 않습니다.",
       "invalidSecretId": "Dolgate 파일의 자격증명 ID가 올바르지 않습니다.",
       "invalidAwsProfile": "Dolgate 파일의 AWS 프로필 정보가 올바르지 않습니다.",
@@ -1346,6 +1353,7 @@
   },
   "hostTransfer": {
     "kind": {
+      "tailnets": "Tailnet",
       "hosts": "호스트",
       "groups": "그룹",
       "secrets": "자격증명",

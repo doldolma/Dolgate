@@ -49,6 +49,7 @@ const importCountLabels = {
   portForwards: 'hostTransfer.kind.portForwards',
   dnsOverrides: 'DNS override',
   knownHosts: 'known host',
+  tailnets: 'hostTransfer.kind.tailnets',
 } as const;
 
 function formatImportCounts(
@@ -70,6 +71,7 @@ function getReadyImportCounts(preview: DolgateImportPreview) {
     portForwards: preview.portForwardCount,
     dnsOverrides: preview.dnsOverrideCount,
     knownHosts: preview.knownHostCount,
+    tailnets: preview.tailnetCount,
   };
 }
 

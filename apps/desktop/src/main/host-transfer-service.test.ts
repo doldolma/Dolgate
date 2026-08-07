@@ -3,6 +3,7 @@ import type {
   AwsProfileMetadataRecord,
   HostRecord,
   ManagedAwsProfilePayload,
+  TailnetPayload,
 } from "@shared";
 import type { DolgateHostBundleV1 } from "./host-transfer-format";
 import {
@@ -10,6 +11,9 @@ import {
   buildHostTransferImportPlan,
 } from "./host-transfer-service";
 import type { DesktopStateFile } from "./state-storage";
+
+// auth key 는 OS 암호화 저장소에 들어간다. 테스트에는 그것이 없으므로 평문 폴백을 연다.
+process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS = "true";
 
 const timestamp = "2026-07-22T00:00:00.000Z";
 
@@ -62,6 +66,7 @@ function stateWithHosts(hosts: HostRecord[]): DesktopStateFile {
       secretMetadata: [],
       awsProfiles: [],
       snippets: [],
+      tailnets: [],
       syncOutbox: [],
     },
     secure: {
@@ -69,6 +74,7 @@ function stateWithHosts(hosts: HostRecord[]): DesktopStateFile {
       appSecretsByAccount: {},
       managedSecretsByRef: {},
       managedAwsProfilesById: {},
+      tailnetAuthKeysById: {},
     },
   } as unknown as DesktopStateFile;
 }
@@ -104,6 +110,7 @@ function bundleWithHosts(hosts: HostRecord[]): DolgateHostBundleV1 {
     dnsOverrides: [],
     awsProfiles: [],
     snippets: [],
+    tailnets: [],
   };
 }
 
@@ -231,5 +238,108 @@ describe("buildDolgateHostBundle", () => {
       awsProfileId: null,
       awsProfileName: "",
     });
+  });
+});
+
+// tailnet 은 호스트의 tailnetId 만 옮기면 받는 쪽에 그 id 가 없어 연결이
+// "is not configured" 로 죽는다. 연결 자체는 되는 것처럼 보이는 다른 항목들과 달리, 이건
+// 가져오기가 성공했다고 말한 뒤에 실패하는 종류라 눈에 잘 안 띈다.
+describe("tailnet transfer", () => {
+  const tailnet: TailnetPayload = {
+    id: "tn-1",
+    label: "Gridwiz",
+    controlUrl: "https://headscale.example.com",
+    tailnetName: "gridwiz.example.com",
+    ephemeral: false,
+    hasAuthKey: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  function stateWithTailnet(hosts: HostRecord[], authKey?: string): DesktopStateFile {
+    const state = stateWithHosts(hosts);
+    const { authKey: _drop, ...record } = tailnet;
+    state.data.tailnets.push({ ...record, hasAuthKey: Boolean(authKey) });
+    if (authKey) {
+      state.secure.tailnetAuthKeysById[tailnet.id] = {
+        encrypted: false,
+        value: Buffer.from(authKey, "utf8").toString("base64"),
+      };
+    }
+    return state;
+  }
+
+  function tailnetHost(): HostRecord {
+    return { ...host("h-tn", "lime-dev"), tailnetId: tailnet.id } as HostRecord;
+  }
+
+  it("exports the tailnet a host goes through, with its auth key", () => {
+    const record = tailnetHost();
+    const bundle = buildDolgateHostBundle(stateWithTailnet([record], "tskey-abc"), [
+      record.id,
+    ]);
+    expect(bundle.tailnets).toHaveLength(1);
+    expect(bundle.tailnets[0]).toMatchObject({
+      id: "tn-1",
+      label: "Gridwiz",
+      controlUrl: "https://headscale.example.com",
+      authKey: "tskey-abc",
+      hasAuthKey: true,
+    });
+  });
+
+  // 브라우저 로그인으로 등록한 tailnet 은 키가 없다. 없는 것을 있다고 적으면 받는 쪽이
+  // "키가 있다는데 없는" 상태가 된다.
+  it("marks a tailnet without an auth key as having none", () => {
+    const record = tailnetHost();
+    const bundle = buildDolgateHostBundle(stateWithTailnet([record]), [record.id]);
+    expect(bundle.tailnets[0].authKey).toBeUndefined();
+    expect(bundle.tailnets[0].hasAuthKey).toBe(false);
+  });
+
+  // 쓰지 않는 tailnet 까지 실어 보내면 파일을 건넨 상대에게 필요 없는 자격증명이 넘어간다.
+  it("only exports tailnets the exported hosts actually use", () => {
+    const plain = host("h-plain", "plain");
+    const bundle = buildDolgateHostBundle(stateWithTailnet([plain], "tskey-abc"), [
+      plain.id,
+    ]);
+    expect(bundle.tailnets).toHaveLength(0);
+  });
+
+  it("imports the tailnet so the host can connect", () => {
+    const record = tailnetHost();
+    const bundle = buildDolgateHostBundle(stateWithTailnet([record], "tskey-abc"), [
+      record.id,
+    ]);
+    const plan = buildHostTransferImportPlan(bundle, stateWithHosts([]));
+    expect(plan.tailnets).toHaveLength(1);
+    expect(plan.tailnets[0].authKey).toBe("tskey-abc");
+    expect(plan.warnings).toHaveLength(0);
+  });
+
+  // 이미 등록돼 있으면 로컬 쪽이 더 최신일 수 있다(재인증한 키 등). 덮어쓰면 되던 연결이 끊긴다.
+  it("keeps an existing tailnet instead of overwriting it", () => {
+    const record = tailnetHost();
+    const bundle = buildDolgateHostBundle(stateWithTailnet([record], "tskey-abc"), [
+      record.id,
+    ]);
+    const plan = buildHostTransferImportPlan(bundle, stateWithTailnet([], "tskey-local"));
+    expect(plan.tailnets).toHaveLength(0);
+    expect(plan.skippedCounts.tailnets).toBe(1);
+    expect(plan.warnings).toHaveLength(0);
+  });
+
+  // 이 필드가 생기기 전 파일에는 tailnet 이 없다. 막으면 그런 파일을 통째로 못 가져온다.
+  it("imports an older bundle that carries no tailnets, with a warning", () => {
+    const record = tailnetHost();
+    const bundle = buildDolgateHostBundle(stateWithTailnet([record], "tskey-abc"), [
+      record.id,
+    ]);
+    const legacy = { ...bundle, tailnets: [] };
+    const plan = buildHostTransferImportPlan(legacy, stateWithHosts([]));
+    expect(plan.hosts).toHaveLength(1);
+    // tailnetId 를 비우지 않는다 — 비우면 그 호스트는 tailnet 밖으로 조용히 붙는다.
+    expect((plan.hosts[0] as { tailnetId?: string | null }).tailnetId).toBe("tn-1");
+    expect(plan.warnings).toHaveLength(1);
   });
 });

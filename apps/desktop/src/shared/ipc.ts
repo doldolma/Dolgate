@@ -171,6 +171,7 @@ export interface DolgateImportItemCounts {
   portForwards: number;
   dnsOverrides: number;
   knownHosts: number;
+  tailnets: number;
 }
 
 export interface DolgateImportPreview {
@@ -183,6 +184,7 @@ export interface DolgateImportPreview {
   portForwardCount: number;
   dnsOverrideCount: number;
   knownHostCount: number;
+  tailnetCount: number;
   skippedCount: number;
   skippedCounts: DolgateImportItemCounts;
   warnings: string[];
@@ -197,6 +199,7 @@ export interface DolgateImportResult {
   importedPortForwardCount: number;
   importedDnsOverrideCount: number;
   importedKnownHostCount: number;
+  importedTailnetCount: number;
   skippedCount: number;
   skippedCounts: DolgateImportItemCounts;
   warnings: string[];

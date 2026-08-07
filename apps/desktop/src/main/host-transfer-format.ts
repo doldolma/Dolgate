@@ -10,6 +10,7 @@ import {
   type ManagedSecretPayload,
   type PortForwardRuleRecord,
   type SnippetRecord,
+  type TailnetPayload,
   type VaultKdfDescriptor,
 } from "@shared";
 import {
@@ -42,6 +43,16 @@ export interface DolgateHostBundleV1 {
   dnsOverrides: DnsOverrideRecord[];
   awsProfiles: ManagedAwsProfilePayload[];
   snippets: SnippetRecord[];
+  /**
+   * 호스트가 경유하는 tailnet 등록 정보(auth key 포함).
+   *
+   * 호스트의 tailnetId 만 옮기면 받는 쪽에는 그 id 가 없어 연결이 "is not configured" 로
+   * 죽는다 — AWS 프로필을 함께 담는 것과 같은 이유다. auth key 도 담는다: 이 파일은 이미
+   * 사용자 암호로 암호화되고 SSH 비밀번호·개인키가 그 안에 들어간다.
+   *
+   * 스키마 버전을 올리지 않는다 — 이 필드가 없는 예전 파일도 그대로 읽혀야 한다.
+   */
+  tailnets: TailnetPayload[];
 }
 
 interface DolgateFileHeaderV1 {

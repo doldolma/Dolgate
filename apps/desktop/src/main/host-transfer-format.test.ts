@@ -22,6 +22,7 @@ describe("Dolgate host transfer format", () => {
         dnsOverrides: [],
         awsProfiles: [],
         snippets: [],
+        tailnets: [],
       };
 
       const encrypted = await encryptDolgateHostBundle(bundle, "테스트 암호", "1.8.1");

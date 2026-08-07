@@ -12,6 +12,7 @@ import {
   type PortForwardRuleRecord,
   type SecretMetadataRecord,
   type SnippetRecord,
+  type TailnetPayload,
   type SyncKind,
 } from "@shared";
 import { randomUUID } from "node:crypto";
@@ -60,6 +61,7 @@ interface ImportPlan {
   awsProfiles: ManagedAwsProfilePayload[];
   awsProfileMetadata: AwsProfileMetadataRecord[];
   snippets: SnippetRecord[];
+  tailnets: TailnetPayload[];
   skippedCount: number;
   skippedCounts: DolgateImportItemCounts;
   warnings: string[];
@@ -267,6 +269,32 @@ function parseSnippet(value: unknown): SnippetRecord {
   };
 }
 
+/**
+ * tailnet 등록 정보를 읽는다. auth key 는 있을 수도, 없을 수도 있다(브라우저 로그인 방식).
+ *
+ * hasAuthKey 는 파일 값을 믿지 않고 키의 유무로 다시 세운다 — 저장이 레코드와 키 두 곳으로
+ * 나뉘어서, 파일이 말하는 것과 실제가 어긋나면 "키가 있다는데 없는" 상태가 만들어진다.
+ */
+function parseTailnet(value: unknown): TailnetPayload {
+  if (!isObject(value)) {
+    throw new Error(t("transfer.error.invalidTailnet"));
+  }
+  const authKey =
+    typeof value.authKey === "string" && value.authKey ? value.authKey : undefined;
+  return {
+    id: requireString(value.id, "transfer.field.tailnetId"),
+    label: requireString(value.label, "transfer.field.tailnetLabel"),
+    ...(typeof value.controlUrl === "string" ? { controlUrl: value.controlUrl } : {}),
+    ...(typeof value.tailnetName === "string" ? { tailnetName: value.tailnetName } : {}),
+    ...(typeof value.loginName === "string" ? { loginName: value.loginName } : {}),
+    ephemeral: value.ephemeral === true,
+    hasAuthKey: Boolean(authKey),
+    ...(authKey ? { authKey } : {}),
+    createdAt: requireString(value.createdAt, "transfer.field.tailnetCreatedAt"),
+    updatedAt: requireString(value.updatedAt, "transfer.field.tailnetUpdatedAt"),
+  };
+}
+
 function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
   if (!isObject(value) || value.schemaVersion !== 1 || value.scope !== "hosts") {
     throw new Error(t("transfer.error.unsupportedBundle"));
@@ -306,6 +334,13 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
   });
   const awsProfiles = requireArray(value.awsProfiles, "transfer.field.awsProfiles").map(parseAwsProfile);
   const snippets = requireArray(value.snippets, "snippet").map(parseSnippet);
+  // 이 필드가 생기기 전에 만든 파일에는 없다. 없으면 빈 목록으로 읽는다 — 예전 파일을
+  // 거부하면 잃는 것이 얻는 것보다 크다.
+  const tailnets = (
+    value.tailnets === undefined
+      ? []
+      : requireArray(value.tailnets, "transfer.field.tailnets")
+  ).map(parseTailnet);
   const totalRecords =
     groups.length +
     hosts.length +
@@ -314,7 +349,8 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     portForwards.length +
     dnsOverrides.length +
     awsProfiles.length +
-    snippets.length;
+    snippets.length +
+    tailnets.length;
   if (totalRecords > MAX_DOLGATE_RECORDS) {
     throw new Error(t("transfer.error.tooManyItems"));
   }
@@ -327,6 +363,7 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
   assertUniqueIds(dnsOverrides, (record) => record.id, "DNS override");
   assertUniqueIds(awsProfiles, (record) => record.id, "transfer.field.awsProfiles");
   assertUniqueIds(snippets, (record) => record.id, "snippet");
+  assertUniqueIds(tailnets, (record) => record.id, "transfer.field.tailnets");
   if (new Set(rootHostIds).size !== rootHostIds.length) {
     throw new Error(t("transfer.error.duplicateSelectedHostId"));
   }
@@ -344,6 +381,7 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     dnsOverrides,
     awsProfiles,
     snippets,
+    tailnets,
   };
   assertBundleReferences(bundle);
   return bundle;
@@ -573,6 +611,36 @@ export function buildDolgateHostBundle(
     (record) => record.type === "linked" && portForwardIds.has(record.portForwardRuleId),
   );
 
+  // 호스트가 경유하는 tailnet 을 함께 담는다. 이것이 없으면 받는 쪽에서 호스트의 tailnetId 가
+  // 가리킬 곳이 없어 연결이 "is not configured" 로 죽는다 — AWS 프로필과 같은 이유다.
+  //
+  // auth key 도 담는다: 파일은 이미 사용자 암호로 암호화되고 SSH 비밀번호·개인키가 그 안에
+  // 들어간다. 키만 빼면 받는 쪽이 재인증해야 해서 "가져오면 바로 된다"가 성립하지 않는다.
+  const tailnetIds = new Set<string>();
+  for (const host of hosts) {
+    if (host.kind === "ssh" && host.tailnetId?.trim()) {
+      tailnetIds.add(host.tailnetId.trim());
+    }
+  }
+  const tailnetsById = new Map(state.data.tailnets.map((record) => [record.id, record]));
+  const tailnets: TailnetPayload[] = [];
+  for (const id of tailnetIds) {
+    const record = tailnetsById.get(id);
+    // 이미 지워진 tailnet 을 가리키는 호스트가 있을 수 있다. tailnetId 를 비우지는 않는다 —
+    // 비우면 그 호스트는 tailnet 밖 일반 네트워크로 조용히 붙는다. 그대로 두면 받는 쪽에서
+    // 연결이 분명하게 실패하고, 사용자가 tailnet 을 다시 등록하면 살아난다.
+    if (!record) {
+      continue;
+    }
+    const stored = state.secure.tailnetAuthKeysById[record.id];
+    const authKey = stored ? decodeSecretFromStorage(stored) : null;
+    tailnets.push({
+      ...record,
+      hasAuthKey: Boolean(authKey),
+      ...(authKey ? { authKey } : {}),
+    });
+  }
+
   // known_hosts are intentionally NOT exported: they are machine-local TOFU trust
   // records. Carried to another machine (or re-imported) a stale/mismatched
   // fingerprint only blocks the connection (host key mismatch); a matching one is
@@ -593,6 +661,7 @@ export function buildDolgateHostBundle(
     dnsOverrides,
     awsProfiles,
     snippets,
+    tailnets,
   };
 }
 
@@ -632,6 +701,7 @@ export function buildHostTransferImportPlan(
     portForwards: 0,
     dnsOverrides: 0,
     knownHosts: 0,
+    tailnets: 0,
   };
   const recordSkip = (kind: keyof DolgateImportItemCounts) => {
     skippedCount += 1;
@@ -760,9 +830,22 @@ export function buildHostTransferImportPlan(
     })
     .map((record) => ({ ...record, updatedAt: now }));
 
+  // 이미 같은 id 로 등록돼 있으면 건드리지 않는다. 로컬 등록이 더 최신일 수 있고(재인증한
+  // auth key 등), 가져오기가 그것을 덮어쓰면 되던 연결이 끊긴다.
+  const tailnets = takeNew(
+    bundle.tailnets,
+    new Set(state.data.tailnets.map((record) => record.id)),
+    (record) => record.id,
+    "tailnets",
+  ).map((record) => ({ ...record, updatedAt: now }));
+
   const availableHostIds = new Set([
     ...state.data.hosts.map((record) => record.id),
     ...hosts.map((record) => record.id),
+  ]);
+  const availableTailnetIds = new Set([
+    ...state.data.tailnets.map((record) => record.id),
+    ...tailnets.map((record) => record.id),
   ]);
   const availableSecretIds = new Set([
     ...state.data.secretMetadata.map((record) => record.secretRef),
@@ -786,6 +869,12 @@ export function buildHostTransferImportPlan(
         if (!availableHostIds.has(jumpId)) {
           throw new Error(t("transfer.error.unresolvedJumpHostRef", { label: host.label }));
         }
+      }
+      // tailnet 은 다른 참조와 달리 막지 않고 알리기만 한다. 이 필드가 생기기 전에 만든
+      // 파일에는 tailnet 이 아예 없어서, 막으면 그런 파일을 통째로 못 가져온다. 그리고
+      // 사용자가 그 tailnet 을 나중에 등록하면 호스트는 그대로 살아난다.
+      if (host.tailnetId?.trim() && !availableTailnetIds.has(host.tailnetId.trim())) {
+        warnings.push(t("transfer.error.tailnetMissing", { label: host.label }));
       }
     }
     if (
@@ -830,6 +919,7 @@ export function buildHostTransferImportPlan(
     awsProfiles,
     awsProfileMetadata,
     snippets,
+    tailnets,
     skippedCount,
     skippedCounts,
     warnings,
@@ -847,6 +937,7 @@ function toImportPreview(snapshotId: string, plan: ImportPlan): DolgateImportPre
     portForwardCount: plan.portForwards.length,
     dnsOverrideCount: plan.dnsOverrides.length,
     knownHostCount: plan.knownHosts.length,
+    tailnetCount: plan.tailnets.length,
     skippedCount: plan.skippedCount,
     skippedCounts: plan.skippedCounts,
     warnings: plan.warnings,
@@ -863,6 +954,7 @@ function toImportResult(plan: ImportPlan): DolgateImportResult {
     importedPortForwardCount: plan.portForwards.length,
     importedDnsOverrideCount: plan.dnsOverrides.length,
     importedKnownHostCount: plan.knownHosts.length,
+    importedTailnetCount: plan.tailnets.length,
     skippedCount: plan.skippedCount,
     skippedCounts: plan.skippedCounts,
     warnings: plan.warnings,
@@ -882,6 +974,7 @@ function clearImportedTombstones(state: DesktopStateFile, plan: ImportPlan): voi
   add("knownHosts", plan.knownHosts.map((record) => record.id));
   add("portForwards", plan.portForwards.map((record) => record.id));
   add("dnsOverrides", plan.dnsOverrides.map((record) => record.id));
+  add("tailnets", plan.tailnets.map((record) => record.id));
   add("awsProfiles", plan.awsProfiles.map((record) => record.id));
   add("snippets", plan.snippets.map((record) => record.id));
   state.data.syncOutbox = state.data.syncOutbox.filter(
@@ -955,6 +1048,12 @@ export class HostTransferService {
           encodeSecretForStorage(JSON.stringify(record)),
         ]),
       );
+      // 레코드에서 키를 떼어 낸다 — 레코드는 평문 저장소, 키는 암호화 저장소로 간다.
+      const encodedTailnetKeys = new Map(
+        plan.tailnets
+          .filter((record) => Boolean(record.authKey))
+          .map((record) => [record.id, encodeSecretForStorage(record.authKey as string)]),
+      );
       this.storage.updateState((state) => {
         state.data.groups.push(...plan.groups);
         state.data.hosts.push(...plan.hosts);
@@ -969,6 +1068,13 @@ export class HostTransferService {
         }
         for (const [profileId, record] of encodedProfiles) {
           state.secure.managedAwsProfilesById[profileId] = record;
+        }
+        for (const payload of plan.tailnets) {
+          const { authKey: _authKey, ...record } = payload;
+          state.data.tailnets.push(record);
+        }
+        for (const [tailnetId, record] of encodedTailnetKeys) {
+          state.secure.tailnetAuthKeysById[tailnetId] = record;
         }
         clearImportedTombstones(state, plan);
       });
