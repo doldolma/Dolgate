@@ -1,6 +1,10 @@
 {
   "name": "dolssh",
   "version": "1.8.10",
+  "engines": {
+    "node": ">= 24.15.0",
+    "npm": ">= 11.0.0"
+  },
   "license": "MIT",
   "private": true,
   "workspaces": [
@@ -36,6 +40,7 @@
     "release:linux": "npm run release:publish:linux --workspace @dolssh/desktop",
     "release:all": "npm run release:all --workspace @dolssh/desktop",
     "check": "npm run version:check && npm run typecheck && npm run test:fast && npm run test:mobile -- --runInBand",
+    "check:js": "npm run version:check && npm run typecheck && npm run test:desktop && npm run test:mobile -- --runInBand",
     "test": "npm run test:fast",
     "test:fast": "npm run test:desktop && npm run test:services",
     "test:desktop": "npm run test --workspace @dolssh/desktop",

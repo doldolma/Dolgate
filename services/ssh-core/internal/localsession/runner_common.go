@@ -39,15 +39,15 @@ type sessionExit struct {
 }
 
 type localCommandRuntime struct {
-	shellKind        string
+	shellKind string
 	// shellIntegrationPreinstalled 는 기동 인자로 셸 통합을 이미 넣었는지다. true 면 stdin 으로
 	// 다시 쓰지 않는다 — 그 echo 를 화면에서 걷어내는 과정이 커서를 어긋나게 한다.
 	shellIntegrationPreinstalled bool
-	executablePath   string
-	args             []string
-	env              []string
-	wrapperPath      string
-	workingDirectory string
+	executablePath               string
+	args                         []string
+	env                          []string
+	wrapperPath                  string
+	workingDirectory             string
 }
 
 func defaultRunnerFactory(payload protocol.LocalConnectPayload) (sessionRunner, error) {

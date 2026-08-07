@@ -1,0 +1,4 @@
+# 생성물 표시. 이 경로는 스크립트(apps/desktop/scripts/generate-command-specs.cjs)가 만들고
+# 커밋한다 — 커밋하는 이유는 재생성에 네트워크가 필요하고 렌더러가 명령별로 지연 로딩하기
+# 때문이다. 추적 파일 2,574개 중 1,428개가 여기라서, 표시해 두지 않으면 GitHub 언어 통계가 왜곡됨
+apps/desktop/src/renderer/generated/** linguist-generated=true -diff

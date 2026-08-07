@@ -151,8 +151,6 @@ SSH-over-SSM and AWS SFTP require EC2 Instance Connect public key injection perm
 
 ## Documentation
 
-> The documents below are currently written in Korean. Translations are in progress.
-
 - [Desktop](./docs/desktop.md)
 - [AI assistant](./docs/ai-assistant-design.md)
 - [AWS / SSM setup guide](./docs/aws.md)

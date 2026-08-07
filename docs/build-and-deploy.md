@@ -19,9 +19,9 @@
 초기 설치:
 
 ```bash
-npm install
-(cd services/ssh-core && go mod tidy)
-(cd services/sync-api && go mod tidy)
+npm ci
+(cd services/ssh-core && go build ./...)
+(cd services/sync-api && go build ./...)
 ```
 
 ## 로컬 개발 실행
@@ -39,17 +39,17 @@ npm run dev:api
 전체 테스트:
 
 ```bash
-npm test
+npm run check:js   # Node 만 필요. 버전 정합 + 타입체크 + 데스크톱·모바일 테스트
+npm run check      # 위 + Go 서비스 테스트(Go 툴체인 필요)
 ```
 
 추가 검증:
 
 ```bash
-npm run typecheck --workspace @dolssh/desktop
+npm run typecheck                      # 데스크톱 + 모바일
+npm run test:mobile                    # 모바일만
 (cd services/ssh-core && go test ./...)
-(cd services/ssh-core && go build ./...)
 (cd services/sync-api && go test ./...)
-(cd services/sync-api && go build ./...)
 ```
 
 ## 저장소 공통 버전 관리

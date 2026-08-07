@@ -32,11 +32,11 @@ type windowsConPTYRunner struct {
 	// shellIntegrationPreinstalled 는 기동 인자로 통합을 넣었는지다. 매니저가 이것을 보고 stdin
 	// 주입을 건너뛴다.
 	shellIntegrationPreinstalled bool
-	process       windows.Handle
-	pseudoConsole windows.Handle
-	inputWriter   *os.File
-	outputReader  *os.File
-	closeOnce     sync.Once
+	process                      windows.Handle
+	pseudoConsole                windows.Handle
+	inputWriter                  *os.File
+	outputReader                 *os.File
+	closeOnce                    sync.Once
 }
 
 type windowsShellRuntime struct {
@@ -183,9 +183,9 @@ func startPlatformLocalRunner(payload protocol.LocalConnectPayload, runtime loca
 		shellKind:                    runtime.shellKind,
 		shellIntegrationPreinstalled: runtime.shellIntegrationPreinstalled,
 		process:                      processInfo.Process,
-		pseudoConsole: pseudoConsole,
-		inputWriter:   inputWriter,
-		outputReader:  outputReader,
+		pseudoConsole:                pseudoConsole,
+		inputWriter:                  inputWriter,
+		outputReader:                 outputReader,
 	}, nil
 }
 
