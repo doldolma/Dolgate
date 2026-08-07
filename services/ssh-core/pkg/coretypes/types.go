@@ -650,6 +650,9 @@ type TailnetPeerPayload struct {
 	// Relay 는 이 기기와 통신에 쓰는 DERP 지역이다. Direct 여도 폴백 경로로 남아 있어
 	// 채워질 수 있다.
 	Relay string `json:"relay,omitempty"`
+	// Routes 는 이 기기가 서브넷 라우터로서 담당하는 대역(CIDR)이다. tailscale 이 깔려
+	// 있지 않은 호스트는 이 대역을 통해 닿으므로, 그 호스트의 경로를 말하려면 필요하다.
+	Routes []string `json:"routes,omitempty"`
 	// RxBytes·TxBytes 는 이 노드가 만들어진 뒤의 누적치다. 경로가 실제로 쓰이고 있는지를
 	// 구분하는 단서다 — 0 이면 아직 이 기기와 주고받은 것이 없다.
 	RxBytes int64 `json:"rxBytes,omitempty"`

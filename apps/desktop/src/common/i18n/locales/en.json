@@ -660,6 +660,7 @@
       "tailnetPathRelay": "Relayed ({{relay}})",
       "tailnetPathRelayUnknown": "Relayed",
       "tailnetPathUnknown": "Checking path",
+      "tailnetPathViaRouter": "via {{router}} · {{path}}",
       "tailnetNotConnected": "Not connected",
       "jump": "Jump",
       "reconnect": "Reconnect",

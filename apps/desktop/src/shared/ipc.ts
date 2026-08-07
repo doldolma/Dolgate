@@ -298,6 +298,14 @@ export interface TailnetPeer {
   direct: boolean;
   /** 이 기기와 쓰는 DERP 지역. 직결이어도 폴백으로 남아 채워질 수 있다. */
   relay?: string;
+  /**
+   * 이 기기가 서브넷 라우터로서 담당하는 대역(CIDR).
+   *
+   * tailnet 을 거쳐 가는 호스트가 전부 tailnet 노드인 것은 아니다 — tailscale 이 깔려 있지
+   * 않은 사내망 장비는 이 대역을 통해 닿는다. 그런 호스트의 경로를 말하려면 라우터를 먼저
+   * 찾아야 한다.
+   */
+  routes?: string[];
   rxBytes?: number;
   txBytes?: number;
 }

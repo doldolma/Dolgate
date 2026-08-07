@@ -1019,6 +1019,7 @@ func tailnetPeerPayloads(peers []tailnet.Peer) []coretypes.TailnetPeerPayload {
 			IPs:      peer.IPs,
 			Direct:   peer.Direct,
 			Relay:    peer.Relay,
+			Routes:   peer.Routes,
 			RxBytes:  peer.RxBytes,
 			TxBytes:  peer.TxBytes,
 		})

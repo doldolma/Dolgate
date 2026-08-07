@@ -665,6 +665,30 @@ func keyExpired(expiry *time.Time, now time.Time) bool {
 	return expiry != nil && !expiry.IsZero() && expiry.Before(now)
 }
 
+// advertisedRoutes 는 이 기기가 서브넷 라우터로서 실제로 담당하는 대역이다.
+//
+// PrimaryRoutes 를 쓴다 — 같은 대역을 여러 노드가 광고해도 지금 트래픽을 받는 것은 하나뿐이라,
+// 이 목록이 "이 IP 로 가려면 실제로 누구를 거치는가"와 일치한다.
+//
+// 기본 경로(0.0.0.0/0, ::/0)는 뺀다. exit node 는 모든 주소를 담당하므로 그대로 두면 어떤
+// 호스트든 exit node 경유로 보고돼, 정작 그 호스트를 담당하는 서브넷 라우터를 가린다.
+func advertisedRoutes(peer *ipnstate.PeerStatus) []string {
+	if peer.PrimaryRoutes == nil || peer.PrimaryRoutes.IsNil() {
+		return nil
+	}
+	routes := make([]string, 0, peer.PrimaryRoutes.Len())
+	for _, prefix := range peer.PrimaryRoutes.All() {
+		if !prefix.IsValid() || prefix.Bits() == 0 {
+			continue
+		}
+		routes = append(routes, prefix.String())
+	}
+	if len(routes) == 0 {
+		return nil
+	}
+	return routes
+}
+
 // peersFromBackend 는 tailnet 안의 기기들과 그 경로를 옮긴다.
 //
 // 직결 판정은 CurAddr 이다 — 실제로 쓰는 엔드포인트가 정해져 있으면 직결이고, 비어 있으면
@@ -689,6 +713,7 @@ func peersFromBackend(state *ipnstate.Status) []Peer {
 			IPs:      ips,
 			Direct:   strings.TrimSpace(peer.CurAddr) != "",
 			Relay:    peer.Relay,
+			Routes:   advertisedRoutes(peer),
 			RxBytes:  peer.RxBytes,
 			TxBytes:  peer.TxBytes,
 		})

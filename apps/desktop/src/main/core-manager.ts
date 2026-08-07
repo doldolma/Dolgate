@@ -652,6 +652,9 @@ function toTailnetPeers(value: unknown): TailnetPeer[] | undefined {
         : undefined,
       direct: entry.direct === true,
       relay: optionalText(entry.relay),
+      routes: Array.isArray(entry.routes)
+        ? entry.routes.filter((route): route is string => typeof route === "string")
+        : undefined,
       rxBytes: typeof entry.rxBytes === "number" ? entry.rxBytes : undefined,
       txBytes: typeof entry.txBytes === "number" ? entry.txBytes : undefined,
     }));

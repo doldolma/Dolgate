@@ -660,6 +660,7 @@
       "tailnetPathRelay": "릴레이 경유 ({{relay}})",
       "tailnetPathRelayUnknown": "릴레이 경유",
       "tailnetPathUnknown": "경로 확인 중",
+      "tailnetPathViaRouter": "{{router}} 경유 · {{path}}",
       "tailnetNotConnected": "연결 안 됨",
       "jump": "점프",
       "reconnect": "재연결",

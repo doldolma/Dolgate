@@ -196,7 +196,14 @@ type Peer struct {
 	// Direct 는 직결 경로가 서 있는지다. false 면 릴레이 경유다.
 	Direct bool
 	// Relay 는 이 기기와 쓰는 DERP 지역이다. 직결이어도 폴백으로 남아 채워질 수 있다.
-	Relay   string
+	Relay string
+	// Routes 는 이 기기가 서브넷 라우터로서 광고하는 대역이다(CIDR).
+	//
+	// tailnet 을 거쳐 가는 호스트가 전부 tailnet 노드인 것은 아니다. 사내망 장비처럼
+	// tailscale 이 깔려 있지 않은 기기는 서브넷 라우터를 통해 닿는데, 그런 호스트는
+	// TailscaleIPs 로는 어떤 peer 와도 맞지 않아 "경로 확인 중"에서 영영 멈춘다.
+	// 라우터를 찾으려면 광고 대역이 필요하다.
+	Routes  []string
 	RxBytes int64
 	TxBytes int64
 }

@@ -10,6 +10,7 @@ import type {
 } from '../store/createAppStore';
 import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowControls';
 import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
+import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix';
 import { cn } from '../lib/cn';
 import {
   getSessionConnectedAt,
@@ -331,6 +332,13 @@ type TailnetPathInfo = {
   /** 대상 기기를 아직 못 찾았으면 undefined(경로 확인 중). */
   direct?: boolean;
   relay?: string;
+  /**
+   * 대상이 tailnet 노드가 아니라 서브넷 라우터를 거쳐 닿는 경우, 그 라우터의 이름.
+   *
+   * 이때 direct·relay 는 라우터까지의 경로다 — 그 구간이 tailnet 이 관여하는 전부이고,
+   * 라우터에서 대상까지는 평범한 사내망이라 여기서 말할 것이 없다.
+   */
+  via?: string;
 };
 
 const TAILNET_PATH_POLL_MS = 5_000;
@@ -406,10 +414,22 @@ function useTailnetPathLookup(tabs: TerminalTab[], hosts: HostRecord[]): Tailnet
         return { label, connected: false };
       }
       const peer = findTailnetPeer(status.peers, host.hostname);
-      if (!peer) {
+      if (peer) {
+        return { label, connected: true, direct: peer.direct, relay: peer.relay };
+      }
+      // 대상이 tailnet 노드가 아니면 그것으로 끝이 아니다 — 서브넷 라우터를 거쳐 닿는
+      // 호스트가 흔하다. 라우터를 못 찾을 때만 "경로 확인 중"이다.
+      const router = findTailnetSubnetRouter(status.peers, host.hostname);
+      if (!router) {
         return { label, connected: true };
       }
-      return { label, connected: true, direct: peer.direct, relay: peer.relay };
+      return {
+        label,
+        connected: true,
+        direct: router.direct,
+        relay: router.relay,
+        via: router.hostName || router.dnsName?.split('.')[0] || undefined,
+      };
     },
     [labels, statuses],
   );
@@ -447,6 +467,58 @@ export function findTailnetPeer(
   );
 }
 
+/**
+ * 이 주소를 담당하는 서브넷 라우터를 찾는다.
+ *
+ * tailnet 을 거쳐 가는 호스트가 전부 tailnet 노드인 것은 아니다 — tailscale 이 깔려 있지 않은
+ * 사내망 장비는 라우터가 광고하는 대역을 통해 닿는다. 그런 호스트는 peer 목록의 어떤 IP 와도
+ * 맞지 않아, 라우터를 찾지 않으면 경로가 영영 "확인 중"으로 남는다.
+ *
+ * 이름이 아니라 IP 일 때만 찾는다. MagicDNS 이름이 대역에 속하는지는 물어볼 수 없다.
+ * 여러 대역이 걸리면 더 구체적인 쪽(접두가 긴 쪽)이 실제 경로다.
+ */
+export function findTailnetSubnetRouter(
+  peers: TailnetPeer[] | undefined,
+  hostname: string,
+): TailnetPeer | null {
+  const target = hostname.trim();
+  if (!target || !peers || !isIpAddress(target)) {
+    return null;
+  }
+  let best: TailnetPeer | null = null;
+  let bestBits = -1;
+  for (const peer of peers) {
+    for (const route of peer.routes ?? []) {
+      if (!isAddressInCidr(target, route)) {
+        continue;
+      }
+      const bits = cidrPrefixLength(route);
+      if (bits > bestBits) {
+        best = peer;
+        bestBits = bits;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * 라우터 이름이 길면 이름 쪽을 줄인다.
+ *
+ * 값 칸은 CSS 로 잘리는데 잘리는 쪽이 **끝**이라, 그대로 두면 `…경유 · 직결` 에서 정작
+ * 중요한 직결/릴레이가 먼저 사라진다. 경로를 남기려면 이름을 우리가 먼저 줄여야 한다.
+ *
+ * 앞쪽을 남긴다 — 호스트 이름은 보통 앞이 구별하는 부분이다(`seoul-rtr-01` 의 `seoul-rtr`).
+ */
+export function shortenRouterName(name: string, max = 14): string {
+  const trimmed = name.trim();
+  if (trimmed.length <= max) {
+    return trimmed;
+  }
+  // 말줄임표가 한 글자를 차지하므로 그만큼 덜 남긴다.
+  return `${trimmed.slice(0, Math.max(1, max - 1))}…`;
+}
+
 /** 경로 한 줄을 만든다. 릴레이면 어느 DERP 지역인지까지 보여 준다. */
 function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
   if (!info.connected) {
@@ -462,21 +534,23 @@ function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
       value: `${info.label} · ${t('titleBar.hover.tailnetPathUnknown')}`,
     };
   }
-  if (info.direct) {
-    return {
-      label: t('titleBar.hover.tailnet'),
-      value: `${info.label} · ${t('titleBar.hover.tailnetPathDirect')}`,
-      valueColor: 'var(--success,#3fae8f)',
-    };
-  }
+  // 라우터 경유면 그 사실을 먼저 말한다 — 경로(직결/릴레이)가 대상이 아니라 라우터까지의
+  // 것이라, 그 말이 없으면 숫자를 잘못 읽는다.
+  const path = info.direct
+    ? t('titleBar.hover.tailnetPathDirect')
+    : info.relay
+      ? t('titleBar.hover.tailnetPathRelay', { relay: info.relay })
+      : t('titleBar.hover.tailnetPathRelayUnknown');
+  const detail = info.via
+    ? t('titleBar.hover.tailnetPathViaRouter', {
+        router: shortenRouterName(info.via),
+        path,
+      })
+    : path;
   return {
     label: t('titleBar.hover.tailnet'),
-    value: `${info.label} · ${
-      info.relay
-        ? t('titleBar.hover.tailnetPathRelay', { relay: info.relay })
-        : t('titleBar.hover.tailnetPathRelayUnknown')
-    }`,
-    valueColor: 'var(--warning-text)',
+    value: `${info.label} · ${detail}`,
+    valueColor: info.direct ? 'var(--success,#3fae8f)' : 'var(--warning-text)',
   };
 }
 
