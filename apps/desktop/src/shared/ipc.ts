@@ -451,6 +451,28 @@ export interface TailnetConfig {
   authKey?: string;
   /** 활동이 멈추면 노드를 지우도록 요청한다. 컨트롤 플레인이 최종 판단한다. */
   ephemeral?: boolean;
+  /**
+   * tailnet 기기 목록에 보일 이름. undefined 면 코어가 `dolgate-<기기이름>` 을 쓴다.
+   *
+   * 선택 필드가 아니다(값은 없을 수 있어도 키는 써야 한다). 코어는 이 config 로 저장된
+   * 설정을 덮어쓰므로, 빠뜨리면 밀어 넣어 둔 이름이 지워진다. 필수로 두면 그것을 컴파일러가
+   * 잡는다.
+   */
+  hostname: string | undefined;
+}
+
+/**
+ * 화면이 "연결"을 눌렀을 때 메인으로 보내는 것. 코어 설정(TailnetConfig)과 다른 타입이다.
+ *
+ * 화면은 노드 이름도 저장된 auth key 도 모른다 — 둘 다 기기 로컬이라 메인이 채운다. 같은
+ * 타입으로 두면 화면이 못 채우는 필드를 필수로 만들 수 없어, 정작 필요한 곳에서 누락을
+ * 잡지 못한다.
+ */
+export interface TailnetTestRequest {
+  id: string;
+  controlUrl?: string;
+  /** 아직 저장하지 않은 초안을 시험할 때만. 저장된 것은 메인이 읽어 넣는다. */
+  authKey?: string;
 }
 
 export type CoreEventType =
@@ -1500,7 +1522,7 @@ export interface DesktopApi {
      * onStatus 로 온다 — 브라우저 로그인이면 사용자가 인증하는 구간이 있어서 응답 하나로는
      * 무엇을 기다리는지 보여줄 수 없다.
      */
-    test: (config: TailnetConfig) => Promise<TailnetStatus>;
+    test: (config: TailnetTestRequest) => Promise<TailnetStatus>;
     /** 노드 등록을 해제한다. tailnet 설정 자체는 남는다. */
     forget: (id: string) => Promise<void>;
     /** 노드를 지금 내린다. 등록은 남으므로 다시 연결해도 재인증이 없다. */

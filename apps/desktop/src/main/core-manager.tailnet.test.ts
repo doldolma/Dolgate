@@ -181,10 +181,43 @@ describe("tailnet test completion", () => {
     openExternalMock.mockClear();
   });
 
+  // 코어는 이 config 로 저장된 설정을 통째로 덮어쓴다(TailnetTest → configs.set). 그래서 여기서
+  // 필드를 빠뜨리면 그 값이 지워지고, 다음에 만들어지는 노드가 옛 설정으로 뜬다. 노드 이름이
+  // 그렇게 세 번 유실됐다 — 설정 읽기·연결 테스트 IPC·이 페이로드 조립 세 곳 모두 화이트리스트라,
+  // 새 필드를 더할 때 한 곳만 빠뜨려도 화면에는 저장된 것처럼 보이면서 반영만 안 된다.
+  it("carries the whole config into the core, including the node name", async () => {
+    const { manager, child } = await startManager();
+
+    void manager.testTailnet(
+      {
+        id: "net-1",
+        controlUrl: "https://headscale.example.com",
+        authKey: "tskey-abc",
+        ephemeral: false,
+        hostname: "work-laptop",
+      },
+      () => {},
+    );
+    await lastRequestId(child);
+
+    const frame = String(child.stdin.write.mock.calls.at(-1)?.[0]);
+    const sent = JSON.parse(/(\{.*\})\s*$/s.exec(frame)?.[1] ?? "{}");
+    expect(sent.payload.config).toMatchObject({
+      id: "net-1",
+      controlUrl: "https://headscale.example.com",
+      authKey: "tskey-abc",
+      ephemeral: false,
+      hostname: "work-laptop",
+    });
+  });
+
   it("settles when the core reports the attempt was cancelled", async () => {
     const { manager, child, emitControl } = await startManager();
 
-    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const test = manager.testTailnet(
+      { id: "net-1", controlUrl: "", hostname: undefined },
+      () => {},
+    );
 
     const requestId = await lastRequestId(child);
 
@@ -207,7 +240,10 @@ describe("tailnet test completion", () => {
   it("keeps waiting while the node is still coming up", async () => {
     const { manager, child, emitControl } = await startManager();
 
-    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const test = manager.testTailnet(
+      { id: "net-1", controlUrl: "", hostname: undefined },
+      () => {},
+    );
     const requestId = await lastRequestId(child);
 
     // 노드가 아직 안 올라온 구간에서도 stopped 가 온다 — 그것만으로 끝내면 즉시 실패한다.
@@ -238,7 +274,10 @@ describe("tailnet test completion", () => {
   it("running 이어도 준비되지 않았으면 끝내지 않는다", async () => {
     const { manager, child, emitControl } = await startManager();
 
-    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const test = manager.testTailnet(
+      { id: "net-1", controlUrl: "", hostname: undefined },
+      () => {},
+    );
     const requestId = await lastRequestId(child);
 
     emitControl({
@@ -270,7 +309,10 @@ describe("tailnet test completion", () => {
   it("동기화가 끊긴 채 진행하기로 한 것도 종료로 본다", async () => {
     const { manager, child, emitControl } = await startManager();
 
-    const test = manager.testTailnet({ id: "net-1", controlUrl: "" }, () => {});
+    const test = manager.testTailnet(
+      { id: "net-1", controlUrl: "", hostname: undefined },
+      () => {},
+    );
     const requestId = await lastRequestId(child);
 
     emitControl({

@@ -114,6 +114,8 @@ export interface DesktopStateFile {
     subshellReinjectPatterns: string[];
     ai: AiSettings | null;
     serverUrlOverride: string | null;
+    // 기기 로컬 전용. settings 는 동기화 대상이 아니라 여기 두는 것만으로 그렇게 된다.
+    tailnetHostname: string | null;
     updatedAt: string;
   };
   terminal: {
@@ -545,6 +547,7 @@ function createDefaultStateFile(): DesktopStateFile {
       subshellReinjectPatterns: [],
       ai: null,
       serverUrlOverride: null,
+      tailnetHostname: null,
       updatedAt: timestamp
     },
     terminal: {
@@ -1015,6 +1018,10 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         : [],
       ai: normalizeAiSettings(settings.ai),
       serverUrlOverride: typeof settings.serverUrlOverride === 'string' && settings.serverUrlOverride.trim() ? settings.serverUrlOverride.trim() : null,
+      tailnetHostname:
+        typeof settings.tailnetHostname === 'string' && settings.tailnetHostname.trim()
+          ? settings.tailnetHostname.trim()
+          : null,
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
     terminal: {

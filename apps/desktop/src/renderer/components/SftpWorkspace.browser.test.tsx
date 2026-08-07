@@ -88,6 +88,7 @@ function triggerResize(element: HTMLElement) {
 
 const baseSettings: AppSettings = {
   theme: "system",
+  tailnetHostname: null,
   globalTerminalThemeId: "dolssh-dark",
   terminalFontFamily: "sf-mono",
   terminalFontSize: 13,

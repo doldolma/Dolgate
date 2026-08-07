@@ -11,6 +11,8 @@ let tempDir = '';
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((name: string) => (name === 'userData' ? tempDir : os.tmpdir())),
+    // SettingsRepository.get() 은 기본 서버 주소를 앱 설정 파일에서 읽는다.
+    getAppPath: vi.fn(() => process.cwd()),
     isPackaged: false,
   },
   safeStorage: {
@@ -30,6 +32,17 @@ async function loadTailnets() {
   stateStorageModule.resetDesktopStateStorageForTests();
   const { TailnetRepository } = await import('./database');
   return new TailnetRepository();
+}
+
+async function loadSettings() {
+  tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-tailnet-db-'));
+  process.env.DOLSSH_USER_DATA_DIR = tempDir;
+  vi.resetModules();
+
+  const stateStorageModule = await import('./state-storage');
+  stateStorageModule.resetDesktopStateStorageForTests();
+  const { SettingsRepository } = await import('./database');
+  return new SettingsRepository();
 }
 
 function draft(overrides: Partial<TailnetRecord> = {}): TailnetRecord {
@@ -366,5 +379,51 @@ describe('SSH host tailnetId survives the whitelists', () => {
     expect((reloaded.getById('host-3') as { tailnetId?: string | null })?.tailnetId).toBe(
       'net-b',
     );
+  });
+});
+
+// get() 은 필드를 하나하나 나열하는 화이트리스트라, 새 설정을 빠뜨리면 저장은 되는데 읽을
+// 때 사라진다. 노드 이름은 이 값이 코어로 나가는 유일한 통로라, 빠지면 화면에는 저장된 것처럼
+// 보이면서 컨트롤 플레인의 이름은 영영 안 바뀐다 — 아무도 버그로 신고하지 않는 종류의 실패다.
+describe('SettingsRepository tailnet node name', () => {
+  beforeEach(() => {
+    tempDir = '';
+  });
+
+  afterEach(() => {
+    delete process.env.DOLSSH_USER_DATA_DIR;
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads back a saved node name', async () => {
+    const settings = await loadSettings();
+
+    expect(settings.get().tailnetHostname).toBeNull();
+
+    settings.update({ tailnetHostname: 'work-laptop' });
+    expect(settings.get().tailnetHostname).toBe('work-laptop');
+  });
+
+  it('treats a blank name as unset so the core falls back to its default', async () => {
+    const settings = await loadSettings();
+    settings.update({ tailnetHostname: 'work-laptop' });
+
+    settings.update({ tailnetHostname: '   ' });
+    expect(settings.get().tailnetHostname).toBeNull();
+
+    settings.update({ tailnetHostname: 'work-laptop' });
+    settings.update({ tailnetHostname: null });
+    expect(settings.get().tailnetHostname).toBeNull();
+  });
+
+  // 다른 설정을 바꿀 때 이름이 날아가면, 사용자는 자기가 지운 적 없는 값이 사라진 것을 본다.
+  it('survives an unrelated settings update', async () => {
+    const settings = await loadSettings();
+    settings.update({ tailnetHostname: 'work-laptop' });
+
+    settings.update({ theme: 'dark' });
+    expect(settings.get().tailnetHostname).toBe('work-laptop');
   });
 });

@@ -1828,3 +1828,98 @@ func TestTailnetTestRetriesAfterARefusedRebuild(t *testing.T) {
 		t.Error("거절이 상태로 나가지 않았다 — 화면이 무엇을 기다리는지 알 수 없다")
 	}
 }
+
+// 노드는 그 tailnet 의 모든 세션이 공유하고, 쓰이는 중이면 폐기 예약만 걸린 채 새 리스 요청이
+// 전부 ErrNodeRetiring 으로 떨어진다. 그래서 "노드를 다시 만들어야 하는 변경"의 범위가 곧
+// "이 값을 바꾸면 그 tailnet 의 새 연결이 막히는가"다. 이름은 표시용이라 그 대가를 치를 값이
+// 아니고, auth key·컨트롤 플레인은 옛 노드로 붙으면 엉뚱한 tailnet 에 연결되므로 반드시 막아야 한다.
+func TestConfigChangeRebuildsNodeOnlyWhenItMustN(t *testing.T) {
+	base := coretypes.TailnetConfigPayload{
+		ID:         "net-1",
+		ControlURL: "https://headscale.example.com",
+		AuthKey:    "tskey-a",
+		Hostname:   "dolgate-old",
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload
+		rebuild bool
+	}{
+		{
+			name: "hostname only",
+			mutate: func(c coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload {
+				c.Hostname = "dolgate-new"
+				return c
+			},
+			rebuild: false,
+		},
+		{
+			name: "auth key",
+			mutate: func(c coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload {
+				c.AuthKey = "tskey-b"
+				return c
+			},
+			rebuild: true,
+		},
+		{
+			name: "control plane",
+			mutate: func(c coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload {
+				c.ControlURL = "https://other.example.com"
+				return c
+			},
+			rebuild: true,
+		},
+		{
+			name: "auth key together with a new name",
+			mutate: func(c coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload {
+				c.AuthKey = "tskey-b"
+				c.Hostname = "dolgate-new"
+				return c
+			},
+			rebuild: true,
+		},
+		{
+			name:    "nothing",
+			mutate:  func(c coretypes.TailnetConfigPayload) coretypes.TailnetConfigPayload { return c },
+			rebuild: false,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			configs := newTailnetConfigs(t.TempDir())
+			configs.replaceAll([]coretypes.TailnetConfigPayload{base})
+
+			next := testCase.mutate(base)
+			changes := configs.replaceAll([]coretypes.TailnetConfigPayload{next})
+
+			if got := len(changes.Changed) > 0; got != testCase.rebuild {
+				t.Fatalf("rebuild = %v, want %v", got, testCase.rebuild)
+			}
+			// 노드를 안 버려도 값은 저장돼야 한다. 다음에 노드가 만들어질 때 이 이름을 쓴다.
+			if stored := configs.byID[base.ID]; stored.Hostname != next.Hostname {
+				t.Fatalf("stored hostname = %q, want %q", stored.Hostname, next.Hostname)
+			}
+		})
+	}
+}
+
+// set 은 연결 테스트가 쓰는 경로다. replaceAll 과 같은 규칙이어야 노드가 둘로 갈라지지 않는다.
+func TestSetSkipsRebuildForHostnameOnlyN(t *testing.T) {
+	configs := newTailnetConfigs(t.TempDir())
+	base := coretypes.TailnetConfigPayload{ID: "net-1", AuthKey: "tskey-a", Hostname: "old"}
+	configs.set(base)
+
+	renamed := base
+	renamed.Hostname = "new"
+	if configs.set(renamed) {
+		t.Fatal("set() reported a rebuild for a hostname-only change")
+	}
+
+	rekeyed := renamed
+	rekeyed.AuthKey = "tskey-b"
+	if !configs.set(rekeyed) {
+		t.Fatal("set() did not report a rebuild for a new auth key")
+	}
+}

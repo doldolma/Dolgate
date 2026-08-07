@@ -772,6 +772,25 @@ func (c *tailnetConfigs) advanceGenerationLocked(id string) {
 	c.generations[id] = c.nextGeneration
 }
 
+// requiresNodeRebuild 는 이 설정 변경이 노드를 버려야 하는 것인지다.
+//
+// Hostname 은 비교에서 뺀다. 그 값은 기기 목록에 보이는 이름일 뿐이라, 새 연결이 잠시 옛
+// 이름으로 떠 있는 노드에 붙어도 잘못될 것이 없다. auth key·컨트롤 플레인은 다르다 — 옛
+// 노드로 붙으면 엉뚱한 tailnet 에 연결되므로 반드시 버려야 한다.
+//
+// 이름까지 버리기 대상에 넣으면 대가가 크다. 노드는 그 tailnet 의 모든 세션이 공유하고,
+// 쓰이는 중이면 즉시 버릴 수 없어 폐기 예약만 걸린다. 그동안 새 리스 요청은 전부
+// ErrNodeRetiring 으로 떨어지므로, 이름 한 번 바꿨다고 그 tailnet 의 새 연결이 세션을
+// 다 닫을 때까지 막힌다. 표시용 값이 치를 대가가 아니다.
+//
+// 바뀐 이름은 저장돼 있다가 노드가 다음에 만들어질 때(유휴 만료·앱 재시작·실제 재생성이
+// 필요한 다른 변경) 반영된다.
+func requiresNodeRebuild(previous, next coretypes.TailnetConfigPayload) bool {
+	previous.Hostname = ""
+	next.Hostname = ""
+	return previous != next
+}
+
 // set 은 설정을 갈아 끼우고, 노드를 다시 만들어야 하는 변경이었는지 알려준다.
 //
 // 노드는 만들어질 때 설정을 받으므로, 이미 만들어진 노드는 새 auth key 나 새 컨트롤 플레인을
@@ -781,10 +800,11 @@ func (c *tailnetConfigs) set(config coretypes.TailnetConfigPayload) (changed boo
 	defer c.mu.Unlock()
 	previous, existed := c.byID[config.ID]
 	c.byID[config.ID] = config
-	if !existed || previous != config {
+	rebuild := !existed || requiresNodeRebuild(previous, config)
+	if rebuild {
 		c.advanceGenerationLocked(config.ID)
 	}
-	return existed && previous != config
+	return existed && rebuild
 }
 
 type tailnetConfigChanges struct {
@@ -810,10 +830,11 @@ func (c *tailnetConfigs) replaceAll(configs []coretypes.TailnetConfigPayload) ta
 		config.ID = id
 		next[id] = config
 		previous, existed := c.byID[id]
-		if !existed || previous != config {
+		rebuild := !existed || requiresNodeRebuild(previous, config)
+		if rebuild {
 			c.advanceGenerationLocked(id)
 		}
-		if existed && previous != config {
+		if existed && rebuild {
 			changes.Changed = append(changes.Changed, id)
 		}
 	}

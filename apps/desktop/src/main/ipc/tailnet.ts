@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import type {
   TailnetConfig,
+  TailnetTestRequest,
   TailnetRecord,
   TailnetSnapshot,
   TailnetStatus,
@@ -57,7 +58,25 @@ export interface TailnetSaveInput {
  * 자동 정리가 필요한 사람은 ephemeral 속성이 켜진 재사용 가능한 키를 쓰면 되고, 그 경우 노드가
  * ephemeral 이 되는지는 컨트롤 플레인이 키를 보고 정한다 — 우리가 요청하지 않아도 그렇게 된다.
  */
+/**
+ * 이 기기가 tailnet 에 등록할 이름. 비면 코어가 `dolgate-<기기이름>` 을 쓴다.
+ *
+ * 노드 이름은 tailnet 별이 아니라 기기별이다 — 한 기기는 어느 tailnet 에서든 같은 이름으로
+ * 보이는 편이 알아보기 쉽다. 코어 설정이 tailnet 마다 받으므로 같은 값을 모두에 넣는다.
+ *
+ * 코어로 설정이 나가는 경로가 둘(전체 밀어넣기·연결 테스트)이라 함수로 묶는다. 한쪽이
+ * 빠뜨리면 그쪽이 코어에 저장된 설정을 덮어써서, 이름이 조용히 기본값으로 되돌아간다.
+ */
+function resolveTailnetHostname(ctx: MainIpcContext): string | undefined {
+  return ctx.settings.get().tailnetHostname?.trim() || undefined;
+}
+
 function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
+  //
+  // 이름만 바뀐 경우 코어는 노드를 버리지 않는다(requiresNodeRebuild). 저장해 뒀다가 노드가
+  // 다음에 만들어질 때 쓴다 — 그래서 연결이 끊기지도, 새 연결이 막히지도 않는다. 노드키는
+  // 그대로라 재인증도 없고 컨트롤 플레인에서도 같은 노드다.
+  const hostname = resolveTailnetHostname(ctx);
   return ctx.tailnets.listPayloads().map((payload) => {
     const authKey = payload.authKey?.trim() || undefined;
     return {
@@ -65,6 +84,7 @@ function buildTailnetConfigs(ctx: MainIpcContext): TailnetConfig[] {
       controlUrl: payload.controlUrl,
       authKey,
       ephemeral: false,
+      hostname,
     };
   });
 }
@@ -122,7 +142,7 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
 
   ipcMain.handle(
     ipcChannels.tailnet.test,
-    async (event, config: TailnetConfig): Promise<TailnetStatus> => {
+    async (event, request: TailnetTestRequest): Promise<TailnetStatus> => {
       // 진행 상태는 요청한 창에만 보낸다. 다른 창이 남의 tailnet 인증 URL 을 받을 이유가
       // 없고, 창이 닫힌 뒤 보내면 예외가 난다.
       const sender = BrowserWindow.fromWebContents(event.sender);
@@ -136,22 +156,27 @@ export function registerTailnetIpcHandlers(ctx: MainIpcContext): void {
       // 저장 전에도 시험할 수 있어야 하므로, 방금 입력한 키가 딸려 오면 그것을 쓴다.
       // 그 외에는 렌더러가 키를 갖고 있지 않으니 여기서 읽어 넣는다. 키가 위로 올라오는 건
       // 저장과 같은 방향이라 "키는 렌더러로 내려보내지 않는다"는 원칙과 무관하다.
-      const typedAuthKey = config.authKey?.trim();
+      const typedAuthKey = request.authKey?.trim();
       const authKey = typedAuthKey
         ? typedAuthKey
-        : (ctx.tailnets.readAuthKey(config.id) ?? undefined);
+        : (ctx.tailnets.readAuthKey(request.id) ?? undefined);
+
+      // 화면의 요청을 코어 설정으로 승격한다. TailnetConfig 로 못박아 두면 새 필드가 생겼을 때
+      // 여기서 컴파일 오류가 난다 — 조용히 빠지는 것보다 낫다.
+      const config: TailnetConfig = {
+        id: request.id,
+        controlUrl: request.controlUrl,
+        authKey,
+        // 저장 때와 같은 규칙이어야 한다 — 시험과 실제 연결이 다르게 붙으면 같은 tailnet 에
+        // 노드가 둘로 갈라진다. 둘 다 요청하지 않는다(위 buildTailnetConfigs 설명 참조).
+        ephemeral: false,
+        // 화면은 노드 이름을 모른다(기기 로컬 설정이다). 여기서 넣지 않으면 코어가 이 config 로
+        // 저장된 설정을 덮어써 이름이 기본값으로 되돌아간다.
+        hostname: resolveTailnetHostname(ctx),
+      };
 
       return ctx.coreManager
-        .testTailnet(
-          {
-            ...config,
-            authKey,
-            // 저장 때와 같은 규칙이어야 한다 — 시험과 실제 연결이 다르게 붙으면 같은 tailnet 에
-            // 노드가 둘로 갈라진다. 둘 다 요청하지 않는다(위 buildTailnetConfigs 설명 참조).
-            ephemeral: false,
-          },
-          pushStatus,
-        )
+        .testTailnet(config, pushStatus)
         .catch((cause: unknown) => {
           throw toUserFacingTailnetError(cause);
         });

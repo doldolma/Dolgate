@@ -1945,7 +1945,10 @@
       "noResults": "No search results.",
       "failed": "Could not install the SSH public key.",
       "busy": "Installing…"
-    }
+    },
+    "aboutToggle": "How credentials are stored",
+    "aboutStorage": "Stored in your OS keychain",
+    "aboutSync": "Encrypted with your sync passphrase before upload, so the server only sees ciphertext"
   },
   "sshKeyInstall": {
     "generateTitle": "Generate and install a new SSH key",
@@ -3080,10 +3083,16 @@
   },
   "tailnetSettings": {
     "heading": "Networks",
+    "aboutToggle": "About this feature",
+    "aboutNoClient": "No need to install Tailscale",
+    "aboutNoOsChange": "Leaves your OS network settings alone",
+    "aboutMultiple": "Connect to several tailnets at once",
+    "stepAdd": "Add a tailnet with “Add network”",
+    "stepAssign": "Pick that tailnet when editing a host",
+    "stepConnect": "Connecting to that host now goes through the tailnet",
     "description": "Join a Tailscale or Headscale network (tailnet) as a node to reach the hosts inside it.",
     "add": "Add network",
     "empty": "No networks registered.",
-    "emptyHint": "Once you add one, the connection test tells you whether the node comes up.",
     "test": "Test connection",
     "remove": "Delete {{label}}",
     "tailscaleDefault": "Tailscale",

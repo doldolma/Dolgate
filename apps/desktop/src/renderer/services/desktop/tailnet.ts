@@ -1,5 +1,5 @@
 import type {
-  TailnetConfig,
+  TailnetTestRequest,
   TailnetRecord,
   TailnetSnapshot,
   TailnetStatus,
@@ -26,7 +26,7 @@ export function removeTailnet(id: string): Promise<void> {
  * 옵션이 없다. 다시 세울지·재인증을 개시할지는 코어가 링크를 확보하는 과정에서 판단한다 —
  * 화면은 상태를 그리고 의사만 전달한다.
  */
-export function testTailnet(config: TailnetConfig): Promise<TailnetStatus> {
+export function testTailnet(config: TailnetTestRequest): Promise<TailnetStatus> {
   return desktopApi.tailnet.test(config);
 }
 

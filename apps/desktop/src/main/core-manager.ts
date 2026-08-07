@@ -4929,12 +4929,10 @@ export class CoreManager {
         id: randomUUID(),
         type: "tailnetTest",
         payload: {
-          config: {
-            id: config.id,
-            controlUrl: config.controlUrl,
-            authKey: config.authKey,
-            ephemeral: config.ephemeral,
-          },
+          // config 를 통째로 넘긴다. 필드를 다시 나열하면 새 필드가 생길 때마다 여기를 고쳐야
+          // 하고, 안 고쳐도 타입 오류가 나지 않는다 — 노드 이름이 그렇게 유실됐다. 코어는 이
+          // config 로 저장된 설정을 덮어쓰므로 한 필드만 빠져도 그 값이 지워진다.
+          config,
           timeoutMs: coreTimeoutMs,
         },
       },

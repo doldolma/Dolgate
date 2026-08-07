@@ -85,7 +85,14 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
     ipcChannels.settings.update,
     async (event, input: Partial<AppSettings>) => {
       const previousServerUrl = ctx.settings.get().serverUrl;
+      const previousTailnetHostname = ctx.settings.get().tailnetHostname ?? null;
       const nextSettings = ctx.settings.update(input);
+      // 노드 이름은 코어가 노드를 만들 때 쓴다. 다시 밀어 넣지 않으면 앱을 재시작할 때까지
+      // 코어가 옛 이름을 들고 있다. 이름만 바뀐 변경은 노드를 버리지 않으므로 이 호출로
+      // 끊기는 연결은 없다.
+      if ((nextSettings.tailnetHostname ?? null) !== previousTailnetHostname) {
+        ctx.coreManager.pushTailnetConfigs();
+      }
       if (Object.prototype.hasOwnProperty.call(input, "language")) {
         applyMainLanguage(nextSettings.language);
       }

@@ -1945,7 +1945,10 @@
       "noResults": "검색 결과가 없습니다.",
       "failed": "SSH 공개 키를 설치하지 못했습니다.",
       "busy": "설치 중..."
-    }
+    },
+    "aboutToggle": "자격증명 저장 방식 설명",
+    "aboutStorage": "OS 암호화 저장소에 저장됩니다",
+    "aboutSync": "동기화 암호로 암호화해 올리므로 서버는 암호문만 봅니다"
   },
   "sshKeyInstall": {
     "generateTitle": "새 SSH 키 생성·설치",
@@ -3080,10 +3083,16 @@
   },
   "tailnetSettings": {
     "heading": "네트워크",
+    "aboutToggle": "이 기능 설명",
+    "aboutNoClient": "Tailscale 을 따로 설치하지 않아도 됩니다",
+    "aboutNoOsChange": "OS 네트워크 설정을 건드리지 않습니다",
+    "aboutMultiple": "여러 tailnet 에 동시에 연결할 수 있습니다",
+    "stepAdd": "‘네트워크 추가’로 tailnet 을 등록합니다",
+    "stepAssign": "호스트 편집에서 그 tailnet 을 지정합니다",
+    "stepConnect": "그 호스트에 연결하면 tailnet 을 거쳐 갑니다",
     "description": "Tailscale 또는 Headscale 네트워크(tailnet)에 노드로 참여해, 그 안의 호스트에 연결합니다.",
     "add": "네트워크 추가",
     "empty": "등록된 네트워크가 없습니다.",
-    "emptyHint": "네트워크를 추가하면 연결 테스트로 노드가 올라오는지 먼저 확인할 수 있습니다.",
     "test": "연결 테스트",
     "remove": "{{label}} 삭제",
     "tailscaleDefault": "Tailscale",

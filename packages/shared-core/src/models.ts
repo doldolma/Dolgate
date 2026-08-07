@@ -1059,6 +1059,17 @@ export interface AppSettings extends TerminalAppearanceSettings {
   ai?: AiSettings;
   serverUrl: string;
   serverUrlOverride?: string | null;
+  /**
+   * 이 기기가 tailnet 에 등록할 때 쓸 이름. null 이면 코어가 정하는 기본값(`dolgate-<기기이름>`).
+   *
+   * **기기 로컬 전용이다 — 동기화하지 않는다.** 노드는 기기마다 별개라 이름이 같으면
+   * 컨트롤 플레인이 `-1`, `-2` 를 붙인다. settings 는 동기화 대상이 아니므로 여기 두면 된다.
+   *
+   * 선택 필드가 아니다. 이 값이 코어까지 가려면 객체를 필드별로 다시 만드는 곳을 세 군데
+   * 지나는데, 선택으로 두면 한 곳만 빠뜨려도 컴파일러가 잡지 못하고 조용히 undefined 가 된다
+   * — 화면에는 저장된 것처럼 보이면서 반영만 안 되는, 원인 찾기 어려운 실패다.
+   */
+  tailnetHostname: string | null;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
 }

@@ -13,6 +13,8 @@ import {
   CardMain,
   EmptyState,
   FieldGroup,
+  InfoHint,
+  InfoHintPoints,
   Input,
   ModalBody,
   ModalFooter,
@@ -124,6 +126,115 @@ function emptyDraft(): TailnetDraft {
  * 연결 테스트가 이 화면의 핵심이다. 노드가 올라오는 과정에서 무엇을 기다리는지 —
  * 브라우저 로그인인지 관리자 승인인지 — 를 보여주지 않으면 사용자는 멈춘 것으로 오해한다.
  */
+import {
+  isTailnetHostnameExact,
+  normalizeTailnetHostname,
+} from '../lib/tailnet-hostname';
+
+/**
+ * 이 기기가 tailnet 에 등록할 이름을 정하는 칸.
+ *
+ * 비워 두면 코어가 정하는 기본값(`dolgate-<기기이름>`)을 쓴다. 값은 기기마다 달라야 해서
+ * 동기화하지 않는다 — 같은 이름이면 컨트롤 플레인이 `-1`, `-2` 를 붙인다.
+ *
+ * 이름을 바꿔도 연결은 끊기지 않는다. 코어는 이름만 바뀐 변경으로는 노드를 버리지 않고,
+ * 저장해 뒀다가 노드가 다음에 만들어질 때 쓴다 — 같은 노드키라 재인증도 없다.
+ */
+function LocalNodeNameField({ defaultName }: { defaultName: string | null }) {
+  const { t: translate } = useTranslation();
+  const settings = useAppStore((state) => state.settings);
+  const updateSettings = useAppStore((state) => state.updateSettings);
+  const saved = settings?.tailnetHostname ?? '';
+  const [value, setValue] = useState(saved);
+  // 저장된 값이 밖에서 바뀌면(다른 화면·재로드) 입력도 따라간다.
+  useEffect(() => {
+    setValue(saved);
+  }, [saved]);
+
+  const normalized = normalizeTailnetHostname(value);
+  const dirty = normalized !== saved.trim();
+  // 입력한 그대로 등록되지 않으면 무엇으로 등록될지 보여 준다. 컨트롤 플레인이
+  // 어차피 다듬으므로, 말해 주지 않으면 목록에서 다른 이름을 보고 당황한다.
+  const willDiffer = value.trim().length > 0 && !isTailnetHostnameExact(value);
+
+  const commit = () => {
+    if (!dirty) {
+      return;
+    }
+    setValue(normalized);
+    void updateSettings({ tailnetHostname: normalized || null });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <label
+        className="shrink-0 text-[0.85rem] text-[var(--text-soft)]"
+        htmlFor="tailnet-node-hostname"
+      >
+        {translate('tailnetSettings.field.nodeName')}
+      </label>
+      <Input
+        id="tailnet-node-hostname"
+        className="w-[15rem]"
+        value={value}
+        placeholder={defaultName ?? ''}
+        spellCheck={false}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commit();
+          }
+        }}
+      />
+      {/* 값을 건드렸을 때만 말한다.
+          평소에도 글자를 두면 입력 양옆에 같은 크기·색 문구가 놓여 어느 것이 라벨인지 알 수
+          없다. 손댄 뒤에만 뜨면 라벨과 경쟁하는 설명이 아니라 내 행동에 대한 응답으로 읽힌다.
+          "이 기기에만 저장된다"는 라벨의 "이 기기의" 가 이미 말해 준다. */}
+      {willDiffer || dirty ? (
+        <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
+          {willDiffer
+            ? translate('tailnetSettings.field.nodeNameNormalized', {
+                name: normalized || (defaultName ?? ''),
+              })
+            : translate('tailnetSettings.field.nodeNamePending')}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 빈 상태에서 알려줄 것은 "이게 무엇인가"가 아니라 "그래서 뭘 하면 되는가"다.
+ *
+ * 무엇인가는 바로 위 설명 줄이 이미 말한다. 같은 층위의 설명을 한 번 더 놓으면 둘 다 안
+ * 읽힌다. 이 자리는 등록·지정·연결이라는 순서를 처음 보는 사람이 짐작하기 어려워서 있다 —
+ * 네트워크만 추가해도 아무 일이 없고, 호스트 쪽에서 지정해야 비로소 경유한다.
+ */
+function TailnetUsageSteps() {
+  const { t: translate } = useTranslation();
+  const steps = [
+    'tailnetSettings.stepAdd',
+    'tailnetSettings.stepAssign',
+    'tailnetSettings.stepConnect',
+  ];
+  return (
+    <ol className="m-0 grid list-none gap-2 p-0 text-left text-[0.85rem] text-[var(--text-soft)]">
+      {steps.map((key, index) => (
+        <li key={key} className="flex items-start gap-2.5">
+          <span
+            className="mt-[0.1rem] inline-flex h-[1.15rem] w-[1.15rem] shrink-0 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[0.7rem] font-medium text-[var(--text)]"
+            aria-hidden
+          >
+            {index + 1}
+          </span>
+          <span>{translate(key)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function TailnetSettingsPanel() {
   const { t: translate } = useTranslation();
   const [records, setRecords] = useState<TailnetRecord[]>([]);
@@ -417,28 +528,44 @@ export function TailnetSettingsPanel() {
 
   return (
     <div className="grid gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          {/* 상단 탭이 이미 "Tailscale" 이라 여기서 한 번 더 말하지 않는다. */}
-          <h3 className="m-0">{translate('tailnetSettings.heading')}</h3>
-          <p className="mb-0 mt-2 max-w-[46rem] text-[0.9rem] text-[var(--text-soft)]">
-            {translate('tailnetSettings.description')}
-          </p>
-          {localNodeName ? (
-            <p className="mb-0 mt-1 text-[0.82rem] text-[var(--text-soft)]">
-              {translate('tailnetSettings.localNodeName')}{' '}
-              <span className="font-medium text-[var(--text)]">{localNodeName}</span>
+      {/* 호스트명은 제목 블록 밖에 둔다. 안에 넣으면 헤더가 다섯 줄로 불어나고, 추가 버튼이
+          그 블록 바닥에 정렬돼(items-end) 붕 뜬다. 제목·설명·버튼은 한 줄로 두고, 기기 설정은
+          구분선 아래 제 행을 갖는다. */}
+      <div className="grid gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            {/* 상단 탭이 이미 "Tailscale" 이라 여기서 한 번 더 말하지 않는다. */}
+            <h3 className="m-0 flex items-center gap-2">
+              {translate('tailnetSettings.heading')}
+              {/* 아래 설명 줄은 tailnet 이 무엇인지, 빈 상태는 쓰는 순서, 이 말풍선은 "내
+                  컴퓨터에 무엇이 생기나" — 셋이 각각 다른 물음에 답해야 서로를 밀어내지 않는다. */}
+              <InfoHint label={translate('tailnetSettings.aboutToggle')}>
+                <InfoHintPoints
+                  items={[
+                    translate('tailnetSettings.aboutNoClient'),
+                    translate('tailnetSettings.aboutNoOsChange'),
+                    translate('tailnetSettings.aboutMultiple'),
+                  ]}
+                />
+              </InfoHint>
+            </h3>
+            <p className="mb-0 mt-2 max-w-[46rem] text-[0.9rem] text-[var(--text-soft)]">
+              {translate('tailnetSettings.description')}
             </p>
-          ) : null}
+          </div>
+
+          <Button
+            variant="primary"
+            onClick={() => setDraft(emptyDraft())}
+            disabled={draft !== null}
+          >
+            {translate('tailnetSettings.add')}
+          </Button>
         </div>
 
-        <Button
-          variant="primary"
-          onClick={() => setDraft(emptyDraft())}
-          disabled={draft !== null}
-        >
-          {translate('tailnetSettings.add')}
-        </Button>
+        <div className="border-t border-[var(--border)] pt-4">
+          <LocalNodeNameField defaultName={localNodeName} />
+        </div>
       </div>
 
       {removedPersistent ? (
@@ -476,10 +603,11 @@ export function TailnetSettingsPanel() {
       ) : null}
 
       {rows.length === 0 && !draft ? (
-        <EmptyState
-          title={translate('tailnetSettings.empty')}
-          description={translate('tailnetSettings.emptyHint')}
-        />
+        // 이 기능을 처음 보는 사람의 물음은 여기서 딱 한 번 생긴다. 화면이 비어 있는 지금이
+        // 설명할 자리이고, 하나라도 등록하면 사라지므로 매일 쓰는 사람에게는 비용이 없다.
+        <EmptyState title={translate('tailnetSettings.empty')}>
+          <TailnetUsageSteps />
+        </EmptyState>
       ) : null}
 
       {rows.length > 0 ? (

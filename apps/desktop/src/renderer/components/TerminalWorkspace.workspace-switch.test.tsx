@@ -76,6 +76,7 @@ vi.mock('./terminal-resize', () => ({
 
 const settings: AppSettings = {
   theme: 'system',
+  tailnetHostname: null,
   globalTerminalThemeId: 'dolssh-dark',
   terminalFontFamily: 'sf-mono',
   terminalFontSize: 13,

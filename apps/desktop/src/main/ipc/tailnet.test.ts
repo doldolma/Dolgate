@@ -46,6 +46,9 @@ function createContext() {
       remove: vi.fn(),
       readAuthKey: vi.fn<(id: string) => string | null>(() => 'tskey-secret'),
     },
+    settings: {
+      get: vi.fn(() => ({ tailnetHostname: null }) as never),
+    },
     syncOutbox: {
       upsertDeletion: vi.fn(),
     },
@@ -318,7 +321,14 @@ describe('tailnet config push', () => {
     expect(provider).toBeTypeOf('function');
     expect(provider?.()).toEqual([
       // ephemeral 은 요청하지 않는다 — 연결 테스트와 같은 규칙이어야 노드가 둘로 갈라지지 않는다.
-      { id: 'net-1', controlUrl: undefined, authKey: 'tskey-secret', ephemeral: false },
+      {
+        id: 'net-1',
+        controlUrl: undefined,
+        authKey: 'tskey-secret',
+        ephemeral: false,
+        // 설정하지 않으면 비운다 — 코어가 기본값 `dolgate-<기기이름>` 을 쓴다.
+        hostname: undefined,
+      },
     ]);
   });
 
@@ -330,6 +340,42 @@ describe('tailnet config push', () => {
     await invoke(ipcChannels.tailnet.save, { record: record(), authKey: 'tskey-new' });
 
     expect(ctx.coreManager.pushTailnetConfigs).toHaveBeenCalledTimes(1);
+  });
+
+  // 연결 테스트는 코어에 저장된 설정을 덮어쓴다(TailnetTest → configs.set). 그래서 이 경로가
+  // 이름을 빠뜨리면, 전체 밀어넣기로 잘 보내 둔 값이 설정 화면에서 연결을 누르는 순간 지워지고
+  // 노드가 기본 이름으로 뜬다 — 저장은 됐는데 컨트롤 플레인은 안 바뀌는, 원인 찾기 어려운 실패다.
+  it('carries the node name into the connection test as well', async () => {
+    const ctx = createContext();
+    ctx.settings.get.mockReturnValue({ tailnetHostname: 'work-laptop' } as never);
+    registerTailnetIpcHandlers(ctx as never);
+
+    await invoke(ipcChannels.tailnet.test, { id: 'net-1', controlUrl: undefined });
+
+    expect(ctx.coreManager.testTailnet).toHaveBeenCalledWith(
+      expect.objectContaining({ hostname: 'work-laptop' }),
+      expect.anything(),
+    );
+  });
+
+  // 노드 이름은 기기 로컬 설정이라 tailnet 레코드가 아니라 settings 에서 온다. 이 배선이
+  // 끊기면 사용자가 이름을 정해도 조용히 기본값으로 등록된다.
+  it('carries the configured node name into every tailnet config', () => {
+    const ctx = createContext();
+    ctx.settings.get.mockReturnValue({ tailnetHostname: 'work-laptop' } as never);
+    registerTailnetIpcHandlers(ctx as never);
+
+    const provider = ctx.coreManager.setTailnetConfigProvider.mock.calls[0]?.[0];
+    expect(provider?.()[0]).toMatchObject({ hostname: 'work-laptop' });
+  });
+
+  it('falls back to the core default when the name is blank', () => {
+    const ctx = createContext();
+    ctx.settings.get.mockReturnValue({ tailnetHostname: '   ' } as never);
+    registerTailnetIpcHandlers(ctx as never);
+
+    const provider = ctx.coreManager.setTailnetConfigProvider.mock.calls[0]?.[0];
+    expect(provider?.()[0].hostname).toBeUndefined();
   });
 
   it('re-pushes after a removal so the core drops the deleted config', async () => {

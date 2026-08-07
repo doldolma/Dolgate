@@ -1425,6 +1425,7 @@ export class SettingsRepository {
       ai: state.settings.ai ?? { ...DEFAULT_AI_SETTINGS },
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
+      tailnetHostname: state.settings.tailnetHostname ?? null,
       dismissedUpdateVersion: state.updater.dismissedVersion,
       updatedAt: [
         state.settings.updatedAt,
@@ -1689,6 +1690,17 @@ export class SettingsRepository {
           }
         }
         state.settings.serverUrlOverride = nextValue ? normalizeServerUrl(nextValue) : null;
+        state.settings.updatedAt = nowIso();
+      }
+
+      // 기기 로컬 전용이라 updatedAt 을 움직여도 동기화로 나가지 않는다(settings 는 동기화
+      // 대상이 아니다). 빈 값은 null 로 — 코어가 기본값 `dolgate-<기기이름>` 으로 되돌린다.
+      if (Object.prototype.hasOwnProperty.call(input, 'tailnetHostname')) {
+        const nextHostname =
+          typeof input.tailnetHostname === 'string' && input.tailnetHostname.trim()
+            ? input.tailnetHostname.trim()
+            : null;
+        state.settings.tailnetHostname = nextHostname;
         state.settings.updatedAt = nowIso();
       }
 

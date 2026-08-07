@@ -169,6 +169,7 @@ describe("createAppStore catalog and settings", () => {
     vi.mocked(api.settings.get)
       .mockResolvedValueOnce({
         theme: "system",
+        tailnetHostname: null,
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -198,6 +199,7 @@ describe("createAppStore catalog and settings", () => {
       })
       .mockResolvedValueOnce({
         theme: "dark",
+        tailnetHostname: null,
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
