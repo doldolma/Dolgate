@@ -55,6 +55,7 @@ export {
   Wrench,
   Paperclip,
   FileText,
+  Info,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

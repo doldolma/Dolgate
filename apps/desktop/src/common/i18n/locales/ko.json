@@ -100,7 +100,9 @@
         "localNote": "이 기기의 로컬 데이터(호스트·시크릿·스니펫)는 유지되며, 새 암호를 설정하면 다시 암호화되어 업로드됩니다. 다른 기기는 다음 동기화 때 새 암호 입력이 필요하고, 서버에만 있던 데이터는 복구할 수 없습니다.",
         "submitting": "초기화 중...",
         "submit": "서버 데이터 삭제하고 새로 시작"
-      }
+      },
+      "aboutToggle": "동기화 암호 설명",
+      "aboutE2ee": "서버에는 이 암호로 암호화한 데이터만 올라갑니다"
     },
     "preferences": {
       "scrollbackHint": "보관할 터미널 히스토리 줄 수입니다.",
@@ -3106,6 +3108,9 @@
       "syncStalled": "동기화 끊김"
     },
     "field": {
+      "nodeName": "이 기기의 호스트명",
+      "nodeNamePending": "다음 연결부터 적용됩니다.",
+      "nodeNameNormalized": "{{name}} 으로 등록됩니다.",
       "label": "네트워크 이름",
       "labelPlaceholder": "예: 회사 네트워크",
       "controlUrl": "Headscale 서버 (선택)",

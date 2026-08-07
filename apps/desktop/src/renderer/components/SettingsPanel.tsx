@@ -42,6 +42,8 @@ import {
   ModalHeader,
   ModalShell,
   OptionCard,
+  InfoHint,
+  InfoHintPoints,
   SectionLabel,
   SelectField,
   TabButton,
@@ -1196,7 +1198,14 @@ export function SettingsPanel({
           {vaultStatus === 'unlocked' && onChangeVaultPassphrase ? (
             <section className="mt-4 rounded-[12px] border border-[color-mix(in_srgb,var(--border)_82%,white_18%)] bg-[var(--surface-elevated)] p-[1.6rem] shadow-[var(--shadow-soft)]">
               <div className="mb-4">
-                <h3>{translate('settings.vault.title')}</h3>
+                <h3 className="flex items-center gap-2">
+                  {translate('settings.vault.title')}
+                  {/* "서버가 내 데이터를 볼 수 있나"에 답하는 자리. 잊었을 때의 절차는 아래
+                      초기화 흐름이 이미 안내하므로 여기서는 원리만 말한다. */}
+                  <InfoHint label={translate('settings.vault.aboutToggle')}>
+                    <InfoHintPoints items={[translate('settings.vault.aboutE2ee')]} />
+                  </InfoHint>
+                </h3>
               </div>
               <p className="m-0 mb-4 text-[0.88rem] leading-[1.6] text-[var(--text-soft)]">
                 {translate('settings.vault.isSet')}

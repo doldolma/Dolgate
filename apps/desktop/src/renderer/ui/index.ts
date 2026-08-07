@@ -8,6 +8,7 @@ export * from './FilterRow';
 export * from './FontSelectField';
 export * from './IconButton';
 export * from './Input';
+export * from './InfoHint';
 export * from './ModalShell';
 export * from './SearchableSelect';
 export * from './SectionLabel';

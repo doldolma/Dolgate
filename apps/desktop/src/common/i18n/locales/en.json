@@ -100,7 +100,9 @@
         "localNote": "Local data on this device (hosts, secrets, snippets) is kept and will be re-encrypted and uploaded once you set a new passphrase. Other devices will need the new passphrase at their next sync, and anything that existed only on the server cannot be recovered.",
         "submitting": "Resetting…",
         "submit": "Delete server data and start over"
-      }
+      },
+      "aboutToggle": "About the sync passphrase",
+      "aboutE2ee": "Only data encrypted with this passphrase reaches the server"
     },
     "preferences": {
       "scrollbackHint": "Number of terminal history lines to keep.",
@@ -3106,6 +3108,9 @@
       "syncStalled": "Sync stalled"
     },
     "field": {
+      "nodeName": "This device's hostname",
+      "nodeNamePending": "Applies from the next connection.",
+      "nodeNameNormalized": "Registers as {{name}}.",
       "label": "Network name",
       "labelPlaceholder": "e.g. Work network",
       "controlUrl": "Headscale server (optional)",

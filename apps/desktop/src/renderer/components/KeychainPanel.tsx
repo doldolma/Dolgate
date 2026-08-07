@@ -27,6 +27,8 @@ import {
   ModalHeader,
   ModalShell,
   PanelSection,
+  InfoHint,
+  InfoHintPoints,
   SectionLabel,
   SelectField,
 } from '../ui';
@@ -229,8 +231,18 @@ export function KeychainPanel({
     <div className="flex flex-col gap-[1.1rem]">
       <div className="flex items-end justify-between gap-4 px-0 pt-1 pb-2">
         <div>
-          <p className="m-0 max-w-[48rem] text-[var(--text-soft)]">
-            {translate('keychain.intro')}
+          {/* 저장·전송 방식은 사용자가 실제로 불안해하는 지점인데 화면 어디에도 답이 없었다.
+              평소에는 자리를 차지하지 않게 말풍선으로 둔다. */}
+          <p className="m-0 flex max-w-[48rem] items-start gap-1.5 text-[var(--text-soft)]">
+            <span>{translate('keychain.intro')}</span>
+            <InfoHint label={translate('keychain.aboutToggle')} widthClassName="w-[26rem]">
+              <InfoHintPoints
+                items={[
+                  translate('keychain.aboutStorage'),
+                  translate('keychain.aboutSync'),
+                ]}
+              />
+            </InfoHint>
           </p>
         </div>
         <Button variant="secondary" onClick={() => setGenerateOpen(true)}>
