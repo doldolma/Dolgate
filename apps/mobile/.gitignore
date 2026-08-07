@@ -60,6 +60,14 @@ yarn-error.log
 # Ruby / CocoaPods
 **/Pods/
 /vendor/bundle/
+# Podfile.lock 은 추적하지 않는다. RN 0.85 는 iOS 프리빌트 xcframework 를 tarball 로 내려받아
+# **그 로컬 경로를 박은 podspec** 을 pod install 때 생성하는데(react-native/scripts/cocoapods/
+# rndependencies.rb, rncore.rb), lock 의 SPEC CHECKSUMS 가 바로 그 생성된 파일의 SHA1 이다.
+# 경로에 사용자 홈이 들어가므로 사람마다 값이 달라 재현되지 않는다(hermes 는 원격 URL 이라
+# 재현되고 그 둘만 깨진다 — 확인 방법: shasum -a 1 "ios/Pods/Local Podspecs/*.podspec.json").
+# 팟 버전 고정은 package-lock.json(팟이 node_modules 에서 온다)과 Podfile 이 하고, pod install
+# 은 빌드 스크립트(scripts/ios-env.cjs)가 돌린다. 추적하면 모든 기여자에게 dirty diff 만 남는다.
+ios/Podfile.lock
 
 # Temporary files created by Metro to check the health of the file watcher
 .metro-health-check*
