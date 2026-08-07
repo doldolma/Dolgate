@@ -8,11 +8,20 @@
 // 방향키와 스크롤이 겹치던 원인이 이것이었다.
 //
 // 그래서 document 의 **capture 단계**에서 xterm 보다 먼저 터치를 받는다:
-//   - 평소 드래그      → 그대로 흘려보낸다. xterm 자체 스크롤(원래의 그 동작)이 돈다.
+//   - 스크롤로 확정     → 그 제스처의 나머지를 끊고 우리가 viewport.scrollTop 을 민다.
 //   - 홀드가 완성된 뒤 → 그 제스처의 나머지 이벤트를 끊는다. xterm 은 아무것도 못 보므로
 //                        방향키 도중 스크롤이 **구조적으로** 불가능하다.
 // 한 제스처의 주인은 항상 하나다. 판정 파라미터로 섞임을 줄이는 게 아니라, 전달 자체로
 // 소유권을 가른다.
+//
+// **스크롤까지 우리가 굴리는 이유**: xterm 에 흘려보내면 빠른 플릭이 죽는다 — 1~2px 움찔하고
+// 그 제스처가 끝까지 아무 반응이 없다(앱을 켠 직후에 잘 나고, 한동안 쓰다 안정화되면 사라진다).
+// xterm 은 touchmove 마다 scrollTop 을 바꾸고 그때마다 DOM 렌더러가 행을 다시 그리는데,
+// 그 지연으로 응답이 늦으면 WebView 가 제스처를 회수한다. 그런데 스크롤러(.xterm-viewport)는
+// 터치가 닿는 .xterm-screen 의 **형제**라, 회수된 제스처는 굴릴 스크롤러를 못 찾아 아무것도
+// 하지 않는다(그래서 "사망"). 우리가 매 이벤트를 claim 하면 회수될 근거가 없고, scrollTop 반영은
+// rAF 로 프레임당 1회만 해서 리렌더가 이벤트 응답을 막지 못한다.
+// 같은 이유로 스크롤 주체가 하나로 줄어, 방향키와 스크롤이 겹칠 여지도 함께 사라진다.
 //
 // **RN 제스처를 쓰지 않는 이유**: WebView 가 터치를 먼저 가져가서 래퍼 View 의 onTouch* 까지
 // 오지 않는다. 웹 쪽 한 곳에서 판정하면 제스처가 서로 경쟁하지 않는다.
@@ -81,9 +90,14 @@ export const TERMINAL_GESTURE_TUNING = {
   /**
    * 이 시간을 넘겨 누르고 있으면 롱프레스로 본다(떼면 단어 선택, 움직이면 방향키).
    *
-   * 스크롤 의도의 이동은 대부분 접촉 후 ~150ms 안에 시작되므로 200 이면 충분히 가른다.
+   * 200 으로 뒀다가 올렸다 — 스크롤하려다 방향키 모드로 빠졌다. "스크롤 의도는 ~150ms 안에
+   * 움직인다"는 건 빠른 플릭에만 맞고, 천천히 끌기 시작하면 그 안에 holdCancelPx 를 넘지
+   * 못해 롱프레스로 확정된다. 플랫폼 기본은 이보다 훨씬 길다(iOS·Android·RN 모두 500ms).
+   *
+   * 올린 대가는 판정이 끝날 때까지 움직임을 삼키는 구간이 그만큼 길어지는 것뿐이다.
+   * holdCancelPx 를 넘기면 즉시 스크롤로 넘겨주므로 아주 느리게 끄는 경우에만 손에 걸린다.
    */
-  longPressMs: 200,
+  longPressMs: 300,
   /**
    * 홀드를 취소하고 스크롤로 넘길 이동 거리(px).
    *
@@ -443,6 +457,9 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
     // ---- 제스처 판정 (document capture — xterm 리스너보다 항상 먼저) ----
 
     function endGesture() {
+      // 스크롤 중이었다면 마지막 프레임을 반영하고 끝낸다 — 버리면 뗄 때 몇 px 이 남는다.
+      if (state && state.mode === 'scroll') { applyScroll(); }
+      cancelScroll();
       if (state) {
         if (state.timer) { clearTimeout(state.timer); }
         if (state.node && state.node.removeEventListener) {
@@ -485,6 +502,45 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
         }
       }, { capture: true, passive: false });
     });
+
+    // 스크롤러는 .xterm-viewport 하나다. xterm 이 행을 다시 그려도 이 요소는 유지되지만,
+    // 터미널이 재생성되는 경우까지 감안해 끊기면 다시 찾는다.
+    var viewportEl = null;
+    function scrollViewport() {
+      if (!viewportEl || !viewportEl.isConnected) {
+        viewportEl = document.querySelector('.xterm-viewport');
+      }
+      return viewportEl;
+    }
+
+    // 이벤트마다 scrollTop 을 만지면 그때마다 리렌더가 붙어 이벤트 처리가 밀린다(그 지연이
+    // 곧 제스처 회수다). 좌표만 받아 두고 반영은 프레임당 한 번만 한다.
+    var scrollFrame = 0;
+    function scheduleScroll() {
+      if (scrollFrame) { return; }
+      scrollFrame = requestAnimationFrame(function () {
+        scrollFrame = 0;
+        applyScroll();
+      });
+    }
+    function cancelScroll() {
+      if (scrollFrame) { cancelAnimationFrame(scrollFrame); scrollFrame = 0; }
+    }
+    function applyScroll() {
+      if (!state || state.mode !== 'scroll') { return; }
+      var el = scrollViewport();
+      if (!el) { return; }
+      // 손가락이 올라가면 내용은 내려간다 — xterm 이 하던 것과 같은 부호.
+      var delta = state.scrollFromY - state.curY;
+      if (!delta) { return; }
+      var max = el.scrollHeight - el.clientHeight;
+      var next = el.scrollTop + delta;
+      if (next < 0) { next = 0; } else if (next > max) { next = max; }
+      el.scrollTop = next;
+      // 이번 프레임의 이동은 소비했다. 경계에서 남은 양은 버린다 — 들고 있으면 되돌릴 때
+      // 그만큼 밀어야 움직여서 끝에서 손이 붙잡히는 느낌이 난다.
+      state.scrollFromY = state.curY;
+    }
 
     function insideOverlay(event) {
       try { return layer.contains(event.target); } catch (error) { return false; }
@@ -609,8 +665,6 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
       if (alreadyHandled(event)) { return; }
       if (insideOverlay(event)) { return; }
       if (!state) { return; }
-      // 스크롤로 확정된 제스처 — 끝까지 xterm 것이다.
-      if (state.mode === 'passthrough') { return; }
 
       if (state.mode === 'handle') {
         claim(event);
@@ -623,17 +677,28 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
       }
 
       var touch = event.touches[0];
+      if (!touch) { return; }
       state.curX = touch.clientX;
       state.curY = touch.clientY;
+
+      // 스크롤로 확정된 제스처 — 끝까지 우리 것이다. xterm 은 아무것도 못 본다.
+      if (state.mode === 'scroll') {
+        claim(event);
+        scheduleScroll();
+        return;
+      }
 
       if (state.mode === 'pending' && !state.armed) {
         var dx0 = state.curX - state.startX;
         var dy0 = state.curY - state.startY;
         if (Math.abs(dx0) > TUNING.holdCancelPx || Math.abs(dy0) > TUNING.holdCancelPx) {
-          // 홀드 전에 이만큼 움직였으면 스크롤이다. 이 이벤트부터 xterm 에게 넘긴다 —
-          // 삼켜 뒀던 오프셋은 xterm 이 touchstart 기준으로 한 번에 따라잡는다.
+          // 홀드 전에 이만큼 움직였으면 스크롤이다. 이 이벤트부터 우리가 굴린다.
+          // 기준점을 touchstart 지점으로 잡아, 삼켜 뒀던 오프셋을 첫 프레임에 따라잡는다.
           if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-          state.mode = 'passthrough';
+          state.mode = 'scroll';
+          state.scrollFromY = state.startY;
+          claim(event);
+          scheduleScroll();
           post({ type: 'trace', text: 'scroll' });
           return;
         }
@@ -739,7 +804,8 @@ export const TERMINAL_GESTURE_SCRIPT = `(function () {
         lastTapY = touch.clientY;
         if (sel) { clearSelection(); }
       }
-      // passthrough: 그대로 흘린다.
+      // scroll: 이동은 endGesture 가 마지막 프레임까지 반영했다. 여기서 할 일은 없다 —
+      // touchmove 를 계속 막았으므로 합성 클릭도 오지 않는다.
     }
     document.addEventListener('touchend', onTouchEnd, { capture: true, passive: false });
 
