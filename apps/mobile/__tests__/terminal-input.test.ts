@@ -1,4 +1,6 @@
 import {
+  TERMINAL_PRIMARY_SHORTCUTS,
+  TERMINAL_SECONDARY_SHORTCUTS,
   stripTerminalQueryReplies,
   translateTerminalInputEventToSequence,
   type NativeTerminalInputEvent,
@@ -92,6 +94,41 @@ describe("stripTerminalQueryReplies", () => {
 
     for (const input of cases) {
       expect(stripTerminalQueryReplies(input)).toBe(input);
+    }
+  });
+});
+
+describe("단축키 버튼 표면", () => {
+  const arrows = ["Left", "Right", "Up", "Down"];
+  const all = [...TERMINAL_PRIMARY_SHORTCUTS, ...TERMINAL_SECONDARY_SHORTCUTS];
+
+  it("방향키는 아이콘으로 그린다", () => {
+    const icons = Object.fromEntries(
+      all.filter(item => arrows.includes(item.label)).map(item => [item.label, item.icon]),
+    );
+
+    expect(icons).toEqual({
+      Left: "arrow-back",
+      Right: "arrow-forward",
+      Up: "arrow-up",
+      Down: "arrow-down",
+    });
+  });
+
+  it("아이콘이 붙어도 label 은 남는다", () => {
+    // label 은 화면에서 사라져도 accessibilityLabel 로 계속 쓰인다. 비우면 스크린리더
+    // 사용자에게 방향키가 이름 없는 버튼이 된다.
+    for (const item of all) {
+      expect(item.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("이름 자체가 키캡인 키는 글자로 남긴다", () => {
+    // ESC·TAB 등은 기호로 바꾸면 오히려 못 알아본다.
+    for (const item of all) {
+      if (!arrows.includes(item.label)) {
+        expect(item.icon).toBeUndefined();
+      }
     }
   });
 });

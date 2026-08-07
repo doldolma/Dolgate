@@ -103,7 +103,16 @@ export function translateTerminalInputEventToSequence(
 }
 
 export type TerminalShortcutItem = {
+  /**
+   * 버튼에 보여줄 글자. icon 이 있으면 화면에는 아이콘이 대신 그려지지만 label 은
+   * 여전히 접근성 이름으로 쓰이므로(스크린리더는 "Up" 을 읽는다) 비우지 말 것.
+   */
   label: string;
+  /**
+   * 있으면 label 대신 이 Ionicons 아이콘을 그린다. 방향키처럼 글자보다 기호가 훨씬
+   * 빨리 읽히는 키에만 쓴다 — ESC·TAB 같이 이름 자체가 키캡인 것은 글자가 낫다.
+   */
+  icon?: string;
   event: NativeTerminalInputEvent;
 };
 
@@ -140,6 +149,7 @@ export const TERMINAL_PRIMARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
   },
   {
     label: "Left",
+    icon: "arrow-back",
     event: {
       kind: "special-key",
       key: "arrowLeft",
@@ -147,6 +157,7 @@ export const TERMINAL_PRIMARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
   },
   {
     label: "Right",
+    icon: "arrow-forward",
     event: {
       kind: "special-key",
       key: "arrowRight",
@@ -154,6 +165,7 @@ export const TERMINAL_PRIMARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
   },
   {
     label: "Up",
+    icon: "arrow-up",
     event: {
       kind: "special-key",
       key: "arrowUp",
@@ -161,6 +173,7 @@ export const TERMINAL_PRIMARY_SHORTCUTS: readonly TerminalShortcutItem[] = [
   },
   {
     label: "Down",
+    icon: "arrow-down",
     event: {
       kind: "special-key",
       key: "arrowDown",

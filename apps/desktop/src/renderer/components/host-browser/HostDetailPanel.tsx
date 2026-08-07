@@ -676,7 +676,11 @@ function EmptyDetail({
         <span className="text-[0.76rem] font-bold uppercase tracking-[0.1em] text-[var(--text-soft)]">
           {translate('hostDetail.empty.quickStart')}
         </span>
-        <div className="grid grid-cols-3 gap-[0.55rem]">
+        {/* 2열이다. 이 패널은 340~400px 고정폭이라(HostBrowser 의 grid 트랙) 3열이면
+            버튼 하나에 글자 폭이 340px 기준 50px 밖에 안 남는다 — "Local terminal" 같은
+            영문 라벨이 두 줄로 접히면서 그 행만 키가 커진다. 2열이면 가장 좁을 때도
+            104px 라 한 줄로 들어간다(한국어보다 긴 언어가 와도 여유). */}
+        <div className="grid grid-cols-2 gap-[0.55rem]">
           <Button variant="secondary" size="sm" onClick={hb.onCreateHost}>
             <Plus className="h-[0.95rem] w-[0.95rem]" />
             {translate('hostDetail.empty.newHost')}

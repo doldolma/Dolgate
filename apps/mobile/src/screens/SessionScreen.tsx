@@ -44,6 +44,7 @@ import {
   stripTerminalQueryReplies,
   translateTerminalInputEventToSequence,
   type NativeTerminalInputEvent,
+  type TerminalShortcutItem,
 } from '../lib/terminal-input';
 import { getKeyboardDockInset } from '../lib/keyboard-layout';
 import {
@@ -137,6 +138,17 @@ function getSessionStatusMeta(
         color: palette.sessionStatusMuted,
       };
   }
+}
+
+// 단축키 버튼의 표면. 방향키처럼 icon 이 지정된 키는 기호로 그린다 — 좁은 키보드
+// 액세서리 바에서 "Up"/"Down" 글자보다 화살표가 훨씬 빨리 읽힌다. 접근성 이름은
+// 호출부의 accessibilityLabel(=item.label)이 계속 담당하므로 여기서는 aria 를 만들지
+// 않는다. 아이콘 크기는 버튼 높이(38)와 글자(12pt bold) 사이에서 고른 값이다.
+function renderShortcutFace(item: TerminalShortcutItem, color: string) {
+  if (item.icon) {
+    return <Ionicons name={item.icon} size={16} color={color} />;
+  }
+  return <Text style={[styles.toolbarButtonText, { color }]}>{item.label}</Text>;
 }
 
 function isLiveSession(status: string) {
@@ -1541,14 +1553,7 @@ export function SessionScreen(): React.JSX.Element {
                         },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.toolbarButtonText,
-                          { color: palette.text },
-                        ]}
-                      >
-                        {item.label}
-                      </Text>
+                      {renderShortcutFace(item, palette.text)}
                     </Pressable>
                   ))}
                 </ScrollView>
@@ -1575,14 +1580,7 @@ export function SessionScreen(): React.JSX.Element {
                       },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.toolbarButtonText,
-                        { color: palette.text },
-                      ]}
-                    >
-                      {item.label}
-                    </Text>
+                    {renderShortcutFace(item, palette.text)}
                   </Pressable>
                 ))}
                 <Pressable
