@@ -55,6 +55,158 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().hostDrawer).toEqual({ mode: "closed" });
   });
 
+  it("opens an RDP host as a remote-desktop pane instead of a terminal", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+
+    // 비밀번호는 메인 프로세스가 secretRef 로 푼다 — 렌더러는 hostId 만 넘긴다.
+    //
+    // 세 번째 인자는 원격 화면이 들어갈 자리의 크기다. 접속할 때 이 크기로 붙어야 화면이 뜨는
+    // 순간부터 창에 맞는다. 테스트 환경에는 그 요소가 없으므로 undefined 가 간다.
+    expect(api.rdp.connect).toHaveBeenCalledWith(
+      expect.any(String),
+      "rdp-host-1",
+      undefined,
+    );
+    // 터미널 경로로 새지 않아야 한다.
+    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(api.serial.connect).not.toHaveBeenCalled();
+
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.paneKind).toBe("rdp");
+    expect(tab?.hostId).toBe("rdp-host-1");
+    expect(tab?.status).toBe("connected");
+    // 붙은 뒤에는 연결 화면이 캔버스를 가리면 안 된다.
+    expect(tab?.connectionProgress).toBeNull();
+    expect(store.getState().activeWorkspaceTab).toBe(
+      `session:${tab?.sessionId}`,
+    );
+  });
+
+  it("removes the RDP tab when the remote side ends the session", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+    const sessionId = store.getState().tabs.at(-1)!.sessionId;
+
+    // 원격에서 로그오프하면 코어가 closed 를 올린다. 탭이 connected 로 남아 거짓말하면 안 된다.
+    store.getState().handleRdpEvent({ type: "closed", sessionId });
+
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === sessionId),
+    ).toBeUndefined();
+  });
+
+  it("keeps a failed RDP tab visible when closed follows the error", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+    const sessionId = store.getState().tabs.at(-1)!.sessionId;
+
+    // rdp-core 는 실패 시 error 다음에 항상 closed 를 보낸다. 그때 탭을 지우면 사용자가
+    // 이유를 읽기도 전에 사라진다.
+    store
+      .getState()
+      .handleRdpEvent({ type: "error", sessionId, message: "logon failure" });
+    store.getState().handleRdpEvent({ type: "closed", sessionId });
+
+    const tab = store.getState().tabs.find((item) => item.sessionId === sessionId);
+    expect(tab?.status).toBe("error");
+    expect(tab?.errorMessage).toBe("logon failure");
+  });
+
+  it("ignores RDP events for a session it does not have", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    const before = store.getState().tabs.length;
+
+    store.getState().handleRdpEvent({ type: "closed", sessionId: "ghost" });
+
+    expect(store.getState().tabs).toHaveLength(before);
+  });
+
+  it("disconnects the RDP core when its tab is closed", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+
+    const sessionId = store.getState().tabs.at(-1)!.sessionId;
+    await store.getState().disconnectTab(sessionId);
+
+    // ssh-core 로 보내면 아무 일도 일어나지 않고 사이드카 세션이 살아남는다.
+    expect(api.rdp.disconnect).toHaveBeenCalledWith(sessionId);
+    expect(api.ssh.disconnect).not.toHaveBeenCalled();
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === sessionId),
+    ).toBeUndefined();
+  });
+
+  it("saves the chosen monitors on the host and reconnects", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+    const first = store.getState().tabs.at(-1)!.sessionId;
+
+    const monitors = [
+      { id: 1, label: "Built-in", width: 3024, height: 1964 },
+      { id: 2, label: "LG HDR 4K", width: 3840, height: 2160 },
+    ];
+    await store.getState().setRdpMonitors(first, monitors);
+
+    // 호스트에 남아야 다음 접속에도 같은 배치를 쓴다.
+    expect(api.hosts.update).toHaveBeenCalledWith(
+      "rdp-host-1",
+      expect.objectContaining({ monitors }),
+    );
+
+    // 레이아웃은 접속 시점 GCC 값이라 세션 중 변경이 불가능하다 — 끊고 다시 붙어야 한다.
+    expect(api.rdp.disconnect).toHaveBeenCalledWith(first);
+
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.paneKind).toBe("rdp");
+    expect(tab?.sessionId).not.toBe(first);
+  });
+
+  it("ignores a monitor change aimed at a terminal tab", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    const sessionId = store.getState().tabs.at(-1)!.sessionId;
+
+    await store.getState().setRdpMonitors(sessionId, []);
+
+    expect(api.rdp.disconnect).not.toHaveBeenCalled();
+    expect(api.hosts.update).not.toHaveBeenCalled();
+  });
+
+  it("marks an RDP tab as errored when the core refuses the connection", async () => {
+    const api = createMockApi();
+    api.rdp.connect = vi.fn().mockRejectedValue(new Error("auth failed"));
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.status).toBe("error");
+    expect(tab?.errorMessage).toBe("auth failed");
+  });
+
   it("prompts for startup snippet variables and sends the resolved command", async () => {
     const api = createMockApi();
     const originalHosts = await api.hosts.list();

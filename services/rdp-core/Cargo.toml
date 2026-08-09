@@ -1,0 +1,71 @@
+[package]
+name = "rdp-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+publish = false
+description = "Headless RDP sidecar for the Dolgate desktop app"
+
+[[bin]]
+name = "rdp-core"
+path = "src/main.rs"
+
+[dependencies]
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "pdu", "core"] }
+ironrdp-blocking = "0.10"
+ironrdp-graphics = "0.9"
+ironrdp-input = "0.7"
+ironrdp-pdu = "0.9"
+
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sspi = { version = "0.21", features = ["network_client"] }
+tokio-rustls = "0.26"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+x509-cert = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.11.0"
+ironrdp-displaycontrol = "0.8.0"
+ironrdp-dvc = "0.8.0"
+ironrdp-svc = "0.8.0"
+bytes = "1.12.1"
+ironrdp-cliprdr = "0.7.0"
+ironrdp-core = "0.2.1"
+ironrdp-rdpsnd = "0.9.0"
+ironrdp-rdpdr-native = "0.7.0"
+ironrdp-rdpdr = "0.7.0"
+
+# 멀티모니터를 선언하려면 커넥터가 GCC 의 TS_UD_CS_MONITOR 블록을 내보내야 하는데, 게시된
+# ironrdp-connector 는 그 자리를 None 으로 고정해 두었고 주입할 공개 API 도 없다. 업스트림에
+# 아직 없는 기능이라 크레이트를 그대로 복사해 최소 패치를 얹었다(vendor/ironrdp-connector).
+#
+# patch 는 의존성 그래프 전체에 적용되므로 ironrdp / ironrdp-blocking / ironrdp-session 이
+# 참조하는 커넥터도 함께 교체된다 — 한 크레이트만 vendoring 하면 된다.
+# EGFX(그래픽 파이프라인). 스크롤과 하드웨어 가속이 전부 이 채널 위에 있다.
+#
+# openh264-bundled 를 쓰는 이유: 이 크레이트가 디코딩하는 코덱은 AVC420/AVC444/무압축뿐이라,
+# H.264 디코더가 없으면 EGFX 를 붙여도 서버가 보낼 것이 사실상 없다.
+#
+# 배포 전에 정해야 할 것: bundled 는 OpenH264 를 소스에서 빌드해 넣는다. Cisco 의 H.264 특허
+# 라이선스는 그들이 배포하는 바이너리를 쓸 때만 적용되므로, 제품 배포는 libloading 으로 런타임에
+# Cisco 바이너리를 불러오는 쪽을 검토해야 한다.
+ironrdp-egfx = { version = "0.3", features = ["openh264-bundled"] }
+
+[patch.crates-io]
+ironrdp-connector = { path = "vendor/ironrdp-connector" }
+# 상류 ClearCodec 파서가 SHORT_VBAR_CACHE_MISS 의 두 필드를 반대 자리에서 읽어, 실제 Windows
+# 스트림이 첫 V-Bar 부터 깨진다(vendor/ironrdp-pdu/src/codecs/clearcodec/bands.rs).
+ironrdp-pdu = { path = "vendor/ironrdp-pdu" }
+# 상류 ClearCodec 디코더가 RLEX 스위트에 픽셀을 하나씩 더 쓴다 — 세그먼트마다 화면이 밀린다
+# (vendor/ironrdp-graphics/src/clearcodec/mod.rs).
+ironrdp-graphics = { path = "vendor/ironrdp-graphics" }
+# 상류가 H.264 페이로드를 AVCC 로 가정하고 변환한다. MS-RDPEGFX 는 Annex B 로 보내므로 그대로
+# 두어야 한다 — 변환하면 디코더가 그림을 하나도 내지 못한다(vendor/ironrdp-egfx/src/decode.rs).
+ironrdp-egfx = { path = "vendor/ironrdp-egfx" }
+# 상류 파일시스템 백엔드는 공유 폴더 경로에 원격이 준 경로를 검사 없이 이어붙여, ".." 로
+# 폴더 밖 파일을 열 수 있다. 봉쇄 로직을 얹어 쓴다(vendor/ironrdp-rdpdr-native).
+ironrdp-rdpdr-native = { path = "vendor/ironrdp-rdpdr-native" }
+
+[profile.release]
+strip = true

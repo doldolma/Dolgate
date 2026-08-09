@@ -18,6 +18,7 @@ import {
   getTerminalThemePreset,
   resolveTerminalThemeIdForSession,
 } from '../lib/terminal-presets';
+import { RdpSessionCanvas } from './rdp/RdpSessionCanvas';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
 import { resizeTerminal, tmuxCommand } from '../services/desktop/terminal';
@@ -623,7 +624,10 @@ export function TerminalWorkspace({
             onEndSessionDrag();
           }
         : undefined,
-      content: (
+      content: tab.paneKind === 'rdp' ? (
+        // RDP 탭은 터미널이 아니다 — xterm 대신 원격 화면 캔버스를 띄운다.
+        <RdpSessionCanvas sessionId={tab.sessionId} visible={visible} />
+      ) : (
         <TerminalSessionPane
           sessionId={tab.sessionId}
           tab={tab}

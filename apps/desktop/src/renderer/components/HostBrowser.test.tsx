@@ -305,6 +305,7 @@ function renderBrowser({
       onCreateHost={onCreateHost}
       onOpenDolgateImport={onOpenDolgateImport}
       onOpenSerialImport={onOpenSerialImport}
+      onOpenRdpImport={vi.fn()}
       onOpenAwsImport={onOpenAwsImport}
       onOpenOpenSshImport={onOpenOpenSshImport}
       onOpenXshellImport={onOpenXshellImport}
@@ -749,6 +750,7 @@ describe('HostBrowser helpers', () => {
       'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
+      'Import RDP',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -761,6 +763,7 @@ describe('HostBrowser helpers', () => {
       'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
+      'Import RDP',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -770,6 +773,7 @@ describe('HostBrowser helpers', () => {
       'Import Dolgate',
       'Import OpenSSH',
       'Import Serial',
+      'Import RDP',
       'Import from Termius',
       'Import from Warpgate',
       'Import via AWS SSM'

@@ -5,6 +5,7 @@ import { desktopApi } from '../store/appStore';
 
 interface DesktopEventBridgeProps {
   onCoreEvent: (event: any) => void;
+  onRdpEvent: (event: any) => void;
   onSftpConnectionProgress: (event: any) => void;
   onContainerConnectionProgress: (event: any) => void;
   onActivityLogsChanged: () => void;
@@ -19,6 +20,7 @@ interface DesktopEventBridgeProps {
 
 export function DesktopEventBridge({
   onCoreEvent,
+  onRdpEvent,
   onSftpConnectionProgress,
   onContainerConnectionProgress,
   onActivityLogsChanged,
@@ -31,6 +33,7 @@ export function DesktopEventBridge({
   onAiChatEvent,
 }: DesktopEventBridgeProps) {
   const handleCoreEvent = useEffectEvent(onCoreEvent);
+  const handleRdpEvent = useEffectEvent(onRdpEvent);
   const handleSftpConnectionProgress = useEffectEvent(onSftpConnectionProgress);
   const handleContainerConnectionProgress = useEffectEvent(
     onContainerConnectionProgress,
@@ -47,6 +50,9 @@ export function DesktopEventBridge({
   useEffect(() => {
     const offCore = desktopApi.ssh.onEvent((event) => {
       handleCoreEvent(event);
+    });
+    const offRdp = desktopApi.rdp.onEvent((event) => {
+      handleRdpEvent(event);
     });
     const offSftpProgress =
       typeof desktopApi.sftp.onConnectionProgress === "function"
@@ -106,6 +112,7 @@ export function DesktopEventBridge({
 
     return () => {
       offCore();
+      offRdp();
       offSftpProgress();
       offContainersProgress();
       offActivityLogsChanged();

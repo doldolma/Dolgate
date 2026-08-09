@@ -294,6 +294,16 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 kind: "serial",
               },
             }),
+    openCreateRdpDrawer: () =>
+            set({
+              activeWorkspaceTab: "home",
+              homeSection: "hosts",
+              hostDrawer: {
+                mode: "create",
+                defaultGroupPath: get().currentGroupPath,
+                kind: "rdp",
+              },
+            }),
     openEditHostDrawer: (hostId) =>
             set({
               activeWorkspaceTab: "home",

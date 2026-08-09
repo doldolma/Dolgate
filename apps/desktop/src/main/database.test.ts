@@ -575,6 +575,205 @@ describe('HostRepository', () => {
     });
   });
 
+  it('persists RDP hosts on create and reload', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-host-1', {
+      kind: 'rdp',
+      label: 'Win Box',
+      groupName: 'Lab',
+      tags: ['rdp'],
+      terminalThemeId: null,
+      hostname: '192.168.200.27',
+      port: 3389,
+      username: 'user',
+      domain: 'CORP',
+      secretRef: 'secret-1',
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedHosts = new databaseModule.HostRepository();
+
+    expect(reloadedHosts.getById('rdp-host-1')).toMatchObject({
+      kind: 'rdp',
+      label: 'Win Box',
+      groupName: 'Lab',
+      hostname: '192.168.200.27',
+      port: 3389,
+      username: 'user',
+      domain: 'CORP',
+      secretRef: 'secret-1',
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+    });
+  });
+
+  it('keeps the chosen monitors across a reload', async () => {
+    // 저장·복원 두 계층 모두 명시한 필드만 통과시킨다. 어느 한쪽에서 빠뜨리면 배치도에서
+    // 고른 화면이 앱을 껐다 켜면 조용히 사라진다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-host-monitors', {
+      kind: 'rdp',
+      label: 'Multi',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'host',
+      port: 3389,
+      username: 'user',
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+      monitors: [
+        { id: 1, label: 'Built-in', width: 3024, height: 1964 },
+        { id: 2, label: 'LG HDR 4K', width: 3840, height: 2160 },
+      ],
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedHosts = new databaseModule.HostRepository();
+
+    expect(reloadedHosts.getById('rdp-host-monitors')).toMatchObject({
+      monitors: [
+        { id: 1, label: 'Built-in', width: 3024, height: 1964 },
+        { id: 2, label: 'LG HDR 4K', width: 3840, height: 2160 },
+      ],
+    });
+  });
+
+  it('keeps the chosen monitors when an unrelated edit omits them', async () => {
+    // 호스트 폼은 이 필드를 모른다. draft 에 없다고 지워버리면 이름만 바꿔도 배치가 날아간다 —
+    // 인증서 핀이 같은 이유로 current 에서 이어받는다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const base = {
+      kind: 'rdp' as const,
+      label: 'Multi',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'host',
+      port: 3389,
+      username: 'user',
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+    };
+
+    hosts.create('rdp-host-keep', {
+      ...base,
+      monitors: [{ id: 1, label: 'Built-in', width: 3024, height: 1964 }],
+    });
+
+    const updated = hosts.update('rdp-host-keep', { ...base, label: 'Renamed' });
+
+    expect(updated).toMatchObject({
+      label: 'Renamed',
+      monitors: [{ id: 1, label: 'Built-in', width: 3024, height: 1964 }],
+    });
+  });
+
+  it('clears the monitor choice when the picker sends an empty list', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const base = {
+      kind: 'rdp' as const,
+      label: 'Multi',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'host',
+      port: 3389,
+      username: 'user',
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+    };
+
+    hosts.create('rdp-host-clear', {
+      ...base,
+      monitors: [{ id: 1, label: 'Built-in', width: 3024, height: 1964 }],
+    });
+
+    // 빈 배열은 "안 정했다"가 아니라 "지운다"는 뜻이다 — undefined 와 구분된다.
+    const updated = hosts.update('rdp-host-clear', { ...base, monitors: [] });
+
+    expect(updated).toMatchObject({ monitors: null });
+  });
+
+  it('stores an empty monitor choice as none at all', async () => {
+    // "선택 없음"이 [] 와 null 두 모양으로 저장되면 접속 경로에서 판단이 갈린다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    const created = hosts.create('rdp-host-empty', {
+      kind: 'rdp',
+      label: 'Empty',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'host',
+      port: 3389,
+      username: 'user',
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+      monitors: [],
+    });
+
+    expect(created).toMatchObject({ monitors: null });
+  });
+
+  it('brings a stored RDP desktop size back inside the protocol limits', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    // 폭은 홀수 금지, 양변은 200~8192 — 규격을 벗어난 값이 저장돼 있으면 연결 단계에서야
+    // 터지므로 읽는 시점에 되돌려야 한다.
+    hosts.create('rdp-host-2', {
+      kind: 'rdp',
+      label: 'Odd',
+      groupName: null,
+      tags: [],
+      terminalThemeId: null,
+      hostname: 'host',
+      port: 3389,
+      username: 'user',
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1921,
+      desktopHeight: 99999,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedHosts = new databaseModule.HostRepository();
+
+    expect(reloadedHosts.getById('rdp-host-2')).toMatchObject({
+      desktopWidth: 1920,
+      desktopHeight: 8192,
+    });
+  });
+
   it('clears key paths when unlinking a secret-backed SSH host', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

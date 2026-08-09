@@ -231,6 +231,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     startPendingSessionConnect,
     startPendingLocalSessionConnect,
     startSessionConnectionFlow,
+    startRdpConnectionFlow,
     promptForMissingUsername,
     startLocalTerminalFlow,
   } = services;
@@ -1017,6 +1018,44 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               ),
             }));
           },
+    // 전체 모니터로 다시 붙는다.
+    //
+    // 모니터 레이아웃은 GCC 블록으로 접속 시점에 선언하는 값이라 세션 중에 바꿀 수 없다.
+    // 그래서 끊고 다시 붙인다 — mstsc 나 Microsoft Remote Desktop 도 이 설정에 재접속을
+    // 요구한다. 이 선택은 호스트에 저장하지 않는다: 이번 세션에만 적용된다.
+    setRdpMonitors: async (sessionId, monitors) => {
+            const tab = get().tabs.find((item) => item.sessionId === sessionId);
+            if (!tab || tab.paneKind !== "rdp" || !tab.hostId) {
+              return;
+            }
+            const host = get().hosts.find((item) => item.id === tab.hostId);
+            if (!host || host.kind !== "rdp") {
+              return;
+            }
+
+            const draft = toHostDraft(host, host.label);
+            if (draft.kind !== "rdp") {
+              return;
+            }
+
+            // 호스트에 먼저 남긴다. 재접속이 실패해도 고른 배치는 남아 다음 접속에 쓰인다.
+            const nextHost = await api.hosts.update(host.id, {
+              ...draft,
+              monitors,
+            });
+            set((state) => ({
+              hosts: sortHosts([
+                ...state.hosts.filter((item) => item.id !== nextHost.id),
+                nextHost,
+              ]),
+            }));
+
+            // 모니터 배치는 접속 시점에 서버와 협상해 고정된다 — 붙어 있는 세션에 적용할 방법이
+            // 없어서 다시 붙어야 한다.
+            await api.rdp.disconnect(sessionId).catch(() => undefined);
+            set((state) => removeSessionFromState(state, sessionId));
+            await startRdpConnectionFlow(set, get, nextHost);
+          },
     disconnectTab: async (sessionId) => {
             // tmux pane 은 SSH 세션이 아니라 control 채널 위의 가상 pane 이다. 닫기는
             // tmux kill-pane 으로 보내고, 레이아웃/탭 제거는 이어 오는 tmux 이벤트
@@ -1031,6 +1070,17 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             )?.hostId;
             if (closingHostId) {
               pushClosedHost(closingHostId);
+            }
+            // RDP 는 별도 코어를 쓴다. 아래 경로는 전부 ssh-core 를 향하고, RDP sessionId 는
+            // pending 접두사를 유지하므로 그냥 두면 탭만 사라지고 사이드카 세션은 계속 살아
+            // 프레임을 흘린다.
+            if (
+              get().tabs.find((tab) => tab.sessionId === sessionId)?.paneKind ===
+              "rdp"
+            ) {
+              await api.rdp.disconnect(sessionId).catch(() => undefined);
+              set((state) => removeSessionFromState(state, sessionId));
+              return;
             }
             // 사용자가 직접 끊으면 진행 중인 자동 재연결을 즉시 취소(의도적 종료).
             const reconnectTab = get().tabs.find(

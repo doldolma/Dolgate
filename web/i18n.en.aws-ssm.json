@@ -1,0 +1,38 @@
+{
+  "meta": {
+    "title": "SSH into EC2 over AWS SSM — no CLI, no plugin | Dolgate",
+    "description": "Reach EC2 instances with no public IP and no open inbound ports. The SSM data channel is built into the app — no AWS CLI, no session-manager-plugin. SSH-over-SSM, AWS SFTP, SSM port forwarding and ECS Exec.",
+    "ogTitle": "SSH into EC2 over AWS SSM — no CLI, no plugin",
+    "ogDescription": "Reach EC2 instances with no public IP and no open inbound ports. The SSM data channel is built into the app."
+  },
+  "keys": {
+    "nav.features": "Features",
+    "nav.download": "Download",
+    "theme.button": "Switch theme",
+    "foot.license": "© 2026 doldolma · MIT License",
+    "foot.releases": "Releases",
+    "ssm.h1": "SSH into EC2 over SSM,<br />without the AWS CLI",
+    "ssm.lede": "Reach EC2 instances that have no public IP and no open inbound ports. The SSM data channel is built into the app, so there is no AWS CLI and no session-manager-plugin to install.",
+    "ssm.problem.h2": "The official path takes four steps",
+    "ssm.problem.p1": "The official way to reach EC2 over SSM is installing the AWS CLI, installing session-manager-plugin, authenticating a profile, and running a session command in a terminal — repeated on every machine. Dolgate implements the SSM data channel protocol inside the app, so clicking a host just connects you.",
+    "ssm.problem.p2": "Profile authentication (SSO browser login, credential validation, AssumeRole) is handled through the AWS SDK, and the <code>~/.aws</code> profiles you already use can be imported as they are.",
+    "ssm.feat.h2": "What runs over SSM",
+    "ssm.feat.i1": "<b>SSH-over-SSM</b> — EC2 terminals try SSH over the SSM channel first, and fall back to an SSM shell when SSH cannot be opened",
+    "ssm.feat.i2": "<b>AWS SFTP</b> — file browsing, uploads and downloads over the same channel",
+    "ssm.feat.i3": "<b>SSM port forwarding</b> — bring private-subnet database and service ports to localhost",
+    "ssm.feat.i4": "<b>ECS Exec</b> — container shells and ECS tunneling",
+    "ssm.feat.i5": "<b>EC2 import</b> — list the instances in a region and register them as hosts",
+    "ssm.req.h2": "What you need",
+    "ssm.req.p1": "The target EC2 must be an <b>SSM managed instance</b>, and SSH-over-SSM and AWS SFTP need permission to inject public keys via EC2 Instance Connect. The required IAM permissions and example policy JSON are collected in the <a style=\"color:var(--accent)\" href=\"https://github.com/doldolma/dolgate/blob/main/docs/aws.md\" target=\"_blank\" rel=\"noopener\">AWS / SSM setup guide</a>.",
+    "ssm.cta.h": "Reach EC2 with no bastion and no open ports",
+    "ssm.cta.p": "Windows · macOS · Linux · iOS · Android, open source (MIT)",
+    "ssm.cta.dl": "Download"
+  },
+  "runtime": {
+    "themePrefix": "Theme",
+    "themeHint": "click to switch",
+    "themeAuto": "follows the system",
+    "themeLight": "light",
+    "themeDark": "dark"
+  }
+}

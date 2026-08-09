@@ -6,8 +6,8 @@ Dolgate는 Windows, macOS, Linux, iOS, Android에서 같은 서버 작업 환경
 호스트·세션·스니펫을 동기화하되, sync-api를 직접 호스팅해 접속 정보와 작업 데이터를 스스로 통제할 수 있습니다.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/hosts-workspace-dark.png">
-  <img alt="Dolgate 홈 화면" src="./docs/hosts-workspace.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hosts-workspace-dark.png">
+  <img alt="Dolgate 홈 화면" src="./docs/images/hosts-workspace.png">
 </picture>
 
 ### 대표 기능
@@ -103,8 +103,8 @@ Linux `deb`와 ARM64 빌드는 [GitHub Releases](https://github.com/doldolma/dol
 - 자동 업데이트 · 셀프호스팅 sync-api
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/port-forwarding-dark.png">
-  <img alt="Dolgate 포트 포워딩 화면" src="./docs/port-forwarding.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/port-forwarding-dark.png">
+  <img alt="Dolgate 포트 포워딩 화면" src="./docs/images/port-forwarding.png">
 </picture>
 
 ## 자체 sync-api 호스팅
@@ -127,8 +127,8 @@ curl http://127.0.0.1:8080/healthz
 데스크톱 앱에서는 로그인 화면의 톱니바퀴를 눌러 `Login Server`를 self-host 주소로 바꾸면 됩니다.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/login-dark.png">
-  <img alt="Login Server 설정 화면" src="./docs/login.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/login-dark.png">
+  <img alt="Login Server 설정 화면" src="./docs/images/login.png">
 </picture>
 
 ## 중요한 사항
@@ -150,6 +150,7 @@ SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 �
 ## 문서
 
 - [Desktop 문서](./docs/desktop.md)
+- [Tailscale / Headscale 가이드](./docs/tailscale.md)
 - [AI 어시스턴트](./docs/ai-assistant-design.md)
 - [AWS / SSM 설정 가이드](./docs/aws.md)
 - [아키텍처](./docs/architecture.md)

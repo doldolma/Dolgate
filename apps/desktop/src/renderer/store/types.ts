@@ -9,6 +9,7 @@ import type {
   AwsMetricHistoryPoint,
   ContainerConnectionProgressEvent,
   CoreEvent,
+  RdpSessionEvent,
   DesktopApi,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
@@ -70,6 +71,7 @@ import type {
   TransferJobEvent,
   TransferStartInput,
   TailnetStatus,
+  RdpMonitorSelection,
 } from "@shared";
 
 export type SessionWorkspaceTabId = `session:${string}`;
@@ -94,7 +96,7 @@ export type SftpSourceKind = "local" | "host";
 export type WorkspaceDropDirection = "left" | "right" | "top" | "bottom";
 export type HostDrawerState =
   | { mode: "closed" }
-  | { mode: "create"; defaultGroupPath: string | null; kind: "ssh" | "serial" }
+  | { mode: "create"; defaultGroupPath: string | null; kind: "ssh" | "serial" | "rdp" }
   | { mode: "edit"; hostId: string };
 
 export interface WorkspaceLeafNode {
@@ -674,6 +676,7 @@ interface AppStateParts {
   openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
   openCreateSerialDrawer: () => void;
+  openCreateRdpDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
@@ -971,6 +974,17 @@ interface AppStateParts {
   ) => void;
   markSessionOutput: (sessionId: string, chunk?: Uint8Array) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
+  handleRdpEvent: (event: RdpSessionEvent) => void;
+  /**
+   * 이 세션의 호스트가 쓸 로컬 모니터를 정하고 다시 붙는다.
+   *
+   * 선택은 호스트에 남는다 — 매번 고르지 않아도 되고, 자리를 옮겨 디스플레이 구성이 바뀌면
+   * 이름·크기로 다시 맞춘다. 배치는 접속 시점에 협상되므로 적용에 재접속이 필요하다.
+   */
+  setRdpMonitors: (
+    sessionId: string,
+    monitors: RdpMonitorSelection[] | null,
+  ) => Promise<void>;
   handleTmuxLayoutChange: (
     controlSessionId: string,
     windowId: string,
@@ -1100,6 +1114,7 @@ export type CatalogSlice = Pick<
   | "openSettingsSection"
   | "openCreateHostDrawer"
   | "openCreateSerialDrawer"
+  | "openCreateRdpDrawer"
   | "openEditHostDrawer"
   | "closeHostDrawer"
   | "navigateGroup"
@@ -1121,6 +1136,7 @@ export type CatalogSlice = Pick<
 
 export type SessionSlice = Pick<
   AppStateParts,
+  | "setRdpMonitors"
   | "tabs"
   | "sessionShareChatNotifications"
   | "workspaces"
@@ -1311,6 +1327,7 @@ export type SettingsSlice = Pick<
 export type RuntimeEventSlice = Pick<
   AppStateParts,
   | "handleCoreEvent"
+  | "handleRdpEvent"
   | "handleSessionShareEvent"
   | "handleSessionShareChatEvent"
   | "dismissSessionShareChatNotification"

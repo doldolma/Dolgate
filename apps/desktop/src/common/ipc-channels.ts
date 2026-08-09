@@ -108,6 +108,33 @@ export const ipcChannels = {
     importSelection: 'xshell:import-selection',
     discardSnapshot: 'xshell:discard-snapshot'
   },
+  rdp: {
+    connect: 'rdp:connect',
+    disconnect: 'rdp:disconnect',
+    input: 'rdp:input',
+    trustCertificate: 'rdp:trust-certificate',
+    resize: 'rdp:resize',
+    clipboard: 'rdp:clipboard',
+    syncClipboard: 'rdp:sync-clipboard',
+    pickShareFolder: 'rdp:pick-share-folder',
+    // 배치도 UI 가 그릴 로컬 디스플레이 목록.
+    listMonitors: 'rdp:list-monitors',
+    // 이미 붙어 있는 세션의 접속 정보(크기·모니터 배치). 모니터별 창이 뒤늦게 물어본다.
+    describeSession: 'rdp:describe-session',
+    // 지금 화면 전체를 한 번 더 보내 달라. 세션 도중에 붙는 창이 검은 화면으로 남지 않게.
+    refresh: 'rdp:refresh',
+    // 원격 모니터를 물리 화면마다 펼치기 / 다시 한 창으로 접기.
+    // 이 창이 이 세션의 픽셀을 원한다/그만 원한다. 프레임을 볼 창에만 보내기 위한 것.
+    watch: 'rdp:watch',
+    unwatch: 'rdp:unwatch',
+    spreadMonitors: 'rdp:spread-monitors',
+    collapseMonitors: 'rdp:collapse-monitors',
+    event: 'rdp:event',
+    // 픽셀 전용 채널. ssh.data 와 같은 이유로 store를 거치지 않고 캔버스로 직결한다.
+    frame: 'rdp:frame',
+    // 오디오도 픽셀과 같은 이유로 store 를 거치지 않는다.
+    audio: 'rdp:audio'
+  },
   ssh: {
     connect: 'ssh:connect',
     connectLocal: 'ssh:connect-local',

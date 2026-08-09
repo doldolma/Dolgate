@@ -1,55 +1,55 @@
-# 데이터 보호 (E2EE 동기화)
+# Data Protection (E2EE Sync)
 
-Dolgate는 동기화되는 **모든 데이터**를 업로드 전에 기기에서 암호화합니다. 복호화 키는 사용자의 **동기화 암호**로만 열 수 있고, 서버는 동기화 암호와 복호화 키 원문을 보관하지 않습니다. 따라서 **서버(자체 호스팅 운영자 포함)는 동기화된 데이터의 내용을 알 수 없습니다**.
+Dolgate encrypts **all synced data** on the device before upload. The decryption key can only be unlocked with the user's **sync passphrase**, and the server never stores the sync passphrase or the raw decryption key. As a result, **the server — including a self-hosting operator — cannot read the contents of synced data**.
 
-E2EE의 핵심은 데이터 암호화에 더해 **복호화 키 자체도 서버가 알 수 없게 보호하는 것**입니다. 아래에서는 현재 방식의 키 생성·보관과 복구 절차를 설명합니다.
+The point of E2EE is not just encrypting the data, but **protecting the decryption key itself so the server can never learn it**. This page explains how keys are created and stored, and how recovery works.
 
-## 동작 방식
+## How it works
 
-동기화 암호에서 두 단계로 키가 만들어집니다.
+Two keys are involved, set up in two stages.
 
 ```mermaid
 flowchart LR
-  PW["동기화 암호"] -->|Argon2id| KEK["KEK"]
-  DEK["DEK<br/>(기기에서 생성)"] -->|"모든 레코드 암호화"| CIPHER["암호문"]
-  KEK -->|"DEK를 감쌈"| WRAPPED["감싼 DEK"]
+  PW["Sync passphrase"] -->|Argon2id| KEK["KEK"]
+  DEK["DEK<br/>(generated on device)"] -->|"encrypts every record"| CIPHER["Ciphertext"]
+  KEK -->|"wraps the DEK"| WRAPPED["Wrapped DEK"]
   DEK --> WRAPPED
-  WRAPPED --> SERVER[("서버<br/>감싼 DEK + 암호문만 저장")]
+  WRAPPED --> SERVER[("Server<br/>stores only the wrapped DEK + ciphertext")]
   CIPHER --> SERVER
 ```
 
-- **DEK** — 실제 데이터를 암호화하는 키(AES-256-GCM). 기기에서 생성됩니다.
-- **KEK** — 동기화 암호에서 Argon2id로 유도한 키. DEK를 감싸는 데만 씁니다. 동기화 암호와 KEK는 기기를 떠나지 않습니다.
-- 서버에는 **감싼 DEK와 암호문만** 저장됩니다. 감싼 DEK는 올바른 동기화 암호 없이는 풀리지 않습니다.
+- **DEK** — the key that encrypts the actual data (AES-256-GCM). Generated on the device.
+- **KEK** — a key derived from the sync passphrase with Argon2id. Used only to wrap the DEK. The sync passphrase and the KEK never leave the device.
+- The server stores **only the wrapped DEK and ciphertext**. The wrapped DEK cannot be unwrapped without the correct sync passphrase.
 
-## 서버가 아는 것 / 모르는 것
+## What the server knows / does not know
 
-- **모름** — 동기화되는 데이터의 내용(전부 암호문), 동기화 암호, 복호화 키 원문.
-- **앎** — 계정 이메일, 그리고 운영에 필요한 동기화 메타데이터(레코드 개수·변경 시각 등). 내용은 포함되지 않습니다.
+- **Does not know** — the contents of synced data (all of it is ciphertext), the sync passphrase, the raw decryption key.
+- **Knows** — the account email, plus the sync metadata needed to operate (record counts, modification times, and so on). None of it includes content.
 
-이 구조에서는 관리형 서버든 자체 호스팅이든, DB가 유출되더라도 암호문과 감싼 키만 노출됩니다.
+Under this design, whether you use the managed server or self-host, a database breach exposes only ciphertext and wrapped keys.
 
-## 초기화와 복구
+## Reset and recovery
 
-동기화 암호를 잊으면 서버는 복구해 줄 수 없습니다(키를 갖지 않으므로). 이때 최후 수단이 **초기화**이며, 설정의 "동기화 암호" 섹션(잠금 해제 상태) 또는 로그인 후 암호 입력 화면에서 실행할 수 있습니다. 실행하면 다음 순서로 진행됩니다.
+If you forget the sync passphrase, the server cannot recover it for you (it holds no key). The last resort is a **reset**, available from the "Sync passphrase" section in Settings (while unlocked) or from the passphrase prompt after signing in. A reset proceeds in this order:
 
-1. **서버에 동기화돼 있던 데이터가 전부 삭제됩니다.** 옛 키로 암호화돼 더 이상 풀 수 없는 데이터를 서버에서 완전히 지웁니다.
-2. **새 동기화 암호와 새 키(DEK)를 만듭니다.**
-3. **초기화를 실행한 기기의 로컬 데이터가 그 새 키로 암호화되어 서버에 새로 업로드됩니다.** 로컬 데이터는 동기화 암호로 잠겨 있지 않으므로(암호는 서버에 올라가는 데이터만 보호합니다) 옛 암호 없이도 새 키로 암호화해 올릴 수 있습니다. 초기화는 서버 데이터만 지우고 기기 로컬 데이터는 건드리지 않습니다.
+1. **All data synced to the server is deleted.** Data encrypted with the old key can no longer be decrypted, so it is removed from the server entirely.
+2. **A new sync passphrase and a new key (DEK) are created.**
+3. **The local data on the device that ran the reset is encrypted with the new key and uploaded fresh.** Local data is not locked behind the sync passphrase (the passphrase only protects what goes to the server), so it can be re-encrypted and uploaded without the old passphrase. A reset deletes server data only — it never touches the device's local data.
 
-이후 다른 기기는 서버의 세대 변경을 감지해 잠금 화면으로 전환하고(옛 키로는 서버가 push를 거부합니다), 새 동기화 암호를 입력하면 다시 합류합니다.
+Afterwards, other devices detect the generation change on the server and switch to the lock screen (the server rejects pushes made with the old key). Entering the new sync passphrase lets them rejoin.
 
-> **주의 — 복구는 로컬 데이터가 있는 기기에서만 됩니다.** 초기화는 데이터를 가진 기기(평소 쓰던 기기)에서 실행하세요. **로그아웃은 이 기기의 동기화 데이터(키체인 시크릿 포함)를 지우므로**, 암호를 잊은 상태에서 로그아웃부터 하면 복구할 로컬 데이터가 사라집니다. 데이터가 없는 새 기기에서 초기화한 경우에는, 데이터를 가진 다른 기기가 다음 동기화에서 새 암호를 입력할 때 다시 업로드됩니다.
+> **Caution — recovery only works from a device that still has local data.** Run the reset on the device you normally use, the one that holds your data. **Signing out deletes this device's sync data, including keychain secrets**, so if you have forgotten the passphrase and sign out first, there is no local data left to recover from. If you reset from a fresh device with no data, a device that does have data will re-upload it the next time it syncs, after the new passphrase is entered there.
 
-## 호스트 파일 내보내기
+## Host file export
 
-동기화와 별개로, 데스크톱에서는 선택한 호스트를 파일로 내보낼 수 있습니다. 이는 **자격증명이 기기 밖 파일로 나가는 유일한 경로**이므로 취급에 주의가 필요합니다.
+Separately from sync, the desktop app can export selected hosts to a file. This is **the only path where credentials leave the device as a file**, so handle it with care.
 
-- **Dolgate 파일(`.dolgate`)** — 그룹·호스트·자격증명·known hosts·포트 포워딩·DNS 오버라이드·AWS 프로필·스니펫을 담고, 파일 전체를 **내보내기 암호로 암호화**합니다. 동기화 볼트와 같은 방식(Argon2id로 키 유도 + AES-256-GCM)이며, 암호는 파일 어디에도 저장되지 않습니다. **암호를 잊으면 파일을 열 수 없고 복구할 방법도 없습니다.** 파일과 암호는 서로 다른 경로로 보관하세요.
-- **OpenSSH config** — 다른 도구에서 쓰기 위한 **평문** 설정입니다. **자격증명은 포함되지 않지만** 호스트 주소·사용자명 같은 접속 정보는 그대로 드러나므로, 일반 설정 파일과 동일한 수준으로 취급하세요.
+- **Dolgate file (`.dolgate`)** — contains groups, hosts, credentials, known hosts, port forwarding rules, DNS overrides, AWS profiles and snippets, with the entire file **encrypted with an export passphrase**. It uses the same scheme as the sync vault (Argon2id key derivation + AES-256-GCM), and the passphrase is stored nowhere in the file. **If you forget the passphrase, the file cannot be opened and there is no way to recover it.** Keep the file and its passphrase in separate places.
+- **OpenSSH config** — a **plaintext** config for use with other tools. **It contains no credentials**, but connection details such as host addresses and usernames are exposed as-is, so treat it like any other configuration file.
 
-내보내기 암호는 동기화 암호와 **별개**입니다. 하나를 바꿔도 다른 쪽에 영향이 없고, 이미 내보낸 파일은 그때 쓴 암호로만 열립니다(사후에 무효화할 수 없으니, 유출이 우려되면 파일 자체를 폐기하고 자격증명을 교체하세요).
+The export passphrase is **independent** of the sync passphrase. Changing one does not affect the other, and an already-exported file opens only with the passphrase used at export time (it cannot be invalidated after the fact — if you suspect a leak, destroy the file and rotate the credentials).
 
-## 암호화 방식
+## Cryptography
 
-동기화 암호에서 KEK를 유도할 때는 Argon2id, DEK와 레코드 암호화에는 AES-256-GCM을 씁니다 — 모두 널리 검증된 표준 알고리즘이며 자체 고안한 암호는 쓰지 않습니다. 구체적인 파라미터는 구현([`packages/shared-core/src/vault.ts`](../packages/shared-core/src/vault.ts))에 있습니다.
+KEK derivation from the sync passphrase uses Argon2id; the DEK and record encryption use AES-256-GCM — all widely reviewed standard algorithms, with no home-grown cryptography. The exact parameters live in the implementation ([`packages/shared-core/src/vault.ts`](../packages/shared-core/src/vault.ts)).

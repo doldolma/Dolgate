@@ -6,7 +6,7 @@ describe('getWindowControlDescriptors', () => {
   it.each(['darwin', 'unknown'] as const)('returns no custom window controls on %s', (platform) => {
     const controls = getWindowControlDescriptors(
       platform,
-      { isMaximized: false },
+      { isMaximized: false, isFullScreen: false },
       {
         onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
         onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
@@ -21,7 +21,7 @@ describe('getWindowControlDescriptors', () => {
   it('shows custom window controls on Linux', () => {
     const controls = getWindowControlDescriptors(
       'linux',
-      { isMaximized: false },
+      { isMaximized: false, isFullScreen: false },
       {
         onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
         onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
@@ -36,7 +36,7 @@ describe('getWindowControlDescriptors', () => {
   it('switches maximize control descriptor to restore when maximized', () => {
     const controls = getWindowControlDescriptors(
       'win32',
-      { isMaximized: true },
+      { isMaximized: true, isFullScreen: false },
       {
         onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
         onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
@@ -56,7 +56,7 @@ describe('getWindowControlDescriptors', () => {
     const onCloseWindow = vi.fn().mockResolvedValue(undefined);
     const controls = getWindowControlDescriptors(
       'win32',
-      { isMaximized: false },
+      { isMaximized: false, isFullScreen: false },
       {
         onMinimizeWindow,
         onMaximizeWindow,

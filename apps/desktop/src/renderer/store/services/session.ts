@@ -1,3 +1,4 @@
+import { isRdpHostRecord } from "@shared";
 import type {
   HostRecord,
   HostSecretInput,
@@ -6,6 +7,7 @@ import type {
 } from "@shared";
 import type { AppState, PendingMissingUsernamePrompt } from "../types";
 import type { SliceDeps } from "./context";
+import { rdpViewportSize } from "./rdp-viewport";
 import { createTrustAuthServices } from "./trust-auth";
 import {
   activateSessionContextInState,
@@ -46,6 +48,8 @@ type StoreGetter = SliceDeps["get"];
  * 컨트롤러가 정정한다.
  */
 const PENDING_SIZE_MEASURE_FRAMES = 4;
+
+
 
 function nextAnimationFrame(): Promise<void> {
   return new Promise((resolve) => {
@@ -721,6 +725,70 @@ export function createSessionServices(deps: SliceDeps) {
     }
   };
 
+  // RDP 는 터미널 세션 기계(재연결·tmux·홉·셸 통합)를 타지 않는다. 탭 하나를 만들고 코어에
+  // 붙이는 게 전부라, startSessionConnectionFlow 에 분기를 흩뿌리는 대신 별도 경로로 둔다.
+  const startRdpConnectionFlow = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    host: HostRecord,
+  ) => {
+    const sessionId = createPendingSessionId();
+    const title = buildSessionTitle(
+      host.label,
+      { source: "host", hostId: host.id },
+      get().tabs,
+    );
+
+    const tab = createPendingSessionTab({
+      sessionId,
+      source: "host",
+      hostId: host.id,
+      title,
+      paneKind: "rdp",
+      progress: resolveConnectingProgress(host),
+    });
+
+    set((state) => ({
+      tabs: [...state.tabs, tab],
+      tabStrip: [...state.tabStrip, { kind: "session" as const, sessionId }],
+      ...activateSessionContextInState(state, sessionId),
+    }));
+
+    updateSessionProgress(
+      set,
+      sessionId,
+      resolveConnectingProgress(host),
+      "connecting",
+    );
+
+    try {
+      const connected = await api.rdp.connect(sessionId, host.id, rdpViewportSize());
+      // 붙고 나면 진행 표시는 지운다 — 연결 화면이 캔버스를 가리면 안 된다.
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.sessionId === sessionId
+            ? {
+                ...tab,
+                status: "connected" as const,
+                errorMessage: undefined,
+                connectionProgress: null,
+                // 전체화면에서 화면마다 창을 펼칠지 여기서 판단한다.
+                rdpMonitorCount: connected.monitors.length,
+                lastEventAt: new Date().toISOString(),
+              }
+            : tab,
+        ),
+      }));
+    } catch (error) {
+      markSessionError(
+        set,
+        sessionId,
+        error instanceof Error ? error.message : String(error),
+        { retryable: false },
+      );
+    }
+  };
+
   const startSessionConnectionFlow = async (
     set: StoreSetter,
     get: StoreGetter,
@@ -738,6 +806,11 @@ export function createSessionServices(deps: SliceDeps) {
   ) => {
     const host = get().hosts.find((item) => item.id === hostId);
     if (!host) {
+      return;
+    }
+
+    if (isRdpHostRecord(host)) {
+      await startRdpConnectionFlow(set, get, host);
       return;
     }
 
@@ -927,6 +1000,7 @@ export function createSessionServices(deps: SliceDeps) {
     updateSessionProgress,
     markSessionError,
     createPendingSessionTabForHost,
+    startRdpConnectionFlow,
     createPendingSessionTabForLocal,
     createPendingSessionTabForContainerShell,
     createPendingSessionTabForEcsShell,

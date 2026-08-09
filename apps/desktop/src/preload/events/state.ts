@@ -12,6 +12,9 @@ import type {
   TailnetStatus,
   TabCommandPayload,
   TransferJobEvent,
+  RdpAudioPayload,
+  RdpFramePayload,
+  RdpSessionEvent,
   UpdateEvent,
   WarpgateImportEvent,
 } from "@shared";
@@ -42,6 +45,10 @@ function createListenerHub<T>() {
 }
 
 const coreEventHub = createListenerHub<CoreEvent>();
+const rdpEventHub = createListenerHub<RdpSessionEvent>();
+// 프레임은 세션 단위로 흘려보낸다. 창마다 다른 세션을 그리므로 전역 팬아웃은 낭비다.
+const rdpFrameListeners = new Map<string, Set<Listener<RdpFramePayload>>>();
+const rdpAudioListeners = new Map<string, Set<Listener<RdpAudioPayload>>>();
 const transferEventHub = createListenerHub<TransferJobEvent>();
 const sftpConnectionProgressHub =
   createListenerHub<SftpConnectionProgressEvent>();
@@ -136,6 +143,103 @@ export function emitSshData(payload: {
 
 export function subscribeCoreEvent(listener: Listener<CoreEvent>): () => void {
   return coreEventHub.subscribe(listener);
+}
+
+export function emitRdpEvent(payload: RdpSessionEvent): void {
+  rdpEventHub.emit(payload);
+}
+
+export function subscribeRdpEvent(listener: Listener<RdpSessionEvent>): () => void {
+  return rdpEventHub.subscribe(listener);
+}
+
+export function emitRdpFrame(payload: RdpFramePayload): void {
+  const listeners = rdpFrameListeners.get(payload.sessionId);
+  if (!listeners) {
+    // 캔버스가 아직 안 붙었으면 버린다. 픽셀은 backlog로 쌓아둘 값이 아니고, 다음 갱신이
+    // 어차피 덮어쓴다.
+    return;
+  }
+  for (const listener of listeners) {
+    try {
+      listener(payload);
+    } catch (err) {
+      console.error("rdp frame listener failed", err);
+    }
+  }
+}
+
+export function emitRdpAudio(payload: RdpAudioPayload): void {
+  const listeners = rdpAudioListeners.get(payload.sessionId);
+  if (!listeners) {
+    return;
+  }
+  for (const listener of listeners) {
+    try {
+      listener(payload);
+    } catch (err) {
+      console.error("rdp audio listener failed", err);
+    }
+  }
+}
+
+export function subscribeRdpAudio(
+  sessionId: string,
+  listener: Listener<RdpAudioPayload>,
+): () => void {
+  const listeners = rdpAudioListeners.get(sessionId) ?? new Set<Listener<RdpAudioPayload>>();
+  listeners.add(listener);
+  rdpAudioListeners.set(sessionId, listeners);
+
+  return () => {
+    const current = rdpAudioListeners.get(sessionId);
+    if (!current) {
+      return;
+    }
+    current.delete(listener);
+    if (current.size === 0) {
+      rdpAudioListeners.delete(sessionId);
+    }
+  };
+}
+
+/**
+ * 이 창이 어느 세션의 픽셀을 원하는지 메인 프로세스에 알린다.
+ *
+ * 프레임은 IPC structured clone 이라 창마다 전체 복사본이 생긴다. 안 보내도 되는 창까지
+ * 뿌리면 창 수만큼 픽셀 트래픽이 곱해진다 — 1920x1080 전체 갱신 한 번이 8.3MB 다.
+ */
+let watchSession: ((sessionId: string, watching: boolean) => void) | null = null;
+
+export function setRdpFrameWatchNotifier(
+  notify: (sessionId: string, watching: boolean) => void,
+): void {
+  watchSession = notify;
+}
+
+export function subscribeRdpFrame(
+  sessionId: string,
+  listener: Listener<RdpFramePayload>,
+): () => void {
+  const listeners = rdpFrameListeners.get(sessionId) ?? new Set<Listener<RdpFramePayload>>();
+  const first = listeners.size === 0;
+  listeners.add(listener);
+  rdpFrameListeners.set(sessionId, listeners);
+  if (first) {
+    watchSession?.(sessionId, true);
+  }
+
+  return () => {
+    const current = rdpFrameListeners.get(sessionId);
+    if (!current) {
+      return;
+    }
+    current.delete(listener);
+    if (current.size === 0) {
+      rdpFrameListeners.delete(sessionId);
+      watchSession?.(sessionId, false);
+    }
+  };
 }
 
 export function emitWorkspaceChanged(): void {

@@ -486,6 +486,11 @@ export function HomeShell({
               setSelectedHostId(null);
               homeViewModel.openCreateSerialDrawer();
             }}
+            onOpenRdpImport={() => {
+              resetHostBrowserMessages();
+              setSelectedHostId(null);
+              homeViewModel.openCreateRdpDrawer();
+            }}
             onOpenAwsImport={() => {
               resetHostBrowserMessages();
               setSelectedHostId(null);

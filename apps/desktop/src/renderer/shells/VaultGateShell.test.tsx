@@ -17,7 +17,7 @@ vi.mock('../services/desktop/auth-window-updater', () => ({
   migrateVault: vaultServiceMocks.migrateVault,
 }));
 
-const windowState: DesktopWindowState = { isMaximized: false };
+const windowState: DesktopWindowState = { isMaximized: false, isFullScreen: false };
 
 function createAuthState(): AuthState {
   return {

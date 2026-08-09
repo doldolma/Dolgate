@@ -28,7 +28,8 @@ describe("createAppStore catalog and settings", () => {
     await store.getState().bootstrap();
 
     expect(api.bootstrap.getInitialSnapshot).toHaveBeenCalledTimes(1);
-    expect(store.getState().hosts).toHaveLength(1);
+    // 목 카탈로그는 SSH 호스트 하나와 RDP 호스트 하나를 담고 있다.
+    expect(store.getState().hosts).toHaveLength(2);
     expect(store.getState().groups).toHaveLength(1);
     expect(store.getState().activeWorkspaceTab).toBe("home");
     expect(store.getState().homeSection).toBe("hosts");
@@ -715,6 +716,19 @@ describe("createAppStore catalog and settings", () => {
           transmitLineEnding: draft.transmitLineEnding,
           localEcho: draft.localEcho,
           localLineEditing: draft.localLineEditing,
+        } satisfies HostRecord;
+      }
+      if (draft.kind === "rdp") {
+        return {
+          ...recordBase,
+          kind: "rdp",
+          hostname: draft.hostname,
+          port: draft.port,
+          username: draft.username,
+          domain: draft.domain ?? null,
+          secretRef: draft.secretRef ?? null,
+          desktopWidth: draft.desktopWidth,
+          desktopHeight: draft.desktopHeight,
         } satisfies HostRecord;
       }
       return {

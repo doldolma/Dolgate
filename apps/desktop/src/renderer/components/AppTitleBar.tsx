@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { DesktopWindowState, HostRecord, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
+import type { DesktopWindowState, HostRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
 import { isSshHostRecord } from '@shared';
 import type {
   DynamicTabStripItem,
@@ -12,6 +12,8 @@ import { DesktopWindowControls, type DesktopPlatform } from './DesktopWindowCont
 import { listTailnets, snapshotTailnets } from '../services/desktop/tailnet';
 import { cidrPrefixLength, isAddressInCidr, isIpAddress } from '../lib/ip-prefix';
 import { cn } from '../lib/cn';
+import { RdpMonitorPicker } from './rdp/RdpMonitorPicker';
+import { titleBarMode, useTitleBarAutoHide } from './useTitleBarAutoHide';
 import {
   getSessionConnectedAt,
   getSessionCwd,
@@ -37,6 +39,13 @@ interface AppTitleBarProps {
   /** 호스트 카탈로그 — tmux 상단 탭에 호스트명을 표시하기 위해 group.hostId 해석에 사용. */
   hosts: HostRecord[];
   tabStrip: DynamicTabStripItem[];
+  /**
+   * 이 RDP 세션의 호스트가 쓸 로컬 모니터를 정한다. 선택은 호스트에 남고, 배치는 접속 시점에
+   * 정해지므로 적용에 재접속이 따른다.
+   */
+  onSetRdpMonitors: (sessionId: string, monitors: RdpMonitorSelection[]) => void;
+  /** 이 세션의 호스트에 저장된 모니터 선택. 배치도를 열 때 켜둘 화면을 정한다. */
+  resolveRdpMonitors: (sessionId: string) => RdpMonitorSelection[] | null;
   activeWorkspaceTab: WorkspaceTabId;
   draggedSession: DraggedSessionPayload | null;
   updateState: UpdateState;
@@ -157,6 +166,8 @@ type TitlebarDynamicItem =
       status: TerminalTab['status'];
       active: boolean;
       dotState: TabDotState;
+      /** RDP 세션에만 있는 메뉴를 위해 종류를 구분한다. */
+      paneKind: 'terminal' | 'rdp';
       rttMs: number | null;
     }
   | {
@@ -850,6 +861,8 @@ export function AppTitleBar({
   tmuxGroups,
   hosts,
   tabStrip,
+  onSetRdpMonitors,
+  resolveRdpMonitors,
   activeWorkspaceTab,
   draggedSession,
   updateState,
@@ -902,6 +915,21 @@ export function AppTitleBar({
   const [showLeftTabStripFade, setShowLeftTabStripFade] = useState(false);
   const [showRightTabStripFade, setShowRightTabStripFade] = useState(false);
 
+  // 전체화면에서는 타이틀바를 감추고 상단 가장자리에서만 부른다.
+  const titleBar = useTitleBarAutoHide(
+    titleBarMode(windowState.isFullScreen, desktopPlatform),
+  );
+
+  // 모니터 배치도를 띄운 RDP 세션. null 이면 닫혀 있다.
+  const [monitorPicker, setMonitorPicker] = useState<string | null>(null);
+
+  // RDP 탭 우클릭 메뉴. 지금은 항목이 하나뿐이라 전용 컴포넌트를 만들지 않았다.
+  const [tabMenu, setTabMenu] = useState<{
+    sessionId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const dynamicItems = useMemo<TitlebarDynamicItem[]>(
     () =>
       tabStrip
@@ -921,6 +949,8 @@ export function AppTitleBar({
                 tabConnStateFromTab(tab),
                 tab.commandState,
               ),
+              // RDP 탭에만 뜨는 메뉴가 있어 종류를 함께 싣는다.
+              paneKind: tab.paneKind ?? 'terminal',
               rttMs: tab.lastRttMs ?? null
             } satisfies TitlebarDynamicItem;
           }
@@ -1368,16 +1398,26 @@ export function AppTitleBar({
 
   return (
     <header
+      onPointerEnter={titleBar.onPointerEnter}
+      onPointerLeave={titleBar.onPointerLeave}
       className={cn(
         // 상단바 chrome 배경 전체를 창 드래그 영역으로 둔다(macOS·Windows 공통). 실제 탭/버튼처럼
         // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
         'fixed inset-x-0 top-0 z-[7] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem] [-webkit-app-region:drag]',
-        desktopPlatform === 'darwin' && 'pl-[5.7rem] max-[1040px]:pl-[5.1rem] max-[760px]:px-[5.1rem] max-[760px]:pr-[0.9rem]',
+        // 신호등 자리는 창 모드에서만 비워둔다. macOS 전체화면에서는 신호등이 OS 오버레이로
+        // 올라가 우리 바에 없다 — 그대로 두면 왼쪽이 이유 없이 5.7rem 비어 보인다.
+        desktopPlatform === 'darwin' &&
+          !windowState.isFullScreen &&
+          'pl-[5.7rem] max-[1040px]:pl-[5.1rem] max-[760px]:px-[5.1rem] max-[760px]:pr-[0.9rem]',
+        // 전체화면에서는 위로 밀어 감춘다. display 대신 transform 을 쓰는 이유는 두 가지다:
+        // 레이아웃을 유지해야 내려올 때 흔들리지 않고, 숨은 동안에도 포인터 진입을 받을 수 있다.
+        'transition-transform duration-150',
+        !titleBar.visible && '-translate-y-full',
       )}
     >
       {/* ① 좌측 드래그 존: macOS 신호등 영역(헤더 좌측 패딩). 스크롤 스트립과 겹치지 않는
           고정 rect 라 위치-의존 버그가 없다. 네이티브 신호등 클릭은 그대로, 빈 곳은 창 드래그. */}
-      {desktopPlatform === 'darwin' ? (
+      {desktopPlatform === 'darwin' && !windowState.isFullScreen ? (
         <div
           aria-hidden
           className="absolute left-0 top-0 bottom-0 w-[5.7rem] max-[1040px]:w-[5.1rem] [-webkit-app-region:drag]"
@@ -1589,6 +1629,19 @@ export function AppTitleBar({
                     draggable
                 onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
                 onMouseLeave={() => hideTabHover(targetKey)}
+                onContextMenu={(event) => {
+                  // 지금은 RDP 세션에만 메뉴가 있다. 다른 탭은 기본 동작을 막지 않는다.
+                  if (item.paneKind !== 'rdp') {
+                    return;
+                  }
+                  event.preventDefault();
+                  hideTabHover(targetKey);
+                  setTabMenu({
+                    sessionId: item.sessionId,
+                    x: event.clientX,
+                    y: event.clientY,
+                  });
+                }}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('application/x-dolssh-session-id', item.sessionId);
@@ -2015,6 +2068,51 @@ export function AppTitleBar({
             </div>
           ) : null}
         </div>
+      ) : null}
+
+      {monitorPicker ? (
+        <RdpMonitorPicker
+          selected={resolveRdpMonitors(monitorPicker)}
+          onCancel={() => setMonitorPicker(null)}
+          onApply={(monitors) => {
+            const sessionId = monitorPicker;
+            setMonitorPicker(null);
+            onSetRdpMonitors(sessionId, monitors);
+          }}
+        />
+      ) : null}
+
+      {tabMenu ? (
+        <>
+          {/* 바깥을 누르면 닫는다. 메뉴보다 아래에 깔되 나머지 UI 는 덮는다. */}
+          <div
+            className="fixed inset-0 z-[60] [-webkit-app-region:no-drag]"
+            onClick={() => setTabMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setTabMenu(null);
+            }}
+          />
+          <div
+            className="fixed z-[61] min-w-[13rem] rounded-[8px] border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[0_14px_28px_rgba(0,0,0,0.22)] [-webkit-app-region:no-drag]"
+            style={{ left: tabMenu.x, top: tabMenu.y }}
+          >
+            <button
+              type="button"
+              className="block w-full px-3 py-[0.4rem] text-left text-[0.82rem] text-[var(--text)] hover:bg-[color-mix(in_srgb,var(--accent-strong)_14%,transparent)]"
+              onClick={() => {
+                const sessionId = tabMenu.sessionId;
+                setTabMenu(null);
+                setMonitorPicker(sessionId);
+              }}
+            >
+              사용할 모니터…
+              <span className="mt-[0.15rem] block text-[0.72rem] leading-[1.35] text-[var(--text-soft)]">
+                호스트에 저장됩니다. 적용하면 다시 접속합니다.
+              </span>
+            </button>
+          </div>
+        </>
       ) : null}
     </header>
   );

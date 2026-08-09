@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "title": "SSH client with built-in Tailscale — connect to multiple tailnets at once | Dolgate",
+    "description": "No Tailscale app needed — the SSH client itself becomes a tailnet node. Connect to several Tailscale and Headscale networks at the same time, without touching OS network settings.",
+    "ogTitle": "SSH client with built-in Tailscale — multiple tailnets at once",
+    "ogDescription": "Connect without the Tailscale app, and use several networks at the same time. Headscale works the same way."
+  },
+  "keys": {
+    "nav.features": "Features",
+    "nav.download": "Download",
+    "theme.button": "Switch theme",
+    "foot.license": "© 2026 doldolma · MIT License",
+    "foot.releases": "Releases",
+    "ts.h1": "Tailscale built into an SSH client —<br />connect to multiple tailnets at once",
+    "ts.lede": "In Dolgate, the app itself becomes a tailnet node. No Tailscale app to install, no VPN profile to approve — reach servers across several Tailscale and Headscale networks from one window.",
+    "ts.problem.h2": "The Tailscale client joins one network at a time",
+    "ts.problem.p1": "When your servers are spread across several Tailscale networks, every visit to another network means switching accounts in Tailscale. The moment you switch, sessions on the previous network are gone — and you switch again to go back.",
+    "ts.problem.p2": "Dolgate uses Tailscale's <code>tsnet</code> to run one node per network inside the app, all at the same time. It is not a system VPN, so there is no reason only one can be on — and no TUN device or administrator rights are needed.",
+    "ts.how.h2": "How to use it",
+    "ts.how.s1": "<b>Register networks</b> — with an auth key or browser login. For Headscale, add the server address.",
+    "ts.how.s2": "<b>Pick a network per host</b> — hosts without one connect directly over the regular network.",
+    "ts.how.s3": "<b>Connect</b> — progress is shown while the node comes up, including when authentication or admin approval is needed.",
+    "ts.how.note": "Once assigned, everything headed for that host — not just the terminal but SFTP and port forwarding too — travels through the tailnet. Addresses can be MagicDNS short names, FQDNs, or tailnet IPs.",
+    "ts.props.h2": "How it behaves",
+    "ts.props.i1": "Multiple tailnets at once — one node per network, no switching, one window",
+    "ts.props.i2": "No effect on OS networking — an in-app network stack that never touches system routing or DNS",
+    "ts.props.i3": "Headscale support — point at your control plane address and register the same way",
+    "ts.props.i4": "Mobile included — iOS and Android connect the same way, and tailnet settings added on desktop sync over",
+    "ts.docs": "Registration steps, connection states, and the security rules are covered in detail in the <a style=\"color:var(--accent)\" href=\"https://github.com/doldolma/dolgate/blob/main/docs/tailscale.md\" target=\"_blank\" rel=\"noopener\">Tailscale guide</a>.",
+    "ts.cta.h": "Reach the servers inside your Tailscale network right now",
+    "ts.cta.p": "Windows · macOS · Linux · iOS · Android, open source (MIT)",
+    "ts.cta.dl": "Download"
+  },
+  "runtime": {
+    "themePrefix": "Theme",
+    "themeHint": "click to switch",
+    "themeAuto": "follows the system",
+    "themeLight": "light",
+    "themeDark": "dark"
+  }
+}

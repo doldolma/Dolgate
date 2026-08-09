@@ -199,6 +199,21 @@ jobs:
           go-version-file: services/ssh-core/go.mod
           cache-dependency-path: services/ssh-core/go.sum
 
+      - name: Set up Rust
+        # rdp-core 는 rustls 를 통해 aws-lc-sys(C)를 링크해 GOOS/GOARCH 식 크로스컴파일이
+        # 안 된다. 각 러너가 자기 플랫폼을 빌드한다. 버전은 rust-toolchain.toml 이 정한다.
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/rdp-core
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+
       # 러너 번들 npm 이 codex 도입 후의 lock 그래프에서 hoist 된 7zip-bin 바이너리를
       # 누락 설치할 수 있어, 로컬에서 이 lock 을 올바르게 설치함을 검증한 npm 으로 고정한다.
       - name: Pin npm (lockfile-verified version)
@@ -288,6 +303,21 @@ jobs:
           go-version-file: services/ssh-core/go.mod
           cache-dependency-path: services/ssh-core/go.sum
 
+      - name: Set up Rust
+        # rdp-core 는 rustls 를 통해 aws-lc-sys(C)를 링크해 GOOS/GOARCH 식 크로스컴파일이
+        # 안 된다. 각 러너가 자기 플랫폼을 빌드한다. 버전은 rust-toolchain.toml 이 정한다.
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/rdp-core
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(win/x64/7za.exe)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
       - name: Pin npm (lockfile-verified version)
@@ -366,6 +396,28 @@ jobs:
         with:
           go-version-file: services/ssh-core/go.mod
           cache-dependency-path: services/ssh-core/go.sum
+
+      - name: Set up Rust
+        # rdp-core 는 rustls 를 통해 aws-lc-sys(C)를 링크해 GOOS/GOARCH 식 크로스컴파일이
+        # 안 된다. 각 러너가 자기 플랫폼을 빌드한다. 버전은 rust-toolchain.toml 이 정한다.
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/rdp-core
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/rdp-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+
+      - name: Install the aarch64 cross toolchain
+        # 이 러너는 x64 인데 릴리스는 linux/arm64 도 낸다. ssh-core 는 GOARCH 만 바꾸면 되지만
+        # rdp-core 는 aws-lc-sys(C)를 링크하므로 타깃용 컴파일러·링커가 있어야 한다.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(linux/x64/7za)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.

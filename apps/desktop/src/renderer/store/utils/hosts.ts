@@ -90,6 +90,26 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
     };
   }
 
+  if (record.kind === "rdp") {
+    return {
+      kind: "rdp",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      hostname: record.hostname,
+      port: record.port,
+      username: record.username,
+      domain: record.domain ?? null,
+      secretRef: record.secretRef ?? null,
+      desktopWidth: record.desktopWidth,
+      desktopHeight: record.desktopHeight,
+      drivePath: record.drivePath ?? null,
+      driveReadOnly: record.driveReadOnly ?? null,
+      monitors: record.monitors ?? null,
+    };
+  }
+
   return {
     kind: "ssh",
     label,

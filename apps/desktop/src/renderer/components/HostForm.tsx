@@ -1,9 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { MAX_HOST_STARTUP_COMMAND_LENGTH, isAwsEc2HostRecord, isAwsEcsHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import { MAX_HOST_STARTUP_COMMAND_LENGTH, isAwsEc2HostRecord, isAwsEcsHostRecord, isRdpHostDraft, isRdpHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, RdpHostDraft, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import { loadSavedCredential } from '../services/desktop/settings';
+import { pickRdpShareFolder } from '../services/desktop/rdp';
 import { formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
@@ -231,10 +232,33 @@ const defaultSerialDraft: SerialHostDraft = {
   terminalThemeId: null,
 };
 
-function createDraft(defaultGroupPath?: string | null, kind: 'ssh' | 'serial' = 'ssh'): HostDraft {
+const defaultRdpDraft: RdpHostDraft = {
+  kind: 'rdp',
+  label: '',
+  tags: [],
+  hostname: '',
+  port: 3389,
+  username: '',
+  domain: '',
+  secretRef: null,
+  desktopWidth: 1920,
+  desktopHeight: 1080,
+  drivePath: null,
+  driveReadOnly: null,
+  groupName: '',
+  terminalThemeId: null,
+};
+
+function createDraft(defaultGroupPath?: string | null, kind: 'ssh' | 'serial' | 'rdp' = 'ssh'): HostDraft {
   if (kind === 'serial') {
     return {
       ...defaultSerialDraft,
+      groupName: defaultGroupPath ?? ''
+    };
+  }
+  if (kind === 'rdp') {
+    return {
+      ...defaultRdpDraft,
       groupName: defaultGroupPath ?? ''
     };
   }
@@ -286,6 +310,9 @@ function deriveDefaultHostLabel(draft: HostDraft): string {
     }
     return draft.port ? `${host}:${draft.port}` : host;
   }
+  if (draft.kind === 'rdp') {
+    return draft.hostname.trim();
+  }
   if (draft.kind === 'aws-ec2') {
     return draft.awsInstanceName?.trim() || draft.awsInstanceId.trim();
   }
@@ -319,7 +346,7 @@ export interface HostFormProps {
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
-  createKind?: 'ssh' | 'serial';
+  createKind?: 'ssh' | 'serial' | 'rdp';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
@@ -374,6 +401,16 @@ function isHostDraftValid(draft: HostDraft): boolean {
       return Boolean((draft.devicePath ?? '').trim());
     }
     return Boolean((draft.host ?? '').trim()) && Number.isInteger(draft.port) && (draft.port ?? 0) >= 1 && (draft.port ?? 0) <= 65535;
+  }
+
+  if (draft.kind === 'rdp') {
+    return (
+      Boolean(draft.hostname.trim()) &&
+      Boolean(draft.username.trim()) &&
+      Number.isInteger(draft.port) &&
+      draft.port >= 1 &&
+      draft.port <= 65535
+    );
   }
 
   if (draft.kind === 'warpgate-ssh') {
@@ -449,6 +486,26 @@ function buildHostFormSubmission(input: {
                 : null,
         }
       : input.draft;
+  // RDP도 비밀번호를 시크릿 저장소에 둔다(SSH와 같은 규칙). 아래 SSH 전용 경로는 키/인증서까지
+  // 다루므로 재사용하지 않고, 비밀번호만 취급하는 짧은 경로를 따로 둔다.
+  if (isRdpHostDraft(normalizedDraft)) {
+    const nextDraft: RdpHostDraft = {
+      ...normalizedDraft,
+      label: nextLabel,
+      tags: nextTags,
+      secretRef: input.credentialMode === 'existing' ? input.selectedSecretRef || null : null,
+    };
+
+    if (input.credentialMode !== 'new') {
+      return { draft: nextDraft };
+    }
+
+    return {
+      draft: nextDraft,
+      secrets: input.password ? { password: input.password } : undefined,
+    };
+  }
+
   if (!isSshHostDraft(normalizedDraft)) {
     return {
       draft: {
@@ -641,6 +698,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     };
   }, [isAgentAuthDraft, probeSshAgent]);
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
+  const rdpDraft = isRdpHostDraft(draft) ? draft : null;
   const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
   const commitJumpHostChain = (ids: string[]) => {
     if (!sshDraft) {
@@ -862,6 +920,25 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         localLineEditing: host.localLineEditing,
       };
       nextCredentialMode = 'new';
+    } else if (isRdpHostRecord(host)) {
+      nextDraft = {
+        kind: 'rdp',
+        label: host.label,
+        tags: host.tags ?? [],
+        groupName: host.groupName ?? '',
+        terminalThemeId: host.terminalThemeId ?? null,
+        hostname: host.hostname,
+        port: host.port,
+        username: host.username,
+        domain: host.domain ?? '',
+        secretRef: host.secretRef,
+        desktopWidth: host.desktopWidth,
+        desktopHeight: host.desktopHeight,
+        drivePath: host.drivePath ?? null,
+        driveReadOnly: host.driveReadOnly ?? null,
+      };
+      nextSelectedSecretRef = host.secretRef ?? '';
+      nextCredentialMode = host.secretRef ? 'existing' : 'new';
     } else {
       nextDraft = {
         kind: 'ssh',
@@ -1111,6 +1188,26 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             ...nextDraft,
             label: deriveDefaultHostLabel(nextDraft)
           }
+        : nextDraft;
+    });
+  }
+
+  function handleRdpFieldChange<K extends keyof RdpHostDraft>(key: K, value: RdpHostDraft[K]) {
+    setDraft((current) => {
+      if (!isRdpHostDraft(current)) {
+        return current;
+      }
+      const previousAutoLabel = deriveDefaultHostLabel(current);
+      // 라벨을 손대지 않은 동안에는 호스트명을 따라가게 둔다(다른 종류와 같은 동작).
+      const shouldSyncLabel =
+        !host &&
+        (current.label.trim() === '' || current.label.trim() === previousAutoLabel);
+      const nextDraft: RdpHostDraft = {
+        ...current,
+        [key]: value
+      };
+      return shouldSyncLabel
+        ? { ...nextDraft, label: deriveDefaultHostLabel(nextDraft) }
         : nextDraft;
     });
   }
@@ -2335,6 +2432,145 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </SelectField>
             </label>
             {renderTerminalThemeField(serialDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...serialDraft, terminalThemeId }))}
+          </FormSection>
+        </>
+      ) : rdpDraft ? (
+        <>
+          <FormSection
+            title="Connection"
+            description="Configure the Windows host to open a remote desktop on."
+            testId="hostform-section-connection"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Host</span>
+              <Input
+                value={rdpDraft.hostname}
+                onChange={(event) => handleRdpFieldChange('hostname', event.target.value)}
+                placeholder="192.168.0.10"
+              />
+            </label>
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Port</span>
+              <Input
+                type="number"
+                value={String(rdpDraft.port)}
+                onChange={(event) =>
+                  handleRdpFieldChange('port', Number.parseInt(event.target.value, 10) || 3389)
+                }
+              />
+            </label>
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Username</span>
+              <Input
+                value={rdpDraft.username}
+                onChange={(event) => handleRdpFieldChange('username', event.target.value)}
+              />
+            </label>
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Domain</span>
+              <Input
+                value={rdpDraft.domain ?? ''}
+                onChange={(event) => handleRdpFieldChange('domain', event.target.value)}
+                placeholder="Leave blank for a local or Microsoft account"
+              />
+            </label>
+
+            {credentialMode === 'new' ? (
+              <label className={fieldClassName}>
+                <span className={fieldLabelClassName}>Password</span>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={host ? 'Leave blank to keep' : ''}
+                />
+              </label>
+            ) : null}
+          </FormSection>
+
+          <FormSection
+            title="Display"
+            description="The remote desktop is created at this size."
+            testId="hostform-section-display"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Width</span>
+              <Input
+                type="number"
+                value={String(rdpDraft.desktopWidth)}
+                onChange={(event) =>
+                  handleRdpFieldChange('desktopWidth', Number.parseInt(event.target.value, 10) || 1920)
+                }
+              />
+            </label>
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Height</span>
+              <Input
+                type="number"
+                value={String(rdpDraft.desktopHeight)}
+                onChange={(event) =>
+                  handleRdpFieldChange('desktopHeight', Number.parseInt(event.target.value, 10) || 1080)
+                }
+              />
+            </label>
+            <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
+              Between 200 and 8192. An odd width is rounded down — RDP does not accept one.
+            </span>
+
+          </FormSection>
+
+          <FormSection
+            title="Folder sharing"
+            description="Expose a local folder to the remote session as a drive."
+            testId="hostform-section-drive"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>Shared folder</span>
+              <div className="flex gap-[0.7rem]">
+                <Input
+                  value={rdpDraft.drivePath ?? ''}
+                  onChange={(event) => handleRdpFieldChange('drivePath', event.target.value)}
+                  placeholder="Not shared"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    void pickRdpShareFolder().then((picked) => {
+                      if (picked) {
+                        handleRdpFieldChange('drivePath', picked);
+                      }
+                    });
+                  }}
+                >
+                  Choose…
+                </Button>
+                {rdpDraft.drivePath ? (
+                  <Button variant="secondary" onClick={() => handleRdpFieldChange('drivePath', null)}>
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            </label>
+            <ToggleSwitch
+              checked={rdpDraft.driveReadOnly === true}
+              label="Read-only"
+              description="The remote can open files in the folder but cannot change or delete them."
+              onClick={() =>
+                handleRdpFieldChange(
+                  'driveReadOnly',
+                  rdpDraft.driveReadOnly === true ? null : true,
+                )
+              }
+            />
+            <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
+              Everything inside this folder becomes visible to the remote machine — and writable
+              unless read-only is on. Share only with hosts you trust.
+              Not available on Windows clients yet.
+            </span>
           </FormSection>
         </>
       ) : null}

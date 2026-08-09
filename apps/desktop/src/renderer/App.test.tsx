@@ -317,6 +317,9 @@ function createDolsshApi(options: {
     ssh: {
       onEvent: vi.fn(() => off.core),
     },
+    rdp: {
+      onEvent: vi.fn(() => vi.fn()),
+    },
     containers: {
       onConnectionProgress: vi.fn(() => off.containersProgress),
     },

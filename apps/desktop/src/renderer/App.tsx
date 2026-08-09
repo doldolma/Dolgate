@@ -79,6 +79,7 @@ function createDefaultUpdateState(): UpdateState {
 function createDefaultWindowState(): DesktopWindowState {
   return {
     isMaximized: false,
+    isFullScreen: false,
   };
 }
 
@@ -364,6 +365,7 @@ export function App() {
       />
       <DesktopEventBridge
         onCoreEvent={homeViewModel.handleCoreEvent}
+        onRdpEvent={homeViewModel.handleRdpEvent}
         onSftpConnectionProgress={sftpViewModel.handleSftpConnectionProgressEvent}
         onContainerConnectionProgress={
           containersViewModel.handleContainerConnectionProgressEvent

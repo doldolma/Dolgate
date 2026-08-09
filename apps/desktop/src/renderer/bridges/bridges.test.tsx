@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => {
 
   return {
     desktopApi: {
+      rdp: {
+        onEvent: vi.fn(() => vi.fn()),
+      },
       ssh: {
         onEvent: vi.fn((listener: (event: unknown) => void) => {
           listeners.core = listener;
@@ -147,6 +150,7 @@ describe('renderer bridges', () => {
     const { rerender } = render(
       <DesktopEventBridge
         onCoreEvent={firstCore}
+        onRdpEvent={stableFn}
         onSftpConnectionProgress={stableFn}
         onContainerConnectionProgress={stableFn}
         onActivityLogsChanged={stableFn}
@@ -162,6 +166,7 @@ describe('renderer bridges', () => {
     rerender(
       <DesktopEventBridge
         onCoreEvent={latestCore}
+        onRdpEvent={stableFn}
         onSftpConnectionProgress={stableFn}
         onContainerConnectionProgress={stableFn}
         onActivityLogsChanged={stableFn}
@@ -191,6 +196,7 @@ describe('renderer bridges', () => {
     render(
       <DesktopEventBridge
         onCoreEvent={stableFn}
+        onRdpEvent={stableFn}
         onSftpConnectionProgress={stableFn}
         onContainerConnectionProgress={stableFn}
         onActivityLogsChanged={stableFn}

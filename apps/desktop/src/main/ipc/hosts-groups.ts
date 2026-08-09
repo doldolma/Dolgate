@@ -1,5 +1,5 @@
 import type { GroupRemoveMode, HostDraft, HostSecretInput } from "@shared";
-import { isSshHostDraft, isSshHostRecord } from "@shared";
+import { isRdpHostDraft, isRdpHostRecord, isSshHostDraft, isSshHostRecord } from "@shared";
 import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -30,9 +30,11 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.hosts.create,
     async (event, draft: HostDraft, secrets?: HostSecretInput) => {
       const hostId = randomUUID();
-      const existingSecretRef = isSshHostDraft(draft)
-        ? (draft.secretRef ?? null)
-        : null;
+      // RDP 도 비밀번호를 시크릿 저장소에 둔다. SSH 처럼 키/인증서까지 다루지는 않으므로
+      // 관리형 키 해석 없이 비밀번호만 넣는다.
+      const isRdpDraft = isRdpHostDraft(draft);
+      const existingSecretRef =
+        isSshHostDraft(draft) || isRdpDraft ? (draft.secretRef ?? null) : null;
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
             ...secrets,
@@ -45,7 +47,11 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
             ctx.describeHostLabel(draft),
             resolvedSecrets,
           )
-        : null;
+        : isRdpDraft && secrets?.password
+          ? await ctx.persistSecret(ctx.describeHostLabel(draft), {
+              password: secrets.password,
+            })
+          : null;
       const secretRef = createdSecretRef ?? existingSecretRef;
       if (secretRef) {
         ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretSaved'), {
@@ -75,8 +81,9 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       if (!current) {
         throw new Error("Host not found");
       }
+      const isRdpUpdate = isRdpHostDraft(draft) && isRdpHostRecord(current);
       let secretRef =
-        isSshHostDraft(draft) && isSshHostRecord(current)
+        (isSshHostDraft(draft) && isSshHostRecord(current)) || isRdpUpdate
           ? draft.secretRef !== undefined
             ? draft.secretRef
             : (current.secretRef ?? null)
@@ -125,6 +132,15 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         });
       } else if (isSshHostDraft(draft) && secrets) {
         secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
+      } else if (isRdpUpdate && secrets?.password) {
+        // 새 비밀번호를 받은 경우에만 다시 저장한다. 비워 두면 기존 ref 를 그대로 유지한다.
+        secretRef = await ctx.persistSecret(ctx.describeHostLabel(draft), {
+          password: secrets.password,
+        });
+        ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretUpdated'), {
+          hostId: id,
+          secretRef,
+        });
       }
       const persistedDraft = normalizeSshDraftForPersistence(draft, secretRef);
       const record = ctx.hosts.update(id, persistedDraft, secretRef);

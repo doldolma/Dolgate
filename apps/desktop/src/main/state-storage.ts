@@ -41,7 +41,8 @@ import type {
   AiProviderId,
   AiSettings,
   TerminalFontFamilyId,
-  TerminalThemeId
+  TerminalThemeId,
+  RdpMonitorSelection
 } from '@shared';
 import {
   DEFAULT_AUTO_RECONNECT_SETTINGS,
@@ -617,6 +618,46 @@ function normalizeStoredEncryptedValue(value: unknown): StoredEncryptedValue | n
   };
 }
 
+/**
+ * 저장된 모니터 선택을 읽어들인다.
+ *
+ * 저장 파일은 손으로 고칠 수도 있고 예전 버전이 쓴 것일 수도 있다. 모양이 어긋난 항목은 버린다 —
+ * 반쯤 깨진 선택으로 접속하면 엉뚱한 화면 배치가 나온다.
+ */
+function normalizeStoredRdpMonitors(value: unknown): RdpMonitorSelection[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const monitors = value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return [];
+    }
+    const candidate = entry as Record<string, unknown>;
+    const id = candidate.id;
+    const width = candidate.width;
+    const height = candidate.height;
+    if (
+      typeof id !== 'number' ||
+      !Number.isFinite(id) ||
+      typeof width !== 'number' ||
+      !Number.isFinite(width) ||
+      typeof height !== 'number' ||
+      !Number.isFinite(height)
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: Math.round(id),
+        label: typeof candidate.label === 'string' ? candidate.label : '',
+        width: Math.round(width),
+        height: Math.round(height)
+      }
+    ];
+  });
+  return monitors.length > 0 ? monitors : null;
+}
+
 function normalizeStoredHostStartupCommand(value: unknown): HostStartupCommand | null {
   if (!isObject(value)) {
     return null;
@@ -801,6 +842,47 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
           : 'none',
       localEcho: Boolean(value.localEcho),
       localLineEditing: Boolean(value.localLineEditing),
+      favorite: value.favorite === true ? true : null,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
+  if (value.kind === 'rdp') {
+    if (typeof value.hostname !== 'string' || typeof value.username !== 'string') {
+      return null;
+    }
+
+    // 화면 크기는 RDP 규격상 200~8192, 폭은 홀수 금지다. 저장된 값이 규격을 벗어나면 연결
+    // 단계에서야 실패하므로 여기서 되돌려 둔다.
+    const clampDimension = (raw: unknown, fallback: number): number => {
+      const value = typeof raw === 'number' && Number.isFinite(raw) ? Math.round(raw) : fallback;
+      return Math.min(8192, Math.max(200, value));
+    };
+    const desktopWidth = clampDimension(value.desktopWidth, 1920);
+
+    return {
+      id: value.id,
+      kind: 'rdp',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      hostname: value.hostname,
+      port:
+        typeof value.port === 'number' && Number.isFinite(value.port)
+          ? Math.round(value.port)
+          : 3389,
+      username: value.username,
+      domain: typeof value.domain === 'string' ? value.domain : null,
+      secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
+      desktopWidth: desktopWidth % 2 === 0 ? desktopWidth : desktopWidth - 1,
+      desktopHeight: clampDimension(value.desktopHeight, 1080),
+      certificateFingerprint:
+        typeof value.certificateFingerprint === 'string' ? value.certificateFingerprint : null,
+      drivePath: typeof value.drivePath === 'string' ? value.drivePath : null,
+      driveReadOnly: value.driveReadOnly === true ? true : null,
+      monitors: normalizeStoredRdpMonitors(value.monitors),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()

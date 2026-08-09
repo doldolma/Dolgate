@@ -1,11 +1,11 @@
-# sync-api 자체 호스팅 가이드
+# Self-hosting sync-api
 
-Dolgate의 브라우저 로그인과 데이터 동기화를 직접 운영하려면 `sync-api`를 별도 서버에 띄우면 됩니다.
-이 문서는 가장 단순한 SQLite 단일 인스턴스 배포부터 MySQL, OIDC, 운영 시 주의사항까지 한 번에 정리한 가이드입니다.
+To run Dolgate's browser login and data sync on your own infrastructure, deploy `sync-api` on a server of your choice.
+This guide covers everything in one place — from the simplest single-instance SQLite deployment to MySQL, OIDC, and operational notes.
 
-## 가장 빠른 시작: SQLite 단일 인스턴스
+## Fastest start: single instance with SQLite
 
-`docker-compose.yml`을 아래 내용으로 만들고 띄웁니다.
+Create a `docker-compose.yml` with the following content and bring it up.
 
 ```yaml
 services:
@@ -28,74 +28,74 @@ docker compose ps
 curl http://127.0.0.1:8080/healthz
 ```
 
-- `/app/data`에 SQLite DB와 인증 서명 키(첫 부팅 시 자동 생성)가 저장됩니다.
-- 이 volume을 잃으면 토큰·세션이 모두 무효화되어 전원 재로그인이 필요합니다.
+- `/app/data` holds the SQLite database and the auth signing key (generated automatically on first boot).
+- If you lose this volume, every token and session is invalidated and all users must sign in again.
 
-## 데스크톱 앱 연결
+## Connecting the desktop app
 
-서버가 뜨면 데스크톱 앱에서 다음 순서로 연결합니다.
+Once the server is up, connect the desktop app in this order:
 
-1. 로그인 화면에서 톱니바퀴를 엽니다.
-2. `Login Server`를 self-host 주소로 바꿉니다.
-3. 저장 후 로그인/동기화를 진행합니다.
+1. Click the gear icon on the login screen.
+2. Change `Login Server` to your self-hosted address.
+3. Save, then proceed with login/sync.
 
-예:
+Examples:
 
-- 로컬 테스트: `http://127.0.0.1:8080`
-- reverse proxy 뒤 운영: `https://ssh.example.com`
+- Local testing: `http://127.0.0.1:8080`
+- Behind a reverse proxy: `https://ssh.example.com`
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./login-dark.png">
-  <img alt="Login Server 설정 화면" src="./login.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./images/login-dark.png">
+  <img alt="Login Server settings screen" src="./images/login.png">
 </picture>
 
-## 운영 기본값과 권장 설정
+## Operational defaults and recommendations
 
-### 이미지 태그
+### Image tags
 
-- 예제는 빠른 시작용으로 `latest`를 사용합니다.
-- 운영에서는 버전 태그 pinning을 권장합니다.
+- The examples use `latest` for a quick start.
+- For production, pin a version tag.
 
-예:
+Example:
 
 ```yaml
 image: ghcr.io/doldolma/dolgate-sync-api:X.Y.Z
 ```
 
-업데이트 절차:
+Update procedure:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-### 백업 대상
+### What to back up
 
-SQLite 단일 인스턴스 기준으로는 `/app/data` 전체를 백업하면 됩니다.
+For a single-instance SQLite deployment, backing up all of `/app/data` is enough.
 
-중요 파일:
+Important files:
 
 - `dolgate_sync.db`
 - `auth-signing-private.pem`
 
 ### HTTPS / reverse proxy
 
-- 운영 배포는 HTTPS reverse proxy 뒤에 두는 것을 전제로 하는 편이 안전합니다.
-- reverse proxy를 쓴다면 `TRUSTED_PROXIES`에 실제 프록시 주소만 넣어야 합니다.
-- `TRUSTED_PROXIES`를 비워 두면 `X-Forwarded-For`를 신뢰하지 않습니다.
+- Production deployments should sit behind an HTTPS reverse proxy.
+- If you use a reverse proxy, put only the actual proxy addresses in `TRUSTED_PROXIES`.
+- With `TRUSTED_PROXIES` left empty, `X-Forwarded-For` is not trusted.
 
-예:
+Example:
 
 ```yaml
 environment:
   TRUSTED_PROXIES: "172.17.0.1,10.0.0.0/8"
 ```
 
-현재 repo에는 nginx 예제 파일이 포함되어 있지 않으므로, 사용하는 프록시에 맞춰 `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` 전달을 맞추고 **WebSocket 업그레이드(`Upgrade`/`Connection` 헤더)를 허용**해야 합니다. 일부 기능이 WebSocket을 사용하므로 막히면 동작하지 않습니다.
+The repository does not ship an nginx example, so configure your proxy to forward `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`, and make sure it **allows WebSocket upgrades (`Upgrade`/`Connection` headers)**. Some features run over WebSocket and will not work if it is blocked.
 
 ## MySQL + Google OIDC
 
-SQLite 대신 MySQL을 쓰고, 로컬 로그인·회원가입을 끄고 Google OIDC만 허용하는 구성입니다. DB는 이미 운영 중인 MySQL을 가리킵니다.
+This configuration uses MySQL instead of SQLite, disables local login/signup, and allows Google OIDC only. The DB points at a MySQL server you already operate.
 
 ```yaml
 services:
@@ -125,12 +125,12 @@ volumes:
   dolgate-sync-api-data:
 ```
 
-주의사항:
+Notes:
 
-- 비밀번호는 예제의 `CHANGE_ME_*` 값을 그대로 쓰면 안 됩니다.
-- DB를 MySQL로 옮겨도 signing key는 계속 필요하므로 `sync-api`의 `/app/data` volume은 유지하세요.
+- Never use the example `CHANGE_ME_*` values as real passwords.
+- Moving the DB to MySQL does not remove the need for the signing key — keep the `/app/data` volume for `sync-api`.
 
-OIDC 입력값
+OIDC inputs
 
 - `OIDC_ISSUER_URL`
 - `OIDC_CLIENT_ID`
@@ -138,21 +138,21 @@ OIDC 입력값
 - `OIDC_REDIRECT_URL`
 - `OIDC_SCOPES`
 
-`OIDC_REDIRECT_URL`은 실제 외부에서 접근하는 주소와 정확히 일치해야 합니다.
+`OIDC_REDIRECT_URL` must exactly match the externally reachable URL.
 
-## 패스키(WebAuthn) 로그인
+## Passkey (WebAuthn) login
 
-브라우저 로그인에 패스키를 추가로 켤 수 있습니다(비밀번호·OIDC와 공존).
+You can additionally enable passkeys for browser login (they coexist with passwords and OIDC).
 
-- `WEBAUTHN_ENABLED: "true"`로 켭니다. 단 `PUBLIC_BASE_URL`이 **HTTPS 도메인**이어야 합니다(IP·평문 HTTP 불가, `localhost`만 개발용 예외). 조건이 안 맞으면 부팅 시 자동 비활성화됩니다.
-- RP 값은 `PUBLIC_BASE_URL`에서 자동 유도되며, 필요하면 `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_DISPLAY_NAME` / `WEBAUTHN_ORIGINS`로 직접 지정합니다.
-- 패스키는 등록한 도메인에 묶이므로 도메인이 바뀌면 재등록이 필요합니다.
+- Turn it on with `WEBAUTHN_ENABLED: "true"`. `PUBLIC_BASE_URL` must be an **HTTPS domain** (no IPs or plain HTTP; `localhost` is the only development exception). If the conditions are not met, it is automatically disabled at boot.
+- RP values are derived from `PUBLIC_BASE_URL` automatically; override them with `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_DISPLAY_NAME` / `WEBAUTHN_ORIGINS` if needed.
+- Passkeys are bound to the domain they were registered on — if the domain changes, they must be re-registered.
 
-## 설정 파일로 운영하기
+## Running from a config file
 
-환경 변수 대신 JSON 설정 파일로도 운영할 수 있습니다. 항목이 많아지는 OIDC·패스키 구성이나, 설정을 버전 관리하고 싶을 때 편합니다.
+Instead of environment variables, you can run from a JSON config file. It is convenient for OIDC/passkey setups where the number of settings grows, or when you want the configuration under version control.
 
-`sync-api`는 다음 경로를 순서대로 찾아 **처음 발견한 설정 파일을 자동으로 읽습니다.**
+`sync-api` checks the following paths in order and **automatically reads the first config file it finds:**
 
 ```text
 ./config.json
@@ -160,9 +160,9 @@ OIDC 입력값
 /etc/dolgate/config.json
 ```
 
-- 상대 경로는 작업 디렉터리 기준입니다. 컨테이너 이미지의 작업 디렉터리가 `/app`이라 `/app/config.json` 또는 `/app/config/config.json`으로 마운트하면 그대로 잡힙니다.
-- 다른 위치를 쓰려면 `DOLSSH_API_CONFIG_PATH`로 경로를 직접 지정합니다(지정하면 자동 탐색은 건너뜁니다).
-- **환경 변수는 파일 값을 덮어씁니다**(파일 → env 순서로 적용). 비밀 값만 환경 변수로 빼서 섞어 쓸 수 있습니다.
+- Relative paths are resolved against the working directory. The container image's working directory is `/app`, so a file mounted at `/app/config.json` or `/app/config/config.json` is picked up as-is.
+- To use a different location, set the path explicitly with `DOLSSH_API_CONFIG_PATH` (this skips the automatic search).
+- **Environment variables override file values** (applied in order: file → env). You can keep only the secrets in environment variables and mix the two.
 
 ```json
 {
@@ -200,7 +200,7 @@ OIDC 입력값
 }
 ```
 
-컨테이너에 마운트해서 쓰는 예입니다.
+Example of mounting it into the container:
 
 ```yaml
 services:
@@ -218,15 +218,15 @@ volumes:
   dolgate-sync-api-data:
 ```
 
-- 적지 않은 항목은 기본값을 씁니다(아래 [기본값 메모](#자주-쓰는-환경-변수) 참고).
-- 비밀 값(`clientSecret`, DB 비밀번호, `signingPrivateKeyPem`)이 파일에 들어가므로 권한을 좁히고 저장소에 커밋하지 마세요.
-- 부팅 로그에 어떤 설정을 읽었는지 찍히므로 적용 여부를 확인할 수 있습니다.
+- Omitted settings fall back to defaults (see [default values](#common-environment-variables) below).
+- Secrets (`clientSecret`, DB passwords, `signingPrivateKeyPem`) end up in the file — restrict its permissions and never commit it to a repository.
+- The boot log prints which configuration was read, so you can confirm what was applied.
 
-## 자주 쓰는 환경 변수
+## Common environment variables
 
-`sync-api`는 설정 파일 없이 환경 변수만으로도 운영할 수 있습니다(설정 파일과 섞어 쓰면 환경 변수가 우선합니다 — 위 [설정 파일로 운영하기](#설정-파일로-운영하기) 참고).
+`sync-api` can also run on environment variables alone, without a config file (when mixed with a config file, environment variables win — see [Running from a config file](#running-from-a-config-file) above).
 
-주요 변수:
+Main variables:
 
 ```text
 PORT
@@ -255,40 +255,39 @@ WEBAUTHN_RP_DISPLAY_NAME
 WEBAUTHN_ORIGINS
 ```
 
-기본값 메모:
+Default values:
 
 - `PORT`: `8080`
-- `DB_DRIVER`: `sqlite` (`mysql`, `postgres`도 지원)
+- `DB_DRIVER`: `sqlite` (`mysql` and `postgres` are also supported)
 - `DATABASE_URL`: `file:./data/dolgate_sync.db?_pragma=busy_timeout(5000)`
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`: `./data/auth-signing-private.pem`
 - `LOCAL_AUTH_ENABLED`: `true`
 - `LOCAL_SIGNUP_ENABLED`: `true`
 - `OIDC_ENABLED`: `false`
-- `WEBAUTHN_ENABLED`: `false` (활성화하려면 `PUBLIC_BASE_URL`이 HTTPS 도메인이어야 함 — 위 패스키 섹션 참고)
+- `WEBAUTHN_ENABLED`: `false` (enabling it requires `PUBLIC_BASE_URL` to be an HTTPS domain — see the passkey section above)
 
-PostgreSQL을 사용할 때는 `DB_DRIVER=postgres`와 PostgreSQL DSN을 지정합니다.
+For PostgreSQL, set `DB_DRIVER=postgres` with a PostgreSQL DSN.
 
 ```text
 DATABASE_URL=host=127.0.0.1 user=dolgate_user password=CHANGE_ME_PASSWORD dbname=dolgate port=5432 sslmode=disable TimeZone=UTC
 ```
 
-## 서명 키 관련 주의사항
+## Notes on the signing key
 
-`sync-api`는 access token, browser login state, offline lease를 모두 같은 RS256 signing keypair로 서명합니다.
+`sync-api` signs access tokens, browser login state, and offline leases with the same RS256 signing keypair.
 
-운영 팁:
+Operational tips:
 
-- 단일 인스턴스면 `/app/data/auth-signing-private.pem` 자동 생성만으로도 충분합니다.
-- 멀티 인스턴스 운영이나 키 교체 정책이 필요하면 직접 PEM을 주입해야 합니다.
-- 별도 PEM을 주입하면 자동 생성보다 그 값을 우선 사용합니다.
+- For a single instance, the auto-generated `/app/data/auth-signing-private.pem` is sufficient.
+- For multi-instance deployments or key rotation policies, inject your own PEM.
+- An injected PEM takes precedence over the auto-generated one.
 
-지원 방식:
+Supported methods:
 
 - `AUTH_SIGNING_PRIVATE_KEY_PEM`
 - `AUTH_SIGNING_PRIVATE_KEY_PATH`
 
+## Related documents
 
-## 관련 문서
-
-- [빌드 및 배포](./build-and-deploy.md)
-- [아키텍처](./architecture.md)
+- [Build and deploy](./build-and-deploy.md)
+- [Architecture](./architecture.md)

@@ -42,6 +42,7 @@ export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import Dolgate',
   'Import OpenSSH',
   'Import Serial',
+  'Import RDP',
   'Import from Termius',
   'Import from Xshell',
   'Import from Warpgate',
@@ -360,6 +361,7 @@ export interface UseHostBrowserParams {
   onCreateHost: () => void;
   onOpenDolgateImport: () => void;
   onOpenSerialImport: () => void;
+  onOpenRdpImport: () => void;
   onOpenAwsImport: () => void;
   onOpenOpenSshImport: () => void;
   onOpenXshellImport: () => void;

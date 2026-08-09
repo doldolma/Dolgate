@@ -9,6 +9,12 @@ export type RendererWindowMode =
   | {
       kind: 'session-replay';
       recordingId: string;
+    }
+  | {
+      /** 원격 모니터 하나만 띄우는 전체화면 창. */
+      kind: 'rdp-monitor';
+      sessionId: string;
+      monitorIndex: number;
     };
 
 export function resolveRendererWindowMode(search: string): RendererWindowMode {
@@ -38,8 +44,27 @@ export function resolveRendererWindowMode(search: string): RendererWindowMode {
     };
   }
 
-  if (windowKind !== 'session-share-chat') {
-    return { kind: 'main' };
+  if (windowKind === 'rdp-monitor') {
+    const sessionId = params.get('sessionId')?.trim() ?? '';
+    // Number(null) 은 0 이라 파라미터가 통째로 빠진 경우가 "0번 모니터"로 통과한다. 원문을
+    // 먼저 확인해야 한다.
+    const rawIndex = params.get('monitorIndex')?.trim() ?? '';
+    const monitorIndex = Number(rawIndex);
+    // 번호가 없거나 이상하면 메인 창으로 떨어뜨린다 — 잘못된 인덱스로 열면 빈 화면만 남는다.
+    if (
+      !sessionId ||
+      rawIndex === '' ||
+      !Number.isInteger(monitorIndex) ||
+      monitorIndex < 0
+    ) {
+      return { kind: 'main' };
+    }
+
+    return {
+      kind: 'rdp-monitor',
+      sessionId,
+      monitorIndex,
+    };
   }
 
   return { kind: 'main' };

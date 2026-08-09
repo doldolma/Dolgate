@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AWS SSM으로 EC2 SSH 접속 — CLI·플러그인 없이 | Dolgate</title>
+  <meta name="description" content="AWS CLI와 session-manager-plugin 설치 없이 공인 IP 없는 EC2에 접속합니다. SSH-over-SSM, AWS SFTP, SSM 포트 포워딩, ECS Exec까지 SSM 데이터 채널 내장." />
+  <link rel="icon" type="image/svg+xml" href="./assets/icon.svg" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <link rel="canonical" href="https://doldolma.github.io/Dolgate/aws-ssm.html" />
+  <link rel="alternate" hreflang="ko" href="https://doldolma.github.io/Dolgate/aws-ssm.html" />
+  <link rel="alternate" hreflang="en" href="https://doldolma.github.io/Dolgate/en/aws-ssm.html" />
+  <link rel="alternate" hreflang="x-default" href="https://doldolma.github.io/Dolgate/aws-ssm.html" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e18" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f7fb" />
+  <meta property="og:title" content="AWS SSM으로 EC2 SSH 접속 — CLI·플러그인 없이" />
+  <meta property="og:description" content="공인 IP도 인바운드 포트도 없는 EC2에 접속합니다. SSM 데이터 채널이 앱에 내장되어 있습니다." />
+  <meta property="og:image" content="./assets/hosts-workspace.png" />
+  <style>
+    /* index.html 과 같은 디자인 토큰 — 가이드 페이지는 본문 중심이라 필요한 부분만 가져온다.
+       토큰 값을 바꿀 때는 index.html 과 함께 바꿀 것. */
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e18;
+      --panel: #141728;
+      --panel-2: #181c30;
+      --line: #262b45;
+      --line-strong: #34406e;
+      --nav-bg: #0b0e18cc;
+      --text: #e8ebf5;
+      --text-soft: #9aa3c0;
+      --accent: #2d7cff;
+      --accent-soft: #2d7cff2b;
+      --green: #35d49a;
+      --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        color-scheme: light;
+        --bg: #f6f7fb; --panel: #ffffff; --panel-2: #eef1f8;
+        --line: #dde2f0; --line-strong: #b9c3e2; --nav-bg: #f6f7fbcc;
+        --text: #181c2e; --text-soft: #5a6382;
+        --accent: #2361e8; --accent-soft: #2361e81f; --green: #0b9e6f;
+      }
+    }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f6f7fb; --panel: #ffffff; --panel-2: #eef1f8;
+      --line: #dde2f0; --line-strong: #b9c3e2; --nav-bg: #f6f7fbcc;
+      --text: #181c2e; --text-soft: #5a6382;
+      --accent: #2361e8; --accent-soft: #2361e81f; --green: #0b9e6f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+      line-height: 1.7; -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    code { font-family: var(--mono); font-size: .92em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+    .wrap { max-width: 780px; margin: 0 auto; padding: 0 24px; }
+
+    nav { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(14px); background: var(--nav-bg); border-bottom: 1px solid var(--line); }
+    .nav-inner { display: flex; align-items: center; gap: 28px; height: 60px; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.05rem; }
+    .brand img { width: 26px; height: 26px; border-radius: 6px; }
+    .nav-links { display: flex; gap: 22px; font-size: .92rem; color: var(--text-soft); }
+    .nav-links a:hover { color: var(--text); }
+    .nav-links a[aria-current] { color: var(--text); }
+    .nav-spacer { flex: 1; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 10px; font-size: .95rem; font-weight: 600; border: 1px solid var(--line); color: var(--text); transition: border-color .15s, background .15s; }
+    .btn:hover { border-color: var(--line-strong); background: var(--panel); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #3f89ff; border-color: #3f89ff; }
+    .nav-actions { display: flex; align-items: center; gap: 8px; }
+    .nav-actions .btn { height: 36px; line-height: 1; white-space: nowrap; }
+    .btn-sm { padding: 0 14px; font-size: .88rem; }
+    .icon-btn { width: 36px; padding: 0; justify-content: center; font-size: .82rem; cursor: pointer; background: transparent; font-family: var(--mono); letter-spacing: .02em; border-color: transparent; color: var(--text-soft); }
+    .icon-btn:hover { border-color: transparent; background: var(--panel-2); color: var(--text); }
+
+    .page { padding: 64px 0 24px; }
+    .page .kicker { font-family: var(--mono); font-size: .82rem; color: var(--accent); letter-spacing: .08em; text-transform: uppercase; }
+    .page h1 { margin-top: 10px; font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.3; letter-spacing: -0.02em; word-break: keep-all; }
+    .page .lede { margin-top: 16px; color: var(--text-soft); font-size: 1.06rem; word-break: keep-all; }
+    .page h2 { margin: 44px 0 12px; font-size: 1.25rem; letter-spacing: -0.01em; word-break: keep-all; }
+    .page p { margin: 12px 0; word-break: keep-all; }
+    .page p, .page li { color: var(--text); }
+    .muted { color: var(--text-soft); }
+
+    ul.checks { margin: 16px 0 0; padding: 0; list-style: none; }
+    ul.checks li { padding: 6px 0 6px 26px; position: relative; word-break: keep-all; }
+    ul.checks li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+    ul.checks li b { display: inline; }
+
+    .cta-band { margin: 56px 0 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 28px; text-align: center; }
+    .cta-band p { color: var(--text-soft); margin-top: 6px; word-break: keep-all; }
+    .cta-row { margin-top: 18px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    footer { border-top: 1px solid var(--line); padding: 36px 0 48px; margin-top: 64px; }
+    .foot { display: flex; gap: 18px; flex-wrap: wrap; font-size: .9rem; color: var(--text-soft); max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    .foot a:hover { color: var(--text); }
+    .foot .spacer { flex: 1; }
+
+    @media (max-width: 720px) { .nav-links { display: none; } }
+    @media (max-width: 560px) { .nav-inner { gap: 12px; } }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="./"><img src="./assets/icon-192.png" alt="" />Dolgate</a>
+    <div class="nav-links">
+      <a href="./#features" data-i18n="nav.features">기능</a>
+      <a href="./tailscale.html">Tailscale</a>
+      <a href="./aws-ssm.html" aria-current="page">AWS SSM</a>
+      <a href="./#download" data-i18n="nav.download">다운로드</a>
+    </div>
+    <div class="nav-spacer"></div>
+    <div class="nav-actions">
+      <a class="btn icon-btn" id="lang-link" href="./en/aws-ssm.html" hreflang="en" title="English" aria-label="English">EN</a>
+      <button class="btn icon-btn" id="theme-toggle" type="button" data-i18n-title="theme.button" title="테마 전환" aria-label="테마 전환">◐</button>
+      <a class="btn btn-sm" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<main class="page">
+  <div class="wrap">
+    <div class="kicker">AWS SSM</div>
+    <h1 data-i18n="ssm.h1">AWS CLI 없이 SSM으로<br />EC2에 SSH 접속</h1>
+    <p class="lede" data-i18n="ssm.lede">공인 IP도, 열린 인바운드 포트도 없는 EC2에 접속합니다. SSM 데이터 채널이 앱에 내장되어 있어 AWS CLI도 session-manager-plugin도 설치할 필요가 없습니다.</p>
+
+    <h2 data-i18n="ssm.problem.h2">공식 경로는 4단계입니다</h2>
+    <p data-i18n="ssm.problem.p1">SSM으로 EC2에 붙는 공식 방법은 AWS CLI 설치, session-manager-plugin 설치, 프로필 인증, 터미널에서 세션 명령 실행 — 이 네 단계를 기기마다 반복하는 것입니다. Dolgate는 SSM 데이터 채널 프로토콜을 앱 안에 구현해서, 호스트를 누르면 바로 접속됩니다.</p>
+    <p data-i18n="ssm.problem.p2">프로필 인증(SSO 브라우저 로그인, 자격 증명 검증, AssumeRole)은 AWS SDK로 처리하고, 이미 쓰고 있는 <code>~/.aws</code> 프로필은 가져오기로 그대로 사용할 수 있습니다.</p>
+
+    <h2 data-i18n="ssm.feat.h2">SSM 위에서 되는 것들</h2>
+    <ul class="checks">
+      <li data-i18n="ssm.feat.i1"><b>SSH-over-SSM</b> — EC2 터미널은 SSH를 SSM 채널 위로 먼저 시도하고, SSH를 열 수 없으면 SSM shell로 fallback합니다</li>
+      <li data-i18n="ssm.feat.i2"><b>AWS SFTP</b> — 같은 채널로 파일 브라우저·업로드·다운로드</li>
+      <li data-i18n="ssm.feat.i3"><b>SSM 포트 포워딩</b> — 사설 대역의 DB·서비스 포트를 로컬로</li>
+      <li data-i18n="ssm.feat.i4"><b>ECS Exec</b> — 컨테이너 셸 접속과 ECS 터널링</li>
+      <li data-i18n="ssm.feat.i5"><b>EC2 가져오기</b> — 리전의 인스턴스를 조회해 호스트로 등록</li>
+    </ul>
+
+    <h2 data-i18n="ssm.req.h2">필요한 것</h2>
+    <p data-i18n="ssm.req.p1">대상 EC2는 <b>SSM managed instance</b> 상태여야 하고, SSH-over-SSM과 AWS SFTP에는 EC2 Instance Connect 공개키 주입 권한이 필요합니다. 필요한 IAM 권한과 정책 JSON 예시는 <a style="color:var(--accent)" href="https://github.com/doldolma/dolgate/blob/main/docs/aws.md" target="_blank" rel="noopener">AWS / SSM 설정 가이드</a>에 정리되어 있습니다.</p>
+
+    <div class="cta-band">
+      <b data-i18n="ssm.cta.h">배스천 없이, 포트 열지 않고 EC2에 접속해 보세요</b>
+      <p data-i18n="ssm.cta.p">Windows · macOS · Linux · iOS · Android, 오픈소스(MIT)</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="./#download" data-i18n="ssm.cta.dl">다운로드</a>
+        <a class="btn" href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="foot">
+    <span data-i18n="foot.license">© 2026 doldolma · MIT License</span>
+    <div class="spacer"></div>
+    <a href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/doldolma/dolgate/releases" target="_blank" rel="noopener" data-i18n="foot.releases">릴리즈</a>
+  </div>
+</footer>
+
+<script>
+  window.dolgateStrings = {
+    themePrefix: "테마",
+    themeHint: "클릭해서 전환",
+    themeAuto: "시스템 설정 따름",
+    themeLight: "라이트",
+    themeDark: "다크",
+  };
+</script>
+
+<script>
+  // 테마 토글: 시스템(auto) → 라이트 → 다크 순환. index.html 과 같은 규칙·저장 키.
+  (() => {
+    const KEY = "dolgate-theme";
+    const root = document.documentElement;
+    const btn = document.getElementById("theme-toggle");
+    const metas = document.querySelectorAll('meta[name="theme-color"]');
+    const COLORS = { dark: "#0b0e18", light: "#f6f7fb" };
+    const ICONS = { auto: "◐", light: "☀", dark: "☾" };
+    const S = window.dolgateStrings;
+    const LABELS = { auto: S.themeAuto, light: S.themeLight, dark: S.themeDark };
+    const ORDER = ["auto", "light", "dark"];
+    const current = () => {
+      const t = localStorage.getItem(KEY);
+      return t === "light" || t === "dark" ? t : "auto";
+    };
+    const apply = (mode) => {
+      if (mode === "auto") delete root.dataset.theme;
+      else root.dataset.theme = mode;
+      metas.forEach((m) => {
+        const scheme = (m.media || "").includes("dark") ? "dark" : "light";
+        m.content = mode === "auto" ? COLORS[scheme] : COLORS[mode];
+      });
+      btn.textContent = ICONS[mode];
+      btn.title = `${S.themePrefix}: ${LABELS[mode]} (${S.themeHint})`;
+      btn.setAttribute("aria-label", btn.title);
+    };
+    btn.addEventListener("click", () => {
+      const next = ORDER[(ORDER.indexOf(current()) + 1) % ORDER.length];
+      if (next === "auto") localStorage.removeItem(KEY);
+      else localStorage.setItem(KEY, next);
+      apply(next);
+    });
+    apply(current());
+  })();
+</script>
+
+</body>
+</html>

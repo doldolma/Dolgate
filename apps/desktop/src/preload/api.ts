@@ -42,6 +42,7 @@ import {
   buildWindowBridge,
 } from "./bridges/system";
 import { buildAiBridge } from "./bridges/ai";
+import { buildRdpBridge } from "./bridges/rdp";
 
 export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
   return {
@@ -57,6 +58,7 @@ export function createDesktopApi(ipcRenderer: IpcRenderer): DesktopApi {
     hostTransfer: buildHostTransferBridge(ipcRenderer),
     xshell: buildXshellBridge(ipcRenderer),
     ssh: buildSshBridge(ipcRenderer),
+    rdp: buildRdpBridge(ipcRenderer),
     serial: buildSerialBridge(ipcRenderer),
     sessionShares: buildSessionSharesBridge(ipcRenderer),
     shell: buildShellBridge(ipcRenderer),

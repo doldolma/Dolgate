@@ -25,6 +25,7 @@ export interface CoreEventBridge {
   resolveWindowFromSender: (sender: Electron.WebContents) => BrowserWindow;
   buildWindowState: (window: BrowserWindow) => {
     isMaximized: boolean;
+    isFullScreen: boolean;
   };
   emitWorkspaceChanged: (sender?: Electron.WebContents) => void;
 }
@@ -100,6 +101,7 @@ export function createCoreEventBridge(deps: {
   };
 
   const buildWindowState = (window: BrowserWindow) => ({
+    isFullScreen: window.isFullScreen(),
     isMaximized: window.isMaximized(),
   });
 

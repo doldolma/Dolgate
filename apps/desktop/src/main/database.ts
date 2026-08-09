@@ -23,6 +23,9 @@ import {
   isAwsEcsHostDraft,
   isGroupWithinPath,
   isWarpgateSshHostDraft,
+  isRdpHostDraft,
+  type RdpHostDraft,
+  type RdpHostRecord,
   isSerialHostDraft,
   isSshHostDraft,
   isSshHostRecord,
@@ -35,7 +38,8 @@ import {
   normalizeHostEnvVars,
   normalizeJumpHostIds,
   rebaseGroupPath,
-  stripRemovedGroupSegment
+  stripRemovedGroupSegment,
+  type RdpMonitorSelection
 } from '@shared';
 import type {
   ActivityLogCategory,
@@ -691,6 +695,72 @@ function toSerialHostRecord(
   };
 }
 
+function toRdpHostRecord(
+  id: string,
+  draft: RdpHostDraft,
+  secretRef: string | null,
+  timestamp: string,
+  current?: RdpHostRecord,
+): RdpHostRecord {
+  return {
+    id,
+    kind: 'rdp',
+    label: draft.label.trim() || draft.hostname.trim(),
+    hostname: draft.hostname.trim(),
+    port: Number.isFinite(draft.port) ? Math.round(draft.port) : 3389,
+    username: draft.username.trim(),
+    domain: draft.domain?.trim() || null,
+    // SSH 와 같은 규칙: 호출자가 넘긴 ref 가 우선이고, 없으면 draft 가 들고 있던 것을 유지한다.
+    secretRef: secretRef ?? draft.secretRef ?? null,
+    desktopWidth: normalizeRdpDimension(draft.desktopWidth, 1920, true),
+    desktopHeight: normalizeRdpDimension(draft.desktopHeight, 1080, false),
+    // 핀은 폼이 아니라 신뢰 흐름이 정한다. draft 에 없으므로 기존 레코드에서 이어받지 않으면
+    // 호스트를 수정할 때마다 신뢰가 초기화된다.
+    certificateFingerprint: current?.certificateFingerprint ?? null,
+    drivePath: draft.drivePath?.trim() || null,
+    driveReadOnly: draft.driveReadOnly === true ? true : null,
+    // 인증서 핀과 같은 이유로 draft 에 없으면 기존 값을 이어받는다. 모니터 선택은 배치도에서만
+    // 정해지므로, 호스트 폼처럼 이 필드를 모르는 경로가 draft 를 만들면 선택이 지워진다.
+    monitors:
+      draft.monitors === undefined
+        ? (current?.monitors ?? null)
+        : normalizeRdpMonitors(draft.monitors),
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    favorite: current?.favorite ?? null,
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+// RDP 화면 크기는 200~8192 이고 폭은 홀수를 허용하지 않는다([MS-RDPEDISP] 2.2.2.2.1).
+// 규격을 벗어난 값은 연결 시점에 거부되므로 저장 전에 맞춰 둔다.
+/**
+ * 호스트에 저장할 모니터 선택을 정리한다.
+ *
+ * 빈 배열은 null 로 눕힌다 — "선택 없음"이 두 모양으로 저장되면 접속 경로에서 판단이 갈린다.
+ */
+function normalizeRdpMonitors(
+  value: RdpMonitorSelection[] | null | undefined,
+): RdpMonitorSelection[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  return value.map((monitor) => ({
+    id: Math.round(monitor.id),
+    label: String(monitor.label ?? ''),
+    width: Math.round(monitor.width),
+    height: Math.round(monitor.height)
+  }));
+}
+
+function normalizeRdpDimension(raw: number, fallback: number, mustBeEven: boolean): number {
+  const value = Number.isFinite(raw) ? Math.round(raw) : fallback;
+  const clamped = Math.min(8192, Math.max(200, value));
+  return mustBeEven && clamped % 2 !== 0 ? clamped - 1 : clamped;
+}
+
 function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
   if (isSshHostDraft(draft)) {
     return toSshHostRecord(id, draft, secretRef, timestamp, current?.kind === 'ssh' ? current : undefined);
@@ -706,6 +776,9 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
   }
   if (isSerialHostDraft(draft)) {
     return toSerialHostRecord(id, draft, timestamp, current && current.kind === 'serial' ? current : undefined);
+  }
+  if (isRdpHostDraft(draft)) {
+    return toRdpHostRecord(id, draft, secretRef, timestamp, current && current.kind === 'rdp' ? current : undefined);
   }
   throw new Error('Unsupported host draft type');
 }
@@ -810,6 +883,22 @@ export class HostRepository {
           return entry;
         }
         nextRecord = { ...entry, favorite: favorite ? true : null, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
+  }
+
+  // 사용자가 신뢰한 RDP 서버 인증서 지문을 기록한다. 호스트 폼을 거치지 않는 값이라
+  // update() 로 통째로 저장하면 draft 에 없는 이 필드가 날아간다.
+  updateRdpCertificateFingerprint(id: string, fingerprint: string): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id || entry.kind !== 'rdp') {
+          return entry;
+        }
+        nextRecord = { ...entry, certificateFingerprint: fingerprint, updatedAt: nowIso() };
         return nextRecord;
       });
     });

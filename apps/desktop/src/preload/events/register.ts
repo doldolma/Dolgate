@@ -6,6 +6,9 @@ import type {
   CoreEvent,
   DesktopWindowState,
   PortForwardRuntimeEvent,
+  RdpAudioPayload,
+  RdpFramePayload,
+  RdpSessionEvent,
   SessionShareChatEvent,
   SessionShareEvent,
   SftpConnectionProgressEvent,
@@ -24,6 +27,9 @@ import {
   emitTailnetStatus,
   emitCoreEvent,
   emitPortForwardEvent,
+  emitRdpEvent,
+  emitRdpAudio,
+  emitRdpFrame,
   emitSessionShareChatEvent,
   emitSessionShareEvent,
   emitCloseActiveTab,
@@ -36,6 +42,7 @@ import {
   emitWarpgateImportEvent,
   emitWindowState,
   emitWorkspaceChanged,
+  setRdpFrameWatchNotifier,
 } from "./state";
 
 let bindingsRegistered = false;
@@ -45,6 +52,15 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
     return;
   }
   bindingsRegistered = true;
+
+  // 이 창이 어느 세션의 픽셀을 원하는지 알린다. 안 알리면 메인 프로세스가 모든 창에 뿌리고,
+  // 창마다 전체 복사본이 생긴다.
+  setRdpFrameWatchNotifier((sessionId, watching) => {
+    ipcRenderer.send(
+      watching ? ipcChannels.rdp.watch : ipcChannels.rdp.unwatch,
+      sessionId,
+    );
+  });
 
   ipcRenderer.on(ipcChannels.ssh.event, (_event, payload: CoreEvent) => {
     emitCoreEvent(payload);
@@ -56,6 +72,18 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
       emitSshData(payload);
     },
   );
+
+  ipcRenderer.on(ipcChannels.rdp.event, (_event, payload: RdpSessionEvent) => {
+    emitRdpEvent(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.rdp.frame, (_event, payload: RdpFramePayload) => {
+    emitRdpFrame(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.rdp.audio, (_event, payload: RdpAudioPayload) => {
+    emitRdpAudio(payload);
+  });
 
   ipcRenderer.on(
     ipcChannels.sftp.connectionProgress,

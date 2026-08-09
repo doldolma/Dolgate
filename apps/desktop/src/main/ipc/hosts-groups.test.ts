@@ -105,6 +105,76 @@ describe("registerHostsGroupsIpcHandlers", () => {
     expect(result).toEqual(createdRecord);
   });
 
+  it("stores an RDP password in the secret store instead of the host record", async () => {
+    const ctx = createContext();
+    const draft = {
+      kind: "rdp",
+      label: "Win Box",
+      tags: [],
+      hostname: "192.168.200.27",
+      port: 3389,
+      username: "user",
+      domain: null,
+      secretRef: null,
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+      groupName: "",
+      terminalThemeId: null,
+    } as const;
+
+    ctx.persistSecret.mockResolvedValue("secret:rdp");
+    ctx.hosts.create.mockReturnValue({ id: "rdp-1", ...draft });
+
+    registerHostsGroupsIpcHandlers(ctx);
+    const createHandler = getRegisteredHandler(ipcChannels.hosts.create);
+
+    await createHandler({}, draft, { password: "hunter2" });
+
+    // 비밀번호는 시크릿 저장소로 가고, 호스트 레코드에는 ref 만 남는다.
+    expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", {
+      password: "hunter2",
+    });
+    expect(ctx.hosts.create).toHaveBeenCalledWith(
+      expect.any(String),
+      draft,
+      "secret:rdp",
+    );
+  });
+
+  it("keeps the existing RDP secret when the password field was left blank", async () => {
+    const ctx = createContext();
+    const draft = {
+      kind: "rdp",
+      label: "Win Box",
+      tags: [],
+      hostname: "192.168.200.27",
+      port: 3389,
+      username: "user",
+      domain: null,
+      secretRef: "secret:rdp",
+      desktopWidth: 1920,
+      desktopHeight: 1080,
+      groupName: "",
+      terminalThemeId: null,
+    } as const;
+
+    ctx.hosts.getById.mockReturnValue({ id: "rdp-1", ...draft });
+    ctx.hosts.update.mockReturnValue({ id: "rdp-1", ...draft });
+
+    registerHostsGroupsIpcHandlers(ctx);
+    const updateHandler = getRegisteredHandler(ipcChannels.hosts.update);
+
+    await updateHandler({}, "rdp-1", draft, {});
+
+    // 빈 비밀번호로 덮어써서 로그인을 깨뜨리면 안 된다.
+    expect(ctx.persistSecret).not.toHaveBeenCalled();
+    expect(ctx.hosts.update).toHaveBeenCalledWith(
+      "rdp-1",
+      draft,
+      "secret:rdp",
+    );
+  });
+
   it("persists certificate secrets when certificate auth material is resolved", async () => {
     const ctx = createContext();
     const draft = {

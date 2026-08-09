@@ -6,7 +6,7 @@ export type AuthType =
   | 'keyboardInteractive'
   | 'certificate'
   | 'agent';
-export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial';
+export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial' | 'rdp';
 export type SerialTransport = 'local' | 'raw-tcp' | 'rfc2217';
 export type SerialDataBits = 5 | 6 | 7 | 8;
 export type SerialParity = 'none' | 'odd' | 'even' | 'mark' | 'space';
@@ -260,6 +260,79 @@ export interface SshHostDraft extends HostBaseDraft {
   env?: HostEnvVar[] | null;
 }
 
+/**
+ * 이 호스트에 빌려줄 로컬 모니터 하나.
+ *
+ * id 만으로는 부족하다 — 재부팅하거나 케이블을 다시 꽂으면 OS 가 주는 디스플레이 id 가 바뀐다
+ * (mstsc 가 selectedmonitors 를 .rdp 파일에서만 다루고, 그마저 재부팅 뒤 깨지는 이유가 이것).
+ * 그래서 이름과 크기를 함께 남겨 id 가 어긋났을 때 그걸로 다시 맞춘다.
+ */
+export interface RdpMonitorSelection {
+  /** Electron Display.id. 1순위 대조 키. */
+  id: number;
+  /** 디스플레이 이름. id 가 바뀌었을 때 크기와 함께 2순위로 쓴다. */
+  label: string;
+  width: number;
+  height: number;
+}
+
+export interface RdpHostRecord extends HostBaseRecord {
+  kind: 'rdp';
+  hostname: string;
+  port: number;
+  username: string;
+  /** Windows 도메인. 로컬/Microsoft 계정이면 비운다. */
+  domain?: string | null;
+  /**
+   * 비밀번호는 레코드가 아니라 시크릿 저장소에 둔다. SSH와 같은 규칙이다 —
+   * 호스트 레코드는 동기화·내보내기 대상이라 자격증명이 실리면 안 된다.
+   */
+  secretRef?: string | null;
+  /** 요청할 화면 크기. 서버가 이 크기의 데스크톱을 만든다. */
+  desktopWidth: number;
+  desktopHeight: number;
+  /**
+   * 신뢰한 서버 인증서의 SHA-256 지문(TOFU 핀).
+   *
+   * RDP 서버는 대개 자체 서명이라 CA 검증이 성립하지 않는다. 대신 처음 접속할 때 지문을
+   * 기록해 두고, 이후 달라지면 사용자에게 묻는다 — SSH known_hosts 와 같은 모델이고
+   * mstsc(CertHash)·FreeRDP(known_hosts2)도 같은 방식이다.
+   */
+  certificateFingerprint?: string | null;
+  /**
+   * 원격에 공유할 로컬 폴더의 절대 경로. 비어 있으면 공유하지 않는다.
+   *
+   * 공유하면 그 폴더 안의 파일이 원격 머신에 그대로 노출된다 — 신뢰하는 호스트에만 켤 것.
+   */
+  drivePath?: string | null;
+  /** 공유 폴더를 읽기 전용으로 준다. 원격이 파일을 바꾸거나 지울 수 없다. */
+  driveReadOnly?: boolean | null;
+  /**
+   * 이 호스트에 빌려줄 로컬 모니터들. 비어 있거나 없으면 desktopWidth/Height 로 한 화면만 쓴다.
+   *
+   * 여러 개면 그 모니터들을 감싸는 하나의 큰 데스크톱이 만들어진다. 떨어져 있으면 사이의 빈
+   * 공간도 데스크톱에 포함되어 검은 영역으로 남는다.
+   */
+  monitors?: RdpMonitorSelection[] | null;
+}
+
+export interface RdpHostDraft extends HostBaseDraft {
+  kind: 'rdp';
+  hostname: string;
+  port: number;
+  username: string;
+  domain?: string | null;
+  secretRef?: string | null;
+  desktopWidth: number;
+  desktopHeight: number;
+  /** 원격에 공유할 로컬 폴더. [[RdpHostRecord]] 참고. */
+  drivePath?: string | null;
+  /** 공유 폴더를 읽기 전용으로 준다. [[RdpHostRecord]] 참고. */
+  driveReadOnly?: boolean | null;
+  /** 이 호스트에 빌려줄 로컬 모니터들. [[RdpHostRecord]] 참고. */
+  monitors?: RdpMonitorSelection[] | null;
+}
+
 export interface AwsEc2HostRecord extends HostBaseRecord {
   kind: 'aws-ec2';
   awsProfileId?: string | null;
@@ -386,7 +459,8 @@ export type HostRecord =
   | AwsEc2HostRecord
   | AwsEcsHostRecord
   | WarpgateSshHostRecord
-  | SerialHostRecord;
+  | SerialHostRecord
+  | RdpHostRecord;
 
 // HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
 export type HostDraft =
@@ -394,7 +468,8 @@ export type HostDraft =
   | AwsEc2HostDraft
   | AwsEcsHostDraft
   | WarpgateSshHostDraft
-  | SerialHostDraft;
+  | SerialHostDraft
+  | RdpHostDraft;
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -416,6 +491,10 @@ export function isSerialHostRecord(host: HostRecord): host is SerialHostRecord {
   return host.kind === 'serial';
 }
 
+export function isRdpHostRecord(host: HostRecord): host is RdpHostRecord {
+  return host.kind === 'rdp';
+}
+
 export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
   return host.kind === 'ssh';
 }
@@ -434,6 +513,10 @@ export function isWarpgateSshHostDraft(host: HostDraft): host is WarpgateSshHost
 
 export function isSerialHostDraft(host: HostDraft): host is SerialHostDraft {
   return host.kind === 'serial';
+}
+
+export function isRdpHostDraft(host: HostDraft): host is RdpHostDraft {
+  return host.kind === 'rdp';
 }
 
 export function getHostSearchText(host: HostRecord): string[] {
@@ -469,6 +552,16 @@ export function getHostSearchText(host: HostRecord): string[] {
       host.awsEcsClusterArn,
       host.awsRegion,
       host.awsProfileName,
+      host.groupName ?? '',
+      ...(host.tags ?? []),
+    ];
+  }
+  if (host.kind === 'rdp') {
+    return [
+      host.label,
+      host.hostname,
+      host.username,
+      host.domain ?? '',
       host.groupName ?? '',
       ...(host.tags ?? []),
     ];
@@ -509,6 +602,9 @@ export function getHostSubtitle(host: HostRecord, labels: HostSubtitleLabels): s
       .filter(Boolean)
       .join(' • ');
   }
+  if (host.kind === 'rdp') {
+    return ['RDP', `${host.username}@${host.hostname}:${host.port}`].join(' • ');
+  }
   if (host.kind === 'serial') {
     if (host.transport === 'local') {
       return ['Serial', host.devicePath ?? labels.devicePathUnset].join(' • ');
@@ -539,6 +635,9 @@ export function getHostBadgeLabel(host: HostRecord): string {
   if (host.kind === 'serial') {
     return 'SER';
   }
+  if (host.kind === 'rdp') {
+    return 'RDP';
+  }
   if (host.authType === 'privateKey') {
     return 'K';
   }
@@ -549,7 +648,10 @@ export function getHostBadgeLabel(host: HostRecord): string {
 }
 
 export function getHostSecretRef(host: HostRecord): string | null {
-  return host.kind === 'ssh' ? (host.secretRef ?? null) : null;
+  if (host.kind === 'ssh' || host.kind === 'rdp') {
+    return host.secretRef ?? null;
+  }
+  return null;
 }
 
 /**
@@ -1404,6 +1506,11 @@ export interface UpdateEvent {
 
 export interface DesktopWindowState {
   isMaximized: boolean;
+  /**
+   * 창이 전체화면인지. 전체화면에서는 타이틀바를 감추고 상단 가장자리에 포인터를 대면
+   * 다시 내려오게 한다 — 원격 화면이나 터미널이 화면을 온전히 쓰게 하기 위해서다.
+   */
+  isFullScreen: boolean;
 }
 
 export interface TerminalThemePreset {
@@ -2942,6 +3049,17 @@ export interface TerminalTab {
    * 탭 상태 점이 연결이 정상일 때 이 값을 보여준다(하이브리드). 셸 통합 없으면 null/undefined.
    */
   commandState?: 'running' | 'ok' | 'failed' | null;
+  /**
+   * 이 탭이 터미널이 아니라 원격 데스크톱(RDP) 화면이면 'rdp'. 없거나 'terminal' 이면 터미널이다.
+   * RDP 세션은 재연결·tmux·셸 통합 같은 터미널 기계를 타지 않으므로 렌더링 분기에 쓴다.
+   */
+  paneKind?: 'terminal' | 'rdp';
+  /**
+   * RDP 세션이 쓰고 있는 원격 모니터 수. 접속 응답에서 채운다.
+   *
+   * 전체화면에서 화면마다 창을 펼칠지 정하는 데 쓴다 — 1이면 펼칠 것이 없다.
+   */
+  rdpMonitorCount?: number;
   /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
   tmux?: TerminalTmuxPaneState | null;
   /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */

@@ -15,6 +15,9 @@ apps/desktop/release
 apps/desktop/src/renderer/vite-env.d.ts
 services/ssh-core/bin
 services/ssh-core/build
+services/rdp-core/target
+# 벤더링한 크레이트를 그 디렉터리에서 직접 빌드·테스트하면 각자 target 이 생긴다(합쳐서 GB 단위).
+services/rdp-core/vendor/*/target
 apps/mobile/ios/GoSshEngine/SshCoreEngine.xcframework
 services/sync-api/bin
 apps/desktop/config/development.json

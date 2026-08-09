@@ -29,6 +29,7 @@ export function useHomeViewModel() {
   const openSettingsSection = useAppStore((state) => state.openSettingsSection);
   const openCreateHostDrawer = useAppStore((state) => state.openCreateHostDrawer);
   const openCreateSerialDrawer = useAppStore((state) => state.openCreateSerialDrawer);
+  const openCreateRdpDrawer = useAppStore((state) => state.openCreateRdpDrawer);
   const openEditHostDrawer = useAppStore((state) => state.openEditHostDrawer);
   const closeHostDrawer = useAppStore((state) => state.closeHostDrawer);
   const navigateGroup = useAppStore((state) => state.navigateGroup);
@@ -57,6 +58,7 @@ export function useHomeViewModel() {
   const startPortForward = useAppStore((state) => state.startPortForward);
   const stopPortForward = useAppStore((state) => state.stopPortForward);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
+  const handleRdpEvent = useAppStore((state) => state.handleRdpEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
   const handleActivityLogsChanged = useAppStore(
     (state) => state.handleActivityLogsChanged,
@@ -85,6 +87,7 @@ export function useHomeViewModel() {
     openSettingsSection,
     openCreateHostDrawer,
     openCreateSerialDrawer,
+    openCreateRdpDrawer,
     openEditHostDrawer,
     closeHostDrawer,
     navigateGroup,
@@ -111,6 +114,7 @@ export function useHomeViewModel() {
     startPortForward,
     stopPortForward,
     handleCoreEvent,
+    handleRdpEvent,
     handlePortForwardEvent,
     handleActivityLogsChanged,
     openHostInNewWindow,

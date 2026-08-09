@@ -307,6 +307,44 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     handleActivityLogsChanged: () => {
       scheduleActivityLogsRefresh();
     },
+    // RDP 는 별도 코어를 쓰고 재연결·tmux·자격증명 재시도 같은 SSH 기계를 타지 않는다.
+    // handleCoreEvent 에 분기를 더하면 그 1500 줄이 RDP 도 감당한다고 착각하게 되므로 분리한다.
+    handleRdpEvent: (event) => {
+            set((state) => {
+              const tab = state.tabs.find((item) => item.sessionId === event.sessionId);
+              if (!tab) {
+                return state;
+              }
+
+              if (event.type === "error") {
+                return {
+                  tabs: state.tabs.map((item) =>
+                    item.sessionId === event.sessionId
+                      ? {
+                          ...item,
+                          status: "error" as const,
+                          errorMessage: event.message,
+                          connectionProgress: resolveErrorProgress(event.message, false),
+                          lastEventAt: new Date().toISOString(),
+                        }
+                      : item,
+                  ),
+                };
+              }
+
+              if (event.type === "closed") {
+                // rdp-core 는 실패 시 error 다음에 항상 closed 를 보낸다. 무조건 지우면 방금
+                // 띄운 에러가 스쳐 지나가 사용자가 이유를 못 본다. 에러 상태면 남겨 두고,
+                // 정상 종료(원격 로그오프 등)일 때만 SSH 와 같이 탭을 제거한다.
+                if (tab.status === "error") {
+                  return state;
+                }
+                return removeSessionFromState(state, event.sessionId);
+              }
+
+              return state;
+            });
+          },
     handleCoreEvent: (event) => {
             const sessionId = event.sessionId;
             const endpointId = event.endpointId;

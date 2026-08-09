@@ -1,249 +1,251 @@
 # Dolgate Desktop
 
-Dolgate Desktop은 Windows, macOS, Linux를 위한 Electron 기반 SSH 워크스페이스입니다.  
-여러 세션을 한 화면에서 다루고, 파일 전송과 포트 포워딩, 세션 공유, AWS/컨테이너 작업까지 하나의 UI에서 처리하는 것이 현재 데스크톱 앱의 중심 역할입니다.
+Dolgate Desktop is an Electron-based SSH workspace for Windows, macOS, and Linux.
+Its central role today is handling multiple sessions on one screen — with file transfer, port forwarding, session sharing, and AWS/container work in a single UI.
 
-## 현재 기능
+## Current features
 
-- 멀티 세션 터미널과 탭 기반 워크스페이스
-- tmux control mode 연동 (원격 윈도우→탭, 패인→분할 워크스페이스, detach 지원)
-- mosh 연결 (UDP 기반, 네트워크 전환·절전 복귀에 강함)
-- 명령어 자동완성 (Fig 스펙 + generator + 경로 + 스니펫)
-- 명령어 스니펫 (변수 지원, 자동완성·관리 UI 연동)
-- 명령 완료 OS 알림 (오래 걸리거나 실패한 명령 종료 시, 셸 통합 기반)
-- 명령 블록 (셸 통합 기반, 점 마커·hover 액션·상단 고정 헤더·명령 팔레트)
-- AI 어시스턴트 (세션 컨텍스트 기반 질문, 조회/실행 도구, provider 선택)
-- 듀얼 패널 SFTP 브라우저와 파일 전송
-- 터미널 파일 전송 (드래그 SFTP 업로드 / 원격 `sz` ZMODEM 다운로드)
-- SFTP 원격 파일 내장 편집 (텍스트 파일 인앱 편집·저장, 변경 충돌 감지, sudo 저장)
-- SSH Agent 인증 (1Password / `ssh-add` / OS ssh-agent)
-- SSH Agent Forwarding (`ssh -A` 계열, 신뢰하는 호스트에서만 권장)
-- 점프 호스트(베스천) 경유 연결 (ProxyJump / `ssh -J`)
-- Tailscale / Headscale 내장 (앱이 tailnet 노드로 참여, OS 클라이언트·VPN 권한 불필요)
-- Local / Remote / Dynamic 포트 포워딩
-- 세션 녹화 및 재생 (로컬 저장, 서버 동기화 없음)
-- Session Share, 브라우저 viewer, 실시간 채팅
-- AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM 포트 포워딩, ECS Exec shell, ECS 터널링
-- Docker / Podman 컨테이너 모니터링, 로그, 메트릭, 셸, 터널링
-- 호스트 내보내기(Dolgate 암호화 파일 · OpenSSH config), Dolgate 파일 가져오기
+- Multi-session terminals with a tab-based workspace
+- tmux control mode integration (remote windows → tabs, panes → split workspace, detach supported)
+- mosh connections (UDP-based, resilient to switching networks and sleep/wake)
+- Command autocomplete (Fig specs + generators + paths + snippets)
+- Command snippets (variables supported, wired into autocomplete and a management UI)
+- OS notifications on command completion (for long-running or failed commands, via shell integration)
+- Command blocks (shell-integration based: dot markers, hover actions, sticky header, command palette)
+- AI assistant (session-context questions, inspect/run tools, provider choice)
+- Dual-panel SFTP browser and file transfer
+- Terminal file transfer (drag SFTP upload / remote `sz` ZMODEM download)
+- Built-in editing of remote SFTP files (in-app text editing and save, conflict detection, sudo save)
+- SSH Agent authentication (1Password / `ssh-add` / OS ssh-agent)
+- SSH Agent Forwarding (`ssh -A` style; recommended only on trusted hosts)
+- Jump host (bastion) connections (ProxyJump / `ssh -J`)
+- Tailscale / Headscale built in (the app joins as a tailnet node — no OS client, no VPN permissions)
+- Local / Remote / Dynamic port forwarding
+- Session recording and replay (stored locally, never synced to the server)
+- Session Share with a browser viewer and live chat
+- AWS EC2 import, EC2 SSH-over-SSM, SSM shell fallback, AWS SFTP, SSM port forwarding, ECS Exec shell, ECS tunneling
+- Docker / Podman container monitoring, logs, metrics, shells, tunneling
+- Host export (encrypted Dolgate file · OpenSSH config), Dolgate file import
 - OpenSSH / Xshell / Termius import
-- 패스키(WebAuthn) 로그인 · 패스키 관리 (서버에서 켠 경우)
-- GitHub Releases 기반 업데이트 배포
+- Passkey (WebAuthn) login and passkey management (when enabled on the server)
+- Update distribution via GitHub Releases
 
-## 명령어 자동완성
+## Command autocomplete
 
-터미널 입력 중에 명령어·옵션·경로·동적 값(컨테이너 이름, git 브랜치 등)을 추천합니다. 설정 > General의 **Command autocomplete** 토글로 켜고 끌 수 있으며 기본값은 켜짐입니다.
+While you type in the terminal, it suggests commands, options, paths, and dynamic values (container names, git branches, and so on). Toggle it under Settings > General with **Command autocomplete**; the default is on.
 
-- **활성 조건**: 셸 통합(OSC 133)이 감지된 세션에서만 동작합니다. 접속 시 bash/zsh에 프롬프트 마커를 주입해 프롬프트 경계를 인식하고, 마커가 확인되면 추천이 시작됩니다. (SSH / 로컬 / AWS SSM 모두 통합이 되면 동작)
-- **추천 출처**
-  - 실행파일 이름(원격 `$PATH`)과 셸 history
-  - **Fig 스펙** 기반 옵션·서브커맨드 — withfig/autocomplete에서 변환, 입력한 적 없어도 표시
-  - **파일/폴더 경로** — 현재 디렉터리를 실제로 조회해 추천 (`cd`/`ls`/`cat` 등). 경로 인자일 땐 stale한 history 경로 대신 실제 파일시스템이 우선
-  - **generator 동적 값** — `docker logs <컨테이너>`, `git checkout <브랜치>`처럼 호스트에서 read-only 명령을 돌려 실제 값을 추천
-  - **스니펫** — 저장한 명령을 keyword(없으면 label) 접두사로 매칭해 전체 명령을 삽입 (변수 `{{name}}`은 삽입 시 입력)
-- **동적 완성 동작**: SSH/로컬은 보조 채널(별도 SSH exec / 로컬 서브프로세스)로 짧은 명령을 실행해 값을 가져오고, 결과는 프롬프트 단위로 캐시합니다(명령 실행 시 갱신, 같은 디렉터리 내 추가 입력은 재조회 없이 필터). AWS SSM은 보조 채널이 없어 동적 값 없이 정적 추천 + history로 degrade합니다.
-- **키보드**: `↓`/`↑` 이동, `Tab` 또는 `→` 선택, `Enter`는 화살표로 고른 항목 선택(맨 위면 명령 실행), `Esc` 닫기.
+- **When it activates**: only in sessions where shell integration (OSC 133) is detected. On connect, prompt markers are injected into bash/zsh so prompt boundaries can be recognized; once markers are confirmed, suggestions start. (Works on SSH / local / AWS SSM whenever integration succeeds.)
+- **Suggestion sources**
+  - Executable names (remote `$PATH`) and shell history
+  - **Fig-spec** options and subcommands — converted from withfig/autocomplete, shown even if you have never typed them
+  - **File/folder paths** — for `cd`/`ls`/`cat` and the like, suggested by actually listing the current directory. For path arguments, the real filesystem wins over stale history paths
+  - **Generator dynamic values** — real values fetched by running read-only commands on the host, as in `docker logs <container>` or `git checkout <branch>`
+  - **Snippets** — saved commands matched by keyword (or label) prefix, inserting the full command (variables `{{name}}` are filled in at insert time)
+- **How dynamic completion works**: SSH/local sessions run short commands over an auxiliary channel (a separate SSH exec / local subprocess) to fetch values, cached per prompt (refreshed when a command runs; further typing in the same directory filters without re-querying). AWS SSM has no auxiliary channel, so it degrades to static suggestions + history without dynamic values.
+- **Keyboard**: `↓`/`↑` to move, `Tab` or `→` to select, `Enter` selects the arrow-highlighted item (or runs the command when at the top), `Esc` to close.
 
-generator 실행 엔진은 Amazon Q Developer CLI(오픈소스 Fig 후신, Apache-2.0/MIT)의 generator 런타임을 이식한 것으로, 로컬 실행 대신 우리 보조 채널로 **원격 호스트에서** 실행하도록 바꿨습니다. 번들 스펙/generator는 `npm run generate:specs`로 생성합니다 (`apps/desktop/src/renderer/generated/command-specs*`, withfig/autocomplete MIT).
+The generator execution engine is ported from the generator runtime of Amazon Q Developer CLI (the open-source successor to Fig, Apache-2.0/MIT), changed to run **on the remote host** over our auxiliary channel instead of locally. Bundled specs/generators are produced with `npm run generate:specs` (`apps/desktop/src/renderer/generated/command-specs*`, withfig/autocomplete MIT).
 
-### 추천 점수 체계
+### Scoring
 
-각 후보는 **출처별 기본 점수 + 보너스**로 점수를 매기고, 같은 결과는 더 높은 점수로 합쳐(dedup) **점수순 최대 20개**를 추립니다. 오버레이에는 **한 번에 5개**만 보이고, 방향키(↓/↑)로 나머지를 스크롤합니다. 입력은 **최소 2글자**부터, 커서가 줄 끝일 때만 추천합니다.
+Each candidate gets **a per-source base score + bonuses**; identical results are merged at the higher score (dedup), keeping **the top 20 by score**. The overlay shows **5 at a time**; arrow keys (↓/↑) scroll the rest. Suggestions start from **2 characters** and only when the cursor is at the end of the line.
 
-출처별 기본 점수:
+Base scores by source:
 
-| 출처 | 오버레이 라벨 | 기본 점수 |
+| Source | Overlay label | Base score |
 |---|---|---|
-| 저장한 Snippet — 키워드/라벨 **정확히 일치** | Snippet | `20000` (최상위) |
-| 실행파일 (원격 `$PATH`) | Command | `6000 − 글자수` |
-| 이번 세션에 실행한 명령(전체 줄) | History | `4500` + 보너스 |
-| 저장한 Snippet — 키워드/라벨 prefix 매칭 | Snippet | `4000` |
-| 파일/폴더 경로 | Path | `2000 − 글자수` |
-| generator 동적 값 | Value | `1800 − 글자수` |
-| 저장한 Snippet — 키워드/라벨 부분(substring) 매칭 | Snippet | `1500` |
-| Fig 스펙 옵션·서브커맨드 | Spec | `1000` |
-| `~/.bash_history` 줄 | History | `150` + 보너스 |
+| Saved snippet — keyword/label **exact match** | Snippet | `20000` (top) |
+| Executables (remote `$PATH`) | Command | `6000 − length` |
+| Commands run this session (full line) | History | `4500` + bonuses |
+| Saved snippet — keyword/label prefix match | Snippet | `4000` |
+| File/folder paths | Path | `2000 − length` |
+| Generator dynamic values | Value | `1800 − length` |
+| Saved snippet — keyword/label substring match | Snippet | `1500` |
+| Fig-spec options and subcommands | Spec | `1000` |
+| `~/.bash_history` lines | History | `150` + bonuses |
 
-보너스(history/세션 전체 줄에만 가산):
+Bonuses (applied only to history/full-line entries):
 
-| 보너스 | 값 | 조건 |
+| Bonus | Value | Condition |
 |---|---|---|
-| recency(최근성) | 최대 `+550` | 최근일수록 (비율 0~1) |
-| frequency(빈도) | `+350 × log₂(1+횟수)` | 자주 쓸수록 |
-| exitSuccess | `+1500` | 세션에서 exit 0 |
-| cwdMatch | `+2000` | 세션 + 같은 디렉터리 |
+| recency | up to `+550` | the more recent, the larger the bonus (ratio 0–1) |
+| frequency | `+350 × log₂(1+count)` | the more often used |
+| exitSuccess | `+1500` | exited 0 in this session |
+| cwdMatch | `+2000` | this session + same directory |
 
-추가 규칙:
+Additional rules:
 
-- 이번 세션에서 **실패(exit ≠ 0)** 한 명령은 추천에서 제외합니다.
-- **경로 인자**(`cd`/`ls` 등)일 땐 raw history 전체 줄 추천을 억제해 실제 파일시스템(Path)이 우선합니다 — stale한 history 경로가 묻어 나오지 않게.
-- raw history는 일부러 약하게(150) 둬서, 매우 자주 쓰는 줄(횟수 ~20+)만 Path/Value 위로 올라옵니다.
+- Commands that **failed (exit ≠ 0)** in this session are excluded from suggestions.
+- For **path arguments** (`cd`/`ls`, and so on), raw full-line history suggestions are suppressed so the real filesystem (Path) wins — stale history paths do not leak through.
+- Raw history is deliberately weak (150) so that only very frequently used lines (count ~20+) rise above Path/Value.
 
-가중치 상수는 `apps/desktop/src/renderer/lib/terminal-autocomplete.ts`의 `SCORE_WEIGHTS` 한 곳에서 조정합니다.
+The weight constants are tuned in one place: `SCORE_WEIGHTS` in `apps/desktop/src/renderer/lib/terminal-autocomplete.ts`.
 
-## 명령 완료 알림
+## Command completion notifications
 
-오래 걸리거나 실패한 명령이 끝나면 OS 네이티브 알림으로 알려줍니다. 명령 경계·소요 시간·종료 코드는 명령어 자동완성과 동일하게 셸 통합(OSC 133)에서 얻으므로, 셸 통합이 감지된 세션(SSH / 로컬 / AWS SSM)에서 동작합니다.
+When a long-running or failed command finishes, a native OS notification tells you. Command boundaries, durations, and exit codes come from shell integration (OSC 133), the same as command autocomplete, so it works in sessions where integration is detected (SSH / local / AWS SSM).
 
-- **설정 위치**: 설정 > General의 **Notifications** 그룹.
-  - **명령 완료 알림**: 기능 on/off. 켤 때 OS 알림 권한이 미결정이면 권한을 요청합니다.
-  - **알림 기준 시간(초)**: 이 시간 이상 걸린 명령이 끝나면 알립니다. (기본 30초)
-  - **비활성 상태일 때만 알림**: 앱이 포커스되어 있고 해당 세션이 활성 탭이면(=지금 보고 있으면) 알리지 않습니다. (기본 켜짐)
-  - **실패한 명령은 항상 알림**: 종료 코드가 0이 아니면 소요 시간과 무관하게 알립니다. (기본 꺼짐)
-  - **소리**: 알림 사운드 on/off.
-- **알림 내용**: 제목은 호스트 라벨, 본문은 `명령 · 완료/실패(exit N) · 소요시간`. 알림을 클릭하면 앱 창이 다시 앞으로 옵니다.
-- 표시 여부 판정(임계 시간·실패·포커스)은 렌더러에서 끝내고, 실제 OS 알림 표시는 Electron main의 notification 서비스가 담당합니다.
+- **Where to configure**: the **Notifications** group under Settings > General.
+  - **Command completion notifications**: feature on/off. Turning it on requests OS notification permission if undecided.
+  - **Notification threshold (seconds)**: notify when a command takes at least this long. (Default: 30 seconds)
+  - **Only notify when inactive**: no notification if the app is focused and that session is the active tab (that is, you are already looking at it). (Default: on)
+  - **Always notify on failed commands**: notify regardless of duration when the exit code is non-zero. (Default: off)
+  - **Sound**: notification sound on/off.
+- **What it shows**: the title is the host label, the body is `command · done/failed (exit N) · duration`. Clicking the notification brings the app window back to the front.
+- The show/hide decision (threshold, failure, focus) is made in the renderer; actually displaying the OS notification is the job of the notification service in Electron main.
 
-## 명령 블록
+## Command blocks
 
-실행한 명령 하나하나를 "블록"으로 인식해, 터미널 화면 위에 얇은 표시와 액션을 얹습니다. 출력을 카드로 재구성하지 않고 기존 터미널 렌더링은 그대로 두기 때문에, 셸을 쓰던 감각은 바뀌지 않습니다. 명령 경계·종료 코드·소요 시간은 명령 완료 알림과 동일하게 셸 통합(OSC 133)에서 얻습니다.
+Each command you run is recognized as a "block", with a thin layer of indicators and actions on top of the terminal screen. Output is not reconstructed into cards — the terminal rendering stays as-is, so the feel of using a shell does not change. Command boundaries, exit codes, and durations come from shell integration (OSC 133), the same as completion notifications.
 
-- **활성 조건**: 셸 통합(OSC 133)이 감지된 세션에서만 동작합니다. (SSH / 로컬 / AWS SSM 모두 통합이 되면 동작) 대체화면을 쓰는 프로그램(vim·htop 등) 안에서는 명령 경계가 성립하지 않아 표시하지 않습니다.
-- **점 마커**: 명령 줄 왼쪽 여백에 점 하나로 상태를 표시합니다 — 실행 중 / 성공 / 실패. 성공은 화면이 시끄러워지지 않도록 낮은 채도로 표시합니다.
-- **hover 액션**: 블록 위에 마우스를 올리면 그 범위가 옅게 강조되고, 우측 상단에 상태 칩(종료 코드·소요 시간)과 툴바가 뜹니다.
-  - **출력 복사** — 그 명령의 출력만 복사합니다(화면 폭에 걸려 접힌 줄은 원래 한 줄로 복원).
-  - **명령 복사** / **재실행**
-  - **AI** — 그 명령과 출력을 컨텍스트로 AI 패널에 질문합니다. 실패한 명령이면 원인과 해결 방법을 묻습니다. (AI 어시스턴트가 켜져 있을 때만 표시)
-- **상단 고정 헤더**: 긴 출력 안으로 스크롤해 명령 줄이 화면 위로 사라지면, 지금 보고 있는 출력이 어느 명령의 것인지 상단에 붙어 따라옵니다. 누르면 그 명령 줄로 돌아갑니다.
-- **단축키**
-  - `Cmd/Ctrl+↑` / `Cmd/Ctrl+↓` — 이전 / 다음 명령으로 이동
-  - `Cmd/Ctrl+Shift+↑` / `Cmd/Ctrl+Shift+↓` — 이전 / 다음 **실패한** 명령으로 이동
-  - `Cmd/Ctrl+Shift+P` — 명령 팔레트
-- **명령 팔레트**: 이 세션에서 실행한 명령 목록을 검색합니다. 셸의 `Ctrl+R` 히스토리와 달리 "무엇을 쳤는지"뿐 아니라 성공/실패·종료 코드·소요 시간·작업 디렉터리까지 함께 보여주고, **실패만** 필터로 좁힐 수 있습니다. `Enter`로 그 명령의 출력 위치로 이동, `Cmd/Ctrl+Enter`로 재실행합니다.
+- **When it activates**: only in sessions where shell integration (OSC 133) is detected. (SSH / local / AWS SSM all work once integrated.) Inside alternate-screen programs (vim, htop, and so on) command boundaries do not exist, so nothing is shown.
+- **Dot markers**: one dot in the left gutter of the command line shows the state — running / succeeded / failed. Success uses low saturation so the screen stays quiet.
+- **Hover actions**: hovering over a block softly highlights its range, with a status chip (exit code · duration) and a toolbar at the top right.
+  - **Copy output** — copies only that command's output (lines soft-wrapped by screen width are restored to single lines).
+  - **Copy command** / **Re-run**
+  - **AI** — asks the AI panel with that command and output as context. For failed commands, it asks for the cause and a fix. (Shown only when the AI assistant is enabled.)
+- **Sticky header**: when you scroll into long output and the command line leaves the top of the screen, a header pinned to the top shows which command the visible output belongs to. Clicking it returns to that command line.
+- **Shortcuts**
+  - `Cmd/Ctrl+↑` / `Cmd/Ctrl+↓` — jump to the previous / next command
+  - `Cmd/Ctrl+Shift+↑` / `Cmd/Ctrl+Shift+↓` — jump to the previous / next **failed** command
+  - `Cmd/Ctrl+Shift+P` — command palette
+- **Command palette**: searches the commands run in this session. Unlike the shell's `Ctrl+R` history, it shows not just "what you typed" but success/failure, exit code, duration, and working directory — and can filter to **failures only**. `Enter` jumps to that command's output; `Cmd/Ctrl+Enter` re-runs it.
 
-**재실행의 한계** — 셸 통합은 명령 텍스트 자체를 알려주지 않기 때문에, 명령은 **화면에 그려진 내용을 읽어** 복원합니다. 그래서 다음 경우에는 실제로 입력한 것과 달라질 수 있어 재실행을 막고 팔레트에 `재실행 불가`로 표시합니다.
+**Limits of re-run** — shell integration does not report the command text itself, so commands are recovered **by reading what was drawn on screen**. In the following cases the recovered text may differ from what was actually typed, so re-run is blocked and the palette marks it `not re-runnable`:
 
-- 명령이 20행을 넘겨 뒤가 잘린 경우 — 잘린 앞부분도 그 자체로 유효한 명령일 수 있어(예: `--dry-run`이 날아간 `rsync`) 그대로 보내면 위험합니다.
-- `\` 연장이나 heredoc처럼 여러 줄로 입력한 경우.
+- The command exceeded 20 rows and was truncated — the truncated prefix may itself be a valid command (for example an `rsync` whose `--dry-run` was cut off), which would be dangerous to send as-is.
+- Multi-line input via `\` continuation or heredocs.
 
-zsh에서 오른쪽 프롬프트(RPROMPT)를 쓰면 같은 행에 함께 그려지므로 명령 뒤에 섞여 들어갈 수 있습니다. 표시와 복사는 그대로 되며, 막히는 것은 재실행뿐입니다.
+With a zsh right prompt (RPROMPT), it is drawn on the same row and can bleed into the command text. Display and copy still work; only re-run is blocked.
 
-## AI 어시스턴트
+## AI assistant
 
-터미널 우측의 AI 패널에서 현재 세션에 대해 질문하고, 필요한 경우 도구로 호스트 상태를 조회하거나 사용자가 보는 터미널에 명령을 실행할 수 있습니다. 패널은 우측 AI 버튼이나 `Cmd/Ctrl+I` 단축키로 열고 닫을 수 있으며, 세션 탭 단위로 유지됩니다. 터미널 입력 영역과 분리되어 자동완성·tmux 조작과 충돌하지 않습니다.
+In the AI panel to the right of the terminal, you can ask about the current session, and when needed the AI can inspect host state through tools or run commands in the terminal you are watching. Open and close the panel with the AI button or `Cmd/Ctrl+I`; it persists per session tab. It is separate from the terminal input area, so it does not conflict with autocomplete or tmux handling.
 
-- **Provider**: OpenAI-compatible API(OpenAI, Ollama, LM Studio, vLLM 등), Anthropic Claude API, Codex(ChatGPT 계정 로그인)를 지원합니다. OpenAI-compatible/Anthropic은 API 키를 OS 키체인에 저장하고, Codex는 API 키 없이 브라우저 로그인 세션을 사용합니다.
-- **자동 컨텍스트**: 질문 시점의 호스트 요약, 현재 세션 정보, 최근 터미널 출력 100줄을 함께 보냅니다. 더 이전 출력이 필요하면 AI가 질문 시점에 고정된 scrollback snapshot에서 추가 범위를 읽을 수 있습니다.
-- **도구**: `inspect_command`는 숨은 SSH exec 채널로 읽기 전용 조회를 수행하고, `run_in_terminal`은 사용자가 보는 터미널에 명령을 입력해 실행합니다. 웹 검색과 URL 읽기도 provider와 별개로 사용할 수 있습니다.
-- **안전장치**: 컨텍스트와 도구 결과는 시크릿 redaction을 거치며, 변경 가능성이 있는 명령은 사용자 승인 후 실행합니다. 진행 중인 응답과 도구 루프는 패널의 정지 버튼으로 중단할 수 있습니다.
-- **제약**: 호스트 exec 도구는 세션에 SSH client가 있는 경우에만 노출됩니다. 일반 SSH, Warpgate SSH, EC2 SSH-over-SSM은 같은 SSH 연결을 공유하고, raw SSM shell fallback처럼 SSH client가 없는 경로는 실행 도구가 제한될 수 있습니다.
+- **Providers**: OpenAI-compatible APIs (OpenAI, Ollama, LM Studio, vLLM, and so on), the Anthropic Claude API, and Codex (ChatGPT account login). OpenAI-compatible/Anthropic store the API key in the OS keychain; Codex uses a browser login session with no API key.
+- **Automatic context**: the host summary at the time of the question, current session info, and the last 100 lines of terminal output are sent along. If older output is needed, the AI can read further ranges from a scrollback snapshot frozen at question time.
+- **Tools**: `inspect_command` performs read-only queries over a hidden SSH exec channel; `run_in_terminal` types a command into the terminal you see. Web search and URL reading are available independently of the provider.
+- **Safeguards**: context and tool results pass through secret redaction, and commands that could make changes run only after user approval. In-flight responses and tool loops can be stopped with the panel's stop button.
+- **Constraints**: host exec tools are exposed only when the session has an SSH client. Plain SSH, Warpgate SSH, and EC2 SSH-over-SSM share the same SSH connection; paths without an SSH client, like the raw SSM shell fallback, may have limited execution tools.
 
-설계(주고받는 컨텍스트 구성, provider egress 경계, 도구 안전장치)는 [ai-assistant-design](./ai-assistant-design.md)에 정리돼 있습니다.
+The design (context composition, provider egress boundaries, tool safeguards) is written up in [ai-assistant-design](./ai-assistant-design.md).
 
-## SSH Agent 인증과 Forwarding
+## SSH Agent authentication and forwarding
 
-호스트 생성/수정 화면에서 **Auth Type = SSH Agent**를 선택하면 비밀번호나 키 파일을 Dolgate에 저장하지 않고 로컬 ssh-agent로 인증합니다. macOS·Linux의 `SSH_AUTH_SOCK`, launchctl agent, Windows OpenSSH agent, 1Password SSH Agent, `ssh-add`로 등록한 키를 사용할 수 있습니다.
+Choosing **Auth Type = SSH Agent** in the host create/edit window authenticates through your local ssh-agent without storing a password or key file in Dolgate. It can use `SSH_AUTH_SOCK` on macOS/Linux, launchctl agents, the Windows OpenSSH agent, the 1Password SSH Agent, and keys registered via `ssh-add`.
 
-- **상태 확인**: SSH Agent 인증을 선택하면 로컬 agent 연결 가능 여부와 키 개수를 설정 화면에서 확인합니다.
-- **저장 방식**: agent 인증은 로컬 agent에 서명을 위임하므로 개인키 자체를 Dolgate 저장소나 sync-api에 저장하지 않습니다.
-- **Agent Forwarding**: SSH 호스트와 AWS EC2 호스트에서 **SSH Agent Forwarding**을 켜면 원격 호스트에서 다시 다른 서버로 hop할 때 로컬 키를 사용할 수 있습니다. `ssh -A`와 같은 성격이므로 신뢰하는 호스트에서만 켜는 것을 권장합니다.
-- **제약**: mosh 연결에서는 agent forwarding을 지원하지 않아 토글이 비활성화됩니다.
+- **Status check**: selecting SSH Agent authentication shows whether the local agent is reachable and how many keys it holds, right in the settings screen.
+- **Storage model**: agent authentication delegates signing to the local agent, so the private key itself is never stored in Dolgate's storage or sync-api.
+- **Agent Forwarding**: enabling **SSH Agent Forwarding** on SSH and AWS EC2 hosts lets you use local keys when hopping from the remote host to further servers. It behaves like `ssh -A`, so enable it only on hosts you trust.
+- **Constraint**: mosh connections do not support agent forwarding, so the toggle is disabled there.
 
-## 점프 호스트 (베스천)
+## Jump hosts (bastions)
 
-프라이빗 서브넷처럼 직접 닿지 않는 호스트를, 중간 **베스천(SSH 서버)을 경유**해 접속하는 기능입니다. 표준 SSH의 `direct-tcpip` 포워딩(`ssh -J`)을 쓰므로 베스천에는 평범한 sshd만 있으면 되고, 모든 처리는 클라이언트(`ssh-core`)에서 일어납니다(sync-api 무관).
+Connect to hosts you cannot reach directly — hosts on private subnets, for example — **via an intermediate bastion (SSH server)**. It uses standard SSH `direct-tcpip` forwarding (`ssh -J`), so the bastion only needs a plain sshd; everything happens in the client (`ssh-core`), with sync-api uninvolved.
 
-- **설정**: 호스트 생성/수정 창의 Connection 섹션 **Jump host** 선택기에서 **저장된 다른 SSH 호스트**를 베스천으로 고릅니다. 베스천의 자격증명·known-host는 그 저장 호스트 것을 재사용합니다.
-- **적용 범위**: 터미널 · SFTP · 포트 포워딩 · 컨테이너 — 4개 연결 전부 동일하게 경유합니다. (내부적으로 모든 연결이 거치는 단일 dial 지점 `sshconn.DialClient`에 점프를 주입)
-- **신뢰(TOFU)**: 베스천을 먼저 신뢰한 뒤, 타깃 호스트 키는 **신뢰된 베스천을 경유해** probe합니다. 베스천이 신뢰돼 있지 않으면 자동으로 지문 프롬프트가 떠 신뢰 후 진행합니다. 베스천 뒤의(직접 닿지 않는) 타깃 키도 이 경유 probe로 확인/신뢰할 수 있습니다.
-- **인증**: 베스천이 password / privateKey / certificate / keyboard-interactive 어느 방식이든 연결됩니다(두 홉을 순차 인증). 단, 베스천 경유 **키 probe**는 비대화형 인증(password/key/certificate)만 지원합니다.
-- **다단 체인**: 여러 jump host를 위에서부터 순서대로 지정할 수 있습니다. 첫 번째 홉은 클라이언트에서 직접 연결하는 베스천이고, 마지막 홉은 타깃 바로 앞 홉입니다.
-- **제약**: 점프 대상은 일반 SSH 호스트만 가능하며 AWS-SSM/Warpgate 호스트는 점프로 쓸 수 없습니다.
+- **Setup**: in the host create/edit window's Connection section, pick **another saved SSH host** as the bastion in the **Jump host** selector. The bastion's credentials and known-host entries are reused from that saved host.
+- **Scope**: terminal · SFTP · port forwarding · containers — all four connection types route the same way. (The jump is injected at `sshconn.DialClient`, the single dial point every connection passes through.)
+- **Trust (TOFU)**: the bastion is trusted first, then the target's host key is probed **through the trusted bastion**. If the bastion is not yet trusted, a fingerprint prompt appears automatically before proceeding. Keys of targets behind the bastion (unreachable directly) can be verified and trusted through this relayed probe.
+- **Authentication**: the bastion can use password / privateKey / certificate / keyboard-interactive (the two hops authenticate in sequence). However, the **key probe** through a bastion supports non-interactive auth only (password/key/certificate).
+- **Multi-hop chains**: multiple jump hosts can be listed in order from the top. The first hop is the bastion the client dials directly; the last hop sits just in front of the target.
+- **Constraint**: only a plain SSH host can serve as a jump host; AWS-SSM/Warpgate hosts cannot be used as jumps.
 
 ## Tailscale / Headscale (tailnet)
 
-앱 안에 tailnet 노드가 들어 있어, **Tailscale을 설치하거나 VPN 권한을 주지 않고** tailnet 안의 호스트에 붙습니다. OS의 라우팅·DNS도 건드리지 않습니다. 여러 tailnet(회사·고객사·집)을 함께 등록해 두고 호스트마다 어디를 경유할지 고릅니다.
+A tailnet node lives inside the app, so you can reach hosts inside a tailnet **without installing Tailscale or granting VPN permissions**. The OS routing and DNS are untouched. Register several tailnets (work, customer, home) side by side and choose per host which one to go through.
 
-- **등록**: 설정 → **네트워크**에서 추가합니다. 이름, Headscale 서버 주소(비우면 Tailscale 기본 서버), auth key를 넣고 **연결 테스트**를 통과하면 저장됩니다. 붙은 뒤에는 어느 계정으로 어느 tailnet에 참여했는지 함께 보여 줍니다.
-- **인증**: auth key를 넣으면 브라우저 없이 등록합니다. 비워 두면 인증 링크가 준비되는 대로 브라우저가 자동으로 열립니다. auth key로 등록한 노드는 안 쓰면 컨트롤 플레인이 자동으로 정리하고, 브라우저 로그인으로 등록한 노드는 남습니다.
-- **호스트 지정**: 호스트 생성/수정 창 Connection 섹션의 **Tailnet** 선택기에서 고릅니다. 옆 *Manage*로 설정의 네트워크 섹션으로 바로 갈 수 있습니다.
-- **적용 범위**: 셸 · tmux · mosh · SFTP · 컨테이너 · 포트 포워딩과 **호스트 키 확인까지** 같은 통로로 나갑니다(모든 연결이 거치는 단일 dial 지점에 주입). mosh는 부트스트랩 SSH와 UDP 세션 둘 다 경유합니다.
-- **첫 연결**: 설정에서 미리 연결해 두지 않아도 호스트에 접속할 때 노드가 올라옵니다. 그래서 **첫 연결만 몇 초** 걸리고 이후는 즉시입니다. 노드는 tailnet마다 하나를 공유하며 마지막 연결이 끝난 뒤 30분간 유지됩니다. 단, 브라우저 로그인이 필요한 tailnet은 설정에서 먼저 인증해야 합니다.
-- **동기화가 끊긴 경우**: 컨트롤 플레인과의 동기화(map poll)가 끊겨도 **연결을 시도합니다**. 이미 받아 둔 기기 목록으로 기존 경로는 그대로 통하고, 끊긴 것은 갱신 통로이기 때문입니다(Tailscale 자체도 이 상태를 8분간 경고하지 않습니다). 잠깐 기다린 뒤 넘어가며, 연결 화면의 *컨트롤 플레인 동기화* 단계에 경고로 남습니다 — 설정에서는 **동기화 끊김**으로 표시됩니다. 실제로 못 가면 그 다음 단계(경로·SSH)에서 이유가 나옵니다.
-- **호스트 키 신뢰**: 신뢰한 키는 **그 tailnet 안에서만** 유효합니다. 다른 tailnet의 같은 이름은 다른 기기이기 때문입니다. 또 접속 직전에 실제로 참여한 tailnet이 저장된 것과 같은지 확인하고, 다르면 연결하지 않습니다.
-- **경로 표시**: 탭에 마우스를 올리면 tailnet 이름과 현재 경로(**직결** 또는 **릴레이 경유 + DERP 지역**)를 지연 시간과 함께 보여 줍니다. 붙은 직후에는 릴레이로 시작해 잠시 뒤 직결로 바뀌는 것이 정상입니다.
-- **기기별 등록**: tailnet은 **기기마다 따로 등록**합니다. 설정과 auth key는 암호화해 동기화되지만(서버는 암호문만 봄) 기기의 노드 키는 동기화하지 않습니다. 기기 목록에는 `dolgate-<기기명>`으로 표시됩니다.
-- **제약**: AWS EC2의 서버 프록시와 함께 쓸 수 없습니다(둘 다 대상까지의 연결을 대신하므로). 설정에서 지운 tailnet을 가리키는 호스트는 연결을 거부합니다 — 그대로 두면 tailnet 밖으로 나가기 때문입니다.
-- **성능**: 앱 내부 네트워크 스택을 쓰므로 대용량 전송 처리량은 OS 클라이언트보다 낮습니다. 반면 응답 지연은 경로가 좌우해서, 직결이 서면 차이가 거의 없습니다.
+- **Registration**: add under Settings > **Tailscale**. Enter a name, a Headscale server address (empty = the default Tailscale server), and an auth key; it saves once the **connection test** passes. After joining, it also shows which account joined which tailnet.
+- **Authentication**: with an auth key, registration happens without a browser. Leave it empty and a browser opens automatically as soon as the auth link is ready. Nodes registered with an auth key are cleaned up by the control plane when unused; nodes registered via browser login persist.
+- **Assigning hosts**: choose in the **Tailnet** selector in the host create/edit window's Connection section. The *Manage* link next to it jumps straight to the Tailscale section in Settings.
+- **Scope**: shell · tmux · mosh · SFTP · containers · port forwarding, and **host key verification too**, all leave through the same path (injected at the single dial point every connection passes). mosh routes both the bootstrap SSH and the UDP session through the tailnet.
+- **First connection**: you do not have to pre-connect in Settings — the node comes up when you connect to a host. So **only the first connection takes a few seconds**; after that it is instant. One node is shared per tailnet and stays up for 30 minutes after the last connection ends. Tailnets that require browser login must be authenticated in Settings first.
+- **When sync is lost**: even if synchronization with the control plane (map poll) drops, **connections are still attempted**. Existing routes keep working from the already-received device list — what broke is the update channel (Tailscale itself does not warn about this state for 8 minutes). It waits briefly and moves on, leaving a warning on the *control plane sync* step of the connection screen — shown as **sync lost** in Settings. If the host truly cannot be reached, the reason appears at the next steps (routing/SSH).
+- **Host key trust**: a trusted key is valid **only within that tailnet**. The same name on a different tailnet is a different machine. Right before connecting, the actually-joined tailnet is compared against the stored one — if they differ, the connection is refused.
+- **Route display**: hover a tab to see the tailnet name and the current path (**direct** or **via relay + DERP region**) with latency. Starting on a relay right after connecting and switching to direct shortly after is normal.
+- **Per-device registration**: tailnets are registered **per device**. Settings and auth keys sync encrypted (the server sees only ciphertext), but a device's node key never syncs. The node appears in device lists as `dolgate-<device name>`.
+- **Constraints**: cannot be combined with AWS EC2's server proxy (both take over the connection to the target). Hosts pointing at a tailnet that was deleted in Settings are refused — otherwise the connection would silently go outside the tailnet.
+- **Performance**: it uses an in-app network stack, so bulk-transfer throughput is lower than with the OS client. Latency is dominated by the path, so once a direct connection is established the difference is negligible.
 
-## 패스키(WebAuthn) 로그인
+The full guide — registration, connection states, security rules — is in the [Tailscale / Headscale guide](./tailscale.md).
 
-생체 인증이나 보안 키로 비밀번호 없이 로그인합니다. **동기화 서버에서 켠 경우에만** 나타나며(자체 호스팅은 [설정 문서](./sync-api-self-hosting.md#패스키webauthn-로그인) 참고), 비밀번호·OIDC 로그인과 함께 쓸 수 있습니다.
+## Passkey (WebAuthn) login
 
-- **로그인**: 브라우저 로그인 화면의 **패스키로 로그인** 버튼, 또는 입력란에서 브라우저가 제안하는 패스키를 선택합니다.
-- **추가·관리**: 설정 > **패스키** 에서 추가(브라우저에서 등록을 마치면 목록에 반영)하고 삭제합니다. 등록 개수에 상한이 있습니다.
-- **주의**: 등록한 도메인에 묶이므로 서버 주소가 바뀌면 재등록이 필요하고, **동기화 암호를 대체하지 않습니다**(로그인 후 따로 입력).
+Sign in with biometrics or a security key instead of a password. It appears **only when the sync server has it enabled** (for self-hosting see the [setup guide](./sync-api-self-hosting.md#passkey-webauthn-login)) and coexists with password and OIDC login.
 
-## 호스트 내보내기 · 가져오기
+- **Signing in**: use the **Sign in with a passkey** button on the browser login screen, or pick the passkey the browser suggests at the input field.
+- **Adding and managing**: add and delete passkeys under Settings > **Account** > **Passkeys** (the list updates once registration completes in the browser). There is a cap on the number of registrations.
+- **Caution**: passkeys are bound to the registered domain, so a changed server address requires re-registration — and they **do not replace the sync passphrase** (entered separately after login).
 
-호스트 목록에서 호스트나 그룹을 우클릭해 **내보내기...** 를 고르면 연결에 필요한 항목까지 함께 파일로 저장합니다. 데스크톱 전용입니다.
+## Host export · import
 
-- **형식**: **Dolgate 파일(`.dolgate`)** — 자격증명과 관련 설정을 담고 내보내기 암호(4자 이상)로 전체를 암호화합니다(Argon2id + AES-256-GCM). **암호는 복구할 수 없습니다.** / **OpenSSH config** — 평문이며 자격증명은 빠지고, 표현할 수 없는 호스트는 개수를 알려주고 제외합니다.
-- **Dolgate 파일 가져오기**: 파일과 암호를 넣으면 무엇이 들어올지 먼저 보여주고, 확정할 때만 반영합니다. 이미 있는 항목은 제외하고, 이름이 겹치면 이름을 바꿔 가져온 뒤 알려줍니다.
-- **다른 앱에서 가져오기**: 호스트 목록의 가져오기 메뉴에서 **OpenSSH · Termius · Xshell(Windows 전용) · Warpgate · AWS SSM · 시리얼**도 불러올 수 있습니다.
+Right-click a host or group in the host list and choose **Export...** to save it to a file together with everything the connection needs. Desktop only.
 
-## 명령어 스니펫 (Snippets)
+- **Formats**: **Dolgate file (`.dolgate`)** — contains credentials and related settings, fully encrypted with an export passphrase (4+ characters; Argon2id + AES-256-GCM). **The passphrase is unrecoverable.** / **OpenSSH config** — plaintext, credentials excluded; hosts that cannot be expressed are counted and skipped.
+- **Importing a Dolgate file**: pick the file and enter the passphrase to preview what will come in; the import is applied only when you confirm. Existing items are skipped; items with name collisions are imported under a new name and reported.
+- **Importing from other apps**: the host list's import menu also reads **OpenSSH · Termius · Xshell (Windows only) · Warpgate · AWS SSM · serial**.
 
-자주 쓰는 명령을 저장해 두고 터미널에서 꺼내 씁니다. 사이드바 **Snippets** 섹션에서 추가/편집/삭제하며, 호스트·그룹처럼 암호화 클라우드 동기화에 포함됩니다.
+## Command snippets
 
-- **자동완성 연동**: 입력이 `keyword`·label과 **정확히 일치(20000·최상위) → 접두사(4000) → 부분 문자열(1500)** 순으로 매칭돼 후보로 뜨고, 선택하면 현재 줄을 비우고 **전체 명령**을 삽입합니다(실행은 사용자가 Enter). 정확히 일치하면 무엇보다 위로, 접두사 매칭은 이번 세션에 실행한 명령보다는 아래로, 부분 문자열은 발견용 하위 티어로 뜹니다. keyword와 label **양쪽**을 매칭하므로 라벨 단어로도 찾을 수 있습니다. 자동완성에는 단일 라인 스니펫만 노출됩니다.
-- **변수**: 명령에 `{{name}}` 또는 `{{name=기본값}}`을 넣으면, 삽입 시 값 입력 모달이 떠서 치환합니다.
-- **저장 필드**: label(표시명), keyword(자동완성 매칭용, 선택), command(멀티라인 가능).
+Save frequently used commands and pull them up in the terminal. Add/edit/delete in the sidebar **Snippets** section; like hosts and groups, they are included in encrypted cloud sync.
 
-## SFTP 원격 파일 편집
+- **Autocomplete integration**: input matches `keyword`/label by **exact match (20000, top) → prefix (4000) → substring (1500)**, and selecting a candidate clears the current line and inserts the **full command** (you press Enter to run). Exact matches rank above everything; prefix matches rank below commands run this session; substring matches sit in a lower discovery tier. Both keyword **and** label are matched, so label words work too. Only single-line snippets surface in autocomplete.
+- **Variables**: put `{{name}}` or `{{name=default}}` in a command and an input modal appears at insert time to substitute values.
+- **Stored fields**: label (display name), keyword (for autocomplete matching, optional), command (multi-line allowed).
 
-SFTP 패널에서 원격 텍스트 파일을 더블클릭하거나 우클릭 **편집**을 누르면 앱 안의 코드 에디터(CodeMirror)가 열립니다. 별도 다운로드 없이 메모리로 읽어 편집하고, 저장하면 원격에 바로 반영합니다.
+## Editing remote files over SFTP
 
-- **열기 대상**: 설정한 최대 크기(기본 5MB) 이하의 텍스트 파일. 바이너리·용량 초과 파일은 편집 대상에서 제외됩니다. (`ssh-core`가 앞부분 NUL 바이트로 바이너리를 최종 판별)
-- **저장**: `Cmd/Ctrl+S`. 같은 디렉터리에 임시 파일을 쓴 뒤 원자적으로 교체(temp + rename)해 중간 실패로 원본이 깨지지 않으며, 권한·수정 시각을 유지합니다.
-- **충돌 감지**: 열 때의 크기·수정 시각을 스냅샷으로 잡아두고 저장 직전 원격과 비교합니다. 그 사이 파일이 바뀌었으면 *다시 불러오기 / 덮어쓰기*를 고를 수 있습니다.
-- **sudo 저장**: 권한이 없는(예: root 소유) 파일은 sudo 비밀번호를 입력하면 `sudo`로 저장합니다. 비밀번호는 명령 문자열이 아니라 stdin으로만 전달합니다.
-- 최대 편집 크기는 설정 > SFTP의 **Editor Max File Size (MB)**에서 조정합니다.
+Double-click a remote text file in the SFTP panel, or right-click → **Edit**, and an in-app code editor (CodeMirror) opens. The file is read into memory with no separate download; saving writes straight back to the remote.
+
+- **What opens**: text files up to the configured size limit (default 5MB). Binary and oversized files are excluded. (`ssh-core` makes the final call on binary by checking the file's leading bytes for NUL.)
+- **Saving**: `Cmd/Ctrl+S`. A temp file is written in the same directory and swapped in atomically (temp + rename), so a mid-write failure never corrupts the original; permissions and modification time are preserved.
+- **Conflict detection**: the size and mtime at open time are snapshotted and compared against the remote just before saving. If the file changed in between, you choose *reload* or *overwrite*.
+- **sudo save**: files you lack permission for (for example root-owned) can be saved with `sudo` after entering the sudo password. The password is passed via stdin only, never in the command string.
+- The maximum editable size is adjusted under Settings > SFTP, **Editor Max File Size (MB)**.
 
 ## tmux control mode
 
-tmux는 보통 터미널에서 prefix 단축키로만 다뤄야 해 진입장벽이 높습니다. Dolgate는 원격 tmux의 윈도우를 상단 탭으로, 패인을 분할 화면으로 보여주고, 마우스(클릭·경계 드래그)나 익숙한 `Ctrl-b` 단축키로 조작합니다. 단축키를 외우지 않아도 tmux 세션을 쓸 수 있고, 연결이 끊겨도 서버 세션은 살아 있어(detach) 다시 붙으면 그대로 이어집니다.
+tmux normally has a high barrier to entry — everything runs through prefix keystrokes in the terminal. Dolgate shows remote tmux windows as top tabs and panes as split views, driven by mouse (clicks, border drags) or the familiar `Ctrl-b` shortcuts. You can use tmux sessions without memorizing keybindings, and since the server session stays alive on disconnect (detach), reattaching picks up where you left off.
 
-호스트 우클릭 메뉴의 **tmux로 연결**을 고르면 tmux control mode(`tmux -CC`)로 붙습니다. 일반 SSH 자격증명을 그대로 쓰고 원격엔 tmux만 있으면 됩니다.
+Choose **Connect with tmux** in a host's right-click menu to attach in tmux control mode (`tmux -CC`). It uses your regular SSH credentials; the remote only needs tmux installed.
 
-- **조작**: 새 윈도우·좌우/상하 분할·윈도우/패인 선택·이름변경·kill을 앱에서 직접 하고, 변경은 서버 tmux와 양방향 동기화됩니다.
-- **키보드 단축키**: **tmux prefix 단축키**(설정, 기본 켜짐)로 마우스 없이 조작합니다. prefix 다음 방향키(pane 이동)·`Ctrl+방향키`(크기 조절)·`c`(새 창)·`%`/`"`(분할)·`n`/`p`/숫자/`l`(창 전환)·`w`(창 목록)·`z`(zoom)·`{`/`}`(swap)·`!`(break)·`Space`(레이아웃)·`x`/`&`(종료)·`[`/`]`(복사/붙여넣기)·`,`/`$`(이름 변경)·`:`(명령 입력)·`d`(detach). prefix 키는 기본 `Ctrl-b`이며 설정에서 `Ctrl-a`/`Ctrl-Space` 등으로 바꿀 수 있습니다. 매핑 안 된 키는 tmux에 그대로 전달됩니다.
-- **닫기 = detach**: 탭의 `×`는 kill이 아니라 detach라 원격 세션이 살아 있어, 다시 tmux로 연결하면 이어집니다.
-- **tmux 버전별 동작**: **2.6 이상**이면 GUI control mode로 붙고, 입력 방식은 버전에 맞춰 앱이 자동 처리합니다(2.6~3.0은 `send-keys -l`, 3.0a+는 더 빠른 `-H` hex). 따라서 구버전 서버라고 따로 설정할 게 없습니다. **2.6 미만**은 control mode의 사이즈 모델이 없어, GUI 통합 대신 일반 SSH 셸에서 tmux를 실행(passthrough)합니다.
-- **제약**: SSH 호스트 전용 · 점프 호스트와 병용 불가.
+- **Operations**: new windows, horizontal/vertical splits, window/pane selection, rename, and kill — all directly in the app, with changes syncing both ways with the server tmux.
+- **Keyboard shortcuts**: operate mouse-free with **tmux prefix shortcuts** (a setting, on by default). After the prefix: arrows (pane focus), `Ctrl+arrows` (resize), `c` (new window), `%`/`"` (split), `n`/`p`/digits/`l` (switch window), `w` (window list), `z` (zoom), `{`/`}` (swap), `!` (break), `Space` (layouts), `x`/`&` (kill), `[`/`]` (copy/paste), `,`/`$` (rename), `:` (command prompt), `d` (detach). The prefix defaults to `Ctrl-b` and can be changed to `Ctrl-a`/`Ctrl-Space` and others in Settings. Unmapped keys pass through to tmux unchanged.
+- **Close = detach**: a tab's `×` detaches rather than kills, so the remote session stays alive — connect with tmux again and it continues.
+- **Per-version behavior**: **2.6 and later** attach in GUI control mode, with the input method handled automatically per version (`send-keys -l` for 2.6–3.0, the faster `-H` hex for 3.0a+). Nothing to configure for older servers. **Below 2.6**, control mode lacks the size model, so instead of GUI integration tmux runs in a plain SSH shell (passthrough).
+- **Constraints**: SSH hosts only · cannot be combined with jump hosts.
 
-## mosh 연결
+## mosh connections
 
-SSH로 한 번 부트스트랩한 뒤 **UDP**로 전환해, 네트워크 전환(Wi-Fi↔셀룰러)이나 절전/복귀에도 끊기지 않는 연결입니다.
+After a one-time SSH bootstrap, the connection switches to **UDP** — surviving network switches (Wi-Fi↔cellular) and sleep/wake without dropping.
 
-- **사용**: 호스트 생성/수정 창에서 **Mosh로 연결** 토글을 켜고 평소처럼 연결합니다.
-- **흐름**: SSH가 원격에서 `mosh-server`를 기동 → `MOSH CONNECT <port> <key>`를 받아 UDP 세션을 열고 → 부트스트랩 SSH는 닫힙니다. 이후 입출력은 UDP로 흐릅니다.
-- **상태 표시**: 터미널 하단 바에 **연결됨 / 재연결 중(마지막 응답 N초 전) / 끊김**을 표시합니다(약 4초 무응답 → 재연결 중, 12초 → 끊김).
-- **전제**: 원격에 `mosh-server` 설치, 원격 UTF-8 로케일, 그리고 **UDP 포트 개방**. mosh는 SSH 포트와 별개로 UDP 60000~61000 중 한 포트를 씁니다 — SSH만 열려 있으면 연결된 것처럼 보이다가 응답을 받지 못합니다.
-- **tailnet**: 호스트에 tailnet이 지정돼 있으면 UDP 세션도 그 tailnet으로 나가므로, 방화벽에 UDP 포트를 열지 않아도 됩니다.
-- **제약**: 점프 호스트(베스천)와 병용 불가 — UDP를 프록시할 수 없어 점프가 설정돼 있으면 자동으로 일반 SSH로 폴백합니다. keyboard-interactive 인증은 미지원입니다.
+- **Usage**: turn on the **Connect with Mosh** toggle in the host create/edit window and connect as usual.
+- **Flow**: SSH starts `mosh-server` on the remote → receives `MOSH CONNECT <port> <key>` and opens the UDP session → the bootstrap SSH closes. I/O then flows over UDP.
+- **Status display**: the terminal's bottom bar shows **connected / reconnecting (last response N seconds ago) / disconnected** (~4s silence → reconnecting, 12s → disconnected).
+- **Prerequisites**: `mosh-server` installed on the remote, a UTF-8 locale there, and an **open UDP port**. mosh uses one port in UDP 60000–61000, separate from the SSH port — with only SSH open it looks connected but never gets responses.
+- **tailnet**: if the host has a tailnet assigned, the UDP session also leaves through that tailnet, so no firewall UDP port needs opening.
+- **Constraints**: cannot be combined with jump hosts (bastions) — UDP cannot be proxied, so with a jump configured it automatically falls back to plain SSH. keyboard-interactive auth is unsupported.
 
-## 터미널 파일 전송
+## Terminal file transfer
 
-SFTP 패널을 열지 않고 **터미널에서 직접** 파일을 주고받는 두 경로입니다 — 로컬 파일 드래그 업로드와 원격 `sz`(ZMODEM) 다운로드.
+Two paths for moving files **directly in the terminal**, without opening the SFTP panel — local drag-and-drop upload, and remote `sz` (ZMODEM) download.
 
-- **드래그 업로드(SFTP)**: 연결된 터미널(SSH / AWS EC2 / Warpgate)에 로컬 파일을 끌어다 놓으면, 그 세션의 **현재 작업 디렉터리**로 SFTP 업로드합니다(작업 디렉터리를 알 수 없으면 홈으로). 진행률은 우하단 토스트로 보이며, 폴더(디렉터리) 업로드는 지원하지 않습니다.
-- **ZMODEM 다운로드**: 원격에서 `sz <파일>`을 실행하면 터미널 스트림에서 ZMODEM 전송을 자동 감지해 **로컬 Downloads** 폴더에 저장합니다(완료 후 *폴더 열기* 버튼).
-- **제한**: ZMODEM 다운로드는 **512MB까지**이며, 초과 시 SFTP 사용을 권하는 메시지로 중단됩니다. `rz`(ZMODEM 업로드)는 지원하지 않으며, 업로드는 드래그 업로드로 대체합니다.
-- **레이어**: 드래그 업로드는 렌더러가 SFTP 전송 작업(`sftp:start-transfer`)으로 처리하고, ZMODEM은 렌더러가 스트림에서 감지해 Electron main이 Downloads에 저장합니다.
+- **Drag upload (SFTP)**: drop local files onto a connected terminal (SSH / AWS EC2 / Warpgate) and they upload via SFTP into that session's **current working directory** (or the home directory if it cannot be determined). Progress appears as a toast at the bottom right; folder (directory) uploads are not supported.
+- **ZMODEM download**: run `sz <file>` on the remote and the ZMODEM transfer is auto-detected in the terminal stream and saved to the **local Downloads** folder (with an *Open folder* button on completion).
+- **Limits**: ZMODEM downloads go up to **512MB**; beyond that it stops with a message recommending SFTP. `rz` (ZMODEM upload) is not supported — use drag upload instead.
+- **Layering**: drag upload is handled by the renderer as an SFTP transfer job (`sftp:start-transfer`); ZMODEM is detected in the stream by the renderer and saved to Downloads by Electron main.
 
-## 세션 녹화와 Replay
+## Session recording and replay
 
-터미널 세션이 종료되면 입출력과 화면 크기 변경을 로컬 replay 데이터로 남겨 나중에 다시 볼 수 있습니다. Replay 창에서는 재생/일시정지, scrubber 이동, 속도 조절, 확대/축소를 사용할 수 있습니다.
+When a terminal session ends, its I/O and screen size changes are kept as local replay data for later viewing. The replay window offers play/pause, scrubbing, speed control, and zoom.
 
-- **저장 위치**: 세션 replay는 데스크톱 로컬 저장소에만 보관되며 sync-api로 동기화되지 않습니다.
-- **보관 개수**: 설정 > General의 **Session Replay Retention**에서 로컬에 남길 종료 세션 replay 개수를 조정합니다.
-- **명령 목록**: 녹화에 셸 통합이 있었다면 오른쪽에 실행한 명령 목록이 뜹니다. 항목을 누르면 그 명령이 실행된 시점으로 바로 이동합니다. 터미널과 목록 사이의 손잡이로 접어 터미널을 넓게 볼 수 있습니다.
-- **재생바 눈금**: 명령 위치가 재생바에 눈금으로 표시되고, 실패한 명령은 색과 길이로 구분됩니다. 어디쯤에서 무슨 일이 있었는지 스크럽 전에 한눈에 볼 수 있습니다. 눈금 위에 마우스를 올리면 그 시점의 명령을 보여줍니다.
-- **용도**: 장애 조사, 작업 복기, 다른 사람에게 전달하기 전 화면 흐름 확인에 적합합니다. 실시간 공유가 필요하면 Session Share를 사용합니다.
+- **Storage**: session replays live only in the desktop's local storage and are never synced to sync-api.
+- **Retention**: adjust how many finished session replays are kept locally under Settings > General, **Session Replay Retention**.
+- **Command list**: if the recording had shell integration, a list of executed commands appears on the right. Clicking an entry jumps to the moment that command ran. A handle between the terminal and the list collapses it for a wider view.
+- **Timeline ticks**: command positions are marked on the scrubber, with failed commands distinguished by color and length — you can see roughly where things happened before scrubbing. Hovering a tick shows the command at that point.
+- **Use cases**: incident investigation, reviewing your own work, and checking the screen flow before handing it to someone else. For live sharing, use Session Share.
 
-## 빌드 · 실행 · AWS
+## Build · run · AWS
 
-- 로컬 개발 실행과 릴리즈 빌드(`release:dist:*` / `release:publish:*`)는 [build-and-deploy](./build-and-deploy.md)를 참고하세요.
-- AWS/SSM 운영 전제와 IAM 권한 예시는 [AWS / SSM 설정 가이드](./aws.md)에 있습니다.
-- 데스크톱 런타임 경계(ssh-core lazy 시작, `cmd/ssh-core` stdio framed IPC, sync-api 역할, GitHub Releases 자동 업데이트)는 [architecture](./architecture.md)에 정리돼 있습니다.
+- For local development runs and release builds (`release:dist:*` / `release:publish:*`), see [build-and-deploy](./build-and-deploy.md).
+- AWS/SSM operational prerequisites and example IAM permissions are in the [AWS / SSM setup guide](./aws.md).
+- The desktop runtime boundaries (lazy ssh-core startup, `cmd/ssh-core` stdio framed IPC, sync-api's role, GitHub Releases auto-update) are covered in [architecture](./architecture.md).

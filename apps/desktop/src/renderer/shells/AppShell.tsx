@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AuthState, DesktopWindowState, UpdateState } from '@shared';
 import { AppTitleBar } from '../components/AppTitleBar';
+import { cn } from '../lib/cn';
+import { titleBarMode } from '../components/useTitleBarAutoHide';
+import {
+  resolveSpreadTarget,
+  useRdpMonitorSpread,
+} from '../components/rdp/useRdpMonitorSpread';
 import type { SecretEditDialogRequest } from '../components/SecretEditDialog';
 import type { useLoginController } from '../controllers/useLoginController';
 import type {
@@ -81,6 +87,19 @@ export function AppShell({
     useState(false);
   const [secretEditRequest, setSecretEditRequest] =
     useState<SecretEditDialogRequest | null>(null);
+
+  // 전체화면 + 멀티모니터 RDP 세션이면 원격 모니터를 물리 화면마다 펼친다. 창을 여는 일은
+  // 메인 프로세스가 하고, 여기서는 언제 펼칠지만 정한다.
+  useRdpMonitorSpread(
+    resolveSpreadTarget({
+      isFullScreen: windowState.isFullScreen,
+      activeWorkspaceTab: sessionViewModel.activeWorkspaceTab,
+      tabs: sessionViewModel.tabs,
+      monitorCountBySession: (sessionId) =>
+        sessionViewModel.tabs.find((tab) => tab.sessionId === sessionId)
+          ?.rdpMonitorCount ?? 0,
+    }),
+  );
 
   const isHomeActive = homeViewModel.activeWorkspaceTab === 'home';
   const isSftpActive = homeViewModel.activeWorkspaceTab === 'sftp';
@@ -242,13 +261,36 @@ export function AppShell({
           onMinimizeWindow={loginController.minimizeWindow}
           onMaximizeWindow={loginController.maximizeWindow}
           onRestoreWindow={loginController.restoreWindow}
+          onSetRdpMonitors={(sessionId, monitors) => {
+            void sessionViewModel.setRdpMonitors(sessionId, monitors);
+          }}
+          resolveRdpMonitors={(sessionId) => {
+            const hostId = sessionViewModel.tabs.find(
+              (tab) => tab.sessionId === sessionId,
+            )?.hostId;
+            const host = homeViewModel.hosts.find((item) => item.id === hostId);
+            return host?.kind === 'rdp' ? (host.monitors ?? null) : null;
+          }}
           onCloseWindow={loginController.closeWindow}
         />,
         document.body,
       )}
-      <div aria-hidden className="h-[2.95rem] flex-none" />
+      {/* 헤더는 fixed 라 이 스페이서가 그 자리를 대신 차지한다. 전체화면에서는 헤더가
+          위로 접히므로 스페이서도 함께 접어야 화면을 온전히 쓴다 — 안 그러면 위쪽에
+          아무것도 없는 띠가 남는다. */}
+      <div
+        aria-hidden
+        className={cn(
+          'flex-none transition-[height] duration-150',
+          titleBarMode(windowState.isFullScreen, desktopPlatform) === 'visible'
+            ? 'h-[2.95rem]'
+            : 'h-0',
+        )}
+      />
 
-      <div className="relative flex-1 min-h-0">
+      {/* 탭 아래 내용 영역. 원격 화면도 여기에 들어간다 — 접속할 때 이 크기로 붙어야 화면이
+          뜨는 순간부터 창에 맞는다. 홈에서 원격을 열 때도 이 요소는 이미 있으므로 잴 수 있다. */}
+      <div className="relative flex-1 min-h-0" data-rdp-viewport="">
         <HomeShell
           active={isHomeActive}
           authState={authState}

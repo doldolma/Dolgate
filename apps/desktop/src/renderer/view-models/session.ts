@@ -26,6 +26,9 @@ export function useSessionWorkspaceViewModel() {
   );
   const stopSessionShare = useAppStore((state) => state.stopSessionShare);
   const disconnectTab = useAppStore((state) => state.disconnectTab);
+  const setRdpMonitors = useAppStore(
+    (state) => state.setRdpMonitors,
+  );
   const closeWorkspace = useAppStore((state) => state.closeWorkspace);
   const splitSessionIntoWorkspace = useAppStore(
     (state) => state.splitSessionIntoWorkspace,
@@ -73,6 +76,7 @@ export function useSessionWorkspaceViewModel() {
     setSessionShareInputEnabled,
     stopSessionShare,
     disconnectTab,
+    setRdpMonitors,
     closeWorkspace,
     splitSessionIntoWorkspace,
     moveWorkspaceSession,

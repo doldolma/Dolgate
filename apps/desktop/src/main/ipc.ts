@@ -2,6 +2,7 @@ import type { AuthService } from "./auth-service";
 import type { AwsSsmTunnelService } from "./aws-ssm-tunnel-service";
 import type { AwsService } from "./aws-service";
 import type { CoreManager } from "./core-manager";
+import type { RdpManager } from "./rdp-manager";
 import type {
   ActivityLogRepository,
   DnsOverrideRepository,
@@ -38,6 +39,7 @@ import { registerPortForwardAndDnsIpcHandlers } from "./ipc/port-forwards-dns";
 import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
 import { registerSnippetsIpcHandlers } from "./ipc/snippets";
 import { registerSerialIpcHandlers } from "./ipc/serial";
+import { createCertificatePromptBridge, registerRdpIpcHandlers } from "./ipc/rdp";
 import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshKeyIpcHandlers } from "./ipc/ssh-keys";
 import { registerSshIpcHandlers } from "./ipc/ssh";
@@ -73,6 +75,7 @@ export function registerIpcHandlers(
   sessionShareService: SessionShareService,
   sessionReplayService: SessionReplayService,
   tailnets: TailnetRepository,
+  rdpManager: RdpManager,
   windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   const ctx = createMainIpcContext({
@@ -112,6 +115,14 @@ export function registerIpcHandlers(
   registerImportIpcHandlers(ctx);
   registerSshIpcHandlers(ctx);
   registerSerialIpcHandlers(ctx);
+  // 프롬프트는 렌더러가 띄우고 응답을 되돌려 준다. 그 왕복을 rdpManager 의 이벤트 채널
+  // 위에 얹어, RDP 관련 신호가 한 경로로만 흐르게 한다.
+  const certificatePrompts = createCertificatePromptBridge((event) =>
+    rdpManager.emitSessionEvent(event),
+  );
+  registerRdpIpcHandlers(ctx, rdpManager, {
+    askCertificate: certificatePrompts.ask,
+  });
   registerContainersIpcHandlers(ctx);
   registerSftpIpcHandlers(ctx);
   registerPortForwardAndDnsIpcHandlers(ctx);

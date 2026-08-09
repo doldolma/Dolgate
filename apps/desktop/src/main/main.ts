@@ -36,6 +36,7 @@ import { APP_LOCALE_QUERY_PARAM } from '../common/i18n/locale';
 import { CoreManager } from './core-manager';
 import { getMainLocale, initMainI18n, onMainLocaleChanged, t } from './i18n';
 import { registerIpcHandlers } from './ipc';
+import { RdpManager } from './rdp-manager';
 import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
 import { isSecureStorageUsable, SecretStore } from './secret-store';
@@ -248,6 +249,11 @@ if (termiusHelperArgIndex >= 0) {
     },
     upsertActivityLog,
   );
+  // RDP 는 별도 사이드카(services/rdp-core)를 쓰므로 CoreManager 와 독립적이다.
+  const rdpManager = new RdpManager({
+    getWindows: () => BrowserWindow.getAllWindows(),
+  });
+
   awsSsmTunnelService.setInProcessBackend({
     shouldUse: () => awsService.shouldUseInProcessSsm(),
     start: (input) =>
@@ -432,7 +438,8 @@ if (termiusHelperArgIndex >= 0) {
 
   function buildWindowState(window: BrowserWindow): DesktopWindowState {
     return {
-      isMaximized: window.isMaximized()
+      isMaximized: window.isMaximized(),
+      isFullScreen: window.isFullScreen()
     };
   }
 
@@ -446,6 +453,9 @@ if (termiusHelperArgIndex >= 0) {
 
     window.on('maximize', emitState);
     window.on('unmaximize', emitState);
+    // 전체화면 진입/이탈은 별도 이벤트다. 이걸 놓치면 타이틀바가 숨은 채로 남는다.
+    window.on('enter-full-screen', emitState);
+    window.on('leave-full-screen', emitState);
   }
 
   async function createWindow(
@@ -622,6 +632,7 @@ if (termiusHelperArgIndex >= 0) {
   authService.setOnSessionInvalidated(async (context) => {
     // 인증 세션이 사라지면 SSH/SFTP/포워딩 런타임도 함께 정리해서 로그인 게이트 뒤에 연결이 남지 않게 한다.
     sessionReplayService.shutdown();
+    rdpManager.shutdown();
     await sessionShareService.shutdown();
     await awsSsmTunnelService.shutdown();
     await coreManager.shutdown({ finalizePortForwardsAsStopped: true });
@@ -698,6 +709,7 @@ if (termiusHelperArgIndex >= 0) {
       sessionShareService,
       sessionReplayService,
       tailnetRepository,
+      rdpManager,
       {
         openWindow: async (intent) => {
           await createWindow(intent);
@@ -785,6 +797,8 @@ if (termiusHelperArgIndex >= 0) {
     event.preventDefault();
     isQuitting = true;
     sessionReplayService.shutdown();
+    // 사이드카는 동기 종료라 비동기 정리 체인에 끼울 필요가 없다.
+    rdpManager.shutdown();
     void sessionShareService.shutdown().finally(() => {
       void awsSsmTunnelService.shutdown().finally(() => {
         void coreManager

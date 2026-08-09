@@ -33,6 +33,8 @@ function createSessionTab(id = 'session-1') {
 
 function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
   const props: AppTitleBarPropsForTest = {
+    onSetRdpMonitors: vi.fn(),
+    resolveRdpMonitors: () => null,
     desktopPlatform: 'darwin',
     tabs: [],
     workspaces: [],
@@ -40,7 +42,7 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
     activeWorkspaceTab: 'home',
     draggedSession: null,
     updateState: createUpdateState(),
-    windowState: { isMaximized: false },
+    windowState: { isMaximized: false, isFullScreen: false },
     tmuxGroups: [],
     hosts: [],
     onSelectTmuxGroup: vi.fn(),
@@ -193,7 +195,7 @@ describe('AppTitleBar update popover', () => {
         activeWorkspaceTab="containers"
         draggedSession={null}
         updateState={createUpdateState()}
-        windowState={{ isMaximized: false }}
+        windowState={{ isMaximized: false, isFullScreen: false }}
       tmuxGroups={[]}
       hosts={[]}
       onSelectTmuxGroup={vi.fn()}
@@ -217,6 +219,8 @@ describe('AppTitleBar update popover', () => {
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
         onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
         onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onSetRdpMonitors={vi.fn()}
+        resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -333,7 +337,7 @@ describe('AppTitleBar update popover', () => {
         activeWorkspaceTab="home"
         draggedSession={null}
         updateState={createUpdateState()}
-        windowState={{ isMaximized: false }}
+        windowState={{ isMaximized: false, isFullScreen: false }}
       tmuxGroups={[]}
       hosts={[]}
       onSelectTmuxGroup={vi.fn()}
@@ -357,6 +361,8 @@ describe('AppTitleBar update popover', () => {
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
         onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
         onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onSetRdpMonitors={vi.fn()}
+        resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
       />,
     );
@@ -436,7 +442,7 @@ describe('AppTitleBar update popover', () => {
         activeWorkspaceTab="session:session-1"
         draggedSession={null}
         updateState={createUpdateState()}
-        windowState={{ isMaximized: false }}
+        windowState={{ isMaximized: false, isFullScreen: false }}
       tmuxGroups={[]}
       hosts={[]}
       onSelectTmuxGroup={vi.fn()}
@@ -460,6 +466,8 @@ describe('AppTitleBar update popover', () => {
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
         onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
         onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onSetRdpMonitors={vi.fn()}
+        resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
       />,
     );
@@ -495,7 +503,7 @@ describe('AppTitleBar update popover', () => {
         activeWorkspaceTab="session:session-4"
         draggedSession={null}
         updateState={createUpdateState()}
-        windowState={{ isMaximized: false }}
+        windowState={{ isMaximized: false, isFullScreen: false }}
       tmuxGroups={[]}
       hosts={[]}
       onSelectTmuxGroup={vi.fn()}
@@ -519,6 +527,8 @@ describe('AppTitleBar update popover', () => {
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
         onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
         onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onSetRdpMonitors={vi.fn()}
+        resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
       />,
     );

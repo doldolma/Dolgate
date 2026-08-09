@@ -203,6 +203,8 @@
     .card .ico { font-size: 1.4rem; }
     .card h3 { margin-top: 12px; font-size: 1.03rem; }
     .card p { margin-top: 8px; color: var(--text-soft); font-size: .92rem; }
+    .card .card-more { display: inline-block; margin-top: 10px; font-size: .88rem; font-weight: 600; color: var(--accent); }
+    .card .card-more:hover { text-decoration: underline; }
 
     .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 34px; }
     .chip {
@@ -347,14 +349,16 @@
 <section id="features">
   <div class="wrap">
     <div class="sec-label">Features</div>
-    <h2 data-i18n="feat.h2">터미널에서 필요한 것들, 한 앱에</h2>
-    <p class="sec-sub" data-i18n="feat.sub">SSH부터 AWS SSM, 컨테이너, tmux까지 — 서버 작업의 전 과정을 하나의 워크스페이스로 다룹니다.</p>
+    <h2 data-i18n="feat.h2">워크스페이스에 들어 있는 것들</h2>
+    <p class="sec-sub" data-i18n="feat.sub">SSH부터 AWS SSM, 컨테이너까지 — 서버 작업의 전 과정을 한 앱에서 다룹니다.</p>
 
     <div class="grid">
       <div class="card"><div class="ico">🖥️</div><h3 data-i18n="card.ssh.t">SSH / SSM 워크스페이스</h3>
-        <p data-i18n="card.ssh.d">SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서. SSH Agent 인증과 Agent Forwarding 지원.</p></div>
-      <div class="card"><div class="ico">🪟</div><h3 data-i18n="card.tmux.t">tmux control mode</h3>
-        <p data-i18n="card.tmux.d">원격 tmux 윈도우를 앱 탭으로, 패인을 분할 화면으로. 탭을 닫아도 detach라 세션이 살아 있고, 다시 붙으면 이어집니다.</p></div>
+        <p data-i18n="card.ssh.d">SSH, EC2 SSH-over-SSM, SSM shell fallback, ECS Exec, SFTP, 포트 포워딩을 한 앱에서. SSH Agent 인증과 Agent Forwarding 지원.</p>
+        <!-- 상대 링크라 en/ 생성물에서는 en/ 쪽 가이드로 이어진다. -->
+        <a class="card-more" href="./aws-ssm.html" data-i18n="card.more">자세히 →</a></div>
+      <div class="card"><div class="ico">⌨️</div><h3 data-i18n="card.complete.t">명령어 자동완성</h3>
+        <p data-i18n="card.complete.d">Fig 스펙 기반 자동완성이 원격 세션 안에서 동작합니다. 하위 명령·옵션에 더해 원격 서버의 파일 경로, 서버에서 만들어지는 동적 값, 스니펫까지 이어서 제안합니다.</p></div>
       <div class="card"><div class="ico">🤖</div><h3 data-i18n="card.ai.t">AI 어시스턴트</h3>
         <p data-i18n="card.ai.d">현재 세션의 호스트 정보와 터미널 출력을 바탕으로 질문하고, 조회는 자동·변경은 승인 후 실행. OpenAI 호환 · Claude · Codex 지원.</p></div>
       <div class="card"><div class="ico">🎬</div><h3 data-i18n="card.record.t">세션 녹화 · 재생</h3>
@@ -362,11 +366,12 @@
       <div class="card"><div class="ico">🔁</div><h3 data-i18n="card.sync.t">E2EE 동기화, self-host로</h3>
         <p data-i18n="card.sync.d">호스트·시크릿·스니펫을 종단간 암호화로 데스크톱↔모바일 동기화. 동기화 서버(sync-api)는 Docker 한 줄로 직접 띄울 수도 있습니다.</p></div>
       <div class="card"><div class="ico">🌐</div><h3 data-i18n="card.tailnet.t">Tailscale 내장</h3>
-        <p data-i18n="card.tailnet.d">앱 자체가 tailnet 노드로 참여합니다. Tailscale 클라이언트도 VPN 권한도 없이 tailnet 안의 호스트에 붙고, OS의 라우팅·DNS는 건드리지 않습니다.</p></div>
+        <p data-i18n="card.tailnet.d">앱 자체가 tailnet 노드로 참여합니다. Tailscale 클라이언트도 VPN 권한도 없이 tailnet 안의 호스트에 붙고, OS의 라우팅·DNS는 건드리지 않습니다.</p>
+        <a class="card-more" href="./tailscale.html" data-i18n="card.more">자세히 →</a></div>
     </div>
 
     <div class="chips">
-      <span class="chip" data-i18n="chip.1">명령어 자동완성</span>
+      <span class="chip" data-i18n="chip.1">tmux control mode</span>
       <span class="chip" data-i18n="chip.2">스니펫</span>
       <span class="chip" data-i18n="chip.3">듀얼 패널 SFTP</span>
       <span class="chip" data-i18n="chip.4">원격 파일 편집</span>
@@ -473,6 +478,8 @@
     <span data-i18n="foot.license">© 2026 doldolma · MIT License</span>
     <div class="spacer"></div>
     <a href="https://github.com/doldolma/dolgate" target="_blank" rel="noopener">GitHub</a>
+    <a href="./tailscale.html">Tailscale</a>
+    <a href="./aws-ssm.html">AWS SSM</a>
     <a href="https://github.com/doldolma/dolgate/tree/main/docs" target="_blank" rel="noopener" data-i18n="foot.docs">문서</a>
     <a href="https://github.com/doldolma/dolgate/releases" target="_blank" rel="noopener" data-i18n="foot.releases">릴리즈</a>
     <a href="https://github.com/doldolma/dolgate/blob/main/PRIVACY.md" target="_blank" rel="noopener" data-i18n="foot.privacy">개인정보 처리방침</a>

@@ -20,6 +20,13 @@ const moduleSpies = vi.hoisted(() => ({
 vi.mock("electron", () => ({
   app: {
     getPath: vi.fn(() => "/tmp"),
+    on: vi.fn(),
+  },
+  screen: {
+    getAllDisplays: vi.fn(() => []),
+    getPrimaryDisplay: vi.fn(() => ({ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } })),
+    getDisplayMatching: vi.fn(() => ({ id: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } })),
+    on: vi.fn(),
   },
   BrowserWindow: {
     getAllWindows: vi.fn(() => []),
@@ -30,6 +37,8 @@ vi.mock("electron", () => ({
   },
   ipcMain: {
     handle: vi.fn(),
+    // RDP 입력처럼 응답이 필요 없는 채널은 handle 이 아니라 on 을 쓴다.
+    on: vi.fn(),
   },
   shell: {
     openExternal: vi.fn(),
@@ -130,6 +139,10 @@ function createDependencySet() {
     xshellImportService: {} as any,
     sessionShareService: {} as any,
     sessionReplayService: {} as any,
+    rdpManager: {
+      setCertificateVerifier: vi.fn(),
+      emitSessionEvent: vi.fn(),
+    } as any,
   };
 }
 
@@ -167,6 +180,7 @@ describe("registerIpcHandlers", () => {
       deps.sessionShareService,
       deps.sessionReplayService,
       deps.tailnets,
+      deps.rdpManager,
     );
 
     expect(deps.coreManager.setTerminalEventHandler).toHaveBeenCalledTimes(1);

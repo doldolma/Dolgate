@@ -8,6 +8,7 @@ import './styles/fonts';
 import { App } from './App';
 import { SessionReplayWindow } from './components/SessionReplayWindow';
 import { SessionShareChatWindow } from './components/SessionShareChatWindow';
+import { RdpMonitorWindow } from './components/rdp/RdpMonitorWindow';
 import { initRendererI18n } from './i18n';
 import { resolveRendererWindowMode } from './window-mode';
 
@@ -21,6 +22,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <SessionShareChatWindow sessionId={rendererWindowMode.sessionId} />
   ) : rendererWindowMode.kind === 'session-replay' ? (
     <SessionReplayWindow recordingId={rendererWindowMode.recordingId} />
+  ) : rendererWindowMode.kind === 'rdp-monitor' ? (
+    <RdpMonitorWindow
+      sessionId={rendererWindowMode.sessionId}
+      monitorIndex={rendererWindowMode.monitorIndex}
+    />
   ) : (
     <App />
   ),

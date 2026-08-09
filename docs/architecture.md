@@ -1,20 +1,20 @@
-# Dolgate 아키텍처
+# Dolgate Architecture
 
-Dolgate는 현재 네 개의 주요 런타임 경계로 나뉩니다.
+Dolgate currently divides into four major runtime boundaries.
 
-1. Electron 기반 데스크톱 앱
-2. React Native 기반 모바일 앱
-3. SSH/SFTP/포트 포워딩 기능을 제공하는 Go `ssh-core`
-4. 인증, 동기화, session share viewer, AWS SSM 브로커를 담당하는 Go `sync-api`
+1. The Electron-based desktop app
+2. The React Native-based mobile app
+3. Go `ssh-core`, providing SSH/SFTP/port forwarding
+4. Go `sync-api`, handling authentication, sync, the session share viewer, and the AWS SSM broker
 
-복잡한 사용자 흐름(인증/오프라인, Session Share, AWS Import, 호스트 내보내기/가져오기, Warpgate)은 아래 [주요 흐름](#주요-흐름)에 정리돼 있습니다.
+Complex user flows (auth/offline, Session Share, AWS import, host export/import, Warpgate) are summarized under [Key flows](#key-flows) below.
 
 ```mermaid
 flowchart LR
   subgraph Desktop["Electron Desktop"]
-    Main["main<br/>브라우저 로그인 / AI egress / 로컬 저장소 / 프로세스 관리"]
+    Main["main<br/>browser login / AI egress / local storage / process management"]
     Preload["preload<br/>contextBridge API"]
-    Renderer["renderer<br/>workspace UI / xterm.js / AI panel / 상태관리"]
+    Renderer["renderer<br/>workspace UI / xterm.js / AI panel / state"]
     Main --> Preload --> Renderer
   end
   subgraph Mobile["React Native Mobile"]
@@ -26,140 +26,140 @@ flowchart LR
   Main <-->|"auth / sync / share"| Sync["sync-api<br/>browser login / sync records / viewer"]
   MobileApp <-->|"auth / sync / AWS broker"| Sync
   Sync -.-> CoreLib["ssh-core/pkg/runtime<br/>embedded AWS SSM bridge"]
-  Sync --> DB["SQLite / MySQL"]
+  Sync --> DB["SQLite / MySQL / PostgreSQL"]
   Browser["External Browser"] <-->|"/login / callback"| Sync
   Main -. "open browser" .-> Browser
   MobileApp -. "open browser" .-> Browser
 ```
 
-## 데스크톱 앱
+## Desktop app
 
 - `main`
-  브라우저 윈도우, 로컬 파일 저장소, encrypted secret store, 브라우저 로그인, 서버 동기화, AI provider egress, Go 코어 프로세스 수명주기, GitHub Releases 기반 auto update를 관리합니다.
+  Manages browser windows, local file storage, the encrypted secret store, browser login, server sync, AI provider egress, the Go core process lifecycle, and GitHub Releases-based auto-update.
 - `preload`
-  `contextBridge`를 통해 renderer에 필요한 최소 API만 노출합니다.
+  Exposes only the minimum API the renderer needs, via `contextBridge`.
 - `renderer`
-  Zustand 상태와 xterm.js 기반 탭 UI, 로그인 게이트, 호스트 목록, 검색 인터페이스, 고정 `SFTP` 워크스페이스, AI 패널과 터미널 scrollback snapshot을 담당합니다.
+  Owns Zustand state and the xterm.js tab UI, the login gate, the host list, search interfaces, the pinned `SFTP` workspace, the AI panel, and terminal scrollback snapshots.
 
-주요 런타임 특징:
+Key runtime traits:
 
-- main이 앱 시작 시 로그인 복구, offline lease 기반 `offline-authenticated` 진입, 외부 브라우저 로그인 세션 교환을 담당합니다(상세 단계는 아래 [주요 흐름 > 인증과 오프라인](#인증과-오프라인)).
-- AI 어시스턴트의 provider 호출과 웹/URL 도구는 Electron main에서 실행해 API 키와 외부 egress를 renderer 밖에 둡니다. renderer는 질문 시점의 터미널 snapshot과 사용자 인터페이스만 담당합니다.
-- `ssh-core`는 앱 시작 시 항상 떠 있지 않고, 실제 SSH/SFTP/포트 포워딩 경로가 필요할 때 lazily 시작합니다.
-- 로컬 파일 브라우징은 Electron main의 파일 서비스가 담당하고, 원격 SFTP 작업·파일 전송·인앱 파일 편집(읽기/쓰기)은 Go 코어가 담당합니다.
+- main handles login recovery at app start, `offline-authenticated` entry based on the offline lease, and session exchange for external browser login (detailed steps under [Key flows > Auth and offline](#auth-and-offline)).
+- The AI assistant's provider calls and web/URL tools run in Electron main, keeping API keys and external egress out of the renderer. The renderer owns only the terminal snapshot taken at question time and the user interface.
+- `ssh-core` is not kept running from app start; it starts lazily when an actual SSH/SFTP/port forwarding path needs it.
+- Local file browsing is served by Electron main's file service; remote SFTP operations, file transfers, and in-app file editing (read/write) are the Go core's job.
 
-## 모바일 앱
+## Mobile app
 
-- React Native 기반 iOS / Android 앱입니다.
-- 동기화된 host / group / session 상태를 기반으로 현재 연결된 세션 탭 워크스페이스를 구성합니다.
-- 하단 단축키 바와 모바일 터미널 입력 보조 UI로 터치 환경의 터미널 입력을 돕습니다.
-- SSH/SFTP는 `ssh-core`를 앱 프로세스 안에 바인딩한 엔진이 직접 처리하고, 인증·동기화·AWS SSM 브로커는 `sync-api`와 통신합니다.
-- 하위 프로세스를 띄울 수 없고 터미널 출력을 청크마다 React Native 브리지로 넘기는 비용도 커서, 출력은 ring buffer에 쌓고 앱이 커서로 읽어 갑니다.
-- 모바일은 데스크톱과 같은 저장소 버전을 따르지만, 별도 앱 런타임과 별도 build 체계를 가집니다(빌드·실행은 [build-and-deploy](./build-and-deploy.md) 참고).
+- A React Native app for iOS / Android.
+- Builds the currently connected session tab workspace on top of synced host / group / session state.
+- A bottom shortcut bar and mobile terminal input helpers assist terminal input in a touch environment.
+- SSH/SFTP is handled directly by an engine bound into the app process from `ssh-core`; auth, sync, and the AWS SSM broker talk to `sync-api`.
+- It cannot spawn subprocesses, and pushing terminal output chunk-by-chunk over the React Native bridge is costly — so output accumulates in a ring buffer that the app reads with a cursor.
+- Mobile follows the same repository version as desktop but has its own app runtime and build system (for builds and runs, see [build-and-deploy](./build-and-deploy.md)).
 
-## SSH 코어
+## SSH core
 
-- `services/ssh-core/pkg/runtime`이 공개 런타임 façade 역할을 합니다.
-- 그 아래는 연결 유형마다 서비스가 나뉩니다 — 일반 SSH/PTY, mosh(SSH로 부트스트랩한 뒤 UDP로 전환), tmux control mode(원격 윈도우·패인을 탭·분할로 매핑), SFTP, 포트 포워딩, AWS SSM, 컨테이너.
-- Electron 데스크톱은 `cmd/ssh-core` child process를 띄워 사용합니다.
-- `cmd/ssh-core`는 stdio framed protocol을 decode/encode하는 호환 어댑터이고, 실제 작업은 `pkg/runtime`에 위임합니다.
-- `sync-api`는 AWS SSM WebSocket 브로커에서 `pkg/runtime`를 직접 import해서 고루틴 기반으로 세션을 처리합니다.
-- 모바일은 `pkg/runtime` 대신 gomobile로 바인딩한 별도 표면을 앱 프로세스 안에서 직접 씁니다.
-- 세 경로 모두 다이얼링·점프 체인·host key 정책·인증은 같은 연결 계층을 공유합니다.
-- control 명령은 metadata JSON frame으로, 터미널 입출력은 raw byte stream frame으로 주고받습니다.
-- SSH 터미널 세션은 `sessionId`, SFTP endpoint는 `endpointId`, 전송 작업은 `jobId`로 구분합니다.
-- 개발 모드에서 desktop는 `go run ./cmd/ssh-core`를 필요 시 실행하고, 서버는 `sync-api` 프로세스 안에 embedded runtime을 직접 구성합니다.
+- `services/ssh-core/pkg/runtime` acts as the public runtime façade.
+- Below it, services split by connection type — plain SSH/PTY, mosh (bootstrapped over SSH then switched to UDP), tmux control mode (remote windows/panes mapped to tabs/splits), SFTP, port forwarding, AWS SSM, and containers.
+- The Electron desktop runs it as a `cmd/ssh-core` child process.
+- `cmd/ssh-core` is a compatibility adapter that decodes/encodes the stdio framed protocol; the actual work is delegated to `pkg/runtime`.
+- `sync-api` imports `pkg/runtime` directly in its AWS SSM WebSocket broker, handling sessions in goroutines.
+- Mobile uses a separate gomobile-bound surface inside the app process instead of `pkg/runtime`.
+- All three paths share the same connection layer for dialing, jump chains, host key policy, and authentication.
+- Control commands travel as metadata JSON frames; terminal I/O travels as raw byte stream frames.
+- SSH terminal sessions are identified by `sessionId`, SFTP endpoints by `endpointId`, and transfer jobs by `jobId`.
+- In development, desktop runs `go run ./cmd/ssh-core` on demand, and the server composes the embedded runtime directly inside the `sync-api` process.
 
 ## Sync API
 
-- 서버는 `/login` 브라우저 페이지와 인증 API, 그리고 암호화된 동기화 레코드 저장소를 함께 제공합니다.
-- 인증은 local login + optional OIDC SSO를 동시에 지원할 수 있습니다.
-- refresh token은 해시만 저장하며, 미사용 14일 만료와 rotation 정책을 사용합니다.
-- 동기화 레코드는 `groups`, `hosts`, `secrets`, `known_hosts`, `port_forwards`, `preferences` 단위의 generic `sync_records` 구조에 저장합니다.
-- secrets는 비밀번호, passphrase, 관리형 private key PEM까지 포함하지만 서버에는 ciphertext만 저장합니다.
-- session share는 별도의 in-memory hub와 viewer asset으로 제공되며, 브라우저 viewer는 WebSocket으로 owner 세션을 구독합니다.
-- 저장소 계층은 GORM으로 구현하고, SQLite와 MySQL을 모두 지원합니다.
-- 모바일 AWS SSM 세션 브로커는 `sync-api` 안의 embedded `ssh-core/pkg/runtime`를 사용하며, 별도 `ssh-core` 바이너리를 실행하지 않습니다.
+- The server provides the `/login` browser page and auth APIs together with the encrypted sync record store.
+- Authentication can support local login and optional OIDC SSO simultaneously.
+- Refresh tokens are stored as hashes only, with a 14-day idle expiry and a rotation policy.
+- Sync records are stored in a generic `sync_records` structure with `groups`, `hosts`, `secrets`, `known_hosts`, `port_forwards`, and `preferences` units.
+- Secrets include passwords, passphrases, and managed private key PEMs — but the server stores ciphertext only.
+- Session share is served by a separate in-memory hub with viewer assets; the browser viewer subscribes to the owner session over WebSocket.
+- The storage layer is implemented with GORM, supporting SQLite, MySQL, and PostgreSQL.
+- The mobile AWS SSM session broker uses the embedded `ssh-core/pkg/runtime` inside `sync-api`; no separate `ssh-core` binary is executed.
 
-## 경계 요약
+## Boundary summary
 
-- 데스크톱은 `cmd/ssh-core` child process를 사용합니다.
-- 모바일은 `ssh-core/mobile`을 gomobile로 바인딩해 앱 프로세스 안에서 SSH를 처리하고, 서버와는 인증/동기화/AWS 경계에서 통신합니다.
-- `sync-api`는 브라우저 로그인, 암호화된 동기화 저장소, session share, AWS SSM 브로커를 한 프로세스에서 담당합니다.
-- `ssh-core/pkg/runtime`는 desktop과 server 양쪽에서 재사용되는 공용 코어 런타임입니다. 모바일은 이 façade 대신 `mobile` 패키지를 쓰지만, 연결 계층인 `internal/sshconn`은 셋이 함께 씁니다.
+- Desktop uses the `cmd/ssh-core` child process.
+- Mobile binds `ssh-core/mobile` via gomobile to handle SSH inside the app process, talking to the server only at the auth/sync/AWS boundaries.
+- `sync-api` covers browser login, the encrypted sync store, session share, and the AWS SSM broker in one process.
+- `ssh-core/pkg/runtime` is the shared core runtime reused by both desktop and server. Mobile uses the `mobile` package instead of this façade, but the connection layer `internal/sshconn` is shared by all three.
 
-## 주요 흐름
+## Key flows
 
-복잡한 사용자 흐름을 빠르게 이해하기 위한 요약입니다.
+Quick summaries for understanding the complex user flows.
 
-### 인증과 오프라인
+### Auth and offline
 
 ```mermaid
 flowchart TD
-  Start["앱 시작"] --> Refresh["refresh token으로 온라인 복구 시도"]
-  Refresh --> Online{"복구 성공?"}
-  Online -->|예| Ready["정상 세션으로 홈 진입"]
-  Online -->|아니오| Lease{"offline lease 유효?"}
-  Lease -->|예| Offline["offline-authenticated로 홈 진입"]
-  Offline --> Resync["백그라운드 재동기화 재시도"]
-  Lease -->|아니오| Browser["외부 브라우저 로그인"]
+  Start["App start"] --> Refresh["Try online recovery with the refresh token"]
+  Refresh --> Online{"Recovered?"}
+  Online -->|yes| Ready["Enter home with a normal session"]
+  Online -->|no| Lease{"Offline lease valid?"}
+  Lease -->|yes| Offline["Enter home as offline-authenticated"]
+  Offline --> Resync["Retry re-sync in the background"]
+  Lease -->|no| Browser["External browser login"]
   Browser --> Ready
 ```
 
-- offline 상태에서는 기존 로컬 캐시와 설정을 사용하고, 백그라운드에서 재동기화를 재시도합니다.
-- 로그인은 외부 브라우저에서 처리하며, 데스크톱은 loopback callback 또는 `dolgate://auth/callback` 식별자로 세션을 교환합니다.
+- While offline, the existing local cache and settings are used, and re-sync retries in the background.
+- Login happens in an external browser; desktop exchanges the session via a loopback callback or the `dolgate://auth/callback` identifier.
 
 ### Session Share
 
 #### owner
 
-- 터미널 세션에서 share를 시작하면 viewer URL이 생성됩니다.
-- owner는 읽기 전용 또는 입력 허용 모드를 전환할 수 있습니다.
-- viewer가 채팅을 보내면 owner 데스크톱 우하단에 토스트가 쌓입니다.
-- `채팅 기록` 버튼을 누르면 별도 창에서 최근 메시지를 실시간으로 볼 수 있습니다.
+- Starting a share from a terminal session generates a viewer URL.
+- The owner can switch between read-only and input-allowed modes.
+- When a viewer sends a chat message, toasts stack at the bottom right of the owner's desktop.
+- The `chat history` button opens a separate window showing recent messages live.
 
 #### viewer
 
-- 브라우저 viewer는 session share URL로 접속합니다.
-- 터미널 화면과 채팅 패널을 함께 사용합니다.
-- 채팅 패널은 기본적으로 접힌 상태로 시작하고, 열면 참여자끼리 실시간 채팅이 가능합니다.
-- 세션이 종료되면 viewer 연결과 채팅 기록이 함께 정리됩니다.
+- The browser viewer connects via the session share URL.
+- It combines the terminal screen with a chat panel.
+- The chat panel starts collapsed; opening it enables live chat between participants.
+- When the session ends, viewer connections and chat history are cleaned up together.
 
-### AWS Import + AWS SFTP
+### AWS import + AWS SFTP
 
 #### import
 
-- AWS profile을 고르면 인증 상태를 확인합니다.
-- profile에 기본 리전이 있으면 그 리전을 자동 선택하고 EC2 목록을 불러옵니다.
-- 기본 리전이 없으면 리전 목록만 먼저 보여주고, 사용자가 고른 뒤에만 EC2 목록을 조회합니다.
-- Linux 인스턴스는 `SSH 정보 확인`을 눌러 SSH username/port 추천값을 확인합니다.
-- 자동 확인 결과는 수정 가능하고, 값을 비운 채로도 Host를 최종 등록할 수 있습니다.
+- Picking an AWS profile checks its authentication state.
+- If the profile has a default region, it is auto-selected and the EC2 list loads.
+- Without a default region, only the region list is shown first; EC2 is queried only after the user picks one.
+- For Linux instances, `Check SSH info` fetches suggested SSH username/port values.
+- Auto-detected values are editable, and a Host can be registered even with the fields left empty.
 
 #### SFTP
 
-- AWS SFTP는 Linux 인스턴스만 지원합니다.
-- 전제 조건:
+- AWS SFTP supports Linux instances only.
+- Prerequisites:
   - SSM managed
   - sshd/SFTP enabled
-  - EC2 Instance Connect 가능
-  - AWS 프로필 인증 완료 (세션 연결은 내장 SSM 데이터 채널로 동작)
-- 연결 시 진행 단계가 UI에 표시됩니다.
-  - profile 확인
-  - 브라우저 로그인 필요 시 로그인
-  - SSM 확인
-  - 인스턴스 메타데이터 확인
+  - EC2 Instance Connect available
+  - AWS profile authenticated (session connections run over the built-in SSM data channel)
+- Connection progress is shown step by step in the UI:
+  - profile check
+  - browser login if needed
+  - SSM check
+  - instance metadata check
   - host key probe
-  - ephemeral key 생성과 공개 키 전송
-  - 실제 SFTP 연결
-- 자동 추천값이 맞지 않으면 username/port를 다시 입력해 재시도할 수 있습니다.
+  - ephemeral key generation and public key delivery
+  - the actual SFTP connection
+- If the auto-suggested values are wrong, re-enter username/port and retry.
 
-### 호스트 내보내기 · 가져오기
+### Host export / import
 
-- 호스트 목록에서 호스트나 그룹을 골라 내보내면, 연결에 필요한 항목(자격증명·점프 호스트 등)을 함께 담습니다.
-- 형식은 암호로 암호화한 Dolgate 파일과 평문 OpenSSH config 중에 고릅니다. OpenSSH로 표현할 수 없는 호스트는 개수를 먼저 알려주고 제외합니다.
+- Exporting hosts or groups from the host list bundles what the connection needs (credentials, jump hosts, and so on).
+- Choose between a passphrase-encrypted Dolgate file and a plaintext OpenSSH config. The number of hosts OpenSSH cannot express is shown upfront, and those hosts are excluded.
 
-### Warpgate Import
+### Warpgate import
 
-- Warpgate import는 내부 브라우저 인증 창으로 로그인합니다.
-- 중단 후에도 import 다이얼로그는 그대로 남아 URL 수정이나 재시도가 가능합니다.
-- 로그인 성공 후 target 목록을 가져와 Host로 추가합니다.
+- Warpgate import signs in through an internal browser auth window.
+- After cancelling, the import dialog remains, allowing URL edits or retries.
+- After a successful login, the targets are fetched and added as Hosts.

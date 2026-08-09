@@ -406,6 +406,7 @@ export function createPendingSessionTab(input: {
   hostId: string | null;
   title: string;
   shellKind?: string;
+  paneKind?: "terminal" | "rdp";
   progress: TerminalConnectionProgress;
 }): TerminalTab {
   return {
@@ -416,6 +417,7 @@ export function createPendingSessionTab(input: {
     hostId: input.hostId,
     title: input.title,
     shellKind: input.shellKind,
+    paneKind: input.paneKind,
     status: "pending",
     connectionProgress: input.progress,
     sessionShare: createInactiveSessionShareState(),

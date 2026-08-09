@@ -8,8 +8,8 @@ Hosts, sessions and snippets sync between devices — and you can self-host `syn
 Two things set it apart from other SSH clients: **it joins a Tailscale tailnet without installing Tailscale**, and **it talks to AWS SSM without the AWS CLI or session-manager-plugin**.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/hosts-workspace-dark.png">
-  <img alt="Dolgate home screen" src="./docs/hosts-workspace.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/hosts-workspace-dark.png">
+  <img alt="Dolgate home screen" src="./docs/images/hosts-workspace.png">
 </picture>
 
 ### Highlights
@@ -105,8 +105,8 @@ See the [data protection document](./docs/data-protection.md) for the design in 
 - Auto-update · self-hosted sync-api
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/port-forwarding-dark.png">
-  <img alt="Dolgate port forwarding screen" src="./docs/port-forwarding.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/port-forwarding-dark.png">
+  <img alt="Dolgate port forwarding screen" src="./docs/images/port-forwarding.png">
 </picture>
 
 ## Self-hosting sync-api
@@ -129,8 +129,8 @@ details, see the [sync-api self-hosting guide](./docs/sync-api-self-hosting.md).
 In the desktop app, click the gear on the login screen and point `Login Server` at your self-hosted address.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./docs/login-dark.png">
-  <img alt="Login Server settings screen" src="./docs/login.png">
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/login-dark.png">
+  <img alt="Login Server settings screen" src="./docs/images/login.png">
 </picture>
 
 ## Things to know
@@ -152,6 +152,7 @@ SSH-over-SSM and AWS SFTP require EC2 Instance Connect public key injection perm
 ## Documentation
 
 - [Desktop](./docs/desktop.md)
+- [Tailscale / Headscale guide](./docs/tailscale.md)
 - [AI assistant](./docs/ai-assistant-design.md)
 - [AWS / SSM setup guide](./docs/aws.md)
 - [Architecture](./docs/architecture.md)

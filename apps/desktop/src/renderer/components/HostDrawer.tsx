@@ -18,7 +18,7 @@ interface HostDrawerProps {
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
-  createKind?: 'ssh' | 'serial';
+  createKind?: 'ssh' | 'serial' | 'rdp';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   onClose: () => void;
   onSubmit: HostFormProps['onSubmit'];
