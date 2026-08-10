@@ -38,6 +38,26 @@ func (runtime *Runtime) TailnetSnapshot(requestID string) error {
 	return runtime.tailnetService.TailnetSnapshot(requestID)
 }
 
+// TailnetForwardOpen 은 tailnet 안의 한 곳으로 이어 줄 로컬 포워드를 연다.
+//
+// RDP(Rust 코어)가 tailnet 을 직접 쓸 수 없어서 필요하다 — 여기서 만든 로컬 주소로 붙는다.
+func (runtime *Runtime) TailnetForwardOpen(
+	requestID string,
+	payload coretypes.TailnetForwardOpenPayload,
+) error {
+	if runtime.tailnetService == nil {
+		return errTailnetDisabled
+	}
+	return runtime.tailnetService.TailnetForwardOpen(requestID, payload)
+}
+
+func (runtime *Runtime) TailnetForwardClose(payload coretypes.TailnetForwardClosePayload) error {
+	if runtime.tailnetService == nil {
+		return errTailnetDisabled
+	}
+	return runtime.tailnetService.TailnetForwardClose(payload)
+}
+
 func (runtime *Runtime) TailnetConfigure(payload coretypes.TailnetConfigurePayload) error {
 	if runtime.tailnetService == nil {
 		return errTailnetDisabled

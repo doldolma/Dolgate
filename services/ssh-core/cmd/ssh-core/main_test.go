@@ -112,6 +112,17 @@ func (stub *stubCoreRuntime) TailnetCancel(_ string, payload protocol.TailnetDis
 	return nil
 }
 
+func (stub *stubCoreRuntime) TailnetForwardOpen(
+	_ string,
+	_ protocol.TailnetForwardOpenPayload,
+) error {
+	return nil
+}
+
+func (stub *stubCoreRuntime) TailnetForwardClose(_ protocol.TailnetForwardClosePayload) error {
+	return nil
+}
+
 func (stub *stubCoreRuntime) TailnetSnapshot(_ string) error {
 	stub.tailnetSnapshots += 1
 	return nil

@@ -61,6 +61,8 @@ const (
 	CommandTailnetCancel               CommandType = "tailnetCancel"
 	CommandTailnetSnapshot             CommandType = "tailnetSnapshot"
 	CommandTailnetConfigure            CommandType = "tailnetConfigure"
+	CommandTailnetForwardOpen          CommandType = "tailnetForwardOpen"
+	CommandTailnetForwardClose         CommandType = "tailnetForwardClose"
 	CommandTerminalAutocompletePrepare CommandType = "terminalAutocompletePrepare"
 	CommandTerminalAutocompleteRefresh CommandType = "terminalAutocompleteRefresh"
 	CommandTerminalAutocompleteStop    CommandType = "terminalAutocompleteStop"
@@ -100,6 +102,7 @@ const (
 	EventTailnetStatus                  EventType = "tailnetStatus"
 	EventTailnetForgot                  EventType = "tailnetForgot"
 	EventTailnetSnapshot                EventType = "tailnetSnapshot"
+	EventTailnetForwardOpened           EventType = "tailnetForwardOpened"
 	EventPrivateKeyGenerated            EventType = "privateKeyGenerated"
 	EventPrivateKeyInspected            EventType = "privateKeyInspected"
 	EventAuthorizedKeyInstalled         EventType = "authorizedKeyInstalled"
@@ -668,6 +671,33 @@ type TailnetForgotPayload struct {
 // 재인증 없이 올라온다.
 type TailnetDisconnectPayload struct {
 	ID string `json:"id"`
+}
+
+// TailnetForwardOpenPayload 는 tailnet 안의 한 곳으로 이어 줄 로컬 포워드를 여는 요청이다.
+//
+// RDP 코어는 Rust 라서 tsnet 을 쓸 수 없다. 여기서 로컬 주소를 만들어 주면 그쪽은 평범한 TCP 로
+// 붙기만 하면 된다.
+type TailnetForwardOpenPayload struct {
+	// ID 는 이 포워드를 가리키는 이름이다(RDP 는 세션 id). 같은 id 로 다시 열면 앞의 것을 닫는다.
+	ID string `json:"id"`
+	// TailnetID 는 어느 tailnet 으로 보낼지다.
+	TailnetID string `json:"tailnetId"`
+	// TailnetName 은 설정에 박아 둔 tailnet 이름이다. 다르면 연결을 거부한다.
+	TailnetName string `json:"tailnetName,omitempty"`
+	// Host·Port 는 tailnet 안의 대상이다.
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type TailnetForwardClosePayload struct {
+	ID string `json:"id"`
+}
+
+// TailnetForwardOpenedPayload 는 열린 포워드의 로컬 주소다. 붙는 쪽은 이 주소로 TCP 를 연다.
+type TailnetForwardOpenedPayload struct {
+	ID string `json:"id"`
+	// Address 는 항상 루프백이다(`127.0.0.1:<port>`).
+	Address string `json:"address"`
 }
 
 // TailnetSnapshotPayload 는 지금 살아 있는 노드들의 상태다.

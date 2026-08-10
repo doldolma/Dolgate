@@ -30,6 +30,9 @@ type Service struct {
 	tailnets       *tailnet.Registry
 	tailnetConfigs *tailnetConfigs
 	tailnetTests   *tailnetTests
+	// forwards 는 열려 있는 tailnet 로컬 포워드들이다(키는 호출부가 정하는 id — RDP 는 세션 id).
+	forwardMu sync.Mutex
+	forwards  map[string]*forwarder
 
 	tailnetRecoveryMu         sync.Mutex
 	tailnetRecoveryPending    map[string]bool
@@ -59,7 +62,13 @@ func New(options Options) *Service {
 // Close stops Tailnet nodes without logging them out, preserving their local
 // identity for the next application launch.
 func (service *Service) Close() error {
-	if service == nil || service.tailnets == nil {
+	if service == nil {
+		return nil
+	}
+	// 포워드를 먼저 닫는다. 노드를 내린 뒤 남아 있으면 그 리스너가 죽은 tailnet 을 가리킨 채
+	// 계속 연결을 받아 준다.
+	service.shutdownForwards()
+	if service.tailnets == nil {
 		return nil
 	}
 	return service.tailnets.Close()

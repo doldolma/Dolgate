@@ -35,6 +35,8 @@ type coreRuntime interface {
 	TailnetDisconnect(requestID string, payload protocol.TailnetDisconnectPayload) error
 	TailnetCancel(requestID string, payload protocol.TailnetDisconnectPayload) error
 	TailnetSnapshot(requestID string) error
+	TailnetForwardOpen(requestID string, payload protocol.TailnetForwardOpenPayload) error
+	TailnetForwardClose(payload protocol.TailnetForwardClosePayload) error
 	TailnetConfigure(payload protocol.TailnetConfigurePayload) error
 	ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error
 	ConnectLocal(sessionID, requestID string, payload protocol.LocalConnectPayload) error
@@ -314,6 +316,21 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return core.TailnetSnapshot(request.ID)
 		})()
 		return nil
+	case protocol.CommandTailnetForwardOpen:
+		var payload protocol.TailnetForwardOpenPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		go emitAsyncError(writer, request.ID, "", "", protocol.EventError, func() error {
+			return core.TailnetForwardOpen(request.ID, payload)
+		})()
+		return nil
+	case protocol.CommandTailnetForwardClose:
+		var payload protocol.TailnetForwardClosePayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		return core.TailnetForwardClose(payload)
 	case protocol.CommandTailnetForget:
 		var payload protocol.TailnetForgetPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
