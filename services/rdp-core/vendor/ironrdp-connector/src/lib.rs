@@ -152,6 +152,19 @@ pub struct Config {
     /// are relative to it, so they may be negative. `desktop_size` must be the bounding box of all
     /// of them. `right`/`bottom` are inclusive. At most 16 entries are encoded.
     pub monitors: Vec<gcc::Monitor>,
+    /// PATCH (Dolgate): connect to the administrative session (`mstsc /admin`).
+    ///
+    /// Upstream hardcodes `cluster: None` (see its `TODO(#139)`), so a client cannot ask for the
+    /// administrative session. That session does not consume an RDS client access license and can
+    /// be reached when the session limit is hit or the host is draining — it is the successor to
+    /// `mstsc /console`.
+    ///
+    /// When true this becomes a [`TS_UD_CS_CLUSTER`](gcc::ClientClusterData) block requesting
+    /// session 0. When false no block is sent at all, which is the historical behaviour.
+    ///
+    /// This is *not* `/restrictedAdmin` (logging on without sending credentials) — that one is a
+    /// negotiation flag and needs a different CredSSP path.
+    pub admin_session: bool,
     /// PATCH (Dolgate): whether to ask the server for the graphics pipeline (EGFX).
     ///
     /// Upstream never sets `SUPPORT_DYN_VC_GFX_PROTOCOL`, so the server never opens the

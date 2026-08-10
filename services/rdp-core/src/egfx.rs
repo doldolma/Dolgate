@@ -41,17 +41,35 @@ const AVC_FAILURE_LIMIT: u32 = 60;
 /// 다시 접속한다(=예전 경로). 검은 화면으로 남기는 것보다 낫다.
 pub type EgfxUnusable = Arc<AtomicBool>;
 
+/// 서피스 하나의 H.264 스트림 상태.
+struct AvcStream {
+    decoder: Box<dyn ironrdp_egfx::decode::H264Decoder>,
+    /// 연달아 그림을 못 낸 횟수. 성공하면 0 으로 돌아간다.
+    ///
+    /// 서피스별로 센다. 합쳐서 세면 한 화면의 일시적 실패가 다른 화면의 실패와 더해져, 둘 다
+    /// 정상인데도 한도를 넘겨 EGFX 를 접을 수 있다.
+    failures: u32,
+}
+
 pub struct EgfxHandler {
     session_id: String,
     surface: EgfxSurfaceHandle,
     unusable: EgfxUnusable,
-    /// AVC444 용 H.264 디코더.
+    /// AVC444 용 H.264 디코더. **서피스마다 하나씩.**
     ///
     /// 크레이트는 AVC420 만 풀고 AVC444 는 흘려보낸다. 그런데 이 서버는 H.264 를 쓸 수 있으면
     /// AVC444 로 보낸다(4:2:0 만 달라고 해도 그렇다). AVC444 는 AVC420 스트림 두 개다 — 첫
     /// 번째가 4:2:0 화면이고 두 번째는 색차를 4:4:4 로 올리는 보강분이라, 첫 번째만 풀어도
     /// 화면은 제대로 나온다(색이 4:2:0 만큼만 곱다).
-    avc444: Option<Box<dyn ironrdp_egfx::decode::H264Decoder>>,
+    ///
+    /// 왜 서피스마다 따로 두는가: 모니터마다 서피스가 하나씩 오고, **서피스마다 독립된 H.264
+    /// 스트림**이다(자기 SPS/PPS, 자기 참조 프레임). 한 디코더에 두 스트림을 번갈아 먹이면
+    /// 상태가 오염되어 두 번째 스트림부터 영원히 못 푼다 — 계측으로 확인했다: 모니터 1개는
+    /// 15초간 무결, 2개는 첫 프레임 직후 `dsNoParamSets | dsRefLost`(OpenH264 Native:22/18)로
+    /// 죽고 EGFX 를 통째로 접었다. FreeRDP·mstsc 도 서피스마다 컨텍스트를 둔다.
+    avc: HashMap<u16, AvcStream>,
+    /// H.264 디코더를 아예 만들 수 없는 빌드. 매 프레임 경고하지 않도록 한 번만 남긴다.
+    avc_unavailable: bool,
     /// RemoteFX Progressive 디코더.
     ///
     /// 이 서버는 사진·영상 같은 영역을 WireToSurface2 로 보낸다. 크레이트의 EGFX 클라이언트는
@@ -111,8 +129,6 @@ struct EgfxCounts {
     wire2: u64,
     progressive_tiles: u64,
     avc444: u64,
-    /// 연달아 그림을 못 낸 횟수. 성공하면 0 으로 돌아간다.
-    avc_failures: u32,
     /// 다음에 남길 지점(연산 누계). 처음엔 촘촘히, 그 뒤엔 뜸하게.
     next_report: u64,
     /// 마지막으로 남긴 시각. 조용한 구간에서도 주기적으로 보이게 한다.
@@ -138,13 +154,9 @@ impl EgfxHandler {
             logged_unmapped: false,
             logged_unhandled: false,
             logged_codecs: HashSet::new(),
-            avc444: match ironrdp_egfx::decode::OpenH264Decoder::new() {
-                Ok(decoder) => Some(Box::new(decoder)),
-                Err(error) => {
-                    warn!(%error, "no H.264 decoder; AVC444 frames will not be drawn");
-                    None
-                }
-            },
+            // 디코더는 서피스가 실제로 H.264 를 보낼 때 만든다. 서피스 수를 미리 알 수 없다.
+            avc: HashMap::new(),
+            avc_unavailable: false,
             progressive: ProgressiveDecoder::new(),
             sizes: HashMap::new(),
             clear_codec: ClearCodecDecoder::new(),
@@ -196,7 +208,9 @@ impl EgfxHandler {
             wire2 = self.counts.wire2,
             progressive_tiles = self.counts.progressive_tiles,
             avc444 = self.counts.avc444,
-            avc_failures = self.counts.avc_failures,
+            // 가장 나쁜 서피스의 연속 실패 수. 0 이 아니면 그 화면이 멎고 있다는 뜻이다.
+            avc_failures = self.avc.values().map(|stream| stream.failures).max().unwrap_or(0),
+            avc_surfaces = self.avc.len(),
             dropped_unmapped = self.counts.dropped_unmapped,
             "egfx counts"
         );
@@ -211,6 +225,40 @@ impl EgfxHandler {
                 "egfx cannot render this session; falling back to the legacy path"
             );
         }
+    }
+
+    /// 이 서피스의 H.264 스트림. 처음 보는 서피스면 디코더를 만든다.
+    ///
+    /// 디코더를 못 만드는 빌드에서는 `None` 이고, 그때 경고는 한 번만 남긴다 — 프레임마다
+    /// 남기면 로그가 쓸려나간다.
+    fn avc_stream(&mut self, surface_id: u16) -> Option<&mut AvcStream> {
+        if self.avc_unavailable {
+            return None;
+        }
+        if !self.avc.contains_key(&surface_id) {
+            match ironrdp_egfx::decode::OpenH264Decoder::new() {
+                Ok(decoder) => {
+                    info!(
+                        session_id = %self.session_id,
+                        surface_id,
+                        "created an H.264 decoder for this surface"
+                    );
+                    self.avc.insert(
+                        surface_id,
+                        AvcStream {
+                            decoder: Box::new(decoder),
+                            failures: 0,
+                        },
+                    );
+                }
+                Err(error) => {
+                    self.avc_unavailable = true;
+                    warn!(%error, "no H.264 decoder; AVC444 frames will not be drawn");
+                    return None;
+                }
+            }
+        }
+        self.avc.get_mut(&surface_id)
     }
 
     /// 화면에 합성한다. 잠금은 같은 스레드 안에서만 오가므로 다툼이 없다.
@@ -245,42 +293,69 @@ impl EgfxHandler {
             _ => return,
         };
 
-        let Some(decoder) = self.avc444.as_mut() else {
-            return;
-        };
-
         use ironrdp_core::Decode as _;
         let stream = match ironrdp_egfx::pdu::Avc420BitmapStream::decode(
             &mut ironrdp_core::ReadCursor::new(luma),
         ) {
             Ok(stream) => stream,
             Err(error) => {
-                warn!(session_id = %self.session_id, %error, "avc444 stream decode failed");
+                warn!(
+                    session_id = %self.session_id,
+                    surface_id = wire.surface_id,
+                    %error,
+                    "avc444 stream decode failed"
+                );
                 self.give_up("avc444 stream decode failed");
                 return;
             }
         };
 
-        let frame = match decoder.decode(stream.data) {
+        // 이 서피스 몫의 디코더로만 푼다. DecodedFrame 은 소유값이라 여기서 빌림이 끝난다.
+        let surface_id = wire.surface_id;
+        let decoded = {
+            let Some(avc) = self.avc_stream(surface_id) else {
+                return;
+            };
+            avc.decoder.decode(stream.data)
+        };
+
+        let frame = match decoded {
             Ok(frame) => frame,
             Err(error) => {
                 // 낼 그림이 아직 없는 것은 정상이다 — H.264 는 파라미터 세트만 담긴 조각으로
                 // 시작하고, 그때는 디코더가 아무것도 내놓지 않는다. 여기서 접으면 H.264 를
                 // 쓰는 서버에서 매번 예전 경로로 떨어진다.
                 //
-                // 다만 계속 못 풀면 화면이 멎은 채로 남으므로, 연달아 실패하면 그때 접는다.
-                self.counts.avc_failures += 1;
-                if self.counts.avc_failures <= 3 {
-                    info!(session_id = %self.session_id, %error, "avc444 frame produced no picture");
+                // 다만 계속 못 풀면 그 화면이 멎은 채로 남으므로, 연달아 실패하면 그때 접는다.
+                let failures = self
+                    .avc
+                    .get_mut(&surface_id)
+                    .map(|avc| {
+                        avc.failures += 1;
+                        avc.failures
+                    })
+                    .unwrap_or(0);
+                if failures <= 3 {
+                    info!(
+                        session_id = %self.session_id,
+                        surface_id, failures, %error,
+                        "avc444 frame produced no picture"
+                    );
                 }
-                if self.counts.avc_failures >= AVC_FAILURE_LIMIT {
-                    warn!(session_id = %self.session_id, %error, "avc444 decoding keeps failing");
+                if failures >= AVC_FAILURE_LIMIT {
+                    warn!(
+                        session_id = %self.session_id,
+                        surface_id, failures, %error,
+                        "avc444 decoding keeps failing"
+                    );
                     self.give_up("avc444 decode failed");
                 }
                 return;
             }
         };
-        self.counts.avc_failures = 0;
+        if let Some(avc) = self.avc.get_mut(&surface_id) {
+            avc.failures = 0;
+        }
 
         let width = wire
             .destination_rectangle
@@ -321,6 +396,7 @@ impl EgfxHandler {
             self.logged_first_avc = true;
             info!(
                 session_id = %self.session_id,
+                surface_id,
                 width, height,
                 dest_left, dest_top,
                 frame_width = frame.width(),
@@ -662,11 +738,9 @@ impl GraphicsPipelineHandler for EgfxHandler {
             // H.264 는 앞 프레임에 기대어 풀리므로, 옛 크기의 상태를 붙든 디코더는 새 스트림을
             // 계속 못 푼다. 그러면 연달아 실패한 것으로 보고 이 채널을 접어 버린다 — 창 크기를
             // 바꿨을 뿐인데 세션이 예전 경로로 떨어지거나 끊긴다.
-            if let Some(decoder) = self.avc444.as_mut() {
-                decoder.reset();
-            }
+            // 서피스마다 스트림이 다르므로 통째로 버린다. 다음 프레임이 새 디코더를 만든다.
+            self.avc.clear();
             self.progressive.reset();
-            self.counts.avc_failures = 0;
         }
 
         info!(session_id = %self.session_id, width, height, changed, "egfx reset graphics");
@@ -686,6 +760,9 @@ impl GraphicsPipelineHandler for EgfxHandler {
     fn on_surface_deleted(&mut self, surface_id: u16) {
         self.origins.remove(&surface_id);
         self.sizes.remove(&surface_id);
+        // 이 서피스의 디코더도 같이 버린다. 같은 번호로 새 서피스가 오면 그것은 새 스트림이고,
+        // 옛 상태를 붙든 디코더는 그걸 못 푼다.
+        self.avc.remove(&surface_id);
     }
 
     fn on_surface_mapped(&mut self, surface_id: u16, origin_x: u32, origin_y: u32) {
@@ -885,6 +962,48 @@ mod tests {
 
     use super::*;
     use crate::egfx_surface::{DirtyRect, new_surface};
+
+    /// 서피스마다 H.264 디코더가 따로 있어야 한다.
+    ///
+    /// 하나를 공유하면 두 번째 서피스의 프레임부터 영원히 못 푼다. 서피스마다 독립된 H.264
+    /// 스트림이라(자기 SPS/PPS, 자기 참조 프레임) 한 디코더에 번갈아 먹이면 상태가 오염된다.
+    /// 계측: 모니터 1개는 무결, 2개는 첫 프레임 직후 OpenH264 Native:22 로 죽고 EGFX 를 접었다.
+    #[test]
+    fn keeps_one_h264_decoder_per_surface() {
+        let (mut handler, _surface) = two_monitors();
+
+        assert!(handler.avc_stream(1).is_some());
+        assert!(handler.avc_stream(2).is_some());
+        assert_eq!(handler.avc.len(), 2, "서피스마다 하나씩");
+
+        // 같은 서피스를 다시 물으면 새로 만들지 않는다. 새로 만들면 그때까지의 참조 프레임이
+        // 사라져 다음 프레임을 못 푼다.
+        assert!(handler.avc_stream(1).is_some());
+        assert_eq!(handler.avc.len(), 2);
+    }
+
+    #[test]
+    fn drops_the_decoder_with_its_surface() {
+        // 같은 번호로 새 서피스가 오면 그것은 새 스트림이다. 옛 상태를 붙든 디코더는 못 푼다.
+        let (mut handler, _surface) = two_monitors();
+        handler.avc_stream(1);
+        handler.avc_stream(2);
+
+        handler.on_surface_deleted(1);
+        assert_eq!(handler.avc.len(), 1);
+        assert!(!handler.avc.contains_key(&1));
+    }
+
+    #[test]
+    fn drops_every_decoder_when_the_desktop_is_resized() {
+        // 크기가 바뀌면 서버가 스트림을 처음부터 다시 시작한다. 옛 상태로는 못 푼다.
+        let (mut handler, _surface) = two_monitors();
+        handler.avc_stream(1);
+        handler.avc_stream(2);
+
+        handler.on_reset_graphics(1920, 1080);
+        assert!(handler.avc.is_empty());
+    }
 
     fn rectangle(left: u16, top: u16, right: u16, bottom: u16) -> ExclusiveRectangle {
         ExclusiveRectangle {

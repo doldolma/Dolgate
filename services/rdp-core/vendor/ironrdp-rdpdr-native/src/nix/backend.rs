@@ -13,35 +13,55 @@ use ironrdp_svc::SvcMessage;
 use nix::dir::{Dir, OwningIter};
 use tracing::{debug, warn};
 
-#[derive(Debug, Default)]
-pub struct NixRdpdrBackend {
-    file_id: u32,
-    file_base: String,
-    /// PATCH (Dolgate): 원격이 공유 폴더를 수정하지 못하게 한다.
+/// PATCH (Dolgate): 공유 폴더 하나.
+#[derive(Debug, Clone)]
+pub struct DriveRoot {
+    /// 로컬 절대 경로. 원격이 준 경로는 항상 이 아래로 봉쇄된다.
+    pub path: String,
+    /// 원격이 이 폴더를 수정하지 못하게 한다.
     ///
     /// 상류에는 읽기 전용 개념이 없어 write/rename/delete 가 무조건 실행된다. 공유는 신뢰
     /// 경계를 넘기는 동작이라, 읽기만 필요한 경우에 쓰기까지 열어둘 이유가 없다.
-    read_only: bool,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct NixRdpdrBackend {
+    file_id: u32,
+    /// PATCH (Dolgate): 장치 번호별 공유 루트.
+    ///
+    /// RDPDR 은 채널 하나에 드라이브 여러 개를 붙일 수 있고 요청마다 `device_id` 가 온다.
+    /// 상류는 루트를 **하나만** 들고 있어서, 드라이브를 여럿 announce 하면 전부 같은 폴더를
+    /// 보여 줬다. 요청의 device_id 로 루트를 골라야 폴더별로 갈린다.
+    roots: std::collections::HashMap<u32, DriveRoot>,
     file_map: std::collections::HashMap<u32, std::fs::File>,
     file_path_map: std::collections::HashMap<u32, String>,
     file_dir_map: std::collections::HashMap<u32, OwningIter>,
 }
 
 impl NixRdpdrBackend {
-    pub fn new(file_base: String) -> Self {
+    /// PATCH (Dolgate): 장치 번호 → 공유 루트.
+    pub fn new(roots: std::collections::HashMap<u32, DriveRoot>) -> Self {
         Self {
-            file_base,
+            roots,
             ..Default::default()
         }
     }
 
-    /// PATCH (Dolgate): 쓰기를 막은 백엔드.
-    pub fn new_read_only(file_base: String) -> Self {
-        Self {
-            file_base,
-            read_only: true,
-            ..Default::default()
-        }
+    /// 이 요청이 가리키는 공유 루트. 모르는 장치면 `None` — 그때는 요청을 거절해야 한다.
+    /// 임의의 루트로 대신 처리하면 다른 공유 폴더의 내용이 새어 나간다.
+    fn root_of(&self, device_id: u32) -> Option<&DriveRoot> {
+        self.roots.get(&device_id)
+    }
+
+    /// 이 요청의 공유 루트 경로. 모르는 장치면 `None`.
+    fn base_of(&self, device_id: u32) -> Option<&str> {
+        self.root_of(device_id).map(|root| root.path.as_str())
+    }
+
+    /// 이 장치가 읽기 전용인지. 모르는 장치는 쓰기를 막는다(안전한 쪽).
+    fn is_read_only(&self, device_id: u32) -> bool {
+        self.root_of(device_id).map(|root| root.read_only).unwrap_or(true)
     }
 }
 
@@ -86,8 +106,8 @@ impl RdpdrBackend for NixRdpdrBackend {
 }
 
 pub(crate) fn write_device(backend: &mut NixRdpdrBackend, req_inner: DeviceWriteRequest) -> PduResult<Vec<SvcMessage>> {
-    // PATCH (Dolgate): 읽기 전용 공유에서는 쓰기를 거절한다.
-    if backend.read_only {
+    // PATCH (Dolgate): 읽기 전용 공유에서는 쓰기를 거절한다. 장치별로 다르다.
+    if backend.is_read_only(req_inner.device_io_request.device_id) {
         return Ok(vec![SvcMessage::from(RdpdrPdu::DeviceWriteResponse(
             DeviceWriteResponse {
                 device_io_reply: DeviceIoResponse::new(
@@ -414,7 +434,12 @@ pub(crate) fn set_information(
                 FileInformationClass::Rename(info) => {
                     // PATCH (Dolgate): 이름 변경의 대상도 원격이 정한다. 봉쇄하지 않으면
                     // 공유 폴더 안의 파일을 밖으로 옮길 수 있다.
-                    let Some(to) = contained_path(&backend.file_base, &info.file_name) else {
+                    let Some(base) = backend.base_of(req_inner.device_io_request.device_id)
+                    else {
+                        warn!("rename for an unknown device; refusing");
+                        return Ok(Vec::new());
+                    };
+                    let Some(to) = contained_path(base, &info.file_name) else {
                         warn!("rename target escapes the shared folder; refusing");
                         return Ok(Vec::new());
                     };
@@ -587,7 +612,12 @@ pub(crate) fn query_directory(
             let mut find_file_name = None;
             if req_inner.initial_query > 0 {
                 if req_inner.path.ends_with('*') {
-                    let mut parent = backend.file_base.clone();
+                    let Some(base) = backend.base_of(req_inner.device_io_request.device_id)
+                    else {
+                        warn!("directory query for an unknown device; refusing");
+                        return Ok(Vec::new());
+                    };
+                    let mut parent = base.to_owned();
                     let query_path = req_inner.path.replace('\\', "/");
                     let len = query_path.len();
                     // path ends with *, so its len > 0
@@ -614,7 +644,9 @@ pub(crate) fn query_directory(
                     }
                 } else {
                     // PATCH (Dolgate): 질의 경로도 봉쇄한다.
-                    let Some(full_path) = contained_path(&backend.file_base, &req_inner.path)
+                    let Some(full_path) = backend
+                        .base_of(req_inner.device_io_request.device_id)
+                        .and_then(|base| contained_path(base, &req_inner.path))
                     else {
                         warn!("query path escapes the shared folder; refusing");
                         return Ok(Vec::new());
@@ -722,7 +754,10 @@ pub(crate) fn create_drive(
 ) -> PduResult<Vec<SvcMessage>> {
     let file_id = backend.file_id;
     backend.file_id += 1;
-    let Some(path) = contained_path(&backend.file_base, &req_inner.path) else {
+    let Some(path) = backend
+        .base_of(req_inner.device_io_request.device_id)
+        .and_then(|base| contained_path(base, &req_inner.path))
+    else {
         // 공유 폴더 밖을 가리키는 요청. 존재하지 않는 것처럼 응답한다.
         return Ok(vec![SvcMessage::from(RdpdrPdu::DeviceCreateResponse(
             DeviceCreateResponse {
@@ -857,6 +892,60 @@ pub(crate) fn process_dependent_file(
     match backend.file_map.get_mut(&request.file_id) {
         None => error_fx(request),
         Some(file) => fx(file, request),
+    }
+}
+
+/// PATCH (Dolgate): 장치별 루트 해석.
+///
+/// 여기서 어긋나면 한 공유 폴더의 요청이 다른 폴더로 해석되어, 사용자가 공유하지 않은 파일이
+/// 원격에 노출된다. 상류에는 루트가 하나뿐이라 이 개념 자체가 없었다.
+#[cfg(test)]
+mod root_tests {
+    use super::{DriveRoot, NixRdpdrBackend};
+
+    fn backend() -> NixRdpdrBackend {
+        let mut roots = std::collections::HashMap::new();
+        roots.insert(
+            1,
+            DriveRoot {
+                path: "/share/a".to_owned(),
+                read_only: false,
+            },
+        );
+        roots.insert(
+            2,
+            DriveRoot {
+                path: "/share/b".to_owned(),
+                read_only: true,
+            },
+        );
+        NixRdpdrBackend::new(roots)
+    }
+
+    #[test]
+    fn resolves_each_device_to_its_own_root() {
+        let backend = backend();
+        assert_eq!(backend.base_of(1), Some("/share/a"));
+        assert_eq!(backend.base_of(2), Some("/share/b"));
+    }
+
+    #[test]
+    fn refuses_an_unknown_device() {
+        // 임의의 루트로 대신 처리하면 공유하지 않은 폴더가 새어 나간다.
+        assert_eq!(backend().base_of(99), None);
+    }
+
+    #[test]
+    fn applies_read_only_per_device() {
+        let backend = backend();
+        assert!(!backend.is_read_only(1));
+        assert!(backend.is_read_only(2));
+    }
+
+    #[test]
+    fn treats_an_unknown_device_as_read_only() {
+        // 쓰기를 막는 쪽이 안전하다. 어차피 경로 해석도 실패한다.
+        assert!(backend().is_read_only(99));
     }
 }
 

@@ -42,7 +42,10 @@ resolver = "2"
 [lib]
 name = "ironrdp_rdpdr_native"
 path = "src/lib.rs"
-test = false
+# PATCH (Dolgate): 상류는 test = false 로 자기 테스트 하네스를 껐다. 그래서 이 크레이트에 있던
+# 경로 탈출 방어 테스트(containment_tests)가 한 번도 실행되지 않았다. 우리 패치가 보안에 걸리는
+# 부분(장치별 루트 해석)을 다루므로 켠다 — `cargo test -p ironrdp-rdpdr-native` 로 돈다.
+test = true
 doctest = false
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies.ironrdp-core]

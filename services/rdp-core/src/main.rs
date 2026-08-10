@@ -43,6 +43,8 @@ struct SessionHandle {
     trust: Sender<bool>,
     /// Requested desktop sizes. Only the newest is acted on — see flush_resize_requests.
     resize: Sender<(u16, u16)>,
+    /// 다시 선언할 모니터 배치. 창이 실제로 그릴 수 있는 크기를 알게 된 뒤 온다.
+    layout: Sender<Vec<crate::protocol::MonitorRequest>>,
     /// Local clipboard text, so the remote can paste what was copied here.
     clipboard: Sender<String>,
     /// 화면 전체를 다시 보내 달라는 요청.
@@ -109,6 +111,7 @@ fn handle(request: Request, output: &Arc<Output>, sessions: &Sessions) {
         "rdpInput" => send_input(request, sessions),
         "rdpTrustCertificate" => resolve_trust(request, sessions),
         "rdpResize" => request_resize(request, sessions),
+        "rdpSetLayout" => request_layout(request, sessions),
         "rdpRefresh" => request_refresh(request, sessions),
         "rdpClipboard" => set_clipboard(request, sessions),
         "disconnect" => disconnect(request, output, sessions),
@@ -153,6 +156,7 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
     let (input_tx, input_rx) = mpsc::channel();
     let (trust_tx, trust_rx) = mpsc::channel();
     let (resize_tx, resize_rx) = mpsc::channel();
+    let (layout_tx, layout_rx) = mpsc::channel();
     let (refresh_tx, refresh_rx) = mpsc::channel();
     let (clipboard_tx, clipboard_rx) = mpsc::channel();
     {
@@ -174,6 +178,7 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
                 input: input_tx,
                 trust: trust_tx,
                 resize: resize_tx,
+                layout: layout_tx,
                 refresh: refresh_tx,
                 clipboard: clipboard_tx,
             },
@@ -189,18 +194,46 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
     if let Err(error) = thread::Builder::new()
         .name(format!("rdp-{session_id}"))
         .spawn(move || {
-            session::run(
-                thread_session_id.clone(),
-                request_id,
-                payload,
-                thread_output,
-                stop,
-                input_rx,
-                trust_rx,
-                resize_rx,
-                refresh_rx,
-                clipboard_rx,
-            );
+            // 패닉을 잡아 사용자에게 알린다.
+            //
+            // 이 스레드가 패닉하면 프로세스는 살아 있어서 Electron 쪽은 아무것도 눈치채지
+            // 못한다 — 화면은 마지막 프레임에 얼어붙고, 사용자는 이유를 알 방법이 없다.
+            // (실제로 EGFX 더티 사각형 병합의 u64 언더플로로 그렇게 됐다.)
+            // 그래서 여기서 잡아 session::run 의 실패와 같은 `error` 이벤트로 흘린다 —
+            // 그 경로는 이미 렌더러의 세션 화면까지 이어져 있다.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                session::run(
+                    thread_session_id.clone(),
+                    request_id.clone(),
+                    payload,
+                    Arc::clone(&thread_output),
+                    stop,
+                    input_rx,
+                    trust_rx,
+                    resize_rx,
+                    layout_rx,
+                    refresh_rx,
+                    clipboard_rx,
+                );
+            }));
+
+            if let Err(panic) = outcome {
+                let detail = panic_message(&panic);
+                // 이미 기본 패닉 훅이 스택을 stderr 에 찍었다. 여기서는 사용자에게 보일
+                // 한 줄만 만든다 — 원문은 로그에 남아 있다.
+                warn!(session_id = %thread_session_id, detail, "session thread panicked");
+                let _ = thread_output.send_event(
+                    &Event::new(
+                        "error",
+                        ErrorPayload {
+                            message: format!("RDP 세션이 내부 오류로 중단되었습니다: {detail}"),
+                        },
+                    )
+                    .session(&thread_session_id)
+                    .request(&request_id),
+                );
+            }
+
             thread_sessions
                 .lock()
                 .expect("sessions mutex poisoned")
@@ -213,6 +246,18 @@ fn connect_rdp(request: Request, output: &Arc<Output>, sessions: &Sessions) {
             .expect("sessions mutex poisoned")
             .remove(&session_id);
     }
+}
+
+/// 패닉 payload 에서 사람이 읽을 한 줄을 뽑는다. panic!("...") 은 &str, format! 로 만든
+/// 것은 String 으로 온다 — 둘 다 아니면 타입만 남는다.
+fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = panic.downcast_ref::<&'static str>() {
+        return (*text).to_owned();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "알 수 없는 패닉".to_owned()
 }
 
 fn disconnect(request: Request, output: &Arc<Output>, sessions: &Sessions) {
@@ -305,6 +350,34 @@ fn request_resize(request: Request, sessions: &Sessions) {
         .get(session_id)
     {
         let _ = handle.resize.send((payload.width, payload.height));
+    }
+}
+
+fn request_layout(request: Request, sessions: &Sessions) {
+    let Some(session_id) = request.session_id.as_deref() else {
+        return;
+    };
+
+    let payload: crate::protocol::SetLayoutPayload =
+        match serde_json::from_value(request.payload) {
+            Ok(payload) => payload,
+            Err(error) => {
+                warn!(%error, "invalid layout payload");
+                return;
+            }
+        };
+
+    if payload.monitors.is_empty() {
+        warn!("ignoring an empty monitor layout");
+        return;
+    }
+
+    if let Some(handle) = sessions
+        .lock()
+        .expect("sessions mutex poisoned")
+        .get(session_id)
+    {
+        let _ = handle.layout.send(payload.monitors);
     }
 }
 

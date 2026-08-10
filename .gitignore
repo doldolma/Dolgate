@@ -37,3 +37,10 @@ services/sync-api/=busy_timeout*
 
 # 랜딩페이지 영어판 — web/build-en.mjs 가 배포 때 생성한다.
 web/en/
+
+# 개발용 자격증명. scripts/probe.mjs 같은 도구가 읽는다.
+.env.local
+.env.local.*
+**/.env.local
+# 예시 파일은 커밋한다 — 위 .env.local.* 가 이것까지 잡으므로 명시적으로 되돌린다.
+!**/.env.local.example

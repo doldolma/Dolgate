@@ -79,12 +79,42 @@ pub struct ConnectPayload {
     #[serde(default)]
     pub domain: Option<String>,
     pub monitors: Vec<MonitorRequest>,
-    /// 원격에 공유할 로컬 폴더. 없으면 드라이브를 붙이지 않는다.
+    /// 원격 소리를 받는다. 끄면 rdpsnd 채널을 아예 붙이지 않는다.
+    ///
+    /// 기본값이 true 다 — 이 필드를 모르는 옛 요청은 지금까지처럼 소리가 난다.
+    #[serde(default = "default_true")]
+    pub audio: bool,
+    /// 원격과 클립보드를 주고받는다. 끄면 cliprdr 채널을 아예 붙이지 않는다.
+    #[serde(default = "default_true")]
+    pub clipboard: bool,
+    /// 색 깊이(비트). 없으면 커넥터 기본값(32)을 그대로 쓴다.
+    ///
+    /// 16 만 특별히 다룬다 — 32 는 지금까지와 완전히 같은 경로여야 해서 아무것도 설정하지 않는다.
     #[serde(default)]
-    pub share: Option<DriveShare>,
+    pub color_depth: Option<u32>,
+    /// 관리 세션으로 붙는다(`mstsc /admin` 체크박스).
+    ///
+    /// RDS 라이선스를 소모하지 않고, 세션 수 제한이나 드레인 상태에서도 붙는다. 기본값이
+    /// 거짓이므로 이 필드를 모르는 옛 요청은 지금까지와 똑같이 동작한다.
+    #[serde(default)]
+    pub admin_session: bool,
+    /// 실제로 TCP 를 열 주소(`host:port`). 없으면 `host`/`port` 로 붙는다.
+    ///
+    /// tailnet 경유일 때 쓴다 — Go 가 `127.0.0.1` 에 리스너를 열어 tailnet 으로 잇고, 여기에는
+    /// 그 로컬 주소가 온다. **`host` 는 논리 이름으로 그대로 남는다**: TLS 서버 이름과 인증서
+    /// 지문 핀의 키가 그것이라, 여기에 `127.0.0.1` 이 섞이면 서로 다른 tailnet 호스트가 모두
+    /// 같은 서버로 보이고 핀이 무의미해진다.
+    #[serde(default)]
+    pub dial_address: Option<String>,
+    /// 원격에 공유할 로컬 폴더들. 비어 있으면 드라이브를 붙이지 않는다.
+    #[serde(default)]
+    pub drives: Vec<DriveShare>,
 }
 
 /// 원격에 노출할 로컬 폴더 하나.
+///
+/// `label` 은 요청하는 쪽이 정한다 — 편집 화면이 같은 이름을 보여주므로 코어가 다시 만들면
+/// 보여준 것과 원격에 뜨는 것이 갈린다.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DriveShare {
@@ -98,6 +128,11 @@ pub struct DriveShare {
 
 fn default_rdp_port() -> u16 {
     3389
+}
+
+/// 켜짐이 기본인 옵션들에 쓴다. serde 의 `default` 는 bool 을 false 로 두므로 명시해야 한다.
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]
@@ -158,6 +193,20 @@ pub struct CertificatePayload {
     pub not_after: String,
 }
 
+/// 세션이 끝났다.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClosedPayload {
+    /// 정상 종료인지. 원격에서 로그오프하거나 서버가 세션을 끊으면 참이다.
+    ///
+    /// 네트워크가 끊기면 IO 오류가 되어 `error` 로 가고 여기는 거짓이다. 앱이 자동 재연결을
+    /// 할지 정하는 근거다 — 사용자가 로그오프한 세션을 되살리면 안 된다.
+    pub graceful: bool,
+    /// 서버가 말한 이유(있으면). 화면에 그대로 보여줄 수 있다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// 원격 데스크톱 크기 변경 요청.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,12 +215,30 @@ pub struct ResizePayload {
     pub height: u16,
 }
 
+/// 배치를 다시 선언한다. 창이 실제로 그릴 수 있는 크기를 알게 된 뒤 정정하는 데 쓴다.
+///
+/// 왜 필요한가: 접속할 때는 디스플레이 크기로 선언하는데, 노치 있는 맥북은 전체화면이어도
+/// 그 33px 을 못 쓴다(측정: bounds 982 / 전체화면 콘텐츠 949). 창이 다 뜬 뒤 실측값으로
+/// 다시 보내면 원격 데스크톱이 그릴 수 있는 크기로 만들어져 축소도 잘림도 없다.
+///
+/// ResizePayload 와 달리 모니터 목록을 그대로 받는다 — DISP 채널의 배치 PDU 는 원래 여러 개를
+/// 받는다(단일 모니터만 되는 것은 편의 헬퍼뿐이다).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetLayoutPayload {
+    pub monitors: Vec<MonitorRequest>,
+}
+
 /// 해상도가 실제로 바뀐 뒤 알린다. 렌더러는 캔버스와 누적 버퍼를 다시 만들어야 한다.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResizedPayload {
     pub desktop_width: u16,
     pub desktop_height: u16,
+    /// 새 크기에서 각 모니터가 차지하는 사각형.
+    ///
+    /// 크기만 알리면 배치를 나눠 그리는 창들이 옛 사각형으로 잘라 그린다.
+    pub monitors: Vec<MonitorPlacement>,
 }
 
 #[derive(Debug, Deserialize)]

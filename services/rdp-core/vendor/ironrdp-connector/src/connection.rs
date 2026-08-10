@@ -889,8 +889,23 @@ fn create_gcc_blocks<'a>(
         } else {
             Some(ClientNetworkData { channels })
         },
-        // TODO(#139): support for Some(ClientClusterData { flags: RedirectionFlags::REDIRECTION_SUPPORTED, redirection_version: RedirectionVersion::V4, redirected_session_id: 0, }),
-        cluster: None,
+        // PATCH (Dolgate): ask for the administrative session when the user wants it.
+        //
+        // Upstream leaves this at None with a TODO(#139). Sending no block at all is what every
+        // previous release did, so that stays the default — only an explicit request adds it.
+        //
+        // `REDIRECTED_SESSION_FIELD_VALID` with a session id of 0 is how a client asks for the
+        // administrative (formerly "console") session; this mirrors FreeRDP's `ConsoleSession`.
+        cluster: if config.admin_session {
+            Some(gcc::ClientClusterData {
+                flags: gcc::RedirectionFlags::REDIRECTION_SUPPORTED
+                    | gcc::RedirectionFlags::REDIRECTED_SESSION_FIELD_VALID,
+                redirection_version: gcc::RedirectionVersion::V4,
+                redirected_session_id: 0,
+            })
+        } else {
+            None
+        },
         // PATCH (Dolgate): 설정된 모니터 레이아웃을 실제로 실어 보낸다.
         monitor: if config.monitors.is_empty() {
             None

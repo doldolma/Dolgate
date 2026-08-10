@@ -142,8 +142,19 @@ impl EgfxSurface {
         // 그래서 "합쳤을 때 늘어나는 넓이"가 작을 때만 합친다.
         let mut best: Option<(usize, u64)> = None;
         for (index, existing) in self.dirty.iter().enumerate() {
-            let added = area(union(*existing, rect)) - area(*existing) - area(rect)
-                + overlap_area(*existing, rect);
+            // 순서가 중요하다. area 들이 u64(부호 없음)라
+            //   area(union) - area(existing) - area(rect) + overlap
+            // 처럼 쓰면 두 사각형이 겹치는 순간 `+ overlap` 에 닿기 전에 중간값이 음수가 되어
+            // 언더플로한다(디버그: 패닉, 릴리스: wrapping 으로 거대한 값 → 병합이 영영 안 됨).
+            // 실제로 EC2 Windows Server 에서 한 프레임에 겹치는 사각형이 쌓여 패닉했고,
+            // 세션 스레드가 죽어 화면이 마지막 프레임에 얼었다.
+            //
+            // 그래서 "따로 보낼 때의 실제 넓이"를 먼저 구한 뒤 한 번만 뺀다. union 은 바운딩
+            // 박스라 merged >= separate 가 항상 성립하지만, saturating_sub 로 보험을 든다.
+            let merged = area(union(*existing, rect));
+            let separate =
+                area(*existing) + area(rect) - overlap_area(*existing, rect);
+            let added = merged.saturating_sub(separate);
             if best.map(|(_, cost)| added < cost).unwrap_or(true) {
                 best = Some((index, added));
             }
@@ -423,6 +434,38 @@ mod tests {
             .take(usize::from(width) * usize::from(height) * BYTES_PER_PIXEL)
             .copied()
             .collect()
+    }
+
+    // EC2 Windows Server 에서 실제로 터진 케이스. 한 프레임에 겹치는 사각형이 쌓이면
+    // 병합 비용 계산이 u64 언더플로로 패닉했고(디버그), 세션 스레드가 죽어 화면이 마지막
+    // 프레임에 얼었다. 겹침 정도를 달리해 가며 계산이 성립하는지만 본다 — 값이 아니라
+    // "터지지 않고 사각형이 남는지"가 요점이다.
+    #[test]
+    fn merges_overlapping_dirty_rectangles_without_underflowing() {
+        for (x, y) in [(0, 0), (1, 1), (2, 0), (7, 3)] {
+            let mut surface = EgfxSurface::new();
+            surface.resize(16, 8);
+
+            // 첫 사각형은 비교 대상이 없어 그냥 쌓인다. 두 번째부터 병합 비용을 계산한다.
+            surface.write(0, 0, 4, 4, &solid(4, 4, [1, 2, 3, 255]));
+            surface.write(x, y, 4, 4, &solid(4, 4, [4, 5, 6, 255]));
+
+            let rects = all_dirty(&mut surface);
+            assert!(!rects.is_empty(), "겹침 ({x},{y}) 에서 변경 영역이 사라졌다");
+        }
+    }
+
+    /// 완전히 같은 사각형 두 번 — merged == separate 인 경계. 옛 식은 여기서 바로 터졌다.
+    #[test]
+    fn marks_the_same_rectangle_twice() {
+        let mut surface = EgfxSurface::new();
+        surface.resize(8, 4);
+
+        surface.write(2, 1, 2, 2, &solid(2, 2, [9, 9, 9, 255]));
+        surface.write(2, 1, 2, 2, &solid(2, 2, [8, 8, 8, 255]));
+
+        let rect = only_dirty(&mut surface).expect("변경 영역이 있어야 한다");
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (2, 1, 2, 2));
     }
 
     #[test]

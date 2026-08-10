@@ -18,6 +18,9 @@ use ironrdp::connector::connection_activation::{
 use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_pdu::ironrdp_core::WriteBuf;
 use ironrdp_displaycontrol::client::DisplayControlClient;
+use ironrdp_displaycontrol::pdu::{
+    DisplayControlMonitorLayout, DisplayControlPdu, MonitorLayoutEntry,
+};
 use ironrdp_cliprdr::backend::ClipboardMessage;
 use ironrdp_cliprdr::{Cliprdr, CliprdrClient};
 use ironrdp_dvc::DrdynvcClient;
@@ -70,6 +73,7 @@ pub fn run(
     input: Receiver<Vec<InputEvent>>,
     trust: Receiver<bool>,
     resize: Receiver<(u16, u16)>,
+    layout_updates: Receiver<Vec<crate::protocol::MonitorRequest>>,
     refresh: Receiver<()>,
     local_clipboard: Receiver<String>,
 ) {
@@ -81,6 +85,10 @@ pub fn run(
     // 오디오 무음이 EGFX 탓인지 아닌지도 이걸로 갈랐다.
     let mut allow_egfx = std::env::var_os("DOLGATE_RDP_NO_EGFX").is_none();
     let mut trusted_fingerprint: Option<String> = None;
+    // 서버가 세션을 정상적으로 끝냈을 때 그 이유. 네트워크가 끊기면 IO 오류가 되어 여기 안 온다.
+    // 앱이 자동 재연결 여부를 이걸로 가른다 — 로그오프한 세션을 되살리면 안 된다.
+    let graceful_reason: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
 
     loop {
         match connect_and_pump(
@@ -92,8 +100,10 @@ pub fn run(
             &input,
             &trust,
             &resize,
+            &layout_updates,
             &refresh,
             &local_clipboard,
+            &graceful_reason,
             allow_egfx,
             &mut trusted_fingerprint,
         ) {
@@ -121,8 +131,13 @@ pub fn run(
         }
     }
 
+    let reason = graceful_reason.lock().ok().and_then(|slot| slot.clone());
     let _ = output.send_event(
-        &Event::new("closed", crate::protocol::EmptyPayload {}).session(&session_id),
+        &Event::new("closed", crate::protocol::ClosedPayload {
+            graceful: reason.is_some(),
+            reason,
+        })
+        .session(&session_id),
     );
 }
 
@@ -135,8 +150,10 @@ fn connect_and_pump(
     input: &Receiver<Vec<InputEvent>>,
     trust: &Receiver<bool>,
     resize: &Receiver<(u16, u16)>,
+    layout_updates: &Receiver<Vec<crate::protocol::MonitorRequest>>,
     refresh: &Receiver<()>,
     local_clipboard: &Receiver<String>,
+    graceful_reason: &Arc<std::sync::Mutex<Option<String>>>,
     allow_egfx: bool,
     trusted_fingerprint: &mut Option<String>,
 ) -> anyhow::Result<()> {
@@ -176,19 +193,26 @@ fn connect_and_pump(
         config,
         payload.host.clone(),
         payload.port,
+        payload.dial_address.clone(),
         session_id,
         request_id,
         output,
         trust,
-        clipboard_backend,
-        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
-        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
-        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
-        payload.share.as_ref().map(|share| crate::drive::DriveShareConfig {
-            label: share.label.clone(),
-            path: share.path.clone(),
-            read_only: share.read_only,
+        payload.clipboard.then_some(clipboard_backend),
+        payload.audio.then(|| {
+            AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard))
         }),
+        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
+        AudioBackend::new(session_id.to_owned(), Arc::clone(output), Arc::clone(&audio_heard)),
+        payload
+            .drives
+            .iter()
+            .map(|share| crate::drive::DriveShareConfig {
+                label: share.label.clone(),
+                path: share.path.clone(),
+                read_only: share.read_only,
+            })
+            .collect(),
         allow_egfx,
         trusted_fingerprint,
     )
@@ -207,32 +231,12 @@ fn connect_and_pump(
         width = desktop.width,
         height = desktop.height,
         channels = ?joined,
+        // 관리 세션 요청이 실렸는지. 서버가 이걸 무시하는지 가릴 때 이 줄부터 본다.
+        admin_session = payload.admin_session,
         "connected"
     );
 
-    // 서버가 요청한 크기를 그대로 주지 않을 수 있다. 그럴 때 우리가 계산한 배치는 무의미하므로,
-    // 크기가 어긋나면 단일 화면으로 되돌려 알린다 — 어긋난 배치로 화면을 나누면 조용히 깨진다.
-    let placements = if desktop.width == layout.desktop_width
-        && desktop.height == layout.desktop_height
-    {
-        layout.placements.clone()
-    } else {
-        warn!(
-            session_id,
-            requested_width = layout.desktop_width,
-            requested_height = layout.desktop_height,
-            granted_width = desktop.width,
-            granted_height = desktop.height,
-            "server did not grant the requested layout; falling back to a single screen"
-        );
-        vec![MonitorPlacement {
-            index: 0,
-            left: 0,
-            top: 0,
-            width: desktop.width,
-            height: desktop.height,
-        }]
-    };
+    let placements = resolve_placements(session_id, desktop.width, desktop.height, &layout);
 
     output.send_event(
         &Event::new("connected", ConnectedPayload {
@@ -259,9 +263,12 @@ fn connect_and_pump(
         stop,
         input,
         resize,
+        layout_updates,
         refresh,
         &clipboard_rx,
         local_clipboard,
+        graceful_reason,
+        layout,
         &egfx_surface,
         &egfx_unusable,
         &audio_heard,
@@ -291,9 +298,13 @@ fn pump(
     stop: &AtomicBool,
     input: &Receiver<Vec<InputEvent>>,
     resize: &Receiver<(u16, u16)>,
+    layout_updates: &Receiver<Vec<crate::protocol::MonitorRequest>>,
     refresh: &Receiver<()>,
     clipboard: &Receiver<ClipboardMessage>,
     local_clipboard: &Receiver<String>,
+    graceful_reason: &Arc<std::sync::Mutex<Option<String>>>,
+    // 지금 선언돼 있는 배치. 크기가 바뀔 때 각 모니터 몫을 다시 계산하는 데 쓴다.
+    declared: MonitorLayout,
     egfx: &crate::egfx_surface::EgfxSurfaceHandle,
     egfx_unusable: &crate::egfx::EgfxUnusable,
     audio_heard: &crate::audio::AudioHeard,
@@ -340,6 +351,9 @@ fn pump(
     let mut last_flush = std::time::Instant::now();
     // 채널이 열리기 전에 온 크기 요청.
     let mut pending_resize: Option<(u16, u16)> = None;
+    // 지금 선언된 배치와, 채널이 열리기를 기다리는 배치.
+    let mut declared = declared;
+    let mut pending_layout: Option<MonitorLayout> = None;
     // 소리가 오지 않는다는 것도 한 번은 남긴다.
     let started = std::time::Instant::now();
     let mut logged_silence = false;
@@ -354,6 +368,33 @@ fn pump(
         }
 
         flush_resize_requests(resize, &mut active_stage, &mut framed, &mut pending_resize)?;
+        if flush_layout_requests(
+            session_id,
+            layout_updates,
+            &mut active_stage,
+            &mut framed,
+            &mut declared,
+            &mut pending_layout,
+        )? && egfx_active(egfx)
+        {
+            // 그래픽 파이프라인은 재활성화 없이 배치를 바꾼다(ResetGraphics). 전체 크기가 그대로면
+            // (노치 33px 처럼 한 화면만 줄면 바운딩 박스는 안 바뀐다) 아래의 크기 비교로는 아무
+            // 일도 일어나지 않아, 나눠 그리는 창들이 옛 사각형으로 계속 잘라 낸다 = 레터박스.
+            //
+            // 레거시 경로는 서버가 반드시 재활성화를 보내므로 거기서 알린다 — 여기서 또 보내면
+            // 같은 값을 두 번 보내게 된다.
+            //
+            // 서버가 실제로 배치를 바꾸는 데 1초쯤 걸리므로 그 사이 한 화면이 33px 밀려 보일 수
+            // 있다. 영구히 어긋난 채로 두는 것보다 낫다.
+            output.send_event(
+                &Event::new("resized", ResizedPayload {
+                    desktop_width: declared.desktop_width,
+                    desktop_height: declared.desktop_height,
+                    monitors: declared.placements.clone(),
+                })
+                .session(session_id),
+            )?;
+        }
         flush_refresh_requests(refresh, session_id, image, &mut scratch, output, egfx)?;
         flush_local_clipboard(local_clipboard, &mut active_stage, &mut framed)?;
         flush_clipboard(clipboard, &mut active_stage, &mut framed)?;
@@ -374,6 +415,7 @@ fn pump(
                 &Event::new("resized", ResizedPayload {
                     desktop_width: current.0,
                     desktop_height: current.1,
+                    monitors: resolve_placements(session_id, current.0, current.1, &declared),
                 })
                 .session(session_id),
             )?;
@@ -450,6 +492,11 @@ fn pump(
                 }
                 ActiveStageOutput::Terminate(reason) => {
                     info!(session_id, ?reason, "server terminated the session");
+                    // 정상 종료다(로그오프·서버가 끊음). 여기 기록해 두면 closed 이벤트가
+                    // 그 사실을 실어 나가고, 앱이 자동 재연결을 하지 않는다.
+                    if let Ok(mut slot) = graceful_reason.lock() {
+                        *slot = Some(reason.description());
+                    }
                     return Ok(());
                 }
                 ActiveStageOutput::DeactivateAll => {
@@ -488,6 +535,12 @@ fn pump(
                         &Event::new("resized", ResizedPayload {
                             desktop_width: desktop.width,
                             desktop_height: desktop.height,
+                            monitors: resolve_placements(
+                                session_id,
+                                desktop.width,
+                                desktop.height,
+                                &declared,
+                            ),
                         })
                         .session(session_id),
                     )?;
@@ -697,6 +750,182 @@ fn flush_clipboard(
             .context("encode clipboard messages")?;
         framed.write_all(&encoded).context("write clipboard")?;
     }
+}
+
+/// 모니터 배치를 다시 선언한다.
+///
+/// 접속할 때는 디스플레이 크기로 선언하는데, 창이 실제로 그릴 수 있는 크기는 그보다 작을 수
+/// 있다(노치 있는 맥북은 전체화면이어도 33px 을 못 쓴다). 그 실측값이 오면 여기서 다시 선언해
+/// 원격 데스크톱을 그릴 수 있는 크기로 만든다 — 그래야 축소도 레터박스도 없다.
+///
+/// [MS-RDPEDISP] 의 배치 PDU 는 모니터 여러 개를 받는다. `ActiveStage::encode_resize` 는 단일
+/// 주 모니터 전용 헬퍼라 여기서는 쓸 수 없다.
+///
+/// 성공하면 `declared` 를 새 배치로 바꾼다. 크기 변경이 실제로 도착했을 때 각 모니터 몫을
+/// 이 배치로 계산한다.
+fn flush_layout_requests(
+    session_id: &str,
+    layout_updates: &Receiver<Vec<crate::protocol::MonitorRequest>>,
+    active_stage: &mut ActiveStage,
+    framed: &mut UpgradedFramed,
+    declared: &mut MonitorLayout,
+    // 아직 못 보낸 배치. DISP 채널이 열릴 때까지 들고 있는다.
+    pending: &mut Option<MonitorLayout>,
+) -> anyhow::Result<bool> {
+    let mut latest = pending.take();
+    loop {
+        match layout_updates.try_recv() {
+            Ok(monitors) => match build_monitor_layout(&normalize_layout_sizes(&monitors)) {
+                Ok(layout) => latest = Some(layout),
+                Err(error) => {
+                    // 보낼 수 없는 배치다. 지금 선언된 배치를 그대로 두는 편이 낫다 —
+                    // 화면이 깨지는 대신 정정만 안 될 뿐이다.
+                    warn!(
+                        session_id,
+                        error = format!("{error:#}"),
+                        "ignoring an invalid monitor layout"
+                    );
+                }
+            },
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => break,
+        }
+    }
+
+    let Some(layout) = latest else {
+        return Ok(false);
+    };
+
+    // 지금 선언된 것과 같으면 보내지 않는다. 배치 PDU 하나하나가 재활성화 왕복이라, 창 이벤트가
+    // 여러 번 올 때마다 보내면 화면이 계속 멎는다.
+    if layout.same_as(declared) {
+        return Ok(false);
+    }
+
+    let Some(entries) = layout_entries(session_id, &layout) else {
+        return Ok(false);
+    };
+
+    // None 이면 DISP 채널이 아직 안 열렸다는 뜻이다(접속 직후 조금 뒤에 열린다). 버리면 창을
+    // 다시 흔들 때까지 정정이 안 되므로 들고 있다가 열리면 보낸다 — flush_resize_requests 와
+    // 같은 이유다.
+    let Some(encoded) = encode_monitor_layout(active_stage, &entries) else {
+        *pending = Some(layout);
+        return Ok(false);
+    };
+
+    framed
+        .write_all(&encoded.context("encode monitor layout")?)
+        .context("write monitor layout request")?;
+
+    info!(
+        session_id,
+        desktop_width = layout.desktop_width,
+        desktop_height = layout.desktop_height,
+        monitors = layout
+            .placements
+            .iter()
+            .map(|p| format!("{}x{}@({},{})", p.width, p.height, p.left, p.top))
+            .collect::<Vec<_>>()
+            .join(" "),
+        "declaring a new monitor layout"
+    );
+
+    *declared = layout;
+    Ok(true)
+}
+
+/// 배치 PDU 가 받아들이는 크기로 미리 맞춘다.
+///
+/// PDU 는 양변 200~8192 에 폭은 짝수만 받는다([MS-RDPEDISP] 2.2.2.2.1). 여기서 안 맞추면 우리가
+/// 계산한 프레임버퍼 배치는 요청한 크기 그대로인데 실제로 선언되는 것은 보정된 크기여서, 서버가
+/// 1px 다른 데스크톱을 주고 그걸 "요청과 다르다"고 판단해 배치를 통째로 포기한다 — 폭이 홀수인
+/// 화면(맥의 1707x1067 같은 스케일 모드)에서 멀티모니터가 조용히 안 되던 원인이 된다.
+fn normalize_layout_sizes(
+    monitors: &[crate::protocol::MonitorRequest],
+) -> Vec<crate::protocol::MonitorRequest> {
+    monitors
+        .iter()
+        .map(|monitor| {
+            let (width, height) = MonitorLayoutEntry::adjust_display_size(
+                u32::from(monitor.width),
+                u32::from(monitor.height),
+            );
+            crate::protocol::MonitorRequest {
+                width: u16::try_from(width).unwrap_or(monitor.width),
+                height: u16::try_from(height).unwrap_or(monitor.height),
+                ..*monitor
+            }
+        })
+        .collect()
+}
+
+/// 선언 좌표계의 모니터들을 배치 PDU 항목으로 바꾼다.
+///
+/// 규격 위반이면 서버가 요청 전체를 버리므로 `MonitorLayoutEntry::adjust_display_size` 로
+/// 미리 맞춘다(양변 200~8192, 폭은 짝수).
+fn layout_entries(session_id: &str, layout: &MonitorLayout) -> Option<Vec<MonitorLayoutEntry>> {
+    let mut entries = Vec::with_capacity(layout.declared.len());
+    for monitor in &layout.declared {
+        let primary = monitor
+            .flags
+            .contains(ironrdp_pdu::gcc::MonitorFlags::PRIMARY);
+        // right/bottom 은 inclusive 다.
+        let width = u32::try_from(monitor.right - monitor.left + 1).ok()?;
+        let height = u32::try_from(monitor.bottom - monitor.top + 1).ok()?;
+        let (width, height) = MonitorLayoutEntry::adjust_display_size(width, height);
+
+        let entry = if primary {
+            MonitorLayoutEntry::new_primary(width, height)
+        } else {
+            MonitorLayoutEntry::new_secondary(width, height)
+                .and_then(|entry| entry.with_position(monitor.left, monitor.top))
+        };
+
+        match entry {
+            Ok(entry) => entries.push(entry),
+            Err(error) => {
+                warn!(
+                    session_id,
+                    error = format!("{error}"),
+                    "could not describe a monitor in the layout"
+                );
+                return None;
+            }
+        }
+    }
+    Some(entries)
+}
+
+/// 배치 PDU 를 DISP 채널로 실어 보낼 바이트로 만든다.
+///
+/// 채널이 아직 없으면 `None`. `ActiveStage::encode_resize` 가 단일 모니터에 대해 하는 일과
+/// 같은 순서다(채널 조회 → PDU → DVC 인코딩).
+fn encode_monitor_layout(
+    active_stage: &mut ActiveStage,
+    entries: &[MonitorLayoutEntry],
+) -> Option<anyhow::Result<Vec<u8>>> {
+    let dvc = active_stage.get_dvc::<DisplayControlClient>()?;
+    let channel_id = dvc.channel_id()?;
+    let pdu: DisplayControlPdu = match DisplayControlMonitorLayout::new(entries) {
+        Ok(layout) => layout.into(),
+        Err(error) => return Some(Err(anyhow::anyhow!("{error}"))),
+    };
+
+    let messages = match ironrdp_dvc::encode_dvc_messages(
+        channel_id,
+        vec![Box::new(pdu)],
+        ironrdp_svc::ChannelFlags::empty(),
+    ) {
+        Ok(messages) => messages,
+        Err(error) => return Some(Err(anyhow::anyhow!("{error}"))),
+    };
+
+    Some(
+        active_stage
+            .encode_dvc_messages(messages)
+            .map_err(|error| anyhow::anyhow!("{error}")),
+    )
 }
 
 /// Asks the server to change the desktop size.
@@ -1102,6 +1331,37 @@ fn send_region(
     Ok(())
 }
 
+/// 실제로 받은 데스크톱 크기에 대해 각 모니터가 차지할 사각형을 정한다.
+///
+/// 서버가 요청한 크기를 그대로 주지 않을 수 있다. 그럴 때 우리가 계산한 배치는 무의미하므로,
+/// 크기가 어긋나면 단일 화면으로 되돌린다 — 어긋난 배치로 화면을 나누면 조용히 깨진다.
+fn resolve_placements(
+    session_id: &str,
+    desktop_width: u16,
+    desktop_height: u16,
+    layout: &MonitorLayout,
+) -> Vec<MonitorPlacement> {
+    if desktop_width == layout.desktop_width && desktop_height == layout.desktop_height {
+        return layout.placements.clone();
+    }
+
+    warn!(
+        session_id,
+        requested_width = layout.desktop_width,
+        requested_height = layout.desktop_height,
+        granted_width = desktop_width,
+        granted_height = desktop_height,
+        "server did not grant the requested layout; falling back to a single screen"
+    );
+    vec![MonitorPlacement {
+        index: 0,
+        left: 0,
+        top: 0,
+        width: desktop_width,
+        height: desktop_height,
+    }]
+}
+
 /// 요청받은 모니터들을 RDP 가 기대하는 두 좌표계로 정리한다.
 ///
 /// 선언 공간: 주 모니터가 원점이고 나머지는 그에 상대적이라 음수가 나올 수 있다.
@@ -1115,6 +1375,22 @@ pub struct MonitorLayout {
     pub placements: Vec<MonitorPlacement>,
     pub desktop_width: u16,
     pub desktop_height: u16,
+}
+
+impl MonitorLayout {
+    /// 선언 내용이 같은 배치인지. 같은 배치를 다시 보내면 서버가 재활성화만 한 번 더 한다.
+    fn same_as(&self, other: &MonitorLayout) -> bool {
+        self.desktop_width == other.desktop_width
+            && self.desktop_height == other.desktop_height
+            && self.declared.len() == other.declared.len()
+            && self.declared.iter().zip(&other.declared).all(|(a, b)| {
+                a.left == b.left
+                    && a.top == b.top
+                    && a.right == b.right
+                    && a.bottom == b.bottom
+                    && a.flags == b.flags
+            })
+    }
 }
 
 pub fn build_monitor_layout(monitors: &[crate::protocol::MonitorRequest]) -> anyhow::Result<MonitorLayout> {
@@ -1214,10 +1490,22 @@ fn build_config(
         // 단일 모니터면 비워 둔다. 블록을 보내는 것 자체가 멀티모니터 선언이라, 하나뿐일 때는
         // 보내지 않는 편이 서버 구현 차이에 덜 노출된다.
         monitors: if monitors.len() > 1 { monitors } else { Vec::new() },
+        admin_session: payload.admin_session,
         enable_graphics_pipeline: allow_egfx,
-        // None 이어도 커넥터가 기본 코덱(RemoteFX 포함)을 광고한다. classic bitmap 강제는
-        // 재연결마다 서버 갱신이 최대 1초 가까이 멎는 결과가 나와 사용하지 않는다.
-        bitmap: None,
+        // 32bit(기본)에서는 None 을 그대로 둔다. None 이어도 커넥터가 기본 코덱(RemoteFX 포함)을
+        // 광고하는데, Some 으로 바꾸면 그 목록이 우리가 준 것으로 **대체**된다. classic bitmap
+        // 강제는 재연결마다 서버 갱신이 최대 1초 가까이 멎는 결과가 나와 사용하지 않는다.
+        //
+        // 16bit 을 고른 경우에만 채운다. 코덱 목록은 기본과 같게 넘겨 위 성질을 유지한다.
+        bitmap: match payload.color_depth {
+            Some(16) => Some(connector::BitmapConfig {
+                color_depth: 16,
+                lossy_compression: false,
+                codecs: ironrdp_pdu::rdp::capability_sets::client_codecs_capabilities(&[])
+                    .expect("empty codec config never fails"),
+            }),
+            _ => None,
+        },
         client_build: 0,
         client_name: "dolgate".to_owned(),
         client_dir: "C:\\Windows\\System32\\mstscax.dll".to_owned(),
@@ -1234,7 +1522,10 @@ fn build_config(
         autologon: false,
         // 이게 false 면 커넥터가 ClientInfoFlags::NO_AUDIO_PLAYBACK 를 세워(connection.rs:929)
         // "오디오를 받지 않는다"고 선언한다. RDPSND 채널을 붙여도 소리가 흐르지 않는다.
-        enable_audio_playback: true,
+        //
+        // 소리를 끈 세션에서는 이걸 내려 서버가 애초에 보내지 않게 한다 — 채널만 안 붙이면
+        // 서버는 계속 인코딩해서 보내고 우리가 버리는 꼴이 된다.
+        enable_audio_playback: payload.audio,
         compression_type: None,
         pointer_software_rendering: true,
         multitransport_flags: None,
@@ -1252,16 +1543,22 @@ fn connect(
     config: connector::Config,
     server_name: String,
     port: u16,
+    // 실제로 TCP 를 열 주소. None 이면 server_name/port 로 붙는다.
+    //
+    // server_name 은 여기서도 TLS 서버 이름·인증서 핀 키로 계속 쓰인다 — 주소와 신원을
+    // 분리하는 것이 이 인자의 목적이다.
+    dial_address: Option<String>,
     session_id: &str,
     request_id: &str,
     output: &Output,
     trust: &Receiver<bool>,
-    clipboard_backend: TextClipboardBackend,
-    audio_backend: AudioBackend,
+    // None 이면 그 채널을 붙이지 않는다. 정적 채널이라 접속 시점에만 결정할 수 있다.
+    clipboard_backend: Option<TextClipboardBackend>,
+    audio_backend: Option<AudioBackend>,
     // 동적 채널로 오는 소리를 받을 백엔드. 정적 채널과 같은 세션으로 흘러 나간다.
     dvc_audio_backend: AudioBackend,
     lossy_audio_backend: AudioBackend,
-    share: Option<crate::drive::DriveShareConfig>,
+    drives: Vec<crate::drive::DriveShareConfig>,
     // allow_egfx: 그래픽 파이프라인을 쓸지. 앞선 시도가 이 채널로 화면을 못 그렸으면 끄고 다시
     // 붙는다. trusted_fingerprint: 이미 승인된 인증서 지문. 같으면 다시 묻지 않는다.
     allow_egfx: bool,
@@ -1272,7 +1569,10 @@ fn connect(
     crate::egfx_surface::EgfxSurfaceHandle,
     crate::egfx::EgfxUnusable,
 )> {
-    let server_addr = lookup_addr(&server_name, port).context("lookup addr")?;
+    let server_addr = match dial_address.as_deref() {
+        Some(address) => resolve_dial_address(address).context("lookup dial address")?,
+        None => lookup_addr(&server_name, port).context("lookup addr")?,
+    };
 
     let tcp_stream = TcpStream::connect(server_addr).context("TCP connect")?;
     tcp_stream
@@ -1326,10 +1626,16 @@ fn connect(
 
     let mut connector = connector::ClientConnector::new(config, client_addr)
         .with_static_channel(dynamic_channels)
-        // CLIPRDR / RDPSND 는 정적 채널이라 접속 시점에 붙여야 한다. 나중에 켤 수 없다.
-        .with_static_channel(CliprdrClient::new(Box::new(clipboard_backend)))
-        .with_static_channel(Rdpsnd::new(Box::new(audio_backend)))
-        .with_static_channel(crate::drive::build_rdpdr("dolgate".to_owned(), share));
+        .with_static_channel(crate::drive::build_rdpdr("dolgate".to_owned(), drives));
+
+    // CLIPRDR / RDPSND 는 정적 채널이라 접속 시점에 붙여야 한다. 나중에 켤 수 없고, 끈 세션은
+    // 아예 붙이지 않는다 — 채널을 붙여 두고 버리면 서버가 계속 보낸다.
+    if let Some(clipboard_backend) = clipboard_backend {
+        connector = connector.with_static_channel(CliprdrClient::new(Box::new(clipboard_backend)));
+    }
+    if let Some(audio_backend) = audio_backend {
+        connector = connector.with_static_channel(Rdpsnd::new(Box::new(audio_backend)));
+    }
 
     let should_upgrade =
         ironrdp_blocking::connect_begin(&mut framed, &mut connector).context("begin connection")?;
@@ -1395,6 +1701,19 @@ fn connect(
         egfx_surface,
         egfx_unusable,
     ))
+}
+
+/// `host:port` 문자열을 소켓 주소로 바꾼다.
+///
+/// tailnet 경유의 로컬 포워드 주소를 받는 자리다. 포트가 없으면 거절한다 — 기본 포트를 붙여
+/// 추측하면 엉뚱한 곳으로 붙는다.
+fn resolve_dial_address(address: &str) -> anyhow::Result<core::net::SocketAddr> {
+    use std::net::ToSocketAddrs as _;
+    address
+        .to_socket_addrs()
+        .with_context(|| format!("resolve {address}"))?
+        .next()
+        .context("socket address not found")
 }
 
 fn lookup_addr(hostname: &str, port: u16) -> anyhow::Result<core::net::SocketAddr> {
@@ -1535,6 +1854,181 @@ mod danger {
     }
 }
 
+/// 관리 세션 요청(`mstsc /admin`)이 커넥터까지 전달되는지.
+///
+/// 와이어 표현(GCC 클러스터 블록의 플래그 조합)은 단위 테스트로 증명할 수 없다 — 서버가 그것을
+/// 어떻게 해석하는지가 본질이라 실기기 대조가 필요하다. 여기서는 값이 조용히 떨어지지 않는지만
+/// 잠근다.
+#[cfg(test)]
+mod admin_session_tests {
+    use super::build_config;
+    use crate::protocol::{ConnectPayload, MonitorRequest};
+
+    fn payload(admin_session: bool) -> ConnectPayload {
+        ConnectPayload {
+            host: "host".to_owned(),
+            port: 3389,
+            username: "user".to_owned(),
+            password: String::new(),
+            domain: None,
+            monitors: vec![MonitorRequest {
+                width: 1920,
+                height: 1080,
+                left: 0,
+                top: 0,
+                primary: true,
+            }],
+            audio: true,
+            clipboard: true,
+            color_depth: None,
+            dial_address: None,
+            admin_session,
+            drives: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reaches_the_connector_config() {
+        let config = build_config(true, &payload(true), 1920, 1080, Vec::new());
+        assert!(config.admin_session);
+    }
+
+    #[test]
+    fn stays_off_unless_asked() {
+        let config = build_config(true, &payload(false), 1920, 1080, Vec::new());
+        assert!(
+            !config.admin_session,
+            "켜지 않았는데 관리 세션으로 붙으면 안 된다"
+        );
+    }
+
+    #[test]
+    fn an_older_request_without_the_field_is_a_normal_session() {
+        // 이 필드를 모르는 요청(옛 데스크톱 빌드)이 와도 지금까지와 같이 동작해야 한다.
+        let parsed: ConnectPayload = serde_json::from_value(serde_json::json!({
+            "host": "host",
+            "username": "user",
+            "monitors": [{ "width": 1920, "height": 1080 }],
+        }))
+        .expect("payload");
+        assert!(!parsed.admin_session);
+    }
+
+    #[test]
+    fn reads_the_field_from_the_request() {
+        let parsed: ConnectPayload = serde_json::from_value(serde_json::json!({
+            "host": "host",
+            "username": "user",
+            "monitors": [{ "width": 1920, "height": 1080 }],
+            "adminSession": true,
+        }))
+        .expect("payload");
+        assert!(parsed.admin_session, "camelCase 로 읽어야 한다");
+    }
+}
+
+/// 오디오·클립보드·색 깊이 옵션이 커넥터 설정과 채널 부착에 반영되는지.
+#[cfg(test)]
+mod session_option_tests {
+    use super::build_config;
+    use crate::protocol::{ConnectPayload, MonitorRequest};
+
+    fn payload(json: serde_json::Value) -> ConnectPayload {
+        let mut base = serde_json::json!({
+            "host": "host",
+            "username": "user",
+            "monitors": [{ "width": 1920, "height": 1080, "primary": true }],
+        });
+        let (serde_json::Value::Object(base_map), serde_json::Value::Object(extra)) =
+            (&mut base, json)
+        else {
+            panic!("both must be objects");
+        };
+        base_map.extend(extra);
+        serde_json::from_value(base).expect("payload")
+    }
+
+    #[test]
+    fn audio_and_clipboard_default_to_on() {
+        // 이 필드를 모르는 옛 요청이 와도 소리와 클립보드가 살아 있어야 한다.
+        let parsed = payload(serde_json::json!({}));
+        assert!(parsed.audio);
+        assert!(parsed.clipboard);
+    }
+
+    #[test]
+    fn audio_off_is_declared_to_the_server() {
+        // 채널만 안 붙이면 서버는 계속 인코딩해 보낸다. 선언까지 내려야 안 보낸다.
+        let off = build_config(true, &payload(serde_json::json!({ "audio": false })), 1920, 1080, Vec::new());
+        assert!(!off.enable_audio_playback);
+
+        let on = build_config(true, &payload(serde_json::json!({})), 1920, 1080, Vec::new());
+        assert!(on.enable_audio_playback);
+    }
+
+    #[test]
+    fn keeps_the_logical_host_as_the_tls_identity() {
+        // tailnet 경유일 때 접속은 127.0.0.1 로 하지만 신원은 논리 이름이어야 한다. 여기가
+        // 섞이면 서로 다른 tailnet 호스트가 모두 같은 서버로 보이고 인증서 핀이 무의미해진다.
+        let parsed = payload(serde_json::json!({
+            "host": "winbox.example.ts.net",
+            "dialAddress": "127.0.0.1:52341",
+        }));
+        assert_eq!(parsed.dial_address.as_deref(), Some("127.0.0.1:52341"));
+        assert_eq!(parsed.host, "winbox.example.ts.net");
+    }
+
+    #[test]
+    fn resolves_a_local_forward_address() {
+        use super::resolve_dial_address;
+
+        let addr = resolve_dial_address("127.0.0.1:52341").expect("resolve");
+        assert_eq!(addr.port(), 52341);
+        assert!(addr.ip().is_loopback());
+    }
+
+    #[test]
+    fn refuses_an_address_without_a_port() {
+        // 기본 포트를 붙여 추측하면 엉뚱한 곳으로 붙는다.
+        use super::resolve_dial_address;
+        assert!(resolve_dial_address("127.0.0.1").is_err());
+    }
+
+    #[test]
+    fn without_a_dial_address_nothing_changes() {
+        let parsed = payload(serde_json::json!({}));
+        assert!(parsed.dial_address.is_none());
+    }
+
+    #[test]
+    fn thirty_two_bit_leaves_the_bitmap_config_untouched() {
+        // 32bit 은 지금까지와 완전히 같은 경로여야 한다. Some 으로 바꾸면 코덱 목록이 우리가
+        // 준 것으로 대체되어 RemoteFX 광고가 사라진다.
+        for value in [serde_json::json!({}), serde_json::json!({ "colorDepth": 32 })] {
+            let config = build_config(true, &payload(value), 1920, 1080, Vec::new());
+            assert!(config.bitmap.is_none());
+        }
+    }
+
+    #[test]
+    fn sixteen_bit_keeps_the_default_codec_list() {
+        let config = build_config(
+            true,
+            &payload(serde_json::json!({ "colorDepth": 16 })),
+            1920,
+            1080,
+            Vec::new(),
+        );
+        let bitmap = config.bitmap.expect("16bit 은 설정을 채운다");
+        assert_eq!(bitmap.color_depth, 16);
+        assert!(!bitmap.lossy_compression);
+        // 기본 목록과 같아야 한다 — 다르면 RemoteFX 를 잃는다.
+        let expected =
+            ironrdp_pdu::rdp::capability_sets::client_codecs_capabilities(&[]).expect("codecs");
+        assert_eq!(bitmap.codecs.0.len(), expected.0.len());
+    }
+}
+
 #[cfg(test)]
 mod layout_tests {
     use super::build_monitor_layout;
@@ -1658,6 +2152,149 @@ mod layout_tests {
     #[test]
     fn rejects_an_empty_layout() {
         assert!(build_monitor_layout(&[]).is_err());
+    }
+}
+
+/// 배치 갱신(rdpSetLayout)이 규격에 맞는 PDU 항목으로 바뀌는지.
+///
+/// 여기서 어긋나면 서버가 요청 전체를 조용히 버린다 — 화면은 그냥 옛 크기로 남는다.
+#[cfg(test)]
+mod layout_entry_tests {
+    use super::{build_monitor_layout, layout_entries, resolve_placements};
+    use crate::protocol::MonitorRequest;
+
+    fn monitor(width: u16, height: u16, left: i32, top: i32, primary: bool) -> MonitorRequest {
+        MonitorRequest {
+            width,
+            height,
+            left,
+            top,
+            primary,
+        }
+    }
+
+    #[test]
+    fn keeps_order_sizes_and_the_primary_flag() {
+        let layout = build_monitor_layout(&[
+            monitor(2560, 1440, -2560, -428, false),
+            monitor(1512, 949, 0, 33, true),
+        ])
+        .expect("layout");
+        let entries = layout_entries("test", &layout).expect("entries");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].dimensions(), (2560, 1440));
+        assert_eq!(entries[1].dimensions(), (1512, 949));
+        assert!(!entries[0].is_primary());
+        assert!(entries[1].is_primary(), "입력 순서가 유지된다");
+        // 주 모니터가 원점이므로 보조는 그에 상대적이다.
+        assert_eq!(entries[0].position(), Some((-2560, -461)));
+    }
+
+    #[test]
+    fn corrects_an_odd_width() {
+        // 폭이 홀수면 서버가 요청을 통째로 버린다([MS-RDPEDISP] 2.2.2.2.1).
+        let layout = build_monitor_layout(&[monitor(1367, 768, 0, 0, true)]).expect("layout");
+        let entries = layout_entries("test", &layout).expect("entries");
+        assert_eq!(entries[0].dimensions(), (1366, 768));
+    }
+
+    #[test]
+    fn clamps_sides_to_the_allowed_range() {
+        let layout = build_monitor_layout(&[monitor(200, 200, 0, 0, true)]).expect("layout");
+        let entries = layout_entries("test", &layout).expect("entries");
+        assert_eq!(entries[0].dimensions(), (200, 200), "하한은 그대로 통과한다");
+    }
+
+    #[test]
+    fn the_primary_monitor_sits_at_the_origin() {
+        // 주 모니터가 (0,0) 이 아니면 PDU 생성 자체가 거부된다. build_monitor_layout 이 주
+        // 모니터를 원점으로 옮기므로, 주 모니터가 오른쪽에 있어도 통과해야 한다.
+        let layout = build_monitor_layout(&[
+            monitor(1920, 1080, 0, 0, false),
+            monitor(2560, 1440, 1920, 0, true),
+        ])
+        .expect("layout");
+        let entries = layout_entries("test", &layout).expect("entries");
+        assert_eq!(entries[1].position(), Some((0, 0)), "주 모니터는 원점이어야 한다");
+        assert_eq!(entries[0].position(), Some((-1920, 0)));
+    }
+
+    #[test]
+    fn keeps_the_layout_when_the_granted_size_matches() {
+        let layout = build_monitor_layout(&[
+            monitor(2560, 1440, 0, 0, true),
+            monitor(1512, 949, 2560, 0, false),
+        ])
+        .expect("layout");
+        let placements =
+            resolve_placements("test", layout.desktop_width, layout.desktop_height, &layout);
+        assert_eq!(placements.len(), 2);
+        assert_eq!(placements[1].width, 1512);
+        assert_eq!(placements[1].height, 949);
+        assert_eq!(placements[1].left, 2560);
+    }
+
+    #[test]
+    fn falls_back_to_one_screen_when_the_server_grants_another_size() {
+        let layout = build_monitor_layout(&[
+            monitor(2560, 1440, 0, 0, true),
+            monitor(1512, 949, 2560, 0, false),
+        ])
+        .expect("layout");
+        // 서버가 다른 크기를 주면 우리 배치는 무의미하다. 나눠 그리면 조용히 깨진다.
+        let placements = resolve_placements("test", 1920, 1080, &layout);
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].width, 1920);
+        assert_eq!(placements[0].height, 1080);
+    }
+
+    #[test]
+    fn normalizes_sizes_before_computing_the_framebuffer() {
+        use super::normalize_layout_sizes;
+
+        // 폭이 홀수인 화면(맥의 1707x1067 스케일 모드). PDU 는 짝수 폭만 받으므로 여기서 미리
+        // 맞춰야 프레임버퍼 배치와 선언이 같은 크기가 된다 — 안 맞추면 서버가 1px 다른 데스크톱을
+        // 주고, 우리가 그걸 "요청과 다르다"고 보아 배치를 통째로 포기한다.
+        let layout = build_monitor_layout(&normalize_layout_sizes(&[
+            monitor(1707, 1067, 0, 0, true),
+            monitor(1367, 768, 1707, 0, false),
+        ]))
+        .expect("layout");
+
+        assert_eq!(layout.placements[0].width, 1706);
+        assert_eq!(layout.placements[1].width, 1366);
+        // 위치는 화면에서 잰 좌표라 보정과 무관하다. 그래서 짝수로 줄어든 1px 만큼 원격 배치에
+        // 빈 열이 남는데, 프레임버퍼와 선언이 **같은** 크기로 계산되기만 하면 문제가 없다
+        // (그 열은 그려지지 않는다). 어긋나는 쪽이 배치를 포기하게 만드는 원인이다.
+        assert_eq!(layout.desktop_width, 1707 + 1366);
+
+        let entries = layout_entries("test", &layout).expect("entries");
+        assert_eq!(entries[0].dimensions(), (1706, 1067));
+        assert_eq!(
+            entries[1].position(),
+            Some((1707, 0)),
+            "위치는 잰 좌표 그대로다"
+        );
+    }
+
+    #[test]
+    fn treats_an_identical_layout_as_unchanged() {
+        // 같은 배치를 다시 보내면 서버가 재활성화만 한 번 더 한다(화면이 멎는다).
+        let monitors = [
+            monitor(2560, 1440, 0, 0, true),
+            monitor(1512, 949, 2560, 0, false),
+        ];
+        let a = build_monitor_layout(&monitors).expect("layout");
+        let b = build_monitor_layout(&monitors).expect("layout");
+        assert!(a.same_as(&b));
+
+        let changed = build_monitor_layout(&[
+            monitor(2560, 1440, 0, 0, true),
+            monitor(1512, 982, 2560, 0, false),
+        ])
+        .expect("layout");
+        assert!(!a.same_as(&changed), "높이가 달라지면 다시 보내야 한다");
     }
 }
 
