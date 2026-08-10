@@ -1351,6 +1351,46 @@
       "empty": "No tailnet is registered yet. Add one in Settings → Tailscale first. Each device registers its own.",
       "missingOption": "Tailnet setting missing",
       "missing": "The Tailnet setting selected by this host is missing. Select 'Not used' to clear it, or register the network again."
+    },
+    "rdp": {
+      "connection": {
+        "title": "Connection"
+      },
+      "port": "Port",
+      "username": "Username",
+      "domain": "Domain",
+      "domainPlaceholder": "Leave blank for a local or Microsoft account",
+      "password": "Password",
+      "passwordKeep": "Leave blank to keep",
+      "adminSession": {
+        "label": "Connect to the admin session"
+      },
+      "details": {
+        "title": "Details"
+      },
+      "colorQuality": "Color quality",
+      "color32": "32-bit",
+      "color16": "16-bit",
+      "useAllMonitors": {
+        "label": "Use all monitors"
+      },
+      "preferences": {
+        "title": "Preferences"
+      },
+      "audio": {
+        "label": "Play remote audio"
+      },
+      "clipboard": {
+        "label": "Share the clipboard"
+      },
+      "drive": {
+        "title": "Redirect folders",
+        "readOnly": "Read-only",
+        "add": "Add folder",
+        "remove": "Remove"
+      },
+      "hostname": "Hostname",
+      "credential": "Credential"
     }
   },
   "hostTransfer": {
@@ -3181,5 +3221,11 @@
     "tailscaleTargetNoPath": "Neither a direct connection nor a relay is up.",
     "tailscaleTargetMissing": "That device is not on this Tailscale network.",
     "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}"
+  },
+  "rdp": {
+    "overlay": {
+      "connectingTitle": "Connecting",
+      "failedTitle": "Cannot connect"
+    }
   }
 }

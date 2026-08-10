@@ -268,8 +268,11 @@ export function AppShell({
             const hostId = sessionViewModel.tabs.find(
               (tab) => tab.sessionId === sessionId,
             )?.hostId;
-            const host = homeViewModel.hosts.find((item) => item.id === hostId);
-            return host?.kind === 'rdp' ? (host.monitors ?? null) : null;
+            if (!hostId) {
+              return null;
+            }
+            // 기기 로컬 설정에 있다. 호스트 레코드는 동기화되므로 모니터 선택을 담지 않는다.
+            return settingsViewModel.settings.rdpMonitorsByHostId[hostId] ?? null;
           }}
           onCloseWindow={loginController.closeWindow}
         />,

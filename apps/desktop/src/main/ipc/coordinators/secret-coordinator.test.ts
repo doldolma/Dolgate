@@ -107,6 +107,61 @@ describe("secret coordinator", () => {
     ]);
   });
 
+  it("round-trips the account and mirrors it into plaintext metadata", async () => {
+    // RDP 는 계정이 자격증명에 딸린다. 평문 메타데이터에도 같이 적어야 목록 표시와 접속이
+    // 복호화 없이 계정을 알 수 있다 — 쓰는 곳이 persistSecret 하나뿐이라 값이 갈리지 않는다.
+    const saved: Record<string, string> = {};
+    const { deps, coordinator } = createCoordinator({
+      secretStore: {
+        save: vi.fn(async (ref: string, json: string) => {
+          saved[ref] = json;
+        }),
+        load: vi.fn(async (ref: string) => saved[ref] ?? null),
+      },
+    });
+
+    const secretRef = await coordinator.persistSecret("Win admin", {
+      kind: "rdp",
+      username: "Administrator",
+      domain: "CORP",
+      password: "pw",
+    });
+    expect(secretRef).toBeTruthy();
+
+    const loaded = await coordinator.loadSecrets(secretRef);
+    expect(loaded.username).toBe("Administrator");
+    expect(loaded.domain).toBe("CORP");
+
+    // kind 도 같이 적힌다 — RDP 목록에 SSH 자격증명이 섞이면 고를 수 없는 항목만 늘어난다.
+    expect(deps.secretMetadata.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "rdp",
+        username: "Administrator",
+        domain: "CORP",
+        hasPassword: true,
+      }),
+    );
+    expect(loaded.kind).toBe("rdp");
+  });
+
+  it("does not create a credential from an account with no password", async () => {
+    // 비밀이 없는 자격증명은 의미가 없다. 만들면 목록에 붙을 수 없는 항목이 쌓인다.
+    const { coordinator } = createCoordinator();
+    await expect(
+      coordinator.persistSecret("Win admin", { username: "Administrator" }),
+    ).resolves.toBeNull();
+  });
+
+  it("keeps the account when merging runtime secret patches", () => {
+    const { coordinator } = createCoordinator();
+    expect(
+      coordinator.mergeSecrets(
+        { username: "Administrator", domain: "CORP", password: "pw" },
+        { password: "new" },
+      ),
+    ).toMatchObject({ username: "Administrator", domain: "CORP", password: "new" });
+  });
+
   it("preserves env when merging runtime secret patches", () => {
     const { coordinator } = createCoordinator();
     expect(

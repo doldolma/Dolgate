@@ -171,6 +171,7 @@ describe("createAppStore catalog and settings", () => {
       .mockResolvedValueOnce({
         theme: "system",
         tailnetHostname: null,
+        rdpMonitorsByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -201,6 +202,7 @@ describe("createAppStore catalog and settings", () => {
       .mockResolvedValueOnce({
         theme: "dark",
         tailnetHostname: null,
+        rdpMonitorsByHostId: {},
         globalTerminalThemeId: "dolssh-dark",
         terminalFontFamily: "sf-mono",
         terminalFontSize: 13,
@@ -724,11 +726,7 @@ describe("createAppStore catalog and settings", () => {
           kind: "rdp",
           hostname: draft.hostname,
           port: draft.port,
-          username: draft.username,
-          domain: draft.domain ?? null,
           secretRef: draft.secretRef ?? null,
-          desktopWidth: draft.desktopWidth,
-          desktopHeight: draft.desktopHeight,
         } satisfies HostRecord;
       }
       return {

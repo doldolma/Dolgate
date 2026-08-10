@@ -1,4 +1,5 @@
 import {
+  describeRdpDrives,
   isRdpHostRecord,
   type RdpCertificatePrompt,
   type RdpInputEvent,
@@ -13,11 +14,29 @@ import type { RdpManager } from "../rdp-manager";
 import { decideCertificate } from "../rdp-certificate-trust";
 import { resolveSelectedDisplays } from "../rdp-monitor-selection";
 import { mapScreenPointToDesktop } from "../rdp-screen-pointer";
+import {
+  buildLayoutRequest,
+  sameLayoutRequest,
+  type MeasuredMonitorWindow,
+  type MonitorLayoutRequest,
+} from "../rdp-monitor-layout";
 import { RdpMonitorWindows } from "../rdp-monitor-windows";
 import type { MainIpcContext } from "./context";
 
 // 렌더러는 hostId 만 넘긴다. 호스트 레코드 조회와 비밀번호 해석은 여기서 한다 —
 // 자격증명은 메인 프로세스 밖으로 나가지 않는다(SSH/serial 과 같은 규칙).
+
+/**
+ * 창 크기가 멈춘 뒤 배치를 다시 선언하기까지 기다리는 시간(ms).
+ *
+ * macOS 전체화면은 애니메이션이라 크기가 여러 번 바뀐다. 중간값마다 보내면 배치 PDU 마다
+ * 재활성화가 일어나 화면이 계속 멎는다.
+ */
+const RDP_LAYOUT_SETTLE_MS = 250;
+
+/** 창 크기를 알 수 없을 때만 쓰는 화면 크기. 붙은 직후 창 크기로 교체된다. */
+const RDP_FALLBACK_VIEWPORT = { width: 1920, height: 1080 } as const;
+
 export function registerRdpIpcHandlers(
   ctx: MainIpcContext,
   rdpManager: RdpManager,
@@ -86,10 +105,147 @@ export function registerRdpIpcHandlers(
   screen.on("display-removed", invalidateDisplays);
   screen.on("display-metrics-changed", invalidateDisplays);
 
+  // tailnet 포워드를 연 세션들. 세션이 끝날 때 닫아야 하므로 무엇을 열었는지 알아야 한다.
+  const tailnetForwardSessions = new Set<string>();
+  const closeTailnetForward = (sessionId: string) => {
+    if (!tailnetForwardSessions.delete(sessionId)) {
+      return;
+    }
+    ctx.coreManager.closeTailnetForward(sessionId);
+  };
+
   // 세션마다 접속 때 선언한 로컬 디스플레이 순서. 원격 모니터 번호와 물리 화면을 잇는 유일한
   // 연결고리라, 이게 없으면 어느 화면에 무엇을 띄울지 알 수 없다.
   const displayIdsBySession = new Map<string, number[]>();
+  // 접속 때 주로 선언한 모니터 번호. 배치를 다시 선언할 때도 같은 것을 주로 둬야 원격의 시작
+  // 메뉴와 작업표시줄이 화면을 옮겨 다니지 않는다.
+  const primaryIndexBySession = new Map<string, number>();
   const monitorWindows = new RdpMonitorWindows();
+
+  /** 화면마다 창을 펼쳐 둔 세션의 상태. 접으면 지운다. */
+  interface SpreadState {
+    /** 메인 창. 자기 몫의 모니터를 맡는다. */
+    window: BrowserWindow;
+    mainIndex: number;
+    monitorCount: number;
+    primaryIndex: number;
+    /**
+     * 원격 모니터가 실제로 그려지는 화면 사각형. 마지막으로 선언한 값과 같은 측정이다.
+     *
+     * 포인터 환산이 이걸 쓴다 — `display.bounds` 로 나누면 창이 화면을 다 못 쓰는 경우
+     * (노치 있는 맥북은 33px) 커서가 어긋난다.
+     */
+    drawnRects: Map<number, Electron.Rectangle>;
+    /** 마지막으로 보낸 배치. 같은 값을 다시 보내면 원격이 화면을 또 멈춘다. */
+    lastSent: MonitorLayoutRequest[] | null;
+    settleTimer: NodeJS.Timeout | null;
+  }
+  const spreadBySession = new Map<string, SpreadState>();
+
+  /**
+   * 펼쳐 둔 창들을 재서, 그릴 수 있는 크기로 원격 배치를 다시 선언한다.
+   *
+   * 접속 시점에는 창이 없어서 디스플레이 크기로 선언할 수밖에 없다. 그 크기를 창이 전부 쓰지
+   * 못하면(노치 있는 맥북은 982 중 949 만 그린다) 원격 화면이 축소되어 좌우에 검은 띠가 생기고
+   * 커서가 어긋난다. 실측값으로 다시 선언하면 둘 다 사라진다.
+   */
+  const declareMeasuredLayout = (sessionId: string) => {
+    const state = spreadBySession.get(sessionId);
+    if (!state || state.window.isDestroyed()) {
+      return;
+    }
+
+    const measured: MeasuredMonitorWindow[] = [
+      {
+        index: state.mainIndex,
+        fullScreen: state.window.isFullScreen(),
+        bounds: state.window.getContentBounds(),
+      },
+      ...monitorWindows.entries(sessionId).map(({ index, window }) => ({
+        index,
+        fullScreen: window.isFullScreen(),
+        bounds: window.getContentBounds(),
+      })),
+    ];
+
+    const request = buildLayoutRequest(
+      measured,
+      state.monitorCount,
+      state.primaryIndex,
+    );
+    if (!request || sameLayoutRequest(request, state.lastSent)) {
+      return;
+    }
+
+    state.lastSent = request;
+    state.drawnRects = new Map(
+      measured.map((entry) => [entry.index, entry.bounds]),
+    );
+    console.log(
+      `[rdp] re-declaring the layout from what the windows actually draw:`,
+      request
+        .map(
+          (m) =>
+            `${m.width}x${m.height}@(${m.left},${m.top})${m.primary ? " primary" : ""}`,
+        )
+        .join("  "),
+    );
+    rdpManager.requestLayout(sessionId, request);
+  };
+
+  /** 접었다. 예약된 측정을 버리고 상태를 지운다. */
+  const forgetSpread = (sessionId: string) => {
+    const state = spreadBySession.get(sessionId);
+    if (state?.settleTimer) {
+      clearTimeout(state.settleTimer);
+    }
+    spreadBySession.delete(sessionId);
+  };
+
+  /** 창 이벤트가 몰아쳐도 마지막 한 번만 보낸다. */
+  const scheduleLayoutDeclaration = (sessionId: string) => {
+    const state = spreadBySession.get(sessionId);
+    if (!state) {
+      return;
+    }
+    if (state.settleTimer) {
+      clearTimeout(state.settleTimer);
+    }
+    state.settleTimer = setTimeout(() => {
+      state.settleTimer = null;
+      declareMeasuredLayout(sessionId);
+    }, RDP_LAYOUT_SETTLE_MS);
+  };
+
+  // 보조 창이 전체화면이 되거나 크기가 바뀌면 다시 잰다. 고정 지연으로 한 번만 재면 macOS 가
+  // 나중에 프레임을 손대는 경우를 놓친다.
+  monitorWindows.onGeometryChanged = scheduleLayoutDeclaration;
+
+  /**
+   * 배치가 바뀐 뒤 메인 창 몫을 다시 알린다.
+   *
+   * 보조 창은 `resized` 로 새 배치를 받지만, 메인 창의 영역은 여기서 보내는 것만 본다.
+   */
+  rdpManager.onSessionEvent = (event) => {
+    const state =
+      event.sessionId ? spreadBySession.get(event.sessionId) : undefined;
+    if (!state) {
+      return;
+    }
+    if (event.type === "resized" && event.monitors.length > 0) {
+      rdpManager.emitMonitorRegion(
+        event.sessionId,
+        event.monitors[state.mainIndex] ?? null,
+      );
+      return;
+    }
+    // 그래픽 파이프라인을 끄고 다시 붙으면 접속 시점 선언으로 돌아간다. 펼쳐 둔 상태라면
+    // 실측값으로 다시 선언해야 한다.
+    if (event.type === "connected") {
+      state.lastSent = null;
+      scheduleLayoutDeclaration(event.sessionId);
+    }
+  };
 
   ipcMain.handle(
     ipcChannels.rdp.spreadMonitors,
@@ -112,6 +268,24 @@ export function registerRdpIpcHandlers(
       // 남아, 보조 창들과 같은 내용이 겹쳐 보인다.
       rdpManager.emitMonitorRegion(sessionId, region ?? null);
 
+      // 창을 다 펼쳤으니 이제 각 창이 실제로 그릴 수 있는 크기를 알 수 있다. 그 크기로 배치를
+      // 다시 선언해야 원격 화면이 창에 꼭 맞는다(rdp-monitor-layout.ts 참고).
+      const declareFromWindows = () => scheduleLayoutDeclaration(sessionId);
+      if (mainIndex !== null) {
+        spreadBySession.set(sessionId, {
+          window,
+          mainIndex,
+          monitorCount: connected.monitors.length,
+          primaryIndex: primaryIndexBySession.get(sessionId) ?? 0,
+          drawnRects: new Map(),
+          lastSent: null,
+          settleTimer: null,
+        });
+        window.on("enter-full-screen", declareFromWindows);
+        window.on("resize", declareFromWindows);
+        declareFromWindows();
+      }
+
       // 정리는 메인 프로세스가 책임진다. 렌더러가 접어 달라고 부르는 경로만 믿으면, 그 신호가
       // 안 오는 순간(전체화면을 다른 창에서 빠져나오거나, 창이 그냥 닫히거나, 렌더러가 죽거나)
       // 보조 창이 화면을 덮은 채 남는다. 프레임 없는 전체화면 창이라 사용자가 지우기도 어렵다.
@@ -120,6 +294,9 @@ export function registerRdpIpcHandlers(
         // 핸들러가 여러 개 붙는다.
         window.removeListener("leave-full-screen", collapse);
         window.removeListener("closed", collapse);
+        window.removeListener("enter-full-screen", declareFromWindows);
+        window.removeListener("resize", declareFromWindows);
+        forgetSpread(sessionId);
         void monitorWindows.close(sessionId);
         rdpManager.emitMonitorRegion(sessionId, null);
       };
@@ -133,6 +310,7 @@ export function registerRdpIpcHandlers(
   ipcMain.handle(
     ipcChannels.rdp.collapseMonitors,
     async (_event, sessionId: string) => {
+      forgetSpread(sessionId);
       await monitorWindows.close(sessionId);
       rdpManager.emitMonitorRegion(sessionId, null);
     },
@@ -165,27 +343,36 @@ export function registerRdpIpcHandlers(
       hostBySession.set(sessionId, hostId);
       const secrets = await ctx.loadSecrets(host.secretRef);
 
-      // 여러 화면을 고른 경우에만 실제 배치를 빌려준다.
+      // 어느 화면을 빌려줄지 정하는 순서:
+      //   1. 이 기기에서 골라 둔 선택이 있으면 그것 (호스트가 아니라 기기 로컬 설정이다 —
+      //      붙어 있는 모니터가 기기마다 다르므로 동기화하지 않는다)
+      //   2. 없고 "전체 모니터 사용"이 켜져 있으면 붙어 있는 화면 전부
+      //   3. 아니면 아무것도 빌려주지 않는다 = 창이 있는 화면 하나
       //
-      // 하나만 골랐다면 그건 "이 화면에 띄운다"가 아니라 "펼치지 않는다"는 뜻이다. 그 모니터의
-      // 물리 해상도를 그대로 선언하면(3008x1692 같은) 창은 그보다 훨씬 작은데 프레임은 큰 화면
-      // 기준으로 와서 낭비가 크다. 예전처럼 앱 해상도로 붙고 창 크기를 따라가게 둔다.
-      const selected = host.monitors?.length
-        ? describeLocalMonitors(host.monitors)
-        : null;
+      // 3번이 왜 창 크기 경로인가: 한 화면만 쓰는 것은 "이 화면에 띄운다"가 아니라 "펼치지
+      // 않는다"는 뜻이다. 그 모니터의 물리 해상도를 그대로 선언하면(3008x1692 같은) 창은 그보다
+      // 훨씬 작은데 프레임은 큰 화면 기준으로 와서 낭비가 크다.
+      const localMonitors = ctx.settings.get().rdpMonitorsByHostId[hostId];
+      const selected = localMonitors?.length
+        ? describeLocalMonitors(localMonitors)
+        : host.useAllMonitors === true
+          ? describeLocalMonitors(null)
+          : null;
       const layout =
         selected && selected.monitors.length > 1
           ? selected
           : {
               monitors: [
                 {
-                  // 창 크기로 붙는다. 호스트에 적어 둔 해상도로 붙으면 첫 화면이 창과 다른
-                  // 크기로 와서, 창에 맞춰질 때까지 흐리거나 잘려 보인다.
+                  // 창 크기로 붙는다. 화면 크기를 호스트에 적어 두는 설정은 없앴다 — 창이
+                  // 그 값과 다르면 첫 화면이 흐리거나 잘려 보이고, 어차피 붙은 뒤 창 크기를
+                  // 따라가므로 쓸 자리가 없었다.
+                  //
+                  // 두 경로가 다 실패하는 것은 창이 아직 크기를 모르는 순간뿐이라, 그때만
+                  // 흔한 기본값으로 붙고 바로 창 크기에 맞춰진다.
                   ...(clampViewport(viewport) ??
-                    viewportSize(event.sender) ?? {
-                      width: host.desktopWidth,
-                      height: host.desktopHeight,
-                    }),
+                    viewportSize(event.sender) ??
+                    RDP_FALLBACK_VIEWPORT),
                   primary: true,
                 },
               ],
@@ -201,26 +388,66 @@ export function registerRdpIpcHandlers(
       // 원격 모니터 번호 ↔ 물리 화면을 잇는 유일한 연결고리다. 접속 뒤에 저장하면 그 사이에
       // 도착한 펼치기 요청이 빈손이 된다.
       displayIdsBySession.set(sessionId, layout.displayIds);
+      primaryIndexBySession.set(
+        sessionId,
+        Math.max(
+          0,
+          layout.monitors.findIndex((monitor) => monitor.primary),
+        ),
+      );
+
+      // tailnet 을 경유하는 호스트면 여기서 로컬 포워드를 연다.
+      //
+      // rdp-core 는 Rust 라서 tailnet 을 직접 쓸 수 없다. ssh-core 가 `127.0.0.1` 리스너를 열어
+      // tailnet 으로 이어 주고, 코어는 그 주소로 평범하게 붙는다. **호스트 이름은 그대로 넘긴다**
+      // — TLS 서버 이름과 인증서 지문 핀의 키가 그것이라, 로컬 주소로 바꾸면 서로 다른 tailnet
+      // 호스트가 모두 같은 서버로 보인다.
+      //
+      // 포워드를 여는 주체를 메인에 두는 이유: 세션 수명(끊기·앱 종료)을 여기서 관리하므로
+      // 닫기를 빠뜨릴 자리가 적다. 렌더러에 두면 창이 죽을 때 포워드가 남는다.
+      let dialAddress: string | undefined;
+      const tailnetId = host.tailnetId?.trim();
+      if (tailnetId) {
+        dialAddress = await ctx.coreManager.openTailnetForward({
+          id: sessionId,
+          tailnetId,
+          host: host.hostname,
+          port: host.port,
+        });
+        tailnetForwardSessions.add(sessionId);
+      }
 
       try {
         return await rdpManager.connect(sessionId, {
           host: host.hostname,
           port: host.port,
-          username: host.username,
+          dialAddress,
+          // 계정은 자격증명에만 있다 — Windows 는 DOMAIN\user+비밀번호가 한 묶음이고, 같은
+          // 계정을 여러 호스트에 쓸 때 다시 적지 않아도 된다. 호스트 레코드에는 계정이 없다.
+          username: secrets.username?.trim() ?? "",
           password: secrets.password ?? "",
-          domain: host.domain ?? null,
+          domain: secrets.domain?.trim() || null,
+          // 관리 세션으로 붙을지. 켜지 않으면 지금까지와 같이 일반 세션이다.
+          adminSession: host.adminSession === true,
+          // 없거나 null 이 "켜짐"이다. 옛 호스트가 조용해지지 않는다.
+          audio: host.audioEnabled !== false,
+          clipboard: host.clipboardEnabled !== false,
+          // 32 는 커넥터 기본값이라 보내지 않는다 — 코어가 아무것도 설정하지 않는 경로로 간다.
+          colorDepth: host.colorDepth === 16 ? 16 : undefined,
           // 호스트에 고른 모니터가 있으면 그 배치를 빌려주고, 없으면 설정한 한 화면만 쓴다.
           monitors: layout.monitors,
-          share: host.drivePath
-            ? {
-                // 원격 탐색기에 이 이름으로 뜬다. 호스트 라벨을 쓰면 어느 기기의 폴더인지
-                // 원격에서 바로 보인다.
-                label: host.label || "Dolgate",
-                path: host.drivePath,
-                readOnly: host.driveReadOnly === true,
-              }
-            : null,
+          // 원격에 보일 드라이브 이름은 여기서 확정해 보낸다. 편집 화면이 같은 함수로 같은
+          // 이름을 보여주므로, 코어가 다시 만들면 둘이 갈린다.
+          drives: describeRdpDrives(host.drives).map((drive) => ({
+            label: drive.name,
+            path: drive.path,
+            readOnly: drive.readOnly,
+          })),
         });
+      } catch (error) {
+        // 접속이 실패했으면 포워드를 남기지 않는다. 남으면 tailnet 으로 가는 리스너가 계속 산다.
+        closeTailnetForward(sessionId);
+        throw error;
       } finally {
         hostBySession.delete(sessionId);
       }
@@ -230,8 +457,11 @@ export function registerRdpIpcHandlers(
   ipcMain.handle(ipcChannels.rdp.disconnect, async (_event, sessionId: string) => {
     // 세션이 끊기면 펼쳐 둔 창도 같이 내려야 한다. 안 그러면 검은 전체화면 창이 화면을 덮은 채
     // 남아 사용자가 닫을 방법이 없다(프레임이 없어서 닫기 버튼도 없다).
+    forgetSpread(sessionId);
     await monitorWindows.close(sessionId);
     displayIdsBySession.delete(sessionId);
+    primaryIndexBySession.delete(sessionId);
+    closeTailnetForward(sessionId);
     rdpManager.disconnect(sessionId);
   });
 
@@ -350,6 +580,9 @@ export function registerRdpIpcHandlers(
       const mapped = mapScreenPointToDesktop(event, known, {
         displayIds,
         placements,
+        // 창이 화면을 전부 못 쓰는 경우가 있다(노치 있는 맥북은 33px). 그리는 사각형으로
+        // 환산해야 커서가 맞는다.
+        drawnRects: spreadBySession.get(sessionId)?.drawnRects,
       });
       return mapped ? [{ kind: "mouseMove" as const, ...mapped }] : [];
     });
@@ -436,8 +669,20 @@ function describeLocalMonitors(selection?: RdpMonitorSelection[] | null) {
   // 이고, 모니터가 떨어져 있으면 빈 공간까지 포함해 아주 커진다. 한 변이 8192 를 넘으면 서버가
   // 거부하고, 그 전에 프레임버퍼가 수백 MB 가 된다(9856x5348 이면 약 210MB).
   //
-  // 그래서 배율을 주 디스플레이 값부터 1 까지 낮춰 보며 상한에 드는 첫 값을 쓴다.
-  const scale = chooseScale(displays, primary.scaleFactor || 1);
+  // 배율은 곱하지 않는다. `bounds` 를 그대로 쓴다.
+  //
+  // 전에는 scaleFactor 를 곱해 "실제 픽셀"을 낸다고 했는데 그 전제가 틀렸다. macOS 의 HiDPI
+  // 스케일 모드에서 bounds × scaleFactor 는 **백킹 스토어(렌더 해상도)**이고 패널의 실제
+  // 픽셀보다 클 수 있다 — 2560x1440 패널을 그 모드로 쓰면 5120x2880 이 나온다. Electron 은
+  // 진짜 패널 해상도를 알려주지 않는다(bounds·size 모두 DIP).
+  //
+  // 곱했을 때 실제로 생긴 일: 데스크톱이 8144x2880(상한 8192 에 44px 남음)이 되어 서버가
+  // 조정하기만 해도 단일 화면으로 떨어지고, 원격 Windows 는 그 해상도를 100% 배율로 그려
+  // 글자가 읽을 수 없게 작아지고, 프레임버퍼가 약 59MB(논리 크기의 4배)가 됐다.
+  //
+  // 단일 창(pane) 경로는 처음부터 논리 크기를 썼고 그 판단이 옳았다. 두 경로를 같게 맞춘다.
+  // mstsc·Windows App 도 논리 크기를 보내고, 원격의 배율 설정이 그 위에서 동작한다.
+  const scale = 1;
 
   // 주 디스플레이를 선택에서 뺐을 수 있다. 그때는 고른 것 중 첫 번째가 주가 된다 — 아무것도
   // 주로 표시하지 않으면 원격이 임의로 정하고, 시작 메뉴와 작업표시줄이 엉뚱한 화면에 붙는다.
@@ -474,7 +719,7 @@ function describeLocalMonitors(selection?: RdpMonitorSelection[] | null) {
 
   // 배치가 의도와 다르게 잡히는 일이 잦아(회전·세로 배치·혼합 DPI) 무엇을 선언했는지 남긴다.
   console.log(
-    `[rdp] declaring monitors (scale ${scale}, desktop ${box.width}x${box.height}):`,
+    `[rdp] declaring monitors (desktop ${box.width}x${box.height}):`,
     monitors
       .map(
         (m) =>
@@ -496,26 +741,6 @@ function boundingBox(
   return { width: right - left, height: bottom - top };
 }
 
-/** 상한에 드는 가장 큰 배율을 고른다. 못 찾으면 1 을 돌려주고 호출부가 판단한다. */
-function chooseScale(
-  displays: readonly { bounds: Electron.Rectangle }[],
-  preferred: number,
-): number {
-  for (let scale = Math.max(1, Math.floor(preferred)); scale >= 1; scale -= 1) {
-    const box = boundingBox(
-      displays.map((display) => ({
-        width: display.bounds.width * scale,
-        height: display.bounds.height * scale,
-        left: display.bounds.x * scale,
-        top: display.bounds.y * scale,
-      })),
-    );
-    if (box.width <= MAX_DESKTOP_SIDE && box.height <= MAX_DESKTOP_SIDE) {
-      return scale;
-    }
-  }
-  return 1;
-}
 
 /** 렌더러의 프롬프트 응답을 기다리는 대기표. */
 export function createCertificatePromptBridge(

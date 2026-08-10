@@ -5144,6 +5144,62 @@ export class CoreManager {
     };
   }
 
+  /**
+   * tailnet 안의 한 곳으로 이어 줄 로컬 포워드를 연다. 붙을 주소(`127.0.0.1:<port>`)를 돌려준다.
+   *
+   * RDP 코어는 Rust 라서 tailnet 을 직접 쓸 수 없다. 이 주소로 평범한 TCP 를 열면 ssh-core 가
+   * tailnet 으로 이어 준다.
+   *
+   * 같은 id 로 다시 열면 코어가 앞의 포워드를 닫는다 — 재연결이 그렇게 돈다.
+   */
+  async openTailnetForward(input: {
+    id: string;
+    tailnetId: string;
+    tailnetName?: string | null;
+    host: string;
+    port: number;
+  }): Promise<string> {
+    await this.start();
+    const payload = await this.requestResponse<Record<string, unknown>>(
+      {
+        id: randomUUID(),
+        type: "tailnetForwardOpen",
+        payload: {
+          id: input.id,
+          tailnetId: input.tailnetId,
+          tailnetName: input.tailnetName ?? "",
+          host: input.host,
+          port: input.port,
+        },
+      },
+      ["tailnetForwardOpened"],
+      { timeoutMs: 30_000 },
+    );
+    const address = optionalText(payload.address);
+    if (!address) {
+      throw new Error("tailnet forward did not return an address");
+    }
+    return address;
+  }
+
+  /**
+   * 포워드를 닫는다. 없는 id 여도 오류가 아니다.
+   *
+   * 세션이 끝나면 반드시 불러야 한다 — 남기면 tailnet 으로 이어지는 리스너가 계속 살아 있다.
+   * 응답을 기다리지 않는다(정리 경로에서 불리므로 실패해도 진행을 막을 이유가 없다).
+   */
+  closeTailnetForward(id: string): void {
+    try {
+      this.sendControl({
+        id: randomUUID(),
+        type: "tailnetForwardClose",
+        payload: { id },
+      });
+    } catch {
+      // 코어가 안 떠 있으면 포워드도 없다. 정리 경로에서 불리므로 던지지 않는다.
+    }
+  }
+
   private requestResponse<TPayload extends Record<string, unknown>>(
     request: CoreRequest<unknown>,
     expectedTypes: CoreEventType[],

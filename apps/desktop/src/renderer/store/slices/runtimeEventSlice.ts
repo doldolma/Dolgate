@@ -166,6 +166,28 @@ import { resolveHopHostNames } from "../../lib/connection-hops";
 import type { CoreEvent, HostRecord } from "@shared";
 import { t } from "../../i18n";
 
+/**
+ * 다시 시도해도 결과가 같은 RDP 오류인지.
+ *
+ * 인증 실패를 반복하면 계정이 잠긴다. 인증서 변경도 자동 재시도하면 신뢰 프롬프트가 무한히 다시
+ * 뜬다. rdp-core 가 아직 오류를 코드로 분류하지 않고 원문을 올리므로, 지금은 문자열로 가른다 —
+ * 확실히 아닌 것만 재시도하는 쪽이 아니라 **확실히 영구인 것만 제외**한다(모르는 오류는 재시도).
+ */
+function isRdpErrorFinal(message: string): boolean {
+  const upper = message.toUpperCase();
+  return [
+    'LOGON_FAILURE',
+    'ACCOUNT_LOCKED',
+    'ACCOUNT_DISABLED',
+    'ACCOUNT_RESTRICTION',
+    'ACCOUNT_EXPIRED',
+    'PASSWORD_EXPIRED',
+    'PASSWORD_MUST_CHANGE',
+    'ACCESS_DENIED',
+    'CERTIFICATE',
+  ].some((marker) => upper.includes(marker));
+}
+
 // AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
 const AWS_SSM_SESSION_EXIT_PATTERN = /AWS SSM session exited with code\s+(-?\d+)/i;
 
@@ -310,6 +332,11 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
     // RDP 는 별도 코어를 쓰고 재연결·tmux·자격증명 재시도 같은 SSH 기계를 타지 않는다.
     // handleCoreEvent 에 분기를 더하면 그 1500 줄이 RDP 도 감당한다고 착각하게 되므로 분리한다.
     handleRdpEvent: (event) => {
+            // 재연결 예약은 set 밖에서 한다 — 예약이 다시 스토어를 갱신하므로(핸들러의
+            // renderScheduled) set 안에서 부르면 갱신이 겹친다.
+            let scheduleFor: { stableId: string; hostId: string } | null =
+              null as { stableId: string; hostId: string } | null;
+
             set((state) => {
               const tab = state.tabs.find((item) => item.sessionId === event.sessionId);
               if (!tab) {
@@ -317,6 +344,15 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               }
 
               if (event.type === "error") {
+                // 인증 실패는 재시도하지 않는다 — 반복하면 계정이 잠긴다. 인증서 변경도
+                // 자동 재시도하면 프롬프트가 무한히 다시 뜬다.
+                if (
+                  get().settings.autoReconnectEnabled &&
+                  tab.hostId &&
+                  !isRdpErrorFinal(event.message)
+                ) {
+                  scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
+                }
                 return {
                   tabs: state.tabs.map((item) =>
                     item.sessionId === event.sessionId
@@ -324,7 +360,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                           ...item,
                           status: "error" as const,
                           errorMessage: event.message,
-                          connectionProgress: resolveErrorProgress(event.message, false),
+                          connectionProgress: resolveErrorProgress(event.message, true),
                           lastEventAt: new Date().toISOString(),
                         }
                       : item,
@@ -334,9 +370,25 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
 
               if (event.type === "closed") {
                 // rdp-core 는 실패 시 error 다음에 항상 closed 를 보낸다. 무조건 지우면 방금
-                // 띄운 에러가 스쳐 지나가 사용자가 이유를 못 본다. 에러 상태면 남겨 두고,
-                // 정상 종료(원격 로그오프 등)일 때만 SSH 와 같이 탭을 제거한다.
+                // 띄운 에러가 스쳐 지나가 사용자가 이유를 못 본다. 에러 상태면 남겨 둔다
+                // (재연결 예약도 그 error 에서 이미 판단했다).
                 if (tab.status === "error") {
+                  return state;
+                }
+                // 붙어 있던 세션이 갑자기 닫혔다 = 서버 재부팅·네트워크 끊김·tailnet 만료.
+                // 탭을 지우면 사용자는 이유도 모른 채 창이 사라진 것만 본다.
+                //
+                // 사용자가 끊은 경우는 여기 오지 않는다 — disconnectTab 이 먼저 탭을 지우므로
+                // 위에서 `!tab` 으로 빠져나간다.
+                if (
+                  tab.status === "connected" &&
+                  // 정상 종료(원격 로그오프·서버가 끊음)는 되살리지 않는다. 네트워크가 끊긴
+                  // 경우는 IO 오류라 error 로 오고 여기 오지 않는다.
+                  event.graceful !== true &&
+                  get().settings.autoReconnectEnabled &&
+                  tab.hostId
+                ) {
+                  scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
                   return state;
                 }
                 return removeSessionFromState(state, event.sessionId);
@@ -344,6 +396,14 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
 
               return state;
             });
+
+            if (scheduleFor) {
+              scheduleReconnect({
+                kind: "rdp",
+                key: scheduleFor.stableId,
+                meta: { hostId: scheduleFor.hostId },
+              });
+            }
           },
     handleCoreEvent: (event) => {
             const sessionId = event.sessionId;

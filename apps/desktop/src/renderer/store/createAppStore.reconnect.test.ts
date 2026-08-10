@@ -578,3 +578,113 @@ describe("connection hop progress (runtimeEventSlice)", () => {
     expect(store.getState().tabs[0]?.connectionHops ?? null).toBeNull();
   });
 });
+
+// RDP 는 터미널과 다른 코어를 쓰므로 재연결 핸들러가 따로 등록돼 있다. 판정만 여기서 검증한다.
+describe("RDP auto-reconnect trigger", () => {
+  const RDP_HOST: HostRecord = {
+    id: "rdp1",
+    kind: "rdp",
+    label: "Win Box",
+    hostname: "10.0.2.181",
+    port: 3389,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  } as HostRecord;
+
+  function seedRdpStore() {
+    const store = createAppStore(createMockApi());
+    const tab = {
+      sessionId: "rdp-s1",
+      stableId: "rdp-stable-1",
+      title: "Win Box",
+      status: "connected",
+      source: "host",
+      hostId: "rdp1",
+      paneKind: "rdp",
+      lastEventAt: "2025-01-01T00:00:00.000Z",
+    } as unknown as TerminalTab;
+    store.setState({
+      hosts: [RDP_HOST],
+      tabs: [tab],
+      tabStrip: [{ kind: "session", sessionId: tab.sessionId }],
+    });
+    return store;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetReconnectOrchestratorForTest();
+    initReconnectOrchestrator(() => ({
+      autoReconnectEnabled: true,
+      autoReconnectMaxAttempts: 10,
+      autoReconnectBaseDelayMs: 1000,
+      autoReconnectMaxDelayMs: 30000,
+    }));
+    registerReconnectHandler("rdp", {
+      renderScheduled: () => undefined,
+      perform: async () => undefined,
+      renderGaveUp: () => undefined,
+      isStillPresent: () => true,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reconnects when a connected session drops", () => {
+    // 서버 재부팅·네트워크 끊김·tailnet 만료. 탭을 지우면 사용자는 이유도 모른 채 창이
+    // 사라진 것만 본다.
+    const store = seedRdpStore();
+
+    store.getState().handleRdpEvent({ type: "closed", sessionId: "rdp-s1" });
+
+    expect(isReconnecting("rdp-stable-1")).toBe(true);
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === "rdp-s1"),
+    ).toBeDefined();
+  });
+
+  it("does not reconnect a graceful end", () => {
+    // 원격에서 로그오프했거나 서버가 끊었다. 되살리면 사용자가 끝낸 세션이 다시 열린다.
+    const store = seedRdpStore();
+
+    store.getState().handleRdpEvent({
+      type: "closed",
+      sessionId: "rdp-s1",
+      graceful: true,
+      reason: "user initiated disconnect",
+    });
+
+    expect(isReconnecting("rdp-stable-1")).toBe(false);
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === "rdp-s1"),
+    ).toBeUndefined();
+  });
+
+  it("does not reconnect an authentication failure", () => {
+    // 반복하면 계정이 잠긴다.
+    const store = seedRdpStore();
+
+    store.getState().handleRdpEvent({
+      type: "error",
+      sessionId: "rdp-s1",
+      message: "CredSSP failed: STATUS_LOGON_FAILURE",
+    });
+
+    expect(isReconnecting("rdp-stable-1")).toBe(false);
+  });
+
+  it("reconnects an unknown error", () => {
+    // 모르는 오류는 재시도한다 — 일시적인 것일 수 있고, 영구 오류만 골라 제외한다.
+    const store = seedRdpStore();
+
+    store.getState().handleRdpEvent({
+      type: "error",
+      sessionId: "rdp-s1",
+      message: "connect: TCP connect: Connection refused (os error 61)",
+    });
+
+    expect(isReconnecting("rdp-stable-1")).toBe(true);
+  });
+});

@@ -45,6 +45,41 @@ describe("mapScreenPointToDesktop", () => {
     ).toEqual({ x: 3018, y: 632 });
   });
 
+  it("maps against what the window actually draws, not the whole display", () => {
+    // 노치 있는 맥북: 화면은 1512x982 인데 전체화면 창은 위 33px 을 못 받아 1512x949 만 그린다.
+    // 그 크기로 선언했으니 환산도 그 사각형 기준이어야 한다 — display.bounds 로 나누면 커서가
+    // 0.966 배로 밀린다.
+    const display: PointerDisplay = {
+      id: 1,
+      bounds: { x: 0, y: 0, width: 1512, height: 982 },
+    };
+    const mapping: ScreenPointerMapping = {
+      displayIds: [1],
+      placements: [{ index: 0, left: 0, top: 0, width: 1512, height: 949 }],
+      drawnRects: new Map([[0, { x: 0, y: 33, width: 1512, height: 949 }]]),
+    };
+
+    // 그리는 영역의 왼쪽 위 = 원격의 (0,0).
+    expect(
+      mapScreenPointToDesktop({ screenX: 0, screenY: 33 }, [display], mapping),
+    ).toEqual({ x: 0, y: 0 });
+    // 그리는 영역의 한가운데는 원격의 한가운데다.
+    expect(
+      mapScreenPointToDesktop(
+        { screenX: 756, screenY: 33 + 474 },
+        [display],
+        mapping,
+      ),
+    ).toEqual({ x: 756, y: 474 });
+  });
+
+  it("falls back to the display bounds when nothing was measured", () => {
+    // 창모드에서는 잰 값이 없다. 예전 동작이 그대로 남아야 한다.
+    expect(
+      mapScreenPointToDesktop({ screenX: 100, screenY: 50 }, DISPLAYS, MAPPING),
+    ).toEqual({ x: 200, y: 100 });
+  });
+
   it("keeps the point inside the monitor at its far edge", () => {
     // 반올림이 경계를 한 칸 넘기면 원격이 그 갱신을 버린다.
     const mapped = mapScreenPointToDesktop(

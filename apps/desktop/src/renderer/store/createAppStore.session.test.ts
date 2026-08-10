@@ -152,7 +152,7 @@ describe("createAppStore sessions and auth recovery", () => {
     ).toBeUndefined();
   });
 
-  it("saves the chosen monitors on the host and reconnects", async () => {
+  it("saves the chosen monitors on this device only and reconnects", async () => {
     const api = createMockApi();
     const store = createAppStore(api);
 
@@ -166,11 +166,13 @@ describe("createAppStore sessions and auth recovery", () => {
     ];
     await store.getState().setRdpMonitors(first, monitors);
 
-    // 호스트에 남아야 다음 접속에도 같은 배치를 쓴다.
-    expect(api.hosts.update).toHaveBeenCalledWith(
-      "rdp-host-1",
-      expect.objectContaining({ monitors }),
-    );
+    // 기기 로컬 설정에 남아야 다음 접속에도 같은 배치를 쓴다. 호스트 레코드에 넣으면 안 된다 —
+    // 레코드는 동기화되는데 붙어 있는 모니터는 기기마다 달라서, 다른 기기에서 고른 배치가
+    // 넘어오면 없는 화면을 가리킨다.
+    expect(api.settings.update).toHaveBeenCalledWith({
+      rdpMonitorsByHostId: { "rdp-host-1": monitors },
+    });
+    expect(api.hosts.update).not.toHaveBeenCalled();
 
     // 레이아웃은 접속 시점 GCC 값이라 세션 중 변경이 불가능하다 — 끊고 다시 붙어야 한다.
     expect(api.rdp.disconnect).toHaveBeenCalledWith(first);

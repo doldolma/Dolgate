@@ -99,13 +99,9 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       terminalThemeId: record.terminalThemeId ?? null,
       hostname: record.hostname,
       port: record.port,
-      username: record.username,
-      domain: record.domain ?? null,
       secretRef: record.secretRef ?? null,
-      desktopWidth: record.desktopWidth,
-      desktopHeight: record.desktopHeight,
-      drivePath: record.drivePath ?? null,
-      driveReadOnly: record.driveReadOnly ?? null,
+      drives: record.drives ?? null,
+      adminSession: record.adminSession ?? null,
       monitors: record.monitors ?? null,
     };
   }

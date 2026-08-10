@@ -735,6 +735,8 @@ interface AppStateParts {
     sessionId: string,
     secrets?: HostSecretInput,
   ) => Promise<void>;
+  /** RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. */
+  retryRdpConnection: (sessionId: string) => Promise<void>;
   startSessionShare: (input: SessionShareStartInput) => Promise<void>;
   updateSessionShareSnapshot: (
     input: SessionShareSnapshotInput,
@@ -1154,6 +1156,7 @@ export type SessionSlice = Pick<
   | "openLocalTerminal"
   | "connectHost"
   | "retrySessionConnection"
+  | "retryRdpConnection"
   | "startSessionShare"
   | "updateSessionShareSnapshot"
   | "setSessionShareInputEnabled"

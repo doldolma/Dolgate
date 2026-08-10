@@ -306,6 +306,17 @@ describe('SSH host tailnetId survives the whitelists', () => {
     };
   }
 
+  function rdpDraft(tailnetId?: string | null) {
+    return {
+      kind: 'rdp' as const,
+      label: 'Win Box',
+      hostname: '10.0.0.9',
+      port: 3389,
+      username: 'Administrator',
+      tailnetId,
+    };
+  }
+
   function sshDraft(tailnetId?: string | null) {
     return {
       kind: 'ssh' as const,
@@ -379,6 +390,84 @@ describe('SSH host tailnetId survives the whitelists', () => {
     expect((reloaded.getById('host-3') as { tailnetId?: string | null })?.tailnetId).toBe(
       'net-b',
     );
+  });
+
+  it('keeps the per-device RDP monitor choice out of the host record', async () => {
+    // 모니터 선택은 기기 로컬 설정에 있다. 호스트 레코드는 동기화 대상이라, 거기 들어가면
+    // 다른 기기에서 고른 배치가 넘어와 없는 화면을 가리킨다.
+    const { hosts } = await loadHosts();
+    const databaseModule = await import('./database');
+    const settings = new databaseModule.SettingsRepository();
+    hosts.create('rdp-1', rdpDraft());
+
+    const monitors = [{ id: 7, label: 'LG', width: 2560, height: 1440 }];
+    settings.update({ rdpMonitorsByHostId: { 'rdp-1': monitors } });
+
+    const storage = await import('./state-storage');
+    storage.resetDesktopStateStorageForTests();
+    const reloadedDb = await import('./database');
+    const reloadedSettings = new reloadedDb.SettingsRepository();
+
+    expect(reloadedSettings.get().rdpMonitorsByHostId).toEqual({ 'rdp-1': monitors });
+    const reloadedHosts = new reloadedDb.HostRepository();
+    expect(
+      (reloadedHosts.getById('rdp-1') as { monitors?: unknown })?.monitors ?? null,
+    ).toBeNull();
+  });
+
+  it('forgets the per-device monitor choice when the host is deleted', async () => {
+    // 남겨 두면 없는 호스트의 설정이 쌓이고, 같은 id 가 재사용되면 엉뚱한 배치가 되살아난다.
+    const { hosts } = await loadHosts();
+    const databaseModule = await import('./database');
+    const settings = new databaseModule.SettingsRepository();
+    hosts.create('rdp-1', rdpDraft());
+    settings.update({
+      rdpMonitorsByHostId: { 'rdp-1': [{ id: 7, label: 'LG', width: 2560, height: 1440 }] },
+    });
+
+    hosts.remove('rdp-1');
+
+    expect(settings.get().rdpMonitorsByHostId).toEqual({});
+  });
+
+  it('moves a legacy single shared folder into the drives list', async () => {
+    // 이관하지 않으면 기존 사용자의 공유가 조용히 사라진다 — 원격에 드라이브가 안 뜨는데
+    // 설정 화면에도 아무것도 없어서 왜 없어졌는지 알 수 없다.
+    const { hosts } = await loadHosts();
+    hosts.create('rdp-1', rdpDraft());
+
+    // 옛 빌드가 남긴 모양을 직접 만든다(폼은 더 이상 이 필드를 쓰지 않는다).
+    const storage = await import('./state-storage');
+    storage.getDesktopStateStorage().updateState((state) => {
+      state.data.hosts = state.data.hosts.map((host) =>
+        host.id === 'rdp-1'
+          ? { ...host, drives: null, drivePath: '/Users/me/docs', driveReadOnly: true }
+          : host,
+      );
+    });
+
+    storage.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloaded = new databaseModule.HostRepository();
+
+    expect((reloaded.getById('rdp-1') as { drives?: unknown })?.drives).toEqual([
+      { path: '/Users/me/docs', readOnly: true },
+    ]);
+  });
+
+  it('clears the tailnet from RDP hosts too', async () => {
+    // SSH 와 RDP 가 같은 필드를 쓴다. 한쪽만 정리하면 그 종류만 없는 tailnet 을 가리킨 채 남아
+    // 연결할 수 없게 된다 — 화면에는 tailnet 이름이 비어 보이는데 저장된 값은 살아 있다.
+    const { hosts, reload } = await loadHosts();
+    const { TailnetRepository } = await import('./database');
+    const tailnets = new TailnetRepository();
+    tailnets.save(draft({ id: 'net-a' }));
+    hosts.create('rdp-1', rdpDraft('net-a'));
+
+    tailnets.remove('net-a');
+
+    const reloaded = await reload();
+    expect((reloaded.getById('rdp-1') as { tailnetId?: string | null })?.tailnetId).toBeNull();
   });
 });
 

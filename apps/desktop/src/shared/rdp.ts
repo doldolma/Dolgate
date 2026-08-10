@@ -9,7 +9,8 @@ export interface RdpMonitorRequest {
 }
 
 export interface RdpConnectOptions {
-  share?: RdpDriveShare | null;
+  /** 공유할 로컬 폴더들. 비어 있으면 드라이브를 붙이지 않는다. */
+  drives?: RdpDriveRequest[];
   host: string;
   port?: number;
   username: string;
@@ -17,6 +18,25 @@ export interface RdpConnectOptions {
   domain?: string | null;
   // 지금은 항목 1개만 허용한다. 멀티모니터가 붙으면 그대로 늘어난다.
   monitors: RdpMonitorRequest[];
+  /**
+   * 관리 세션으로 붙는다(mstsc 의 `/admin`).
+   *
+   * RDS 라이선스를 소모하지 않고, 세션 수 제한에 걸렸을 때도 붙는다. 켜지 않으면 일반 세션이다.
+   */
+  adminSession?: boolean;
+  /** 원격 소리를 받는다. 생략하면 켜짐. */
+  audio?: boolean;
+  /** 원격과 클립보드를 주고받는다. 생략하면 켜짐. */
+  clipboard?: boolean;
+  /** 색 깊이(비트). 생략하면 커넥터 기본값(32). 16 만 특별히 다룬다. */
+  colorDepth?: 16;
+  /**
+   * 실제로 TCP 를 열 주소(`host:port`). 생략하면 `host`/`port` 로 붙는다.
+   *
+   * tailnet 경유일 때 ssh-core 가 연 로컬 포워드 주소가 온다. **`host` 는 논리 이름으로 그대로
+   * 남는다** — TLS 서버 이름과 인증서 지문 핀의 키가 그것이다.
+   */
+  dialAddress?: string;
 }
 
 /**
@@ -74,8 +94,13 @@ export interface RdpAudioPayload {
   pcm: Uint8Array;
 }
 
-// 원격에 공유할 로컬 폴더.
-export interface RdpDriveShare {
+/**
+ * 코어로 보내는 공유 폴더 하나.
+ *
+ * 호스트 레코드의 `RdpDriveShare`(shared-core)와 다르다 — 이쪽은 원격에 보일 `label` 을 이미
+ * 확정해 실어 보낸다. 이름 규칙은 `describeRdpDrives` 한 곳에만 두기 때문이다.
+ */
+export interface RdpDriveRequest {
   label: string;
   path: string;
   /** 원격이 이 폴더를 수정하지 못하게 한다. */
@@ -126,13 +151,30 @@ export interface RdpCertificatePrompt {
 export type RdpSessionEvent =
   | { type: 'connected'; sessionId: string; payload: RdpConnectedPayload }
   | { type: 'error'; sessionId: string; message: string }
-  | { type: 'closed'; sessionId: string }
+  /**
+   * 세션이 끝났다.
+   *
+   * `graceful` 이면 원격에서 로그오프했거나 서버가 세션을 끊은 것이다 — 자동 재연결을 하면
+   * 사용자가 끝낸 세션을 되살린다. 네트워크가 끊긴 경우는 `error` 로 오고 여기는 거짓이다.
+   */
+  | {
+      type: 'closed';
+      sessionId: string;
+      graceful?: boolean;
+      reason?: string | null;
+    }
   // 해상도가 실제로 바뀌었다. 캔버스와 누적 버퍼를 새 크기로 다시 만들어야 한다.
   | {
       type: 'resized';
       sessionId: string;
       desktopWidth: number;
       desktopHeight: number;
+      /**
+       * 새 크기에서 각 모니터가 차지하는 사각형.
+       *
+       * 크기만 알리면 배치를 나눠 그리는 창들이 옛 사각형으로 잘라 그린다.
+       */
+      monitors: RdpMonitorPlacement[];
     }
   | { type: 'certificatePrompt'; sessionId: string; prompt: RdpCertificatePrompt }
   /**

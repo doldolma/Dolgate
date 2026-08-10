@@ -15,6 +15,15 @@ import type {
 } from "./models";
 
 export interface HostSecretInput {
+  /** 이 자격증명이 어느 프로토콜용인가. 없으면 SSH 로 본다. */
+  kind?: 'ssh' | 'rdp';
+  /**
+   * 이 자격증명의 계정. RDP 는 계정이 자격증명에 딸린다([[SecretMetadataRecord]] 참고).
+   *
+   * 이것만 있고 비밀번호가 없으면 자격증명을 만들지 않는다 — 비밀이 없는 자격증명은 의미가 없다.
+   */
+  username?: string;
+  domain?: string;
   password?: string;
   passphrase?: string;
   privateKeyPem?: string;

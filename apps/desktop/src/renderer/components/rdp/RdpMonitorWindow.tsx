@@ -39,6 +39,11 @@ export function RdpMonitorWindow({
                 ...current,
                 desktopWidth: event.desktopWidth,
                 desktopHeight: event.desktopHeight,
+                // 배치도 같이 갱신한다. 크기만 옮기면 새 크기의 프레임을 옛 사각형으로 잘라
+                // 그려서, 이 창이 맡은 화면이 어긋난 채로 남는다.
+                monitors: event.monitors.length
+                  ? event.monitors
+                  : current.monitors,
               }
             : current,
         );

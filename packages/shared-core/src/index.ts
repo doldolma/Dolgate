@@ -6,5 +6,6 @@ export * from "./connection-failure";
 export * from "./group-paths";
 export * from "./locale";
 export * from "./models";
+export * from "./rdp-drives";
 export * from "./server-url";
 export * from "./vault";

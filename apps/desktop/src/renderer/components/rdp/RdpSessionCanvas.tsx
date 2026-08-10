@@ -39,6 +39,8 @@ interface RdpSessionCanvasProps {
    * 서로 다른 시각에 재생해서 메아리가 지고 소리가 겹쳐 커진다.
    */
   audio?: boolean;
+  /** 로컬 → 원격 클립보드 전달. 호스트에서 끄면 false 다. */
+  clipboard?: boolean;
 }
 
 // 원격 화면을 그리는 표면. 키보드·마우스 입력, 창 크기 연동, 클립보드(텍스트)를 함께 다룬다.
@@ -49,6 +51,7 @@ export function RdpSessionCanvas({
   region: regionProp = null,
   autoResize = true,
   audio = true,
+  clipboard = true,
 }: RdpSessionCanvasProps) {
   const [desktop, setDesktop] = useState<RdpConnectedPayload | null>(connected ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,11 @@ export function RdpSessionCanvas({
                 ...current,
                 desktopWidth: event.desktopWidth,
                 desktopHeight: event.desktopHeight,
+                // 배치도 같이 옮긴다. 여기가 몇 개인지로 창 크기 자동 추종을 켜고 끄므로,
+                // 원격이 배치를 단일 화면으로 되돌렸을 때 그걸 알아야 한다.
+                monitors: event.monitors.length
+                  ? event.monitors
+                  : current.monitors,
               }
             : current,
         );
@@ -110,6 +118,7 @@ export function RdpSessionCanvas({
   );
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+
   // pane 이 보일 때만 따라간다. 숨은 pane 의 크기 변화까지 요청하면 보이지도 않는 화면 때문에
   // 원격이 재협상한다.
   //
@@ -128,7 +137,7 @@ export function RdpSessionCanvas({
   useRdpAudio(sessionId, audio && Boolean(desktop));
 
   // 원격 → 로컬은 메인 프로세스가 처리한다. 여기서는 로컬 → 원격만 담당한다.
-  useRdpClipboard(sessionId, canvasRef, visible && Boolean(desktop));
+  useRdpClipboard(sessionId, canvasRef, clipboard && visible && Boolean(desktop));
 
   const { handlers } = useRdpInput({
     sessionId,

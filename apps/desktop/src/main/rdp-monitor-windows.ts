@@ -14,13 +14,37 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * 프레임은 메인 프로세스가 모든 창에 뿌리므로 창마다 세션을 새로 열지 않는다 — 그러면 원격에
  * 세션이 여러 개 생긴다. 각 창은 같은 세션을 구독해 제 몫만 잘라 그린다.
  */
+/** 원격 모니터 번호와 그 창. 배치를 다시 선언할 때 번호 순서를 지켜야 한다. */
+export interface RdpMonitorWindowEntry {
+  index: number;
+  window: BrowserWindow;
+}
+
 export class RdpMonitorWindows {
   /** 세션마다 열어 둔 보조 창들. 메인 창이 맡은 모니터는 여기 없다. */
-  private readonly windowsBySession = new Map<string, BrowserWindow[]>();
+  private readonly windowsBySession = new Map<
+    string,
+    RdpMonitorWindowEntry[]
+  >();
+
+  /**
+   * 창의 크기·전체화면 상태가 바뀌었다.
+   *
+   * 고정 지연으로 재지 않는 이유: macOS 전체화면은 애니메이션이라 값이 늦게 정해지고, OS 가
+   * 나중에 프레임을 또 손대기도 한다. 바뀔 때마다 알리면 저절로 따라간다.
+   */
+  onGeometryChanged: ((sessionId: string) => void) | null = null;
 
   /** 이 세션에 보조 창이 떠 있는지. */
   isOpen(sessionId: string): boolean {
     return (this.windowsBySession.get(sessionId)?.length ?? 0) > 0;
+  }
+
+  /** 이 세션의 보조 창들. 살아 있는 것만 준다. */
+  entries(sessionId: string): RdpMonitorWindowEntry[] {
+    return (this.windowsBySession.get(sessionId) ?? []).filter(
+      (entry) => !entry.window.isDestroyed(),
+    );
   }
 
   /**
@@ -49,7 +73,7 @@ export class RdpMonitorWindows {
       return null;
     }
 
-    const opened: BrowserWindow[] = [];
+    const opened: RdpMonitorWindowEntry[] = [];
     for (let index = 0; index < placements.length; index += 1) {
       if (index === mainIndex) {
         continue;
@@ -91,7 +115,7 @@ export class RdpMonitorWindows {
         if (current) {
           this.windowsBySession.set(
             sessionId,
-            current.filter((entry) => entry !== window),
+            current.filter((entry) => entry.window !== window),
           );
         }
       });
@@ -104,7 +128,14 @@ export class RdpMonitorWindows {
         // 켜져 있으면(기본값) 메인 창의 전체화면과 나란히 유지된다.
         window.setFullScreen(true);
       });
-      opened.push(window);
+
+      // 이 창이 실제로 그릴 수 있는 크기가 정해지거나 바뀌면 알린다. 원격 배치를 그 크기로
+      // 다시 선언해야 화면이 창에 꼭 맞는다(rdp-monitor-layout.ts 참고).
+      const notify = () => this.onGeometryChanged?.(sessionId);
+      window.on("enter-full-screen", notify);
+      window.on("leave-full-screen", notify);
+      window.on("resize", notify);
+      opened.push({ index, window });
       await this.load(window, sessionId, index);
     }
 
@@ -116,7 +147,7 @@ export class RdpMonitorWindows {
   async close(sessionId: string): Promise<void> {
     const windows = this.windowsBySession.get(sessionId) ?? [];
     this.windowsBySession.delete(sessionId);
-    for (const window of windows) {
+    for (const { window } of windows) {
       if (!window.isDestroyed()) {
         window.destroy();
       }

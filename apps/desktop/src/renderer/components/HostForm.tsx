@@ -1,14 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { MAX_HOST_STARTUP_COMMAND_LENGTH, isAwsEc2HostRecord, isAwsEcsHostRecord, isRdpHostDraft, isRdpHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import { MAX_HOST_STARTUP_COMMAND_LENGTH, describeRdpDrives, isAwsEc2HostRecord, isAwsEcsHostRecord, isRdpHostDraft, isRdpHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
 import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, RdpHostDraft, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import { loadSavedCredential } from '../services/desktop/settings';
 import { pickRdpShareFolder } from '../services/desktop/rdp';
-import { formatSavedSecretOptionLabel } from '../lib/secret-display';
+import { formatRdpCredentialOptionLabel, formatSavedSecretOptionLabel } from '../lib/secret-display';
 import { terminalThemePresets } from '../lib/terminal-presets';
 import { listAwsProfiles } from '../services/desktop/imports';
-import { Button, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
+import { Button, IconButton, Input, SearchableSelect, SelectField, TagInputField, Textarea, ToggleSwitch } from '../ui';
+import { FolderPlus, Trash2 } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 import { ArrowDown, ArrowUp, X } from '../ui/icons';
 import { useTranslation } from 'react-i18next';
@@ -58,8 +59,8 @@ const defaultSshDraft: SshHostDraft = {
   label: '',
   tags: [],
   hostname: '',
-  port: 22,
   username: '',
+  port: 22,
   authType: 'password',
   secretRef: null,
   jumpHostId: null,
@@ -238,13 +239,15 @@ const defaultRdpDraft: RdpHostDraft = {
   tags: [],
   hostname: '',
   port: 3389,
-  username: '',
-  domain: '',
   secretRef: null,
-  desktopWidth: 1920,
-  desktopHeight: 1080,
-  drivePath: null,
-  driveReadOnly: null,
+  drives: null,
+  adminSession: null,
+  useAllMonitors: null,
+  // null 이 "켜짐"이다. 명시적으로 false 를 넣지 않는다 — 저장 계층이 false 만 기록한다.
+  audioEnabled: null,
+  clipboardEnabled: null,
+  colorDepth: null,
+  tailnetId: null,
   groupName: '',
   terminalThemeId: null,
 };
@@ -404,9 +407,9 @@ function isHostDraftValid(draft: HostDraft): boolean {
   }
 
   if (draft.kind === 'rdp') {
+    // 계정은 자격증명이 갖는다. 아래 isFormValid 의 hasRequiredRdpCredentials 가 본다.
     return (
       Boolean(draft.hostname.trim()) &&
-      Boolean(draft.username.trim()) &&
       Number.isInteger(draft.port) &&
       draft.port >= 1 &&
       draft.port <= 65535
@@ -457,6 +460,9 @@ function buildHostFormSubmission(input: {
   tags: string[];
   credentialMode: 'new' | 'existing';
   selectedSecretRef: string;
+  /** RDP 새 자격증명의 계정. 호스트 레코드가 아니라 자격증명에 저장된다. */
+  credentialUsername?: string;
+  credentialDomain?: string;
   password: string;
   passphrase: string;
   privateKeyPem?: string;
@@ -500,9 +506,20 @@ function buildHostFormSubmission(input: {
       return { draft: nextDraft };
     }
 
+    const username = input.credentialUsername?.trim() ?? '';
+    const domain = input.credentialDomain?.trim() ?? '';
     return {
       draft: nextDraft,
-      secrets: input.password ? { password: input.password } : undefined,
+      // 비밀번호가 없으면 자격증명을 만들지 않는다. 계정만 있는 자격증명은 의미가 없고,
+      // hasSecretValue 도 그렇게 판단한다.
+      secrets: input.password
+        ? {
+            kind: 'rdp' as const,
+            password: input.password,
+            username: username || undefined,
+            domain: domain || undefined,
+          }
+        : undefined,
     };
   }
 
@@ -651,6 +668,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const envLoadedSecretRef = useRef<string | null>(null);
   const loadedEnvSnapshotRef = useRef('');
   const [credentialMode, setCredentialMode] = useState<'new' | 'existing'>('new');
+  // 새 자격증명의 계정. 비밀번호와 같이 드래프트가 아니라 폼 상태에 둔다 — 저장될 곳이 호스트
+  // 레코드가 아니라 자격증명이기 때문이다.
+  const [credentialUsername, setCredentialUsername] = useState('');
+  const [credentialDomain, setCredentialDomain] = useState('');
   const [selectedSecretRef, setSelectedSecretRef] = useState('');
   const [privateKeyFile, setPrivateKeyFile] = useState<ImportedShellCredentialFile | null>(null);
   const [certificateFile, setCertificateFile] = useState<ImportedShellCredentialFile | null>(null);
@@ -699,6 +720,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   }, [isAgentAuthDraft, probeSshAgent]);
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
   const rdpDraft = isRdpHostDraft(draft) ? draft : null;
+  // 원격에 보일 드라이브 이름. 코어로 나가는 값과 같은 함수로 만든다 — 규칙이 두 곳에 있으면
+  // 화면에 보여준 이름과 원격에 뜨는 이름이 갈린다.
+  const rdpDrives = describeRdpDrives(rdpDraft?.drives);
   const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
   const commitJumpHostChain = (ids: string[]) => {
     if (!sshDraft) {
@@ -721,6 +745,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         tags: tagTokens,
         credentialMode,
         selectedSecretRef,
+        credentialUsername,
+        credentialDomain,
         password,
         passphrase,
         privateKeyPem: privateKeyFile?.content,
@@ -746,6 +772,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return [];
     }
     return keychainEntries.filter((entry) => {
+      // RDP 자격증명은 여기 나오지 않는다. 계정이 자격증명에 딸려 있어 SSH 로는 쓸 수 없다.
+      // kind 가 없는 항목은 SSH 용이다 — 이 필드가 생기기 전에 만든 것들이다.
+      if (entry.kind === 'rdp') {
+        return false;
+      }
       if (sshDraft.authType === 'password') {
         return entry.hasPassword;
       }
@@ -755,6 +786,41 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       return entry.hasManagedPrivateKey;
     });
   }, [keychainEntries, sshDraft]);
+  // RDP 는 비밀번호만 쓴다. SSH 용 reusableEntries 를 고치지 않고 따로 둔다 — SSH 결과에 영향이
+  // 갈 여지를 아예 없앤다.
+  const rdpReusableEntries = useMemo(
+    () =>
+      rdpDraft
+        ? keychainEntries.filter((entry) => entry.kind === 'rdp' && entry.hasPassword)
+        : [],
+    [keychainEntries, rdpDraft],
+  );
+  /**
+   * 이 호스트가 가리키는 자격증명이 목록에 없을 때 쓸 항목.
+   *
+   * kind 가 없는 옛 항목이거나 목록 갱신이 늦은 경우다. 그냥 빼 버리면 셀렉트가 "새 자격증명"으로
+   * 돌아가 **저장한 것이 풀린 것처럼 보인다**(실제로 그렇게 보였다). 있는 그대로 보여준다.
+   */
+  const rdpSelectedMissingEntry = useMemo(() => {
+    if (!rdpDraft || credentialMode !== 'existing' || !selectedSecretRef) {
+      return null;
+    }
+    if (rdpReusableEntries.some((entry) => entry.secretRef === selectedSecretRef)) {
+      return null;
+    }
+    return (
+      keychainEntries.find((entry) => entry.secretRef === selectedSecretRef) ?? {
+        secretRef: selectedSecretRef,
+        label: selectedSecretRef,
+      }
+    );
+  }, [
+    credentialMode,
+    keychainEntries,
+    rdpDraft,
+    rdpReusableEntries,
+    selectedSecretRef,
+  ]);
   const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
     if (!isAwsDraft) {
       return [];
@@ -838,6 +904,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     let nextDraft: HostDraft;
     let nextCredentialMode: 'new' | 'existing';
     let nextSelectedSecretRef = '';
+    // RDP 새 자격증명의 계정. 저장된 자격증명을 쓰는 호스트라면 비워 둔다(그 계정은 자격증명에 있다).
+    let nextCredentialUsername = '';
+    let nextCredentialDomain = '';
     let nextPassword = '';
     let nextPassphrase = '';
     let nextPrivateKeyFile: ImportedShellCredentialFile | null = null;
@@ -929,16 +998,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         terminalThemeId: host.terminalThemeId ?? null,
         hostname: host.hostname,
         port: host.port,
-        username: host.username,
-        domain: host.domain ?? '',
         secretRef: host.secretRef,
-        desktopWidth: host.desktopWidth,
-        desktopHeight: host.desktopHeight,
-        drivePath: host.drivePath ?? null,
-        driveReadOnly: host.driveReadOnly ?? null,
+        drives: host.drives ?? null,
+        adminSession: host.adminSession ?? null,
+        // 여기서 빠뜨리면 호스트를 편집해 저장할 때마다 그 설정이 조용히 초기값으로 돌아간다.
+        // 전부 선택 필드라 컴파일러가 잡아주지 않는다.
+        useAllMonitors: host.useAllMonitors ?? null,
+        audioEnabled: host.audioEnabled ?? null,
+        clipboardEnabled: host.clipboardEnabled ?? null,
+        colorDepth: host.colorDepth ?? null,
+        tailnetId: host.tailnetId ?? null,
       };
       nextSelectedSecretRef = host.secretRef ?? '';
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
+      // 계정은 자격증명에만 있다. 저장된 자격증명을 고른 상태면 그 계정이 쓰이고, 새 자격증명을
+      // 만들 때만 아래 칸에 입력한다.
     } else {
       nextDraft = {
         kind: 'ssh',
@@ -983,6 +1057,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     setPassphrase(nextPassphrase);
     setSelectedSecretRef(nextSelectedSecretRef);
     setCredentialMode(nextCredentialMode);
+    setCredentialUsername(nextCredentialUsername);
+    setCredentialDomain(nextCredentialDomain);
     setPrivateKeyFile(nextPrivateKeyFile);
     setCertificateFile(nextCertificateFile);
     setEnvVars(nextEnvVars);
@@ -1043,6 +1119,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       setCredentialMode('new');
     }
   }, [credentialMode, reusableEntries, selectedSecretRef, sshDraft]);
+
 
   const refreshSerialPorts = useCallback(async () => {
     setIsLoadingSerialPorts(true);
@@ -1273,6 +1350,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         }
         return true;
       })();
+      // RDP 자격증명이 없어도 저장은 막지 않는다. SSH 도 비밀번호 없이 저장되고, 막아 두면
+      // 버튼을 눌러도 아무 일이 없는데 이유를 알 수 없다(실제로 그렇게 막혔다).
       const browserValidity = formRef.current?.checkValidity();
       if (typeof browserValidity === 'boolean') {
         return browserValidity && isHostDraftValid(nextDraft) && hasRequiredSshCredentials;
@@ -1303,6 +1382,8 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         tags: nextTagTokens,
         credentialMode,
         selectedSecretRef,
+        credentialUsername,
+        credentialDomain,
         password,
         passphrase,
         privateKeyPem: privateKeyFile?.content,
@@ -1362,6 +1443,67 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
   const saveStatusText =
     saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
+  /**
+   * tailnet 선택 칸. SSH·RDP 가 같은 필드를 쓰므로 한 곳에서 그린다.
+   *
+   * 등록된 tailnet 이 없어도 칸은 보여 준다 — 숨기면 이 기능이 있다는 것 자체를 알 수 없고,
+   * 기기마다 따로 등록하는 구조라 "다른 PC 에서는 없다"로 보인다.
+   */
+  const renderTailnetField = (
+    currentTailnetId: string | null | undefined,
+    onChange: (tailnetId: string | null) => void,
+  ) => {
+    const selected = currentTailnetId?.trim() ?? '';
+    // 저장된 tailnet 이 이 기기에 없을 수 있다(다른 기기에서 등록). 지워진 것처럼 보이지 않게
+    // 항목을 만들어 그대로 보여 주고 경고한다.
+    const missing =
+      selected && !tailnetOptions.some((option) => option.id === selected) ? selected : '';
+    return (
+      <div className={fieldClassName}>
+        <div className="flex items-center justify-between gap-3">
+          <span className={fieldLabelClassName}>Tailnet</span>
+          {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
+              오히려 여기로 갈 이유가 가장 큰 순간이다. */}
+          {onOpenTailnets ? (
+            <button
+              type="button"
+              className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
+              onClick={onOpenTailnets}
+            >
+              Manage
+            </button>
+          ) : null}
+        </div>
+        <SelectField
+          value={selected}
+          disabled={tailnetOptions.length === 0 && !missing}
+          onChange={(event) => onChange(event.target.value || null)}
+        >
+          <option value="">{translate('hostForm.tailnet.none')}</option>
+          {missing ? (
+            <option value={missing}>{translate('hostForm.tailnet.missingOption')}</option>
+          ) : null}
+          {tailnetOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
+        </SelectField>
+        {/* 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다 —
+            tailnet 은 기기마다 따로 등록해야 해서 "다른 PC 에는 있는데" 로 헷갈린다. */}
+        {missing ? (
+          <span className="text-[0.82rem] text-[var(--danger)]">
+            {translate('hostForm.tailnet.missing')}
+          </span>
+        ) : tailnetOptions.length === 0 ? (
+          <span className="text-[0.82rem] text-[var(--text-soft)]">
+            {translate('hostForm.tailnet.empty')}
+          </span>
+        ) : null}
+      </div>
+    );
+  };
+
   const metadataFields = (
     <>
       <label className={fieldClassName}>
@@ -1641,7 +1783,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       }}
     >
       {hideTitle ? null : <div className="section-title">Host Editor</div>}
-      {sshDraft || serialDraft || isAwsEc2Draft || isAwsEcsDraft ? null : metadataFields}
+      {/* 종류별 폼이 Details 섹션 안에서 직접 그린다. 여기 남은 것은 아직 옮기지 않은 종류를
+          위한 자리다 — 목록에 없는 종류만 폼 맨 위에 그룹·태그가 카드 밖으로 나온다. */}
+      {sshDraft || serialDraft || isAwsEc2Draft || isAwsEcsDraft || rdpDraft
+        ? null
+        : metadataFields}
 
       {isAwsEc2Draft ? (
         <>
@@ -2437,140 +2583,287 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : rdpDraft ? (
         <>
           <FormSection
-            title="Connection"
-            description="Configure the Windows host to open a remote desktop on."
+            title={translate('hostForm.rdp.connection.title')}
             testId="hostform-section-connection"
           >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Host</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.rdp.hostname')}</span>
               <Input
                 value={rdpDraft.hostname}
                 onChange={(event) => handleRdpFieldChange('hostname', event.target.value)}
                 placeholder="192.168.0.10"
+                required
               />
             </label>
 
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Port</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.rdp.port')}</span>
               <Input
                 type="number"
+                min={1}
+                max={65535}
                 value={String(rdpDraft.port)}
                 onChange={(event) =>
                   handleRdpFieldChange('port', Number.parseInt(event.target.value, 10) || 3389)
                 }
+                required
               />
             </label>
 
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Username</span>
-              <Input
-                value={rdpDraft.username}
-                onChange={(event) => handleRdpFieldChange('username', event.target.value)}
-              />
-            </label>
-
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Domain</span>
-              <Input
-                value={rdpDraft.domain ?? ''}
-                onChange={(event) => handleRdpFieldChange('domain', event.target.value)}
-                placeholder="Leave blank for a local or Microsoft account"
-              />
-            </label>
-
-            {credentialMode === 'new' ? (
-              <label className={fieldClassName}>
-                <span className={fieldLabelClassName}>Password</span>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={host ? 'Leave blank to keep' : ''}
-                />
-              </label>
-            ) : null}
-          </FormSection>
-
-          <FormSection
-            title="Display"
-            description="The remote desktop is created at this size."
-            testId="hostform-section-display"
-          >
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Width</span>
-              <Input
-                type="number"
-                value={String(rdpDraft.desktopWidth)}
-                onChange={(event) =>
-                  handleRdpFieldChange('desktopWidth', Number.parseInt(event.target.value, 10) || 1920)
-                }
-              />
-            </label>
-
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Height</span>
-              <Input
-                type="number"
-                value={String(rdpDraft.desktopHeight)}
-                onChange={(event) =>
-                  handleRdpFieldChange('desktopHeight', Number.parseInt(event.target.value, 10) || 1080)
-                }
-              />
-            </label>
-            <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-              Between 200 and 8192. An odd width is rounded down — RDP does not accept one.
-            </span>
-
-          </FormSection>
-
-          <FormSection
-            title="Folder sharing"
-            description="Expose a local folder to the remote session as a drive."
-            testId="hostform-section-drive"
-          >
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Shared folder</span>
-              <div className="flex gap-[0.7rem]">
-                <Input
-                  value={rdpDraft.drivePath ?? ''}
-                  onChange={(event) => handleRdpFieldChange('drivePath', event.target.value)}
-                  placeholder="Not shared"
-                />
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    void pickRdpShareFolder().then((picked) => {
-                      if (picked) {
-                        handleRdpFieldChange('drivePath', picked);
-                      }
-                    });
-                  }}
-                >
-                  Choose…
-                </Button>
-                {rdpDraft.drivePath ? (
-                  <Button variant="secondary" onClick={() => handleRdpFieldChange('drivePath', null)}>
-                    Clear
-                  </Button>
+            {/* 계정은 자격증명에 딸린다 — Windows 의 DOMAIN\user+비밀번호가 한 묶음이고, 같은
+                계정을 여러 호스트에 쓸 때 다시 적지 않아도 된다. */}
+            <div className={fieldClassName}>
+              <div className="flex items-center justify-between gap-3">
+                <span className={fieldLabelClassName}>
+                  {translate('hostForm.rdp.credential')}
+                </span>
+                {credentialMode === 'existing' && selectedSecretRef && onEditExistingSecret ? (
+                  <button
+                    type="button"
+                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
+                    onClick={() => onEditExistingSecret(selectedSecretRef)}
+                  >
+                    {translate('hostForm.auth.edit')}
+                  </button>
                 ) : null}
               </div>
-            </label>
+              <SelectField
+                aria-label={translate('hostForm.rdp.credential')}
+                value={
+                  credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode
+                }
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === 'new') {
+                    setCredentialMode('new');
+                    setSelectedSecretRef('');
+                    return;
+                  }
+                  if (value.startsWith('existing:')) {
+                    setCredentialMode('existing');
+                    setSelectedSecretRef(value.slice('existing:'.length));
+                  }
+                }}
+              >
+                <option value="new">{translate('hostForm.auth.newCredential')}</option>
+                {rdpSelectedMissingEntry ? (
+                  <option value={`existing:${rdpSelectedMissingEntry.secretRef}`}>
+                    {rdpSelectedMissingEntry.label}
+                  </option>
+                ) : null}
+                {rdpReusableEntries.map((entry) => (
+                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
+                    {formatRdpCredentialOptionLabel(entry)}
+                  </option>
+                ))}
+              </SelectField>
+            </div>
+
+            {credentialMode === 'new' ? (
+              <>
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>
+                    {translate('hostForm.rdp.username')}
+                  </span>
+                  <Input
+                    value={credentialUsername}
+                    onChange={(event) => setCredentialUsername(event.target.value)}
+                    required
+                  />
+                </label>
+
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>{translate('hostForm.rdp.domain')}</span>
+                  <Input
+                    value={credentialDomain}
+                    onChange={(event) => setCredentialDomain(event.target.value)}
+                    placeholder={translate('hostForm.rdp.domainPlaceholder')}
+                  />
+                </label>
+
+                <label className={fieldClassName}>
+                  <span className={fieldLabelClassName}>
+                    {translate('hostForm.rdp.password')}
+                  </span>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+
             <ToggleSwitch
-              checked={rdpDraft.driveReadOnly === true}
-              label="Read-only"
-              description="The remote can open files in the folder but cannot change or delete them."
+              checked={rdpDraft.adminSession === true}
+              label={translate('hostForm.rdp.adminSession.label')}
               onClick={() =>
                 handleRdpFieldChange(
-                  'driveReadOnly',
-                  rdpDraft.driveReadOnly === true ? null : true,
+                  'adminSession',
+                  rdpDraft.adminSession === true ? null : true,
                 )
               }
             />
-            <span className="text-[0.76rem] leading-[1.45] text-[var(--text-soft)]">
-              Everything inside this folder becomes visible to the remote machine — and writable
-              unless read-only is on. Share only with hosts you trust.
-              Not available on Windows clients yet.
-            </span>
+
+            {renderTailnetField(rdpDraft.tailnetId, (tailnetId) =>
+              handleRdpFieldChange('tailnetId', tailnetId),
+            )}
+          </FormSection>
+
+          {/* 다른 종류와 같은 순서다: Connection 다음이 Details. */}
+          <FormSection
+            title={translate('hostForm.rdp.details.title')}
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title={translate('hostForm.rdp.preferences.title')}
+            testId="hostform-section-preferences"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>{translate('hostForm.rdp.colorQuality')}</span>
+              <SelectField
+                value={rdpDraft.colorDepth === 16 ? '16' : '32'}
+                onChange={(event) =>
+                  handleRdpFieldChange('colorDepth', event.target.value === '16' ? 16 : null)
+                }
+              >
+                <option value="32">{translate('hostForm.rdp.color32')}</option>
+                <option value="16">{translate('hostForm.rdp.color16')}</option>
+              </SelectField>
+            </label>
+
+            <ToggleSwitch
+              checked={rdpDraft.useAllMonitors === true}
+              label={translate('hostForm.rdp.useAllMonitors.label')}
+              onClick={() =>
+                handleRdpFieldChange(
+                  'useAllMonitors',
+                  rdpDraft.useAllMonitors === true ? null : true,
+                )
+              }
+            />
+
+            <ToggleSwitch
+              checked={rdpDraft.audioEnabled !== false}
+              label={translate('hostForm.rdp.audio.label')}
+              onClick={() =>
+                handleRdpFieldChange(
+                  'audioEnabled',
+                  rdpDraft.audioEnabled === false ? null : false,
+                )
+              }
+            />
+            <ToggleSwitch
+              checked={rdpDraft.clipboardEnabled !== false}
+              label={translate('hostForm.rdp.clipboard.label')}
+              onClick={() =>
+                handleRdpFieldChange(
+                  'clipboardEnabled',
+                  rdpDraft.clipboardEnabled === false ? null : false,
+                )
+              }
+            />
+          </FormSection>
+
+          <FormSection
+            title={translate('hostForm.rdp.drive.title')}
+            testId="hostform-section-drive"
+          >
+            {/* 이름은 저장하지 않는다 — 경로에서 만든 값을 보여주고, 그 값이 원격에 그대로
+                뜬다(describeRdpDrives 한 곳에서 만든다).
+
+                한 줄에 이름·경로를 나란히 두지 않는다. 이름은 경로의 마지막 조각이라 폭을
+                나눠 가지면 좁은 패널에서 둘 중 하나가 늘 잘렸다. 위아래로 쌓으면 둘 다 온전히
+                보이고 머리글 행도 필요 없다. */}
+            {rdpDrives.length > 0 ? (
+              <div
+                className="overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--surface-elevated)]"
+                data-testid="hostform-rdp-drives"
+              >
+                {rdpDrives.map((drive, index) => (
+                  <div
+                    key={`${drive.path}-${index}`}
+                    className="flex items-center gap-[0.6rem] border-b border-[var(--border)] px-[0.75rem] py-[0.55rem] last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[0.9rem] text-[var(--text)]" title={drive.name}>
+                        {drive.name}
+                      </div>
+                      <div
+                        className="truncate text-[0.78rem] text-[var(--text-soft)]"
+                        title={drive.path}
+                      >
+                        {drive.path}
+                      </div>
+                    </div>
+                    {/* 머리글이 없으니 뜻은 라벨로 남긴다. 표 칸에는 체크박스가 맞다 —
+                        ToggleSwitch 는 라벨+설명 한 줄 전용이라 여기서는 늘어난다. */}
+                    <label
+                      className="flex shrink-0 items-center gap-[0.35rem] text-[0.78rem] text-[var(--text-soft)]"
+                      title={translate('hostForm.rdp.drive.readOnly')}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-[var(--accent-strong)]"
+                        checked={drive.readOnly}
+                        aria-label={`${drive.name} ${translate('hostForm.rdp.drive.readOnly')}`}
+                        onChange={(event) =>
+                          handleRdpFieldChange(
+                            'drives',
+                            (rdpDraft.drives ?? []).map((entry, entryIndex) =>
+                              entryIndex === index
+                                ? { ...entry, readOnly: event.target.checked ? true : null }
+                                : entry,
+                            ),
+                          )
+                        }
+                      />
+                      {translate('hostForm.rdp.drive.readOnly')}
+                    </label>
+                    <IconButton
+                      type="button"
+                      tone="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      aria-label={`${drive.name} ${translate('hostForm.rdp.drive.remove')}`}
+                      onClick={() =>
+                        handleRdpFieldChange(
+                          'drives',
+                          (rdpDraft.drives ?? []).filter(
+                            (_entry, entryIndex) => entryIndex !== index,
+                          ),
+                        )
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden />
+                    </IconButton>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  // 빈 행을 만들지 않는다 — 경로 없는 행은 아무 의미가 없고, 저장 계층이
+                  // 어차피 버린다. 고른 폴더로 바로 행이 생긴다.
+                  void pickRdpShareFolder().then((picked) => {
+                    if (picked) {
+                      handleRdpFieldChange('drives', [
+                        ...(rdpDraft.drives ?? []),
+                        { path: picked, readOnly: null },
+                      ]);
+                    }
+                  });
+                }}
+              >
+                <FolderPlus className="h-4 w-4" aria-hidden />
+                {translate('hostForm.rdp.drive.add')}
+              </Button>
+            </div>
           </FormSection>
         </>
       ) : null}

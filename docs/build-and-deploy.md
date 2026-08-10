@@ -14,7 +14,10 @@ For desktop features see [desktop](./desktop.md); for runtime boundaries see [ar
 
 - Node.js 24+
 - npm 11+
-- Go 1.26+
+- Go 1.26+ — `services/ssh-core`, `services/sync-api`, and running the desktop app
+- Rust 1.97+ — only for `services/rdp-core` (the RDP sidecar). The version is pinned by
+  `services/rdp-core/rust-toolchain.toml`, so `rustup` picks it up automatically.
+- JDK 17 + Android SDK/NDK for Android builds, Xcode + CocoaPods for iOS builds
 
 Initial setup:
 
@@ -22,6 +25,14 @@ Initial setup:
 npm ci
 (cd services/ssh-core && go build ./...)
 (cd services/sync-api && go build ./...)
+```
+
+RDP is optional: the desktop app builds and runs without Rust, and only fails when you open an
+RDP host (`rdp-core binary not found`). To work on it, build the sidecar once — the first build
+compiles IronRDP, aws-lc-sys, and OpenH264 from source, so expect it to take a while.
+
+```bash
+(cd services/rdp-core && cargo build)
 ```
 
 ## Running locally for development

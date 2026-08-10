@@ -293,8 +293,6 @@ export function createMockApi(): DesktopApi {
           username: "user",
           domain: null,
           secretRef: "host:rdp-host-1",
-          desktopWidth: 1920,
-          desktopHeight: 1080,
           groupName: null,
           terminalThemeId: null,
           createdAt: "2025-01-01T00:00:00.000Z",

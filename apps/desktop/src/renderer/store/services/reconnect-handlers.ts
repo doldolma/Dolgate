@@ -99,6 +99,68 @@ export function registerReconnectHandlers(): void {
     },
   });
 
+  // --- RDP 세션 (key = stableId) ---
+  //
+  // 터미널과 나뉘어 있는 이유: 그쪽 perform 은 ssh-core 로 가는 retrySessionConnection 을 부른다.
+  // 백오프·상한·홀드는 같은 엔진을 그대로 쓴다.
+  registerReconnectHandler("rdp", {
+    renderScheduled(stableId, info) {
+      appStore.setState((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.stableId === stableId
+            ? {
+                ...tab,
+                status: "connecting" as const,
+                errorMessage: undefined,
+                connectionProgress: createConnectionProgress(
+                  "reconnecting",
+                  reconnectMessage(info),
+                ),
+                reconnect: reconnectSummary(info),
+                lastEventAt: new Date().toISOString(),
+              }
+            : tab,
+        ),
+      }));
+    },
+    async perform(stableId) {
+      const tab = appStore
+        .getState()
+        .tabs.find((item) => item.stableId === stableId);
+      if (!tab) {
+        return;
+      }
+      // 같은 탭에 다시 붙는다(stableId 유지). 새 탭을 만들면 이 재연결의 시도 횟수를 잃는다.
+      await appStore.getState().retryRdpConnection(tab.sessionId);
+    },
+    renderGaveUp(stableId, info) {
+      const message = t('reconnect.failed', { attempts: info.attempts });
+      appStore.setState((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.stableId === stableId
+            ? {
+                ...tab,
+                status: "error" as const,
+                errorMessage: message,
+                connectionProgress: createConnectionProgress(
+                  "reconnecting",
+                  message,
+                  { retryable: true },
+                ),
+                reconnect: null,
+                lastEventAt: new Date().toISOString(),
+              }
+            : tab,
+        ),
+      }));
+    },
+    isStillPresent(stableId) {
+      return appStore
+        .getState()
+        .tabs.some((item) => item.stableId === stableId);
+    },
+  });
+
   // --- SFTP (key = paneId 'left'|'right', meta.hostId) ---
   registerReconnectHandler("sftp", {
     renderScheduled(paneId, info) {

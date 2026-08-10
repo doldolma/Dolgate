@@ -20,6 +20,7 @@ async function loadRepositories(): Promise<{
   DnsOverrideRepository: DatabaseModule['DnsOverrideRepository'];
   KnownHostRepository: DatabaseModule['KnownHostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
+  SecretMetadataRepository: DatabaseModule['SecretMetadataRepository'];
   ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
@@ -41,6 +42,7 @@ async function loadRepositories(): Promise<{
     DnsOverrideRepository: databaseModule.DnsOverrideRepository,
     KnownHostRepository: databaseModule.KnownHostRepository,
     SettingsRepository: databaseModule.SettingsRepository,
+    SecretMetadataRepository: databaseModule.SecretMetadataRepository,
     ActivityLogRepository: databaseModule.ActivityLogRepository
   };
 }
@@ -49,6 +51,7 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
   tempDir: string;
   HostRepository: DatabaseModule['HostRepository'];
   SettingsRepository: DatabaseModule['SettingsRepository'];
+  SecretMetadataRepository: DatabaseModule['SecretMetadataRepository'];
   ActivityLogRepository: DatabaseModule['ActivityLogRepository'];
 }> {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'dolgate-desktop-db-'));
@@ -68,6 +71,7 @@ async function loadRepositoriesWithStateFile(stateFile: unknown): Promise<{
     tempDir,
     HostRepository: databaseModule.HostRepository,
     SettingsRepository: databaseModule.SettingsRepository,
+    SecretMetadataRepository: databaseModule.SecretMetadataRepository,
     ActivityLogRepository: databaseModule.ActivityLogRepository
   };
 }
@@ -587,11 +591,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: '192.168.200.27',
       port: 3389,
-      username: 'user',
-      domain: 'CORP',
       secretRef: 'secret-1',
-      desktopWidth: 1920,
-      desktopHeight: 1080,
     });
 
     vi.resetModules();
@@ -606,12 +606,54 @@ describe('HostRepository', () => {
       groupName: 'Lab',
       hostname: '192.168.200.27',
       port: 3389,
-      username: 'user',
-      domain: 'CORP',
       secretRef: 'secret-1',
-      desktopWidth: 1920,
-      desktopHeight: 1080,
     });
+  });
+
+  it('keeps the admin session choice across a reload', async () => {
+    // 저장·복원 두 계층이 명시한 필드만 통과시키므로, 어느 한쪽을 빠뜨리면 켜 둔 관리 세션이
+    // 앱을 껐다 켜면 조용히 꺼진다 — 그러면 라이선스를 쓰는 일반 세션으로 붙는다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-admin-1', {
+      kind: 'rdp',
+      label: 'Win Box',
+      groupName: '',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.0.9',
+      port: 3389,
+      adminSession: true,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloadedHosts = new databaseModule.HostRepository();
+
+    expect(reloadedHosts.getById('rdp-admin-1')).toMatchObject({
+      adminSession: true,
+    });
+  });
+
+  it('leaves the admin session off unless it was asked for', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-admin-2', {
+      kind: 'rdp',
+      label: 'Win Box',
+      groupName: '',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.0.9',
+      port: 3389,
+    });
+
+    // null 하나로 눕힌다. false 와 null 이 섞이면 접속 경로에서 판단이 갈린다.
+    expect(hosts.getById('rdp-admin-2')).toMatchObject({ adminSession: null });
   });
 
   it('keeps the chosen monitors across a reload', async () => {
@@ -628,11 +670,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: 'host',
       port: 3389,
-      username: 'user',
-      domain: null,
       secretRef: null,
-      desktopWidth: 1920,
-      desktopHeight: 1080,
       monitors: [
         { id: 1, label: 'Built-in', width: 3024, height: 1964 },
         { id: 2, label: 'LG HDR 4K', width: 3840, height: 2160 },
@@ -667,11 +705,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: 'host',
       port: 3389,
-      username: 'user',
-      domain: null,
       secretRef: null,
-      desktopWidth: 1920,
-      desktopHeight: 1080,
     };
 
     hosts.create('rdp-host-keep', {
@@ -699,11 +733,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: 'host',
       port: 3389,
-      username: 'user',
-      domain: null,
       secretRef: null,
-      desktopWidth: 1920,
-      desktopHeight: 1080,
     };
 
     hosts.create('rdp-host-clear', {
@@ -730,11 +760,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: 'host',
       port: 3389,
-      username: 'user',
-      domain: null,
       secretRef: null,
-      desktopWidth: 1920,
-      desktopHeight: 1080,
       monitors: [],
     });
 
@@ -755,11 +781,7 @@ describe('HostRepository', () => {
       terminalThemeId: null,
       hostname: 'host',
       port: 3389,
-      username: 'user',
-      domain: null,
       secretRef: null,
-      desktopWidth: 1921,
-      desktopHeight: 99999,
     });
 
     vi.resetModules();
@@ -769,8 +791,6 @@ describe('HostRepository', () => {
     const reloadedHosts = new databaseModule.HostRepository();
 
     expect(reloadedHosts.getById('rdp-host-2')).toMatchObject({
-      desktopWidth: 1920,
-      desktopHeight: 8192,
     });
   });
 
@@ -1790,6 +1810,86 @@ describe('KnownHostRepository', () => {
 
 // 호스트 이름은 tailnet 안에서만 유효하다 — 다른 tailnet 의 같은 이름은 다른 머신이다.
 // 이 경계가 새면 신뢰한 적 없는 머신을 신뢰한 것으로 착각한다.
+// kind 가 없는 자격증명은 SSH 용으로 본다. 이 필드가 생기기 전에 만든 것이 전부 그렇고, 잘못
+// 판정하면 기존 자격증명이 SSH 목록에서 사라진다.
+describe('SecretMetadataRepository credential kind', () => {
+  // 정리는 파일 위쪽 전역 afterEach 가 한다(DOLSSH_USER_DATA_DIR 기준).
+  it('keeps the kind and account from upsert to list', async () => {
+    // upsert → 저장 → list 사이에 필드를 하나라도 흘리면 저장은 되는데 RDP 목록에 안 나온다.
+    // 실제로 그렇게 깨졌던 자리라(IPC 핸들러) 체인 전체를 여기서 잠근다.
+    const { SecretMetadataRepository } = await loadRepositories();
+    const secrets = new SecretMetadataRepository();
+
+    secrets.upsert({
+      secretRef: 'secret:rdp',
+      label: 'Win admin',
+      kind: 'rdp',
+      username: 'Administrator',
+      domain: 'CORP',
+      hasPassword: true,
+      hasPassphrase: false,
+    });
+
+    const entry = secrets.list().find((item) => item.secretRef === 'secret:rdp');
+    expect(entry).toMatchObject({
+      kind: 'rdp',
+      username: 'Administrator',
+      domain: 'CORP',
+      hasPassword: true,
+    });
+  });
+
+  it('treats a credential without a kind as SSH', async () => {
+    const loaded = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      data: {
+        groups: [],
+        hosts: [],
+        knownHosts: [],
+        portForwards: [],
+        secretMetadata: [
+          {
+            // 옛 항목: kind 가 없다.
+            secretRef: 'secret:legacy',
+            label: 'Prod password',
+            hasPassword: true,
+            hasPassphrase: false,
+            linkedHostCount: 0,
+            updatedAt: '2025-01-01T00:00:00.000Z'
+          },
+          {
+            secretRef: 'secret:rdp',
+            label: 'Win admin',
+            kind: 'rdp',
+            username: 'Administrator',
+            domain: 'CORP',
+            hasPassword: true,
+            hasPassphrase: false,
+            linkedHostCount: 0,
+            updatedAt: '2025-01-01T00:00:00.000Z'
+          }
+        ],
+        syncOutbox: []
+      },
+      secure: {
+        refreshToken: null,
+        managedSecretsByRef: {}
+      }
+    });
+    const entries = new loaded.SecretMetadataRepository().list();
+    const legacy = entries.find((entry) => entry.secretRef === 'secret:legacy');
+    const rdp = entries.find((entry) => entry.secretRef === 'secret:rdp');
+
+    // 옛 항목은 kind 가 비어 있고, SSH 목록의 조건(kind !== 'rdp')을 통과한다.
+    expect(legacy?.kind ?? null).toBeNull();
+    expect(legacy?.kind).not.toBe('rdp');
+    // RDP 항목은 계정까지 그대로 살아난다.
+    expect(rdp?.kind).toBe('rdp');
+    expect(rdp?.username).toBe('Administrator');
+    expect(rdp?.domain).toBe('CORP');
+  });
+});
+
 describe('KnownHostRepository tailnet scoping', () => {
   const base = {
     hostId: 'host-1',

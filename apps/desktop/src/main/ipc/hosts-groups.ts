@@ -7,6 +7,22 @@ import type { MainIpcContext } from "./context";
 import { t } from '../i18n';
 import { logMessage } from "../activity-log-message";
 
+/**
+ * RDP 자격증명으로 저장할 값.
+ *
+ * 필드를 하나하나 나열해 넘기던 자리였는데, 그러다 계정(`username`/`domain`)과 종류(`kind`)를
+ * 빠뜨려서 **저장해도 목록에 안 나오는** 상태가 됐다(kind 가 없으면 RDP 목록 필터에 안 걸린다).
+ * 한 곳으로 모아 다시 빠뜨리지 않게 한다.
+ */
+function rdpSecrets(secrets: HostSecretInput): HostSecretInput {
+  return {
+    kind: 'rdp',
+    username: secrets.username,
+    domain: secrets.domain,
+    password: secrets.password,
+  };
+}
+
 function normalizeSshDraftForPersistence(
   draft: HostDraft,
   secretRef: string | null,
@@ -48,9 +64,7 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
             resolvedSecrets,
           )
         : isRdpDraft && secrets?.password
-          ? await ctx.persistSecret(ctx.describeHostLabel(draft), {
-              password: secrets.password,
-            })
+          ? await ctx.persistSecret(ctx.describeHostLabel(draft), rdpSecrets(secrets))
           : null;
       const secretRef = createdSecretRef ?? existingSecretRef;
       if (secretRef) {
@@ -134,9 +148,10 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
       } else if (isRdpUpdate && secrets?.password) {
         // 새 비밀번호를 받은 경우에만 다시 저장한다. 비워 두면 기존 ref 를 그대로 유지한다.
-        secretRef = await ctx.persistSecret(ctx.describeHostLabel(draft), {
-          password: secrets.password,
-        });
+        secretRef = await ctx.persistSecret(
+          ctx.describeHostLabel(draft),
+          rdpSecrets(secrets),
+        );
         ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretUpdated'), {
           hostId: id,
           secretRef,

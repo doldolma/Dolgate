@@ -15,6 +15,14 @@ export interface PointerDisplay {
 export interface ScreenPointerMapping {
   displayIds: readonly number[];
   placements: readonly RdpMonitorPlacement[];
+  /**
+   * 원격 모니터가 실제로 그려지는 화면 사각형. 창을 펼친 뒤 잰 값이고, 없으면 화면 전체다.
+   *
+   * 왜 `display.bounds` 로는 안 되는가: 창이 화면을 전부 못 쓰는 경우가 있다. 노치 있는 맥북은
+   * 전체화면이어도 위 33px 을 못 받아, 982 짜리 화면에 949 만 그린다. 그리는 크기로 선언해도
+   * 여기서 `bounds`(982)로 나누면 비율이 0.966 이 되어 커서가 다시 어긋난다.
+   */
+  drawnRects?: ReadonlyMap<number, { x: number; y: number; width: number; height: number }>;
 }
 
 /**
@@ -52,12 +60,15 @@ export function mapScreenPointToDesktop(
     return null;
   }
 
-  // 화면과 원격 모니터의 해상도가 다를 수 있다(HiDPI, 배율 낮춤). 비율로 옮긴다.
-  const scaleX = placement.width / display.bounds.width;
-  const scaleY = placement.height / display.bounds.height;
+  // 원격 모니터가 실제로 그려지는 사각형. 재 둔 값이 있으면 그것이 정답이다.
+  const drawn = mapping.drawnRects?.get(index) ?? display.bounds;
 
-  const x = placement.left + (point.screenX - display.bounds.x) * scaleX;
-  const y = placement.top + (point.screenY - display.bounds.y) * scaleY;
+  // 화면과 원격 모니터의 해상도가 다를 수 있다(HiDPI, 배율 낮춤). 비율로 옮긴다.
+  const scaleX = placement.width / drawn.width;
+  const scaleY = placement.height / drawn.height;
+
+  const x = placement.left + (point.screenX - drawn.x) * scaleX;
+  const y = placement.top + (point.screenY - drawn.y) * scaleY;
 
   // 마지막 픽셀을 넘지 않게 잡아 둔다. 반올림이 경계를 한 칸 넘기면 원격이 그 갱신을 버린다.
   return {

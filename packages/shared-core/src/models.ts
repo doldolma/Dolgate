@@ -276,21 +276,29 @@ export interface RdpMonitorSelection {
   height: number;
 }
 
+/**
+ * 원격 세션에 노출할 로컬 폴더 하나.
+ *
+ * 원격에 보이는 드라이브 이름은 저장하지 않는다 — 경로에서 만들어 쓰고, 그 규칙은
+ * `describeRdpDrives` 한 곳에만 둔다(편집 화면이 보여주는 이름과 원격에 뜨는 이름이 갈리면
+ * 사용자가 어느 폴더인지 알 수 없다).
+ */
+export interface RdpDriveShare {
+  /** 로컬 절대 경로. */
+  path: string;
+  /** 원격이 이 폴더를 수정하지 못하게 한다. */
+  readOnly?: boolean | null;
+}
+
 export interface RdpHostRecord extends HostBaseRecord {
   kind: 'rdp';
   hostname: string;
   port: number;
-  username: string;
-  /** Windows 도메인. 로컬/Microsoft 계정이면 비운다. */
-  domain?: string | null;
   /**
    * 비밀번호는 레코드가 아니라 시크릿 저장소에 둔다. SSH와 같은 규칙이다 —
    * 호스트 레코드는 동기화·내보내기 대상이라 자격증명이 실리면 안 된다.
    */
   secretRef?: string | null;
-  /** 요청할 화면 크기. 서버가 이 크기의 데스크톱을 만든다. */
-  desktopWidth: number;
-  desktopHeight: number;
   /**
    * 신뢰한 서버 인증서의 SHA-256 지문(TOFU 핀).
    *
@@ -300,37 +308,86 @@ export interface RdpHostRecord extends HostBaseRecord {
    */
   certificateFingerprint?: string | null;
   /**
-   * 원격에 공유할 로컬 폴더의 절대 경로. 비어 있으면 공유하지 않는다.
+   * 원격 세션에 노출할 로컬 폴더들. 비어 있거나 없으면 드라이브를 붙이지 않는다.
    *
    * 공유하면 그 폴더 안의 파일이 원격 머신에 그대로 노출된다 — 신뢰하는 호스트에만 켤 것.
    */
+  drives?: RdpDriveShare[] | null;
+  /**
+   * @deprecated `drives` 로 옮겼다. 저장된 값은 읽을 때 `drives` 한 항목으로 바뀐다.
+   *
+   * 타입에서 지우지 않는 이유: 다른 기기의 옛 빌드가 계속 이 필드를 쓰므로, 지우면 동기화될
+   * 때마다 값이 왕복한다.
+   */
   drivePath?: string | null;
-  /** 공유 폴더를 읽기 전용으로 준다. 원격이 파일을 바꾸거나 지울 수 없다. */
+  /** @deprecated `drives[].readOnly` 로 옮겼다. */
   driveReadOnly?: boolean | null;
   /**
-   * 이 호스트에 빌려줄 로컬 모니터들. 비어 있거나 없으면 desktopWidth/Height 로 한 화면만 쓴다.
+   * 관리 세션으로 붙는다(mstsc 의 `/admin`, Windows App 의 "관리 세션에 연결" 체크박스).
    *
-   * 여러 개면 그 모니터들을 감싸는 하나의 큰 데스크톱이 만들어진다. 떨어져 있으면 사이의 빈
-   * 공간도 데스크톱에 포함되어 검은 영역으로 남는다.
+   * 관리 세션은 RDS 클라이언트 라이선스(CAL)를 소모하지 않고, 세션 수 제한에 걸렸거나 호스트가
+   * 드레인 중일 때도 붙는다. 옛 `/console` 의 후신이다.
+   *
+   * 자격증명을 원격에 보내지 않는 `/restrictedAdmin` 과는 다른 기능이다.
+   */
+  adminSession?: boolean | null;
+  /**
+   * @deprecated 읽지도 쓰지도 않는다. 모니터 세부 선택은 기기 로컬 설정으로 옮겼다 —
+   * 기기마다 붙어 있는 모니터가 다른데 호스트 레코드는 동기화 대상이라 맞지 않았다.
+   * 지금은 `useAllMonitors` 만 호스트에 남고, 세부 선택은 기기별로 저장한다.
+   *
+   * 타입에서 지우지 않는 이유: 다른 기기의 옛 빌드가 계속 이 필드를 쓰므로, 지우면 동기화될
+   * 때마다 값이 왕복한다. 옛 값은 그대로 두고 무시한다.
    */
   monitors?: RdpMonitorSelection[] | null;
+  /**
+   * 붙어 있는 모니터를 전부 쓴다. 끄거나 없으면 창이 있는 화면 하나만 쓴다.
+   *
+   * 어느 모니터를 쓸지 골라 좁히는 것은 기기 로컬 설정이다(모니터 구성이 기기마다 다르다).
+   * 이 토글은 "여러 화면을 쓸 의도가 있는 호스트인가"만 정하므로 동기화해도 뜻이 유지된다.
+   */
+  useAllMonitors?: boolean | null;
+  /** 원격 소리를 받는다. 없거나 null 이면 켜짐. */
+  audioEnabled?: boolean | null;
+  /** 원격과 클립보드를 주고받는다. 없거나 null 이면 켜짐. */
+  clipboardEnabled?: boolean | null;
+  /**
+   * 색 깊이(비트). 없거나 null 이면 32.
+   *
+   * 그래픽 파이프라인(EGFX/H.264)이 붙으면 거의 의미가 없다 — 16 은 레거시 경로에서 대역폭을
+   * 줄이는 선택이다.
+   */
+  colorDepth?: 16 | 32 | null;
+  /** 경유할 tailnet. 없으면 일반 네트워크로 직접 붙는다. SshHostRecord.tailnetId 와 같다. */
+  tailnetId?: string | null;
 }
 
 export interface RdpHostDraft extends HostBaseDraft {
   kind: 'rdp';
   hostname: string;
   port: number;
-  username: string;
-  domain?: string | null;
+
   secretRef?: string | null;
-  desktopWidth: number;
-  desktopHeight: number;
-  /** 원격에 공유할 로컬 폴더. [[RdpHostRecord]] 참고. */
+  /** 원격 세션에 노출할 로컬 폴더들. [[RdpHostRecord]] 참고. */
+  drives?: RdpDriveShare[] | null;
+  /** @deprecated `drives` 로 옮겼다. [[RdpHostRecord]] 참고. */
   drivePath?: string | null;
-  /** 공유 폴더를 읽기 전용으로 준다. [[RdpHostRecord]] 참고. */
+  /** @deprecated `drives[].readOnly` 로 옮겼다. */
   driveReadOnly?: boolean | null;
-  /** 이 호스트에 빌려줄 로컬 모니터들. [[RdpHostRecord]] 참고. */
+  /** 관리 세션으로 붙는다. [[RdpHostRecord]] 참고. */
+  adminSession?: boolean | null;
+  /** @deprecated 안 쓴다. [[RdpHostRecord]] 참고. */
   monitors?: RdpMonitorSelection[] | null;
+  /** 붙어 있는 모니터를 전부 쓴다. [[RdpHostRecord]] 참고. */
+  useAllMonitors?: boolean | null;
+  /** 원격 소리를 받는다. 기본 켜짐. [[RdpHostRecord]] 참고. */
+  audioEnabled?: boolean | null;
+  /** 원격과 클립보드를 주고받는다. 기본 켜짐. [[RdpHostRecord]] 참고. */
+  clipboardEnabled?: boolean | null;
+  /** 색 깊이(비트). 기본 32. [[RdpHostRecord]] 참고. */
+  colorDepth?: 16 | 32 | null;
+  /** 경유할 tailnet. [[RdpHostRecord]] 참고. */
+  tailnetId?: string | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
@@ -560,8 +617,6 @@ export function getHostSearchText(host: HostRecord): string[] {
     return [
       host.label,
       host.hostname,
-      host.username,
-      host.domain ?? '',
       host.groupName ?? '',
       ...(host.tags ?? []),
     ];
@@ -603,7 +658,8 @@ export function getHostSubtitle(host: HostRecord, labels: HostSubtitleLabels): s
       .join(' • ');
   }
   if (host.kind === 'rdp') {
-    return ['RDP', `${host.username}@${host.hostname}:${host.port}`].join(' • ');
+    // 계정은 자격증명에 있어 레코드에 없다. 여기서는 주소만 보여준다.
+    return ['RDP', `${host.hostname}:${host.port}`].join(' • ');
   }
   if (host.kind === 'serial') {
     if (host.transport === 'local') {
@@ -1172,6 +1228,16 @@ export interface AppSettings extends TerminalAppearanceSettings {
    * — 화면에는 저장된 것처럼 보이면서 반영만 안 되는, 원인 찾기 어려운 실패다.
    */
   tailnetHostname: string | null;
+  /**
+   * RDP 호스트별로 고른 모니터. **기기 로컬 전용이다 — 동기화하지 않는다.**
+   *
+   * 붙어 있는 모니터가 기기마다 다르므로 호스트 레코드(동기화 대상)에 둘 수 없다. 호스트에는
+   * "전체 모니터를 쓸 것인가"만 남고 세부 선택이 여기 있다.
+   *
+   * `tailnetHostname` 과 같은 이유로 선택 필드가 아니다 — 설정 객체를 필드별로 다시 만드는 곳을
+   * 여러 군데 지나는데, 선택으로 두면 한 곳만 빠뜨려도 컴파일러가 못 잡고 조용히 사라진다.
+   */
+  rdpMonitorsByHostId: Record<string, RdpMonitorSelection[]>;
   dismissedUpdateVersion?: string | null;
   updatedAt: string;
 }
@@ -2418,6 +2484,25 @@ export interface ActivityLogRecord {
 export interface SecretMetadataRecord {
   secretRef: string;
   label: string;
+  /**
+   * 이 자격증명이 어느 프로토콜용인가.
+   *
+   * 없으면 SSH 로 본다 — 이 필드가 생기기 전에 만든 것은 모두 SSH 용이다. RDP 목록에 SSH 자격증명
+   * 이 섞여 나오면 고를 수 없는 항목만 늘어난다(계정이 없으니 붙지 못한다).
+   */
+  kind?: 'ssh' | 'rdp' | null;
+  /**
+   * 이 자격증명이 가리키는 계정. RDP 는 계정이 자격증명에 딸린다 — Windows 의
+   * `DOMAIN\user`+비밀번호가 본래 한 묶음이고, 같은 계정을 여러 호스트에 쓸 때 다시 적지
+   * 않아도 된다.
+   *
+   * 평문이다. 사용자 이름은 비밀이 아니고, 목록에 `Administrator@CORP` 로 보여주거나 접속할 때
+   * 복호화 없이 읽어야 한다. `persistSecret` 이 번들에서 그대로 옮겨 적으므로 값이 갈리지 않는다.
+   *
+   * SSH 는 아직 호스트 레코드가 계정을 갖는다(나중에 정리).
+   */
+  username?: string | null;
+  domain?: string | null;
   hasPassword: boolean;
   hasPassphrase: boolean;
   hasManagedPrivateKey: boolean;
@@ -2453,6 +2538,11 @@ export interface SshCertificateInfo {
 export interface ManagedSecretPayload {
   secretRef: string;
   label: string;
+  /** 이 자격증명이 어느 프로토콜용인가. [[SecretMetadataRecord]].kind 참고. */
+  kind?: 'ssh' | 'rdp';
+  /** 이 자격증명의 계정. [[SecretMetadataRecord]].username 참고. */
+  username?: string;
+  domain?: string;
   password?: string;
   passphrase?: string;
   privateKeyPem?: string;

@@ -16,6 +16,7 @@ vi.mock('../services/desktop/settings', () => ({
 const settings: AppSettings = {
   theme: 'system',
   tailnetHostname: null,
+  rdpMonitorsByHostId: {},
   globalTerminalThemeId: 'dolssh-dark',
   terminalFontFamily: 'sf-mono',
   terminalFontSize: 13,

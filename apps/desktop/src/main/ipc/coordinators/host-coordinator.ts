@@ -237,8 +237,9 @@ export function createHostCoordinator(deps: {
           : "";
       return host.label || `${host.transport} ${targetHost}${targetPort}`.trim();
     }
-    return host.label ||
-      (host.username.trim() ? `${host.username}@${host.hostname}` : host.hostname);
+    // RDP 는 계정이 자격증명에 있어 레코드에 사용자 이름이 없다. 그럴 때는 호스트 이름만 쓴다.
+    const account = 'username' in host ? host.username : undefined;
+    return host.label || (account?.trim() ? `${account}@${host.hostname}` : host.hostname);
   };
 
   const describeHostTarget = (

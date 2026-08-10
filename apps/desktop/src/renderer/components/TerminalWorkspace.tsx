@@ -3,10 +3,12 @@ import type { DragEvent } from 'react';
 import type {
   AppSettings,
   HostRecord,
+  RdpHostRecord,
   SessionShareSnapshotInput,
   SessionShareStartInput,
   TerminalTab,
 } from '@shared';
+import { isRdpHostRecord } from '@shared';
 import { useTerminalWorkspaceController } from '../controllers/useTerminalWorkspaceController';
 import type {
   WorkspaceDropDirection,
@@ -19,6 +21,7 @@ import {
   resolveTerminalThemeIdForSession,
 } from '../lib/terminal-presets';
 import { RdpSessionCanvas } from './rdp/RdpSessionCanvas';
+import { RdpConnectionOverlay } from './rdp/RdpConnectionOverlay';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
 import { resizeTerminal, tmuxCommand } from '../services/desktop/terminal';
@@ -109,6 +112,15 @@ function isMacPlatform(): boolean {
 
 function isConnectedHostSession(tab: TerminalTab | undefined): boolean {
   return tab?.source === 'host' && tab.status === 'connected';
+}
+
+/** 이 탭의 RDP 호스트. 오디오·클립보드처럼 호스트에 저장된 설정을 읽는 데 쓴다. */
+function rdpHostFor(hosts: HostRecord[], tab: TerminalTab): RdpHostRecord | undefined {
+  if (!tab.hostId) {
+    return undefined;
+  }
+  const host = hosts.find((record) => record.id === tab.hostId);
+  return host && isRdpHostRecord(host) ? host : undefined;
 }
 
 function resolveTerminalAppearanceForSession(
@@ -626,7 +638,20 @@ export function TerminalWorkspace({
         : undefined,
       content: tab.paneKind === 'rdp' ? (
         // RDP 탭은 터미널이 아니다 — xterm 대신 원격 화면 캔버스를 띄운다.
-        <RdpSessionCanvas sessionId={tab.sessionId} visible={visible} />
+        //
+        // 오디오·클립보드는 호스트 설정을 따른다. 코어가 채널을 안 붙였으면 데이터가 오지도
+        // 가지도 않지만, 훅을 돌릴 이유도 없다(오디오는 AudioContext 를 만든다).
+        <>
+          <RdpSessionCanvas
+            sessionId={tab.sessionId}
+            visible={visible}
+            audio={rdpHostFor(hosts, tab)?.audioEnabled !== false}
+            clipboard={rdpHostFor(hosts, tab)?.clipboardEnabled !== false}
+          />
+          {/* 연결 진행·실패를 pane 위에 덮는다. tailnet 을 경유하면 그 계층의 단계까지 보인다 —
+              Tailscale 에서 막힌 것인지 원격이 거절한 것인지가 여기서 갈린다. */}
+          {visible ? <RdpConnectionOverlay sessionId={tab.sessionId} /> : null}
+        </>
       ) : (
         <TerminalSessionPane
           sessionId={tab.sessionId}

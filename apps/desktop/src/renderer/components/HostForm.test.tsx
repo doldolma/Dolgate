@@ -987,3 +987,86 @@ describe('getJumpHostCandidates', () => {
     ]);
   });
 });
+
+// 저장한 자격증명이 화면에서 사라지던 회귀. 원인은 두 가지였다:
+//  (1) 고른 ref 가 필터된 목록에 없으면 선택을 지우는 효과 → 저장 직후 "새 자격증명"으로 되돌아감
+//  (2) 자격증명이 없으면 저장을 막는 조건 → 그 상태에서 저장 버튼이 아무 반응 없이 무시됨
+// 저장 자체는 정상이었는데(활동 로그에 secret 갱신이 남았다) 폼만 그렇게 보였다.
+describe('HostForm RDP credential selection', () => {
+  function createRdpHost(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'rdp-1',
+      kind: 'rdp' as const,
+      label: 'Win Box',
+      tags: [],
+      hostname: '10.0.2.181',
+      port: 3389,
+      secretRef: 'secret:rdp',
+      groupName: null,
+      terminalThemeId: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      ...overrides,
+    };
+  }
+
+  it('keeps showing the stored credential even when it is not in the reusable list', () => {
+    // kind 가 없는 옛 항목이거나 목록 갱신이 늦은 경우다. 빼 버리면 저장한 것이 풀린 것처럼 보인다.
+    render(
+      <HostForm
+        host={createRdpHost() as never}
+        keychainEntries={[
+          {
+            secretRef: 'secret:rdp',
+            label: 'Win admin',
+            hasPassword: true,
+            hasPassphrase: false,
+            hasManagedPrivateKey: false,
+            hasCertificate: false,
+            linkedHostCount: 1,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const select = screen.getByLabelText('Credential') as HTMLSelectElement;
+    expect(select.value).toBe('existing:secret:rdp');
+  });
+
+  it('saves a newly entered account and password', async () => {
+    // 자격증명이 없다고 저장을 막아 두면 버튼을 눌러도 아무 일이 없는데 이유를 알 수 없다.
+    // 계정은 호스트 레코드가 아니라 자격증명(secrets)으로 나가야 한다.
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={createRdpHost({ secretRef: null }) as never}
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Username'), {
+      target: { value: 'Administrator' },
+    });
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'CORP' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'rdp' }),
+      expect.objectContaining({
+        kind: 'rdp',
+        username: 'Administrator',
+        domain: 'CORP',
+        password: 'pw',
+      }),
+    );
+  });
+});

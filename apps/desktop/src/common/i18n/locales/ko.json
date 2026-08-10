@@ -1351,6 +1351,46 @@
       "empty": "등록된 Tailnet 이 없습니다. 설정 → Tailscale 에서 먼저 추가하세요. Tailnet 은 기기마다 따로 등록합니다.",
       "missingOption": "설정에 없는 Tailnet",
       "missing": "이 호스트가 지정한 Tailnet 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
+    },
+    "rdp": {
+      "connection": {
+        "title": "Connection"
+      },
+      "port": "Port",
+      "username": "Username",
+      "domain": "Domain",
+      "domainPlaceholder": "Leave blank for a local or Microsoft account",
+      "password": "Password",
+      "passwordKeep": "Leave blank to keep",
+      "adminSession": {
+        "label": "Connect to the admin session"
+      },
+      "details": {
+        "title": "Details"
+      },
+      "colorQuality": "Color quality",
+      "color32": "32-bit",
+      "color16": "16-bit",
+      "useAllMonitors": {
+        "label": "Use all monitors"
+      },
+      "preferences": {
+        "title": "Preferences"
+      },
+      "audio": {
+        "label": "Play remote audio"
+      },
+      "clipboard": {
+        "label": "Share the clipboard"
+      },
+      "drive": {
+        "title": "Redirect folders",
+        "readOnly": "Read-only",
+        "add": "Add folder",
+        "remove": "Remove"
+      },
+      "hostname": "Hostname",
+      "credential": "Credential"
     }
   },
   "hostTransfer": {
@@ -3181,5 +3221,11 @@
     "tailscaleTargetNoPath": "직접 연결도 릴레이도 서지 않았습니다.",
     "tailscaleTargetMissing": "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다.",
     "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}"
+  },
+  "rdp": {
+    "overlay": {
+      "connectingTitle": "연결 중",
+      "failedTitle": "연결할 수 없습니다"
+    }
   }
 }

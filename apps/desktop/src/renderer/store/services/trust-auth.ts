@@ -9,6 +9,7 @@ import {
   getAwsEc2HostSshPort,
   isSshHostRecord,
   isWarpgateSshHostRecord,
+  isRdpHostRecord,
 } from "@shared";
 import type { PendingHostKeyPrompt } from "../types";
 import type { SliceDeps } from "./context";
@@ -255,13 +256,28 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
    * 연결 안쪽(dial)에서 하지 않는 이유: 그 층에는 어느 세션인지도, 사람을 기다릴 예산도 없다.
    * 여기서 하면 진행을 그 연결의 오버레이에 그대로 보여줄 수 있다.
    */
+  /**
+   * 이 호스트가 tailnet 을 경유하면 노드를 먼저 올린다.
+   *
+   * 입력을 `EnsureTrustedHostInput` 보다 좁게 받는다 — 이 함수는 hostId 와 진행 표시용
+   * sessionId/endpointId 만 쓴다. `action`(신뢰 프롬프트 이후 동작)을 요구하면 그 프롬프트가
+   * 없는 종류(RDP)가 의미 없는 값을 만들어 넘겨야 한다.
+   */
   const ensureTailnetReady = (
     set: StoreSetter,
-    input: EnsureTrustedHostInput,
+    input: {
+      hostId: string;
+      sessionId?: string | null;
+      endpointId?: string | null;
+    },
   ): Promise<boolean> => {
     const host = get().hosts.find((item) => item.id === input.hostId);
+    // SSH·RDP 가 같은 필드를 쓴다. 한쪽만 보면 그 종류는 노드가 내려간 상태로 붙으려 하고,
+    // 실패 이유가 "연결할 수 없음" 으로만 보인다.
     const tailnetId =
-      host && isSshHostRecord(host) ? host.tailnetId?.trim() : undefined;
+      host && (isSshHostRecord(host) || isRdpHostRecord(host))
+        ? (host as { tailnetId?: string | null }).tailnetId?.trim()
+        : undefined;
     if (!tailnetId) {
       return Promise.resolve(true);
     }
@@ -278,7 +294,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
 
   const runTailnetReady = async (
     set: StoreSetter,
-    input: EnsureTrustedHostInput,
+    input: { hostId: string; sessionId?: string | null; endpointId?: string | null },
     tailnetId: string,
   ): Promise<boolean> => {
     // 인터넷이 없으면 노드를 올릴 수 없다. 그런데 tsnet 의 Start 는 그 사실을 알려 주지 않고
@@ -389,7 +405,11 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
   /** tailnet 준비가 필요한 호스트인지. 동기 판정이라 아닌 경우의 타이밍을 건드리지 않는다. */
   const needsTailnetReady = (hostId: string): boolean => {
     const host = get().hosts.find((item) => item.id === hostId);
-    return Boolean(host && isSshHostRecord(host) && host.tailnetId?.trim());
+    return Boolean(
+      host &&
+        (isSshHostRecord(host) || isRdpHostRecord(host)) &&
+        (host as { tailnetId?: string | null }).tailnetId?.trim(),
+    );
   };
 
   const ensureTrustedHostChain = (
@@ -432,5 +452,8 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     ensureAwsSsoProfileAuthenticationIfNeeded,
     ensureAwsHostAuthentication,
     ensureTrustedHost,
+    // RDP 는 SSH 신뢰 체인(호스트 키 probe)을 타지 않는다 — 인증서 TOFU 를 메인이 따로 한다.
+    // 그래서 tailnet 준비만 따로 쓸 수 있게 내보낸다.
+    ensureTailnetReady,
   };
 }

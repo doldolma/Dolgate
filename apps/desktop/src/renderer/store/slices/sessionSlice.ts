@@ -232,6 +232,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     startPendingLocalSessionConnect,
     startSessionConnectionFlow,
     startRdpConnectionFlow,
+    retryRdpConnection,
     promptForMissingUsername,
     startLocalTerminalFlow,
   } = services;
@@ -689,6 +690,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               tmux ? tmuxVersion : undefined,
             );
           },
+    retryRdpConnection: async (sessionId) => {
+            await retryRdpConnection(set, get, sessionId);
+          },
     retrySessionConnection: async (sessionId, secrets) => {
             const currentTab = get().tabs.find(
               (tab) => tab.sessionId === sessionId,
@@ -1033,28 +1037,28 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return;
             }
 
-            const draft = toHostDraft(host, host.label);
-            if (draft.kind !== "rdp") {
-              return;
+            // 기기 로컬 설정에 남긴다. 호스트 레코드에 두지 않는 이유: 레코드는 동기화되는데
+            // 붙어 있는 모니터는 기기마다 달라서, 다른 기기에서 고른 배치가 넘어오면 없는 화면을
+            // 가리킨다. 호스트에는 "전체 모니터를 쓸 것인가"만 남는다.
+            //
+            // 먼저 저장한다 — 재접속이 실패해도 고른 배치는 남아 다음 접속에 쓰인다.
+            const current = get().settings.rdpMonitorsByHostId;
+            const nextMap = { ...current };
+            if (monitors && monitors.length > 0) {
+              nextMap[host.id] = monitors;
+            } else {
+              delete nextMap[host.id];
             }
-
-            // 호스트에 먼저 남긴다. 재접속이 실패해도 고른 배치는 남아 다음 접속에 쓰인다.
-            const nextHost = await api.hosts.update(host.id, {
-              ...draft,
-              monitors,
+            const settings = await api.settings.update({
+              rdpMonitorsByHostId: nextMap,
             });
-            set((state) => ({
-              hosts: sortHosts([
-                ...state.hosts.filter((item) => item.id !== nextHost.id),
-                nextHost,
-              ]),
-            }));
+            set({ settings });
 
             // 모니터 배치는 접속 시점에 서버와 협상해 고정된다 — 붙어 있는 세션에 적용할 방법이
             // 없어서 다시 붙어야 한다.
             await api.rdp.disconnect(sessionId).catch(() => undefined);
             set((state) => removeSessionFromState(state, sessionId));
-            await startRdpConnectionFlow(set, get, nextHost);
+            await startRdpConnectionFlow(set, get, host);
           },
     disconnectTab: async (sessionId) => {
             // tmux pane 은 SSH 세션이 아니라 control 채널 위의 가상 pane 이다. 닫기는
@@ -1074,10 +1078,12 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             // RDP 는 별도 코어를 쓴다. 아래 경로는 전부 ssh-core 를 향하고, RDP sessionId 는
             // pending 접두사를 유지하므로 그냥 두면 탭만 사라지고 사이드카 세션은 계속 살아
             // 프레임을 흘린다.
-            if (
-              get().tabs.find((tab) => tab.sessionId === sessionId)?.paneKind ===
-              "rdp"
-            ) {
+            const rdpTab = get().tabs.find(
+              (tab) => tab.sessionId === sessionId && tab.paneKind === "rdp",
+            );
+            if (rdpTab) {
+              // 사용자가 직접 끊었다. 예약된 자동 재연결이 남아 있으면 닫은 세션이 되살아난다.
+              cancelReconnect(rdpTab.stableId, "user-disconnect");
               await api.rdp.disconnect(sessionId).catch(() => undefined);
               set((state) => removeSessionFromState(state, sessionId));
               return;

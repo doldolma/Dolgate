@@ -27,6 +27,7 @@ import {
   isSshHostRecord,
   isPendingEcsShellAttempt,
   normalizeEcsExecShellPermissionMessage,
+  isPendingSessionId,
   replaceSessionReferencesInState,
   resolveAwaitingHostTrustProgress,
   resolveConnectingProgress,
@@ -66,6 +67,7 @@ export function createSessionServices(deps: SliceDeps) {
   const {
     ensureAwsHostAuthentication,
     ensureTrustedHost,
+    ensureTailnetReady,
   } = createTrustAuthServices(deps);
 
   const updateSessionProgress = (
@@ -727,32 +729,42 @@ export function createSessionServices(deps: SliceDeps) {
 
   // RDP 는 터미널 세션 기계(재연결·tmux·홉·셸 통합)를 타지 않는다. 탭 하나를 만들고 코어에
   // 붙이는 게 전부라, startSessionConnectionFlow 에 분기를 흩뿌리는 대신 별도 경로로 둔다.
+  /**
+   * RDP 세션을 연다.
+   *
+   * `reuseSessionId` 가 있으면 탭을 새로 만들지 않는다 — 재연결이 이미 그 자리에 탭을 두고
+   * (stableId 를 유지한 채) 이 함수를 부르기 때문이다. 새 탭을 만들면 재연결마다 탭이 늘어나고
+   * 재연결 상태(백오프 카운터)가 붙어 있던 stableId 를 잃는다.
+   */
   const startRdpConnectionFlow = async (
     set: StoreSetter,
     get: StoreGetter,
     host: HostRecord,
+    reuseSessionId?: string,
   ) => {
-    const sessionId = createPendingSessionId();
-    const title = buildSessionTitle(
-      host.label,
-      { source: "host", hostId: host.id },
-      get().tabs,
-    );
+    const sessionId = reuseSessionId ?? createPendingSessionId();
+    if (!reuseSessionId) {
+      const title = buildSessionTitle(
+        host.label,
+        { source: "host", hostId: host.id },
+        get().tabs,
+      );
 
-    const tab = createPendingSessionTab({
-      sessionId,
-      source: "host",
-      hostId: host.id,
-      title,
-      paneKind: "rdp",
-      progress: resolveConnectingProgress(host),
-    });
+      const tab = createPendingSessionTab({
+        sessionId,
+        source: "host",
+        hostId: host.id,
+        title,
+        paneKind: "rdp",
+        progress: resolveConnectingProgress(host),
+      });
 
-    set((state) => ({
-      tabs: [...state.tabs, tab],
-      tabStrip: [...state.tabStrip, { kind: "session" as const, sessionId }],
-      ...activateSessionContextInState(state, sessionId),
-    }));
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        tabStrip: [...state.tabStrip, { kind: "session" as const, sessionId }],
+        ...activateSessionContextInState(state, sessionId),
+      }));
+    }
 
     updateSessionProgress(
       set,
@@ -760,6 +772,19 @@ export function createSessionServices(deps: SliceDeps) {
       resolveConnectingProgress(host),
       "connecting",
     );
+
+    // tailnet 을 경유하는 호스트는 노드가 먼저 올라와 있어야 한다. 메인이 접속 직전에 로컬
+    // 포워드를 여는데, 노드가 내려가 있으면 그 포워드가 곧바로 실패하고 사용자는 이유를
+    // "연결할 수 없음" 으로만 본다. 진행 상황은 이 세션의 오버레이에 그대로 나온다.
+    //
+    // SSH 의 신뢰 체인(호스트 키 probe)은 타지 않는다 — RDP 는 인증서 TOFU 를 메인이 따로 한다.
+    const tailnetReady = await ensureTailnetReady(set, {
+      hostId: host.id,
+      sessionId,
+    });
+    if (!tailnetReady) {
+      return;
+    }
 
     try {
       const connected = await api.rdp.connect(sessionId, host.id, rdpViewportSize());
@@ -787,6 +812,55 @@ export function createSessionServices(deps: SliceDeps) {
         { retryable: false },
       );
     }
+  };
+
+  /**
+   * RDP 세션을 같은 탭에 다시 붙인다.
+   *
+   * 재연결은 탭을 유지해야 한다 — 재연결 상태(시도 횟수·백오프)가 `stableId` 에 붙어 있고,
+   * 새 탭을 만들면 그 카운터를 잃는다. 그래서 세션 id 만 새로 발급하고 참조를 갈아끼운다
+   * (SSH 의 retrySessionConnection 과 같은 방식).
+   */
+  const retryRdpConnection = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    sessionId: string,
+  ) => {
+    const tab = get().tabs.find((item) => item.sessionId === sessionId);
+    if (!tab || tab.paneKind !== "rdp" || !tab.hostId) {
+      return;
+    }
+    const host = get().hosts.find((item) => item.id === tab.hostId);
+    if (!host || !isRdpHostRecord(host)) {
+      return;
+    }
+
+    const pendingSessionId = createPendingSessionId();
+    set((state) => ({
+      ...replaceSessionReferencesInState(
+        state,
+        sessionId,
+        pendingSessionId,
+        (current) =>
+          createPendingSessionTab({
+            sessionId: pendingSessionId,
+            // 이것이 재연결 상태의 키다. 잃으면 시도 횟수가 처음부터 다시 센다.
+            stableId: current.stableId,
+            source: "host",
+            hostId: host.id,
+            title: current.title,
+            paneKind: "rdp",
+            progress: resolveConnectingProgress(host),
+          }),
+      ),
+    }));
+
+    // 아직 코어에 붙지 않은 세션(pending)은 끊을 것이 없다.
+    if (!isPendingSessionId(sessionId)) {
+      await api.rdp.disconnect(sessionId).catch(() => undefined);
+    }
+
+    await startRdpConnectionFlow(set, get, host, pendingSessionId);
   };
 
   const startSessionConnectionFlow = async (
@@ -1001,6 +1075,7 @@ export function createSessionServices(deps: SliceDeps) {
     markSessionError,
     createPendingSessionTabForHost,
     startRdpConnectionFlow,
+    retryRdpConnection,
     createPendingSessionTabForLocal,
     createPendingSessionTabForContainerShell,
     createPendingSessionTabForEcsShell,

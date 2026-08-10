@@ -36,6 +36,21 @@ export function describeSecretType(entry: SecretMetadataRecord): string {
   return labels.join(' + ');
 }
 
+/**
+ * RDP 자격증명 한 줄. 계정을 앞세운다 — RDP 는 계정이 자격증명에 딸리므로, 어느 계정으로 붙는지가
+ * 고를 때 가장 중요한 정보다.
+ *
+ * 계정이 없는 항목(SSH 용으로 만든 비밀번호 등)은 라벨만 보여준다.
+ */
+export function formatRdpCredentialOptionLabel(
+  entry: SecretMetadataRecord,
+): string {
+  const account = entry.domain?.trim()
+    ? `${entry.domain}\\${entry.username ?? ''}`
+    : (entry.username?.trim() ?? '');
+  return account ? `${account} — ${entry.label}` : entry.label;
+}
+
 export function formatSavedSecretOptionLabel(
   entry: SecretMetadataRecord,
 ): string {

@@ -11,7 +11,14 @@
 //     실패(또 다른 closed/error) → runtimeEventSlice가 scheduleReconnect() 재호출
 //     → attempt 증가, maxAttempts 초과 시 handler.renderGaveUp().
 
-export type ReconnectKind = "session" | "sftp" | "portForward" | "tmux";
+// "rdp" 는 "session" 과 나뉘어 있다. 그쪽 perform 은 retrySessionConnection(ssh-core 전용)을
+// 부르므로, RDP 는 같은 엔진(백오프·상한·홀드)에 핸들러만 따로 등록한다.
+export type ReconnectKind =
+  | "session"
+  | "rdp"
+  | "sftp"
+  | "portForward"
+  | "tmux";
 
 export type ReconnectMeta = Record<string, unknown>;
 

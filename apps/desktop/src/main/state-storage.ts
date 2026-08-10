@@ -42,6 +42,7 @@ import type {
   AiSettings,
   TerminalFontFamilyId,
   TerminalThemeId,
+  RdpDriveShare,
   RdpMonitorSelection
 } from '@shared';
 import {
@@ -117,6 +118,14 @@ export interface DesktopStateFile {
     serverUrlOverride: string | null;
     // 기기 로컬 전용. settings 는 동기화 대상이 아니라 여기 두는 것만으로 그렇게 된다.
     tailnetHostname: string | null;
+    /**
+     * RDP 호스트별로 고른 모니터. 기기 로컬 전용이다.
+     *
+     * 호스트 레코드에 두지 않는 이유: 레코드는 동기화되는데 붙어 있는 모니터는 기기마다 다르다.
+     * 다른 기기에서 고른 화면 배치가 넘어오면 없는 화면을 가리키게 된다. 호스트에는 "전체
+     * 모니터를 쓸 것인가"(useAllMonitors)만 남고 세부 선택은 여기 있다.
+     */
+    rdpMonitorsByHostId: Record<string, RdpMonitorSelection[]>;
     updatedAt: string;
   };
   terminal: {
@@ -549,6 +558,7 @@ function createDefaultStateFile(): DesktopStateFile {
       ai: null,
       serverUrlOverride: null,
       tailnetHostname: null,
+      rdpMonitorsByHostId: {},
       updatedAt: timestamp
     },
     terminal: {
@@ -656,6 +666,61 @@ function normalizeStoredRdpMonitors(value: unknown): RdpMonitorSelection[] | nul
     ];
   });
   return monitors.length > 0 ? monitors : null;
+}
+
+/**
+ * 호스트별로 고른 모니터 묶음. 기기 로컬 설정이라 동기화되지 않는다.
+ *
+ * 선택이 빈 배열이 된 호스트는 항목째로 버린다 — "고른 것 없음"이 두 모양(없음/빈 배열)으로
+ * 저장되면 접속 경로에서 판단이 갈린다.
+ */
+/**
+ * 공유 폴더 목록. 없으면 옛 단일 필드(`drivePath`)를 한 항목으로 옮긴다.
+ *
+ * 이관을 안 하면 기존 사용자의 공유가 조용히 사라진다 — 원격에 드라이브가 안 뜨는데 설정
+ * 화면에도 아무것도 없어서 왜 없어졌는지 알 수 없다.
+ */
+function normalizeStoredRdpDrives(
+  value: unknown,
+  legacyPath: unknown,
+  legacyReadOnly: unknown
+): RdpDriveShare[] | null {
+  const fromList = Array.isArray(value)
+    ? value.flatMap((entry) => {
+        if (!isObject(entry) || typeof entry.path !== 'string' || !entry.path.trim()) {
+          return [];
+        }
+        return [{ path: entry.path, readOnly: entry.readOnly === true ? true : null }];
+      })
+    : [];
+  if (fromList.length > 0) {
+    return fromList;
+  }
+
+  if (typeof legacyPath === 'string' && legacyPath.trim()) {
+    return [{ path: legacyPath, readOnly: legacyReadOnly === true ? true : null }];
+  }
+
+  return null;
+}
+
+function normalizeStoredRdpMonitorsByHost(
+  value: unknown
+): Record<string, RdpMonitorSelection[]> {
+  if (!isObject(value)) {
+    return {};
+  }
+  const result: Record<string, RdpMonitorSelection[]> = {};
+  for (const [hostId, monitors] of Object.entries(value)) {
+    if (!hostId.trim()) {
+      continue;
+    }
+    const normalized = normalizeStoredRdpMonitors(monitors);
+    if (normalized) {
+      result[hostId] = normalized;
+    }
+  }
+  return result;
 }
 
 function normalizeStoredHostStartupCommand(value: unknown): HostStartupCommand | null {
@@ -849,17 +914,11 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
   }
 
   if (value.kind === 'rdp') {
-    if (typeof value.hostname !== 'string' || typeof value.username !== 'string') {
+    // 계정은 자격증명에 있으므로 레코드에 없다. 옛 레코드에 남아 있어도 검사하지 않는다 —
+    // 여기서 걸러 내면 그 호스트가 목록에서 통째로 사라진다.
+    if (typeof value.hostname !== 'string') {
       return null;
     }
-
-    // 화면 크기는 RDP 규격상 200~8192, 폭은 홀수 금지다. 저장된 값이 규격을 벗어나면 연결
-    // 단계에서야 실패하므로 여기서 되돌려 둔다.
-    const clampDimension = (raw: unknown, fallback: number): number => {
-      const value = typeof raw === 'number' && Number.isFinite(raw) ? Math.round(raw) : fallback;
-      return Math.min(8192, Math.max(200, value));
-    };
-    const desktopWidth = clampDimension(value.desktopWidth, 1920);
 
     return {
       id: value.id,
@@ -873,15 +932,19 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
         typeof value.port === 'number' && Number.isFinite(value.port)
           ? Math.round(value.port)
           : 3389,
-      username: value.username,
-      domain: typeof value.domain === 'string' ? value.domain : null,
       secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
-      desktopWidth: desktopWidth % 2 === 0 ? desktopWidth : desktopWidth - 1,
-      desktopHeight: clampDimension(value.desktopHeight, 1080),
       certificateFingerprint:
         typeof value.certificateFingerprint === 'string' ? value.certificateFingerprint : null,
+      drives: normalizeStoredRdpDrives(value.drives, value.drivePath, value.driveReadOnly),
+      // 옛 필드는 그대로 남긴다. 지우면 다른 기기의 옛 빌드와 동기화될 때 값이 왕복한다.
       drivePath: typeof value.drivePath === 'string' ? value.drivePath : null,
       driveReadOnly: value.driveReadOnly === true ? true : null,
+      adminSession: value.adminSession === true ? true : null,
+      useAllMonitors: value.useAllMonitors === true ? true : null,
+      audioEnabled: value.audioEnabled === false ? false : null,
+      clipboardEnabled: value.clipboardEnabled === false ? false : null,
+      colorDepth: value.colorDepth === 16 ? 16 : null,
+      tailnetId: typeof value.tailnetId === 'string' && value.tailnetId.trim() ? value.tailnetId.trim() : null,
       monitors: normalizeStoredRdpMonitors(value.monitors),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
@@ -945,6 +1008,9 @@ function normalizeSecretMetadataRecord(value: unknown): SecretMetadataRecord | n
   return {
     secretRef: value.secretRef,
     label: value.label,
+    kind: value.kind === 'rdp' ? 'rdp' : value.kind === 'ssh' ? 'ssh' : null,
+    username: typeof value.username === 'string' && value.username.trim() ? value.username : null,
+    domain: typeof value.domain === 'string' && value.domain.trim() ? value.domain : null,
     hasPassword: Boolean(value.hasPassword),
     hasPassphrase: Boolean(value.hasPassphrase),
     hasManagedPrivateKey: Boolean(value.hasManagedPrivateKey),
@@ -1104,6 +1170,7 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         typeof settings.tailnetHostname === 'string' && settings.tailnetHostname.trim()
           ? settings.tailnetHostname.trim()
           : null,
+      rdpMonitorsByHostId: normalizeStoredRdpMonitorsByHost(settings.rdpMonitorsByHostId),
       updatedAt: typeof settings.updatedAt === 'string' ? settings.updatedAt : fallback.settings.updatedAt
     },
     terminal: {

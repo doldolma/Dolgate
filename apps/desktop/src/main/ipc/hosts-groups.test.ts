@@ -105,7 +105,9 @@ describe("registerHostsGroupsIpcHandlers", () => {
     expect(result).toEqual(createdRecord);
   });
 
-  it("stores an RDP password in the secret store instead of the host record", async () => {
+  it("stores the whole RDP credential — account, kind and password", async () => {
+    // 여기서 필드를 하나라도 빠뜨리면 저장은 되는데 목록에 안 나온다(kind 가 없으면 RDP 목록
+    // 필터에 안 걸린다). 실제로 그렇게 깨졌고, 이 테스트가 password 하나만 확인해서 통과했다.
     const ctx = createContext();
     const draft = {
       kind: "rdp",
@@ -113,11 +115,7 @@ describe("registerHostsGroupsIpcHandlers", () => {
       tags: [],
       hostname: "192.168.200.27",
       port: 3389,
-      username: "user",
-      domain: null,
       secretRef: null,
-      desktopWidth: 1920,
-      desktopHeight: 1080,
       groupName: "",
       terminalThemeId: null,
     } as const;
@@ -128,10 +126,18 @@ describe("registerHostsGroupsIpcHandlers", () => {
     registerHostsGroupsIpcHandlers(ctx);
     const createHandler = getRegisteredHandler(ipcChannels.hosts.create);
 
-    await createHandler({}, draft, { password: "hunter2" });
+    await createHandler({}, draft, {
+      kind: "rdp",
+      username: "Administrator",
+      domain: "CORP",
+      password: "hunter2",
+    });
 
-    // 비밀번호는 시크릿 저장소로 가고, 호스트 레코드에는 ref 만 남는다.
+    // 비밀번호는 시크릿 저장소로 가고, 호스트 레코드에는 ref 만 남는다. 계정도 같이 간다.
     expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", {
+      kind: "rdp",
+      username: "Administrator",
+      domain: "CORP",
       password: "hunter2",
     });
     expect(ctx.hosts.create).toHaveBeenCalledWith(
@@ -139,6 +145,41 @@ describe("registerHostsGroupsIpcHandlers", () => {
       draft,
       "secret:rdp",
     );
+  });
+
+  it("stores the whole RDP credential when the password is replaced", async () => {
+    const ctx = createContext();
+    const draft = {
+      kind: "rdp",
+      label: "Win Box",
+      tags: [],
+      hostname: "192.168.200.27",
+      port: 3389,
+      secretRef: "secret:old",
+      groupName: "",
+      terminalThemeId: null,
+    } as const;
+
+    ctx.persistSecret.mockResolvedValue("secret:new");
+    ctx.hosts.getById.mockReturnValue({ id: "rdp-1", ...draft });
+    ctx.hosts.update.mockReturnValue({ id: "rdp-1", ...draft });
+
+    registerHostsGroupsIpcHandlers(ctx);
+    const updateHandler = getRegisteredHandler(ipcChannels.hosts.update);
+
+    await updateHandler({}, "rdp-1", draft, {
+      kind: "rdp",
+      username: "Administrator",
+      domain: "CORP",
+      password: "next",
+    });
+
+    expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", {
+      kind: "rdp",
+      username: "Administrator",
+      domain: "CORP",
+      password: "next",
+    });
   });
 
   it("keeps the existing RDP secret when the password field was left blank", async () => {
@@ -149,11 +190,7 @@ describe("registerHostsGroupsIpcHandlers", () => {
       tags: [],
       hostname: "192.168.200.27",
       port: 3389,
-      username: "user",
-      domain: null,
       secretRef: "secret:rdp",
-      desktopWidth: 1920,
-      desktopHeight: 1080,
       groupName: "",
       terminalThemeId: null,
     } as const;

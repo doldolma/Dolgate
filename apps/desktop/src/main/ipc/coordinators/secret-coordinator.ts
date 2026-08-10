@@ -141,6 +141,9 @@ export function createSecretCoordinator(deps: {
     current: HostSecretInput,
     patch: HostSecretInput,
   ): HostSecretInput => ({
+    kind: patch.kind !== undefined ? patch.kind : current.kind,
+    username: patch.username !== undefined ? patch.username : current.username,
+    domain: patch.domain !== undefined ? patch.domain : current.domain,
     password: patch.password !== undefined ? patch.password : current.password,
     passphrase:
       patch.passphrase !== undefined ? patch.passphrase : current.passphrase,
@@ -199,6 +202,9 @@ export function createSecretCoordinator(deps: {
       JSON.stringify({
         secretRef,
         label,
+        kind: secrets.kind,
+        username: secrets.username,
+        domain: secrets.domain,
         password: secrets.password,
         passphrase: secrets.passphrase,
         privateKeyPem: secrets.privateKeyPem,
@@ -220,6 +226,11 @@ export function createSecretCoordinator(deps: {
     secretMetadata.upsert({
       secretRef,
       label,
+      kind: secrets.kind,
+      // 평문으로 한 번 더 적는다. 목록 표시와 접속이 복호화 없이 계정을 알아야 한다.
+      // 쓰는 곳이 여기 하나뿐이라 번들과 갈리지 않는다.
+      username: secrets.username,
+      domain: secrets.domain,
       hasPassword: Boolean(secrets.password),
       hasPassphrase: Boolean(secrets.passphrase),
       hasManagedPrivateKey: Boolean(secrets.privateKeyPem),
@@ -249,6 +260,9 @@ export function createSecretCoordinator(deps: {
     return {
       secretRef,
       label: typeof parsed.label === "string" ? parsed.label : secretRef,
+      kind: parsed.kind === "rdp" ? "rdp" : undefined,
+      username: typeof parsed.username === "string" ? parsed.username : undefined,
+      domain: typeof parsed.domain === "string" ? parsed.domain : undefined,
       password: typeof parsed.password === "string" ? parsed.password : undefined,
       passphrase:
         typeof parsed.passphrase === "string" ? parsed.passphrase : undefined,

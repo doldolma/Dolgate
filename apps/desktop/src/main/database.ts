@@ -28,6 +28,7 @@ import {
   type RdpHostRecord,
   isSerialHostDraft,
   isSshHostDraft,
+  isRdpHostRecord,
   isSshHostRecord,
   isSerialHostRecord,
   normalizeAiBaseUrl,
@@ -39,6 +40,7 @@ import {
   normalizeJumpHostIds,
   rebaseGroupPath,
   stripRemovedGroupSegment,
+  type RdpDriveShare,
   type RdpMonitorSelection
 } from '@shared';
 import type {
@@ -708,17 +710,23 @@ function toRdpHostRecord(
     label: draft.label.trim() || draft.hostname.trim(),
     hostname: draft.hostname.trim(),
     port: Number.isFinite(draft.port) ? Math.round(draft.port) : 3389,
-    username: draft.username.trim(),
-    domain: draft.domain?.trim() || null,
     // SSH 와 같은 규칙: 호출자가 넘긴 ref 가 우선이고, 없으면 draft 가 들고 있던 것을 유지한다.
     secretRef: secretRef ?? draft.secretRef ?? null,
-    desktopWidth: normalizeRdpDimension(draft.desktopWidth, 1920, true),
-    desktopHeight: normalizeRdpDimension(draft.desktopHeight, 1080, false),
     // 핀은 폼이 아니라 신뢰 흐름이 정한다. draft 에 없으므로 기존 레코드에서 이어받지 않으면
     // 호스트를 수정할 때마다 신뢰가 초기화된다.
     certificateFingerprint: current?.certificateFingerprint ?? null,
-    drivePath: draft.drivePath?.trim() || null,
-    driveReadOnly: draft.driveReadOnly === true ? true : null,
+    drives: normalizeRdpDrives(draft.drives),
+    // 옛 필드는 더 쓰지 않는다. 새로 쓰지도 않아서 편집하면 자연히 비워진다.
+    drivePath: null,
+    driveReadOnly: null,
+    adminSession: draft.adminSession === true ? true : null,
+    useAllMonitors: draft.useAllMonitors === true ? true : null,
+    // 없거나 null 이 "켜짐"이다. 옛 호스트가 조용히 조용해지지 않게 false 만 저장한다.
+    audioEnabled: draft.audioEnabled === false ? false : null,
+    clipboardEnabled: draft.clipboardEnabled === false ? false : null,
+    // 32 는 기본값이라 저장하지 않는다 — 접속 경로가 null 을 32 로 읽는다.
+    colorDepth: draft.colorDepth === 16 ? 16 : null,
+    tailnetId: draft.tailnetId?.trim() || null,
     // 인증서 핀과 같은 이유로 draft 에 없으면 기존 값을 이어받는다. 모니터 선택은 배치도에서만
     // 정해지므로, 호스트 폼처럼 이 필드를 모르는 경로가 draft 를 만들면 선택이 지워진다.
     monitors:
@@ -737,6 +745,25 @@ function toRdpHostRecord(
 // RDP 화면 크기는 200~8192 이고 폭은 홀수를 허용하지 않는다([MS-RDPEDISP] 2.2.2.2.1).
 // 규격을 벗어난 값은 연결 시점에 거부되므로 저장 전에 맞춰 둔다.
 /**
+ * 공유 폴더 목록을 정리한다.
+ *
+ * 경로가 빈 항목은 버리고, 빈 목록은 null 로 눕힌다 — "공유 없음"이 두 모양으로 저장되면
+ * 접속 경로에서 판단이 갈린다.
+ */
+function normalizeRdpDrives(
+  drives: RdpDriveShare[] | null | undefined
+): RdpDriveShare[] | null {
+  if (!Array.isArray(drives)) {
+    return null;
+  }
+  const cleaned = drives.flatMap((drive) => {
+    const path = drive?.path?.trim();
+    return path ? [{ path, readOnly: drive.readOnly === true ? true : null }] : [];
+  });
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
  * 호스트에 저장할 모니터 선택을 정리한다.
  *
  * 빈 배열은 null 로 눕힌다 — "선택 없음"이 두 모양으로 저장되면 접속 경로에서 판단이 갈린다.
@@ -753,12 +780,6 @@ function normalizeRdpMonitors(
     width: Math.round(monitor.width),
     height: Math.round(monitor.height)
   }));
-}
-
-function normalizeRdpDimension(raw: number, fallback: number, mustBeEven: boolean): number {
-  const value = Number.isFinite(raw) ? Math.round(raw) : fallback;
-  const clamped = Math.min(8192, Math.max(200, value));
-  return mustBeEven && clamped % 2 !== 0 ? clamped - 1 : clamped;
 }
 
 function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, timestamp: string, current?: HostRecord): HostRecord {
@@ -786,7 +807,13 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
 function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]): SecretMetadataRecord {
   return {
     ...record,
-    linkedHostCount: hosts.filter((host) => isSshHostRecord(host) && host.secretRef === record.secretRef).length
+    // SSH·RDP 가 같은 자격증명 저장소를 쓴다. RDP 를 빼먹으면 그 자격증명이 "연결된 호스트
+    // 0개"로 보여서, 지워도 아무 경고가 없고 지운 뒤 그 호스트가 조용히 못 붙는다.
+    linkedHostCount: hosts.filter(
+      (host) =>
+        (isSshHostRecord(host) || isRdpHostRecord(host)) &&
+        host.secretRef === record.secretRef
+    ).length
   };
 }
 
@@ -1013,6 +1040,9 @@ export class HostRepository {
             jumpHostIds: nextChain.length > 0 ? nextChain : null,
           };
         });
+      // 이 호스트에 대해 기기 로컬로 골라 둔 모니터도 같이 버린다. 남겨 두면 없는 호스트의
+      // 설정이 계속 쌓이고, 같은 id 가 재사용되면(가져오기 등) 엉뚱한 배치가 되살아난다.
+      delete state.settings.rdpMonitorsByHostId[id];
     });
   }
 
@@ -1393,7 +1423,12 @@ export class TailnetRepository {
       // 않는 id 를 계속 가리켜 연결할 수 없으므로, 같은 저장 트랜잭션에서 일반 네트워크로
       // 되돌린다. updatedAt 도 움직여야 이 변경이 다른 기기로 동기화된다.
       state.data.hosts = state.data.hosts.map((host) => {
-        if (!isSshHostRecord(host) || host.tailnetId?.trim() !== id) {
+        // SSH 와 RDP 가 같은 필드를 쓴다. 한쪽만 정리하면 그 종류만 없는 tailnet 을 가리킨 채
+        // 남아 연결할 수 없다.
+        if (
+          (!isSshHostRecord(host) && !isRdpHostRecord(host)) ||
+          host.tailnetId?.trim() !== id
+        ) {
           return host;
         }
         return {
@@ -1515,6 +1550,9 @@ export class SettingsRepository {
       serverUrl: serverUrlOverride || this.getDefaultServerUrl(),
       serverUrlOverride,
       tailnetHostname: state.settings.tailnetHostname ?? null,
+      // 상태에서 읽어야 한다. 여기 빈 객체를 두면 저장은 되는데 읽을 때마다 사라진다 —
+      // get() 은 필드를 하나하나 나열하는 화이트리스트다.
+      rdpMonitorsByHostId: state.settings.rdpMonitorsByHostId ?? {},
       dismissedUpdateVersion: state.updater.dismissedVersion,
       updatedAt: [
         state.settings.updatedAt,
@@ -1790,6 +1828,20 @@ export class SettingsRepository {
             ? input.tailnetHostname.trim()
             : null;
         state.settings.tailnetHostname = nextHostname;
+        state.settings.updatedAt = nowIso();
+      }
+
+      // RDP 호스트별 모니터 선택. tailnetHostname 과 같이 기기 로컬 전용이라 동기화로 나가지
+      // 않는다. 선택이 빈 배열이면 항목째로 지운다 — "고른 것 없음"이 두 모양으로 저장되면
+      // 접속 경로에서 판단이 갈린다.
+      if (Object.prototype.hasOwnProperty.call(input, 'rdpMonitorsByHostId')) {
+        const next: Record<string, RdpMonitorSelection[]> = {};
+        for (const [hostId, monitors] of Object.entries(input.rdpMonitorsByHostId ?? {})) {
+          if (hostId.trim() && Array.isArray(monitors) && monitors.length > 0) {
+            next[hostId] = monitors;
+          }
+        }
+        state.settings.rdpMonitorsByHostId = next;
         state.settings.updatedAt = nowIso();
       }
 
@@ -2335,6 +2387,9 @@ export class SecretMetadataRepository {
   upsert(input: {
     secretRef: string;
     label: string;
+    kind?: 'ssh' | 'rdp';
+    username?: string;
+    domain?: string;
     hasPassword: boolean;
     hasPassphrase: boolean;
     hasManagedPrivateKey?: boolean;
@@ -2352,6 +2407,10 @@ export class SecretMetadataRepository {
       const nextRecord: SecretMetadataRecord = {
         secretRef: input.secretRef,
         label: input.label,
+        // 없으면 SSH 로 본다 — 이 필드가 생기기 전 항목은 모두 SSH 용이다.
+        kind: input.kind ?? null,
+        username: input.username?.trim() || null,
+        domain: input.domain?.trim() || null,
         hasPassword: input.hasPassword,
         hasPassphrase: input.hasPassphrase,
         hasManagedPrivateKey: input.hasManagedPrivateKey ?? false,

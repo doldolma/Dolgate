@@ -114,6 +114,14 @@ export class RdpManager {
   /** 원격에서 복사된 텍스트를 받는다. 로컬 클립보드에 넣는 것은 호출자의 몫이다. */
   onRemoteClipboardText: ((text: string) => void) | null = null;
 
+  /**
+   * 창에 뿌리는 세션 이벤트를 메인 프로세스에서도 본다.
+   *
+   * 크기가 바뀌면 각 창이 맡을 영역도 다시 정해야 하는데, 그 계산은 창을 들고 있는 쪽
+   * (ipc/rdp.ts)만 할 수 있다.
+   */
+  onSessionEvent: ((event: RdpSessionEvent) => void) | null = null;
+
   setCertificateVerifier(
     verify: (sessionId: string, certificate: RdpCertificateInfo) => Promise<boolean>,
   ): void {
@@ -232,6 +240,36 @@ export class RdpManager {
         type: "rdpResize",
         sessionId,
         payload: { width, height },
+      }),
+    );
+  }
+
+  /**
+   * 모니터 배치를 다시 선언한다.
+   *
+   * 접속할 때는 디스플레이 크기로 선언하는데, 창이 실제로 그릴 수 있는 크기는 그보다 작을 수
+   * 있다(노치 있는 맥북은 전체화면이어도 33px 을 못 쓴다). 창을 다 펼친 뒤 실측값으로 다시
+   * 선언해야 원격 화면이 그 창에 꼭 맞는다.
+   */
+  requestLayout(
+    sessionId: string,
+    monitors: readonly {
+      width: number;
+      height: number;
+      left: number;
+      top: number;
+      primary: boolean;
+    }[],
+  ): void {
+    if (!this.process || !this.sessions.has(sessionId) || monitors.length === 0) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameOf({
+        id: `rdp-${++this.requestSeq}`,
+        type: "rdpSetLayout",
+        sessionId,
+        payload: { monitors },
       }),
     );
   }
@@ -435,15 +473,22 @@ export class RdpManager {
         const payload = event.payload as {
           desktopWidth: number;
           desktopHeight: number;
+          monitors?: RdpMonitorPlacement[];
         };
         if (event.sessionId) {
           const cached = this.connectedBySession.get(event.sessionId);
+          // 크기가 바뀌면 각 모니터 몫도 바뀐다. 배치를 안 옮기면 나눠 그리는 창들이 새 크기의
+          // 프레임을 옛 사각형으로 잘라, 화면이 어긋난 채로 남는다.
+          const monitors = payload.monitors?.length
+            ? payload.monitors
+            : (cached?.monitors ?? []);
           if (cached) {
             // 나중에 열리는 창이 옛 크기를 받지 않게 캐시도 같이 옮긴다.
             this.connectedBySession.set(event.sessionId, {
               ...cached,
               desktopWidth: payload.desktopWidth,
               desktopHeight: payload.desktopHeight,
+              monitors,
             });
           }
           this.emitEvent({
@@ -451,6 +496,7 @@ export class RdpManager {
             sessionId: event.sessionId,
             desktopWidth: payload.desktopWidth,
             desktopHeight: payload.desktopHeight,
+            monitors,
           });
         }
         return;
@@ -458,8 +504,19 @@ export class RdpManager {
 
       case "closed": {
         if (event.sessionId) {
+          const payload = event.payload as {
+            graceful?: boolean;
+            reason?: string;
+          };
           this.sessions.delete(event.sessionId);
-          this.emitEvent({ type: "closed", sessionId: event.sessionId });
+          // graceful 이면 자동 재연결을 하지 않는다. 이 값을 흘리면 사용자가 로그오프한
+          // 세션이 되살아난다.
+          this.emitEvent({
+            type: "closed",
+            sessionId: event.sessionId,
+            graceful: payload?.graceful === true,
+            reason: payload?.reason ?? null,
+          });
         }
         return;
       }
@@ -470,6 +527,7 @@ export class RdpManager {
   }
 
   private emitEvent(event: RdpSessionEvent): void {
+    this.onSessionEvent?.(event);
     this.broadcast("rdp:event", event);
   }
 
