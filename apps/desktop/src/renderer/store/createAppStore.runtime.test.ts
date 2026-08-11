@@ -739,4 +739,130 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
       },
     ]);
   });
+
+  // 포워딩은 start 실패를 삼키고 런타임 이벤트로만 알린다(services/network.ts). 그래서 키가
+  // 바뀐 경우의 유일한 접점이 handlePortForwardEvent 다 — 터미널·SFTP·컨테이너와 같은 계약으로
+  // 교체 프롬프트를 띄우고, 수락하면 이 룰의 포워딩을 다시 시작한다.
+  function createSshForwardRule() {
+    return {
+      id: "pf-1",
+      label: "Prod 8080",
+      hostId: "host-1",
+      transport: "ssh" as const,
+      mode: "local" as const,
+      bindAddress: "127.0.0.1",
+      bindPort: 8080,
+      targetHost: "127.0.0.1",
+      targetPort: 8080,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    };
+  }
+
+  function createForwardErrorEvent(message: string) {
+    return {
+      runtime: {
+        ruleId: "pf-1",
+        hostId: "host-1",
+        transport: "ssh" as const,
+        mode: "local" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 8080,
+        status: "error" as const,
+        message,
+        updatedAt: "2026-03-27T00:00:00.000Z",
+      },
+    };
+  }
+
+  function seedTrustedHostOne(api: DesktopApi) {
+    api.knownHosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+  }
+
+  it("re-prompts to replace the key when a port forward fails on a changed host key", async () => {
+    const api = createMockApi();
+    seedTrustedHostOne(api);
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue({
+      hostId: "host-1",
+      hostLabel: "Prod",
+      host: "prod.example.com",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAANEW",
+      fingerprintSha256: "SHA256:new",
+      status: "mismatch",
+      existing: {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState({ portForwards: [createSshForwardRule()] });
+
+    store
+      .getState()
+      .handlePortForwardEvent(
+        createForwardErrorEvent("ssh handshake failed: host key mismatch"),
+      );
+    await flushMicrotasks();
+
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("mismatch");
+    expect(store.getState().pendingHostKeyPrompt?.action).toMatchObject({
+      kind: "portForward",
+      ruleId: "pf-1",
+      hostId: "host-1",
+    });
+
+    await store.getState().acceptPendingHostKeyPrompt("replace");
+
+    expect(api.knownHosts.replace).toHaveBeenCalled();
+    expect(api.portForwards.start).toHaveBeenCalledWith("pf-1");
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  it("leaves an ordinary port forward failure alone", async () => {
+    const api = createMockApi();
+    seedTrustedHostOne(api);
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState({ portForwards: [createSshForwardRule()] });
+
+    store
+      .getState()
+      .handlePortForwardEvent(
+        createForwardErrorEvent("bind: address already in use"),
+      );
+    await flushMicrotasks();
+
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(
+      store
+        .getState()
+        .portForwardRuntimes.find((runtime) => runtime.ruleId === "pf-1")
+        ?.message,
+    ).toBe("bind: address already in use");
+  });
 });

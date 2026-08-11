@@ -128,6 +128,9 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
   if (kind === 'warpgate') {
     return 'Warpgate';
   }
+  if (kind === 'rdp') {
+    return 'RDP';
+  }
   return 'SSH';
 }
 

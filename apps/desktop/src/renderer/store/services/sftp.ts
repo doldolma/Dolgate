@@ -127,7 +127,8 @@ export function createSftpServices(deps: SliceDeps) {
   const { api, get } = deps;
   const { refreshHostAndKeychainState } = createBootstrapSyncServices(deps);
   const { promptForMissingUsername } = createSessionServices(deps);
-  const { ensureTrustedHost } = createTrustAuthServices(deps);
+  const { ensureTrustedHost, recoverFromChangedHostKey } =
+    createTrustAuthServices(deps);
 
   const loadPaneListing = async (
     set: StoreSetter,
@@ -459,6 +460,41 @@ export function createSftpServices(deps: SliceDeps) {
       const host = get().hosts.find((item) => item.id === input.hostId);
       const message =
         error instanceof Error ? error.message : t('sftpStore.connectFailed');
+
+      // 키가 바뀐 호스트는 신뢰 단계에서 probe를 건너뛰었으므로 여기서 처음 드러난다. 다시
+      // probe해 교체 프롬프트를 띄우고, 수락하면 이 pane 연결이 이어진다(터미널과 같은 계약).
+      // pane 은 오류로 물들이지 않고 대기 모양으로 되돌린다.
+      if (
+        await recoverFromChangedHostKey(set, {
+          hostId: input.hostId,
+          endpointId: input.endpointId,
+          message,
+          action: {
+            kind: "sftp",
+            paneId: input.paneId,
+            hostId: input.hostId,
+            endpointId: input.endpointId,
+            secrets: input.secrets,
+          },
+        })
+      ) {
+        set((state) => ({
+          sftp: updatePaneState(state, input.paneId, {
+            ...getPane(state, input.paneId),
+            sourceKind: "host",
+            endpoint: null,
+            connectingHostId: null,
+            connectingEndpointId: null,
+            connectionProgress: null,
+            connectionDiagnostic: null,
+            isLoading: false,
+            errorMessage: undefined,
+            warningMessages: [],
+          }),
+        }));
+        return false;
+      }
+
       const shouldPromptCredentialRetry = resolveCredentialRetryKind(host, message);
       const shouldPromptAwsConfig = shouldPromptAwsSftpConfigRetry(host, message);
       if (shouldPromptCredentialRetry && host && isSshHostRecord(host)) {
@@ -844,5 +880,6 @@ export function createSftpServices(deps: SliceDeps) {
     refreshHostAndKeychainState,
     promptForMissingUsername,
     ensureTrustedHost,
+    recoverFromChangedHostKey,
   };
 }

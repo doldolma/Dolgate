@@ -143,6 +143,58 @@ func TestAwsSessionBridgeRejectsNewRunnersAfterClose(t *testing.T) {
 	}
 }
 
+// ssh-core 가 셸 통합 스크립트를 타이핑해도 되는지는 원격 셸 종류로 갈린다. Windows 인스턴스는
+// PowerShell 로 떨어져서 POSIX 스크립트가 파싱 오류만 쏟는데, 서버 프록시 경로에서 이 값을
+// 흘리지 않으면 데스크톱이 알아낸 종류가 서버의 코어까지 도달하지 못한다.
+func TestDirectAwsSessionForwardsShellKind(t *testing.T) {
+	core := &fakeAwsSessionCoreRuntime{}
+	bridge := newAwsSessionBridgeWithCore(core)
+	bridge.ssmTokens = fakeAwsSsmTokenIssuer{}
+	defer bridge.Close()
+
+	if _, err := bridge.NewRunner(awsSessionStartRequest{
+		HostID:     "host-aws-win",
+		Label:      "Windows EC2",
+		Region:     "ap-northeast-2",
+		InstanceID: "i-00c8d7296782e6ad5",
+		ShellKind:  "powershell",
+	}); err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	if len(core.connectCalls) != 1 {
+		t.Fatalf("ConnectAWS() calls = %d, want 1", len(core.connectCalls))
+	}
+	if got := core.connectCalls[0].ShellKind; got != "powershell" {
+		t.Fatalf("ConnectAWS payload ShellKind = %q, want %q", got, "powershell")
+	}
+}
+
+// 리눅스(종류 미지정)는 기존 동작을 그대로 유지해야 한다 — 빈 값이 POSIX 셸을 뜻한다.
+func TestDirectAwsSessionLeavesShellKindEmptyByDefault(t *testing.T) {
+	core := &fakeAwsSessionCoreRuntime{}
+	bridge := newAwsSessionBridgeWithCore(core)
+	bridge.ssmTokens = fakeAwsSsmTokenIssuer{}
+	defer bridge.Close()
+
+	if _, err := bridge.NewRunner(awsSessionStartRequest{
+		HostID:     "host-aws-1",
+		Label:      "Production EC2",
+		Region:     "ap-northeast-2",
+		InstanceID: "i-0123456789",
+	}); err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	if got := core.connectCalls[0].ShellKind; got != "" {
+		t.Fatalf("ConnectAWS payload ShellKind = %q, want empty", got)
+	}
+}
+
 func TestDirectAwsSessionForwardsControlSignal(t *testing.T) {
 	core := &fakeAwsSessionCoreRuntime{}
 	bridge := newAwsSessionBridgeWithCore(core)

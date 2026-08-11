@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type {
+  ActivityLogRecord,
   RdpCertificateInfo,
   RdpConnectOptions,
   RdpInputEvent,
@@ -17,7 +18,9 @@ import type {
   RdpMonitorPlacement,
   RdpFramePayload,
   RdpSessionEvent,
+  SessionLifecycleLogMetadata,
 } from "@shared";
+import { logMessage } from "./activity-log-message";
 import { CoreFrameParser, encodeControlFrameOf } from "./core-framing";
 
 // rdp-core 가 오디오 stream frame 에 실어 보내는 형식 정보.
@@ -44,6 +47,8 @@ export interface RdpLaunchConfig {
   command: string;
   args: string[];
   cwd: string;
+  /** 코어에 넘길 추가 환경변수. 로그 수준처럼 실행 방식만 바꾸는 값이다. */
+  env?: Record<string, string>;
 }
 
 export interface RdpManagerOptions {
@@ -59,6 +64,28 @@ export interface RdpManagerOptions {
   // 테스트에서 실제 프로세스 대신 가짜를 넣기 위한 구멍.
   spawnProcess?: (config: RdpLaunchConfig) => ChildProcessWithoutNullStreams;
   resolveLaunchConfig?: () => RdpLaunchConfig;
+  // 세션 lifecycle 을 활동 로그로 남길 싱크. CoreManager 가 SSH 세션에 쓰는 것과 같은
+  // 저장소를 물려받아, RDP 도 로그 화면·최근 접속에 함께 보인다.
+  upsertLogRecord?: (record: ActivityLogRecord) => void;
+}
+
+/** 연결 하나를 로그로 남기는 데 필요한 호스트 정체. IPC 계층이 호스트 레코드에서 채운다. */
+export interface RdpSessionLifecycleInfo {
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  connectionDetails: string | null;
+}
+
+interface RdpLifecycleState extends RdpSessionLifecycleInfo {
+  /**
+   * 로그 행의 id. SSH 는 세션당 하나(`session:<id>`)지만 RDP 자동 재연결은 sessionId 를
+   * 재사용하므로, 세션 id 로만 잡으면 재연결마다 이전 연결 기록이 덮어써진다. 연결 시도마다
+   * 고유한 requestId 를 붙여 시도 하나 = 로그 행 하나로 만든다.
+   */
+  logId: string;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
 }
 
 interface PendingConnect {
@@ -80,6 +107,7 @@ export class RdpManager {
    * 준다 — 없으면 창이 영원히 "기다리는 중"에 머문다.
    */
   private readonly connectedBySession = new Map<string, RdpConnectedPayload>();
+  private readonly lifecycleBySession = new Map<string, RdpLifecycleState>();
 
   /** 세션마다 픽셀을 보고 있는 창(webContents id). 프레임은 여기 있는 창에만 간다. */
   private readonly watchersBySession = new Map<string, Set<number>>();
@@ -136,6 +164,7 @@ export class RdpManager {
   async connect(
     sessionId: string,
     connectOptions: RdpConnectOptions,
+    lifecycle?: RdpSessionLifecycleInfo,
   ): Promise<RdpConnectedPayload> {
     if (this.sessions.has(sessionId)) {
       throw new Error(`RDP session already exists: ${sessionId}`);
@@ -154,6 +183,15 @@ export class RdpManager {
 
     const child = this.ensureProcess();
     const requestId = `rdp-${++this.requestSeq}`;
+
+    if (lifecycle) {
+      this.lifecycleBySession.set(sessionId, {
+        ...lifecycle,
+        logId: `session:${sessionId}:${requestId}`,
+        connectedAt: null,
+        disconnectedAt: null,
+      });
+    }
 
     const connected = new Promise<RdpConnectedPayload>((resolve, reject) => {
       this.pending.set(requestId, { resolve, reject });
@@ -174,6 +212,9 @@ export class RdpManager {
     } catch (error) {
       this.sessions.delete(sessionId);
       this.connectedBySession.delete(sessionId);
+      // 연결에 이르지 못한 시도는 로그를 남기지 않는다 — 자동 재연결이 백오프로 반복 시도하는
+      // 동안 실패 행이 로그를 채우기 때문이다. 실패는 세션 오버레이가 실시간으로 보여준다.
+      this.lifecycleBySession.delete(sessionId);
       throw error;
     }
   }
@@ -527,8 +568,102 @@ export class RdpManager {
   }
 
   private emitEvent(event: RdpSessionEvent): void {
+    // 프로세스 사망이 만드는 합성 closed 까지 전부 이 함수를 지나므로, lifecycle 로그는
+    // 여기서 한 번에 처리한다.
+    if (event.type === "connected") {
+      this.markLifecycleConnected(event.sessionId);
+    } else if (event.type === "error") {
+      this.finalizeLifecycle(event.sessionId, "error", event.message);
+    } else if (event.type === "closed") {
+      this.finalizeLifecycle(event.sessionId, "closed", event.reason ?? null);
+      this.lifecycleBySession.delete(event.sessionId);
+    }
     this.onSessionEvent?.(event);
     this.broadcast("rdp:event", event);
+  }
+
+  private markLifecycleConnected(sessionId: string): void {
+    const lifecycle = this.lifecycleBySession.get(sessionId);
+    if (!lifecycle || lifecycle.connectedAt) {
+      return;
+    }
+    const connectedAt = new Date().toISOString();
+    lifecycle.connectedAt = connectedAt;
+    this.upsertLifecycleLog(sessionId, lifecycle, {
+      status: "connected",
+      disconnectedAt: null,
+      durationMs: null,
+      disconnectReason: null,
+      updatedAt: connectedAt,
+    });
+  }
+
+  private finalizeLifecycle(
+    sessionId: string,
+    status: "closed" | "error",
+    disconnectReason: string | null,
+  ): void {
+    const lifecycle = this.lifecycleBySession.get(sessionId);
+    // 연결에 이르지 못했거나(connectedAt 없음) 이미 마감된 시도는 건너뛴다 — error 뒤에
+    // closed 가 따라와도 행 하나로 끝난다.
+    if (!lifecycle || !lifecycle.connectedAt || lifecycle.disconnectedAt) {
+      return;
+    }
+    const disconnectedAt = new Date().toISOString();
+    lifecycle.disconnectedAt = disconnectedAt;
+    const durationMs = Math.max(
+      0,
+      new Date(disconnectedAt).getTime() -
+        new Date(lifecycle.connectedAt).getTime(),
+    );
+    this.upsertLifecycleLog(sessionId, lifecycle, {
+      status,
+      disconnectedAt,
+      durationMs,
+      disconnectReason,
+      updatedAt: disconnectedAt,
+    });
+  }
+
+  private upsertLifecycleLog(
+    sessionId: string,
+    lifecycle: RdpLifecycleState,
+    state: {
+      status: "connected" | "closed" | "error";
+      disconnectedAt: string | null;
+      durationMs: number | null;
+      disconnectReason: string | null;
+      updatedAt: string;
+    },
+  ): void {
+    if (!this.options.upsertLogRecord || !lifecycle.connectedAt) {
+      return;
+    }
+    const metadata: SessionLifecycleLogMetadata = {
+      sessionId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      connectionDetails: lifecycle.connectionDetails,
+      connectionKind: "rdp",
+      connectedAt: lifecycle.connectedAt,
+      disconnectedAt: state.disconnectedAt,
+      durationMs: state.durationMs,
+      status: state.status,
+      disconnectReason: state.disconnectReason,
+      recordingId: null,
+      hasReplay: false,
+    };
+    this.options.upsertLogRecord({
+      id: lifecycle.logId,
+      level: state.status === "error" ? "error" : "info",
+      category: "session",
+      kind: "session-lifecycle",
+      ...logMessage("core.sessionLog", { kind: "RDP" }),
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.connectedAt,
+      updatedAt: state.updatedAt,
+    });
   }
 
   private broadcast(channel: string, payload: unknown): void {
@@ -613,6 +748,7 @@ function defaultSpawn(config: RdpLaunchConfig): ChildProcessWithoutNullStreams {
   return spawn(config.command, config.args, {
     cwd: config.cwd,
     stdio: ["pipe", "pipe", "pipe"],
+    env: config.env ? { ...process.env, ...config.env } : process.env,
   });
 }
 
@@ -635,7 +771,19 @@ export function resolveRdpLaunchConfig(): RdpLaunchConfig {
   for (const profile of ["release", "debug"]) {
     const candidate = path.join(serviceDir, "target", profile, binaryName);
     if (existsSync(candidate)) {
-      return { command: candidate, args: [], cwd: serviceDir };
+      return {
+        command: candidate,
+        args: [],
+        cwd: serviceDir,
+        // 개발 중에는 접속 경로까지 보이게 한다.
+        //
+        // 기본값이 WARN 이라 "어느 주소로 붙었는지" 같은 줄이 안 남고, 붙지 않을 때 tailnet
+        // 포워드를 탔는지 원래 주소로 직접 갔는지 구분할 수 없다. 겉으로 쓰는 값은 그대로
+        // 존중한다 — DOLGATE_RDP_LOG=debug 로 더 올릴 수 있다.
+        env: process.env.DOLGATE_RDP_LOG
+          ? undefined
+          : { DOLGATE_RDP_LOG: "info" },
+      };
     }
   }
 

@@ -20,6 +20,7 @@ import {
   createUntrustedHostProbe,
   flushMicrotasks,
 } from "./createAppStore.test-support";
+import { getSessionConnectedAt } from "../lib/terminal-cwd-registry";
 
 describe("createAppStore sessions and auth recovery", () => {
   function createAwsSessionTab(
@@ -84,6 +85,51 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().activeWorkspaceTab).toBe(
       `session:${tab?.sessionId}`,
     );
+  });
+
+  it("stores the RDP hover details from the connect reply and resize events", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.rdpDesktopSize).toEqual({ width: 1920, height: 1080 });
+    expect(tab?.rdpUsername).toBe("WORKGROUP\\admin");
+    expect(tab?.rdpMonitorCount).toBe(1);
+
+    // 해상도가 바뀌면 hover 의 표기도 따라가야 한다.
+    store.getState().handleRdpEvent({
+      type: "resized",
+      sessionId: tab!.sessionId,
+      desktopWidth: 2560,
+      desktopHeight: 1440,
+      monitors: [
+        { index: 0, left: 0, top: 0, width: 1280, height: 1440 },
+        { index: 1, left: 1280, top: 0, width: 1280, height: 1440 },
+      ],
+    });
+
+    const resized = store.getState().tabs.at(-1);
+    expect(resized?.rdpDesktopSize).toEqual({ width: 2560, height: 1440 });
+    expect(resized?.rdpMonitorCount).toBe(2);
+  });
+
+  it("resets the RDP connected-at clock when the session ends", async () => {
+    // 자동 재연결이 sessionId 를 재사용하므로, 끊길 때 지우지 않으면 재연결 후의
+    // "연결 경과"가 이전 연결 시각부터 센다.
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("rdp-host-1", 120, 32);
+    const sessionId = store.getState().tabs.at(-1)!.sessionId;
+    expect(getSessionConnectedAt(sessionId)).not.toBeNull();
+
+    store.getState().handleRdpEvent({ type: "closed", sessionId });
+
+    expect(getSessionConnectedAt(sessionId)).toBeNull();
   });
 
   it("removes the RDP tab when the remote side ends the session", async () => {
@@ -1337,6 +1383,126 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
+  // 이미 신뢰된 호스트는 연결 전 probe를 건너뛰므로(중복 순회 방지), 키가 바뀐 사실은 실연결의
+  // strict 검사가 "host key mismatch"로 처음 알린다. 그 오류를 그대로 두면 신뢰 프롬프트로 갈
+  // 길이 없어(자동 재연결 금지 + 자격증명 프롬프트 대상도 아님) known host 레코드를 손으로
+  // 지워야 했다 — 아래 세 케이스가 그 복구 경로의 계약이다.
+  function seedTrustedHostOne(api: DesktopApi) {
+    api.knownHosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+  }
+
+  it("re-prompts to replace the key when an already-trusted host's key changed", async () => {
+    const api = createMockApi();
+    seedTrustedHostOne(api);
+    api.ssh.connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ssh handshake failed: host key mismatch"))
+      .mockResolvedValue({ sessionId: "session-1" });
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "host-1",
+      hostLabel: "Prod",
+      host: "prod.example.com",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAANEW",
+      fingerprintSha256: "SHA256:new",
+      status: "mismatch",
+      existing: {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    // 신뢰돼 있었으므로 연결 전 probe는 없었고, 실패 후 강제 probe가 한 번 돌았다.
+    expect(api.knownHosts.probeHost).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("mismatch");
+    // 다이얼로그가 저장된 지문과 현재 지문을 대조해 보여줄 수 있어야 한다.
+    expect(
+      store.getState().pendingHostKeyPrompt?.probe.existing?.fingerprintSha256,
+    ).toBe("SHA256:old");
+    expect(store.getState().pendingHostKeyPrompt?.probe.fingerprintSha256).toBe(
+      "SHA256:new",
+    );
+    // 막다른 오류가 아니라 신뢰 대기 상태로 남는다.
+    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
+      "awaiting-host-trust",
+    );
+    expect(store.getState().tabs[0]?.status).not.toBe("error");
+
+    // 사용자가 교체를 선택하면 레코드를 갈아치우고 같은 연결을 이어간다.
+    await store.getState().acceptPendingHostKeyPrompt("replace");
+
+    expect(api.knownHosts.replace).toHaveBeenCalled();
+    expect(api.knownHosts.trust).not.toHaveBeenCalled();
+    expect(api.ssh.connect).toHaveBeenCalledTimes(2);
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  it("keeps the mismatch error without retrying when the probe still reports trusted", async () => {
+    const api = createMockApi();
+    seedTrustedHostOne(api);
+    api.ssh.connect = vi
+      .fn()
+      .mockRejectedValue(new Error("ssh handshake failed: host key mismatch"));
+    // 바뀐 키가 이 호스트가 아닌 경우(점프 홉 등). 여기서 재시도하면 같은 실패를 반복한다.
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "host key mismatch",
+    );
+  });
+
+  it("keeps the original mismatch error when the recovery probe itself fails", async () => {
+    const api = createMockApi();
+    seedTrustedHostOne(api);
+    api.ssh.connect = vi
+      .fn()
+      .mockRejectedValue(new Error("ssh handshake failed: host key mismatch"));
+    api.knownHosts.probeHost = vi
+      .fn()
+      .mockRejectedValue(new Error("Timed out waiting for SSH core response"));
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    // probe 실패 사유로 덮어쓰면 진짜 원인이 가려진다.
+    expect(store.getState().tabs[0]?.errorMessage).toContain(
+      "host key mismatch",
+    );
+    expect(store.getState().tabs[0]?.errorMessage).not.toContain("Timed out");
+  });
+
   it("prompts for host key trust before connecting an untrusted AWS EC2 host over SSM", async () => {
     const api = createMockApi();
     api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
@@ -1393,6 +1559,46 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(api.knownHosts.trust).toHaveBeenCalled();
     expect(api.ssh.connect).toHaveBeenCalled();
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  // Windows EC2 는 SSM 셸(PowerShell)로 붙어서 대조할 SSH 호스트 키가 없다. 그런데도 probe 를
+  // 하면 SSM 터널을 열어 22번 포트에서 키를 읽으려 하고, probe 경로의 AWS preflight 가 Windows
+  // 를 거부해 연결이 거기서 끝난다 — 메인의 SSM 셸 경로까지 가지도 못한다.
+  it("skips the host key probe for a Windows EC2 host and connects straight through", async () => {
+    const api = createMockApi();
+    api.aws.getProfileStatusById = vi.fn().mockResolvedValue({
+      profileName: "default",
+      available: true,
+      isSsoProfile: false,
+      isAuthenticated: true,
+      accountId: null,
+      arn: null,
+      errorMessage: null,
+    });
+    api.knownHosts.probeHost = vi.fn();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [
+        ...state.hosts,
+        {
+          ...createAwsEc2Host(),
+          label: "AWS Win",
+          awsPlatform: "Windows",
+          awsSshUsername: null,
+          awsSshMetadataStatus: "idle",
+        } as HostRecord,
+      ],
+    }));
+
+    await store.getState().connectHost("aws-host-1", 120, 32);
+
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.ssh.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: "aws-host-1" }),
+    );
   });
 
   it("returns to home when the last session closes", async () => {

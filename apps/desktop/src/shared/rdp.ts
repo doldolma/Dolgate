@@ -69,6 +69,12 @@ export interface RdpConnectedPayload {
   desktopWidth: number;
   desktopHeight: number;
   monitors: RdpMonitorPlacement[];
+  /**
+   * 접속한 계정의 표시용 이름(도메인이 있으면 `DOMAIN\user`). 코어가 보내는 값이 아니라
+   * 메인 IPC 가 자격증명에서 채워 렌더러로 넘긴다 — 계정은 호스트 레코드에 없어서
+   * 렌더러가 달리 알 방법이 없다.
+   */
+  username?: string;
 }
 
 // 갱신된 사각형 하나. pixels는 width * height * 4 바이트 RGBA이고 이미 촘촘히 packed 되어

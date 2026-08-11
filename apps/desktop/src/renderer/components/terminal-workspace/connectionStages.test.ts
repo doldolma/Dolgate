@@ -48,6 +48,33 @@ describe('resolveConnectionStages', () => {
     expect(stages.map((stage) => stage.id)).toEqual(['host-key', 'ssh']);
   });
 
+  // Windows EC2 는 SSM 셸(PowerShell)로 붙는다 — SSH 도, 대조할 호스트 키도 없다. 그런데
+  // "호스트 키 확인 → SSH 연결" 을 세우면 없는 관문을 통과한 것처럼 읽힌다.
+  it('Windows EC2 는 호스트 키 관문 없이 SSM 단계만 보여준다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ status: 'connecting' }),
+      hasTailscale: false,
+      hostKind: 'aws-ec2',
+      awsPlatform: 'Windows',
+      failureLayer: null,
+    });
+
+    expect(stages.map((stage) => stage.id)).toEqual(['ssm']);
+  });
+
+  // 리눅스 EC2 는 SSH-over-SSM 을 먼저 타므로 기존 관문이 그대로 맞다.
+  it('리눅스 EC2 는 호스트 키·SSH 관문을 그대로 쓴다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ status: 'connecting' }),
+      hasTailscale: false,
+      hostKind: 'aws-ec2',
+      awsPlatform: 'Linux/UNIX',
+      failureLayer: null,
+    });
+
+    expect(stages.map((stage) => stage.id)).toEqual(['host-key', 'ssh']);
+  });
+
   // 빠르게 지나간 단계도 남아야 한다. 이게 없으면 사용자는 아무것도 못 본 것과 같다.
   it('지나간 단계는 완료로 남는다', () => {
     const stages = resolveConnectionStages({
@@ -456,5 +483,86 @@ describe('resolveConnectionStages', () => {
     expect(target?.state).toBe('done');
     expect(target?.detail).toContain(t('connectStages.tailscaleTargetDirect'));
     expect(target?.detail).toContain('32 KB');
+  });
+  // 무엇에 붙든 "호스트 키 확인 → SSH 연결" 이 뜨던 버그. 로컬 셸에는 둘 다 없고, RDP·시리얼·
+  // ECS Exec 은 SSH 를 쓰지 않는다 — 없는 관문이 통과되는 것처럼 보이면 어디서 막혔는지 못 읽는다.
+  it('로컬 셸에는 호스트 계층 단계를 세우지 않는다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ source: 'local', hostId: null, status: 'connecting' }),
+      hasTailscale: false,
+      failureLayer: null,
+    });
+
+    expect(stages).toEqual([]);
+  });
+
+  it('RDP 는 호스트 키 대신 RDP 연결 한 단계만 세운다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ paneKind: 'rdp', status: 'connecting' }),
+      hasTailscale: false,
+      hostKind: 'rdp',
+      failureLayer: null,
+    });
+
+    expect(stages.map((stage) => stage.id)).toEqual(['rdp']);
+    expect(stages[0].label).toBe(t('connectStages.rdp'));
+    // 앞에 관문이 없으므로 바로 진행 중이어야 한다 — 'pending' 이면 멈춘 것처럼 보인다.
+    expect(stages[0].state).toBe('active');
+  });
+
+  it('시리얼과 ECS Exec 도 SSH 라고 하지 않는다', () => {
+    const serial = resolveConnectionStages({
+      tab: createTab({ status: 'connecting', shellKind: 'serial' }),
+      hasTailscale: false,
+      hostKind: 'serial',
+      failureLayer: null,
+    });
+    const ecs = resolveConnectionStages({
+      tab: createTab({ status: 'connecting' }),
+      hasTailscale: false,
+      hostKind: 'aws-ecs',
+      failureLayer: null,
+    });
+
+    expect(serial.map((stage) => stage.id)).toEqual(['serial']);
+    expect(ecs.map((stage) => stage.id)).toEqual(['ecs-exec']);
+  });
+
+  // SSH 를 타는 종류(SSH·EC2·Warpgate)는 그대로 호스트 키를 먼저 확인한다.
+  it('SSH 계열은 호스트 키 확인을 유지한다', () => {
+    for (const hostKind of ['ssh', 'aws-ec2', 'warpgate-ssh'] as const) {
+      const stages = resolveConnectionStages({
+        tab: createTab({ status: 'connecting' }),
+        hasTailscale: false,
+        hostKind,
+        failureLayer: null,
+      });
+
+      expect(stages.map((stage) => stage.id)).toEqual(['host-key', 'ssh']);
+    }
+  });
+
+  // 호스트 종류가 아직 없을 때(목록 로딩) 로컬로 보면 단계가 통째로 사라진다.
+  it('호스트 탭인데 종류를 모르면 SSH 로 본다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ status: 'connecting' }),
+      hasTailscale: false,
+      failureLayer: null,
+    });
+
+    expect(stages.map((stage) => stage.id)).toEqual(['host-key', 'ssh']);
+  });
+
+  // tailnet 을 경유하는 RDP 는 그 계층을 지나기 전에는 붙는 중이 아니다.
+  it('tailnet 이 아직 준비되지 않으면 RDP 단계는 기다린다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ paneKind: 'rdp', status: 'connecting' }),
+      hasTailscale: true,
+      hostKind: 'rdp',
+      tailnetStatus: createStatus({ ready: false, authorized: false, state: 'starting' }),
+      failureLayer: null,
+    });
+
+    expect(stateOf(stages, 'rdp')).toBe('pending');
   });
 });

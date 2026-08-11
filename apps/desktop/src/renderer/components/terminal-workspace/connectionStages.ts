@@ -1,4 +1,5 @@
-import type { TailnetStatus, TerminalTab } from '@shared';
+import { isAwsEc2WindowsPlatform } from '@shared';
+import type { HostRecord, TailnetStatus, TerminalTab } from '@shared';
 import { t } from '../../i18n';
 
 /**
@@ -35,6 +36,70 @@ export interface ConnectionStage {
 
 /** 실패가 어느 계층의 것인지. 문구가 아니라 이 구분으로 단계에 붙인다. */
 export type ConnectionFailureLayer = 'tailscale' | 'hostKey' | 'ssh' | null;
+
+/**
+ * 호스트 계층이 실제로 무엇을 하는지.
+ *
+ * 이 구분이 없으면 무엇에 붙든 "호스트 키 확인 → SSH 연결" 이 뜬다. 로컬 셸에는 호스트 키도 SSH
+ * 도 없고, RDP·시리얼·ECS Exec 은 SSH 를 쓰지 않는다 — 없는 관문을 통과하는 것처럼 보이면 어디서
+ * 막혔는지 읽을 수 없다.
+ */
+export type ConnectionTransport =
+  | 'local'
+  | 'ssh'
+  | 'ssm'
+  | 'serial'
+  | 'ecs-exec'
+  | 'rdp';
+
+/**
+ * 탭과 호스트 종류로 전송 방식을 정한다.
+ *
+ * 호스트 종류를 모르는 동안(목록 로딩 등)은 SSH 로 본다 — 이 앱의 기본이고, 로컬로 잘못 보면
+ * 단계가 통째로 사라진다.
+ */
+export function resolveConnectionTransport(
+  tab: TerminalTab | undefined,
+  hostKind: HostRecord['kind'] | undefined,
+  awsPlatform?: string | null,
+): ConnectionTransport {
+  if (tab?.paneKind === 'rdp' || hostKind === 'rdp') {
+    return 'rdp';
+  }
+  if (tab?.source === 'local') {
+    return 'local';
+  }
+  switch (hostKind) {
+    case 'serial':
+      return 'serial';
+    case 'aws-ecs':
+      return 'ecs-exec';
+    case 'aws-ec2':
+      // Windows 인스턴스는 SSM 셸(PowerShell)로 붙는다 — SSH 도, 대조할 호스트 키도 없다.
+      // 리눅스는 SSH-over-SSM 을 먼저 타므로 그대로 SSH 관문을 보여준다.
+      return isAwsEc2WindowsPlatform(awsPlatform) ? 'ssm' : 'ssh';
+    default:
+      return 'ssh';
+  }
+}
+
+/** 호스트에 실제로 붙는 마지막 단계의 라벨. 없는 종류(로컬)는 null. */
+function transportStageLabel(transport: ConnectionTransport): string | null {
+  switch (transport) {
+    case 'local':
+      return null;
+    case 'serial':
+      return t('connectStages.serial');
+    case 'ecs-exec':
+      return t('connectStages.ecsExec');
+    case 'rdp':
+      return t('connectStages.rdp');
+    case 'ssm':
+      return t('connectStages.ssm');
+    default:
+      return t('connectStages.ssh');
+  }
+}
 
 /**
  * Tailscale 계층의 단계들.
@@ -220,11 +285,16 @@ export function resolveConnectionStages(input: {
   hasTailscale: boolean;
   /** 대상 기기 주소. 넷맵에서 그 기기를 찾아 경로를 보여주는 데 쓴다. */
   targetAddress?: string;
+  /** 이 탭이 붙는 호스트의 종류. 없으면(로컬 셸·목록 로딩 중) 탭만 보고 정한다. */
+  hostKind?: HostRecord['kind'];
+  /** aws-ec2 의 플랫폼. Windows 면 SSH 가 아니라 SSM 셸로 붙어서 관문이 달라진다. */
+  awsPlatform?: string | null;
   failureLayer: ConnectionFailureLayer;
   failureMessage?: string;
   hostKeyPrompted?: boolean;
 }): ConnectionStage[] {
   const { tab, tailnetStatus, hasTailscale, failureLayer, failureMessage } = input;
+  const transport = resolveConnectionTransport(tab, input.hostKind, input.awsPlatform);
   const stages: ConnectionStage[] = hasTailscale
     ? resolveTailscaleStages(tailnetStatus, failureLayer === 'tailscale', input.targetAddress)
     : [];
@@ -248,48 +318,58 @@ export function resolveConnectionStages(input: {
     stage === 'connecting' ||
     stage === 'waiting-shell' ||
     stage === 'waiting-interactive-auth';
-  stages.push({
-    id: 'host-key',
-    group: 'host',
-    label: t('connectStages.hostKey'),
-    state:
-      failureLayer === 'hostKey'
-        ? 'failed'
-        : input.hostKeyPrompted
-          ? 'blocked'
-          : hostKeyDone
-            ? 'done'
-            : !tailscaleReady
-              ? 'pending'
-              : stage === 'host-key-check' || stage === 'awaiting-host-trust'
-                ? 'active'
-                : failed
-                  ? 'pending'
-                  : 'active',
-    detail:
-      failureLayer === 'hostKey'
-        ? failureMessage
-        : input.hostKeyPrompted
-          ? t('connectStages.hostKeyPromptDetail')
-          : undefined,
-  });
-
-  stages.push({
-    id: 'ssh',
-    group: 'host',
-    label: t('connectStages.ssh'),
-    state:
-      failureLayer === 'ssh'
-        ? 'failed'
-        : connected
-          ? 'done'
-          : failed
-            ? 'pending'
+  // 호스트 키는 SSH 를 타는 종류만 확인한다. RDP 는 서버 인증서를 쓰지만 그 확인은 이 오버레이가
+  // 아니라 전용 화면에서 받으므로, 여기서 관문으로 세우면 상태를 알 수 없는 줄이 하나 늘어난다.
+  const checksHostKey = transport === 'ssh';
+  if (checksHostKey) {
+    stages.push({
+      id: 'host-key',
+      group: 'host',
+      label: t('connectStages.hostKey'),
+      state:
+        failureLayer === 'hostKey'
+          ? 'failed'
+          : input.hostKeyPrompted
+            ? 'blocked'
             : hostKeyDone
-              ? 'active'
-              : 'pending',
-    detail: failureLayer === 'ssh' ? failureMessage : undefined,
-  });
+              ? 'done'
+              : !tailscaleReady
+                ? 'pending'
+                : stage === 'host-key-check' || stage === 'awaiting-host-trust'
+                  ? 'active'
+                  : failed
+                    ? 'pending'
+                    : 'active',
+      detail:
+        failureLayer === 'hostKey'
+          ? failureMessage
+          : input.hostKeyPrompted
+            ? t('connectStages.hostKeyPromptDetail')
+            : undefined,
+    });
+  }
+
+  // 앞에 관문이 없는 종류는 tailnet 만 지나면 바로 붙는 중이다.
+  const readyToConnect = checksHostKey ? hostKeyDone : tailscaleReady;
+  const transportLabel = transportStageLabel(transport);
+  if (transportLabel) {
+    stages.push({
+      id: transport,
+      group: 'host',
+      label: transportLabel,
+      state:
+        failureLayer === 'ssh'
+          ? 'failed'
+          : connected
+            ? 'done'
+            : failed
+              ? 'pending'
+              : readyToConnect
+                ? 'active'
+                : 'pending',
+      detail: failureLayer === 'ssh' ? failureMessage : undefined,
+    });
+  }
 
   // 분류되지 않은 실패는 진행 중이던 단계에 붙인다.
   //

@@ -675,8 +675,6 @@ interface AppStateParts {
   openHomeSection: (section: HomeSection) => void;
   openSettingsSection: (section: SettingsSection) => void;
   openCreateHostDrawer: () => void;
-  openCreateSerialDrawer: () => void;
-  openCreateRdpDrawer: () => void;
   openEditHostDrawer: (hostId: string) => void;
   closeHostDrawer: () => void;
   navigateGroup: (path: string | null) => void;
@@ -1115,8 +1113,6 @@ export type CatalogSlice = Pick<
   | "openHomeSection"
   | "openSettingsSection"
   | "openCreateHostDrawer"
-  | "openCreateSerialDrawer"
-  | "openCreateRdpDrawer"
   | "openEditHostDrawer"
   | "closeHostDrawer"
   | "navigateGroup"

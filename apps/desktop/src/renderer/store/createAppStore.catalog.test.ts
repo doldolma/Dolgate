@@ -305,18 +305,13 @@ describe("createAppStore catalog and settings", () => {
     const store = createAppStore(createMockApi());
 
     await store.getState().bootstrap();
+    // 종류별 입구는 하나로 합쳤다 — 스토어는 기본값(ssh)만 정하고, Serial·RDP 선택은
+    // 드로어 안의 종류 셀렉터가 맡는다.
     store.getState().openCreateHostDrawer();
     expect(store.getState().hostDrawer).toEqual({
       mode: "create",
       defaultGroupPath: null,
       kind: "ssh",
-    });
-
-    store.getState().openCreateSerialDrawer();
-    expect(store.getState().hostDrawer).toEqual({
-      mode: "create",
-      defaultGroupPath: null,
-      kind: "serial",
     });
 
     store.getState().openEditHostDrawer("host-1");

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  isAwsEc2WindowsPlatform,
   type AwsEc2InstanceSummary,
   type AwsEcsClusterListItem,
   type AwsHostSshInspectionResult,
@@ -88,19 +89,29 @@ function getSsmAvailabilityReason(instance: AwsEc2InstanceSummary): string | nul
   return null;
 }
 
-function canInspectEc2Instance(instance: AwsEc2InstanceSummary): boolean {
-  return instance.ssmAvailability === 'ready' && !/windows/i.test(instance.platform || '');
+/**
+ * Windows 인스턴스는 SSH 검사를 건너뛰고 바로 등록한다.
+ *
+ * 검사는 SSH 사용자명·포트를 찾는 단계인데(AWS-RunShellScript, Linux 전용), Windows 는 애초에
+ * SSH 로 붙지 않는다 — SSM 셸이 열어 주는 PowerShell 로 연결하고 그 경로엔 사용자명이 필요 없다.
+ */
+function isWindowsEc2Instance(instance: AwsEc2InstanceSummary): boolean {
+  return isAwsEc2WindowsPlatform(instance.platform);
 }
 
-function getInspectButtonLabel(instance: AwsEc2InstanceSummary): string {
-  if (/windows/i.test(instance.platform || '')) {
-    return t('awsImport.badge.windowsUnsupported');
-  }
+function canAddEc2Instance(instance: AwsEc2InstanceSummary): boolean {
+  return instance.ssmAvailability === 'ready';
+}
+
+function getEc2ActionButtonLabel(instance: AwsEc2InstanceSummary): string {
   if (instance.ssmAvailability === 'unavailable') {
     return t('awsImport.badge.ssmUnavailable');
   }
   if (instance.ssmAvailability === 'unknown') {
     return t('awsImport.badge.blocked');
+  }
+  if (isWindowsEc2Instance(instance)) {
+    return t('awsImport.badge.addWindows');
   }
   return t('awsImport.badge.inspect');
 }
@@ -266,6 +277,21 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       portValueRef.current = nextPort;
       setInspectionPort(nextPort);
     }
+  };
+
+  /** Windows 는 검사할 게 없으므로 등록 화면만 띄운다 — SSH 사용자명·포트는 비운 채로 남는다. */
+  const beginWindowsRegistration = (instance: AwsEc2InstanceSummary) => {
+    inspectionRequestIdRef.current += 1;
+    usernameDirtyRef.current = false;
+    portDirtyRef.current = false;
+    usernameValueRef.current = '';
+    portValueRef.current = '';
+    setInspectionUsername('');
+    setInspectionPort('');
+    setInspectionUsernameCandidates([]);
+    setInspectionTarget(instance);
+    setInspectionStatus('idle');
+    setInspectionError(null);
   };
 
   const inspectInstance = async (
@@ -778,13 +804,19 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 </CardMain>
               </Card>
 
-              {inspectionStatus === 'loading' ? (
+              {isWindowsEc2Instance(inspectionTarget) ? (
+                <NoticeCard tone="info" title={translate('awsImport.inspect.windowsTitle')}>
+                  <p>{translate('awsImport.inspect.windowsHint')}</p>
+                </NoticeCard>
+              ) : null}
+
+              {!isWindowsEc2Instance(inspectionTarget) && inspectionStatus === 'loading' ? (
                 <NoticeCard tone="info">
                   {translate('awsImport.inspect.inProgress')}
                 </NoticeCard>
               ) : null}
 
-              {inspectionStatus === 'ready' ? (
+              {!isWindowsEc2Instance(inspectionTarget) && inspectionStatus === 'ready' ? (
                 <NoticeCard
                   title={translate('awsImport.inspect.doneTitle')}
                 >
@@ -792,12 +824,17 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 </NoticeCard>
               ) : null}
 
-              {inspectionStatus === 'error' && inspectionError ? (
+              {!isWindowsEc2Instance(inspectionTarget) &&
+              inspectionStatus === 'error' &&
+              inspectionError ? (
                 <NoticeCard tone="danger" role="alert">
                   {inspectionError}
                 </NoticeCard>
               ) : null}
 
+              {/* SSH 사용자명·포트는 SSH 경로에만 쓰인다 — Windows 는 그 경로로 안 가므로 뺀다. */}
+              {isWindowsEc2Instance(inspectionTarget) ? null : (
+              <>
               <div className="grid gap-4 md:grid-cols-2">
                 <FieldGroup label="SSH Username">
                   <input
@@ -847,6 +884,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   ))}
                 </div>
               ) : null}
+              </>
+              )}
             </div>
           ) : profileStatus?.isAuthenticated && selectedRegion && importMode === 'ecs' ? (
             <div className="mt-[0.9rem]" data-testid="aws-import-ecs-cluster-list">
@@ -940,15 +979,19 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                       <CardActions>
                         <Button
                           variant="primary"
-                          disabled={!canInspectEc2Instance(instance)}
+                          disabled={!canAddEc2Instance(instance)}
                           onClick={async () => {
-                            if (!canInspectEc2Instance(instance)) {
+                            if (!canAddEc2Instance(instance)) {
+                              return;
+                            }
+                            if (isWindowsEc2Instance(instance)) {
+                              beginWindowsRegistration(instance);
                               return;
                             }
                             await inspectInstance(instance, false);
                           }}
                         >
-                          {getInspectButtonLabel(instance)}
+                          {getEc2ActionButtonLabel(instance)}
                         </Button>
                       </CardActions>
                     </Card>
@@ -981,6 +1024,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 {translate('awsImport.action.back')}
               </Button>
               <div className="ml-auto flex items-center justify-end gap-3">
+                {/* 재검사는 SSH 메타데이터를 다시 읽는 것이라 Windows 에는 해당 없다. */}
+                {isWindowsEc2Instance(inspectionTarget) ? null : (
                 <Button
                   variant="secondary"
                   disabled={inspectionStatus === 'loading' || isRegistering}
@@ -990,6 +1035,7 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 >
                   {translate('awsImport.action.recheck')}
                 </Button>
+                )}
                 <Button
                   variant="primary"
                   disabled={inspectionStatus === 'loading' || isRegistering}

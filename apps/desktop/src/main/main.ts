@@ -252,6 +252,8 @@ if (termiusHelperArgIndex >= 0) {
   // RDP 는 별도 사이드카(services/rdp-core)를 쓰므로 CoreManager 와 독립적이다.
   const rdpManager = new RdpManager({
     getWindows: () => BrowserWindow.getAllWindows(),
+    // SSH 세션과 같은 로그 저장소를 쓴다 — RDP 연결도 로그 화면·최근 접속에 함께 보인다.
+    upsertLogRecord: upsertActivityLog,
   });
 
   awsSsmTunnelService.setInProcessBackend({

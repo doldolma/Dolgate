@@ -192,6 +192,22 @@ func TestOpenForwardRefusesAnEmptyRoute(t *testing.T) {
 	}
 }
 
+func TestOpenForwardLeavesNothingListeningWhenItFails(t *testing.T) {
+	// 실패했는데 리스너가 남으면 tailnet 을 향한 문이 인증 없이 열려 있게 된다. 그리고 호출부는
+	// 붙을 수 있는 줄 알고 그리로 붙는다.
+	service := &Service{}
+	if _, err := service.OpenForward("s1", ForwardTarget{Host: "winbox", Port: 3389}); err == nil {
+		t.Fatal("expected an error without a tailnet route")
+	}
+
+	service.forwardMu.Lock()
+	count := len(service.forwards)
+	service.forwardMu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected no forwards registered, got %d", count)
+	}
+}
+
 func TestOpenForwardValidatesTheTarget(t *testing.T) {
 	service := &Service{}
 	if _, err := service.OpenForward("s1", ForwardTarget{Host: "  ", Port: 3389}); err == nil {

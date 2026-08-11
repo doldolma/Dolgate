@@ -19,6 +19,7 @@ import {
   resolveTailnetProgress,
   isAwsEc2HostRecord,
   isAwsSsoAuthenticationErrorMessage,
+  isChangedHostKeyErrorMessage,
   normalizeRemoteInvokeErrorMessage,
 } from "../utils";
 import { t } from '../../i18n';
@@ -189,6 +190,13 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     sessionId?: string | null;
     endpointId?: string | null;
     skipProbeIfAlreadyTrusted?: boolean;
+    /**
+     * 이미 신뢰된 호스트라도 probe를 강제한다(점프 체인의 홉까지).
+     *
+     * 키가 바뀐 뒤 복구할 때만 쓴다 — skipProbeIfAlreadyTrusted 를 이기므로, 저장된 레코드가
+     * 있어도 현재 서버 키와 대조해 mismatch 를 확인할 수 있다.
+     */
+    forceProbe?: boolean;
     action: PendingHostKeyPrompt["action"];
   };
 
@@ -199,7 +207,11 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     set: StoreSetter,
     input: EnsureTrustedHostInput,
   ): Promise<boolean> => {
-    if (input.skipProbeIfAlreadyTrusted && hasTrustedHostKey(input.hostId)) {
+    if (
+      !input.forceProbe &&
+      input.skipProbeIfAlreadyTrusted &&
+      hasTrustedHostKey(input.hostId)
+    ) {
       return true;
     }
 
@@ -420,7 +432,8 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     // probe할 수 있다. 다단 ProxyJump는 체인 전체를 첫 홉부터 순서대로 신뢰한다 — 각 홉은
     // 자신의 설정으로 probe되며, 미신뢰 홉이 있으면 그 홉에서 신뢰 프롬프트가 뜬다(Termius식
     // 홉별 trust). 이미 신뢰된 홉은 재-probe를 생략(중복 순회·pre-auth 몰림 방지, 실연결의
-    // strict host-key 검사가 안전을 보장). 점프가 없는 일반 경로는 inner 프로미스를 그대로
+    // strict host-key 검사가 안전을 보장) — forceProbe면 홉까지 다시 probe한다(키가 바뀐 게
+    // 베스천일 수 있다). 점프가 없는 일반 경로는 inner 프로미스를 그대로
     // 반환해 추가 마이크로태스크 없이 기존 타이밍을 유지한다.
     const targetHost = get().hosts.find((item) => item.id === input.hostId);
     if (targetHost && isSshHostRecord(targetHost)) {
@@ -447,11 +460,46 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     return ensureTrustedHostKey(set, input);
   };
 
+  /**
+   * 연결이 호스트 키 불일치로 실패한 뒤, 교체 프롬프트로 되돌린다.
+   *
+   * 정상 경로는 저장된 키가 있으면 probe를 건너뛰므로(중복 순회·pre-auth 몰림 방지), 키가 바뀐
+   * 사실은 실연결의 strict host-key 검사가 처음 알린다. 그 오류는 자동 재연결 금지 대상이고
+   * (reconnect-classify의 permanent) 자격증명 프롬프트 대상도 아니라서, 여기서 다시 probe하지
+   * 않으면 known host 레코드를 손으로 지우는 것 말고는 빠져나갈 길이 없다.
+   *
+   * 자동으로 신뢰하지는 않는다 — probe가 mismatch를 확인하면 프롬프트를 띄우고, 사용자가 저장된
+   * 지문과 현재 지문을 직접 보고 "교체 후 계속"을 눌러야 진행된다.
+   *
+   * probe가 trusted를 돌려주면 아무것도 하지 않는다. 바뀐 키가 이 호스트가 아닌 경우(예: 점프
+   * 홉, 노드마다 키가 다른 로드밸런서)인데, 그때 재시도하면 같은 실패를 반복하는 루프가 된다 —
+   * 원래 오류를 그대로 남겨 호출자가 보여주게 한다.
+   *
+   * @returns 프롬프트를 띄웠으면 true. 호출자는 오류 상태 대신 "신뢰 대기" 상태를 보이면 된다.
+   */
+  const recoverFromChangedHostKey = async (
+    set: StoreSetter,
+    input: EnsureTrustedHostInput & { message: string },
+  ): Promise<boolean> => {
+    if (!isChangedHostKeyErrorMessage(input.message)) {
+      return false;
+    }
+    try {
+      await ensureTrustedHost(set, { ...input, forceProbe: true });
+    } catch {
+      // probe 자체가 실패하면(네트워크·tailnet·권한) 원래 연결 오류를 보여주는 게 맞다 —
+      // probe 실패 사유로 덮어쓰면 진짜 원인이 가려진다.
+      return false;
+    }
+    return Boolean(get().pendingHostKeyPrompt);
+  };
+
   return {
     loginAwsSsoProfile,
     ensureAwsSsoProfileAuthenticationIfNeeded,
     ensureAwsHostAuthentication,
     ensureTrustedHost,
+    recoverFromChangedHostKey,
     // RDP 는 SSH 신뢰 체인(호스트 키 probe)을 타지 않는다 — 인증서 TOFU 를 메인이 따로 한다.
     // 그래서 tailnet 준비만 따로 쓸 수 있게 내보낸다.
     ensureTailnetReady,

@@ -13,6 +13,7 @@ import {
   type TerminalRuntime,
 } from '../lib/terminal-runtime';
 import { createTerminalResizeScheduler } from '../components/terminal-resize';
+import { hostSupportsSftp } from '../components/host-browser/hostCapabilities';
 import {
   loadScrollbackFromSession,
   registerTerminalHooks,
@@ -518,10 +519,9 @@ export function useTerminalSessionViewController({
       terminalAutocompleteEnabled &&
       host?.kind !== 'serial' &&
       tab?.shellKind !== 'aws-ecs-exec';
-    const sftpCapable =
-      host?.kind === 'ssh' ||
-      host?.kind === 'aws-ec2' ||
-      host?.kind === 'warpgate-ssh';
+    // 셸 통합은 SSH 세션 위에서만 성립한다 — Windows EC2 는 SSM 셸(PowerShell)이라 제외된다.
+    // (코어도 같은 판단으로 거절하지만, 되지도 않을 설치를 요청할 이유가 없다.)
+    const sftpCapable = host ? hostSupportsSftp(host) : false;
     if (
       autocompleteActive ||
       !sftpCapable ||

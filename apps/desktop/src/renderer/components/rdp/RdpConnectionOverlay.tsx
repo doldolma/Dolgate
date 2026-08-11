@@ -55,6 +55,7 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
         // 대상 주소로 넷맵에서 그 기기를 찾아 경로를 보여준다 — Tailscale 이 붙어 있어도 대상에
         // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.
         targetAddress: host && isRdpHostRecord(host) ? host.hostname : undefined,
+        hostKind: host?.kind,
         tailnetStatus,
         // RDP 는 실패 계층을 아직 나누지 않는다. 단계 목록만으로도 tailnet 에서 막혔는지
         // 원격이 거절했는지 갈린다.

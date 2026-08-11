@@ -8,10 +8,17 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
+
+// forwardPrepareTimeout 은 포워드를 열기 전 노드를 올리는 데 기다리는 시간이다.
+//
+// 데스크톱은 이 요청에 30초를 준다. 그보다 짧게 잡아 이유가 있는 실패로 돌려준다 — 요청
+// 타임아웃으로 끝나면 "왜 안 되는지" 가 남지 않는다.
+const forwardPrepareTimeout = 20 * time.Second
 
 // ForwardTarget 은 tailnet 안에서 이을 곳이다.
 type ForwardTarget struct {
@@ -61,6 +68,20 @@ func (runtime *Service) OpenForward(id string, target ForwardTarget) (*Forward, 
 		// 경로가 비어 있다. 포워드를 열어 줘도 일반 네트워크로 나가므로 의미가 없고, 호출부는
 		// tailnet 을 쓰는 줄 알고 붙는다.
 		return nil, errors.New("tailnet forward: no tailnet route")
+	}
+
+	// 노드를 먼저 올린다.
+	//
+	// 리스너를 먼저 열면 호출부는 붙을 수 있는 줄 알고 붙는데, 그 시점에 노드가 아직 로그인·
+	// 동기화 중이면 tailnet 으로 나가는 dial 이 그 안에서 기다린다 — 화면은 붙은 것처럼 보이고
+	// 아무 일도 일어나지 않는다. SSH 는 같은 노드를 프로세스 안에서 직접 쓰면서 준비될 때까지
+	// 기다리므로 이 문제가 없다. 여기서도 같은 순서로 맞춘다.
+	//
+	// 실패는 여기서 이유와 함께 올라간다 — 리스너를 열고 나면 그 이유를 전할 길이 없다.
+	prepareCtx, cancelPrepare := context.WithTimeout(context.Background(), forwardPrepareTimeout)
+	defer cancelPrepare()
+	if err := runtime.prepareRoute(prepareCtx, target.Route); err != nil {
+		return nil, fmt.Errorf("tailnet forward: %w", err)
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

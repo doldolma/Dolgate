@@ -66,6 +66,54 @@ func (runtime *Service) tailnetDial(route TailnetRoute) (sshconn.DialFunc, error
 	return runtime.Dial(route)
 }
 
+// prepareRoute 는 이 경로의 노드를 올리고 지금 나갈 수 있는 상태인지 확인한다.
+//
+// dial 이 연결마다 하는 준비와 같은 판단을 미리 한 번 한다. 포워드처럼 "붙을 곳"을 먼저
+// 만들어 주는 경로에서는, 준비를 뒤로 미루면 호출부가 붙은 뒤에 조용히 멈춘다.
+func (runtime *Service) prepareRoute(ctx context.Context, route TailnetRoute) error {
+	id := strings.TrimSpace(route.ID)
+	if id == "" {
+		return nil
+	}
+	if runtime.tailnets == nil {
+		return errors.New("tailnet support is not enabled")
+	}
+
+	lease, err := runtime.tailnets.Acquire(id)
+	if err != nil {
+		return err
+	}
+	// 신원을 갈아치우면 리스가 바뀐다. 변수를 캡처해 그때의 것을 놓는다.
+	defer func() { lease.Release() }()
+
+	if err := lease.Node.Up(ctx); err != nil {
+		return err
+	}
+	probeTailnetIdentity(ctx, lease.Node)
+
+	status, err := lease.Node.Status(ctx)
+	if err != nil {
+		return err
+	}
+	runtime.markTailnetIdentityAuthorized(id, status)
+
+	if status.IdentityInvalid {
+		if _, err := runtime.replaceInvalidIdentity(ctx, id, &lease); err != nil {
+			return err
+		}
+		status, err = lease.Node.Status(ctx)
+		if err != nil {
+			return err
+		}
+		runtime.markTailnetIdentityAuthorized(id, status)
+	}
+
+	if err := assertTailnetNotBlocked(status); err != nil {
+		return err
+	}
+	return assertTailnetIdentity(status, route.ExpectedName)
+}
+
 func (runtime *Service) dialThroughLease(
 	ctx context.Context,
 	id string,

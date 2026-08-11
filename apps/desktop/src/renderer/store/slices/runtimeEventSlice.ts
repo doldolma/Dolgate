@@ -1,4 +1,5 @@
 import type { SliceDeps } from "../services/context";
+import { clearSessionCwd } from "../../lib/terminal-cwd-registry";
 import type {
   AppState,
   ContainerTunnelTabState,
@@ -119,6 +120,7 @@ import {
   parentPath,
   resolveCurrentGroupPathAfterGroupRemoval,
   resolveCredentialRetryKind,
+  isChangedHostKeyErrorMessage,
   shouldPromptAwsSftpConfigRetry,
   resolveHostKeyCheckProgress,
   resolveAwaitingHostTrustProgress,
@@ -149,6 +151,7 @@ import {
   toTrustInput,
 } from "../utils";
 import { createBootstrapSyncServices } from "../services/bootstrap-sync";
+import { createTrustAuthServices } from "../services/trust-auth";
 import { updateStoredSshUsername } from "../services/credential-retry";
 import { createRuntimeEventServices } from "../services/runtime-events";
 import {
@@ -307,6 +310,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
   const { api, set, get } = deps;
   const services = createRuntimeEventServices(deps);
   const bootstrapServices = createBootstrapSyncServices(deps);
+  const { recoverFromChangedHostKey } = createTrustAuthServices(deps);
 
   const {
     openedInteractiveBrowserChallenges,
@@ -337,10 +341,35 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
             let scheduleFor: { stableId: string; hostId: string } | null =
               null as { stableId: string; hostId: string } | null;
 
+            // 세션이 끝나면 hover 의 "연결 경과" 시각을 지운다. 자동 재연결이 같은
+            // sessionId 를 재사용하므로, 안 지우면 재연결 후에도 옛 시각부터 센다.
+            if (event.type === "error" || event.type === "closed") {
+              clearSessionCwd(event.sessionId);
+            }
+
             set((state) => {
               const tab = state.tabs.find((item) => item.sessionId === event.sessionId);
               if (!tab) {
                 return state;
+              }
+
+              if (event.type === "resized") {
+                // 탭 hover 의 해상도 표기를 실제 크기에 따라 갱신한다.
+                return {
+                  tabs: state.tabs.map((item) =>
+                    item.sessionId === event.sessionId
+                      ? {
+                          ...item,
+                          rdpDesktopSize: {
+                            width: event.desktopWidth,
+                            height: event.desktopHeight,
+                          },
+                          rdpMonitorCount: event.monitors.length,
+                          lastEventAt: new Date().toISOString(),
+                        }
+                      : item,
+                  ),
+                };
               }
 
               if (event.type === "error") {
@@ -2090,6 +2119,34 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 (event.runtime.status === "error" && pfPermanent))
             ) {
               cancelReconnect(pfRuleId, "resolved");
+            }
+
+            // 포워딩은 start 실패를 삼키고 이 런타임 이벤트로만 알린다(services/network.ts).
+            // 그래서 키가 바뀐 경우도 여기가 유일한 접점이다 — 다시 probe해 교체 프롬프트를
+            // 띄우고, 수락하면 acceptPendingHostKeyPrompt 가 이 룰을 다시 시작한다.
+            //
+            // 이미 프롬프트가 떠 있으면 건드리지 않는다. 여러 룰이 같이 실패하면(같은 호스트를
+            // 쓰는 포워딩들) 각 이벤트가 probe를 돌려 서로의 프롬프트를 덮어쓴다.
+            const pfRule = get().portForwards.find(
+              (rule) => rule.id === pfRuleId,
+            );
+            if (
+              pfRule &&
+              event.runtime.status === "error" &&
+              isChangedHostKeyErrorMessage(event.runtime.message ?? "") &&
+              !get().pendingHostKeyPrompt
+            ) {
+              // 이벤트 핸들러는 동기다. probe 왕복을 기다리게 하지 않고 띄우기만 한다 —
+              // 런타임 상태는 위 set 에서 이미 error 로 반영됐고, 수락하면 running 으로 바뀐다.
+              void recoverFromChangedHostKey(set, {
+                hostId: pfRule.hostId,
+                message: event.runtime.message ?? "",
+                action: {
+                  kind: "portForward",
+                  ruleId: pfRuleId,
+                  hostId: pfRule.hostId,
+                },
+              });
             }
 
             scheduleActivityLogsRefresh();

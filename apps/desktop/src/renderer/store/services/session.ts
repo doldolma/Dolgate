@@ -1,4 +1,5 @@
-import { isRdpHostRecord } from "@shared";
+import { isAwsEc2WindowsPlatform, isRdpHostRecord } from "@shared";
+import { markSessionConnected } from "../../lib/terminal-cwd-registry";
 import type {
   HostRecord,
   HostSecretInput,
@@ -67,6 +68,7 @@ export function createSessionServices(deps: SliceDeps) {
   const {
     ensureAwsHostAuthentication,
     ensureTrustedHost,
+    recoverFromChangedHostKey,
     ensureTailnetReady,
   } = createTrustAuthServices(deps);
 
@@ -620,6 +622,31 @@ export function createSessionServices(deps: SliceDeps) {
         error instanceof Error
           ? error.message
           : t('sessionSvc.connectFailed');
+
+      // 키가 바뀐 호스트는 위에서 probe를 건너뛰었으므로 여기서 처음 드러난다. 다시 probe해
+      // 교체 프롬프트를 띄우고, 수락 시 이 연결이 이어진다(pendingConnectionAttempt가 남아 있다).
+      if (
+        await recoverFromChangedHostKey(set, {
+          hostId,
+          sessionId,
+          message,
+          action: {
+            kind: "ssh",
+            hostId,
+            cols: attempt.latestCols,
+            rows: attempt.latestRows,
+            secrets,
+          },
+        })
+      ) {
+        updateSessionProgress(
+          set,
+          sessionId,
+          resolveAwaitingHostTrustProgress(host),
+        );
+        return;
+      }
+
       const shouldPromptCredentialRetry =
         !isSerialHostRecord(host) && resolveCredentialRetryKind(host, message);
       if (shouldPromptCredentialRetry && isSshHostRecord(host)) {
@@ -788,6 +815,9 @@ export function createSessionServices(deps: SliceDeps) {
 
     try {
       const connected = await api.rdp.connect(sessionId, host.id, rdpViewportSize());
+      // 탭 hover 의 "연결 경과"가 SSH 와 같은 레지스트리를 읽는다. 재연결이 sessionId 를
+      // 재사용하므로, 끊길 때(runtimeEventSlice) 지워 두면 여기서 새 시각이 찍힌다.
+      markSessionConnected(sessionId);
       // 붙고 나면 진행 표시는 지운다 — 연결 화면이 캔버스를 가리면 안 된다.
       set((state) => ({
         tabs: state.tabs.map((tab) =>
@@ -799,6 +829,12 @@ export function createSessionServices(deps: SliceDeps) {
                 connectionProgress: null,
                 // 전체화면에서 화면마다 창을 펼칠지 여기서 판단한다.
                 rdpMonitorCount: connected.monitors.length,
+                // 탭 hover 표기용 — 대상(user@host)과 해상도.
+                rdpUsername: connected.username,
+                rdpDesktopSize: {
+                  width: connected.desktopWidth,
+                  height: connected.desktopHeight,
+                },
                 lastEventAt: new Date().toISOString(),
               }
             : tab,
@@ -947,19 +983,26 @@ export function createSessionServices(deps: SliceDeps) {
         // 일반 SSH 호스트와 동일하게, SSM 위 SSH 호스트 키를 먼저 probe하고 미신뢰면
         // 신뢰 프롬프트(KnownHostPromptDialog)를 띄운다 — 수락 전에는 연결하지 않는다.
         // probe 진행 이벤트는 aws-ec2-ssh 엔드포인트로 흘려 이 터미널 탭 오버레이에 매핑한다.
-        const trusted = await ensureTrustedHost(set, {
-          hostId,
-          sessionId,
-          endpointId: `aws-ec2-ssh:${hostId}`,
-          skipProbeIfAlreadyTrusted: true,
-          action: {
-            kind: "ssh",
-            hostId,
-            cols,
-            rows,
-            secrets,
-          },
-        });
+        //
+        // Windows 는 이 probe 자체가 성립하지 않는다. SSM 셸(PowerShell)로 붙으므로 대조할
+        // SSH 호스트 키가 없고, probe 는 SSM 터널을 열어 22번 포트에서 키를 읽으려 한다.
+        // 게다가 probe 경로의 AWS preflight 가 Windows 를 거부하므로, 연결이 여기서 끝나
+        // 메인의 SSM 셸 경로까지 가지도 못한다.
+        const trusted = isAwsEc2WindowsPlatform(host.awsPlatform)
+          ? true
+          : await ensureTrustedHost(set, {
+              hostId,
+              sessionId,
+              endpointId: `aws-ec2-ssh:${hostId}`,
+              skipProbeIfAlreadyTrusted: true,
+              action: {
+                kind: "ssh",
+                hostId,
+                cols,
+                rows,
+                secrets,
+              },
+            });
         if (!trusted) {
           updateSessionProgress(
             set,

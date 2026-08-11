@@ -187,6 +187,14 @@ export interface ResolvedAwsConnectPayload {
   streamUrl?: string;
   tokenValue?: string;
   ssmSessionId?: string;
+  /**
+   * SSM 세션이 떨어지는 셸의 종류. Windows 인스턴스는 'powershell' 이고, 비어 있으면
+   * POSIX 셸(리눅스에서 SSM 이 열어 주는 것)이다.
+   *
+   * 코어가 셸 통합 스크립트를 타이핑해도 되는지 판단하는 데 쓴다 — POSIX 스크립트라
+   * PowerShell 에서는 파싱 오류만 화면에 쏟는다.
+   */
+  shellKind?: string;
 }
 
 export interface AwsSsmSessionStartRequest extends ResolvedAwsConnectPayload {

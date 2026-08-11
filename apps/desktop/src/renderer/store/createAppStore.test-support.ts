@@ -708,6 +708,8 @@ export function createMockApi(): DesktopApi {
         desktopWidth: 1920,
         desktopHeight: 1080,
         monitors: [{ index: 0, left: 0, top: 0, width: 1920, height: 1080 }],
+        // 계정은 자격증명에만 있어 메인이 응답에 실어 보낸다 — 탭 hover 의 user@host 표기용.
+        username: "WORKGROUP\\admin",
       }),
       disconnect: vi.fn().mockResolvedValue(undefined),
       sendInput: vi.fn(),

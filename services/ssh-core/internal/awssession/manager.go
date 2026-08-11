@@ -38,6 +38,8 @@ type sessionHandle struct {
 	shellIntegrationTail           string
 	shellIntegrationReady          chan struct{}
 	shellIntegrationReadyOnce      sync.Once
+	// 원격 셸에 통합 스크립트를 타이핑할 수 있는지. 못 하는 종류면 arm 조차 하지 않는다.
+	shellIntegrationTypable bool
 }
 
 type autocompleteProbe struct {
@@ -107,9 +109,10 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.AWSConne
 	}
 
 	handle := &sessionHandle{
-		runner:                runner,
-		done:                  make(chan struct{}),
-		shellIntegrationReady: make(chan struct{}),
+		runner:                  runner,
+		done:                    make(chan struct{}),
+		shellIntegrationReady:   make(chan struct{}),
+		shellIntegrationTypable: shellIntegrationTypable(payload.ShellKind),
 	}
 	m.mu.Lock()
 	m.sessions[sessionID] = handle
@@ -378,9 +381,31 @@ const (
 	shellIntegrationTailLimit        = 2048
 )
 
+// shellIntegrationTypable reports whether the init script can be typed into this
+// shell. The script is POSIX (bash/zsh); a Windows SSM session lands in
+// PowerShell, which parses it as a wall of errors and prints them over the first
+// screen. The PowerShell variant is no help here either -- typing it drifts the
+// cursor (that is why local pwsh sessions get it via -EncodedCommand instead),
+// and an SSM session takes no launch arguments. So for those shells we do not
+// attempt the install at all: shell integration is simply absent, which is what
+// a plain SSM session gives you.
+//
+// An empty ShellKind means Linux/POSIX -- the pre-existing behaviour.
+func shellIntegrationTypable(shellKind string) bool {
+	switch autocomplete.NormalizeShellIntegrationShell(shellKind) {
+	case "pwsh", "powershell":
+		return false
+	default:
+		return true
+	}
+}
+
 func (h *sessionHandle) beginShellIntegration() bool {
 	h.shellIntegrationMu.Lock()
 	defer h.shellIntegrationMu.Unlock()
+	if !h.shellIntegrationTypable {
+		return false
+	}
 	switch h.shellIntegrationState {
 	case shellIntegrationArmed, shellIntegrationInstalling, shellIntegrationInstalled:
 		return false

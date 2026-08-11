@@ -360,6 +360,11 @@ type AWSConnectPayload struct {
 	StreamURL    string `json:"streamUrl,omitempty"`
 	TokenValue   string `json:"tokenValue,omitempty"`
 	SsmSessionID string `json:"ssmSessionId,omitempty"`
+	// ShellKind names the shell the SSM session lands in ("powershell" on Windows
+	// instances). Empty means a POSIX shell, which is what SSM opens on Linux.
+	// It decides whether the shell-integration script can be typed in at all --
+	// see beginShellIntegration in internal/awssession.
+	ShellKind string `json:"shellKind,omitempty"`
 }
 
 type LocalConnectPayload struct {

@@ -396,6 +396,53 @@ func TestManagerDoesNotInstallShellIntegrationBeforePromptOnMaxWait(t *testing.T
 	_ = manager.Disconnect("session-slow-profile")
 }
 
+// A Windows SSM session lands in PowerShell, which cannot run the POSIX
+// integration script -- typing it in prints a wall of parse errors over the
+// first screen. Shell integration is simply absent on those sessions, so the
+// install must not be attempted at all (not even armed, which would hold back
+// output waiting for an echo that never comes).
+func TestManagerSkipsShellIntegrationForPowerShellSessions(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	streams := make(chan []byte, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, payload []byte) {
+		streams <- payload
+	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+	if err := manager.Connect("session-windows", "request-windows", protocol.AWSConnectPayload{
+		ShellKind: "powershell",
+	}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	// A PowerShell prompt would normally trip the install gate.
+	runner.emitOutput("PS C:\\Windows\\system32> ")
+	time.Sleep(shellIntegrationInstallQuiet + 100*time.Millisecond)
+	if writes := runner.writesSnapshot(); len(writes) != 0 {
+		t.Fatalf("shell integration was typed into PowerShell: %q", writes[0])
+	}
+
+	// Output must flow straight through -- nothing is held back for an echo.
+	if got := waitForStream(t, streams); !bytes.Contains(got, []byte("PS C:")) {
+		t.Fatalf("session output was withheld: %q", got)
+	}
+
+	// The explicit install request is refused too (the renderer may still ask).
+	if err := manager.InstallShellIntegration("session-windows"); err != nil {
+		t.Fatalf("install shell integration: %v", err)
+	}
+	time.Sleep(shellIntegrationInstallQuiet + 100*time.Millisecond)
+	if writes := runner.writesSnapshot(); len(writes) != 0 {
+		t.Fatalf("explicit install typed into PowerShell: %q", writes[0])
+	}
+
+	_ = manager.Disconnect("session-windows")
+}
+
 func TestManagerRoutesWriteResizeAndOutputThroughRunner(t *testing.T) {
 	events := make(chan protocol.Event, 16)
 	streams := make(chan []byte, 16)

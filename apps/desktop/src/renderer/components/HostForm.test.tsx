@@ -186,7 +186,7 @@ describe('HostForm', () => {
     await waitFor(() =>
       expect(onActionStateChange).toHaveBeenLastCalledWith({
         saveInFlight: false,
-        saveStatusText: 'Saved',
+        saveStatusText: '저장됨',
       }),
     );
   });
@@ -268,7 +268,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const manageButtons = screen.getAllByRole('button', { name: 'Manage' });
+    const manageButtons = screen.getAllByRole('button', { name: '관리' });
     fireEvent.click(manageButtons[manageButtons.length - 1] as HTMLElement);
     expect(onOpenTailnets).toHaveBeenCalledTimes(1);
     unmount();
@@ -316,8 +316,8 @@ describe('HostForm', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Command' }));
-    fireEvent.change(screen.getByLabelText('Startup command'), {
+    fireEvent.click(screen.getByRole('button', { name: '명령' }));
+    fireEvent.change(screen.getByLabelText('시작 명령'), {
       target: { value: 'cd /srv/app && clear' },
     });
 
@@ -346,7 +346,7 @@ describe('HostForm', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('switch', { name: 'SSH Agent Forwarding' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'SSH 에이전트 포워딩' }));
 
     await saveEdit(ref);
     expect(onSubmit).toHaveBeenLastCalledWith(
@@ -369,7 +369,7 @@ describe('HostForm', () => {
     );
 
     const agentForwardingToggle = screen.getByRole('switch', {
-      name: 'SSH Agent Forwarding',
+      name: 'SSH 에이전트 포워딩',
     });
     expect(agentForwardingToggle).toBeDisabled();
     expect(agentForwardingToggle).toHaveAttribute('aria-checked', 'false');
@@ -391,7 +391,7 @@ describe('HostForm', () => {
     const onLabelChange = vi.fn();
     render(<HostForm host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} onLabelChange={onLabelChange} />);
 
-    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
+    fireEvent.change(screen.getByLabelText('호스트 이름'), { target: { value: 'prod.example.com' } });
 
     // 라벨 입력은 드로어 헤더로 옮겨졌으므로, 파생된 이름은 onLabelChange 로 관찰한다.
     expect(onLabelChange).toHaveBeenLastCalledWith('prod.example.com');
@@ -402,9 +402,9 @@ describe('HostForm', () => {
     const ref = createRef<HostFormHandle>();
     render(<HostForm ref={ref} host={null} keychainEntries={keychainEntries} groupOptions={groupOptions} onSubmit={vi.fn().mockResolvedValue(undefined)} onLabelChange={onLabelChange} />);
 
-    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'prod.example.com' } });
+    fireEvent.change(screen.getByLabelText('호스트 이름'), { target: { value: 'prod.example.com' } });
     act(() => ref.current?.setLabel('Production API'));
-    fireEvent.change(screen.getByLabelText('Hostname'), { target: { value: 'api.example.com' } });
+    fireEvent.change(screen.getByLabelText('호스트 이름'), { target: { value: 'api.example.com' } });
 
     // 수동 편집한 이름은 hostname 이 바뀌어도 유지된다(마지막 보고값이 그대로).
     expect(onLabelChange).toHaveBeenLastCalledWith('Production API');
@@ -421,9 +421,9 @@ describe('HostForm', () => {
       />,
     );
 
-    expect(screen.getByText('Saved Credentials')).toBeInTheDocument();
-    expect(screen.getByLabelText('Saved Credentials')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument();
+    expect(screen.getByText('저장된 인증 정보')).toBeInTheDocument();
+    expect(screen.getByLabelText('저장된 인증 정보')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '관리' })).toBeInTheDocument();
   });
 
   it('shows certificate-specific fields and filters saved secrets for certificate auth', () => {
@@ -437,15 +437,15 @@ describe('HostForm', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Auth Type'), {
+    fireEvent.change(screen.getByLabelText('인증 방식'), {
       target: { value: 'certificate' },
     });
 
-    expect(screen.getByLabelText('Private key file')).toBeInTheDocument();
-    expect(screen.getByLabelText('SSH certificate file')).toBeInTheDocument();
-    expect(screen.getByLabelText('Passphrase')).toBeInTheDocument();
+    expect(screen.getByLabelText('개인키 파일')).toBeInTheDocument();
+    expect(screen.getByLabelText('SSH 인증서 파일')).toBeInTheDocument();
+    expect(screen.getByLabelText('패스프레이즈')).toBeInTheDocument();
 
-    const select = screen.getByLabelText('Saved Credentials');
+    const select = screen.getByLabelText('저장된 인증 정보');
     expect(within(select).queryByRole('option', { name: '사용 안 함' })).not.toBeInTheDocument();
     expect(within(select).getByRole('option', { name: /Shared Certificate · SSH certificate \+ Passphrase/ })).toBeInTheDocument();
     expect(within(select).queryByRole('option', { name: /Shared Key/ })).not.toBeInTheDocument();
@@ -471,12 +471,12 @@ describe('HostForm', () => {
       />,
     );
 
-    expect(await screen.findByLabelText('Transport')).toBeInTheDocument();
-    expect(await screen.findByLabelText('Detected Serial Port')).toBeInTheDocument();
-    expect(screen.getByLabelText('Device Path')).toBeInTheDocument();
-    expect(screen.getByLabelText('Line Ending')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Auth Type')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Saved Credentials')).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('전송 방식')).toBeInTheDocument();
+    expect(await screen.findByLabelText('감지된 시리얼 포트')).toBeInTheDocument();
+    expect(screen.getByLabelText('장치 경로')).toBeInTheDocument();
+    expect(screen.getByLabelText('전송 줄바꿈')).toBeInTheDocument();
+    expect(screen.queryByLabelText('인증 방식')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('저장된 인증 정보')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Connection Type')).not.toBeInTheDocument();
     expect(listSerialPortsMock).toHaveBeenCalled();
   });
@@ -492,16 +492,16 @@ describe('HostForm', () => {
       />,
     );
 
-    fireEvent.change(await screen.findByLabelText('Transport'), {
+    fireEvent.change(await screen.findByLabelText('전송 방식'), {
       target: { value: 'raw-tcp' },
     });
 
-    expect(screen.getByLabelText('Remote Host')).toBeInTheDocument();
-    expect(screen.getByLabelText('Port')).toBeInTheDocument();
-    expect(screen.getByLabelText('Line Ending')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Baud Rate')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Data Bits')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Flow Control')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('원격 호스트')).toBeInTheDocument();
+    expect(screen.getByLabelText('포트')).toBeInTheDocument();
+    expect(screen.getByLabelText('전송 줄바꿈')).toBeInTheDocument();
+    expect(screen.queryByLabelText('통신 속도(baud)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('데이터 비트')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('흐름 제어')).not.toBeInTheDocument();
   });
 
   it('uses a Windows-friendly serial device placeholder on win32', async () => {
@@ -530,9 +530,9 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
-    expect(screen.getByRole('button', { name: 'Manage' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '관리' })).toBeInTheDocument();
   });
 
   it('allows opening the full editor for an attached certificate secret', async () => {
@@ -549,7 +549,7 @@ describe('HostForm', () => {
     );
 
     await waitFor(() =>
-      expect((screen.getByLabelText('Saved Credentials') as HTMLSelectElement).value).toBe(
+      expect((screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement).value).toBe(
         'existing:secret-certificate',
       ),
     );
@@ -570,7 +570,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-password'));
 
     rerender(
@@ -597,7 +597,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const savedSecretSelect = screen.getByLabelText('Saved Credentials') as HTMLSelectElement;
+    const savedSecretSelect = screen.getByLabelText('저장된 인증 정보') as HTMLSelectElement;
     await waitFor(() => expect(savedSecretSelect.value).toBe('existing:secret-certificate'));
 
     rerender(
@@ -630,16 +630,16 @@ describe('HostForm', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Auth Type'), {
+    fireEvent.change(screen.getByLabelText('인증 방식'), {
       target: { value: 'privateKey' },
     });
-    fireEvent.change(screen.getByLabelText('Hostname'), {
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
       target: { value: 'prod.example.com' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await waitFor(() => expect(screen.getByLabelText('Private key file')).toHaveValue('id_ed25519'));
+    fireEvent.click(screen.getByRole('button', { name: '가져오기' }));
+    await waitFor(() => expect(screen.getByLabelText('개인키 파일')).toHaveValue('id_ed25519'));
 
-    const form = screen.getByLabelText('Hostname').closest('form');
+    const form = screen.getByLabelText('호스트 이름').closest('form');
     expect(form).not.toBeNull();
     fireEvent.submit(form!);
 
@@ -742,7 +742,7 @@ describe('HostForm', () => {
       />,
     );
 
-    const hostnameInput = screen.getByLabelText('Hostname');
+    const hostnameInput = screen.getByLabelText('호스트 이름');
     const tagShell = screen.getByTestId('tag-input-shell');
 
     expect(hostnameInput.className).toContain('min-h-11');
@@ -773,19 +773,19 @@ describe('HostForm', () => {
     const preferencesSection = screen.getByTestId('hostform-section-preferences');
 
     expect(within(connectionSection).getByText('Connection')).toBeInTheDocument();
-    expect(within(connectionSection).getByLabelText('Hostname')).toBeInTheDocument();
-    expect(within(connectionSection).getByText('Auth Type')).toBeInTheDocument();
-    expect(within(connectionSection).getByLabelText('Password')).toBeInTheDocument();
-    expect(within(connectionSection).getByText('Saved Credentials')).toBeInTheDocument();
+    expect(within(connectionSection).getByLabelText('호스트 이름')).toBeInTheDocument();
+    expect(within(connectionSection).getByText('인증 방식')).toBeInTheDocument();
+    expect(within(connectionSection).getByLabelText('비밀번호')).toBeInTheDocument();
+    expect(within(connectionSection).getByText('저장된 인증 정보')).toBeInTheDocument();
 
     expect(within(detailsSection).getByText('Details')).toBeInTheDocument();
     // Label(이름)은 드로어 헤더의 편집 타이틀로 이동 — Details 에는 Group·Tags 만 남는다.
     expect(within(detailsSection).queryByLabelText('Label')).not.toBeInTheDocument();
-    expect(within(detailsSection).getByLabelText('Group')).toBeInTheDocument();
-    expect(within(detailsSection).getByLabelText('Tags')).toBeInTheDocument();
+    expect(within(detailsSection).getByLabelText('그룹')).toBeInTheDocument();
+    expect(within(detailsSection).getByLabelText('태그')).toBeInTheDocument();
 
     expect(within(preferencesSection).getByText('Preferences')).toBeInTheDocument();
-    expect(within(preferencesSection).getByText('Terminal Theme')).toBeInTheDocument();
+    expect(within(preferencesSection).getByText('터미널 테마')).toBeInTheDocument();
 
     expect(connectionSection.compareDocumentPosition(detailsSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(detailsSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -803,10 +803,10 @@ describe('HostForm', () => {
 
     const connectionSection = screen.getByTestId('hostform-section-connection');
     const preferencesSection = screen.getByTestId('hostform-section-preferences');
-    const authTypeField = within(connectionSection).getByText('Auth Type').closest('label');
-    const passwordField = within(connectionSection).getByLabelText('Password').closest('label');
-    const savedSecretHeading = within(connectionSection).getByText('Saved Credentials');
-    const terminalThemeField = within(preferencesSection).getByText('Terminal Theme').closest('label');
+    const authTypeField = within(connectionSection).getByText('인증 방식').closest('label');
+    const passwordField = within(connectionSection).getByLabelText('비밀번호').closest('label');
+    const savedSecretHeading = within(connectionSection).getByText('저장된 인증 정보');
+    const terminalThemeField = within(preferencesSection).getByText('터미널 테마').closest('label');
 
     expect(authTypeField).not.toBeNull();
     expect(passwordField).not.toBeNull();
@@ -830,13 +830,13 @@ describe('HostForm', () => {
       />
     );
 
-    expect((screen.getByLabelText('Availability Zone') as HTMLInputElement).value).toBe('ap-northeast-2a');
+    expect((screen.getByLabelText('가용 영역') as HTMLInputElement).value).toBe('ap-northeast-2a');
     expect(screen.getByText('SSH 설정 자동 확인됨')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('SSH Username'), {
+    fireEvent.change(screen.getByLabelText('SSH 사용자 이름'), {
       target: { value: 'ec2-user' }
     });
-    fireEvent.change(screen.getByLabelText('SSH Port'), {
+    fireEvent.change(screen.getByLabelText('SSH 포트'), {
       target: { value: '2222' }
     });
 
@@ -875,7 +875,7 @@ describe('HostForm', () => {
       const missingOption = await screen.findByRole('option', {
         name: 'prod-admin (앱 프로필 없음)',
       });
-      const profileSelect = screen.getByLabelText('AWS Profile') as HTMLSelectElement;
+      const profileSelect = screen.getByLabelText('AWS 프로필') as HTMLSelectElement;
 
       expect(profileSelect.value).toBe(selectedValue);
       expect((missingOption as HTMLOptionElement).selected).toBe(true);
@@ -903,7 +903,7 @@ describe('HostForm', () => {
     // select가 활성화되고 값 변경이 반영된다. 옵션이 뜰 때까지 기다려 CI 타이밍 레이스를 없앤다.
     await screen.findByRole('option', { name: 'prod-admin' });
 
-    fireEvent.change(screen.getByLabelText('AWS Profile'), {
+    fireEvent.change(screen.getByLabelText('AWS 프로필'), {
       target: { value: 'profile-prod' },
     });
 
@@ -1032,7 +1032,7 @@ describe('HostForm RDP credential selection', () => {
       />,
     );
 
-    const select = screen.getByLabelText('Credential') as HTMLSelectElement;
+    const select = screen.getByLabelText('인증 정보') as HTMLSelectElement;
     expect(select.value).toBe('existing:secret:rdp');
   });
 
@@ -1051,11 +1051,11 @@ describe('HostForm RDP credential selection', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('Username'), {
+    fireEvent.change(screen.getByLabelText('사용자 이름'), {
       target: { value: 'Administrator' },
     });
-    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'CORP' } });
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByLabelText('도메인'), { target: { value: 'CORP' } });
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'pw' } });
 
     await saveEdit(ref);
 

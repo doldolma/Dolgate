@@ -816,6 +816,41 @@ export function createContainersServices(deps: SliceDeps) {
         await loadContainerDetails(set, get, hostId, nextSelectedContainerId);
       }
     } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : t("containersStore.listFailed");
+
+      // 키가 바뀐 호스트는 신뢰 단계에서 probe를 건너뛰었으므로 여기서 처음 드러난다. 다시
+      // probe해 교체 프롬프트를 띄우고, 수락하면 이 탭 연결이 이어진다.
+      if (
+        await trustServices.recoverFromChangedHostKey(set, {
+          hostId,
+          endpointId: buildContainersEndpointId(hostId),
+          message,
+          action: {
+            kind: "containers",
+            hostId,
+          },
+        })
+      ) {
+        set((state) => {
+          const currentTab = findContainersTab(state, hostId);
+          if (!currentTab) {
+            return state;
+          }
+          return {
+            containerTabs: upsertContainersTab(state.containerTabs, {
+              ...currentTab,
+              connectionProgress: null,
+              isLoading: false,
+              errorMessage: undefined,
+            }),
+          };
+        });
+        return;
+      }
+
       set((state) => {
         const currentTab =
           findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
@@ -830,10 +865,7 @@ export function createContainersServices(deps: SliceDeps) {
             title: buildContainersTabTitle(host),
             connectionProgress: null,
             isLoading: false,
-            errorMessage:
-              error instanceof Error
-                ? error.message
-                : t("containersStore.listFailed"),
+            errorMessage: message,
           }),
         };
       });

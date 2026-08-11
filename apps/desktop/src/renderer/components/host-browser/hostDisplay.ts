@@ -12,6 +12,8 @@ export function getHostTypeLabel(host: HostRecord): string {
       return 'Warpgate SSH';
     case 'serial':
       return 'Serial';
+    case 'rdp':
+      return 'RDP';
     default:
       return 'SSH';
   }
@@ -28,6 +30,8 @@ export function getHostShortType(host: HostRecord): string {
       return 'Warpgate';
     case 'serial':
       return 'Serial';
+    case 'rdp':
+      return 'RDP';
     default:
       return 'SSH';
   }
@@ -37,6 +41,8 @@ export function getHostShortType(host: HostRecord): string {
 export function getHostAddress(host: HostRecord): string | null {
   switch (host.kind) {
     case 'ssh':
+      return `${host.hostname}:${host.port}`;
+    case 'rdp':
       return `${host.hostname}:${host.port}`;
     case 'aws-ec2':
       return host.awsPrivateIp || host.awsInstanceId || null;

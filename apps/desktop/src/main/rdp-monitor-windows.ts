@@ -35,6 +35,25 @@ export class RdpMonitorWindows {
    */
   onGeometryChanged: ((sessionId: string) => void) | null = null;
 
+  /**
+   * 사용자가 보조 창 하나를 닫거나 그 창의 전체화면을 빠져나왔다.
+   *
+   * 그 창만 사라지게 두면 메인 창은 전체화면으로 남고 원격은 여러 모니터인 채다 — 화면 하나에
+   * 여러 모니터가 겹쳐 보이거나 한 화면만 보이는데 되돌릴 곳이 없다. 펼치기는 창 여러 개가 한
+   * 덩어리로 움직여야 하므로, 어느 창에서 빠져나오든 전체를 접는다.
+   */
+  onCollapseRequested: ((sessionId: string) => void) | null = null;
+
+  /**
+   * 우리가 없앤 창들. 여기 있는 창이 내는 이벤트는 사용자 조작이 아니다.
+   *
+   * 세션 단위 플래그로는 안 된다 — `destroy()` 의 `closed` 가 같은 틱에 오지 않는 플랫폼이 있어서
+   * 플래그를 언제 풀지 정할 수 없다. 일찍 풀면 그 이벤트가 사용자 조작으로 올라가고(다시 펼치는
+   * 중이면 방금 연 창을 닫아 버린다), 늦게 풀면 그 사이의 진짜 조작을 삼킨다. 창 자체를 표시하면
+   * 시점 문제가 사라진다 — 죽은 창의 이벤트는 언제 와도 우리 것이다.
+   */
+  private readonly destroyedByUs = new WeakSet<BrowserWindow>();
+
   /** 이 세션에 보조 창이 떠 있는지. */
   isOpen(sessionId: string): boolean {
     return (this.windowsBySession.get(sessionId)?.length ?? 0) > 0;
@@ -109,7 +128,8 @@ export class RdpMonitorWindows {
       });
 
       window.setMenuBarVisibility(false);
-      // 사용자가 신호등으로 직접 닫을 수 있다. 목록에 죽은 창이 남지 않게 지운다.
+      // 사용자가 신호등으로 직접 닫을 수 있다. 목록에 죽은 창이 남지 않게 지우고, 우리가 닫은
+      // 것이 아니면 펼침 전체를 접어 달라고 알린다.
       window.on("closed", () => {
         const current = this.windowsBySession.get(sessionId);
         if (current) {
@@ -118,6 +138,7 @@ export class RdpMonitorWindows {
             current.filter((entry) => entry.window !== window),
           );
         }
+        this.requestCollapse(sessionId, window);
       });
       window.once("ready-to-show", () => {
         window.show();
@@ -133,8 +154,13 @@ export class RdpMonitorWindows {
       // 다시 선언해야 화면이 창에 꼭 맞는다(rdp-monitor-layout.ts 참고).
       const notify = () => this.onGeometryChanged?.(sessionId);
       window.on("enter-full-screen", notify);
-      window.on("leave-full-screen", notify);
       window.on("resize", notify);
+      // 이 창의 전체화면을 빠져나오면 펼침을 그만두겠다는 뜻이다 — 창 크기만 되돌리고 원격 배치를
+      // 그대로 두면, 이 화면에는 창 하나에 원격 모니터 하나가 축소되어 남고 메인 창은 전체화면
+      // 그대로다. 접는 김에 배치도 접속 시점 하나로 돌아간다(collapse 가 한다).
+      window.on("leave-full-screen", () => {
+        this.requestCollapse(sessionId, window);
+      });
       opened.push({ index, window });
       await this.load(window, sessionId, index);
     }
@@ -149,9 +175,24 @@ export class RdpMonitorWindows {
     this.windowsBySession.delete(sessionId);
     for (const { window } of windows) {
       if (!window.isDestroyed()) {
+        // 없애기 전에 표시한다. 표시가 없으면 destroy 가 부르는 `closed` 가 다시 "접어 달라" 로
+        // 돌아와 같은 정리가 겹쳐 돈다.
+        this.destroyedByUs.add(window);
         window.destroy();
       }
     }
+  }
+
+  /**
+   * 사용자가 이 세션의 펼침에서 빠져나왔다고 알린다.
+   *
+   * 우리가 없앤 창이 내는 이벤트는 알리지 않는다 — 그건 이미 접는 과정이다.
+   */
+  private requestCollapse(sessionId: string, window: BrowserWindow): void {
+    if (this.destroyedByUs.has(window)) {
+      return;
+    }
+    this.onCollapseRequested?.(sessionId);
   }
 
   /** 모든 세션의 보조 창을 닫는다. 앱을 내릴 때 쓴다. */

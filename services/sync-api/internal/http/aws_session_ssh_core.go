@@ -117,6 +117,7 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 		Rows:        rows,
 		Env:         request.Env,
 		UnsetEnv:    request.UnsetEnv,
+		ShellKind:   request.ShellKind,
 	}
 	// ssh-core's in-process data channel needs a StartSession token; skip
 	// issuance in e2e fake mode, where ssh-core substitutes a fake runner.

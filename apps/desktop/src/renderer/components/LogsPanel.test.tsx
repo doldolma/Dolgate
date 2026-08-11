@@ -174,6 +174,34 @@ describe('LogsPanel', () => {
     expect(screen.getByText('연결 중')).toBeInTheDocument();
   });
 
+  it('renders an RDP lifecycle row with its own kind badge and duration', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'rdp-session-1',
+            hostId: 'host-2',
+            hostLabel: 'work-pc',
+            title: 'work-pc',
+            connectionDetails: '10.0.0.5 · 3389 · admin',
+            connectionKind: 'rdp',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            disconnectedAt: '2026-03-29T00:01:00.000Z',
+            durationMs: 60000,
+            status: 'closed',
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText('work-pc')).toBeInTheDocument();
+    // 라벨 폴백이 'SSH' 라서, 케이스가 빠지면 RDP 행이 SSH 로 표시된다.
+    expect(screen.getByText('RDP')).toBeInTheDocument();
+    expect(screen.getByText('1분 0초')).toBeInTheDocument();
+  });
+
   it('renders a local terminal lifecycle row with replay access', () => {
     const onOpenReplay = vi.fn().mockResolvedValue(undefined);
     render(

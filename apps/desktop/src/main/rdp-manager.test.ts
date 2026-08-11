@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import type { ActivityLogRecord, SessionLifecycleLogMetadata } from "@shared";
 import { CoreFrameParser, encodeControlFrame, encodeStreamFrame } from "./core-framing";
 import { RdpManager, type RdpLaunchConfig } from "./rdp-manager";
 
@@ -65,13 +66,15 @@ function createManager() {
   };
 
   const launch: RdpLaunchConfig = { command: "rdp-core", args: [], cwd: "." };
+  const logs: ActivityLogRecord[] = [];
   const manager = new RdpManager({
     getWindows: () => [window, other],
     resolveLaunchConfig: () => launch,
     spawnProcess: () => core.child,
+    upsertLogRecord: (record) => logs.push(record),
   });
 
-  return { manager, core, sent, otherSent };
+  return { manager, core, sent, otherSent, logs };
 }
 
 const CONNECT = {
@@ -381,5 +384,109 @@ describe("RdpManager", () => {
     manager.disconnect("ghost");
 
     expect(core.requests()).toHaveLength(0);
+  });
+});
+
+describe("session lifecycle logs", () => {
+  const LIFECYCLE = {
+    hostId: "host-1",
+    hostLabel: "Work PC",
+    title: "Work PC",
+    connectionDetails: "10.0.0.1 · 3389 · user",
+  };
+
+  function closedFrame(sessionId: string, reason: string | null = null) {
+    return encodeControlFrame({
+      type: "closed",
+      sessionId,
+      payload: { graceful: true, reason },
+    } as never);
+  }
+
+  function metadataOf(record: ActivityLogRecord): SessionLifecycleLogMetadata {
+    return record.metadata as unknown as SessionLifecycleLogMetadata;
+  }
+
+  it("records connect and close on one row, with the duration", async () => {
+    const { manager, core, logs } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(request.id, "sess-1"));
+    await pending;
+
+    expect(logs).toHaveLength(1);
+    expect(logs[0].id).toBe(`session:sess-1:${request.id}`);
+    expect(logs[0].category).toBe("session");
+    expect(logs[0].kind).toBe("session-lifecycle");
+    const connected = metadataOf(logs[0]);
+    expect(connected.status).toBe("connected");
+    expect(connected.connectionKind).toBe("rdp");
+    expect(connected.hostId).toBe("host-1");
+    expect(connected.durationMs).toBeNull();
+
+    core.emit(closedFrame("sess-1", "logoff"));
+
+    expect(logs).toHaveLength(2);
+    expect(logs[1].id).toBe(logs[0].id);
+    const closed = metadataOf(logs[1]);
+    expect(closed.status).toBe("closed");
+    expect(closed.disconnectedAt).toBeTruthy();
+    expect(typeof closed.durationMs).toBe("number");
+    expect(closed.disconnectReason).toBe("logoff");
+  });
+
+  it("does not log attempts that never connected", async () => {
+    const { manager, core, logs } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(
+      encodeControlFrame({
+        type: "error",
+        requestId: request.id,
+        sessionId: "sess-1",
+        payload: { message: "auth failed" },
+      } as never),
+    );
+
+    await expect(pending).rejects.toThrow("auth failed");
+    expect(logs).toHaveLength(0);
+  });
+
+  it("records a core death as a closed session", async () => {
+    const { manager, core, logs } = createManager();
+
+    const pending = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    const request = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(request.id, "sess-1"));
+    await pending;
+
+    core.exit(1);
+
+    expect(logs).toHaveLength(2);
+    const closed = metadataOf(logs[1]);
+    expect(closed.status).toBe("closed");
+    expect(typeof closed.durationMs).toBe("number");
+  });
+
+  it("gives each reconnect attempt its own log row", async () => {
+    const { manager, core, logs } = createManager();
+
+    const first = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    const firstRequest = core.requests()[0].metadata as unknown as { id: string };
+    core.emit(connectedFrame(firstRequest.id, "sess-1"));
+    await first;
+    core.emit(closedFrame("sess-1"));
+
+    // 자동 재연결은 같은 sessionId 로 다시 붙는다 — 이전 연결의 기록이 덮어써지면 안 된다.
+    const second = manager.connect("sess-1", CONNECT, LIFECYCLE);
+    const secondRequest = core.requests()[1].metadata as unknown as { id: string };
+    core.emit(connectedFrame(secondRequest.id, "sess-1"));
+    await second;
+
+    expect(logs).toHaveLength(3);
+    expect(logs[2].id).not.toBe(logs[0].id);
+    expect(metadataOf(logs[2]).status).toBe("connected");
   });
 });

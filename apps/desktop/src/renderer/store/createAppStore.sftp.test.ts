@@ -37,6 +37,76 @@ describe("createAppStore sftp", () => {
     expect(store.getState().sftp.rightPane.currentPath).toBe("/home/ubuntu");
   });
 
+  // 터미널과 같은 계약: 이미 신뢰된 호스트의 키가 바뀌면 pane 을 오류로 물들이는 대신 교체
+  // 프롬프트를 띄우고, 수락하면 이 pane 연결을 이어간다.
+  it("re-prompts to replace the key when a trusted host's key changed on sftp connect", async () => {
+    const api = createMockApi();
+    api.knownHosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    api.sftp.connect = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ssh handshake failed: host key mismatch"))
+      .mockImplementation(async (input) => ({
+        id: input.endpointId ?? "endpoint-1",
+        endpointId: input.endpointId ?? "endpoint-1",
+        hostId: input.hostId,
+        label: "Prod",
+        homePath: "/home/ubuntu",
+        connectedAt: "2025-01-01T00:00:00.000Z",
+      }));
+    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
+      hostId: "host-1",
+      hostLabel: "Prod",
+      host: "prod.example.com",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAANEW",
+      fingerprintSha256: "SHA256:new",
+      status: "mismatch",
+      existing: {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    store.getState().activateSftp();
+    await store.getState().connectSftpHost("right", "host-1");
+
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("mismatch");
+    expect(store.getState().pendingHostKeyPrompt?.action).toMatchObject({
+      kind: "sftp",
+      hostId: "host-1",
+    });
+    expect(store.getState().sftp.rightPane.errorMessage).toBeUndefined();
+    expect(store.getState().sftp.rightPane.isLoading).toBe(false);
+
+    await store.getState().acceptPendingHostKeyPrompt("replace");
+
+    expect(api.knownHosts.replace).toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(store.getState().sftp.rightPane.currentPath).toBe("/home/ubuntu");
+  });
+
   it("downloads selected remote folders and files into Downloads", async () => {
     const api = createMockApi();
     api.sftp.list = vi.fn().mockResolvedValue({

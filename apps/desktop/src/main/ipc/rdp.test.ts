@@ -9,9 +9,36 @@ const displays = [
   { id: 2, label: "LG", bounds: { x: 3008, y: 0, width: 1920, height: 1080 } },
 ];
 
+// 펼치기 요청을 보낸 창. 기본은 없음(펼치기가 그냥 빠져나온다) — 그 경로를 쓰는 테스트만 채운다.
+const { sender, monitorWindowsInstances } = vi.hoisted(() => ({
+  sender: { window: null as unknown },
+  monitorWindowsInstances: [] as Array<{
+    onCollapseRequested: ((sessionId: string) => void) | null;
+    close: ReturnType<typeof vi.fn>;
+  }>,
+}));
+
+vi.mock("../rdp-monitor-windows", () => {
+  class MockRdpMonitorWindows {
+    onGeometryChanged: ((sessionId: string) => void) | null = null;
+    onCollapseRequested: ((sessionId: string) => void) | null = null;
+    // 메인 창이 0번 모니터를 맡았다고 본다.
+    open = vi.fn(async () => 0);
+    close = vi.fn(async () => {});
+    closeAll = vi.fn(async () => {});
+    entries = vi.fn(() => []);
+    isOpen = vi.fn(() => false);
+
+    constructor() {
+      monitorWindowsInstances.push(this as never);
+    }
+  }
+  return { RdpMonitorWindows: MockRdpMonitorWindows };
+});
+
 vi.mock("electron", () => ({
   app: { on: vi.fn() },
-  BrowserWindow: { fromWebContents: () => null },
+  BrowserWindow: { fromWebContents: () => sender.window },
   screen: {
     getAllDisplays: () => displays,
     getPrimaryDisplay: () => displays[0],
@@ -171,6 +198,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
       expect.objectContaining({
         monitors: [{ width: 1920, height: 1080, primary: true }],
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -190,6 +218,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
           expect.objectContaining({ width: 1920, height: 1080 }),
         ]),
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -203,6 +232,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(harness.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ monitors: expect.any(Array) }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -213,6 +243,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(on.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ audio: true, clipboard: true, colorDepth: undefined }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
 
     const off = createHarness("AA:BB:CC", null, {
@@ -224,6 +255,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(off.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ audio: false, clipboard: false, colorDepth: 16 }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -247,6 +279,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
           { label: "docs 2", path: "/Volumes/backup/docs", readOnly: true },
         ],
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -256,6 +289,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(harness.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ drives: [] }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -277,6 +311,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
         domain: "CORP",
         password: "secret",
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -291,6 +326,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(harness.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ username: "", domain: null }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -317,6 +353,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
         dialAddress: "127.0.0.1:52341",
         host: "10.0.0.1",
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -329,6 +366,7 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     expect(harness.rdpManager.connect).toHaveBeenCalledWith(
       "sess-1",
       expect.objectContaining({ dialAddress: undefined }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
   });
 
@@ -342,6 +380,123 @@ describe("registerRdpIpcHandlers monitor layout", () => {
       expect.objectContaining({
         monitors: [{ width: 1920, height: 1080, primary: true }],
       }),
+      expect.objectContaining({ hostId: "rdp-1" }),
     );
+  });
+});
+
+// 펼침은 창 여러 개가 한 덩어리다. 보조 창 하나에서 빠져나왔는데 메인 창이 전체화면으로 남으면,
+// 원격은 여전히 여러 모니터인데 보이는 화면은 하나뿐이라 되돌릴 곳이 없다.
+describe("registerRdpIpcHandlers monitor spread", () => {
+  function createSpreadHarness() {
+    const mainWindow = {
+      fullScreen: true,
+      destroyed: false,
+      setFullScreen: vi.fn(function (this: void, value: boolean) {
+        mainWindow.fullScreen = value;
+      }),
+      isFullScreen: () => mainWindow.fullScreen,
+      isDestroyed: () => mainWindow.destroyed,
+      on: vi.fn(),
+      removeListener: vi.fn(),
+      getBounds: () => ({ x: 0, y: 0, width: 3008, height: 1692 }),
+      getContentBounds: () => ({ x: 0, y: 0, width: 3008, height: 1692 }),
+    };
+
+    const host = {
+      id: "rdp-1",
+      kind: "rdp" as const,
+      label: "Win Box",
+      hostname: "10.0.0.1",
+      port: 3389,
+      username: "",
+      secretRef: null,
+      certificateFingerprint: "AA:BB:CC",
+      useAllMonitors: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const monitors = [
+      { width: 3008, height: 1692, left: 0, top: 0, primary: true },
+      { width: 1920, height: 1080, left: 3008, top: 0, primary: false },
+    ];
+
+    const ctx = {
+      coreManager: { openTailnetForward: vi.fn(), closeTailnetForward: vi.fn() },
+      settings: { get: vi.fn(() => ({ rdpMonitorsByHostId: {} })) },
+      hosts: {
+        getById: vi.fn(() => host),
+        updateRdpCertificateFingerprint: vi.fn(),
+      },
+      loadSecrets: vi.fn(async () => ({ password: "secret" })),
+      activityLogs: { append: vi.fn() },
+      queueSync: vi.fn(),
+    };
+
+    const rdpManager = {
+      setCertificateVerifier: vi.fn(),
+      connect: vi.fn(async () => ({ monitors })),
+      describeSession: vi.fn(() => ({ monitors })),
+      emitMonitorRegion: vi.fn(),
+      declareMonitorLayout: vi.fn(),
+      disconnect: vi.fn(),
+      sendInput: vi.fn(),
+      requestResize: vi.fn(),
+    };
+
+    monitorWindowsInstances.length = 0;
+    registerRdpIpcHandlers(ctx as never, rdpManager as never, {
+      askCertificate: vi.fn(async () => true),
+    });
+    const monitorWindows = monitorWindowsInstances.at(-1)!;
+
+    return {
+      mainWindow,
+      rdpManager,
+      monitorWindows,
+      async spread() {
+        // 접속이 원격 모니터 ↔ 물리 화면 대응을 기록한다. 그것이 없으면 펼치기가 빈손으로 끝난다.
+        await handlers.get("rdp:connect")!({}, "sess-1", "rdp-1");
+        sender.window = mainWindow;
+        return handlers.get("rdp:spread-monitors")!({}, "sess-1");
+      },
+    };
+  }
+
+  it("보조 창에서 빠져나오면 메인 창의 전체화면도 끝낸다", async () => {
+    const harness = createSpreadHarness();
+    await harness.spread();
+
+    harness.monitorWindows.onCollapseRequested?.("sess-1");
+
+    expect(harness.mainWindow.setFullScreen).toHaveBeenCalledWith(false);
+    // 남은 보조 창도 같이 닫고, 메인 창은 다시 전체 데스크톱을 그린다.
+    expect(harness.monitorWindows.close).toHaveBeenCalledWith("sess-1");
+    expect(harness.rdpManager.emitMonitorRegion).toHaveBeenLastCalledWith(
+      "sess-1",
+      null,
+    );
+  });
+
+  it("메인 창이 이미 전체화면이 아니면 건드리지 않고 정리만 한다", async () => {
+    // 이 경우 leave-full-screen 이 오지 않으므로, 그 이벤트만 믿으면 정리가 아예 안 된다.
+    const harness = createSpreadHarness();
+    await harness.spread();
+    harness.mainWindow.fullScreen = false;
+    harness.mainWindow.setFullScreen.mockClear();
+
+    harness.monitorWindows.onCollapseRequested?.("sess-1");
+
+    expect(harness.mainWindow.setFullScreen).not.toHaveBeenCalled();
+    expect(harness.monitorWindows.close).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("펼치지 않은 세션에 대한 요청은 무시한다", async () => {
+    const harness = createSpreadHarness();
+
+    harness.monitorWindows.onCollapseRequested?.("sess-없음");
+
+    expect(harness.mainWindow.setFullScreen).not.toHaveBeenCalled();
   });
 });

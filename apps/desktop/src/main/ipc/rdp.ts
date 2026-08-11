@@ -139,6 +139,13 @@ export function registerRdpIpcHandlers(
     /** 마지막으로 보낸 배치. 같은 값을 다시 보내면 원격이 화면을 또 멈춘다. */
     lastSent: MonitorLayoutRequest[] | null;
     settleTimer: NodeJS.Timeout | null;
+    /**
+     * 펼침을 접는다. 리스너 해제까지 여기서 한다.
+     *
+     * 보조 창에서 빠져나온 경우에도 같은 정리를 해야 해서 상태에 들고 있는다 — 두 경로가 각자
+     * 정리하면 한쪽만 고쳐지고 다른 쪽은 창이나 리스너가 남는다.
+     */
+    collapse: () => void;
   }
   const spreadBySession = new Map<string, SpreadState>();
 
@@ -222,6 +229,27 @@ export function registerRdpIpcHandlers(
   monitorWindows.onGeometryChanged = scheduleLayoutDeclaration;
 
   /**
+   * 보조 창 하나에서 빠져나오면 메인 창의 전체화면까지 함께 끝낸다.
+   *
+   * 펼침은 창 여러 개가 한 덩어리다. 한 창만 접히게 두면 메인 창은 전체화면으로 남는데 원격은
+   * 여전히 여러 모니터라, 보이는 화면 하나에 그중 하나만 뜨고 나머지는 갈 곳이 없다. 되돌리려면
+   * 메인 창에서 다시 전체화면을 빠져나와야 하는데 그게 지금 벌어진 일과 구분되지 않는다.
+   */
+  monitorWindows.onCollapseRequested = (sessionId) => {
+    const state = spreadBySession.get(sessionId);
+    if (!state) {
+      return;
+    }
+    // 먼저 접는다. setFullScreen(false) 가 부르는 leave-full-screen 을 기다리면 macOS 애니메이션
+    // 동안 남은 보조 창이 화면을 덮고 있고, 메인 창이 이미 전체화면이 아니면 그 이벤트가 아예
+    // 오지 않아 정리가 안 된다.
+    state.collapse();
+    if (!state.window.isDestroyed() && state.window.isFullScreen()) {
+      state.window.setFullScreen(false);
+    }
+  };
+
+  /**
    * 배치가 바뀐 뒤 메인 창 몫을 다시 알린다.
    *
    * 보조 창은 `resized` 로 새 배치를 받지만, 메인 창의 영역은 여기서 보내는 것만 본다.
@@ -271,20 +299,6 @@ export function registerRdpIpcHandlers(
       // 창을 다 펼쳤으니 이제 각 창이 실제로 그릴 수 있는 크기를 알 수 있다. 그 크기로 배치를
       // 다시 선언해야 원격 화면이 창에 꼭 맞는다(rdp-monitor-layout.ts 참고).
       const declareFromWindows = () => scheduleLayoutDeclaration(sessionId);
-      if (mainIndex !== null) {
-        spreadBySession.set(sessionId, {
-          window,
-          mainIndex,
-          monitorCount: connected.monitors.length,
-          primaryIndex: primaryIndexBySession.get(sessionId) ?? 0,
-          drawnRects: new Map(),
-          lastSent: null,
-          settleTimer: null,
-        });
-        window.on("enter-full-screen", declareFromWindows);
-        window.on("resize", declareFromWindows);
-        declareFromWindows();
-      }
 
       // 정리는 메인 프로세스가 책임진다. 렌더러가 접어 달라고 부르는 경로만 믿으면, 그 신호가
       // 안 오는 순간(전체화면을 다른 창에서 빠져나오거나, 창이 그냥 닫히거나, 렌더러가 죽거나)
@@ -300,6 +314,23 @@ export function registerRdpIpcHandlers(
         void monitorWindows.close(sessionId);
         rdpManager.emitMonitorRegion(sessionId, null);
       };
+
+      if (mainIndex !== null) {
+        spreadBySession.set(sessionId, {
+          window,
+          mainIndex,
+          monitorCount: connected.monitors.length,
+          primaryIndex: primaryIndexBySession.get(sessionId) ?? 0,
+          drawnRects: new Map(),
+          lastSent: null,
+          settleTimer: null,
+          collapse,
+        });
+        window.on("enter-full-screen", declareFromWindows);
+        window.on("resize", declareFromWindows);
+        declareFromWindows();
+      }
+
       window.on("leave-full-screen", collapse);
       window.on("closed", collapse);
 
@@ -418,7 +449,9 @@ export function registerRdpIpcHandlers(
       }
 
       try {
-        return await rdpManager.connect(sessionId, {
+        const payload = await rdpManager.connect(
+          sessionId,
+          {
           host: host.hostname,
           port: host.port,
           dialAddress,
@@ -443,7 +476,27 @@ export function registerRdpIpcHandlers(
             path: drive.path,
             readOnly: drive.readOnly,
           })),
-        });
+          },
+          // 세션 lifecycle 로그(연결·종료·시간)용 호스트 정체. SSH 의 connectionDetails 와
+          // 같은 `호스트 · 포트 · 사용자` 형식을 쓴다.
+          {
+            hostId: host.id,
+            hostLabel: host.label,
+            title: host.label,
+            connectionDetails: `${host.hostname} · ${host.port} · ${secrets.username?.trim() ?? ""}`,
+          },
+        );
+        // 탭 hover 의 대상(user@host) 표기용. 계정은 자격증명에만 있어 렌더러가 모른다.
+        const username = secrets.username?.trim() ?? "";
+        const domain = secrets.domain?.trim() ?? "";
+        return {
+          ...payload,
+          username: username
+            ? domain
+              ? `${domain}\\${username}`
+              : username
+            : undefined,
+        };
       } catch (error) {
         // 접속이 실패했으면 포워드를 남기지 않는다. 남으면 tailnet 으로 가는 리스너가 계속 산다.
         closeTailnetForward(sessionId);

@@ -428,6 +428,113 @@ describe("registerSshIpcHandlers", () => {
     );
   });
 
+  // Windows 인스턴스에서 SSH-over-SSM 은 성공할 수가 없다 — EC2 Instance Connect 로 임시 공개키를
+  // 밀어 넣어 인증하는데 EIC 는 Linux 전용이다. 시도하면 "공개키 전송 중"을 띄웠다가 EIC 오류로
+  // 떨어지고, 폴백 기억은 10분이면 만료돼 같은 실패를 주기적으로 반복한다.
+  it("skips the SSH-over-SSM attempt for Windows instances and goes straight to the SSM shell", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-win",
+      kind: "aws-ec2",
+      label: "AWS Win",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-win",
+      awsPlatform: "Windows",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
+      env: {},
+      unsetEnv: [],
+    });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(false);
+    ctx.coreManager.connectAwsSession.mockResolvedValue({
+      sessionId: "session-win",
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-win", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-win" });
+
+    expect(connectAwsEc2OverSsmMock).not.toHaveBeenCalled();
+    expect(ctx.coreManager.connectAwsSession).toHaveBeenCalled();
+    // 시도조차 안 했으니 "폴백했다"는 경고도 남기면 안 된다.
+    expect(ctx.activityLogs.append).not.toHaveBeenCalled();
+  });
+
+  it("still attempts SSH-over-SSM for non-Windows instances", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-linux",
+      kind: "aws-ec2",
+      label: "AWS Linux",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-linux",
+      awsPlatform: "Linux/UNIX",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
+      env: {},
+      unsetEnv: [],
+    });
+    ctx.awsService.shouldUseInProcessSsm.mockReturnValue(false);
+    ctx.coreManager.connectAwsSession.mockResolvedValue({
+      sessionId: "session-linux",
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, { hostId: "aws-host-linux", cols: 120, rows: 32 }),
+    ).resolves.toEqual({ sessionId: "session-linux" });
+
+    expect(connectAwsEc2OverSsmMock).toHaveBeenCalled();
+  });
+
+  it("rejects a tmux connect on Windows instead of silently opening a plain SSM shell", async () => {
+    const ctx = createContext();
+    ctx.hosts.getById.mockReturnValue({
+      id: "aws-host-win",
+      kind: "aws-ec2",
+      label: "AWS Win",
+      awsProfileId: "profile-1",
+      awsProfileName: "default",
+      awsRegion: "ap-southeast-2",
+      awsInstanceId: "i-win",
+      awsPlatform: "Windows",
+      awsSsmServerProxyEnabled: false,
+    });
+    ctx.awsService.requireManagedProfileName.mockReturnValue("managed-prod");
+    ctx.awsService.buildManagedSessionEnvSpec.mockReturnValue({
+      env: {},
+      unsetEnv: [],
+    });
+
+    registerSshIpcHandlers(ctx);
+    const connectHandler = ipcHandlers.get(ipcChannels.ssh.connect);
+
+    await expect(
+      connectHandler?.(null, {
+        hostId: "aws-host-win",
+        cols: 120,
+        rows: 32,
+        tmux: true,
+      }),
+    ).rejects.toThrow(/tmux/i);
+
+    expect(connectAwsEc2OverSsmMock).not.toHaveBeenCalled();
+    expect(ctx.coreManager.connectAwsSession).not.toHaveBeenCalled();
+  });
+
   it("uses the server proxy AWS SSM session path when enabled", async () => {
     const ctx = createContext();
     vi.stubGlobal(

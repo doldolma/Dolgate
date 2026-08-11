@@ -14,6 +14,17 @@ import { createConnectionProgress } from "./errors-and-prompts";
 import { getPane, resolveSftpPaneIdByEndpoint, updatePaneState } from "./sftp";
 import { t } from '../../i18n';
 
+/**
+ * 저장된 호스트 키와 서버가 내놓은 키가 다를 때의 오류인지.
+ *
+ * 아래 resolveCredentialRetryKind 가 걸러내는 "호스트 키 문제" 전체보다 좁다 — 키를 교체하면
+ * 풀리는 것만 잡는다. 미신뢰(아직 저장 안 됨)는 정상 경로의 probe 가 이미 프롬프트를 띄우고,
+ * 알고리즘 협상 실패("no matching host key type")는 키를 교체해도 그대로라서 제외한다.
+ */
+export function isChangedHostKeyErrorMessage(message: string): boolean {
+  return /host key mismatch|host key changed/i.test(message);
+}
+
 export function resolveCredentialRetryKind(
   host: HostRecord | undefined,
   message: string,

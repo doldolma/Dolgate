@@ -1574,6 +1574,20 @@ fn connect(
         None => lookup_addr(&server_name, port).context("lookup addr")?,
     };
 
+    // 어디로 붙는지 남긴다.
+    //
+    // tailnet 을 거치는 호스트는 ssh-core 가 열어 준 로컬 포워드(127.0.0.1)로 붙어야 한다. 그
+    // 주소가 안 넘어오면 조용히 원래 주소로 직접 붙어 타임아웃이 나는데, 로그만 보면 왜 그런지
+    // 알 수 없다 — 이 줄이 그것을 가른다.
+    info!(
+        session_id,
+        server_name = %server_name,
+        port,
+        dial_address = dial_address.as_deref().unwrap_or("-"),
+        target = %server_addr,
+        "dialing"
+    );
+
     let tcp_stream = TcpStream::connect(server_addr).context("TCP connect")?;
     tcp_stream
         .set_read_timeout(Some(HANDSHAKE_READ_TIMEOUT))

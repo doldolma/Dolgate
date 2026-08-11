@@ -24,6 +24,10 @@ type awsSessionStartRequest struct {
 	Rows        int               `json:"rows"`
 	Env         map[string]string `json:"env,omitempty"`
 	UnsetEnv    []string          `json:"unsetEnv,omitempty"`
+	// ShellKind names the shell the SSM session lands in ("powershell" on Windows
+	// instances). Empty means a POSIX shell. Forwarded to ssh-core, which uses it
+	// to decide whether the shell-integration script can be typed in at all.
+	ShellKind string `json:"shellKind,omitempty"`
 }
 
 type awsSessionClientMessage struct {

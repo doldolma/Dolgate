@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DesktopWindowState, HostRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
-import { isSshHostRecord } from '@shared';
+import { describeRdpDrives, isRdpHostRecord, isSshHostRecord } from '@shared';
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -211,6 +211,8 @@ function connectionKindLabel(kind: SessionConnectionKind): string {
       return 'Warpgate';
     case 'serial':
       return t('titleBar.kind.serial');
+    case 'rdp':
+      return 'RDP';
     default:
       return kind;
   }
@@ -241,6 +243,8 @@ function deriveSessionConnectionKind(
       return 'aws-ecs-exec';
     case 'aws-ec2':
       return 'aws-ssm';
+    case 'rdp':
+      return 'rdp';
     case 'ssh':
       return host.useMosh || tab.moshState != null ? 'mosh' : 'ssh';
     default:
@@ -253,6 +257,10 @@ function formatHostTarget(host: HostRecord): string | null {
   switch (host.kind) {
     case 'ssh':
       return `${host.username}@${host.hostname}:${host.port}`;
+    // 계정은 자격증명에만 있어 여기선 모른다 — 세션 탭 hover 는 접속 응답에 실려 온
+    // rdpUsername 으로 user@host 를 따로 만든다(buildTabHoverInfo 참고).
+    case 'rdp':
+      return `${host.hostname}:${host.port}`;
     case 'warpgate-ssh':
       return `${host.warpgateUsername}@${host.warpgateSshHost}:${host.warpgateSshPort}`;
     case 'aws-ec2':
@@ -633,6 +641,49 @@ function buildTabHoverInfo(
         });
       }
     }
+    // RDP 는 터미널 개념(cwd·셸·명령)이 없는 대신 화면과 공유 자원이 있다. 해상도는 항상,
+    // 옵션(드라이브·오디오·클립보드·관리 세션)은 기본값과 다를 때만 — 아무것도 안 바꾼
+    // 세션에서는 행이 늘지 않는다.
+    if (tab && host && isRdpHostRecord(host)) {
+      if (tab.rdpDesktopSize) {
+        const monitorCount = tab.rdpMonitorCount ?? 1;
+        const size = `${tab.rdpDesktopSize.width}×${tab.rdpDesktopSize.height}`;
+        rows.push({
+          label: t('titleBar.hover.resolution'),
+          value:
+            monitorCount > 1
+              ? `${size} · ${t('titleBar.hover.monitorCount', { count: monitorCount })}`
+              : size,
+        });
+      }
+      const drives = describeRdpDrives(host.drives);
+      if (drives.length > 0) {
+        const names = drives
+          .slice(0, 2)
+          .map((drive) =>
+            drive.readOnly
+              ? t('titleBar.hover.driveReadOnly', { name: drive.name })
+              : drive.name,
+          )
+          .join(', ');
+        rows.push({
+          label: t('titleBar.hover.drives'),
+          value:
+            drives.length > 2
+              ? t('titleBar.hover.drivesMore', { names, count: drives.length - 2 })
+              : names,
+        });
+      }
+      if (host.audioEnabled === false) {
+        rows.push({ label: t('titleBar.hover.audio'), value: t('titleBar.hover.off') });
+      }
+      if (host.clipboardEnabled === false) {
+        rows.push({ label: t('titleBar.hover.clipboard'), value: t('titleBar.hover.off') });
+      }
+      if (host.adminSession === true) {
+        rows.push({ label: t('titleBar.hover.adminSession'), value: t('titleBar.hover.on') });
+      }
+    }
     // 지연 바로 위에 둔다. "느리다"를 판단할 때 이 둘을 같이 읽어야 한다 — 릴레이 경유면
     // 지연이 큰 이유가 설명되고, 직결인데도 크면 원인이 다른 데 있다.
     if (host) {
@@ -653,7 +704,13 @@ function buildTabHoverInfo(
     }
     return {
       heading: kind ? connectionKindLabel(kind) : t('titleBar.kind.session'),
-      target: host ? formatHostTarget(host) : null,
+      // RDP 계정은 호스트 레코드에 없어 접속 응답에서 온 rdpUsername 으로 붙인다.
+      target:
+        host && isRdpHostRecord(host) && tab?.rdpUsername
+          ? `${tab.rdpUsername}@${host.hostname}:${host.port}`
+          : host
+            ? formatHostTarget(host)
+            : null,
       rows,
     };
   }

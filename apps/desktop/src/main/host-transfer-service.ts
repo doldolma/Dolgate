@@ -116,14 +116,25 @@ function parseGroup(value: unknown): GroupRecord {
   };
 }
 
+/**
+ * 이 버전이 아는 호스트 종류. parseHost 의 통과 조건이자, 가져오기에서 "모르는 종류라서
+ * 건너뛴다"의 판정 기준 — 두 판정이 어긋나면 같은 버전끼리의 내보내기/가져오기가 깨지므로
+ * 반드시 한 목록을 같이 쓴다. 새 종류를 추가하면 여기에만 넣으면 된다.
+ */
+const KNOWN_HOST_KINDS = new Set([
+  "ssh",
+  "aws-ec2",
+  "aws-ecs",
+  "warpgate-ssh",
+  "serial",
+  "rdp",
+]);
+
 function parseHost(value: unknown): HostRecord {
   if (
     !isObject(value) ||
-    (value.kind !== "ssh" &&
-      value.kind !== "aws-ec2" &&
-      value.kind !== "aws-ecs" &&
-      value.kind !== "warpgate-ssh" &&
-      value.kind !== "serial") ||
+    typeof value.kind !== "string" ||
+    !KNOWN_HOST_KINDS.has(value.kind) ||
     typeof value.createdAt !== "string" ||
     typeof value.updatedAt !== "string"
   ) {
@@ -156,6 +167,9 @@ function parseSecret(value: unknown): ManagedSecretPayload {
     "keyAlgorithm",
     "keyCurve",
     "privateKeyCipher",
+    // RDP 자격증명 — 계정이 호스트가 아니라 자격증명에 있다(DOMAIN\user+비밀번호가 한 묶음).
+    "username",
+    "domain",
   ];
   const booleanFields = [
     "privateKeyEncrypted",
@@ -295,7 +309,13 @@ function parseTailnet(value: unknown): TailnetPayload {
   };
 }
 
-function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
+export interface ParsedDolgateBundle {
+  bundle: DolgateHostBundleV1;
+  /** 거부하지 않고 건너뛴 항목 안내. 가져오기 미리보기의 경고 목록에 그대로 얹는다. */
+  warnings: string[];
+}
+
+export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   if (!isObject(value) || value.schemaVersion !== 1 || value.scope !== "hosts") {
     throw new Error(t("transfer.error.unsupportedBundle"));
   }
@@ -303,10 +323,80 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     requireString(id, "transfer.field.selectedHostId"),
   );
   const groups = requireArray(value.groups, "transfer.field.groups").map(parseGroup);
-  const hosts = requireArray(value.hosts, "transfer.field.hosts").map(parseHost);
-  const secrets = requireArray(value.secrets, "transfer.field.secrets").map(parseSecret);
+
+  // 이 버전이 모르는 종류의 호스트는 파일 전체를 거부하지 않고 그 호스트만 건너뛴다.
+  // 종류는 계속 추가되므로(RDP 가 그랬다) 거부하면 새 버전에서 내보낸 파일이 옛 버전에서
+  // 통째로 열리지 않는다. 형식이 깨진 항목은 여전히 거부한다 — 깨진 파일과 새 파일은 다르다.
+  const rawHosts = requireArray(value.hosts, "transfer.field.hosts");
+  const skippedHostIds = new Set<string>();
+  const orphanedSecretRefs = new Set<string>();
+  const orphanedTailnetIds = new Set<string>();
+  let unknownKindHostCount = 0;
+  const hosts: HostRecord[] = [];
+  for (const raw of rawHosts) {
+    if (isObject(raw) && typeof raw.kind === "string" && !KNOWN_HOST_KINDS.has(raw.kind)) {
+      unknownKindHostCount += 1;
+      if (typeof raw.id === "string") {
+        skippedHostIds.add(raw.id);
+      }
+      // 같이 실려 온 자격증명·tailnet 은 이 호스트 몫일 수 있다. 남는 호스트가 같은 것을
+      // 참조하지 않으면 가져오지 않는다 — 주인 없는 자격증명을 심지 않기 위해서다.
+      if (typeof raw.secretRef === "string") {
+        orphanedSecretRefs.add(raw.secretRef);
+      }
+      if (typeof raw.tailnetId === "string") {
+        orphanedTailnetIds.add(raw.tailnetId);
+      }
+      continue;
+    }
+    hosts.push(parseHost(raw));
+  }
+
+  // 건너뛴 호스트를 점프(베스천)로 쓰는 호스트도 함께 내린다. 체인(A→B→C)이 있으므로
+  // 더 빠지는 것이 없을 때까지 반복한다.
+  let dependentHostCount = 0;
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (let index = hosts.length - 1; index >= 0; index -= 1) {
+      const host = hosts[index];
+      if (host.kind !== "ssh") {
+        continue;
+      }
+      const jumpIds = normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId);
+      if (!jumpIds.some((id) => skippedHostIds.has(id))) {
+        continue;
+      }
+      dependentHostCount += 1;
+      skippedHostIds.add(host.id);
+      if (host.secretRef) {
+        orphanedSecretRefs.add(host.secretRef);
+      }
+      if (host.tailnetId?.trim()) {
+        orphanedTailnetIds.add(host.tailnetId.trim());
+      }
+      hosts.splice(index, 1);
+      changed = true;
+    }
+  }
+
+  const parsedSecrets = requireArray(value.secrets, "transfer.field.secrets").map(parseSecret);
+  const survivingSecretRefs = new Set<string>();
+  const survivingTailnetIds = new Set<string>();
+  for (const host of hosts) {
+    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef) {
+      survivingSecretRefs.add(host.secretRef);
+    }
+    if ((host.kind === "ssh" || host.kind === "rdp") && host.tailnetId?.trim()) {
+      survivingTailnetIds.add(host.tailnetId.trim());
+    }
+  }
+  const secrets = parsedSecrets.filter(
+    (record) =>
+      !orphanedSecretRefs.has(record.secretRef) ||
+      survivingSecretRefs.has(record.secretRef),
+  );
   const knownHosts = requireArray(value.knownHosts, "known host").map(parseKnownHost);
-  const portForwards = requireArray(value.portForwards, "transfer.field.portForwards").map((record) => {
+  const parsedPortForwards = requireArray(value.portForwards, "transfer.field.portForwards").map((record) => {
     if (
       !isObject(record) ||
       (record.transport !== "ssh" &&
@@ -322,16 +412,35 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     }
     return normalized;
   });
-  const dnsOverrides = requireArray(value.dnsOverrides, "DNS override").map((record) => {
-    if (!isObject(record) || (record.type !== "linked" && record.type !== "static")) {
-      throw new Error(t("transfer.error.invalidDnsKind"));
+  // 건너뛴 호스트에 붙은 규칙과, 그 규칙에 연결된 DNS 도 같이 내린다 — 남기면 참조 검증에서
+  // 파일 전체가 거부된다.
+  const droppedRuleIds = new Set<string>();
+  const portForwards = parsedPortForwards.filter((rule) => {
+    if (skippedHostIds.has(rule.hostId)) {
+      droppedRuleIds.add(rule.id);
+      return false;
     }
-    const normalized = normalizeDnsOverrideRecord(record);
-    if (!normalized) {
-      throw new Error(t("transfer.error.invalidDnsOverride"));
-    }
-    return normalized;
+    return true;
   });
+  let droppedDnsCount = 0;
+  const dnsOverrides = requireArray(value.dnsOverrides, "DNS override")
+    .map((record) => {
+      if (!isObject(record) || (record.type !== "linked" && record.type !== "static")) {
+        throw new Error(t("transfer.error.invalidDnsKind"));
+      }
+      const normalized = normalizeDnsOverrideRecord(record);
+      if (!normalized) {
+        throw new Error(t("transfer.error.invalidDnsOverride"));
+      }
+      return normalized;
+    })
+    .filter((record) => {
+      if (record.type === "linked" && droppedRuleIds.has(record.portForwardRuleId)) {
+        droppedDnsCount += 1;
+        return false;
+      }
+      return true;
+    });
   const awsProfiles = requireArray(value.awsProfiles, "transfer.field.awsProfiles").map(parseAwsProfile);
   const snippets = requireArray(value.snippets, "snippet").map(parseSnippet);
   // 이 필드가 생기기 전에 만든 파일에는 없다. 없으면 빈 목록으로 읽는다 — 예전 파일을
@@ -340,10 +449,16 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     value.tailnets === undefined
       ? []
       : requireArray(value.tailnets, "transfer.field.tailnets")
-  ).map(parseTailnet);
+  )
+    .map(parseTailnet)
+    .filter(
+      (record) => !orphanedTailnetIds.has(record.id) || survivingTailnetIds.has(record.id),
+    );
+  // 건너뛴 호스트도 상한에는 포함한다 — 모르는 종류라고 해서 상한 밖이 되면 안 된다.
   const totalRecords =
     groups.length +
     hosts.length +
+    unknownKindHostCount +
     secrets.length +
     knownHosts.length +
     portForwards.length +
@@ -372,7 +487,7 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     schemaVersion: 1,
     scope: "hosts",
     exportedAt: requireString(value.exportedAt, "transfer.field.exportedAt"),
-    rootHostIds,
+    rootHostIds: rootHostIds.filter((id) => !skippedHostIds.has(id)),
     groups,
     hosts,
     secrets,
@@ -384,7 +499,16 @@ function parseDolgateBundle(value: unknown): DolgateHostBundleV1 {
     tailnets,
   };
   assertBundleReferences(bundle);
-  return bundle;
+
+  const warnings: string[] = [];
+  if (unknownKindHostCount > 0) {
+    warnings.push(t("transfer.error.unknownHostKindSkipped", { count: unknownKindHostCount }));
+  }
+  const dependentCount = dependentHostCount + droppedRuleIds.size + droppedDnsCount;
+  if (dependentCount > 0) {
+    warnings.push(t("transfer.error.unknownHostKindDependentsSkipped", { count: dependentCount }));
+  }
+  return { bundle, warnings };
 }
 
 function assertBundleReferences(bundle: DolgateHostBundleV1): void {
@@ -399,10 +523,11 @@ function assertBundleReferences(bundle: DolgateHostBundleV1): void {
     }
   }
   for (const host of bundle.hosts) {
+    // 자격증명을 참조로 갖는 종류는 번들 안에 그 자격증명이 실제로 있어야 한다.
+    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef && !secretIds.has(host.secretRef)) {
+      throw new Error(t("transfer.error.missingSecret", { label: host.label }));
+    }
     if (host.kind === "ssh") {
-      if (host.secretRef && !secretIds.has(host.secretRef)) {
-        throw new Error(t("transfer.error.missingSecret", { label: host.label }));
-      }
       for (const jumpId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
         if (!hostIds.has(jumpId)) {
           throw new Error(t("transfer.error.missingJumpHost", { label: host.label }));
@@ -499,7 +624,7 @@ export function buildDolgateHostBundle(
   const availableProfileIdsByHostId = new Map<string, string>();
   const snippetIds = new Set<string>();
   for (const host of selectedHosts) {
-    if (host.kind === "ssh" && host.secretRef) {
+    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef) {
       secretRefs.add(host.secretRef);
     }
     if (host.kind === "aws-ec2" || host.kind === "aws-ecs") {
@@ -618,7 +743,7 @@ export function buildDolgateHostBundle(
   // 들어간다. 키만 빼면 받는 쪽이 재인증해야 해서 "가져오면 바로 된다"가 성립하지 않는다.
   const tailnetIds = new Set<string>();
   for (const host of hosts) {
-    if (host.kind === "ssh" && host.tailnetId?.trim()) {
+    if ((host.kind === "ssh" || host.kind === "rdp") && host.tailnetId?.trim()) {
       tailnetIds.add(host.tailnetId.trim());
     }
   }
@@ -861,20 +986,22 @@ export function buildHostTransferImportPlan(
     ...portForwards.map((record) => record.id),
   ]);
   for (const host of hosts) {
-    if (host.kind === "ssh") {
+    if (host.kind === "ssh" || host.kind === "rdp") {
       if (host.secretRef && !availableSecretIds.has(host.secretRef)) {
         throw new Error(t("transfer.error.unresolvedSecretRef", { label: host.label }));
-      }
-      for (const jumpId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
-        if (!availableHostIds.has(jumpId)) {
-          throw new Error(t("transfer.error.unresolvedJumpHostRef", { label: host.label }));
-        }
       }
       // tailnet 은 다른 참조와 달리 막지 않고 알리기만 한다. 이 필드가 생기기 전에 만든
       // 파일에는 tailnet 이 아예 없어서, 막으면 그런 파일을 통째로 못 가져온다. 그리고
       // 사용자가 그 tailnet 을 나중에 등록하면 호스트는 그대로 살아난다.
       if (host.tailnetId?.trim() && !availableTailnetIds.has(host.tailnetId.trim())) {
         warnings.push(t("transfer.error.tailnetMissing", { label: host.label }));
+      }
+    }
+    if (host.kind === "ssh") {
+      for (const jumpId of normalizeJumpHostIds(host.jumpHostIds, host.jumpHostId)) {
+        if (!availableHostIds.has(jumpId)) {
+          throw new Error(t("transfer.error.unresolvedJumpHostRef", { label: host.label }));
+        }
       }
     }
     if (
@@ -1018,9 +1145,13 @@ export class HostTransferService {
 
   async probeImport(file: Buffer, password: string): Promise<DolgateImportPreview> {
     this.pruneSnapshots();
-    const bundle = parseDolgateBundle(await decryptDolgateHostBundle(file, password));
+    const { bundle, warnings } = parseDolgateBundle(
+      await decryptDolgateHostBundle(file, password),
+    );
     const snapshotId = randomUUID();
     const plan = buildHostTransferImportPlan(bundle, this.storage.getState());
+    // 파싱 단계 경고(모르는 종류 건너뜀 등)를 계획 경고보다 앞에 보여 준다.
+    plan.warnings.unshift(...warnings);
     this.importSnapshots.set(snapshotId, {
       bundle,
       expiresAt: Date.now() + SNAPSHOT_TTL_MS,

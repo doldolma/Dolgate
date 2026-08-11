@@ -1227,6 +1227,76 @@ describe("createAppStore containers", () => {
     );
   });
 
+  // 터미널·SFTP와 같은 계약: 이미 신뢰된 호스트의 키가 바뀌면 탭을 오류로 남기지 않고 교체
+  // 프롬프트를 띄우고, 수락하면 이 탭의 목록 조회를 이어간다.
+  it("re-prompts to replace the key when a trusted host's key changed on containers connect", async () => {
+    const api = createMockApi();
+    api.knownHosts.list = vi.fn().mockResolvedValue([
+      {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ]);
+    const listResult = await api.containers.list("host-1");
+    vi.mocked(api.containers.list)
+      .mockRejectedValueOnce(
+        new Error("ssh handshake failed: host key mismatch"),
+      )
+      .mockResolvedValue(listResult);
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue({
+      hostId: "host-1",
+      hostLabel: "Prod",
+      host: "prod.example.com",
+      port: 22,
+      algorithm: "ssh-ed25519",
+      publicKeyBase64: "AAAANEW",
+      fingerprintSha256: "SHA256:new",
+      status: "mismatch",
+      existing: {
+        id: "known-1",
+        host: "prod.example.com",
+        port: 22,
+        algorithm: "ssh-ed25519",
+        publicKeyBase64: "AAAAOLD",
+        fingerprintSha256: "SHA256:old",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        lastSeenAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    });
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().openHostContainersTab("host-1");
+
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("mismatch");
+    expect(store.getState().pendingHostKeyPrompt?.action).toMatchObject({
+      kind: "containers",
+      hostId: "host-1",
+    });
+    const blockedTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(blockedTab?.errorMessage).toBeUndefined();
+    expect(blockedTab?.isLoading).toBe(false);
+
+    await store.getState().acceptPendingHostKeyPrompt("replace");
+
+    expect(api.knownHosts.replace).toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    const recoveredTab = store
+      .getState()
+      .containerTabs.find((tab) => tab.hostId === "host-1");
+    expect(recoveredTab?.errorMessage).toBeUndefined();
+  });
+
   it("runs host-key preflight again when refreshing host containers", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

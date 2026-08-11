@@ -1,6 +1,7 @@
 import {
   getAwsEc2HostSshPort,
   isAwsEc2HostRecord,
+  isAwsEc2WindowsPlatform,
   isAwsEcsHostRecord,
   isWarpgateSshHostRecord,
   type DesktopConnectInput,
@@ -114,6 +115,7 @@ async function connectAwsServerProxySessionWithAuthRetry(
     hostId: string;
     hostLabel: string;
     startupCommand?: string;
+    shellKind?: string;
   },
 ): Promise<{ sessionId: string }> {
   const envSpec = await ctx.awsService.buildServerProxySessionEnvSpec(
@@ -169,6 +171,10 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           host.awsProfileName,
         );
         const title = input.title?.trim() || host.label;
+        // Windows 인스턴스는 SSH-over-SSM 이 성립하지 않는다. 그 경로는 EC2 Instance Connect 로
+        // 임시 공개키를 밀어 넣어 인증하는데 EIC 는 Linux 전용이라, 시도해 봐야 "공개키 전송 중"
+        // 진행 표시를 띄운 뒤 EIC 오류로 떨어질 뿐이다(폴백 기억도 10분이면 만료돼 계속 반복된다).
+        const isWindowsInstance = isAwsEc2WindowsPlatform(host.awsPlatform);
         const connectionInput = {
           profileName,
           region: host.awsRegion,
@@ -179,6 +185,11 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           hostLabel: host.label,
           title,
           startupCommand: input.startupCommand,
+          // Windows 인스턴스의 SSM 세션은 PowerShell 로 떨어진다. 코어가 POSIX 셸 통합
+          // 스크립트를 타이핑하지 않도록 종류를 알려 준다(안 알려 주면 첫 화면이 PowerShell
+          // 파싱 오류로 덮인다). 두 경로 모두 각자의 ssh-core 로 이 값을 실어 보낸다 —
+          // 직결은 로컬 코어, 서버 프록시는 sync-api 안의 코어.
+          shellKind: isWindowsInstance ? "powershell" : undefined,
         };
         const connectSsmShell = async () =>
           host.awsSsmServerProxyEnabled === true
@@ -201,6 +212,11 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
               })();
 
         let connection: { sessionId: string } | undefined;
+        if (input.tmux === true && isWindowsInstance) {
+          // tmux 는 SSH 경로 전용인데 Windows 는 거기 못 간다. SSM 셸로 대체하면 tmux 없이
+          // 붙어 놓고 성공한 것처럼 보이므로, 무엇이 안 되는지 그대로 알린다.
+          throw new Error(t('sshIpc.windowsTmuxUnsupported'));
+        }
         if (input.tmux === true) {
           // tmux control mode over SSH-over-SSM — same as a normal SSH host,
           // only the transport differs (server-proxy WebSocket vs local tunnel).
@@ -222,9 +238,10 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
           let failedSshOverSsm: { error: unknown; signature: string } | undefined;
           const memo = awsSshOverSsmFallbacks.get(host.id);
           const skipSshAttempt =
-            memo !== undefined &&
-            memo.signature === signature &&
-            memo.retryAfter > Date.now();
+            isWindowsInstance ||
+            (memo !== undefined &&
+              memo.signature === signature &&
+              memo.retryAfter > Date.now());
           if (memo && !skipSshAttempt) {
             awsSshOverSsmFallbacks.delete(host.id);
           }

@@ -121,6 +121,8 @@ interface AwsServerProxyStartPayload {
   rows: number;
   env?: Record<string, string>;
   unsetEnv?: string[];
+  /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 서버의 ssh-core 가 셸 통합 판단에 쓴다. */
+  shellKind?: string;
 }
 
 interface AwsServerProxySessionRuntime {
@@ -2407,6 +2409,8 @@ export class CoreManager {
     ssmSession?: { sessionId: string; streamUrl: string; tokenValue: string };
     connectionKind?: "aws-ssm" | "aws-ecs-exec";
     connectionDetails?: string;
+    /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 코어가 셸 통합 시도 여부를 여기서 정한다. */
+    shellKind?: string;
   }): Promise<{ sessionId: string }> {
     await this.start();
     const sessionId = randomUUID();
@@ -2454,6 +2458,7 @@ export class CoreManager {
       streamUrl: payload.ssmSession?.streamUrl,
       tokenValue: payload.ssmSession?.tokenValue,
       ssmSessionId: payload.ssmSession?.sessionId,
+      shellKind: payload.shellKind,
     };
     this.sendControl<ResolvedAwsConnectPayload>({
       id: randomUUID(),
@@ -2479,6 +2484,8 @@ export class CoreManager {
     env?: Record<string, string>;
     unsetEnv?: string[];
     startupCommand?: string;
+    /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 서버의 ssh-core 가 셸 통합 판단에 쓴다. */
+    shellKind?: string;
   }): Promise<{ sessionId: string }> {
     const sessionId = randomUUID();
     const ownerWebContentsId = this.sessionOwnerStorage.getStore();
@@ -2567,6 +2574,7 @@ export class CoreManager {
             rows: payload.rows,
             env: payload.env,
             unsetEnv: payload.unsetEnv,
+            shellKind: payload.shellKind,
           } satisfies AwsServerProxyStartPayload,
         });
         resolve({ sessionId });

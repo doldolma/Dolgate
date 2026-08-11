@@ -425,6 +425,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.
         targetAddress:
           props.host && isSshHostRecord(props.host) ? props.host.hostname : undefined,
+        // 종류에 따라 호스트 계층 단계가 달라진다 — 로컬 셸에 "SSH 연결" 을 세우면 안 된다.
+        hostKind: props.host?.kind,
+        // Windows EC2 는 같은 aws-ec2 라도 SSM 셸로 붙어서 SSH·호스트 키 관문이 없다.
+        awsPlatform:
+          props.host && isAwsEc2HostRecord(props.host) ? props.host.awsPlatform : undefined,
         tailnetStatus,
         failureLayer: connectionFailurePresentation?.layer ?? null,
         failureMessage: connectionFailurePresentation?.message,

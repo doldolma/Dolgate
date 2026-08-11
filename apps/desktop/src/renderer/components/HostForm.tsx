@@ -587,13 +587,13 @@ function renderTerminalThemeField(
   return (
     <label className="flex flex-col gap-[0.4rem] text-[var(--text)]">
       <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
-        Terminal Theme
+        {t('hostForm.field.terminalTheme')}
       </span>
       <SelectField
         value={value ?? ''}
         onChange={(event) => onChange(event.target.value ? (event.target.value as TerminalThemeId) : null)}
       >
-        <option value="">Use global theme</option>
+        <option value="">{t('hostForm.option.globalTheme')}</option>
         {terminalThemePresets.map((preset) => (
           <option key={preset.id} value={preset.id}>
             {preset.title}
@@ -1442,7 +1442,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   // 호스트 필드 자동저장 제거 — submit()로 명시적으로 저장(하단 "저장" 버튼)할 때만 반영한다.
 
   const saveStatusText =
-    saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? "Couldn't save changes" : null;
+    saveStatus === 'saving'
+      ? translate('hostForm.save.saving')
+      : saveStatus === 'saved'
+        ? translate('hostForm.save.saved')
+        : saveStatus === 'error'
+          ? translate('hostForm.save.error')
+          : null;
   /**
    * tailnet 선택 칸. SSH·RDP 가 같은 필드를 쓰므로 한 곳에서 그린다.
    *
@@ -1461,7 +1467,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     return (
       <div className={fieldClassName}>
         <div className="flex items-center justify-between gap-3">
-          <span className={fieldLabelClassName}>Tailnet</span>
+          <span className={fieldLabelClassName}>{translate('hostForm.field.tailnet')}</span>
           {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
               오히려 여기로 갈 이유가 가장 큰 순간이다. */}
           {onOpenTailnets ? (
@@ -1470,7 +1476,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
               onClick={onOpenTailnets}
             >
-              Manage
+              {translate('hostForm.action.manage')}
             </button>
           ) : null}
         </div>
@@ -1507,7 +1513,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const metadataFields = (
     <>
       <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Group</span>
+        <span className={fieldLabelClassName}>{translate('hostForm.field.group')}</span>
         <SelectField value={draft.groupName ?? ''} onChange={(event) => setDraft({ ...draft, groupName: event.target.value || '' })}>
           {groupOptions.map((option) => (
             <option key={option.value ?? 'ungrouped'} value={option.value ?? ''}>
@@ -1517,10 +1523,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         </SelectField>
       </label>
       <label className={fieldClassName}>
-        <span className={fieldLabelClassName}>Tags</span>
+        <span className={fieldLabelClassName}>{translate('hostForm.field.tags')}</span>
         <TagInputField
           id="host-tag-input"
-          aria-label="Tags"
+          aria-label={translate('hostForm.field.tags')}
           tags={tagTokens}
           value={tagInput}
           onRemoveTag={removeTag}
@@ -1595,7 +1601,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
   const startupCommandField = supportsStartupCommand ? (
     <div className="flex flex-col gap-[0.55rem] text-[var(--text)]">
-      <span className={fieldLabelClassName}>Startup command</span>
+      <span className={fieldLabelClassName}>{translate('hostForm.field.startupCommand')}</span>
       <div className="grid grid-cols-3 gap-1 rounded-[8px] border border-[var(--border)] bg-[var(--app-bg)] p-1">
         {(['none', 'command', 'snippet'] as const).map((mode) => (
           <Button
@@ -1614,14 +1620,18 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               )
             }
           >
-            {mode === 'none' ? 'None' : mode === 'command' ? 'Command' : 'Snippet'}
+            {mode === 'none'
+              ? translate('hostForm.option.none')
+              : mode === 'command'
+                ? translate('hostForm.option.startupCommandMode')
+                : translate('hostForm.option.startupSnippet')}
           </Button>
         ))}
       </div>
       {startupCommand?.type === 'command' ? (
         <div className="flex flex-col gap-[0.4rem]">
           <Textarea
-            aria-label="Startup command"
+            aria-label={translate('hostForm.field.startupCommand')}
             value={startupCommand.command}
             maxLength={MAX_HOST_STARTUP_COMMAND_LENGTH}
             rows={4}
@@ -1782,7 +1792,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         await submitCreate();
       }}
     >
-      {hideTitle ? null : <div className="section-title">Host Editor</div>}
+      {hideTitle ? null : <div className="section-title">{translate('hostForm.title')}</div>}
       {/* 종류별 폼이 Details 섹션 안에서 직접 그린다. 여기 남은 것은 아직 옮기지 않은 종류를
           위한 자리다 — 목록에 없는 종류만 폼 맨 위에 그룹·태그가 카드 밖으로 나온다. */}
       {sshDraft || serialDraft || isAwsEc2Draft || isAwsEcsDraft || rdpDraft
@@ -1792,14 +1802,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       {isAwsEc2Draft ? (
         <>
           <FormSection
-            title="Connection"
+            title={translate('hostForm.section.connection')}
             description="Required to connect."
             testId="hostform-section-connection"
           >
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>AWS Profile</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.awsProfile')}</span>
             <SelectField
-              aria-label="AWS Profile"
+              aria-label={translate('hostForm.field.awsProfile')}
               value={selectedAwsProfileValue}
               onChange={(event) => handleAwsProfileChange(event.target.value)}
               disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
@@ -1815,31 +1825,31 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             ) : null}
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Region</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.region')}</span>
             <Input value={draft.awsRegion} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Availability Zone</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.availabilityZone')}</span>
             <Input value={draft.awsAvailabilityZone ?? ''} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Instance ID</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.instanceId')}</span>
             <Input value={draft.awsInstanceId} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Instance Name</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.instanceName')}</span>
             <Input value={draft.awsInstanceName ?? ''} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Platform</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.platform')}</span>
             <Input value={draft.awsPlatform ?? ''} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Private IP</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.privateIp')}</span>
             <Input value={draft.awsPrivateIp ?? ''} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>State</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.state')}</span>
             <Input value={draft.awsState ?? ''} readOnly />
           </label>
           <div className="flex flex-col gap-[0.4rem] rounded-[10px] border border-[color-mix(in_srgb,var(--accent-strong)_18%,var(--border)_82%)] bg-[color-mix(in_srgb,var(--surface-elevated)_76%,var(--surface)_24%)] px-[0.9rem] py-[0.9rem]">
@@ -1854,7 +1864,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </div>
           <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>SSH Port</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.sshPort')}</span>
               <Input
                 type="number"
                 min={1}
@@ -1873,7 +1883,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               />
             </label>
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>SSH Username</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.sshUsername')}</span>
               <Input
                 value={draft.awsSshUsername ?? ''}
                 onChange={(event) =>
@@ -1908,7 +1918,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           />
           <ToggleSwitch
               checked={draft.agentForwarding === true}
-              label="SSH Agent Forwarding"
+              label={translate('hostForm.field.agentForwarding')}
               description={translate('hostForm.agentForward.awsDescription')}
               onClick={() =>
                   setDraft((current) =>
@@ -1924,7 +1934,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Details"
+            title={translate('hostForm.section.details')}
             description="How this host appears in the app."
             testId="hostform-section-details"
           >
@@ -1932,7 +1942,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Preferences"
+            title={translate('hostForm.section.preferences')}
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
@@ -1943,14 +1953,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : isAwsEcsDraft ? (
         <>
           <FormSection
-            title="Connection"
+            title={translate('hostForm.section.connection')}
             description="Required to connect."
             testId="hostform-section-connection"
           >
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>AWS Profile</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.awsProfile')}</span>
             <SelectField
-              aria-label="AWS Profile"
+              aria-label={translate('hostForm.field.awsProfile')}
               value={selectedAwsProfileValue}
               onChange={(event) => handleAwsProfileChange(event.target.value)}
               disabled={isLoadingAwsProfiles || awsProfileOptions.length === 0}
@@ -1966,21 +1976,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             ) : null}
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Region</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.region')}</span>
             <Input value={draft.awsRegion} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>ECS Cluster</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.ecsCluster')}</span>
             <Input value={draft.awsEcsClusterName} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Cluster ARN</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.clusterArn')}</span>
             <Input value={draft.awsEcsClusterArn} readOnly />
           </label>
           </FormSection>
 
           <FormSection
-            title="Details"
+            title={translate('hostForm.section.details')}
             description="How this host appears in the app."
             testId="hostform-section-details"
           >
@@ -1988,7 +1998,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Preferences"
+            title={translate('hostForm.section.preferences')}
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
@@ -2001,23 +2011,23 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           {startupCommandField}
 
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Warpgate URL</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.warpgateUrl')}</span>
             <Input value={draft.warpgateBaseUrl} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Warpgate SSH Endpoint</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.warpgateEndpoint')}</span>
             <Input value={`${draft.warpgateSshHost}:${draft.warpgateSshPort}`} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Target</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.warpgateTarget')}</span>
             <Input value={draft.warpgateTargetName} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Target ID</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.warpgateTargetId')}</span>
             <Input value={draft.warpgateTargetId} readOnly />
           </label>
           <label className={fieldClassName}>
-            <span className={fieldLabelClassName}>Warpgate Username</span>
+            <span className={fieldLabelClassName}>{translate('hostForm.field.warpgateUsername')}</span>
             <Input
               value={draft.warpgateUsername}
               onChange={(event) =>
@@ -2038,12 +2048,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : sshDraft ? (
         <>
           <FormSection
-            title="Connection"
+            title={translate('hostForm.section.connection')}
             description="Required to connect."
             testId="hostform-section-connection"
           >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Hostname</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.hostname')}</span>
               <Input
                 value={sshDraft.hostname}
                 onChange={(event) => handleSshHostnameChange(event.target.value)}
@@ -2053,7 +2063,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </label>
             <div className="grid gap-[0.7rem] md:grid-cols-[120px_minmax(0,1fr)]">
               <label className={fieldClassName}>
-                <span className={fieldLabelClassName}>Port</span>
+                <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
                 <Input
                   type="number"
                   min={1}
@@ -2064,9 +2074,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 />
               </label>
               <label className={fieldClassName}>
-                <span className={fieldLabelClassName}>Username</span>
+                <span className={fieldLabelClassName}>{translate('hostForm.field.username')}</span>
                 <Input
-                  aria-label="Username"
+                  aria-label={translate('hostForm.field.username')}
                   value={sshDraft.username}
                   onChange={(event) => setDraft({ ...sshDraft, username: event.target.value })}
                   placeholder="ubuntu"
@@ -2074,7 +2084,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </label>
             </div>
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Auth Type</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.authType')}</span>
               <SelectField
                 value={sshDraft.authType}
                 onChange={(event) => {
@@ -2101,10 +2111,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   }
                 }}
               >
-                <option value="password">Password</option>
-                <option value="privateKey">Private key</option>
-                <option value="certificate">Certificate</option>
-                <option value="agent">SSH Agent</option>
+                <option value="password">{translate('hostForm.option.authPassword')}</option>
+                <option value="privateKey">{translate('hostForm.option.authPrivateKey')}</option>
+                <option value="certificate">{translate('hostForm.option.authCertificate')}</option>
+                <option value="agent">{translate('hostForm.option.authAgent')}</option>
               </SelectField>
             </label>
 
@@ -2128,15 +2138,15 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
             {sshDraft.authType === 'password' && credentialMode === 'new' ? (
               <label className={fieldClassName}>
-                <span className={fieldLabelClassName}>Password</span>
-                <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={host ? 'Leave blank to keep' : ''} />
+                <span className={fieldLabelClassName}>{translate('hostForm.field.password')}</span>
+                <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={host ? translate('hostForm.placeholder.keepBlank') : ''} />
               </label>
             ) : null}
 
             {credentialMode === 'new' && (sshDraft.authType === 'privateKey' || sshDraft.authType === 'certificate') ? (
               <>
                 <label className={fieldClassName}>
-                  <span className={fieldLabelClassName}>Private key file</span>
+                  <span className={fieldLabelClassName}>{translate('hostForm.field.privateKeyFile')}</span>
                   <div className="flex gap-[0.7rem]">
                     <Input
                       readOnly
@@ -2144,13 +2154,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                       placeholder="/Users/.../.ssh/id_ed25519"
                     />
                     <Button variant="secondary" onClick={pickPrivateKey}>
-                      Import
+                      {translate('hostForm.action.import')}
                     </Button>
                   </div>
                 </label>
                 {sshDraft.authType === 'certificate' ? (
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>SSH certificate file</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.certificateFile')}</span>
                     <div className="flex gap-[0.7rem]">
                       <Input
                         readOnly
@@ -2158,19 +2168,19 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                         placeholder="/Users/.../.ssh/id_ed25519-cert.pub"
                       />
                       <Button variant="secondary" onClick={pickCertificate}>
-                        Import
+                        {translate('hostForm.action.import')}
                       </Button>
                     </div>
                   </label>
                 ) : null}
                 {credentialMode === 'new' ? (
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>Passphrase</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.passphrase')}</span>
                     <Input
                       type="password"
                       value={passphrase}
                       onChange={(event) => setPassphrase(event.target.value)}
-                      placeholder={host ? 'Leave blank to keep' : ''}
+                      placeholder={host ? translate('hostForm.placeholder.keepBlank') : ''}
                     />
                   </label>
                 ) : null}
@@ -2180,19 +2190,19 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             {sshDraft.authType !== 'agent' ? (
             <div className="grid gap-[0.55rem]">
               <div className="flex items-center justify-between gap-3">
-                <span className={fieldLabelClassName}>Saved Credentials</span>
+                <span className={fieldLabelClassName}>{translate('hostForm.field.savedCredentials')}</span>
                 {onOpenSecrets && keychainEntries.length > 0 ? (
                   <button
                     type="button"
                     className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
                     onClick={onOpenSecrets}
                   >
-                    Manage
+                    {translate('hostForm.action.manage')}
                   </button>
                 ) : null}
               </div>
               <SelectField
-                aria-label="Saved Credentials"
+                aria-label={translate('hostForm.field.savedCredentials')}
                 value={credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -2235,7 +2245,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 보이기 때문이다. 대신 어디서 등록하는지 알려 준다. */}
             <div className={fieldClassName}>
               <div className="flex items-center justify-between gap-3">
-                <span className={fieldLabelClassName}>Tailnet</span>
+                <span className={fieldLabelClassName}>{translate('hostForm.field.tailnet')}</span>
                 {/* 자격증명 쪽과 달리 목록이 비어도 보여 준다 — 등록된 tailnet 이 없을 때가
                     오히려 여기로 갈 이유가 가장 큰 순간이다. */}
                 {onOpenTailnets ? (
@@ -2244,7 +2254,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
                     onClick={onOpenTailnets}
                   >
-                    Manage
+                    {translate('hostForm.action.manage')}
                   </button>
                 ) : null}
               </div>
@@ -2284,7 +2294,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </div>
 
             <div className={fieldClassName}>
-              <span className={fieldLabelClassName}>Jump hosts</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.jumpHosts')}</span>
               <JumpHostChainEditor
                 value={jumpHostChain}
                 candidates={jumpHostOptions}
@@ -2319,7 +2329,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </div>
             <div className={fieldClassName}>
               <ToggleSwitch
-                label="SSH Agent Forwarding"
+                label={translate('hostForm.field.agentForwarding')}
                 description={
                   sshDraft.useMosh === true
                     ? translate('hostForm.agentForward.moshUnsupported')
@@ -2341,7 +2351,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Details"
+            title={translate('hostForm.section.details')}
             description="How this host appears in the app."
             testId="hostform-section-details"
           >
@@ -2349,14 +2359,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Preferences"
+            title={translate('hostForm.section.preferences')}
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
             {renderTerminalThemeField(sshDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...sshDraft, terminalThemeId }))}
             {startupCommandField}
             <div className={fieldClassName}>
-              <span className={fieldLabelClassName}>Environment Variables</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.envVars')}</span>
               <EnvironmentVariablesEditor
                 variables={envVars}
                 onChange={setEnvVars}
@@ -2370,12 +2380,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : serialDraft ? (
         <>
           <FormSection
-            title="Connection"
+            title={translate('hostForm.section.connection')}
             description="Configure the serial transport and terminal behavior."
             testId="hostform-section-connection"
           >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Transport</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.transport')}</span>
               <SelectField
                 value={serialDraft.transport}
                 onChange={(event) => {
@@ -2388,7 +2398,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   handleSerialFieldChange('transport', nextTransport);
                 }}
               >
-                <option value="local">Local serial port</option>
+                <option value="local">{translate('hostForm.option.transportLocal')}</option>
                 <option value="raw-tcp">Raw TCP</option>
                 <option value="rfc2217">RFC2217</option>
               </SelectField>
@@ -2398,13 +2408,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <>
                 <div className="grid gap-[0.55rem]">
                   <div className="flex items-center justify-between gap-3">
-                    <span className={fieldLabelClassName}>Detected Ports</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.detectedPorts')}</span>
                     <Button variant="secondary" onClick={() => void refreshSerialPorts()}>
-                      Refresh
+                      {translate('hostForm.action.refresh')}
                     </Button>
                   </div>
                   <SelectField
-                    aria-label="Detected Serial Port"
+                    aria-label={translate('hostForm.field.detectedPortAria')}
                     value={
                       serialPorts.some((port) => port.path === (serialDraft.devicePath ?? ''))
                         ? serialDraft.devicePath ?? ''
@@ -2412,7 +2422,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     }
                     onChange={(event) => handleSerialFieldChange('devicePath', event.target.value)}
                   >
-                    <option value="">Select detected port</option>
+                    <option value="">{translate('hostForm.option.selectDetectedPort')}</option>
                     {serialPorts.map((port) => (
                       <option key={port.path} value={port.path}>
                         {port.displayName}
@@ -2422,11 +2432,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   {serialPortsError ? (
                     <span className="text-[0.82rem] text-[var(--danger-text)]">{serialPortsError}</span>
                   ) : isLoadingSerialPorts ? (
-                    <span className="text-[0.82rem] text-[var(--text-soft)]">Loading serial ports...</span>
+                    <span className="text-[0.82rem] text-[var(--text-soft)]">{translate('hostForm.serial.loadingPorts')}</span>
                   ) : null}
                 </div>
                 <label className={fieldClassName}>
-                  <span className={fieldLabelClassName}>Device Path</span>
+                  <span className={fieldLabelClassName}>{translate('hostForm.field.devicePath')}</span>
                   <Input
                     value={serialDraft.devicePath ?? ''}
                     onChange={(event) => handleSerialFieldChange('devicePath', event.target.value)}
@@ -2438,7 +2448,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             ) : (
               <div className="grid gap-[0.7rem] md:grid-cols-[minmax(0,1fr)_120px]">
                 <label className={fieldClassName}>
-                  <span className={fieldLabelClassName}>Remote Host</span>
+                  <span className={fieldLabelClassName}>{translate('hostForm.field.remoteHost')}</span>
                   <Input
                     value={serialDraft.host ?? ''}
                     onChange={(event) => handleSerialFieldChange('host', event.target.value)}
@@ -2447,7 +2457,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   />
                 </label>
                 <label className={fieldClassName}>
-                  <span className={fieldLabelClassName}>Port</span>
+                  <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
                   <Input
                     type="number"
                     min={1}
@@ -2464,7 +2474,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <>
                 <div className="grid gap-[0.7rem] md:grid-cols-2">
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>Baud Rate</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.baudRate')}</span>
                     <Input
                       type="number"
                       min={1}
@@ -2474,7 +2484,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     />
                   </label>
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>Data Bits</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.dataBits')}</span>
                     <SelectField
                       value={String(serialDraft.dataBits)}
                       onChange={(event) => handleSerialFieldChange('dataBits', Number(event.target.value) as SerialHostDraft['dataBits'])}
@@ -2486,20 +2496,20 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                     </SelectField>
                   </label>
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>Parity</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.parity')}</span>
                     <SelectField
                       value={serialDraft.parity}
                       onChange={(event) => handleSerialFieldChange('parity', event.target.value as SerialHostDraft['parity'])}
                     >
-                      <option value="none">None</option>
-                      <option value="odd">Odd</option>
-                      <option value="even">Even</option>
+                      <option value="none">{translate('hostForm.option.none')}</option>
+                      <option value="odd">{translate('hostForm.option.parityOdd')}</option>
+                      <option value="even">{translate('hostForm.option.parityEven')}</option>
                       <option value="mark">Mark</option>
                       <option value="space">Space</option>
                     </SelectField>
                   </label>
                   <label className={fieldClassName}>
-                    <span className={fieldLabelClassName}>Stop Bits</span>
+                    <span className={fieldLabelClassName}>{translate('hostForm.field.stopBits')}</span>
                     <SelectField
                       value={String(serialDraft.stopBits)}
                       onChange={(event) =>
@@ -2516,12 +2526,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   </label>
                 </div>
                 <label className={fieldClassName}>
-                  <span className={fieldLabelClassName}>Flow Control</span>
+                  <span className={fieldLabelClassName}>{translate('hostForm.field.flowControl')}</span>
                   <SelectField
                     value={serialDraft.flowControl}
                     onChange={(event) => handleSerialFieldChange('flowControl', event.target.value as SerialHostDraft['flowControl'])}
                   >
-                    <option value="none">None</option>
+                    <option value="none">{translate('hostForm.option.none')}</option>
                     <option value="xon-xoff">XON/XOFF</option>
                     <option value="rts-cts">RTS/CTS</option>
                     <option value="dsr-dtr">DSR/DTR</option>
@@ -2533,21 +2543,21 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             <div className="grid gap-[0.7rem]">
               <ToggleSwitch
                 checked={serialDraft.localEcho}
-                label="Local Echo"
-                description="Echo typed characters locally."
+                label={translate('hostForm.field.localEcho')}
+                description={translate('hostForm.serial.localEchoDesc')}
                 onClick={() => handleSerialFieldChange('localEcho', !serialDraft.localEcho)}
               />
               <ToggleSwitch
                 checked={serialDraft.localLineEditing}
-                label="Local Line Editing"
-                description="Handle backspace and basic line editing locally."
+                label={translate('hostForm.field.localLineEditing')}
+                description={translate('hostForm.serial.localLineEditingDesc')}
                 onClick={() => handleSerialFieldChange('localLineEditing', !serialDraft.localLineEditing)}
               />
             </div>
           </FormSection>
 
           <FormSection
-            title="Details"
+            title={translate('hostForm.section.details')}
             description="How this host appears in the app."
             testId="hostform-section-details"
           >
@@ -2555,14 +2565,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
           </FormSection>
 
           <FormSection
-            title="Preferences"
+            title={translate('hostForm.section.preferences')}
             description="Optional local preference."
             testId="hostform-section-preferences"
           >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>Line Ending</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.lineEnding')}</span>
               <SelectField
-                aria-label="Line Ending"
+                aria-label={translate('hostForm.field.lineEnding')}
                 value={serialDraft.transmitLineEnding}
                 onChange={(event) =>
                   handleSerialFieldChange(
@@ -2571,7 +2581,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                   )
                 }
               >
-                <option value="none">None</option>
+                <option value="none">{translate('hostForm.option.none')}</option>
                 <option value="cr">CR</option>
                 <option value="lf">LF</option>
                 <option value="crlf">CRLF</option>
@@ -2583,11 +2593,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       ) : rdpDraft ? (
         <>
           <FormSection
-            title={translate('hostForm.rdp.connection.title')}
+            title={translate('hostForm.section.connection')}
             testId="hostform-section-connection"
           >
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>{translate('hostForm.rdp.hostname')}</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.hostname')}</span>
               <Input
                 value={rdpDraft.hostname}
                 onChange={(event) => handleRdpFieldChange('hostname', event.target.value)}
@@ -2597,7 +2607,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </label>
 
             <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>{translate('hostForm.rdp.port')}</span>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
               <Input
                 type="number"
                 min={1}
@@ -2663,7 +2673,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               <>
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>
-                    {translate('hostForm.rdp.username')}
+                    {translate('hostForm.field.username')}
                   </span>
                   <Input
                     value={credentialUsername}
@@ -2683,7 +2693,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
                 <label className={fieldClassName}>
                   <span className={fieldLabelClassName}>
-                    {translate('hostForm.rdp.password')}
+                    {translate('hostForm.field.password')}
                   </span>
                   <Input
                     type="password"
@@ -2712,14 +2722,14 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
 
           {/* 다른 종류와 같은 순서다: Connection 다음이 Details. */}
           <FormSection
-            title={translate('hostForm.rdp.details.title')}
+            title={translate('hostForm.section.details')}
             testId="hostform-section-details"
           >
             {metadataFields}
           </FormSection>
 
           <FormSection
-            title={translate('hostForm.rdp.preferences.title')}
+            title={translate('hostForm.section.preferences')}
             testId="hostform-section-preferences"
           >
             <label className={fieldClassName}>

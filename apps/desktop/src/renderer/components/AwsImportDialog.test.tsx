@@ -426,6 +426,84 @@ describe('AwsImportDialog', () => {
     );
   });
 
+  // Windows 인스턴스는 SSM 셸(PowerShell)로 붙는다. SSH 검사(AWS-RunShellScript)는 Linux 전용이고
+  // 그 검사가 찾는 사용자명은 SSM 셸 경로에 필요 없으므로, 검사를 건너뛰고 바로 등록한다.
+  it('registers a Windows instance without running the SSH inspection', async () => {
+    const api = installMockApi();
+    const onImport = vi.fn().mockResolvedValue(undefined);
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-win',
+        name: 'winbox',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Windows',
+        privateIp: '10.0.0.20',
+        state: 'running',
+        ssmAvailability: 'ready',
+        ssmAvailabilityReason: null,
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={onImport}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('winbox')).toBeInTheDocument());
+
+    // "Windows 미지원"으로 막던 자리다 — 이제 등록으로 들어가는 입구여야 한다.
+    expect(screen.queryByRole('button', { name: 'Windows 미지원' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'SSM 셸로 추가' }));
+
+    await waitFor(() =>
+      expect(screen.getByText('Windows 인스턴스는 SSM 셸(PowerShell)로 연결합니다.')).toBeInTheDocument(),
+    );
+    expect(api.aws.inspectHostSshMetadata).not.toHaveBeenCalled();
+    // SSH 사용자명·포트는 이 호스트에 쓰이지 않으므로 입력란도 없어야 한다.
+    expect(screen.queryByText('SSH Username')).toBeNull();
+    expect(screen.queryByText('SSH Port')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'aws-ec2',
+          label: 'winbox',
+          awsInstanceId: 'i-win',
+          awsPlatform: 'Windows',
+          awsSshUsername: null,
+          awsSshMetadataStatus: 'idle',
+        }),
+      ),
+    );
+  });
+
+  it('still runs the SSH inspection for Linux instances', async () => {
+    const api = installMockApi();
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('web-1')).toBeInTheDocument());
+
+    expect(screen.queryByRole('button', { name: 'SSM 셸로 추가' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'SSH 정보 확인' }));
+
+    await waitFor(() => expect(api.aws.inspectHostSshMetadata).toHaveBeenCalled());
+    expect(await screen.findByText('SSH Username')).toBeInTheDocument();
+  });
+
   it('renders the AWS SSM specific title and EC2 tab label', async () => {
     installMockApi();
 

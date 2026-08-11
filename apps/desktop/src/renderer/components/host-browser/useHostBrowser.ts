@@ -38,11 +38,11 @@ export const HOST_DRAG_MIME_TYPE = 'application/x-dolssh-host-id';
 export const HOSTS_DRAG_MIME_TYPE = 'application/x-dolssh-host-ids';
 export const GROUP_DRAG_MIME_TYPE = 'application/x-dolssh-group-path';
 
+// Serial·RDP 는 여기 없다 — 가져오기가 아니라 새로 만들기라서, New Host 폼 맨 위의
+// 종류 셀렉터(SSH/Serial/RDP)로 옮겼다.
 export const HOST_BROWSER_IMPORT_MENU_LABELS = [
   'Import Dolgate',
   'Import OpenSSH',
-  'Import Serial',
-  'Import RDP',
   'Import from Termius',
   'Import from Xshell',
   'Import from Warpgate',
@@ -360,8 +360,6 @@ export interface UseHostBrowserParams {
   onOpenLocalTerminal: () => void;
   onCreateHost: () => void;
   onOpenDolgateImport: () => void;
-  onOpenSerialImport: () => void;
-  onOpenRdpImport: () => void;
   onOpenAwsImport: () => void;
   onOpenOpenSshImport: () => void;
   onOpenXshellImport: () => void;

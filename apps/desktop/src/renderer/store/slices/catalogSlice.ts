@@ -274,6 +274,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               homeSection: "settings",
               settingsSection: section,
             }),
+    // 종류(SSH·Serial·RDP)는 드로어 안 셀렉터가 정한다 — 여기서는 기본값만 정해 준다.
     openCreateHostDrawer: () =>
             set({
               activeWorkspaceTab: "home",
@@ -282,26 +283,6 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
                 mode: "create",
                 defaultGroupPath: get().currentGroupPath,
                 kind: "ssh",
-              },
-            }),
-    openCreateSerialDrawer: () =>
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              hostDrawer: {
-                mode: "create",
-                defaultGroupPath: get().currentGroupPath,
-                kind: "serial",
-              },
-            }),
-    openCreateRdpDrawer: () =>
-            set({
-              activeWorkspaceTab: "home",
-              homeSection: "hosts",
-              hostDrawer: {
-                mode: "create",
-                defaultGroupPath: get().currentGroupPath,
-                kind: "rdp",
               },
             }),
     openEditHostDrawer: (hostId) =>

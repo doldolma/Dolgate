@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  describeRdpDrives,
   getHostBadgeLabel,
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
+  isRdpHostRecord,
   isSshHostRecord,
   normalizeGroupPath,
 } from '@shared';
@@ -11,6 +13,7 @@ import type {
   HostEnvVar,
   HostRecord,
   HostStartupCommand,
+  RdpHostRecord,
   SecretMetadataRecord,
   SnippetRecord,
   SshHostRecord,
@@ -41,6 +44,11 @@ import { SshKeyInstallDialog } from '../SshKeyInstallDialog';
 import { loadSavedCredential } from '../../services/desktop/settings';
 import { terminalThemePresets } from '../../lib/terminal-presets';
 import { getHostAddress, getHostRegion, getHostTypeLabel } from './hostDisplay';
+import {
+  hostSupportsContainers,
+  hostSupportsSftp,
+  hostSupportsTmux,
+} from './hostCapabilities';
 import type { HostBrowserModel } from './useHostBrowser';
 import { useTranslation } from 'react-i18next';
 import { getFormatLocale, t } from '../../i18n';
@@ -136,6 +144,8 @@ function getConnectionKindLabel(kind?: string): string {
       return 'Warpgate';
     case 'serial':
       return 'Serial';
+    case 'rdp':
+      return 'RDP';
     default:
       return kind ?? '';
   }
@@ -259,12 +269,12 @@ function describeSerialTransport(transport: string): string {
 }
 
 /**
- * Connection 탭 행 구성: 공통(Type/Address) + kind별 상세 + 시작 명령/터미널 테마를 한 배열로.
- * Address(host:port·IP 등)·Region과 중복되는 필드는 생략한다.
+ * 호스트가 어떤 자격증명(저장된 시크릿)을 쓰는지 표시. 공유 중이면 호스트 수도 함께 알린다.
+ *
+ * SSH·RDP 가 같이 쓴다 — 둘 다 자격증명을 secretRef 로만 가리킨다.
  */
-// 호스트가 어떤 자격증명(저장된 시크릿)을 쓰는지 표시. 공유 중이면 호스트 수도 함께 알린다.
 function buildCredentialValue(
-  host: SshHostRecord,
+  host: { secretRef?: string | null },
   keychainEntries: SecretMetadataRecord[],
 ): React.ReactNode {
   if (!host.secretRef) {
@@ -309,6 +319,135 @@ function deriveJumpHostIds(host: SshHostRecord): string[] {
   return result;
 }
 
+/**
+ * tailnet 을 경유하는 호스트라는 것은 주소만 봐서는 알 수 없다 — 같은 이름이 tailnet 안과 밖에서
+ * 다른 기기일 수 있으므로 어디를 거치는지 보여 준다. 설정이 지워졌으면 라벨을 못 찾는데, 그때는
+ * 경고를 보여 준다(연결도 그 상태에서는 거부된다).
+ */
+function buildTailnetRow(
+  tailnetId: string | null | undefined,
+  tailnets: Array<{ id: string; label: string }>,
+): { label: string; value: React.ReactNode } | null {
+  const id = tailnetId?.trim();
+  if (!id) {
+    return null;
+  }
+  const known = tailnets.find((entry) => entry.id === id);
+  return {
+    label: 'Tailnet',
+    value: known ? (
+      known.label
+    ) : (
+      <span className="text-[var(--danger)]">{t('hostDetail.row.tailnetMissing')}</span>
+    ),
+  };
+}
+
+/**
+ * RDP 는 계정이 자격증명에 딸린다 — SSH 처럼 호스트 레코드에 username 이 없다. 어느 계정으로
+ * 붙는지가 이 패널에서 가장 먼저 확인할 값이라 자격증명 라벨과 따로 한 줄을 준다.
+ */
+function buildRdpAccount(
+  host: RdpHostRecord,
+  keychainEntries: SecretMetadataRecord[],
+): string | null {
+  if (!host.secretRef) {
+    return null;
+  }
+  const entry = keychainEntries.find((item) => item.secretRef === host.secretRef);
+  const username = entry?.username?.trim();
+  if (!username) {
+    return null;
+  }
+  const domain = entry?.domain?.trim();
+  return domain ? `${domain}\\${username}` : username;
+}
+
+/** 기본값이 "켬"인 토글(오디오·클립보드)은 껐을 때도 한 줄로 보여야 한다 — 안 보이면 켠 줄 안다. */
+function describeToggle(enabled: boolean): string {
+  return enabled ? t('hostDetail.row.enabled') : t('hostDetail.row.disabled');
+}
+
+function buildRdpRows(
+  host: RdpHostRecord,
+  keychainEntries: SecretMetadataRecord[],
+  tailnets: Array<{ id: string; label: string }>,
+): Array<{ label: string; value: React.ReactNode }> {
+  const rows: Array<{ label: string; value: React.ReactNode }> = [];
+  const account = buildRdpAccount(host, keychainEntries);
+
+  rows.push({ label: 'Port', value: host.port });
+  if (account) {
+    rows.push({ label: 'Account', value: account });
+  }
+  rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
+
+  const tailnetRow = buildTailnetRow(host.tailnetId, tailnets);
+  if (tailnetRow) {
+    rows.push(tailnetRow);
+  }
+
+  if (host.adminSession === true) {
+    rows.push({
+      label: t('hostDetail.row.adminSession'),
+      value: t('hostDetail.row.enabled'),
+    });
+  }
+  // 없거나 null 이면 32 비트다(레코드 기본값과 같은 규칙).
+  rows.push({
+    label: t('hostDetail.row.colorQuality'),
+    value: host.colorDepth === 16 ? '16-bit' : '32-bit',
+  });
+  if (host.useAllMonitors === true) {
+    rows.push({
+      label: t('hostDetail.row.allMonitors'),
+      value: t('hostDetail.row.enabled'),
+    });
+  }
+  rows.push({
+    label: t('hostDetail.row.remoteAudio'),
+    value: describeToggle(host.audioEnabled !== false),
+  });
+  rows.push({
+    label: t('hostDetail.row.clipboard'),
+    value: describeToggle(host.clipboardEnabled !== false),
+  });
+
+  // 이름은 원격에 그대로 뜨는 값이다 — 편집 화면과 같은 규칙(describeRdpDrives)으로 만든다.
+  // 공유한 폴더는 원격에 그 안의 파일이 다 노출되므로, 무엇을 열어 뒀는지 여기서 보여야 한다.
+  const drives = describeRdpDrives(host.drives);
+  if (drives.length > 0) {
+    rows.push({
+      label: t('hostDetail.row.redirectedFolders'),
+      value: (
+        <span className="inline-flex flex-col items-end gap-y-1">
+          {drives.map((drive) => (
+            <span key={drive.path} className="inline-flex items-baseline gap-x-1.5">
+              <span className="truncate" title={drive.path}>
+                {drive.name}
+              </span>
+              {drive.readOnly ? (
+                <span className="text-[0.72rem] text-[var(--text-muted)]">
+                  {t('hostDetail.row.driveReadOnly')}
+                </span>
+              ) : null}
+            </span>
+          ))}
+        </span>
+      ),
+    });
+  }
+
+  // 신뢰한 인증서 지문(host.certificateFingerprint)은 일부러 넣지 않는다 — 설정한 값이 아니고,
+  // 달라지면 접속할 때 인증서 확인 화면이 지문을 나란히 보여준다.
+
+  return rows;
+}
+
+/**
+ * Connection 탭 행 구성: 공통(Type/Address) + kind별 상세 + 시작 명령/터미널 테마를 한 배열로.
+ * Address(host:port·IP 등)·Region과 중복되는 필드는 생략한다.
+ */
 function buildConnectionRows(
   host: HostRecord,
   hosts: HostRecord[],
@@ -359,22 +498,9 @@ function buildConnectionRows(
         ),
       });
     }
-    // tailnet 을 경유하는 호스트라는 것은 주소만 봐서는 알 수 없다 — 같은 이름이 tailnet
-    // 안과 밖에서 다른 기기일 수 있으므로 어디를 거치는지 보여 준다. 설정이 지워졌으면
-    // 라벨을 못 찾는데, 그때는 id 를 그대로 보여 준다(연결도 그 상태에서는 거부된다).
-    const tailnetId = host.tailnetId?.trim();
-    if (tailnetId) {
-      const known = tailnets.find((entry) => entry.id === tailnetId);
-      rows.push({
-        label: 'Tailnet',
-        value: known ? (
-          known.label
-        ) : (
-          <span className="text-[var(--danger)]">
-            {t('hostDetail.row.tailnetMissing')}
-          </span>
-        ),
-      });
+    const tailnetRow = buildTailnetRow(host.tailnetId, tailnets);
+    if (tailnetRow) {
+      rows.push(tailnetRow);
     }
     if (host.useMosh) {
       rows.push({ label: 'Mosh', value: t('hostDetail.row.enabled') });
@@ -382,6 +508,8 @@ function buildConnectionRows(
     if (host.agentForwarding) {
       rows.push({ label: 'Agent Forwarding', value: t('hostDetail.row.enabled') });
     }
+  } else if (isRdpHostRecord(host)) {
+    rows.push(...buildRdpRows(host, keychainEntries, tailnets));
   } else if (host.kind === 'aws-ec2') {
     rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
     rows.push({ label: 'Instance', value: host.awsInstanceId });
@@ -916,13 +1044,13 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                   <Pencil className="h-4 w-4" aria-hidden />
                   Edit Host
                 </Button>
-                {!isAwsEcsHostRecord(host) && hb.onOpenSftp ? (
+                {hostSupportsSftp(host) && hb.onOpenSftp ? (
                   <Button variant="secondary" size="sm" onClick={() => hb.onOpenSftp?.(host.id)}>
                     <Folder className="h-4 w-4" aria-hidden />
                     Open SFTP
                   </Button>
                 ) : null}
-                {!isAwsEcsHostRecord(host) && hb.onConnectHostTmux ? (
+                {hostSupportsTmux(host) && hb.onConnectHostTmux ? (
                   <Button
                     variant="secondary"
                     size="sm"
@@ -932,7 +1060,7 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                     TMUX Connect
                   </Button>
                 ) : null}
-                {!isAwsEcsHostRecord(host) ? (
+                {hostSupportsContainers(host) ? (
                   <Button
                     variant="secondary"
                     size="sm"

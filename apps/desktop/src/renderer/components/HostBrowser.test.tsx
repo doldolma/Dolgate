@@ -179,6 +179,20 @@ const hosts: HostRecord[] = [
   }
 ];
 
+// SFTP·tmux·컨테이너는 SSH 세션이 있어야 성립한다 — RDP 는 그 셋이 다 빠지는 종류라
+// 컨텍스트 메뉴가 종류를 보고 거르는지 확인하는 데 쓴다. 기본 목록에는 넣지 않는다(호스트
+// 개수를 세는 기존 테스트가 흔들린다).
+const rdpHost: HostRecord = {
+  id: 'host-rdp',
+  kind: 'rdp',
+  label: 'WinBox',
+  hostname: 'win.example.com',
+  port: 3389,
+  groupName: 'Servers',
+  createdAt: '2025-01-01T00:00:00.000Z',
+  updatedAt: '2025-01-01T00:00:00.000Z'
+};
+
 const keychainEntries: SecretMetadataRecord[] = [
   {
     secretRef: 'secret:host-1',
@@ -226,6 +240,7 @@ interface RenderBrowserOptions {
   onOpenHostInNewWindow?: ReturnType<typeof vi.fn>;
   onConnectHostTmux?: ReturnType<typeof vi.fn>;
   onOpenHostContainers?: ReturnType<typeof vi.fn>;
+  onOpenSftp?: ReturnType<typeof vi.fn>;
   onActivateSftp?: ReturnType<typeof vi.fn>;
   onActivateContainers?: ReturnType<typeof vi.fn>;
   onOpenSettingsSection?: ReturnType<typeof vi.fn>;
@@ -236,7 +251,6 @@ interface RenderBrowserOptions {
   onOpenLocalTerminal?: ReturnType<typeof vi.fn>;
   onCreateHost?: ReturnType<typeof vi.fn>;
   onOpenDolgateImport?: ReturnType<typeof vi.fn>;
-  onOpenSerialImport?: ReturnType<typeof vi.fn>;
   onOpenAwsImport?: ReturnType<typeof vi.fn>;
   onOpenOpenSshImport?: ReturnType<typeof vi.fn>;
   onOpenXshellImport?: ReturnType<typeof vi.fn>;
@@ -269,6 +283,7 @@ function renderBrowser({
   onOpenHostInNewWindow,
   onConnectHostTmux,
   onOpenHostContainers = vi.fn().mockResolvedValue(undefined),
+  onOpenSftp,
   onActivateSftp = vi.fn(),
   onActivateContainers = vi.fn(),
   onOpenSettingsSection = vi.fn(),
@@ -279,7 +294,6 @@ function renderBrowser({
   onOpenLocalTerminal = vi.fn(),
   onCreateHost = vi.fn(),
   onOpenDolgateImport = vi.fn(),
-  onOpenSerialImport = vi.fn(),
   onOpenAwsImport = vi.fn(),
   onOpenOpenSshImport = vi.fn(),
   onOpenXshellImport = vi.fn(),
@@ -304,8 +318,6 @@ function renderBrowser({
       onOpenLocalTerminal={onOpenLocalTerminal}
       onCreateHost={onCreateHost}
       onOpenDolgateImport={onOpenDolgateImport}
-      onOpenSerialImport={onOpenSerialImport}
-      onOpenRdpImport={vi.fn()}
       onOpenAwsImport={onOpenAwsImport}
       onOpenOpenSshImport={onOpenOpenSshImport}
       onOpenXshellImport={onOpenXshellImport}
@@ -329,6 +341,7 @@ function renderBrowser({
       onOpenHostInNewWindow={onOpenHostInNewWindow}
       onConnectHostTmux={onConnectHostTmux}
       onOpenHostContainers={onOpenHostContainers}
+      onOpenSftp={onOpenSftp}
       onActivateSftp={onActivateSftp}
       onActivateContainers={onActivateContainers}
       onOpenSettingsSection={onOpenSettingsSection}
@@ -745,12 +758,12 @@ describe('HostBrowser helpers', () => {
     expect(onHostViewModeChange).toHaveBeenCalledWith('list');
   });
 
+  // Serial·RDP 는 가져오기가 아니라 새로 만들기라서 New Host 폼의 종류 셀렉터로 옮겼다.
+  // 이 메뉴에 다시 생기면 입구가 또 갈라진다.
   it('defines import actions for the split-button menu in the expected order', () => {
     expect(HOST_BROWSER_IMPORT_MENU_LABELS).toEqual([
       'Import Dolgate',
       'Import OpenSSH',
-      'Import Serial',
-      'Import RDP',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -762,8 +775,6 @@ describe('HostBrowser helpers', () => {
     expect(getHostBrowserVisibleImportMenuLabels('win32')).toEqual([
       'Import Dolgate',
       'Import OpenSSH',
-      'Import Serial',
-      'Import RDP',
       'Import from Termius',
       'Import from Xshell',
       'Import from Warpgate',
@@ -772,18 +783,16 @@ describe('HostBrowser helpers', () => {
     expect(getHostBrowserVisibleImportMenuLabels('darwin')).toEqual([
       'Import Dolgate',
       'Import OpenSSH',
-      'Import Serial',
-      'Import RDP',
       'Import from Termius',
       'Import from Warpgate',
       'Import via AWS SSM'
     ]);
   });
 
-  it('updates the empty-state copy to reference the import menu', () => {
-    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.');
+  it('points the empty-state copy at the New Host form instead of an import item', () => {
+    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
-    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.');
+    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.');
   });
 
   it('prioritizes New Host while routing the Import primary action to OpenSSH import', () => {
@@ -803,14 +812,17 @@ describe('HostBrowser helpers', () => {
     expect(onOpenOpenSshImport).toHaveBeenCalledTimes(1);
   });
 
-  it('routes the Import Serial menu item to the serial create flow', () => {
-    const onOpenSerialImport = vi.fn();
-    renderBrowser({ onOpenSerialImport });
+  it('no longer offers Serial or RDP as import menu items', () => {
+    renderBrowser();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open import menu' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Import Serial' }));
 
-    expect(onOpenSerialImport).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole('menuitem', { name: 'Import Serial' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: 'Import RDP' }),
+    ).not.toBeInTheDocument();
   });
 
   it('does not show AWS SSH metadata status on host cards (it lives in the edit form)', () => {
@@ -1454,6 +1466,80 @@ describe('HostBrowser dialogs', () => {
     });
     expect(onConnectHostTmux).toHaveBeenNthCalledWith(1, 'host-1');
     expect(onConnectHostTmux).toHaveBeenNthCalledWith(2, 'host-2');
+  });
+
+  it('hides SSH-only actions from the context menu for an RDP host', () => {
+    renderBrowser({
+      hosts: [...hosts, rdpHost],
+      onConnectHostTmux: vi.fn(),
+      onOpenSftp: vi.fn(),
+    });
+
+    const rdpCard = screen.getByText('WinBox').closest('article') as HTMLElement;
+    fireEvent.contextMenu(rdpCard);
+
+    expect(screen.queryByRole('button', { name: 'SFTP 연결' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'tmux로 연결' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '컨테이너' })).toBeNull();
+
+    // 종류를 가리지 않는 항목은 그대로 남아야 한다 — 메뉴 전체가 사라진 게 아니다.
+    expect(screen.getByRole('button', { name: '연결' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '수정' })).toBeTruthy();
+  });
+
+  it('narrows a mixed selection to the hosts that support the action, and says how many', async () => {
+    const onOpenHostContainers = vi.fn().mockResolvedValue(undefined);
+    renderBrowser({ hosts: [...hosts, rdpHost], onOpenHostContainers });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+    const rdpCard = screen.getByText('WinBox').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+    fireEvent.click(rdpCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    // 3대를 골랐지만 컨테이너가 되는 건 2대다 — 라벨이 그 2대를 말해 준다.
+    fireEvent.click(screen.getByRole('button', { name: '컨테이너 (2개)' }));
+
+    await waitFor(() => {
+      expect(onOpenHostContainers).toHaveBeenCalledTimes(2);
+    });
+    expect(onOpenHostContainers).toHaveBeenNthCalledWith(1, 'host-1');
+    expect(onOpenHostContainers).toHaveBeenNthCalledWith(2, 'host-2');
+    expect(onOpenHostContainers).not.toHaveBeenCalledWith('host-rdp');
+  });
+
+  // SFTP 는 순회가 안 되니 대상이 1대로 좁혀질 때만 연다 — 고른 개수가 아니라 대상 개수가 기준이다.
+  it('enables SFTP when a mixed selection narrows down to exactly one supported host', () => {
+    const onOpenSftp = vi.fn();
+    renderBrowser({ hosts: [...hosts, rdpHost], onOpenSftp });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const rdpCard = screen.getByText('WinBox').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(rdpCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    fireEvent.click(screen.getByRole('button', { name: 'SFTP 연결' }));
+
+    expect(onOpenSftp).toHaveBeenCalledWith('host-1');
+  });
+
+  it('disables SFTP when the selection has more than one supported host', () => {
+    const onOpenSftp = vi.fn();
+    renderBrowser({ hosts: [...hosts, rdpHost], onOpenSftp });
+
+    const appCard = screen.getByText('App').closest('article') as HTMLElement;
+    const dbCard = screen.getByText('DB').closest('article') as HTMLElement;
+
+    fireEvent.click(appCard);
+    fireEvent.click(dbCard, { ctrlKey: true });
+
+    fireEvent.contextMenu(appCard);
+    expect(screen.getByRole('button', { name: 'SFTP 연결' })).toBeDisabled();
   });
 
   it('supports shift range selection for hosts without changing the active drawer selection', () => {

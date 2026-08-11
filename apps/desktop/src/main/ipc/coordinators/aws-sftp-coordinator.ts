@@ -547,6 +547,16 @@ export function createAwsSftpCoordinator(deps: {
         throw new Error(t("awsSftp.progress.notManaged"));
       }
 
+      // 지원하지 않는 플랫폼은 SSH 설정을 읽기 전에 걸러낸다. 아래 metadata 로드는
+      // AWS-RunShellScript(Linux 전용)를 보내므로 Windows 에서는 "unsupported platform type"
+      // 으로 실패하는데, 그 실패가 호스트 레코드의 awsSshMetadataError 에 그대로 저장돼
+      // 편집 화면에 남는다 — 되지도 않는 호출을 하고 그 흔적까지 남길 이유가 없다.
+      // (platform 은 위 hydrateHostForSftp 가 이미 채워 놨다.)
+      const disabledReason = getAwsEc2SftpDisabledMessage(refreshedHost);
+      if (disabledReason) {
+        throw new Error(disabledReason);
+      }
+
       currentStage = "loading-instance-metadata";
       emitProgress({
         endpointId,
@@ -554,13 +564,7 @@ export function createAwsSftpCoordinator(deps: {
         stage: "loading-instance-metadata",
         message: t("awsSftp.progress.checkingSshConfig"),
       });
-      const hydratedHost = await loadHostSshMetadataRecord(refreshedHost);
-      const disabledReason = getAwsEc2SftpDisabledMessage(hydratedHost);
-      if (disabledReason) {
-        throw new Error(disabledReason);
-      }
-
-      return hydratedHost;
+      return await loadHostSshMetadataRecord(refreshedHost);
     } catch (error) {
       if (error instanceof Error && /^\[/.test(error.message)) {
         throw error;
