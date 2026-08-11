@@ -2,6 +2,7 @@ import {
   describeRdpDrives,
   isRdpHostRecord,
   type RdpCertificatePrompt,
+  type RdpHostRecord,
   type RdpInputEvent,
   type RdpLocalMonitor,
   type RdpMonitorSelection,
@@ -12,6 +13,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, screen } from "electron
 import { ipcChannels } from "../../common/ipc-channels";
 import type { RdpManager } from "../rdp-manager";
 import { decideCertificate } from "../rdp-certificate-trust";
+import { setRdpKeyboardCapture } from "../rdp-keyboard-capture";
 import { resolveSelectedDisplays } from "../rdp-monitor-selection";
 import { mapScreenPointToDesktop } from "../rdp-screen-pointer";
 import {
@@ -105,13 +107,78 @@ export function registerRdpIpcHandlers(
   screen.on("display-removed", invalidateDisplays);
   screen.on("display-metrics-changed", invalidateDisplays);
 
-  // tailnet 포워드를 연 세션들. 세션이 끝날 때 닫아야 하므로 무엇을 열었는지 알아야 한다.
-  const tailnetForwardSessions = new Set<string>();
-  const closeTailnetForward = (sessionId: string) => {
-    if (!tailnetForwardSessions.delete(sessionId)) {
+  /**
+   * 이 세션이 무엇을 거쳐 붙는지. 세션이 끝날 때 그 통로를 닫아야 하므로 기억해 둔다.
+   *
+   * rdp-core 는 Rust 라서 tailnet 도 SSM 도 직접 쓸 수 없다. ssh-core 가 `127.0.0.1` 리스너를
+   * 열어 그쪽으로 이어 주고, 코어는 그 주소로 평범하게 붙는다. 코어가 아는 것은 "어디로 dial
+   * 하느냐" 하나뿐이라, 경로가 늘어도 코어는 그대로다.
+   */
+  const forwardKindBySession = new Map<string, "tailnet" | "aws-ssm">();
+
+  /**
+   * 경유가 필요한 호스트면 로컬 포워드를 열고 그 주소를 돌려준다. 직접 붙는 호스트면 undefined.
+   *
+   * **호스트 이름은 바꾸지 않는다** — TLS 서버 이름과 인증서 지문 핀의 키가 그것이다. 로컬 주소로
+   * 바꾸면 서로 다른 원격이 모두 같은 서버로 보인다(그래서 코어는 주소와 신원을 따로 받는다).
+   *
+   * 포워드를 여는 주체를 메인에 두는 이유: 세션 수명(끊기·앱 종료)을 여기서 관리하므로 닫기를
+   * 빠뜨릴 자리가 적다. 렌더러에 두면 창이 죽을 때 포워드가 남는다.
+   */
+  const openSessionForward = async (
+    sessionId: string,
+    host: RdpHostRecord,
+  ): Promise<string | undefined> => {
+    const tailnetId = host.tailnetId?.trim();
+    if (tailnetId) {
+      const address = await ctx.coreManager.openTailnetForward({
+        id: sessionId,
+        tailnetId,
+        host: host.hostname,
+        port: host.port,
+      });
+      forwardKindBySession.set(sessionId, "tailnet");
+      return address;
+    }
+
+    const awsSsm = host.awsSsm;
+    if (awsSsm) {
+      // SFTP·컨테이너가 쓰는 endpoint 단위 터널과 같은 경로다. 포트 포워딩 규칙으로 등록하지
+      // 않으므로 포트 포워딩 화면에 유령 행이 생기지 않는다.
+      //
+      // bindPort 0 = 빈 포트를 OS 가 고른다. 고정 포트를 쓰면 같은 인스턴스에 두 번 붙을 때
+      // 충돌하고, 다른 프로그램이 쓰고 있으면 접속이 실패한다.
+      const tunnel = await ctx.coreManager.startSsmTunnel({
+        ruleId: `rdp:${sessionId}`,
+        profileName: awsSsm.profileName,
+        region: awsSsm.region,
+        targetType: "instance",
+        targetId: awsSsm.instanceId,
+        targetKind: "instance-port",
+        targetPort: host.port,
+        bindAddress: "127.0.0.1",
+        bindPort: 0,
+      });
+      forwardKindBySession.set(sessionId, "aws-ssm");
+      return `${tunnel.bindAddress}:${tunnel.bindPort}`;
+    }
+
+    return undefined;
+  };
+
+  /** 세션이 열어 둔 포워드를 닫는다. 안 열었으면 아무 일도 하지 않는다. */
+  const closeSessionForward = (sessionId: string) => {
+    const kind = forwardKindBySession.get(sessionId);
+    if (!kind) {
       return;
     }
-    ctx.coreManager.closeTailnetForward(sessionId);
+    forwardKindBySession.delete(sessionId);
+    if (kind === "tailnet") {
+      ctx.coreManager.closeTailnetForward(sessionId);
+      return;
+    }
+    // 실패해도 삼킨다 — 이미 죽은 터널을 닫는 것이 세션 정리를 막아서는 안 된다.
+    void ctx.coreManager.stopSsmTunnel(`rdp:${sessionId}`).catch(() => undefined);
   };
 
   // 세션마다 접속 때 선언한 로컬 디스플레이 순서. 원격 모니터 번호와 물리 화면을 잇는 유일한
@@ -266,7 +333,7 @@ export function registerRdpIpcHandlers(
     forgetSpread(sessionId);
     displayIdsBySession.delete(sessionId);
     primaryIndexBySession.delete(sessionId);
-    closeTailnetForward(sessionId);
+    closeSessionForward(sessionId);
     return monitorWindows.close(sessionId);
   };
 
@@ -465,17 +532,7 @@ export function registerRdpIpcHandlers(
       //
       // 포워드를 여는 주체를 메인에 두는 이유: 세션 수명(끊기·앱 종료)을 여기서 관리하므로
       // 닫기를 빠뜨릴 자리가 적다. 렌더러에 두면 창이 죽을 때 포워드가 남는다.
-      let dialAddress: string | undefined;
-      const tailnetId = host.tailnetId?.trim();
-      if (tailnetId) {
-        dialAddress = await ctx.coreManager.openTailnetForward({
-          id: sessionId,
-          tailnetId,
-          host: host.hostname,
-          port: host.port,
-        });
-        tailnetForwardSessions.add(sessionId);
-      }
+      const dialAddress = await openSessionForward(sessionId, host);
 
       try {
         const payload = await rdpManager.connect(
@@ -527,8 +584,8 @@ export function registerRdpIpcHandlers(
             : undefined,
         };
       } catch (error) {
-        // 접속이 실패했으면 포워드를 남기지 않는다. 남으면 tailnet 으로 가는 리스너가 계속 산다.
-        closeTailnetForward(sessionId);
+        // 접속이 실패했으면 포워드를 남기지 않는다. 남으면 원격으로 가는 리스너가 계속 산다.
+        closeSessionForward(sessionId);
         throw error;
       } finally {
         hostBySession.delete(sessionId);
@@ -613,6 +670,16 @@ export function registerRdpIpcHandlers(
     const text = clipboard.readText();
     if (text) {
       rdpManager.sendClipboardText(sessionId, text);
+    }
+  });
+
+  // 원격 화면이 키보드를 쥐었는지. 우리 앱 단축키를 비켜 주는 판단이 메인에 있어서
+  // (before-input-event, 메뉴 accelerator) 렌더러가 알려 줘야 한다. 창 단위다 — 모니터별 창도
+  // 같은 캔버스를 쓴다.
+  ipcMain.on(ipcChannels.rdp.keyboardCapture, (event, active: boolean) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (window) {
+      setRdpKeyboardCapture(window.id, active === true);
     }
   });
 

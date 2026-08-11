@@ -852,6 +852,9 @@
       "sendCommand": "Sending the SSM command",
       "readSshConfig": "Reading the SSH configuration",
       "analyzeUsers": "Analyzing user candidates"
+    },
+    "windowsPassword": {
+      "fetchFailed": "Could not retrieve the Windows password."
     }
   },
   "transfer": {
@@ -1133,7 +1136,8 @@
       "ssmUnavailable": "SSM unavailable",
       "blocked": "Import blocked",
       "inspect": "Check SSH info",
-      "addWindows": "Add via SSM shell"
+      "addWindows": "Add via SSM shell",
+      "addRdp": "Add over RDP"
     },
     "error": {
       "portRange": "The SSH port must be a number between 1 and 65535.",
@@ -1190,6 +1194,25 @@
       "noEc2Instances": "No importable EC2 instance in this region.",
       "selectRegionEcs": "Choose a region to load its ECS clusters.",
       "selectRegionEc2": "Choose a region to load its EC2 instances."
+    },
+    "rdp": {
+      "title": "Get the initial administrator password",
+      "hint": "Decrypts the initial Windows administrator password with this instance's key pair and saves it as a credential. The private key never leaves this machine.",
+      "privateKeyLabel": "Private key",
+      "privateKeyPlaceholder": "-----BEGIN RSA PRIVATE KEY-----",
+      "pickKey": "Choose a file",
+      "fetch": "Get password",
+      "fetching": "Getting…",
+      "fetchFailed": "Could not retrieve the Windows password.",
+      "passwordLabel": "Administrator password",
+      "passwordPlaceholder": "Enter it manually if it could not be retrieved",
+      "noKeyPair": "No key pair",
+      "failure": {
+        "no-key": "Add the private key first.",
+        "encrypted-key": "That key is passphrase-protected. EC2 key pairs are not — check that this is the instance's key pair file.",
+        "wrong-key": "That key does not decrypt it. Check that it is this instance's key pair and an RSA key (ed25519 keys cannot be used here).",
+        "not-available": "AWS returned no password. The password may have been changed, the instance may be domain-joined, or it may have just booted — enter it manually below."
+      }
     }
   },
   "xshellImport": {
@@ -1681,6 +1704,7 @@
       "startupCommand": "Startup command",
       "terminalTheme": "Terminal theme",
       "adminSession": "Admin session",
+      "awsSsm": "Via SSM",
       "colorQuality": "Color quality",
       "allMonitors": "Use all monitors",
       "remoteAudio": "Remote audio",

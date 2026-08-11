@@ -852,6 +852,9 @@
       "sendCommand": "SSM 명령 전송",
       "readSshConfig": "SSH 설정 조회",
       "analyzeUsers": "사용자 후보 분석"
+    },
+    "windowsPassword": {
+      "fetchFailed": "Windows 비밀번호를 가져오지 못했습니다."
     }
   },
   "transfer": {
@@ -1133,7 +1136,8 @@
       "ssmUnavailable": "SSM 사용 불가",
       "blocked": "가져오기 차단됨",
       "inspect": "SSH 정보 확인",
-      "addWindows": "SSM 셸로 추가"
+      "addWindows": "SSM 셸로 추가",
+      "addRdp": "RDP 로 추가"
     },
     "error": {
       "portRange": "SSH 포트는 1에서 65535 사이 숫자여야 합니다.",
@@ -1190,6 +1194,25 @@
       "noEc2Instances": "이 리전에 가져올 수 있는 EC2 인스턴스가 없습니다.",
       "selectRegionEcs": "리전을 선택하면 ECS 클러스터를 불러옵니다.",
       "selectRegionEc2": "리전을 선택하면 EC2 인스턴스를 불러옵니다."
+    },
+    "rdp": {
+      "title": "초기 관리자 암호 가져오기",
+      "hint": "이 인스턴스의 키페어 개인키로 초기 Windows 관리자 암호를 풀어 자격증명으로 저장합니다. 개인키는 이 기기를 벗어나지 않습니다.",
+      "privateKeyLabel": "프라이빗 키",
+      "privateKeyPlaceholder": "-----BEGIN RSA PRIVATE KEY-----",
+      "pickKey": "파일에서 고르기",
+      "fetch": "암호 가져오기",
+      "fetching": "가져오는 중…",
+      "fetchFailed": "Windows 암호를 가져오지 못했습니다.",
+      "passwordLabel": "관리자 암호",
+      "passwordPlaceholder": "가져오지 못했으면 직접 입력",
+      "noKeyPair": "키페어 없음",
+      "failure": {
+        "no-key": "프라이빗 키를 넣어 주세요.",
+        "encrypted-key": "암호가 걸린 키입니다. EC2 가 만든 키페어는 암호가 없습니다 — 이 인스턴스의 키페어 파일인지 확인해 주세요.",
+        "wrong-key": "이 키로는 풀리지 않습니다. 이 인스턴스의 키페어인지, RSA 키인지 확인해 주세요(ed25519 키는 이 기능을 쓸 수 없습니다).",
+        "not-available": "AWS 가 암호를 주지 않았습니다. 암호를 바꿨거나 도메인에 조인된 인스턴스이거나, 부팅 직후일 수 있습니다 — 아래에 직접 입력해 주세요."
+      }
     }
   },
   "xshellImport": {
@@ -1681,6 +1704,7 @@
       "startupCommand": "시작 명령",
       "terminalTheme": "터미널 테마",
       "adminSession": "관리 세션",
+      "awsSsm": "SSM 경유",
       "colorQuality": "색 품질",
       "allMonitors": "모든 모니터 사용",
       "remoteAudio": "원격 소리",

@@ -6,7 +6,9 @@ import {
   type AwsHostSshInspectionResult,
   type AwsProfileStatus,
   type AwsProfileSummary,
+  type AwsWindowsPasswordFailure,
   type HostDraft,
+  type HostSecretInput,
 } from '@shared';
 import { useAwsImportController } from '../controllers/useImportControllers';
 import { DialogBackdrop } from './DialogBackdrop';
@@ -44,7 +46,7 @@ interface AwsImportDialogProps {
   open: boolean;
   currentGroupPath: string | null;
   onClose: () => void;
-  onImport: (draft: HostDraft) => Promise<void>;
+  onImport: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
 }
 
 function getSsmAvailabilityBadgeLabel(
@@ -184,6 +186,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     getAwsProfileStatus,
     importExternalAwsProfiles,
     inspectAwsHostSshMetadata,
+    getAwsWindowsPassword,
+    pickPrivateKeyFile,
     listExternalAwsProfiles,
     listAwsEc2Instances,
     listAwsEcsClusters,
@@ -292,6 +296,110 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setInspectionTarget(instance);
     setInspectionStatus('idle');
     setInspectionError(null);
+  };
+
+  /** RDP 로 추가하는 중인 인스턴스. Linux 의 검사 단계와 같은 자리다. */
+  const [rdpTarget, setRdpTarget] = useState<AwsEc2InstanceSummary | null>(null);
+  const [rdpPrivateKey, setRdpPrivateKey] = useState('');
+  const [rdpPassword, setRdpPassword] = useState('');
+  const [rdpFetchStatus, setRdpFetchStatus] = useState<'idle' | 'loading' | 'done'>('idle');
+  const [rdpFetchFailure, setRdpFetchFailure] = useState<AwsWindowsPasswordFailure | null>(null);
+  const [rdpError, setRdpError] = useState<string | null>(null);
+
+  const resetRdpRegistration = () => {
+    setRdpTarget(null);
+    setRdpPrivateKey('');
+    setRdpPassword('');
+    setRdpFetchStatus('idle');
+    setRdpFetchFailure(null);
+    setRdpError(null);
+  };
+
+  /**
+   * 초기 관리자 비밀번호를 가져온다.
+   *
+   * 개인키는 메인 프로세스로 한 번 건너가 그 자리에서 복호화되고 어디에도 남지 않는다. 결과가 비어
+   * 오는 경우가 흔해서(비밀번호를 바꿨거나 도메인 조인, 부팅 직후) 이유를 받아 화면에 그대로
+   * 안내하고, 사용자는 직접 입력으로 넘어갈 수 있다.
+   */
+  const fetchWindowsPassword = async () => {
+    if (!rdpTarget) {
+      return;
+    }
+    setRdpError(null);
+    setRdpFetchFailure(null);
+    setRdpFetchStatus('loading');
+    try {
+      const result = await getAwsWindowsPassword({
+        profileName: selectedProfile,
+        region: selectedRegion,
+        instanceId: rdpTarget.instanceId,
+        privateKeyPem: rdpPrivateKey,
+      });
+      if (result.password) {
+        setRdpPassword(result.password);
+        setRdpFetchStatus('done');
+        return;
+      }
+      setRdpFetchStatus('idle');
+      setRdpFetchFailure(result.reason ?? 'not-available');
+    } catch (error) {
+      setRdpFetchStatus('idle');
+      setRdpError(
+        error instanceof Error
+          ? error.message
+          : translate('awsImport.rdp.fetchFailed'),
+      );
+    }
+  };
+
+  /**
+   * Windows 인스턴스를 RDP 호스트 + 자격증명으로 등록한다.
+   *
+   * 검사(inspect)를 거치지 않는다 — 그 단계는 SSH 사용자명·포트를 찾는 것이고 RDP 에는 쓸 데가 없다.
+   * 대신 비밀번호가 있어야 등록된다(비밀번호 없이 만들면 붙을 수 없는 호스트가 남는다).
+   *
+   * `hostname` 은 사설 IP 를 그대로 쓴다. 실제 접속은 SSM 포워드가 만든 로컬 주소로 가지만,
+   * TLS 서버 이름과 인증서 지문 핀의 키는 이 이름이다.
+   */
+  const registerRdpInstance = async () => {
+    const instance = rdpTarget;
+    const password = rdpPassword.trim();
+    if (!instance || !password) {
+      return;
+    }
+    try {
+      setRdpError(null);
+      setIsRegistering(true);
+      await onImport(
+        {
+          kind: 'rdp',
+          label: instance.name || instance.instanceId,
+          groupName: currentGroupPath ?? '',
+          terminalThemeId: null,
+          hostname: instance.privateIp?.trim() || instance.instanceId,
+          port: 3389,
+          awsSsm: {
+            profileName: selectedProfile,
+            region: selectedRegion,
+            instanceId: instance.instanceId,
+          },
+        },
+        // 자격증명으로 저장한다 — 호스트 레코드에는 계정이 실리지 않는다. EC2 Windows 의 기본
+        // 관리자 계정은 Administrator 이고, 도메인은 이 경로에서 쓰지 않는다.
+        { kind: 'rdp', username: 'Administrator', password },
+      );
+      resetRdpRegistration();
+      onClose();
+    } catch (submitError) {
+      setRdpError(
+        submitError instanceof Error
+          ? submitError.message
+          : translate('awsImport.error.hostRegisterFailed'),
+      );
+    } finally {
+      setIsRegistering(false);
+    }
   };
 
   const inspectInstance = async (
@@ -786,7 +894,90 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
             </NoticeCard>
           ) : null}
 
-          {inspectionTarget ? (
+          {rdpTarget ? (
+            <div className="grid min-h-0 gap-4" data-testid="aws-import-rdp">
+              <Card>
+                <CardMain>
+                  <CardTitleRow>
+                    <strong>{rdpTarget.name || rdpTarget.instanceId}</strong>
+                    <StatusBadge tone="running">{rdpTarget.state || 'unknown'}</StatusBadge>
+                  </CardTitleRow>
+                  <CardMeta>
+                    <span>{rdpTarget.instanceId}</span>
+                    <span>{selectedRegion}</span>
+                    <span>{rdpTarget.privateIp || 'No private IP'}</span>
+                    {/* 어느 .pem 을 찾아야 하는지. 콘솔도 같은 자리에 보여 준다. */}
+                    <span>{rdpTarget.keyName || translate('awsImport.rdp.noKeyPair')}</span>
+                  </CardMeta>
+                </CardMain>
+              </Card>
+
+              <NoticeCard tone="info" title={translate('awsImport.rdp.title')}>
+                <p>{translate('awsImport.rdp.hint')}</p>
+              </NoticeCard>
+
+              <FieldGroup label={translate('awsImport.rdp.privateKeyLabel')}>
+                <textarea
+                  className="min-h-[7rem] font-mono text-[0.8rem]"
+                  value={rdpPrivateKey}
+                  onChange={(event) => setRdpPrivateKey(event.target.value)}
+                  placeholder={translate('awsImport.rdp.privateKeyPlaceholder')}
+                  disabled={rdpFetchStatus === 'loading' || isRegistering}
+                  spellCheck={false}
+                />
+              </FieldGroup>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  disabled={rdpFetchStatus === 'loading' || isRegistering}
+                  onClick={async () => {
+                    const picked = await pickPrivateKeyFile();
+                    if (picked?.content) {
+                      setRdpPrivateKey(picked.content);
+                    }
+                  }}
+                >
+                  {translate('awsImport.rdp.pickKey')}
+                </Button>
+                <Button
+                  disabled={
+                    !rdpPrivateKey.trim() || rdpFetchStatus === 'loading' || isRegistering
+                  }
+                  onClick={fetchWindowsPassword}
+                >
+                  {translate(
+                    rdpFetchStatus === 'loading'
+                      ? 'awsImport.rdp.fetching'
+                      : 'awsImport.rdp.fetch',
+                  )}
+                </Button>
+              </div>
+
+              {rdpFetchFailure ? (
+                <NoticeCard tone="warning" role="alert">
+                  {translate(`awsImport.rdp.failure.${rdpFetchFailure}`)}
+                </NoticeCard>
+              ) : null}
+              {rdpError ? (
+                <NoticeCard tone="danger" role="alert">
+                  {rdpError}
+                </NoticeCard>
+              ) : null}
+
+              {/* 못 가져왔으면 직접 입력한다. 가져왔어도 고칠 수 있어야 한다 — 비밀번호를 바꾼 뒤라면
+                  AWS 가 주는 값은 이미 옛 것이다. */}
+              <FieldGroup label={translate('awsImport.rdp.passwordLabel')}>
+                <input
+                  type="password"
+                  value={rdpPassword}
+                  onChange={(event) => setRdpPassword(event.target.value)}
+                  placeholder={translate('awsImport.rdp.passwordPlaceholder')}
+                  disabled={isRegistering}
+                />
+              </FieldGroup>
+            </div>
+          ) : inspectionTarget ? (
             <div className="grid min-h-0 gap-4" data-testid="aws-import-inspection">
               <Card>
                 <CardMain>
@@ -977,6 +1168,25 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                         ) : null}
                       </CardMain>
                       <CardActions>
+                        {/* Windows 는 셸(PowerShell)과 RDP 두 가지로 붙을 수 있다. 둘 다 SSM 을
+                            거치므로 보안그룹을 열지 않아도 된다. */}
+                        {isWindowsEc2Instance(instance) ? (
+                          <Button
+                            disabled={!canAddEc2Instance(instance) || isRegistering}
+                            onClick={() => {
+                              if (!canAddEc2Instance(instance)) {
+                                return;
+                              }
+                              // Linux 의 "SSH 정보 확인" 과 같은 자리다 — 바로 등록하지 않고 비밀번호를
+                              // 가져오는 단계로 넘어간다. 비밀번호 없이 만든 호스트는 붙을 수 없다.
+                              resetInspection();
+                              resetRdpRegistration();
+                              setRdpTarget(instance);
+                            }}
+                          >
+                            {translate('awsImport.badge.addRdp')}
+                          </Button>
+                        ) : null}
                         <Button
                           variant="primary"
                           disabled={!canAddEc2Instance(instance)}
@@ -1012,7 +1222,29 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         </ModalBody>
 
         <ModalFooter>
-          {inspectionTarget ? (
+          {rdpTarget ? (
+            <>
+              <Button
+                variant="secondary"
+                disabled={rdpFetchStatus === 'loading' || isRegistering}
+                onClick={resetRdpRegistration}
+              >
+                {translate('awsImport.action.back')}
+              </Button>
+              <Button
+                variant="primary"
+                // 비밀번호가 없으면 붙을 수 없는 호스트가 남는다. 가져오지 못했으면 직접 입력해야 한다.
+                disabled={!rdpPassword.trim() || rdpFetchStatus === 'loading' || isRegistering}
+                onClick={registerRdpInstance}
+              >
+                {translate(
+                  isRegistering
+                    ? 'awsImport.action.registering'
+                    : 'awsImport.action.registerHost',
+                )}
+              </Button>
+            </>
+          ) : inspectionTarget ? (
             <>
               <Button
                 variant="secondary"

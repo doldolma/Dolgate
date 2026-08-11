@@ -13,6 +13,8 @@ import { useRdpAudio } from "./useRdpAudio";
 import { useRdpAutoResize } from "./useRdpAutoResize";
 import { useRdpClipboard } from "./useRdpClipboard";
 import { useRdpInput } from "./useRdpInput";
+import { useRdpKeyboardCapture } from "./useRdpKeyboardCapture";
+import { rdpKeyboardCaptureAttributes } from "../../lib/rdp-keyboard-focus";
 
 interface RdpSessionCanvasProps {
   sessionId: string;
@@ -155,6 +157,10 @@ export function RdpSessionCanvas({
     useScreenCoordinates: Boolean(region),
   });
 
+  // 포커스가 여기 있는 동안에는 우리 앱 단축키(Ctrl+Tab 등)를 메인이 비켜 준다. 안 그러면 그 키가
+  // 캔버스에 닿지도 못하고 우리 탭만 넘어간다.
+  const keyboardCapture = useRdpKeyboardCapture();
+
   return (
     // absolute inset-0 이어야 한다(TerminalSessionPane 도 같다). 단독 세션 탭에서는 감싸는 슬롯에
     // 크기 지정이 없어 h-full 이 auto 로 풀리고, 그러면 이 컨테이너의 높이가 캔버스에서 나온다.
@@ -189,11 +195,20 @@ export function RdpSessionCanvas({
       <canvas
         ref={canvasRef}
         tabIndex={0}
+        // 렌더러 안의 단축키 처리(capture 단계 리스너)가 "지금 원격이 키보드를 쥐었나" 를 이걸로
+        // 판단한다. 상태를 따로 들지 않는 이유는 활성 요소가 곧 사실이라 어긋날 수 없기 때문이다.
+        {...rdpKeyboardCaptureAttributes}
         className={cn(
           'max-h-full max-w-full object-contain outline-none',
           (certificatePrompt || error) && 'hidden',
         )}
         {...handlers}
+        onFocus={keyboardCapture.onFocus}
+        onBlur={() => {
+          // 원래의 blur 처리(누르고 있던 키를 원격에서 떼어 주기)를 잃지 않게 같이 부른다.
+          handlers.onBlur();
+          keyboardCapture.onBlur();
+        }}
       />
     </div>
   );

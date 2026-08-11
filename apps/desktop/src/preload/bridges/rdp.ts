@@ -23,6 +23,14 @@ export interface RdpBridge {
   requestResize: (sessionId: string, width: number, height: number) => void;
   sendClipboardText: (sessionId: string, text: string) => void;
   syncClipboard: (sessionId: string) => void;
+  /**
+   * 원격 화면이 키보드를 잡았는지 알린다(캔버스 포커스 = true).
+   *
+   * 메인이 자기 단축키를 비켜 주는 데 쓴다. 렌더러가 스스로 못 하는 일이라 알려야 한다 —
+   * Win/Linux 의 `before-input-event` 는 렌더러 도달 전이고, macOS 메뉴 accelerator 는 웹 페이지
+   * 보다 먼저 매칭된다.
+   */
+  setKeyboardCapture: (active: boolean) => void;
   pickShareFolder: () => Promise<string | null>;
   /** 배치도 UI 가 그릴 로컬 디스플레이 목록. */
   listMonitors: () => Promise<RdpLocalMonitor[]>;
@@ -55,6 +63,8 @@ export function buildRdpBridge(ipcRenderer: IpcRenderer): RdpBridge {
       ipcRenderer.send(ipcChannels.rdp.clipboard, sessionId, text),
     syncClipboard: (sessionId) =>
       ipcRenderer.send(ipcChannels.rdp.syncClipboard, sessionId),
+    setKeyboardCapture: (active) =>
+      ipcRenderer.send(ipcChannels.rdp.keyboardCapture, active),
     pickShareFolder: () => ipcRenderer.invoke(ipcChannels.rdp.pickShareFolder),
     listMonitors: () => ipcRenderer.invoke(ipcChannels.rdp.listMonitors),
     describeSession: (sessionId) =>

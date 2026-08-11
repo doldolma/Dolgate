@@ -1550,7 +1550,15 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                     currentTab.hasReceivedOutput !== true &&
                     (
                       currentTab.status === "connecting" ||
-                      currentTab.status === "error"
+                      currentTab.status === "error" ||
+                      // connected 도 포함한다. SSM 세션의 connected 는 **데이터채널이 열린
+                      // 시점**에 나가고, 그 뒤의 핸드셰이크나 셸 기동이 실패하면 이 상태에서
+                      // 죽는다(계정의 KMS 세션 암호화가 그 경로다). 여기서 빠뜨리면 그런 실패가
+                      // 전부 "탭이 그냥 사라짐" 으로 보인다 — 이유를 볼 방법이 없다.
+                      //
+                      // 출력을 한 번도 못 받았다는 조건이 정상 종료를 걸러 준다. 붙은 뒤 쓰다가
+                      // 끝낸 세션은 최소한 프롬프트를 받았다.
+                      currentTab.status === "connected"
                     )
                   )
                 );

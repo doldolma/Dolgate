@@ -69,6 +69,8 @@ export function buildAwsBridge(ipcRenderer: IpcRenderer): DesktopApi["aws"] {
       ipcRenderer.invoke(ipcChannels.aws.listRegions, profileName),
     listEc2Instances: (profileName: string, region: string) =>
       ipcRenderer.invoke(ipcChannels.aws.listEc2Instances, profileName, region),
+    getWindowsPassword: (input) =>
+      ipcRenderer.invoke(ipcChannels.aws.getWindowsPassword, input),
     listEcsClusters: (profileName: string, region: string) =>
       ipcRenderer.invoke(ipcChannels.aws.listEcsClusters, profileName, region),
     loadEcsClusterSnapshot: (hostId: string) =>

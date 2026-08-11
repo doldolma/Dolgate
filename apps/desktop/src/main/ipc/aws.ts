@@ -164,6 +164,21 @@ export function registerAwsIpcHandlers(ctx: MainIpcContext): void {
     },
   );
 
+  // 개인키가 렌더러에서 메인으로 한 번 건너온다. 복호화는 메인이 하고 결과 비밀번호만 돌려준다 —
+  // 키를 저장하지도, 로그에 남기지도 않는다.
+  ipcMain.handle(
+    ipcChannels.aws.getWindowsPassword,
+    async (
+      _event,
+      input: {
+        profileName: string;
+        region: string;
+        instanceId: string;
+        privateKeyPem: string;
+      },
+    ) => ctx.awsService.getWindowsPassword(input),
+  );
+
   ipcMain.handle(
     ipcChannels.aws.listEcsClusters,
     async (_event, profileName: string, region: string) => {

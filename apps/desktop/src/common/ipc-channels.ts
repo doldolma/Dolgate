@@ -62,6 +62,8 @@ export const ipcChannels = {
     loginById: 'aws:login-by-id',
     listRegions: 'aws:list-regions',
     listEc2Instances: 'aws:list-ec2-instances',
+    // Windows 초기 관리자 비밀번호. 개인키는 메인 프로세스 밖으로 나가지 않는다.
+    getWindowsPassword: 'aws:get-windows-password',
     listEcsClusters: 'aws:list-ecs-clusters',
     loadEcsClusterSnapshot: 'aws:load-ecs-cluster-snapshot',
     loadEcsClusterUtilization: 'aws:load-ecs-cluster-utilization',
@@ -116,6 +118,9 @@ export const ipcChannels = {
     resize: 'rdp:resize',
     clipboard: 'rdp:clipboard',
     syncClipboard: 'rdp:sync-clipboard',
+    // 원격 화면이 키보드를 잡았는지. 메인이 자기 단축키를 비켜 주는 데 쓴다 — 렌더러 도달 전
+    // 단계(before-input-event)와 메뉴 accelerator 는 메인만 끌 수 있다.
+    keyboardCapture: 'rdp:keyboard-capture',
     pickShareFolder: 'rdp:pick-share-folder',
     // 배치도 UI 가 그릴 로컬 디스플레이 목록.
     listMonitors: 'rdp:list-monitors',

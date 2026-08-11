@@ -5,6 +5,7 @@ import {
   refreshAllTerminals,
 } from "../lib/terminal-write-registry";
 import { registerReconnectHandlers } from "../store/services/reconnect-handlers";
+import { isRdpKeyboardCaptureFocused } from "../lib/rdp-keyboard-focus";
 import { startTailnetStatusStream } from "../services/desktop/tailnet-watch";
 import {
   initReconnectHold,
@@ -100,6 +101,11 @@ export function NetworkBridge() {
     // 가로채 xterm 으로 새지 않게 한다. (Win/Linux 는 메뉴가 Ctrl+Tab 을 담당하므로 제외 —
     // 안 그러면 이중 전환.)
     const handleTabCycleKey = (event: KeyboardEvent) => {
+      // 원격 화면에 포커스가 있으면 Ctrl+Tab 은 원격 것이다. capture 단계라 캔버스보다 먼저
+      // 도착하므로, 캔버스가 stopPropagation 으로 막을 수 없어 여기서 비켜 준다.
+      if (isRdpKeyboardCaptureFocused()) {
+        return;
+      }
       if (
         document.documentElement.dataset.platform === "darwin" &&
         event.ctrlKey &&

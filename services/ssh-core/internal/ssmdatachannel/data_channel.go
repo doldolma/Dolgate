@@ -831,7 +831,8 @@ func (c *SsmDataChannel) processHandshakeRequest(msg *AgentMessage) error {
 	}
 	c.recordHandshakeRequest(req)
 
-	payload, err := json.Marshal(buildHandshakeResponse(req.RequestedClientActions))
+	response := buildHandshakeResponse(req.RequestedClientActions)
+	payload, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
@@ -843,8 +844,33 @@ func (c *SsmDataChannel) processHandshakeRequest(msg *AgentMessage) error {
 	out.PayloadType = HandshakeResponse
 	out.Payload = payload
 
-	_, err = c.WriteMsg(out)
-	return err
+	if _, err := c.WriteMsg(out); err != nil {
+		return err
+	}
+
+	// 응답을 먼저 보내고 나서 오류로 올린다. 순서가 중요하다 — 에이전트는 거부 사실을 알아야
+	// 자기 쪽 세션을 정리하고, 우리는 오류를 올려야 그 이유가 앱까지 간다.
+	//
+	// 안 올리면 에이전트가 조용히 세션을 끊고, 그건 앱에 "이유 없는 종료" 로 도착해서 탭만
+	// 사라진다(무엇 때문인지 어디에도 남지 않는다).
+	return unsupportedHandshakeError(response.ProcessedClientActions)
+}
+
+// unsupportedHandshakeError 는 우리가 거부한 액션이 있으면 사용자에게 보일 오류를 만든다.
+func unsupportedHandshakeError(actions []ProcessedClientAction) error {
+	for _, action := range actions {
+		if action.ActionStatus != Unsupported {
+			continue
+		}
+		if action.ActionType == KMSEncryption {
+			return errors.New(
+				"이 계정은 Session Manager 세션 암호화(KMS)를 사용합니다. 아직 지원하지 않는 방식이라 " +
+					"연결할 수 없습니다 — 세션 관리자 기본 설정에서 KMS 암호화를 끄면 연결됩니다.",
+			)
+		}
+		return fmt.Errorf("SSM 세션이 지원하지 않는 기능을 요구합니다: %s", action.ActionType)
+	}
+	return nil
 }
 
 func (c *SsmDataChannel) recordHandshakeRequest(req *HandshakeRequestPayload) {
@@ -945,6 +971,14 @@ func (c *SsmDataChannel) openDataChannel(token string) error {
 // for each element of RequestedClientActions (there's only 2 types, and port forwarding only uses the
 // SessionType action type, so there should only be 1 element), and the ActionStatus is Success.  Any
 // non-success is considered a failure in the receiving agent.
+//
+// 우리가 처리하지 못하는 액션은 Unsupported 로 되돌려준다. 대표적인 것이 KMSEncryption 이다 —
+// 계정의 Session Manager 설정에서 세션 암호화를 켜면 에이전트가 그걸 요청하는데, 이 구현에는
+// 스트림 암호화가 없다(그 설정을 쓰는 계정에서는 셸·포트 포워딩·SSH over SSM 이 다 안 된다).
+//
+// 예전에는 그런 액션에 빈 항목(ActionType "", ActionStatus 0)을 실어 보냈다. 그러면 에이전트는
+// 무효한 응답을 받고 끊는데, 어느 액션이 문제였는지가 어디에도 남지 않아 원인을 찾을 수 없다.
+// Unsupported 를 명시하면 실패 이유가 분명해진다. 지원 여부 자체는 달라지지 않는다.
 func buildHandshakeResponse(actions []RequestedClientAction) *HandshakeResponsePayload {
 	res := HandshakeResponsePayload{
 		// seems this can be whatever we need it to be, however certain features may only be available at
@@ -954,14 +988,15 @@ func buildHandshakeResponse(actions []RequestedClientAction) *HandshakeResponseP
 	}
 
 	for i, a := range actions {
-		action := new(ProcessedClientAction)
+		action := ProcessedClientAction{ActionType: a.ActionType}
 
 		if a.ActionType == SessionType {
-			action.ActionType = a.ActionType
 			action.ActionStatus = Success
+		} else {
+			action.ActionStatus = Unsupported
 		}
 
-		res.ProcessedClientActions[i] = *action
+		res.ProcessedClientActions[i] = action
 	}
 
 	return &res

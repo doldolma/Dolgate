@@ -9,6 +9,7 @@ import type {
   SnippetDraft,
   AwsSsmPortForwardTargetKind,
   AwsEc2InstanceSummary,
+  AwsWindowsPasswordResult,
   AwsEcsClusterListItem,
   AwsEcsClusterSnapshot,
   AwsEcsTaskTunnelServiceDetails,
@@ -1267,6 +1268,16 @@ export interface DesktopApi {
       profileName: string,
       region: string,
     ) => Promise<AwsEc2InstanceSummary[]>;
+    /**
+     * Windows 초기 관리자 비밀번호를 가져온다. 개인키는 메인 프로세스가 받아 그 자리에서 복호화하고
+     * 어디에도 남기지 않는다. 못 가져오는 경우가 흔해서 이유를 함께 돌려준다.
+     */
+    getWindowsPassword: (input: {
+      profileName: string;
+      region: string;
+      instanceId: string;
+      privateKeyPem: string;
+    }) => Promise<AwsWindowsPasswordResult>;
     listEcsClusters: (
       profileName: string,
       region: string,
@@ -1379,6 +1390,8 @@ export interface DesktopApi {
     requestResize: (sessionId: string, width: number, height: number) => void;
     sendClipboardText: (sessionId: string, text: string) => void;
     syncClipboard: (sessionId: string) => void;
+    /** 원격 화면이 키보드를 잡았는지. 메인이 자기 단축키를 비켜 주는 데 쓴다. */
+    setKeyboardCapture: (active: boolean) => void;
     pickShareFolder: () => Promise<string | null>;
     /** 배치도 UI 가 그릴 로컬 디스플레이 목록. */
     listMonitors: () => Promise<import("./rdp").RdpLocalMonitor[]>;

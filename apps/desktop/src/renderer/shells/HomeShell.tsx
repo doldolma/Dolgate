@@ -765,8 +765,9 @@ export function HomeShell({
         open={isAwsImportOpen}
         currentGroupPath={homeViewModel.currentGroupPath}
         onClose={() => setIsAwsImportOpen(false)}
-        onImport={async (draft) => {
-          await homeViewModel.saveHost(null, draft);
+        onImport={async (draft, secrets) => {
+          // RDP 경로는 자격증명(Administrator + 암호)을 함께 만든다. saveHost 가 시크릿까지 받는다.
+          await homeViewModel.saveHost(null, draft, secrets);
         }}
       />
 

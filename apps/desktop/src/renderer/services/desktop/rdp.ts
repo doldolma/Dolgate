@@ -39,6 +39,16 @@ export function syncRdpClipboard(sessionId: string): void {
   desktopApi.rdp.syncClipboard(sessionId);
 }
 
+/**
+ * 원격 화면이 키보드를 쥐었는지 메인에 알린다.
+ *
+ * 메인이 자기 단축키를 비켜 줘야 키가 캔버스까지 온다 — Win/Linux 의 before-input-event 는 렌더러
+ * 도달 전이고, macOS 메뉴 accelerator 는 웹 페이지보다 먼저 매칭된다.
+ */
+export function setRdpKeyboardCapture(active: boolean): void {
+  desktopApi.rdp.setKeyboardCapture(active);
+}
+
 export function subscribeRdpEvents(
   listener: (event: RdpSessionEvent) => void,
 ): () => void {

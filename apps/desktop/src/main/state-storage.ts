@@ -42,6 +42,7 @@ import type {
   AiSettings,
   TerminalFontFamilyId,
   TerminalThemeId,
+  RdpAwsSsmTarget,
   RdpDriveShare,
   RdpMonitorSelection
 } from '@shared';
@@ -641,6 +642,26 @@ function normalizeStoredEncryptedValue(value: unknown): StoredEncryptedValue | n
 }
 
 /**
+ * 저장된 SSM 경유 정보를 읽어들인다.
+ *
+ * 세 값이 다 있어야 의미가 있다 — 하나라도 비면 포워드를 열 수 없고, 그 상태로 두면 "SSM 으로
+ * 붙는 호스트" 처럼 보이면서 매번 실패한다. 반쯤 깨진 값은 없는 것으로 본다(그러면 hostname 으로
+ * 직접 붙는 평소 경로가 된다).
+ */
+function normalizeStoredRdpAwsSsm(value: unknown): RdpAwsSsmTarget | null {
+  if (!isObject(value)) {
+    return null;
+  }
+  const profileName = typeof value.profileName === 'string' ? value.profileName.trim() : '';
+  const region = typeof value.region === 'string' ? value.region.trim() : '';
+  const instanceId = typeof value.instanceId === 'string' ? value.instanceId.trim() : '';
+  if (!profileName || !region || !instanceId) {
+    return null;
+  }
+  return { profileName, region, instanceId };
+}
+
+/**
  * 저장된 모니터 선택을 읽어들인다.
  *
  * 저장 파일은 손으로 고칠 수도 있고 예전 버전이 쓴 것일 수도 있다. 모양이 어긋난 항목은 버린다 —
@@ -957,6 +978,7 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
       clipboardEnabled: value.clipboardEnabled === false ? false : null,
       colorDepth: value.colorDepth === 16 ? 16 : null,
       tailnetId: typeof value.tailnetId === 'string' && value.tailnetId.trim() ? value.tailnetId.trim() : null,
+      awsSsm: normalizeStoredRdpAwsSsm(value.awsSsm),
       monitors: normalizeStoredRdpMonitors(value.monitors),
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),

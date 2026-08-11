@@ -16,8 +16,13 @@ vi.mock("../../services/desktop/rdp", () => ({
   sendRdpInput: vi.fn(),
   setRdpClipboardText: vi.fn(),
   syncRdpClipboard: vi.fn(),
+  setRdpKeyboardCapture: vi.fn(),
   subscribeRdpAudio: () => () => {},
 }));
+
+const { sendRdpInput, setRdpKeyboardCapture } = await import(
+  "../../services/desktop/rdp"
+);
 
 // jsdom 에는 ResizeObserver 가 없다. 무엇을 관찰하기 시작했는지만 기록한다 — 크기 계산은
 // useRdpAutoResize 쪽 테스트가 따로 본다.
@@ -78,6 +83,71 @@ describe("RdpSessionCanvas auto-resize", () => {
     );
 
     expect(observedTargets.length).toBe(0);
+  });
+});
+
+// Ctrl+Tab 같은 키는 캔버스에 닿기도 전에 메인이 가져간다(Win/Linux 는 before-input-event,
+// macOS 는 메뉴 accelerator). 포커스가 여기 있는 동안 그걸 비켜 달라고 알려야 원격이 받는다.
+describe("RdpSessionCanvas 키보드 캡처", () => {
+  beforeEach(() => {
+    vi.mocked(setRdpKeyboardCapture).mockClear();
+    vi.mocked(sendRdpInput).mockClear();
+  });
+
+  function renderCanvas() {
+    const rendered = render(
+      <RdpSessionCanvas sessionId="s1" visible connected={CONNECTED} />,
+    );
+    const canvas = rendered.container.querySelector(
+      "[data-rdp-keyboard-capture]",
+    ) as HTMLCanvasElement;
+    return { ...rendered, canvas };
+  }
+
+  it("포커스가 오면 켠다", () => {
+    const { canvas } = renderCanvas();
+
+    act(() => canvas.focus());
+
+    expect(setRdpKeyboardCapture).toHaveBeenCalledWith(true);
+  });
+
+  it("포커스를 잃으면 끈다", () => {
+    const { canvas } = renderCanvas();
+    act(() => canvas.focus());
+    vi.mocked(setRdpKeyboardCapture).mockClear();
+
+    act(() => canvas.blur());
+
+    expect(setRdpKeyboardCapture).toHaveBeenCalledWith(false);
+  });
+
+  it("포커스를 잃을 때 누르고 있던 키도 여전히 떼어 준다", () => {
+    // blur 처리를 두 개(원래의 키 떼기 + 캡처 끄기) 합쳐 붙였다. 하나를 덮어쓰면 원격이 Ctrl 을
+    // 계속 눌린 것으로 안다.
+    const { canvas } = renderCanvas();
+    act(() => canvas.focus());
+
+    act(() => canvas.blur());
+
+    expect(sendRdpInput).toHaveBeenCalledWith(
+      "s1",
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "key", pressed: false }),
+      ]),
+    );
+  });
+
+  it("포커스를 쥔 채 사라져도 끈다", () => {
+    // 탭 닫기·원격 로그오프·재연결 교체에서는 blur 가 오지 않는다. 여기서 안 끄면 앱 단축키가
+    // 영구히 죽는다.
+    const { canvas, unmount } = renderCanvas();
+    act(() => canvas.focus());
+    vi.mocked(setRdpKeyboardCapture).mockClear();
+
+    unmount();
+
+    expect(setRdpKeyboardCapture).toHaveBeenCalledWith(false);
   });
 });
 

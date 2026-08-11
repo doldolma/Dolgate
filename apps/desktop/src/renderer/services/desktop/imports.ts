@@ -105,6 +105,21 @@ export function listAwsEc2Instances(profileName: string, region: string) {
   return desktopApi.aws.listEc2Instances(profileName, region);
 }
 
+/**
+ * Windows 초기 관리자 암호를 가져온다.
+ *
+ * 개인키는 메인 프로세스로 넘어가 그 자리에서 복호화되고 어디에도 저장되지 않는다 — 렌더러도, AWS 도
+ * 개인키를 보관하지 않는다.
+ */
+export function getAwsWindowsPassword(input: {
+  profileName: string;
+  region: string;
+  instanceId: string;
+  privateKeyPem: string;
+}) {
+  return desktopApi.aws.getWindowsPassword(input);
+}
+
 export function listAwsEcsClusters(profileName: string, region: string) {
   return desktopApi.aws.listEcsClusters(profileName, region);
 }

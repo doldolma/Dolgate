@@ -40,6 +40,7 @@ import {
   normalizeJumpHostIds,
   rebaseGroupPath,
   stripRemovedGroupSegment,
+  type RdpAwsSsmTarget,
   type RdpDriveShare,
   type RdpMonitorSelection
 } from '@shared';
@@ -727,6 +728,12 @@ function toRdpHostRecord(
     // 32 는 기본값이라 저장하지 않는다 — 접속 경로가 null 을 32 로 읽는다.
     colorDepth: draft.colorDepth === 16 ? 16 : null,
     tailnetId: draft.tailnetId?.trim() || null,
+    // SSM 경유. draft 에 없으면 기존 값을 이어받는다 — 호스트 편집 폼은 이 필드를 다루지 않으므로
+    // (AWS 가져오기가 정한다) 여기서 draft 만 보면 편집 한 번에 경로가 지워진다.
+    awsSsm:
+      draft.awsSsm === undefined
+        ? (current?.awsSsm ?? null)
+        : normalizeRdpAwsSsm(draft.awsSsm),
     // 인증서 핀과 같은 이유로 draft 에 없으면 기존 값을 이어받는다. 모니터 선택은 배치도에서만
     // 정해지므로, 호스트 폼처럼 이 필드를 모르는 경로가 draft 를 만들면 선택이 지워진다.
     monitors:
@@ -744,6 +751,24 @@ function toRdpHostRecord(
 
 // RDP 화면 크기는 200~8192 이고 폭은 홀수를 허용하지 않는다([MS-RDPEDISP] 2.2.2.2.1).
 // 규격을 벗어난 값은 연결 시점에 거부되므로 저장 전에 맞춰 둔다.
+/**
+ * SSM 경유 정보를 정리한다.
+ *
+ * 세 값이 다 있어야 포워드를 열 수 있다. 하나라도 비면 없는 것으로 본다 — 반쯤 채워진 값을 저장하면
+ * "SSM 으로 붙는 호스트" 처럼 보이면서 매번 실패한다.
+ */
+function normalizeRdpAwsSsm(
+  target: RdpAwsSsmTarget | null | undefined
+): RdpAwsSsmTarget | null {
+  const profileName = target?.profileName?.trim() ?? '';
+  const region = target?.region?.trim() ?? '';
+  const instanceId = target?.instanceId?.trim() ?? '';
+  if (!profileName || !region || !instanceId) {
+    return null;
+  }
+  return { profileName, region, instanceId };
+}
+
 /**
  * 공유 폴더 목록을 정리한다.
  *

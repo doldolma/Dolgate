@@ -477,6 +477,56 @@ describe("createAppStore sessions and auth recovery", () => {
     );
   });
 
+  // SSM 세션의 connected 는 데이터채널이 열린 시점에 나간다. 그 뒤 핸드셰이크나 셸 기동이
+  // 실패하면 이 상태에서 죽는데(계정의 KMS 세션 암호화가 그 경로다), 예전에는 탭이 그냥 사라져
+  // 사용자가 이유를 볼 방법이 없었다.
+  it("붙자마자 이유 없이 닫힌 AWS SSM 세션도 탭을 남긴다", async () => {
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [
+        createAwsSessionTab({ status: "connected", hasReceivedOutput: false }),
+      ],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(1);
+    expect(store.getState().tabs[0]).toMatchObject({
+      sessionId: "aws-session-1",
+      status: "error",
+    });
+  });
+
+  it("출력을 받은 뒤 정상 종료한 세션은 그대로 닫는다", async () => {
+    // 위 판정이 정상 종료까지 붙잡으면 셸을 끝낼 때마다 오류 탭이 남는다.
+    const store = createAppStore(createMockApi());
+    await store.getState().bootstrap();
+    store.setState((state) => ({
+      hosts: [...state.hosts, createAwsEc2Host()],
+      tabs: [
+        createAwsSessionTab({ status: "connected", hasReceivedOutput: true }),
+      ],
+      tabStrip: [{ kind: "session", sessionId: "aws-session-1" }],
+      activeWorkspaceTab: "session:aws-session-1",
+    }));
+
+    store.getState().handleCoreEvent({
+      type: "closed",
+      sessionId: "aws-session-1",
+      payload: {},
+    });
+
+    expect(store.getState().tabs).toHaveLength(0);
+  });
+
   it("keeps an AWS SSM session tab open when the SSM session closes with a non-zero exit code", async () => {
     const store = createAppStore(createMockApi());
     await store.getState().bootstrap();

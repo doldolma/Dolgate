@@ -34,7 +34,9 @@ import {
   startWarpgateBrowserImport,
   updateAwsProfile,
   updateAwsProfileRegion,
+  getAwsWindowsPassword,
 } from '../services/desktop/imports';
+import { pickPrivateKey } from '../services/desktop/settings';
 
 export function useAwsImportController() {
   return useMemo(
@@ -52,6 +54,8 @@ export function useAwsImportController() {
       listAwsEc2Instances,
       listAwsEcsClusters,
       inspectAwsHostSshMetadata,
+      getAwsWindowsPassword,
+      pickPrivateKeyFile: pickPrivateKey,
     }),
     [],
   );

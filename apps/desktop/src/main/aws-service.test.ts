@@ -1821,6 +1821,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'running',
         ssmAvailability: 'ready',
         ssmAvailabilityReason: null,
@@ -1868,6 +1869,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'running',
         ssmAvailability: 'unavailable',
         ssmAvailabilityReason:
@@ -1914,6 +1916,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'running',
         ssmAvailability: 'unavailable',
         ssmAvailabilityReason:
@@ -1960,6 +1963,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'stopped',
         ssmAvailability: 'unavailable',
         ssmAvailabilityReason:
@@ -2004,6 +2008,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'running',
         ssmAvailability: 'unknown',
         ssmAvailabilityReason:
@@ -2048,6 +2053,7 @@ describe('AwsService EC2 helpers', () => {
         availabilityZone: 'ap-northeast-2a',
         platform: 'Linux/UNIX',
         privateIp: '10.0.0.10',
+        keyName: null,
         state: 'running',
         ssmAvailability: 'unknown',
         ssmAvailabilityReason:
@@ -2106,6 +2112,7 @@ describe('AwsService EC2 helpers', () => {
           availabilityZone: 'ap-northeast-2a',
           platform: 'Linux/UNIX',
           privateIp: '10.0.0.10',
+          keyName: null,
           state: 'running',
           ssmAvailability: 'ready',
           ssmAvailabilityReason: null,
@@ -2151,6 +2158,7 @@ describe('AwsService EC2 helpers', () => {
       availabilityZone: 'ap-northeast-2c',
       platform: 'Linux/UNIX',
       privateIp: '10.0.0.99',
+      keyName: null,
       state: 'running',
       ssmAvailability: 'unknown',
       ssmAvailabilityReason: null,

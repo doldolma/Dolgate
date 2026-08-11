@@ -375,6 +375,27 @@ export interface RdpHostRecord extends HostBaseRecord {
   colorDepth?: 16 | 32 | null;
   /** 경유할 tailnet. 없으면 일반 네트워크로 직접 붙는다. SshHostRecord.tailnetId 와 같다. */
   tailnetId?: string | null;
+  /**
+   * AWS SSM 을 거쳐 붙는다. 없으면 `hostname` 으로 직접 붙는다.
+   *
+   * **새 호스트 종류를 만들지 않은 이유:** SSM 경유는 종류가 아니라 **경로**다. `tailnetId` 와
+   * 같은 성격이고, 그때도 별도 kind 를 만들지 않았다. 연결 시 SSM 포트 포워딩으로 로컬 주소를
+   * 얻어 그것을 dial 하되, TLS 서버 이름과 인증서 지문 핀은 `hostname` 기준을 유지한다.
+   */
+  awsSsm?: RdpAwsSsmTarget | null;
+}
+
+/**
+ * SSM 으로 3389 에 닿기 위해 필요한 최소 정보.
+ *
+ * 인스턴스의 사설 IP 는 `RdpHostRecord.hostname` 에 그대로 둔다 — SSM 이 안 될 때 같은 네트워크에서
+ * 직접 붙는 경로가 살아 있어야 하고, 인증서 핀의 키도 그 이름이다.
+ */
+export interface RdpAwsSsmTarget {
+  /** 로컬 AWS 프로파일 이름. 기기마다 다를 수 있어 이름으로 들고 있는다. */
+  profileName: string;
+  region: string;
+  instanceId: string;
 }
 
 export interface RdpHostDraft extends HostBaseDraft {
@@ -403,6 +424,8 @@ export interface RdpHostDraft extends HostBaseDraft {
   colorDepth?: 16 | 32 | null;
   /** 경유할 tailnet. [[RdpHostRecord]] 참고. */
   tailnetId?: string | null;
+  /** AWS SSM 경유. [[RdpHostRecord]] 참고. */
+  awsSsm?: RdpAwsSsmTarget | null;
 }
 
 export interface AwsEc2HostRecord extends HostBaseRecord {
@@ -1861,12 +1884,38 @@ export interface AwsProfileDetails extends AwsProfileStatus {
   orphanedSsoSessionName?: string | null;
 }
 
+/**
+ * Windows 초기 비밀번호를 못 가져온 이유. 화면이 무엇을 안내할지 정하는 값이다.
+ *
+ * - `no-key`: 개인키를 아직 안 넣었다
+ * - `encrypted-key`: 암호가 걸린 PEM (EC2 가 만든 키페어는 암호가 없다)
+ * - `wrong-key`: 이 인스턴스의 키페어가 아니거나 RSA 가 아니다(ed25519 는 이 기능을 못 쓴다)
+ * - `not-available`: AWS 가 빈 값을 줬다 — 비밀번호를 바꿨거나, 도메인 조인, 또는 부팅 직후
+ */
+export type AwsWindowsPasswordFailure =
+  | 'no-key'
+  | 'encrypted-key'
+  | 'wrong-key'
+  | 'not-available';
+
+export interface AwsWindowsPasswordResult {
+  password: string | null;
+  reason: AwsWindowsPasswordFailure | null;
+}
+
 export interface AwsEc2InstanceSummary {
   instanceId: string;
   name: string;
   availabilityZone?: string | null;
   platform?: string | null;
   privateIp?: string | null;
+  /**
+   * 이 인스턴스에 연결된 키페어 이름. 없으면 null.
+   *
+   * Windows 초기 관리자 비밀번호는 이 키페어의 개인키로만 풀린다. 어느 `.pem` 을 찾아야 하는지
+   * 화면이 말해 줘야 하고(콘솔도 같은 자리에 보여 준다), null 이면 조회 자체가 불가능하다.
+   */
+  keyName?: string | null;
   state?: string | null;
   ssmAvailability: "ready" | "unavailable" | "unknown";
   ssmAvailabilityReason?: string | null;

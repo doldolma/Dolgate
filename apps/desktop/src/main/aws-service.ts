@@ -2,10 +2,16 @@ import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } fr
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import {
+  constants as cryptoConstants,
+  createHash,
+  privateDecrypt,
+  randomUUID,
+} from "node:crypto";
 import { AWS_PROFILE_REGION_OPTIONS } from "@shared";
 import type {
   AwsEc2InstanceSummary,
+  AwsWindowsPasswordFailure,
   AwsEcsClusterListItem,
   AwsEcsClusterSnapshot,
   AwsEcsDeploymentSummary,
@@ -53,6 +59,7 @@ import {
   DescribeInstancesCommand,
   DescribeRegionsCommand,
   EC2Client,
+  GetPasswordDataCommand,
 } from "@aws-sdk/client-ec2";
 import {
   EC2InstanceConnectClient,
@@ -533,6 +540,7 @@ interface Ec2DescribeInstancesPayload {
   Reservations?: Array<{
     Instances?: Array<{
       InstanceId?: string;
+      KeyName?: string;
       Platform?: string;
       PlatformDetails?: string;
       PrivateIpAddress?: string;
@@ -701,6 +709,10 @@ function toInstanceSummary(
     platform:
       instance.PlatformDetails?.trim() || instance.Platform?.trim() || null,
     privateIp: instance.PrivateIpAddress?.trim() || null,
+    // Windows 비밀번호 조회에 필요한 키페어 이름. 어느 .pem 을 찾아야 하는지 화면이 말해 줘야 한다
+    // (AWS 콘솔도 같은 자리에 보여 준다). 키페어 없이 만든 인스턴스는 null 이고, 그 경우 조회 자체가
+    // 불가능하다.
+    keyName: instance.KeyName?.trim() || null,
     state: instance.State?.Name?.trim() || null,
     ssmAvailability: input?.ssmAvailability ?? "unknown",
     ssmAvailabilityReason: input?.ssmAvailabilityReason ?? null,
@@ -3475,6 +3487,66 @@ export class AwsService {
         return [...DEFAULT_AWS_EC2_REGIONS];
       }
       throw normalizeAwsSdkError(error, t('aws.region.listFailed'));
+    }
+  }
+
+  /**
+   * Windows 인스턴스의 **초기** 관리자 비밀번호를 가져온다.
+   *
+   * AWS 는 키페어의 공개키로 암호화한 값만 준다(`GetPasswordData`). 복호화는 **여기, 이 기계에서**
+   * 한다 — 개인키는 어디로도 나가지 않는다. 콘솔의 "프라이빗 키 업로드" 도 실제로는 브라우저 안에서
+   * 처리하는 것과 같다.
+   *
+   * 못 가져오는 경우가 흔하다. 그래서 던지지 않고 이유를 함께 돌려준다 — 화면이 "직접 입력" 으로
+   * 넘어가야 하기 때문이다:
+   * - 비밀번호를 바꿨거나 AMI 가 `Ec2SetPassword` 를 끈 상태거나 도메인 조인 → 빈 값
+   * - 부팅 직후 몇 분간 → 빈 값
+   * - 키페어가 RSA 가 아니거나(ed25519) 다른 키페어의 개인키 → 복호화 실패
+   */
+  async getWindowsPassword(input: {
+    profileName: string;
+    region: string;
+    instanceId: string;
+    privateKeyPem: string;
+  }): Promise<{ password: string | null; reason: AwsWindowsPasswordFailure | null }> {
+    const privateKeyPem = input.privateKeyPem.trim();
+    if (!privateKeyPem) {
+      return { password: null, reason: "no-key" };
+    }
+    // 암호가 걸린 키는 여기서 갈라낸다. 그냥 넘기면 복호화 오류로 떨어져서 "키가 틀렸다" 로 보이고,
+    // 사용자는 엉뚱한 키를 의심하게 된다. EC2 가 만들어 준 키페어는 암호가 걸려 있지 않다.
+    if (/ENCRYPTED/.test(privateKeyPem)) {
+      return { password: null, reason: "encrypted-key" };
+    }
+
+    let ciphertext: string;
+    try {
+      const output = await this.getEc2Client(input.profileName, input.region).send(
+        new GetPasswordDataCommand({ InstanceId: input.instanceId }),
+        { abortSignal: AbortSignal.timeout(30_000) },
+      );
+      ciphertext = output.PasswordData?.trim() ?? "";
+    } catch (error) {
+      throw normalizeAwsSdkError(error, t('aws.windowsPassword.fetchFailed'));
+    }
+
+    // 빈 값은 오류가 아니다 — 위 주석의 흔한 경우들이 전부 이 모양으로 온다.
+    if (!ciphertext) {
+      return { password: null, reason: "not-available" };
+    }
+
+    try {
+      const password = privateDecrypt(
+        {
+          key: privateKeyPem,
+          // AWS 는 PKCS#1 v1.5 로 암호화한다. Node 기본값은 OAEP 라서 지정하지 않으면 항상 실패한다.
+          padding: cryptoConstants.RSA_PKCS1_PADDING,
+        },
+        Buffer.from(ciphertext, "base64"),
+      ).toString("utf8");
+      return password ? { password, reason: null } : { password: null, reason: "not-available" };
+    } catch {
+      return { password: null, reason: "wrong-key" };
     }
   }
 

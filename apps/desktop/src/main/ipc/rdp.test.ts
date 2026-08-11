@@ -91,6 +91,11 @@ function createHarness(
     coreManager: {
       openTailnetForward: vi.fn(async () => "127.0.0.1:52341"),
       closeTailnetForward: vi.fn(),
+      startSsmTunnel: vi.fn(async () => ({
+        bindAddress: "127.0.0.1",
+        bindPort: 61022,
+      })),
+      stopSsmTunnel: vi.fn(async () => {}),
     },
     settings: {
       get: vi.fn(() => ({
@@ -357,6 +362,79 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     );
   });
 
+  it("routes an EC2 Windows host through an SSM tunnel", async () => {
+    // 보안그룹에 3389 를 열지 않아도 붙는 경로다 — SSM 에이전트가 인스턴스 안에서 localhost:3389
+    // 로 연결한다.
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-00c8d7296782e6ad5",
+      },
+    });
+
+    await harness.connectAndVerify();
+
+    expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ruleId: "rdp:sess-1",
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        targetId: "i-00c8d7296782e6ad5",
+        targetPort: 3389,
+        bindAddress: "127.0.0.1",
+        // OS 가 빈 포트를 고른다. 고정 포트면 같은 인스턴스에 두 번 붙을 때 충돌한다.
+        bindPort: 0,
+      }),
+    );
+    // 붙는 주소는 로컬 터널이지만 **호스트 이름은 그대로** 다 — TLS 서버 이름과 인증서 지문 핀의
+    // 키가 그것이다.
+    expect(harness.rdpManager.connect).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({
+        dialAddress: "127.0.0.1:61022",
+        host: "10.0.0.1",
+      }),
+      expect.objectContaining({ hostId: "rdp-1" }),
+    );
+    // 포트 포워딩 규칙으로 등록하면 사용자 화면에 유령 행이 생긴다. 세션 단위 터널을 써야 한다.
+    expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the SSM tunnel when the session ends", async () => {
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-00c8d7296782e6ad5",
+      },
+    });
+    await harness.connectAndVerify();
+
+    await handlers.get("rdp:disconnect")!({}, "sess-1");
+
+    expect(harness.ctx.coreManager.stopSsmTunnel).toHaveBeenCalledWith(
+      "rdp:sess-1",
+    );
+  });
+
+  it("prefers tailnet over SSM when a host somehow has both", async () => {
+    // 둘 다 있으면 하나만 골라야 한다. 두 포워드를 열면 어느 쪽으로 붙었는지 알 수 없고 하나가 샌다.
+    const harness = createHarness("AA:BB:CC", null, {
+      tailnetId: "net-a",
+      awsSsm: {
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-00c8d7296782e6ad5",
+      },
+    });
+
+    await harness.connectAndVerify();
+
+    expect(harness.ctx.coreManager.openTailnetForward).toHaveBeenCalled();
+    expect(harness.ctx.coreManager.startSsmTunnel).not.toHaveBeenCalled();
+  });
+
   it("does not open a forward for a plain host", async () => {
     const harness = createHarness("AA:BB:CC");
 
@@ -482,7 +560,12 @@ describe("registerRdpIpcHandlers monitor spread", () => {
     ];
 
     const ctx = {
-      coreManager: { openTailnetForward: vi.fn(), closeTailnetForward: vi.fn() },
+      coreManager: {
+        openTailnetForward: vi.fn(),
+        closeTailnetForward: vi.fn(),
+        startSsmTunnel: vi.fn(),
+        stopSsmTunnel: vi.fn(async () => {}),
+      },
       settings: { get: vi.fn(() => ({ rdpMonitorsByHostId: {} })) },
       hosts: {
         getById: vi.fn(() => host),

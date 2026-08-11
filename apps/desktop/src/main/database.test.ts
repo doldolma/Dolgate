@@ -683,6 +683,99 @@ describe('HostRepository', () => {
     expect(reloaded.getById('kindless-1')).toBeNull();
   });
 
+  // 레코드를 만드는 변환(toRdpHostRecord)과 읽는 정규화(normalizeHostRecord) 둘 다 필드를 나열해
+  // 새 객체를 만든다. 어느 한쪽에서 빠뜨리면 "저장은 되는데 다시 켜면 사라지는" 증상이 된다.
+  it('SSM 경유 정보를 저장하고 다시 읽는다', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-ssm-1', {
+      kind: 'rdp',
+      label: 'test',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.181',
+      port: 3389,
+      awsSsm: {
+        profileName: 'gw-prod',
+        region: 'ap-northeast-2',
+        instanceId: 'i-00c8d7296782e6ad5',
+      },
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloaded = new databaseModule.HostRepository().getById('rdp-ssm-1');
+
+    expect(reloaded).toMatchObject({
+      kind: 'rdp',
+      awsSsm: {
+        profileName: 'gw-prod',
+        region: 'ap-northeast-2',
+        instanceId: 'i-00c8d7296782e6ad5',
+      },
+    });
+  });
+
+  it('SSM 경유 정보가 반쯤 비어 있으면 버린다', async () => {
+    // 반쯤 채워진 값을 저장하면 "SSM 으로 붙는 호스트" 처럼 보이면서 접속마다 실패한다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-ssm-2', {
+      kind: 'rdp',
+      label: 'broken',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.181',
+      port: 3389,
+      awsSsm: {
+        profileName: 'gw-prod',
+        region: '',
+        instanceId: 'i-00c8d7296782e6ad5',
+      },
+    });
+
+    expect(hosts.getById('rdp-ssm-2')).toMatchObject({ awsSsm: null });
+  });
+
+  it('호스트를 편집해도 SSM 경유가 지워지지 않는다', async () => {
+    // 편집 폼은 이 필드를 다루지 않는다(AWS 가져오기가 정한다). draft 만 보면 이름만 바꿔도 경로가
+    // 사라져서 그 뒤로 직접 붙으려다 타임아웃 난다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-ssm-3', {
+      kind: 'rdp',
+      label: 'test',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.181',
+      port: 3389,
+      awsSsm: {
+        profileName: 'gw-prod',
+        region: 'ap-northeast-2',
+        instanceId: 'i-00c8d7296782e6ad5',
+      },
+    });
+
+    hosts.update('rdp-ssm-3', {
+      kind: 'rdp',
+      label: 'renamed',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.181',
+      port: 3389,
+    });
+
+    expect(hosts.getById('rdp-ssm-3')).toMatchObject({
+      label: 'renamed',
+      awsSsm: { instanceId: 'i-00c8d7296782e6ad5' },
+    });
+  });
+
   it('RDP 호스트에 username 을 싣지 않는다', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

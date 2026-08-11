@@ -387,6 +387,15 @@ function buildRdpRows(
     rows.push(tailnetRow);
   }
 
+  // SSM 을 거치는지는 주소만 봐서는 알 수 없다. 사설 IP 가 그대로 적혀 있어서 직접 붙는 것처럼
+  // 보이는데, 실제로는 포트 포워딩을 거친다 — 안 보여주면 왜 사설 IP 로 붙는지 설명이 안 된다.
+  if (host.awsSsm) {
+    rows.push({
+      label: t('hostDetail.row.awsSsm'),
+      value: `${host.awsSsm.instanceId} · ${host.awsSsm.region} · ${host.awsSsm.profileName}`,
+    });
+  }
+
   if (host.adminSession === true) {
     rows.push({
       label: t('hostDetail.row.adminSession'),

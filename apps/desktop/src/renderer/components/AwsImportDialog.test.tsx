@@ -105,6 +105,13 @@ function installMockApi(overrides?: {
           errorMessage: null,
         }),
       loadHostSshMetadata: vi.fn().mockResolvedValue(undefined),
+      getWindowsPassword: vi.fn().mockResolvedValue({
+        password: 'Init!alPass',
+        reason: null,
+      }),
+    },
+    shell: {
+      pickPrivateKey: vi.fn().mockResolvedValue(null),
     },
   };
 
@@ -186,6 +193,136 @@ describe('AWS import select disabled state', () => {
 describe('AwsImportDialog', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // Windows 인스턴스는 RDP 로도 붙을 수 있다. Linux 의 "SSH 정보 확인" 과 같은 자리에서 초기 관리자
+  // 암호를 가져와 자격증명으로 저장한다 — 암호 없이 만든 호스트는 붙을 수 없으므로 등록을 막는다.
+  it('RDP 로 추가하면 암호를 가져와 자격증명과 함께 등록한다', async () => {
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({ isAuthenticated: true, configuredRegion: 'ap-northeast-2' }),
+    );
+    api.aws.listRegions.mockResolvedValue(['ap-northeast-2']);
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-win',
+        name: 'test',
+        availabilityZone: 'ap-northeast-2a',
+        platform: 'Windows',
+        privateIp: '10.0.2.181',
+        keyName: 'gw-prod-keypair',
+        state: 'running',
+        ssmAvailability: 'ready',
+        ssmAvailabilityReason: null,
+      },
+    ]);
+    const onImport = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath="Servers"
+        onClose={vi.fn()}
+        onImport={onImport}
+      />,
+    );
+
+    // 목록 컨테이너는 카드보다 먼저 뜬다. 버튼 자체를 기다려야 인스턴스가 그려진 뒤다.
+    fireEvent.click(await screen.findByRole('button', { name: 'RDP 로 추가' }));
+
+    // 어느 .pem 이 필요한지 보여 줘야 사용자가 파일을 찾을 수 있다.
+    expect(screen.getByTestId('aws-import-rdp')).toHaveTextContent('gw-prod-keypair');
+
+    // 암호가 없으면 등록할 수 없다.
+    expect(screen.getByRole('button', { name: 'Host 등록' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('프라이빗 키'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '암호 가져오기' }));
+
+    await waitFor(() =>
+      expect(api.aws.getWindowsPassword).toHaveBeenCalledWith(
+        expect.objectContaining({ instanceId: 'i-win', region: 'ap-northeast-2' }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Host 등록' })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'rdp',
+          hostname: '10.0.2.181',
+          port: 3389,
+          awsSsm: {
+            profileName: 'default',
+            region: 'ap-northeast-2',
+            instanceId: 'i-win',
+          },
+        }),
+        // 계정과 암호는 호스트 레코드가 아니라 자격증명으로 간다.
+        { kind: 'rdp', username: 'Administrator', password: 'Init!alPass' },
+      ),
+    );
+  });
+
+  it('암호를 못 가져오면 이유를 보여주고 직접 입력을 받는다', async () => {
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({ isAuthenticated: true, configuredRegion: 'ap-northeast-2' }),
+    );
+    api.aws.listRegions.mockResolvedValue(['ap-northeast-2']);
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-win',
+        name: 'test',
+        platform: 'Windows',
+        privateIp: '10.0.2.181',
+        keyName: 'gw-prod-keypair',
+        state: 'running',
+        ssmAvailability: 'ready',
+        ssmAvailabilityReason: null,
+      },
+    ]);
+    // 암호를 바꿨거나 도메인 조인된 인스턴스는 AWS 가 빈 값을 준다 — 흔한 경우다.
+    api.aws.getWindowsPassword.mockResolvedValue({
+      password: null,
+      reason: 'not-available',
+    });
+    const onImport = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AwsImportDialog open currentGroupPath={null} onClose={vi.fn()} onImport={onImport} />,
+    );
+
+    // 목록 컨테이너는 카드보다 먼저 뜬다. 버튼 자체를 기다려야 인스턴스가 그려진 뒤다.
+    fireEvent.click(await screen.findByRole('button', { name: 'RDP 로 추가' }));
+    fireEvent.change(screen.getByLabelText('프라이빗 키'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '암호 가져오기' }));
+
+    // role 로 찾으면 다른 알림이 하나라도 같이 떠 있을 때 던진다. 이 패널 안만 본다.
+    await waitFor(() =>
+      expect(screen.getByTestId('aws-import-rdp')).toHaveTextContent('직접 입력'),
+    );
+    expect(screen.getByRole('button', { name: 'Host 등록' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('관리자 암호'), {
+      target: { value: 'TypedByHand1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Host 등록' }));
+
+    await waitFor(() =>
+      expect(onImport).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'rdp' }),
+        { kind: 'rdp', username: 'Administrator', password: 'TypedByHand1' },
+      ),
+    );
   });
 
   it('opens the create profile form, saves a valid profile, and auto-selects it', async () => {

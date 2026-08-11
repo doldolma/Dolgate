@@ -44,6 +44,10 @@ import { SessionShareService } from './session-share-service';
 import { SessionReplayService } from './session-replay-service';
 import { SyncService } from './sync-service';
 import { matchCloseActiveTab, matchTabCommand } from './tab-shortcuts';
+import {
+  forgetRdpKeyboardCapture,
+  isRdpKeyboardCaptureActive,
+} from './rdp-keyboard-capture';
 import { TermiusImportService } from './termius-import-service';
 import { UpdateService } from './update-service';
 import { NotificationService } from './notification-service';
@@ -92,6 +96,10 @@ function installApplicationMenu(openNewWindow: () => void): void {
       label: t('menu.file'),
       submenu: [
         {
+          // id 는 RDP 화면이 키보드를 쥔 동안 비활성화하기 위한 것이다
+          // (rdp-keyboard-capture.ts). macOS 는 Cmd 를 원격 Ctrl 로 옮기므로 Cmd+N 이 원격의
+          // 새 문서/창이 되어야 한다.
+          id: 'window-new',
           label: t('menu.newWindow'),
           accelerator: 'CmdOrCtrl+N',
           click: openNewWindow,
@@ -106,29 +114,35 @@ function installApplicationMenu(openNewWindow: () => void): void {
     {
       label: t('menu.tabs'),
       submenu: [
+        // 이 묶음의 id 는 전부 rdp-keyboard-capture.ts 가 비활성화 대상으로 쓴다.
         {
+          id: 'tab-next',
           label: t('menu.nextTab'),
           accelerator: isMac ? 'Cmd+Alt+Right' : 'Ctrl+Tab',
           click: () => sendTabCommand({ kind: 'next' }),
         },
         {
+          id: 'tab-prev',
           label: t('menu.prevTab'),
           accelerator: isMac ? 'Cmd+Alt+Left' : 'Ctrl+Shift+Tab',
           click: () => sendTabCommand({ kind: 'prev' }),
         },
         { type: 'separator' as const },
         ...Array.from({ length: 8 }, (_unused, i) => ({
+          id: `tab-index-${i}`,
           label: t('menu.nthTab', { index: i + 1 }),
           accelerator: `CmdOrCtrl+${i + 1}`,
           click: () => sendTabCommand({ kind: 'index' as const, index: i + 1 }),
         })),
         {
+          id: 'tab-last',
           label: t('menu.lastTab'),
           accelerator: 'CmdOrCtrl+9',
           click: () => sendTabCommand({ kind: 'last' }),
         },
         { type: 'separator' as const },
         {
+          id: 'tab-reopen',
           label: t('menu.reopenClosedTab'),
           accelerator: 'CmdOrCtrl+Shift+T',
           click: () => sendTabCommand({ kind: 'reopen' }),
@@ -142,6 +156,7 @@ function installApplicationMenu(openNewWindow: () => void): void {
         ...(isMac ? [{ role: 'zoom' as const }] : []),
         { type: 'separator' as const },
         {
+          id: 'tab-close',
           label: t('menu.closeTab'),
           accelerator: 'CmdOrCtrl+W',
           click: () => {
@@ -512,6 +527,8 @@ if (termiusHelperArgIndex >= 0) {
     window.on('closed', () => {
       workspaceWindowIds.delete(window.id);
       launchIntentsByWindowId.delete(window.id);
+      // 캡처를 쥔 채 닫히면 blur 가 오지 않는다. 지우지 않으면 앱 단축키가 영구히 죽는다.
+      forgetRdpKeyboardCapture(window.id);
     });
 
     if (process.platform !== 'darwin') {
@@ -525,6 +542,12 @@ if (termiusHelperArgIndex >= 0) {
     // 발동은 없다.
     if (process.platform !== 'darwin') {
       window.webContents.on('before-input-event', (event, input) => {
+        // 원격 화면이 키보드를 쥐고 있으면 아무것도 가로채지 않는다 — 이 단계에서 가져가면 캔버스는
+        // 그 키를 아예 못 본다. 메뉴 accelerator 는 캔버스의 preventDefault 가 알아서 막으므로
+        // (Win/Linux 는 렌더러가 소비하지 않은 키에만 발동) 여기만 비켜 주면 된다.
+        if (isRdpKeyboardCaptureActive(window.id)) {
+          return;
+        }
         const command = matchTabCommand(input);
         if (command) {
           event.preventDefault();
