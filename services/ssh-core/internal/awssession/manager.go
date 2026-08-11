@@ -67,6 +67,9 @@ const (
 	shellIntegrationArmed
 	shellIntegrationInstalling
 	shellIntegrationInstalled
+	// shellIntegrationUnsupported: 이 셸에는 통합을 넣을 수 없다고 판정했다(PowerShell).
+	// 되돌리지 않는 상태다 — 세션 도중 셸이 바뀌지는 않는다.
+	shellIntegrationUnsupported
 )
 
 type Manager struct {
@@ -171,6 +174,11 @@ func (m *Manager) CollectAutocomplete(sessionID string, revision int) (autocompl
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return autocomplete.Result{}, err
+	}
+	if session.shellIntegrationUnsupportedNow() {
+		// 통합이 없는 셸이다(PowerShell 등). 기다려도 준비되지 않으므로 바로 물러난다 — 여기서
+		// 기다리면 키를 누를 때마다 9초씩 멈춘다.
+		return autocomplete.Unsupported(), nil
 	}
 	if err := m.InstallShellIntegration(sessionID); err != nil {
 		return autocomplete.Result{}, err
@@ -407,7 +415,9 @@ func (h *sessionHandle) beginShellIntegration() bool {
 		return false
 	}
 	switch h.shellIntegrationState {
-	case shellIntegrationArmed, shellIntegrationInstalling, shellIntegrationInstalled:
+	case shellIntegrationArmed, shellIntegrationInstalling, shellIntegrationInstalled,
+		// 판정이 끝난 셸은 다시 무장하지 않는다 — 무장은 곧 출력을 붙잡는다는 뜻이다.
+		shellIntegrationUnsupported:
 		return false
 	}
 	h.shellIntegrationState = shellIntegrationArmed
@@ -418,7 +428,7 @@ func (h *sessionHandle) beginShellIntegration() bool {
 func (m *Manager) writeShellIntegrationCommand(sessionID string, session *sessionHandle) (bool, error) {
 	session.shellIntegrationMu.Lock()
 	switch session.shellIntegrationState {
-	case shellIntegrationInstalling, shellIntegrationInstalled:
+	case shellIntegrationInstalling, shellIntegrationInstalled, shellIntegrationUnsupported:
 		session.shellIntegrationMu.Unlock()
 		return false, nil
 	case shellIntegrationUnknown:
@@ -478,6 +488,24 @@ func (m *Manager) observeShellIntegrationOutput(sessionID string, session *sessi
 	session.shellIntegrationTail += string(chunk)
 	if len(session.shellIntegrationTail) > shellIntegrationTailLimit {
 		session.shellIntegrationTail = session.shellIntegrationTail[len(session.shellIntegrationTail)-shellIntegrationTailLimit:]
+	}
+
+	// PowerShell 이면 POSIX 스크립트를 넣을 수 없다. 붙잡고 있던 출력을 즉시 놓아준다 —
+	// 안 그러면 마커를 8초 기다리다 한꺼번에 쏟아진다(LooksLikePowerShellPrompt 주석).
+	//
+	// 아래 프롬프트 판정보다 **먼저** 봐야 한다. "PS C:\...>" 는 그쪽 검사도 통과한다(접미사가
+	// ">" 다).
+	if autocomplete.LooksLikePowerShellPrompt(session.shellIntegrationTail) {
+		session.stopShellIntegrationInstallTimersLocked()
+		session.shellIntegrationState = shellIntegrationUnsupported
+		session.shellIntegrationMu.Unlock()
+		// 이 함수는 필터보다 먼저 호출되므로(스트림 펌프 참고), 여기서 내보내면 지금 덩어리보다
+		// 앞선다 — 순서가 뒤집히지 않는다.
+		if flushed := session.handshake.Flush(); len(flushed) > 0 && m.HasSession(sessionID) {
+			m.emitStream(protocol.StreamFrame{Type: protocol.StreamTypeData, SessionID: sessionID}, flushed)
+		}
+		session.shellIntegrationMu.Lock()
+		return
 	}
 
 	if autocomplete.LooksLikeShellPrompt(session.shellIntegrationTail) {
@@ -554,6 +582,13 @@ func (h *sessionHandle) markShellIntegrationReady() {
 	h.shellIntegrationReadyOnce.Do(func() {
 		close(h.shellIntegrationReady)
 	})
+}
+
+// shellIntegrationUnsupportedNow 는 이 세션에 셸 통합을 넣을 수 없다고 판정됐는지 알려준다.
+func (h *sessionHandle) shellIntegrationUnsupportedNow() bool {
+	h.shellIntegrationMu.Lock()
+	defer h.shellIntegrationMu.Unlock()
+	return !h.shellIntegrationTypable || h.shellIntegrationState == shellIntegrationUnsupported
 }
 
 func (h *sessionHandle) waitForShellIntegrationReady(timeout time.Duration) bool {

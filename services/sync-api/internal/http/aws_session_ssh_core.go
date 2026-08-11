@@ -135,6 +135,10 @@ func (bridge *AwsSessionBridge) NewRunner(request awsSessionStartRequest) (awsSe
 		payload.StreamURL = token.StreamURL
 		payload.TokenValue = token.TokenValue
 		payload.SsmSessionID = token.SessionID
+		// 세션 암호화를 켠 계정에서는 이 자료가 없으면 에이전트가 handshake 에서 세션을 취소한다.
+		payload.KmsKeyID = token.KmsKeyID
+		payload.KmsCipherTextBlobB64 = token.KmsCipherTextBlobB64
+		payload.KmsPlainTextKeyB64 = token.KmsPlainTextKeyB64
 	}
 	if err := bridge.core.ConnectAWS(session.sessionID, uuid.NewString(), payload); err != nil {
 		session.finalize(nil)

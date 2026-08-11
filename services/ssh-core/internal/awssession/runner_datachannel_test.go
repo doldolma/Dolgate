@@ -201,15 +201,7 @@ func TestDataChannelRunnerEchoAndControls(t *testing.T) {
 
 	agent.waitFor(t, "open")
 
-	// The runner sends the initial terminal size right after opening.
-	initialSize := agent.waitFor(t, "size")
 	var dims map[string]uint32
-	if err := json.Unmarshal(initialSize.payload, &dims); err != nil {
-		t.Fatalf("initial size payload: %v", err)
-	}
-	if dims["rows"] != 30 || dims["cols"] != 100 {
-		t.Fatalf("initial size = %v, want rows=30 cols=100", dims)
-	}
 
 	if err := runner.Write([]byte("ls\n")); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -228,6 +220,16 @@ func TestDataChannelRunnerEchoAndControls(t *testing.T) {
 	}
 	if string(buffer[:n]) != "ls\n" {
 		t.Fatalf("stream output %q, want %q", buffer[:n], "ls\n")
+	}
+
+	// 접속 시 크기는 **첫 출력 뒤에** 나간다. 그전에 보내면 에이전트가 협상 중이라 조용히
+	// 버리기 때문이다(sendPendingSize 주석).
+	initialSize := agent.waitFor(t, "size")
+	if err := json.Unmarshal(initialSize.payload, &dims); err != nil {
+		t.Fatalf("initial size payload: %v", err)
+	}
+	if dims["rows"] != 30 || dims["cols"] != 100 {
+		t.Fatalf("initial size = %v, want rows=30 cols=100", dims)
 	}
 
 	if err := runner.SendControlSignal("interrupt"); err != nil {
@@ -275,7 +277,6 @@ func TestDataChannelRunnerRemoteClose(t *testing.T) {
 	runner := startTestDataChannelRunner(t, url)
 
 	agent.waitFor(t, "open")
-	agent.waitFor(t, "size")
 
 	agent.channelClosed()
 
@@ -301,7 +302,6 @@ func TestDataChannelRunnerHandlesLargeOutputFrame(t *testing.T) {
 	defer runner.Close()
 
 	agent.waitFor(t, "open")
-	agent.waitFor(t, "size")
 
 	want := bytes.Repeat([]byte("x"), 64*1024)
 	agent.echo(want)
@@ -326,7 +326,6 @@ func TestDataChannelRunnerKeepsReadingWhenStreamConsumerIsSlow(t *testing.T) {
 	defer runner.Close()
 
 	agent.waitFor(t, "open")
-	agent.waitFor(t, "size")
 
 	sent := make(chan struct{})
 	go func() {

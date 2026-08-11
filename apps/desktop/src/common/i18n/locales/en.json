@@ -741,7 +741,8 @@
       "commandIdMissing": "Could not determine the SSM command ID.",
       "invocationReadFailed": "Could not read the SSM command result.",
       "pingStatus": "This instance is registered as an SSM managed instance, but its Session Manager connection status is {{status}}. Check the SSM Agent, the instance profile, and network connectivity.",
-      "commandExitStatus": "The SSM command finished with status {{status}}."
+      "commandExitStatus": "The SSM command finished with status {{status}}.",
+      "sessionDataKeyFailed": "Could not create the KMS session data key."
     },
     "credentials": {
       "checkFailed": "The import was blocked because the AWS credentials could not be verified. Check the selected profile's sign-in state and credentials first.",
@@ -2455,6 +2456,7 @@
     "reset": "The connection to {{target}} was reset.",
     "generic": "The connection could not be completed.",
     "tailnetExpired": "This tailnet's node registration has expired.",
+    "tailnetLoginRejected": "The Tailscale login was rejected.",
     "tailnetAuthKeyHint": "This tailnet registers with an auth key, so there is no login to redo. If the key has expired or been used up, a new one is needed.",
     "tailnetReauthHint": "Retrying starts over from authorization.",
     "tailnetAuthInFlight": "This tailnet is being authenticated. Finish the browser login and the connection will continue.",

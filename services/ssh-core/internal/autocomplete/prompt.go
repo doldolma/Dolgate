@@ -76,3 +76,35 @@ func skipEscapeSequence(value string, esc int) int {
 		return esc + 1
 	}
 }
+
+// LooksLikePowerShellPrompt reports whether the output came from a Windows
+// PowerShell session.
+//
+// **왜 필요한가:** POSIX 셸 통합 스크립트를 PowerShell 에 타이핑하면 마커가 영원히 오지 않는다.
+// 그동안 handshake 필터가 출력을 전부 붙잡고 있어서, 화면이 8초 동안 멈춰 있다가 그 사이 친 것이
+// 한꺼번에 쏟아진다. 호스트 정보(awsPlatform)로 미리 걸러도 되지만 그 값이 비어 있는 기록이
+// 있으므로(직접 입력해 만든 호스트, 필드가 생기기 전에 만든 호스트), 출력 자체로도 알아낸다.
+//
+// 두 신호 중 하나면 충분하다. 배너는 세션 첫 덩어리에 오므로 설치를 시도하기도 전에 걸리고,
+// 프롬프트는 배너를 끈 프로필에서도 잡힌다. 통합을 시도하는 창은 세션 시작 직후뿐이라 POSIX
+// 셸에서 이 문구가 우연히 나올 여지는 없다.
+func LooksLikePowerShellPrompt(value string) bool {
+	stripped := StripTerminalControls(value)
+	if strings.Contains(stripped, "Windows PowerShell") ||
+		strings.Contains(stripped, "PowerShell 7") {
+		return true
+	}
+	// "PS C:\...>" — PowerShell 기본 프롬프트. 드라이브 문자가 있어야 POSIX 프롬프트와 섞이지
+	// 않는다.
+	trimmed := strings.TrimRight(stripped, " \t\r\n")
+	if !strings.HasSuffix(trimmed, ">") {
+		return false
+	}
+	lineStart := strings.LastIndexAny(trimmed, "\r\n") + 1
+	line := strings.TrimSpace(trimmed[lineStart:])
+	if !strings.HasPrefix(line, "PS ") {
+		return false
+	}
+	rest := line[len("PS "):]
+	return len(rest) >= 3 && rest[1] == ':' && (rest[2] == '\\' || rest[2] == '/')
+}

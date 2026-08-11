@@ -2,6 +2,8 @@ package http
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect"
+	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sso"
 	"github.com/aws/aws-sdk-go-v2/service/ssooidc"
@@ -261,6 +264,15 @@ type awsSsmSessionToken struct {
 	SessionID  string
 	StreamURL  string
 	TokenValue string
+	// KMS 세션 암호화 자료. 계정의 Session Manager 설정에서 세션 암호화를 켜 두면 SSM 에이전트가
+	// handshake 에서 이것을 요구하고, 못 내놓으면 세션을 취소한다(협상 불가).
+	//
+	// ssh-core 는 자격증명을 갖지 않으므로 데이터 키는 세션 토큰과 같은 방식으로 여기서 만들어
+	// 넘긴다. 셸(Standard_Stream) 세션만 대상이다 — 포트 포워딩은 세션 환경설정을 읽지 않아
+	// 에이전트가 이 액션을 요구하지 않는다.
+	KmsKeyID             string
+	KmsCipherTextBlobB64 string
+	KmsPlainTextKeyB64   string
 }
 
 type awsSsmTokenIssuer interface {
@@ -276,9 +288,91 @@ func (sdkAwsSsmTokenIssuer) IssueShellSession(
 	env map[string]string,
 	instanceID string,
 ) (awsSsmSessionToken, error) {
-	return startSsmSession(ctx, region, env, &ssm.StartSessionInput{
+	token, err := startSsmSession(ctx, region, env, &ssm.StartSessionInput{
 		Target: aws.String(instanceID),
 	}, "SSM 세션을 시작하지 못했습니다.")
+	if err != nil {
+		return awsSsmSessionToken{}, err
+	}
+	// 세션 암호화가 켜져 있으면 데이터 키까지 만들어 넘긴다. EncryptionContext 에 sessionId 가
+	// 들어가므로 StartSession 뒤에야 만들 수 있다.
+	if err := attachSessionDataKey(ctx, region, env, &token, instanceID); err != nil {
+		return awsSsmSessionToken{}, err
+	}
+	return token, nil
+}
+
+// sessionKmsKeyID 는 이 계정·리전의 세션 관리자 설정에 걸린 KMS 키다. 안 켰으면 빈 문자열.
+//
+// 설정은 `SSM-SessionManagerRunShell` 문서에 저장된다. 문서가 없거나 읽을 권한이 없으면 빈
+// 문자열로 둔다 — 대부분의 계정은 이 기능을 쓰지 않고, 실제로 켜져 있으면 에이전트가 handshake
+// 에서 요구하면서 "데이터 키를 못 받았다"는 분명한 이유로 실패한다.
+func sessionKmsKeyID(ctx context.Context, region string, env map[string]string) string {
+	requestCtx, cancel := context.WithTimeout(ctx, awsRequestTimeout)
+	defer cancel()
+
+	cfg, err := awsRequestConfig(requestCtx, region, env)
+	if err != nil {
+		return ""
+	}
+	output, err := ssm.NewFromConfig(cfg).GetDocument(requestCtx, &ssm.GetDocumentInput{
+		Name: aws.String("SSM-SessionManagerRunShell"),
+	})
+	if err != nil || output.Content == nil {
+		return ""
+	}
+	var document struct {
+		Inputs struct {
+			KmsKeyID string `json:"kmsKeyId"`
+		} `json:"inputs"`
+	}
+	if err := json.Unmarshal([]byte(*output.Content), &document); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(document.Inputs.KmsKeyID)
+}
+
+// attachSessionDataKey 는 세션 암호화가 켜져 있으면 데이터 키를 만들어 토큰에 붙인다.
+//
+// 64바이트와 EncryptionContext 두 항목은 규격이다(공식 session-manager-plugin·amazon-ssm-agent
+// 와 같아야 한다). 다르면 에이전트의 kms:Decrypt 가 실패해 세션이 열리지 않는다.
+func attachSessionDataKey(
+	ctx context.Context,
+	region string,
+	env map[string]string,
+	token *awsSsmSessionToken,
+	targetID string,
+) error {
+	keyID := sessionKmsKeyID(ctx, region, env)
+	if keyID == "" {
+		return nil
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, awsRequestTimeout)
+	defer cancel()
+
+	cfg, err := awsRequestConfig(requestCtx, region, env)
+	if err != nil {
+		return err
+	}
+	output, err := kms.NewFromConfig(cfg).GenerateDataKey(requestCtx, &kms.GenerateDataKeyInput{
+		KeyId:         aws.String(keyID),
+		NumberOfBytes: aws.Int32(64),
+		EncryptionContext: map[string]string{
+			"aws:ssm:SessionId": token.SessionID,
+			"aws:ssm:TargetId":  targetID,
+		},
+	})
+	if err != nil {
+		return normalizeAwsSdkError(err, "SSM 세션 데이터 키를 만들지 못했습니다. KMS 키의 kms:GenerateDataKey 권한을 확인해 주세요.")
+	}
+	if len(output.CiphertextBlob) == 0 || len(output.Plaintext) == 0 {
+		return errors.New("SSM 세션 데이터 키 응답이 비어 있습니다.")
+	}
+	token.KmsKeyID = keyID
+	token.KmsCipherTextBlobB64 = base64.StdEncoding.EncodeToString(output.CiphertextBlob)
+	token.KmsPlainTextKeyB64 = base64.StdEncoding.EncodeToString(output.Plaintext)
+	return nil
 }
 
 func (sdkAwsSsmTokenIssuer) IssuePortForwardSession(

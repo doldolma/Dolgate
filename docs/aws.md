@@ -70,6 +70,15 @@ In production, narrow the scope by region, instance, and document name.
         "ec2-instance-connect:SendSSHPublicKey"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "OnlyWhenSessionManagerKmsEncryptionIsEnabled",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetDocument",
+        "kms:GenerateDataKey"
+      ],
+      "Resource": "*"
     }
   ]
 }
@@ -83,6 +92,7 @@ What each permission is for:
 - `ssm:StartSession`, `ssm:TerminateSession`, `ssmmessages:OpenDataChannel`: AWS shell, SSH-over-SSM tunnels, SFTP, port forwarding, container tunnels
 - `ssm:SendCommand`, `ssm:GetCommandInvocation`: auto-detecting the SSH username/port
 - `ec2-instance-connect:SendSSHPublicKey`: injecting the temporary public key for AWS SFTP and SSH-over-SSM connections
+- `ssm:GetDocument`, `kms:GenerateDataKey`: **only when Session Manager KMS encryption is enabled** — see [KMS session encryption](#kms-session-encryption)
 
 When building a least-privilege policy, also consider splitting by SSM document.
 The main documents Dolgate uses are:
@@ -92,10 +102,70 @@ The main documents Dolgate uses are:
 
 In a least-privilege setup, include the SSM document ARNs in scope alongside `instance/*`.
 
+### KMS session encryption
+
+Session Manager can encrypt session data with a KMS key
+(**Session Manager → Preferences → KMS encryption**). This is not TLS: the WebSocket
+TLS terminates at the AWS service, so session bytes are plaintext while AWS relays
+them. With KMS encryption on, the client and the SSM Agent encrypt the payloads
+end to end, so the AWS service itself cannot read the session.
+
+**It is mandatory once enabled.** The agent asks for the `KMSEncryption` action during
+the session handshake, and any answer other than success makes the agent cancel the
+session — a client cannot opt out and fall back to plaintext.
+
+Which sessions it applies to:
+
+| Feature | Session type | Affected |
+| --- | --- | --- |
+| SSM shell (EC2 shell, PowerShell on Windows) | `SSM-SessionManagerRunShell` (Standard_Stream) | **Yes** |
+| SSH-over-SSM, port forwarding, SFTP, container tunnels, RDP over SSM | `AWS-StartPortForwardingSession*` (Port) | No |
+
+Port-type sessions do not read the session preferences document, which is also why
+CloudWatch/S3 session logs never capture port forwarding traffic.
+
+Permissions needed when it is enabled:
+
+- **User/role running Dolgate**: `kms:GenerateDataKey` on the key, and `ssm:GetDocument`
+  on `SSM-SessionManagerRunShell` so Dolgate can tell that encryption is enabled and
+  which key to use. Dolgate generates one data key per session, before opening the
+  data channel.
+- **The role the SSM Agent runs as**: `kms:Decrypt` on the same key. The agent receives
+  the encrypted data key and decrypts it to derive the same session keys.
+
+Be careful which role that second one is. It is the EC2 instance profile **only if the
+account does not use Default Host Management Configuration (DHMC)**. With DHMC the agent
+gets its credentials from the SSM service instead of from instance metadata, so the
+instance profile shown on the EC2 console page is not the identity calling KMS. Check it:
+
+```
+aws ssm get-service-setting --setting-id /ssm/managed-instance/default-ec2-instance-management-role
+```
+
+If that returns a role name, grant `kms:Decrypt` to **that** role. A DHMC role is
+recognizable by `ssm.amazonaws.com` in its trust policy and the
+`AmazonSSMManagedEC2InstanceDefaultPolicy` managed policy.
+
+If `kms:GenerateDataKey` is missing, the session fails at the handshake and Dolgate
+reports that the data key could not be created — check the key policy and the profile's
+permissions first. If `ssm:GetDocument` is missing, Dolgate cannot tell that encryption
+is required and the agent rejects the session for the same reason.
+
+If `kms:Decrypt` is missing on the agent's role, the failure reason cannot reach the
+client at all: the agent treats encryption as on from the start of the handshake, so it
+tries to encrypt even its own error message with a cipher it never initialized. Dolgate
+turns that silent cancellation into a message naming `kms:Decrypt`, and the exact reason
+is in the agent log on the instance (`Fetching data key failed`), which Run Command can
+read without a session.
+
 ### 2) EC2 instance profile (role)
 
 The target EC2 instance must be an **SSM managed instance**.
 The simplest setup attaches the AWS managed policy `AmazonSSMManagedInstanceCore` to the instance profile.
+If Session Manager KMS encryption is enabled, the role the agent runs as also needs
+`kms:Decrypt` on that key (`AmazonSSMManagedInstanceCore` does not include it). That is
+the instance profile only when the account does not use Default Host Management
+Configuration — see [KMS session encryption](#kms-session-encryption).
 
 How the two sides divide up:
 

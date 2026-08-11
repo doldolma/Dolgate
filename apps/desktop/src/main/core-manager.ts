@@ -1659,15 +1659,24 @@ export class CoreManager {
       this.consumeStdout(chunk);
     });
 
-    // stderr는 운영 중 진단 메시지를 위해 별도 error 이벤트로 내린다.
+    // 코어의 stderr 는 콘솔로 남긴다. rdp-core 와 같은 형태다([rdp-core] ↔ [ssh-core]).
+    //
+    // 여기서 세션 error 이벤트를 만들지 않는 이유: 이 출력에는 sessionId 가 없고, 그런 이벤트는
+    // 받는 곳이 없다. 렌더러·이벤트 브리지·녹화·공유가 전부 `if (!event.sessionId) return` 으로
+    // 시작한다. 즉 예전 코드의 error 브로드캐스트는 조용히 버려지는 일이었고, 그래서 코어가
+    // 남기는 진단이 어디에서도 보이지 않았다.
+    //
+    // 코어가 실제로 죽는 경우는 아래 "exit" 핸들러가 세션마다 code·signal 을 담아 closed 로
+    // 알린다 — 사용자에게 닿는 경로는 그쪽이다.
+    //
+    // 읽지 않으면 파이프 버퍼가 차서 코어가 쓰기에서 멈춘다.
     this.process.stderr.setEncoding("utf8");
     this.process.stderr.on("data", (chunk: string) => {
-      this.broadcastTerminalEvent({
-        type: "error",
-        payload: {
-          message: chunk.trim() || "SSH core error",
-        },
-      });
+      for (const line of chunk.split("\n")) {
+        if (line.trim()) {
+          console.error(`[ssh-core] ${line}`);
+        }
+      }
     });
 
     this.process.on("exit", (code, signal) => {
@@ -2406,7 +2415,16 @@ export class CoreManager {
     env?: Record<string, string>;
     unsetEnv?: string[];
     startupCommand?: string;
-    ssmSession?: { sessionId: string; streamUrl: string; tokenValue: string };
+    ssmSession?: {
+      sessionId: string;
+      streamUrl: string;
+      tokenValue: string;
+      // 계정 설정에서 세션 암호화를 켜 두면 여기에 데이터 키 자료가 실려 온다. 코어는 AWS
+      // 자격증명이 없어 직접 만들 수 없다(ssmdatachannel/doc.go).
+      kmsKeyId?: string;
+      kmsCipherTextBlobBase64?: string;
+      kmsPlainTextKeyBase64?: string;
+    };
     connectionKind?: "aws-ssm" | "aws-ecs-exec";
     connectionDetails?: string;
     /** 원격 셸 종류. Windows 인스턴스는 "powershell" — 코어가 셸 통합 시도 여부를 여기서 정한다. */
@@ -2458,6 +2476,9 @@ export class CoreManager {
       streamUrl: payload.ssmSession?.streamUrl,
       tokenValue: payload.ssmSession?.tokenValue,
       ssmSessionId: payload.ssmSession?.sessionId,
+      kmsKeyId: payload.ssmSession?.kmsKeyId,
+      kmsCipherTextBlobBase64: payload.ssmSession?.kmsCipherTextBlobBase64,
+      kmsPlainTextKeyBase64: payload.ssmSession?.kmsPlainTextKeyBase64,
       shellKind: payload.shellKind,
     };
     this.sendControl<ResolvedAwsConnectPayload>({

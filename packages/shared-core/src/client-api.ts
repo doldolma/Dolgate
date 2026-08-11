@@ -188,6 +188,17 @@ export interface ResolvedAwsConnectPayload {
   tokenValue?: string;
   ssmSessionId?: string;
   /**
+   * KMS 세션 암호화 자료.
+   *
+   * 계정의 Session Manager 설정에서 세션 암호화를 켜 두면 에이전트가 handshake 에서 이것을
+   * 요구하고, 못 내놓으면 세션이 취소된다(협상 불가). ssh-core 는 AWS 자격증명을 갖지 않으므로
+   * 데이터 키는 자격증명을 가진 쪽이 kms:GenerateDataKey 로 만들어 넘긴다 — 세션 토큰과 같은
+   * 방식이고, 평문 키도 같은 등급의 값이다.
+   */
+  kmsKeyId?: string;
+  kmsCipherTextBlobBase64?: string;
+  kmsPlainTextKeyBase64?: string;
+  /**
    * SSM 세션이 떨어지는 셸의 종류. Windows 인스턴스는 'powershell' 이고, 비어 있으면
    * POSIX 셸(리눅스에서 SSM 이 열어 주는 것)이다.
    *

@@ -741,7 +741,8 @@
       "commandIdMissing": "SSM 명령 ID를 확인하지 못했습니다.",
       "invocationReadFailed": "SSM 명령 실행 결과를 읽지 못했습니다.",
       "pingStatus": "이 인스턴스는 SSM managed instance로 등록되어 있지만 Session Manager 연결 상태가 {{status}}입니다. SSM Agent, 인스턴스 프로파일, 네트워크 연결을 확인해 주세요.",
-      "commandExitStatus": "SSM 명령이 {{status}} 상태로 종료되었습니다."
+      "commandExitStatus": "SSM 명령이 {{status}} 상태로 종료되었습니다.",
+      "sessionDataKeyFailed": "KMS 세션 데이터 키를 만들지 못했습니다."
     },
     "credentials": {
       "checkFailed": "AWS 자격 증명을 확인하지 못해 가져오기를 차단했습니다. 선택한 프로필의 로그인 상태와 자격 증명을 먼저 확인해 주세요.",
@@ -2455,6 +2456,7 @@
     "reset": "{{target}} 연결이 중간에 끊겼습니다.",
     "generic": "연결을 완료하지 못했습니다.",
     "tailnetExpired": "이 Tailnet 의 노드 등록이 만료됐습니다.",
+    "tailnetLoginRejected": "Tailscale 로그인이 거부됐습니다.",
     "tailnetAuthKeyHint": "auth key 로 등록된 Tailnet 이라 다시 로그인할 것이 없습니다. 키가 만료·소진됐다면 새 키가 필요합니다.",
     "tailnetReauthHint": "다시 시도하면 인증부터 새로 진행합니다.",
     "tailnetAuthInFlight": "이 Tailnet 의 인증이 진행 중입니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",

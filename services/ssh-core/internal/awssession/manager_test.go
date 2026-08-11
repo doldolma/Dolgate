@@ -578,3 +578,61 @@ func TestManagerShutdownKillsActiveSessions(t *testing.T) {
 		t.Fatalf("closed message = %q", payload.Message)
 	}
 }
+
+// PowerShell 세션은 셸 통합을 시도해서는 안 되고, 출력을 붙잡고 있어서도 안 된다.
+//
+// POSIX 스크립트를 넣으면 마커가 영원히 오지 않아 handshake 필터가 8초를 붙잡는다. 그동안 화면이
+// 멈춰 있고 그 사이 친 것이 한꺼번에 쏟아진다 — Windows SSM 셸이 정확히 이 상태였다.
+func TestManagerDoesNotHoldOutputOnPowerShellSession(t *testing.T) {
+	events := make(chan protocol.Event, 16)
+	streams := make(chan []byte, 16)
+	runner := newStubRunner()
+	manager := NewManagerWithRunnerFactory(func(event protocol.Event) {
+		events <- event
+	}, func(_ protocol.StreamFrame, payload []byte) {
+		streams <- payload
+	}, func(protocol.AWSConnectPayload) (sessionRunner, error) {
+		return runner, nil
+	})
+
+	// ShellKind 를 일부러 비워 둔다 — 호스트 기록에 플랫폼이 없는 경우가 이 시나리오다.
+	if err := manager.Connect("session-ps", "req-ps", protocol.AWSConnectPayload{
+		ProfileName: "default",
+		Region:      "ap-northeast-2",
+		InstanceID:  "i-windows",
+		Cols:        120,
+		Rows:        30,
+	}); err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	waitForEvent(t, events, protocol.EventConnected)
+
+	banner := "Windows PowerShell\r\nCopyright (C) Microsoft Corporation.\r\n\r\nPS C:\\Windows\\system32> "
+	runner.emitOutput(banner)
+
+	// 붙잡히면 여기서 기다리다 실패한다(실제로는 8초 뒤에야 나왔다).
+	got := waitForStream(t, streams)
+	if !bytes.Contains(got, []byte("Windows PowerShell")) {
+		t.Fatalf("배너가 그대로 나와야 한다: %q", got)
+	}
+
+	// 통합 스크립트를 타이핑해서도 안 된다. 화면이 PowerShell 파싱 오류로 덮인다.
+	runner.emitOutput("PS C:\\Windows\\system32> ")
+	time.Sleep(shellIntegrationInstallQuiet + 300*time.Millisecond)
+	if writes := runner.writesSnapshot(); len(writes) != 0 {
+		t.Fatalf("PowerShell 세션에 쓴 것이 있다: %q", writes)
+	}
+
+	// 자동완성은 9초를 기다리지 않고 즉시 물러나야 한다.
+	start := time.Now()
+	result, err := manager.CollectAutocomplete("session-ps", 1)
+	if err != nil {
+		t.Fatalf("CollectAutocomplete: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("자동완성이 %v 기다렸다 — 즉시 물러나야 한다", elapsed)
+	}
+	if result.Capability.Status != "unsupported" {
+		t.Fatalf("status = %q, want unsupported", result.Capability.Status)
+	}
+}

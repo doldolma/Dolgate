@@ -19,6 +19,11 @@ func (fakeAwsSsmTokenIssuer) IssueShellSession(context.Context, string, map[stri
 		SessionID:  "fake-ssm-session",
 		StreamURL:  "wss://fake.example/stream",
 		TokenValue: "fake-token",
+		// 세션 암호화를 켠 계정을 흉내 낸다 — 이 자료가 코어까지 가지 않으면 에이전트가
+		// handshake 에서 세션을 취소한다.
+		KmsKeyID:             "arn:aws:kms:ap-northeast-2:1:key/k1",
+		KmsCipherTextBlobB64: "Y2lwaGVy",
+		KmsPlainTextKeyB64:   "cGxhaW4=",
 	}, nil
 }
 
@@ -298,5 +303,39 @@ func waitForAwsRuntimeEvent(t *testing.T, events <-chan awsSessionRuntimeEvent, 
 		case <-deadline:
 			t.Fatalf("timed out waiting for AWS runtime event %s", expectedType)
 		}
+	}
+}
+
+// 서버 프록시 경로에서도 KMS 세션 암호화 자료가 코어까지 가야 한다.
+//
+// 직결 경로만 고쳤을 때 이 경로는 그대로 실패했다("서버 AWS SSM 프록시 연결에 실패했습니다").
+// 세션을 시작하는 주체가 서버라서 데이터 키도 서버가 만들어 넘겨야 한다.
+func TestServerProxyShellSessionCarriesKmsMaterialToCore(t *testing.T) {
+	core := &fakeAwsSessionCoreRuntime{}
+	bridge := newAwsSessionBridgeWithCore(core)
+	bridge.ssmTokens = fakeAwsSsmTokenIssuer{}
+	defer bridge.Close()
+
+	if _, err := bridge.NewRunner(awsSessionStartRequest{
+		HostID:     "host-aws-win",
+		Label:      "Windows EC2",
+		Region:     "ap-northeast-2",
+		InstanceID: "i-abc",
+		ShellKind:  "powershell",
+	}); err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	if len(core.connectCalls) != 1 {
+		t.Fatalf("ConnectAWS() calls = %d, want 1", len(core.connectCalls))
+	}
+	payload := core.connectCalls[0]
+	if payload.KmsKeyID != "arn:aws:kms:ap-northeast-2:1:key/k1" {
+		t.Errorf("KmsKeyID = %q", payload.KmsKeyID)
+	}
+	if payload.KmsCipherTextBlobB64 != "Y2lwaGVy" || payload.KmsPlainTextKeyB64 != "cGxhaW4=" {
+		t.Errorf("데이터 키 자료가 코어로 넘어가지 않았다: %+v", payload)
 	}
 }

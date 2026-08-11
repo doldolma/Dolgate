@@ -81,8 +81,10 @@ import {
   GetCommandInvocationCommand,
   SendCommandCommand,
   SSMClient,
+  GetDocumentCommand,
   StartSessionCommand,
 } from "@aws-sdk/client-ssm";
+import { GenerateDataKeyCommand, KMSClient } from "@aws-sdk/client-kms";
 import {
   ListAccountRolesCommand,
   ListAccountsCommand,
@@ -1343,6 +1345,7 @@ export class AwsService {
   private readonly ecsClientCache = new Map<string, ECSClient>();
   private readonly ec2ClientCache = new Map<string, EC2Client>();
   private readonly ssmClientCache = new Map<string, SSMClient>();
+  private readonly kmsClientCache = new Map<string, KMSClient>();
   private readonly ec2InstanceConnectClientCache = new Map<
     string,
     EC2InstanceConnectClient
@@ -1615,6 +1618,20 @@ export class AwsService {
     return client;
   }
 
+  private getKmsClient(profileName: string, region: string): KMSClient {
+    const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
+    const cached = this.kmsClientCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+    const client = new KMSClient({
+      credentials: this.getAwsSdkCredentialsProvider(profileName, region),
+      region,
+    });
+    this.kmsClientCache.set(cacheKey, client);
+    return client;
+  }
+
   private getSsmClient(profileName: string, region: string): SSMClient {
     const cacheKey = this.buildAwsSdkClientCacheKey(profileName, region);
     const cached = this.ssmClientCache.get(cacheKey);
@@ -1880,6 +1897,7 @@ export class AwsService {
     this.ecsClientCache.clear();
     this.ec2ClientCache.clear();
     this.ssmClientCache.clear();
+    this.kmsClientCache.clear();
     this.ec2InstanceConnectClientCache.clear();
     this.hasBackfilledManagedSsoCache = false;
 
@@ -4791,12 +4809,100 @@ export class AwsService {
     return !isE2EFakeAwsSessionEnabled();
   }
 
+  /**
+   * 이 계정·리전의 세션 관리자 설정에 걸린 KMS 키. 안 켰으면 null.
+   *
+   * 설정은 `SSM-SessionManagerRunShell` 문서에 저장된다. 이 값을 미리 읽는 이유는, KMS 암호화가
+   * 켜져 있으면 **세션을 열기 전에** 데이터 키를 만들어 두어야 하기 때문이다 — 에이전트는
+   * handshake 에서 곧바로 그것을 요구하고, ssh-core 는 AWS 자격증명이 없어 그 자리에서 만들 수
+   * 없다.
+   *
+   * 문서가 없으면(설정을 한 번도 바꾸지 않은 계정) 기본값이므로 암호화도 없다.
+   *
+   * 캐시하지 않는다 — 세션 시작은 드문 동작이고, 캐시하면 콘솔에서 설정을 바꿔도 앱을 다시
+   * 켜기 전까지 옛 판정을 쓴다.
+   */
+  private async readSessionKmsKeyId(
+    profileName: string,
+    region: string,
+  ): Promise<string | null> {
+    try {
+      const output = await this.getSsmClient(profileName, region).send(
+        new GetDocumentCommand({ Name: "SSM-SessionManagerRunShell" }),
+        { abortSignal: AbortSignal.timeout(15_000) },
+      );
+      if (!output.Content) {
+        return null;
+      }
+      const parsed = JSON.parse(output.Content) as {
+        inputs?: { kmsKeyId?: unknown };
+      };
+      const keyId = parsed.inputs?.kmsKeyId;
+      return typeof keyId === "string" && keyId.trim() ? keyId.trim() : null;
+    } catch (error) {
+      // 문서가 없거나 ssm:GetDocument 권한이 없는 경우다. 여기서 실패로 끊지 않는다 — KMS 를
+      // 안 쓰는 계정이 대부분이고, 실제로 켜져 있으면 에이전트가 handshake 에서 요구하면서
+      // "데이터 키를 못 받았다"는 분명한 이유로 실패한다.
+      console.warn("[aws] session preferences unreadable; assuming no KMS encryption", error);
+      return null;
+    }
+  }
+
+  /**
+   * 이 세션에 쓸 KMS 데이터 키를 만든다.
+   *
+   * 64바이트를 받는 것과 EncryptionContext 두 항목은 규격이다(공식 session-manager-plugin·
+   * amazon-ssm-agent 와 같아야 한다). 컨텍스트가 다르면 에이전트의 kms:Decrypt 가 실패한다.
+   */
+  private async generateSsmSessionDataKey(
+    profileName: string,
+    region: string,
+    kmsKeyId: string,
+    sessionId: string,
+    targetId: string,
+  ): Promise<{ cipherTextBlobBase64: string; plainTextKeyBase64: string }> {
+    const output = await this.getKmsClient(profileName, region).send(
+      new GenerateDataKeyCommand({
+        KeyId: kmsKeyId,
+        NumberOfBytes: 64,
+        EncryptionContext: {
+          "aws:ssm:SessionId": sessionId,
+          "aws:ssm:TargetId": targetId,
+        },
+      }),
+      { abortSignal: AbortSignal.timeout(15_000) },
+    );
+    if (!output.CiphertextBlob || !output.Plaintext) {
+      throw new Error(t('aws.ssm.sessionDataKeyFailed'));
+    }
+    return {
+      cipherTextBlobBase64: Buffer.from(output.CiphertextBlob).toString("base64"),
+      plainTextKeyBase64: Buffer.from(output.Plaintext).toString("base64"),
+    };
+  }
+
   async startSsmShellSession(
     profileName: string,
     region: string,
     instanceId: string,
-  ): Promise<{ sessionId: string; streamUrl: string; tokenValue: string }> {
+  ): Promise<{
+    sessionId: string;
+    streamUrl: string;
+    tokenValue: string;
+    kmsKeyId?: string;
+    kmsCipherTextBlobBase64?: string;
+    kmsPlainTextKeyBase64?: string;
+  }> {
+    const startedAt = Date.now();
     try {
+      // 세션 환경설정(어느 키를 쓰는지)은 세션과 무관하므로 StartSession 과 **같이** 시작한다.
+      //
+      // 순서대로 부르면 그 왕복이 그대로 연결 지연이 된다. 에이전트는 StartSession 직후 자기
+      // 워커를 띄우고 협상 요청을 채널에 올려놓고 기다리므로, 우리가 채널에 늦게 붙는 만큼
+      // 셸이 그만큼 늦게 뜬다(에이전트 로그의 "Initiating Handshake" 와 우리 응답 도착 시각
+      // 차이로 그대로 보인다). 이 함수는 실패해도 null 을 주고 절대 reject 하지 않으므로,
+      // StartSession 이 먼저 던져도 떠 있는 rejection 이 남지 않는다.
+      const kmsKeyIdPromise = this.readSessionKmsKeyId(profileName, region);
       const output = await this.getSsmClient(profileName, region).send(
         new StartSessionCommand({ Target: instanceId }),
         { abortSignal: AbortSignal.timeout(30_000) },
@@ -4807,7 +4913,36 @@ export class AwsService {
       if (!sessionId || !streamUrl || !tokenValue) {
         throw new Error(t('aws.ssm.sessionNoStream'));
       }
-      return { sessionId, streamUrl, tokenValue };
+
+      // 세션 암호화가 켜져 있으면 데이터 키까지 만들어 넘긴다. EncryptionContext 에 sessionId 가
+      // 들어가므로 이것만은 StartSession 뒤에야 만들 수 있다(미리 만들어 둘 수 없다).
+      const kmsKeyId = await kmsKeyIdPromise;
+      if (!kmsKeyId) {
+        return { sessionId, streamUrl, tokenValue };
+      }
+      const dataKeyStartedAt = Date.now();
+      const dataKey = await this.generateSsmSessionDataKey(
+        profileName,
+        region,
+        kmsKeyId,
+        sessionId,
+        instanceId,
+      );
+      // 이 왕복은 셸이 뜨는 시각에 그대로 더해진다 — 에이전트는 이미 협상 요청을 올려놓고
+      // 기다리는 중이다. 느려지면 여기서 바로 보이게 남긴다.
+      console.log(
+        `[aws] SSM 세션 데이터 키 생성 ${Date.now() - dataKeyStartedAt}ms (세션 준비 총 ${
+          Date.now() - startedAt
+        }ms)`,
+      );
+      return {
+        sessionId,
+        streamUrl,
+        tokenValue,
+        kmsKeyId,
+        kmsCipherTextBlobBase64: dataKey.cipherTextBlobBase64,
+        kmsPlainTextKeyBase64: dataKey.plainTextKeyBase64,
+      };
     } catch (error) {
       throw normalizeAwsSdkError(error, t('aws.ssm.sessionStartFailed'));
     }

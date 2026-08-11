@@ -365,6 +365,16 @@ type AWSConnectPayload struct {
 	// It decides whether the shell-integration script can be typed in at all --
 	// see beginShellIntegration in internal/awssession.
 	ShellKind string `json:"shellKind,omitempty"`
+	// KMS 세션 암호화 자료. 계정의 Session Manager 설정에서 세션 암호화를 켜 두면 에이전트가
+	// handshake 에서 이 자료를 요구하고, 못 내놓으면 세션이 취소된다(협상 불가).
+	//
+	// **데이터 키를 이 프로세스가 만들지 않는 이유:** ssh-core 는 AWS 자격증명을 갖지 않는다
+	// (internal/ssmdatachannel/doc.go). 세션 토큰과 같은 방식으로, 자격증명을 가진 쪽이
+	// kms:GenerateDataKey 를 부르고 결과만 넘긴다. 평문 키는 base64 로 실려 와 이 프로세스
+	// 메모리에만 머문다 — 세션 토큰과 같은 등급의 값이다.
+	KmsKeyID             string `json:"kmsKeyId,omitempty"`
+	KmsCipherTextBlobB64 string `json:"kmsCipherTextBlobBase64,omitempty"`
+	KmsPlainTextKeyB64   string `json:"kmsPlainTextKeyBase64,omitempty"`
 }
 
 type LocalConnectPayload struct {

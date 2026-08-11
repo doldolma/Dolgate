@@ -2411,7 +2411,102 @@ describe('AwsService.startSsmShellSession', () => {
       streamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
       tokenValue: 'token-1',
     });
-    expect(send.mock.calls[0][0].input).toEqual({ Target: 'i-abc' });
+    // 순서로 찾지 않는다 — 세션 환경설정 조회(GetDocument)는 StartSession 과 **동시에** 나가고,
+    // 어느 쪽이 먼저 도착하는지는 정하지 않는다(연결 지연을 줄이려고 병렬로 만들었다).
+    const inputs = send.mock.calls.map((call) => call[0].input);
+    expect(inputs).toContainEqual({ Target: 'i-abc' });
+    expect(inputs).toContainEqual({ Name: 'SSM-SessionManagerRunShell' });
+  });
+
+  // 계정 설정에서 세션 암호화를 켜 두면 에이전트가 handshake 에서 데이터 키를 요구하고, 못 내놓으면
+  // 세션이 취소된다(협상 불가). ssh-core 는 AWS 자격증명이 없으므로 여기서 미리 만들어 넘겨야 한다.
+  it('generates a session data key when the account enables KMS encryption', async () => {
+    const service = new AwsService() as unknown as {
+      getSsmClient: ReturnType<typeof vi.fn>;
+      getKmsClient: ReturnType<typeof vi.fn>;
+      startSsmShellSession: (
+        profileName: string,
+        region: string,
+        instanceId: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    const ssmSend = vi.fn(async (command: { input: Record<string, unknown> }) => {
+      if ('Name' in command.input) {
+        // 세션 관리자 기본 설정 문서. kmsKeyId 가 있으면 암호화가 켜진 것이다.
+        return {
+          Content: JSON.stringify({ inputs: { kmsKeyId: 'arn:aws:kms:ap-northeast-2:1:key/k1' } }),
+        };
+      }
+      return {
+        SessionId: 'ssm-sess-1',
+        StreamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
+        TokenValue: 'token-1',
+      };
+    });
+    const kmsSend = vi.fn().mockResolvedValue({
+      CiphertextBlob: new Uint8Array([1, 2, 3]),
+      Plaintext: new Uint8Array(64).fill(7),
+    });
+    service.getSsmClient = vi.fn().mockReturnValue({ send: ssmSend });
+    service.getKmsClient = vi.fn().mockReturnValue({ send: kmsSend });
+
+    const result = await service.startSsmShellSession('default', 'ap-northeast-2', 'i-abc');
+
+    expect(result).toMatchObject({
+      sessionId: 'ssm-sess-1',
+      kmsKeyId: 'arn:aws:kms:ap-northeast-2:1:key/k1',
+      kmsCipherTextBlobBase64: Buffer.from([1, 2, 3]).toString('base64'),
+      kmsPlainTextKeyBase64: Buffer.from(new Uint8Array(64).fill(7)).toString('base64'),
+    });
+    // 64바이트와 EncryptionContext 두 항목은 규격이다 — 어긋나면 에이전트의 kms:Decrypt 가
+    // 실패해서 세션이 열리지 않는다.
+    expect(kmsSend.mock.calls[0][0].input).toEqual({
+      KeyId: 'arn:aws:kms:ap-northeast-2:1:key/k1',
+      NumberOfBytes: 64,
+      EncryptionContext: {
+        'aws:ssm:SessionId': 'ssm-sess-1',
+        'aws:ssm:TargetId': 'i-abc',
+      },
+    });
+  });
+
+  // 설정 문서를 못 읽는 계정(문서 없음·ssm:GetDocument 권한 없음)에서 접속 자체를 막지 않는다.
+  // KMS 를 안 쓰는 계정이 대부분이고, 실제로 켜져 있으면 에이전트가 분명한 이유로 거절한다.
+  it('connects without a data key when the session preferences cannot be read', async () => {
+    const service = new AwsService() as unknown as {
+      getSsmClient: ReturnType<typeof vi.fn>;
+      getKmsClient: ReturnType<typeof vi.fn>;
+      startSsmShellSession: (
+        profileName: string,
+        region: string,
+        instanceId: string,
+      ) => Promise<Record<string, unknown>>;
+    };
+
+    const kmsSend = vi.fn();
+    service.getSsmClient = vi.fn().mockReturnValue({
+      send: vi.fn(async (command: { input: Record<string, unknown> }) => {
+        if ('Name' in command.input) {
+          throw new Error('AccessDeniedException');
+        }
+        return {
+          SessionId: 'ssm-sess-1',
+          StreamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
+          TokenValue: 'token-1',
+        };
+      }),
+    });
+    service.getKmsClient = vi.fn().mockReturnValue({ send: kmsSend });
+
+    const result = await service.startSsmShellSession('default', 'ap-northeast-2', 'i-abc');
+
+    expect(result).toEqual({
+      sessionId: 'ssm-sess-1',
+      streamUrl: 'wss://ssmmessages.example/v1/data-channel/ssm-sess-1',
+      tokenValue: 'token-1',
+    });
+    expect(kmsSend).not.toHaveBeenCalled();
   });
 
   it('fails when the StartSession response is missing stream details', async () => {

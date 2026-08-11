@@ -47,6 +47,11 @@ const (
 	EncChallengeRequest  PayloadType = iota
 	EncChallengeResponse PayloadType = iota
 	Flag                 PayloadType = iota
+	// StdErr·ExitCode 는 비대화형 명령 세션(AWS-StartNonInteractiveCommand)에서 출력 스트림을
+	// 나눠 보낼 때 쓰인다. 대화형 셸(Standard_Stream)에는 오지 않지만, 우리가 광고하는 클라이언트
+	// 버전(1.3.0.0)은 에이전트 기준으로 "출력 분리를 이해한다" 는 선언이므로 받을 수 있어야 한다.
+	StdErr   PayloadType = iota
+	ExitCode PayloadType = iota
 )
 
 // PayloadTypeFlag is the value set in the Payload of certain messages to indicate certain control operations.
