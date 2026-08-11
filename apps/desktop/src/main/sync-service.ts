@@ -20,11 +20,11 @@ import type {
 import {
   formatSyncRevisionEtag,
   isKnownHostKind,
-  isRdpHostRecord,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
   SYNC_DATA_FLOOR_HEADER,
-  SYNC_DATA_FLOOR_RDP_HOSTS,
+  SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS,
+  LEGACY_TOLERATED_HOST_KINDS,
   VAULT_EPOCH_HEADER,
 } from '@shared';
 import {
@@ -886,8 +886,15 @@ export class SyncService {
    * RDP 호스트를 가진 경우는 그 기기가 이미 올려 뒀다(서버는 max 로만 반영한다).
    */
   private resolveSyncDataFloor(): number {
-    return this.hosts.list().some((record) => isRdpHostRecord(record))
-      ? SYNC_DATA_FLOOR_RDP_HOSTS
+    // "RDP 가 있나" 가 아니라 "옛 버전이 모르는 종류가 있나" 로 본다.
+    //
+    // 종류 이름을 여기 적으면 새 종류를 만들 때마다 이 함수를 기억해야 하고, 한 번 잊으면 그
+    // 종류를 저장한 계정에서 1.8.10 이 흰 화면이 된다(RDP 때 겪은 그대로다). 지난 빌드가 알던
+    // 목록만 고정해 두고 그 밖은 전부 하한을 올린다 — VNC 든 그다음이든 이 함수는 그대로다.
+    return this.hosts
+      .list()
+      .some((record) => !LEGACY_TOLERATED_HOST_KINDS.has(record.kind))
+      ? SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS
       : 0;
   }
 
@@ -1145,6 +1152,12 @@ export class SyncService {
     const nextSecretMetadata: SecretMetadataRecord[] = secrets.map((secret) => ({
         secretRef: secret.secretRef,
         label: secret.label,
+        // 페이로드→메타데이터 투영은 필드 나열 화이트리스트다. RDP 구분(kind)과 계정을
+        // 빠뜨리면 pull 한 번에 모든 RDP 자격증명이 SSH 취급으로 강등돼 RDP 폼 목록에서
+        // 사라진다(실제로 그랬다). 페이로드에 필드를 더할 때 여기도 같이 갱신할 것.
+        kind: secret.kind ?? null,
+        username: secret.username?.trim() || null,
+        domain: secret.domain?.trim() || null,
         hasPassword: Boolean(secret.password),
         hasPassphrase: Boolean(secret.passphrase),
         hasManagedPrivateKey: Boolean(secret.privateKeyPem),

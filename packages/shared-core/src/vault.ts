@@ -33,13 +33,37 @@ export const VAULT_EPOCH_HEADER = "X-Dolgate-Vault-Epoch";
  * 계정 행에 max 로만 반영한다(단조). 그 수준을 못 갖춘 클라이언트는 동기화가 426 으로 막히고
  * 업데이트 안내를 받는다 — 계정 단위라, 문제 되는 항목을 쓰지 않는 사용자는 영향이 없다.
  *
- * 수준 1 = RDP 호스트가 있다(1.8.10 이하 데스크톱은 모르는 호스트 종류를 SSH 로 간주해 화면이
- * 비거나 레코드를 고쳐 되올린다).
+ * 수준 1 = 1.8.10 이하 데스크톱이 견디지 못하는 종류의 호스트가 있다. 그 버전은 모르는 종류를
+ * SSH 로 간주해 화면이 비거나 레코드를 고쳐 되올린다. RDP 가 첫 사례였고 그 뒤에 생기는 종류도
+ * 모두 같다 — 그래서 이 수준은 "RDP 가 있다" 가 아니라 "옛 버전이 모르는 종류가 있다" 로 판정한다
+ * (LEGACY_TOLERATED_HOST_KINDS).
  */
 export const SYNC_DATA_FLOOR_HEADER = "X-Dolgate-Sync-Data-Floor";
 
-/** RDP 호스트가 있는 계정의 데이터 수준. */
-export const SYNC_DATA_FLOOR_RDP_HOSTS = 1;
+/**
+ * 옛 버전이 모르는 종류의 호스트가 있는 계정의 데이터 수준.
+ *
+ * 새 종류가 생겨도 이 값은 그대로다. 1.9.0 부터는 모르는 종류를 무시하고 **보존**하므로, 필요한
+ * 것은 "그 종류를 안다" 가 아니라 "모르는 종류를 견딘다" 이고 그 능력은 수준 1 이 이미 뜻한다.
+ * 수준을 새로 만들어야 하는 것은 견디는 것만으로 부족한 변경(예: 1.9.0 이 망가뜨릴 새 페이로드
+ * 구획)이 생겼을 때뿐이다.
+ */
+export const SYNC_DATA_FLOOR_LEGACY_INTOLERANT_KINDS = 1;
+
+/**
+ * 1.8.10 이하 데스크톱이 알던 호스트 종류.
+ *
+ * **이 목록은 늘어나지 않는다.** 지난 빌드가 무엇을 알았는지에 대한 기록이므로 새 종류를 여기
+ * 추가하면 그 종류를 저장한 계정이 옛 클라이언트에 그대로 열려 흰 화면이 된다. 새 종류는
+ * KNOWN_HOST_KINDS 에만 추가한다.
+ */
+export const LEGACY_TOLERATED_HOST_KINDS: ReadonlySet<string> = new Set([
+  "ssh",
+  "aws-ec2",
+  "aws-ecs",
+  "warpgate-ssh",
+  "serial",
+]);
 
 // push 거부 응답의 code — 두 값 모두 "세션을 갱신해 볼트를 재판정하라"로 처리한다.
 // (vault_reset: 볼트 부재(초기화 직후) / vault_dek_mismatch: DEK 세대 불일치)

@@ -1217,6 +1217,11 @@ export function deriveSecretMetadata(
     .map(record => ({
       secretRef: record.secretRef,
       label: record.label,
+      // RDP 구분(kind)과 계정. 이 투영에서 빠뜨리면 RDP 자격증명이 SSH 취급으로 강등된다
+      // — 데스크톱 sync-service 의 같은 투영과 함께 갱신할 것.
+      kind: record.kind ?? null,
+      username: record.username?.trim() || null,
+      domain: record.domain?.trim() || null,
       hasPassword: Boolean(record.password),
       hasPassphrase: Boolean(record.passphrase),
       hasManagedPrivateKey: Boolean(record.privateKeyPem),

@@ -780,6 +780,11 @@ function buildSecretMetadata(secret: ManagedSecretPayload, updatedAt: string): S
   return {
     secretRef: secret.secretRef,
     label: secret.label,
+    // RDP 구분(kind)과 계정. 빠뜨리면 가져온 RDP 자격증명이 RDP 폼 목록에 안 나온다
+    // (kind 없는 메타데이터는 SSH 로 간주된다). sync-service 의 같은 투영과 함께 갱신할 것.
+    kind: secret.kind ?? null,
+    username: secret.username?.trim() || null,
+    domain: secret.domain?.trim() || null,
     hasPassword: Boolean(secret.password),
     hasPassphrase: Boolean(secret.passphrase),
     hasManagedPrivateKey: Boolean(secret.privateKeyPem),

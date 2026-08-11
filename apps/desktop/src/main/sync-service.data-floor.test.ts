@@ -161,7 +161,24 @@ describe("계정 데이터 수준 헤더", () => {
     expect(headers.at(-1)?.get("X-Dolgate-Sync-Data-Floor")).toBe("1");
   });
 
-  it("RDP 호스트가 없으면 0 을 알린다", async () => {
+  // 이게 이 판정의 핵심이다. 종류 이름을 나열하는 방식이면 새 종류를 만들 때마다
+  // resolveSyncDataFloor 를 고쳐야 하고, 한 번 잊으면 그 종류를 저장한 계정에서 1.8.10 이 흰
+  // 화면이 된다(RDP 때 그랬다). 이 빌드가 아직 모르는 종류라도 하한은 올라가야 한다.
+  it("옛 버전이 모르는 종류이면 RDP 가 아니어도 수준 1 을 알린다", async () => {
+    const futureHost = {
+      ...SSH_HOST,
+      id: "host-future",
+      kind: "will-not-exist-in-1.8.10",
+    } as unknown as typeof SSH_HOST;
+    const service = await createHarness([SSH_HOST, futureHost]);
+    const headers = stubFetch();
+
+    await service.pushDirty();
+
+    expect(headers.at(-1)?.get("X-Dolgate-Sync-Data-Floor")).toBe("1");
+  });
+
+  it("옛 버전이 알던 종류만 있으면 0 을 알린다", async () => {
     // 0 을 보내는 것과 안 보내는 것은 서버에서 같지만(둘 다 요구 없음), 모든 클라이언트가 자기
     // 수준을 선언하게 해 "안 보낸 것" 과 "0" 을 구분할 일을 없앤다. 0 이 계정 수준을 내리지는
     // 않는다 — 서버가 올리기만 한다.
