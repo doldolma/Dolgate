@@ -120,6 +120,9 @@ export class RdpMonitorWindows {
           : { frame: false }),
         show: false,
         backgroundColor: "#000000",
+        // 이 창은 내용이 원격 화면뿐이다. macOS 가 비활성 창의 첫 클릭을 삼키면 원격에 클릭을
+        // 보내려고 두 번 눌러야 한다.
+        acceptFirstMouse: true,
         webPreferences: {
           preload: path.join(__dirname, "preload.js"),
           contextIsolation: true,

@@ -1,4 +1,4 @@
-const { chmodSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
+const { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const desktopPackage = require(path.resolve(__dirname, '..', 'package.json'));
@@ -110,6 +110,15 @@ function buildWindowsDnsHelperVersionInfo(serviceDir, repoRoot) {
       2
     )
   );
+  // 아이콘은 SVG 에서 만들어 내는 산출물이라 없을 수 있다(생성 도구가 macOS 전용이다).
+  // 없다고 빌드를 세우지는 않는다 — 버전 정보는 그대로 박고 아이콘만 뺀다. 릴리스는 앞단에서
+  // generate:icons 를 돌리므로 아이콘이 붙고, dev·CI 빌드는 아이콘 없이 그냥 만들어진다.
+  const hasIcon = existsSync(iconPath);
+  if (!hasIcon) {
+    console.warn(
+      `아이콘이 없어 DNS 헬퍼에 아이콘 없이 버전 정보만 넣습니다: ${iconPath}`,
+    );
+  }
   run(
     'go',
     [
@@ -118,8 +127,7 @@ function buildWindowsDnsHelperVersionInfo(serviceDir, repoRoot) {
       '-64',
       '-o',
       sysoPath,
-      '-icon',
-      iconPath,
+      ...(hasIcon ? ['-icon', iconPath] : []),
       versionInfoPath
     ],
     {

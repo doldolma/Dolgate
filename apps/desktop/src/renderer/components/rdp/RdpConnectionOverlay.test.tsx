@@ -36,7 +36,12 @@ function seedTab(overrides: Partial<TerminalTab>) {
 
 describe('RdpConnectionOverlay', () => {
   beforeEach(() => {
-    appStore.setState({ hosts: [], tabs: [], tailnetStatuses: {} });
+    appStore.setState({
+      hosts: [],
+      tabs: [],
+      tailnetStatuses: {},
+      pendingRdpCertificatePrompt: null,
+    });
   });
 
   it('does not cover the canvas once connected', () => {
@@ -72,5 +77,51 @@ describe('RdpConnectionOverlay', () => {
 
     expect(screen.getByRole('alertdialog')).toBeTruthy();
     expect(screen.getByText('connect: TCP connect: refused')).toBeTruthy();
+  });
+
+  // 인증서 확인 화면과 겹쳐 보이던 버그. 둘 다 pane 을 덮는데 이 오버레이가 나중에 렌더되는
+  // 형제라 위에 깔리고, 배경이 반투명이라 아래 프롬프트가 비쳐 두 창이 겹쳐 보였다. 재시도 버튼이
+  // 있는 상태에서는 프롬프트 클릭까지 막혔다.
+  it('인증서 확인 중에는 물러난다', () => {
+    seedTab({ status: 'connecting' });
+    appStore.setState({
+      pendingRdpCertificatePrompt: {
+        sessionId: 'rdp-s1',
+        hostLabel: 'Win Box',
+        status: 'unknown',
+        certificate: {
+          fingerprint: 'AA:BB',
+          subject: 'CN=winbox',
+          issuer: 'CN=winbox',
+          notAfter: '2027-01-01T00:00:00Z',
+        },
+      } as never,
+    });
+
+    const { container } = render(<RdpConnectionOverlay sessionId="rdp-s1" />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  // 다른 세션의 프롬프트가 떠 있다고 이 세션의 진행 화면을 내리면, 붙는 중인데 검은 화면만 남는다.
+  it('다른 세션의 인증서 확인에는 그대로 남는다', () => {
+    seedTab({ status: 'connecting' });
+    appStore.setState({
+      pendingRdpCertificatePrompt: {
+        sessionId: 'rdp-other',
+        hostLabel: 'Other',
+        status: 'unknown',
+        certificate: {
+          fingerprint: 'CC:DD',
+          subject: 'CN=other',
+          issuer: 'CN=other',
+          notAfter: '2027-01-01T00:00:00Z',
+        },
+      } as never,
+    });
+
+    render(<RdpConnectionOverlay sessionId="rdp-s1" />);
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
   });
 });

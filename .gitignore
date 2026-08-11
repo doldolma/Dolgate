@@ -44,3 +44,5 @@ web/en/
 **/.env.local
 # 예시 파일은 커밋한다 — 위 .env.local.* 가 이것까지 잡으므로 명시적으로 되돌린다.
 !**/.env.local.example
+# generate:icons 가 .icns 를 만들 때 쓰는 중간 산출물. 결과물(.icns/.ico/.png)만 커밋한다.
+apps/desktop/build/icons/dolssh.iconset

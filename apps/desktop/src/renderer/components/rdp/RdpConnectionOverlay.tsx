@@ -34,6 +34,12 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
     tailnetId ? state.tailnetStatuses[tailnetId] : undefined,
   );
   const retryRdpConnection = useAppStore((state) => state.retryRdpConnection);
+  // 서버 인증서를 신뢰할지 묻는 화면이 떠 있는 동안은 이 오버레이를 그리지 않는다.
+  //
+  // 둘 다 pane 을 덮는데 이쪽이 나중에 렌더되는 형제라 위에 깔린다. 배경이 반투명이라 아래
+  // 프롬프트가 비쳐 "두 창이 겹쳐" 보이고, 재시도 버튼이 있는 상태에서는 클릭도 막는다.
+  // 사용자가 지금 해야 할 일은 프롬프트 하나이므로 그것만 남긴다.
+  const certificatePrompt = useAppStore((state) => state.pendingRdpCertificatePrompt);
 
   // 아직 붙지 못한 tailnet 세션인 동안만 상태를 읽는다. 붙은 연결에는 이 왕복이 얹히지 않는다.
   //
@@ -67,6 +73,10 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
 
   if (!tab || tab.status === 'connected') {
     // 붙었으면 화면을 가리지 않는다.
+    return null;
+  }
+  if (certificatePrompt?.sessionId === sessionId) {
+    // 다른 세션의 프롬프트라면 이 오버레이는 그대로 보여야 한다 — 그래서 세션까지 대조한다.
     return null;
   }
 

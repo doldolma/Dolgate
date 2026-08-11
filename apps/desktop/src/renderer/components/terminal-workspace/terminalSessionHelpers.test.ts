@@ -6,6 +6,7 @@ import {
   resolveConnectionOverlayMessage,
   resolveConnectionOverlayTitle,
   resolveTailnetFailureGuidance,
+  resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
 } from "./terminalSessionHelpers";
 
@@ -119,6 +120,27 @@ describe("resolveTailnetFailureGuidance", () => {
   // 설정을 아직 못 읽었으면 브라우저 경로로 떨어진다 — 그쪽이 기본이다.
   it("인증 방식을 모르면 브라우저 경로로 떨어진다", () => {
     expect(resolveTailnetFailureGuidance(null).message).toContain(
+      t("connectFailure.tailnetReauthHint"),
+    );
+  });
+});
+
+// 거부는 만료와 다른 사건이다 — 유효했던 등록이 수명을 다한 것이 아니라 애초에 받아들여지지
+// 않은 것이다(없는 auth key). 만료라고 말하면 사용자는 멀쩡한 키를 의심하러 간다.
+describe("resolveTailnetLoginRejectedGuidance", () => {
+  it("만료가 아니라 거부됐다고 말한다", () => {
+    const guidance = resolveTailnetLoginRejectedGuidance(true);
+
+    expect(guidance.message).toContain(t("connectFailure.tailnetLoginRejected"));
+    expect(guidance.message).not.toContain(t("connectFailure.tailnetExpired"));
+  });
+
+  // 뒤에 붙는 안내는 만료와 같다 — 어느 쪽이든 auth key 경로에는 다시 할 로그인이 없다.
+  it("auth key tailnet 에는 새 키가 필요하다고 말한다", () => {
+    expect(resolveTailnetLoginRejectedGuidance(true).message).toContain(
+      t("connectFailure.tailnetAuthKeyHint"),
+    );
+    expect(resolveTailnetLoginRejectedGuidance(false).message).toContain(
       t("connectFailure.tailnetReauthHint"),
     );
   });

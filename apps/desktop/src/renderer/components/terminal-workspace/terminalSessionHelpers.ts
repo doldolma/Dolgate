@@ -199,8 +199,28 @@ export interface TailnetFailureGuidance {
 export function resolveTailnetFailureGuidance(
   usesAuthKey: boolean | null,
 ): TailnetFailureGuidance {
+  return buildTailnetGuidance(t('connectFailure.tailnetExpired'), usesAuthKey);
+}
+
+/**
+ * 컨트롤 플레인이 로그인을 거부해서 못 붙은 실패를 어떻게 말할지.
+ *
+ * 만료와 나눠 두는 이유는 사용자가 할 일이 아니라 **일어난 일**이 다르기 때문이다. 만료는
+ * 유효했던 등록이 수명을 다한 것이고, 거부는 애초에 받아들여지지 않은 것이다(없는 auth key,
+ * 취소된 키). 뒤이어 붙는 안내는 같다 — 어느 쪽이든 auth key 경로에는 다시 할 로그인이 없다.
+ */
+export function resolveTailnetLoginRejectedGuidance(
+  usesAuthKey: boolean | null,
+): TailnetFailureGuidance {
+  return buildTailnetGuidance(t('connectFailure.tailnetLoginRejected'), usesAuthKey);
+}
+
+function buildTailnetGuidance(
+  lead: string,
+  usesAuthKey: boolean | null,
+): TailnetFailureGuidance {
   return {
-    message: `${t('connectFailure.tailnetExpired')} ${t(
+    message: `${lead} ${t(
       usesAuthKey
         ? 'connectFailure.tailnetAuthKeyHint'
         : 'connectFailure.tailnetReauthHint',

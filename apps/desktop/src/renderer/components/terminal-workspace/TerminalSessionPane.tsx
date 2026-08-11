@@ -34,6 +34,7 @@ import { Button, NoticeCard } from '../../ui';
 import { resolveConnectionFailurePresentation } from '../../store/utils';
 import {
   resolveTailnetFailureGuidance,
+  resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
 } from './terminalSessionHelpers';
 import { resolveConnectionStages } from './connectionStages';
@@ -366,8 +367,17 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
    * 그 경우 실패 화면을 그대로 두면 거짓말이 된다 — 이미 인증이 진행 중인데 "다시 로그인"을
    * 권하게 된다. 진행 중이라고 말하고, 설정 화면과 같은 동작(브라우저 다시 열기·취소)을 준다.
    */
+  /**
+   * 컨트롤 플레인이 로그인을 거부했는지.
+   *
+   * 거부돼도 상태는 needsAuth 로 남는다 — 잘못된 auth key 가 그렇다. 이것을 보지 않으면 아래
+   * 판정이 "인증 진행 중" 으로 기울어, 오지 않을 링크를 기다리라고 말하게 된다. 단계 목록과
+   * 설정 화면은 이미 이 신호를 보고 실패로 그리므로, 여기만 안 보면 한 화면이 서로 다른 말을 한다.
+   */
+  const tailnetLoginRejected = Boolean(tailnetStatus?.loginError?.trim());
   const tailnetAuthInFlight =
     tailnetSessionPending &&
+    !tailnetLoginRejected &&
     (tailnetStatus?.state === 'needsAuth' || tailnetStatus?.state === 'needsApproval');
 
   /**
@@ -403,10 +413,15 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
 
   // 만료만 그 자리에서 다시 로그인해서 풀린다. 인증이 진행 중인 경우는 새 로그인을 걸면 진행
   // 중인 것을 버리게 되므로 브라우저로 보낸다.
+  //
+  // 거부는 기다려서 풀리지 않으므로 무엇이 막혔는지 말해 준다 — 특히 auth key 로 등록한
+  // tailnet 은 다시 할 로그인이 없어서 새 키가 필요하다는 것까지 알려야 손을 쓸 수 있다.
   const tailnetGuidance =
     failureKind === 'tailscale-expired'
       ? resolveTailnetFailureGuidance(tailnetUsesAuthKey)
-      : null;
+      : tailnetLoginRejected
+        ? resolveTailnetLoginRejectedGuidance(tailnetUsesAuthKey)
+        : null;
 
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
 
@@ -773,6 +788,15 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
               // 그대로 둬(렌더 안정성 보존) 그리드는 좌상단 정렬이되 여백이 배경과 동색이라 덜 띈다.
               tab?.tmux && 'bg-[var(--surface)] [&_.xterm]:bg-[var(--surface)]',
             )}
+            // 마커 거터까지 터미널 테마 배경으로 칠한다. 앱 surface 로 두면 xterm 배경이 거터
+            // 오른쪽에서 각지게 시작해 터미널 블록이 "오른쪽만 둥글게" 보인다 — 테마 배경을
+            // 컨테이너 전체에 깔아야 양쪽 모서리가 같은 rounded-[6px] 를 따라간다. tmux pane 은
+            // 위의 dead-zone 블렌딩(bg surface)을 그대로 쓴다.
+            style={
+              isTmuxPane
+                ? undefined
+                : { backgroundColor: props.appearance.theme.background }
+            }
             data-terminal-canvas="true"
             data-tmux-pane={tab?.tmux ? 'true' : undefined}
             onMouseMove={controller.handleBlockPointerMove}

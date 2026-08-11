@@ -9,6 +9,7 @@ import type {
   AwsMetricHistoryPoint,
   ContainerConnectionProgressEvent,
   CoreEvent,
+  RdpCertificatePrompt,
   RdpSessionEvent,
   DesktopApi,
   DnsOverrideDraft,
@@ -643,6 +644,16 @@ interface AppStateParts {
   sftp: SftpState;
   pendingHostKeyPrompt: PendingHostKeyPrompt | null;
   /**
+   * 사용자의 판단을 기다리는 RDP 서버 인증서. 없으면 null.
+   *
+   * **왜 스토어에 두는가:** 프롬프트를 그리는 곳(RdpSessionCanvas)과 그동안 자기를 내려야 하는
+   * 곳(RdpConnectionOverlay)이 형제 컴포넌트라 서로의 로컬 state 를 볼 수 없다. 각자 이벤트를
+   * 구독하면 "사용자가 눌렀다"는 사실은 누른 쪽만 알아서, 수락한 뒤에도 연결 화면이 계속 숨은 채
+   * 남는다. 한 곳에 두고 둘이 읽는다 — SSH 의 pendingHostKeyPrompt 와 같은 이유다.
+   */
+  pendingRdpCertificatePrompt: RdpCertificatePrompt | null;
+  setPendingRdpCertificatePrompt: (prompt: RdpCertificatePrompt | null) => void;
+  /**
    * tailnet 별 최신 상태. 화면들이 여기만 읽어서 서로 다른 말을 하지 않게 한다.
    *
    * 노드는 tailnet 단위로 공유되므로 상태도 하나다 — 설정에서 시작한 연결의 진행을 터미널
@@ -1276,6 +1287,8 @@ export type NetworkSlice = Pick<
   | "portForwardRuntimes"
   | "knownHosts"
   | "pendingHostKeyPrompt"
+  | "pendingRdpCertificatePrompt"
+  | "setPendingRdpCertificatePrompt"
   | "tailnetStatuses"
   | "localTailnetNodeName"
   | "savePortForward"

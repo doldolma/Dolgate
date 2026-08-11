@@ -1813,11 +1813,22 @@ mod danger {
     use tokio_rustls::rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use tokio_rustls::rustls::{DigitallySignedStruct, Error, SignatureScheme, pki_types};
 
-    /// TODO(before release): RDP servers normally present a self-signed certificate, so a CA check
-    /// is not the answer — pinning is. The app already keeps SSH known-hosts state and surfaces a
-    /// trust prompt; RDP needs the same, keyed on the certificate fingerprint. Until that exists
-    /// this accepts any certificate, which leaves the connection open to an active
-    /// man-in-the-middle. Not shippable as-is.
+    /// Accepts any certificate **on purpose**: RDP servers normally present a self-signed
+    /// certificate, so a CA check would reject every real server. Trust is decided one layer up by
+    /// fingerprint pinning, the same model as SSH known-hosts:
+    ///
+    ///   1. this verifier lets the TLS handshake finish so we can see the certificate at all,
+    ///   2. the fingerprint is computed (`tls_upgrade`) and compared with the approved one,
+    ///   3. a mismatch (or a first-ever connection) asks the user and waits for the verdict —
+    ///      `anyhow::bail!` on refusal, and CredSSP runs inside `connect_finalize` afterwards, so
+    ///      **no credential byte leaves this process before the approval**,
+    ///   4. the app persists the approved fingerprint on the host record
+    ///      (`certificateFingerprint`) and syncs it, so later connections do not ask again.
+    ///
+    /// Residual risk is the one trust-on-first-use always has: the very first connection to a host
+    /// cannot tell a real server from an impostor. Every connection after that detects a changed
+    /// certificate. Do not "fix" this by enabling a CA check — that breaks self-signed servers
+    /// without adding anything pinning does not already give.
     #[derive(Debug)]
     pub(super) struct NoCertificateVerification;
 

@@ -5,6 +5,7 @@ import type {
   RdpSessionEvent,
 } from "@shared";
 import { cn } from "../../lib/cn";
+import { useAppStore } from "../../store/appStore";
 import { subscribeRdpEvents, trustRdpCertificate } from "../../services/desktop/rdp";
 import type { RdpCanvasRegion } from "./canvas-region";
 import { RdpCertificatePrompt } from "./RdpCertificatePrompt";
@@ -57,8 +58,12 @@ export function RdpSessionCanvas({
 }: RdpSessionCanvasProps) {
   const [desktop, setDesktop] = useState<RdpConnectedPayload | null>(connected ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [certificatePrompt, setCertificatePrompt] =
-    useState<RdpCertificatePromptData | null>(null);
+  // 인증서 프롬프트는 스토어에 둔다 — 연결 오버레이가 그동안 자기를 내려야 하는데, 그쪽은 이
+  // 컴포넌트의 형제라 로컬 state 를 볼 수 없다(store/types.ts 주석 참고).
+  const certificatePrompt = useAppStore((state) => state.pendingRdpCertificatePrompt);
+  const setCertificatePrompt = useAppStore(
+    (state) => state.setPendingRdpCertificatePrompt,
+  );
   // 모니터별로 펼쳤을 때 이 창이 맡은 영역. 메인 프로세스가 알려준다.
   const [assignedRegion, setAssignedRegion] =
     useState<RdpCanvasRegion | null>(null);

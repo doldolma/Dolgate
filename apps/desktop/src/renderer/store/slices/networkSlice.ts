@@ -173,6 +173,12 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     portForwardRuntimes: [],
     knownHosts: [],
     pendingHostKeyPrompt: null,
+    // RDP 서버 인증서 확인. 프롬프트를 그리는 곳과 그동안 자기를 내려야 하는 곳이 형제라
+    // 여기에 둔다(types.ts 주석 참고).
+    pendingRdpCertificatePrompt: null,
+    setPendingRdpCertificatePrompt: (prompt) => {
+      set({ pendingRdpCertificatePrompt: prompt });
+    },
     tailnetStatuses: {},
     localTailnetNodeName: null,
     savePortForward: async (ruleId, draft) => {

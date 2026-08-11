@@ -397,6 +397,11 @@ export class SessionShareService {
       minWidth: 320,
       minHeight: 420,
       show: false,
+      // macOS 는 비활성 창의 첫 클릭을 창 활성화에만 쓰고 내용에는 주지 않는다. RDP 세션에서는
+      // 그것이 "한 번은 포커스, 한 번은 실제 클릭" 이라는 두 번 클릭으로 나타난다. 창 단위
+      // 옵션이라 캔버스만 골라 켤 수 없어서 창 전체에 켠다 — 비활성 상태의 첫 클릭이 버튼에도
+      // 그대로 먹는다는 뜻이다(그래서 기본값이 false 다). Windows·Linux 에서는 무시된다.
+      acceptFirstMouse: true,
       autoHideMenuBar: true,
       backgroundColor: "#eef3f7",
       title: this.buildOwnerChatWindowTitle(share.title),
