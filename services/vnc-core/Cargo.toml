@@ -1,0 +1,13 @@
+[package]
+name = "vnc-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94"
+publish = false
+description = "Headless VNC/RFB sidecar for the Dolgate desktop app"
+
+[dependencies]
+anyhow = "1"
+# VncAuth 의 DES 챌린지 응답에만 쓴다. RFB 의 비밀번호 인증은 1998년 규격 그대로라 대체 수단이
+# 없다 — 전송 보호는 VeNCrypt(TLS)나 터널이 담당한다.
+des = "0.8"
