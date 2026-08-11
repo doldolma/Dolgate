@@ -20,6 +20,7 @@ import type {
 import {
   formatSyncRevisionEtag,
   isKnownHostKind,
+  projectSecretMetadata,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
   SYNC_DATA_FLOOR_HEADER,
@@ -325,6 +326,20 @@ async function loadManagedSecret(secretStore: SecretStore, secretRef: string): P
     return null;
   }
   return JSON.parse(raw) as ManagedSecretPayload;
+}
+
+/**
+ * pull 로 받은 자격증명 페이로드를 목록용 메타데이터로 투영한다.
+ *
+ * 투영 자체는 shared-core 의 projectSecretMetadata 가 한다 — 같은 투영이 번들 가져오기·모바일에도
+ * 있어서 필드를 빠뜨리면 세 곳이 갈렸다(kind 가 실제로 그랬다). 여기서는 이 경로의 사실만 얹는다:
+ * pull 직후에는 호스트 연결 수를 세지 않고(0), 시각은 페이로드에 적힌 값을 쓴다.
+ */
+export function secretMetadataFromSyncedSecret(secret: ManagedSecretPayload): SecretMetadataRecord {
+  return projectSecretMetadata(secret, {
+    linkedHostCount: 0,
+    updatedAt: secret.updatedAt,
+  });
 }
 
 export class SyncService {
@@ -1149,29 +1164,9 @@ export class SyncService {
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<ManagedSecretPayload>(record.encrypted_payload, vaultKeyBase64));
 
-    const nextSecretMetadata: SecretMetadataRecord[] = secrets.map((secret) => ({
-        secretRef: secret.secretRef,
-        label: secret.label,
-        // 페이로드→메타데이터 투영은 필드 나열 화이트리스트다. RDP 구분(kind)과 계정을
-        // 빠뜨리면 pull 한 번에 모든 RDP 자격증명이 SSH 취급으로 강등돼 RDP 폼 목록에서
-        // 사라진다(실제로 그랬다). 페이로드에 필드를 더할 때 여기도 같이 갱신할 것.
-        kind: secret.kind ?? null,
-        username: secret.username?.trim() || null,
-        domain: secret.domain?.trim() || null,
-        hasPassword: Boolean(secret.password),
-        hasPassphrase: Boolean(secret.passphrase),
-        hasManagedPrivateKey: Boolean(secret.privateKeyPem),
-        hasCertificate: Boolean(secret.certificateText),
-        privateKeyEncrypted: secret.privateKeyEncrypted,
-        keyAlgorithm: secret.keyAlgorithm,
-        keyCurve: secret.keyCurve,
-        keyBits: secret.keyBits,
-        privateKeyCipher: secret.privateKeyCipher,
-        privateKeyKdfRounds: secret.privateKeyKdfRounds,
-        passphraseSaved: secret.passphraseSaved,
-        linkedHostCount: 0,
-        updatedAt: secret.updatedAt
-      }));
+    const nextSecretMetadata: SecretMetadataRecord[] = secrets.map(
+      secretMetadataFromSyncedSecret,
+    );
     const nextStoredSecrets = new Map(
       secrets.map((secret) => [
         secret.secretRef,

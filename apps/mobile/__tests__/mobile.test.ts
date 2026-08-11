@@ -1,9 +1,14 @@
 import { Platform } from 'react-native';
-import { createVaultKdfDescriptor, type AuthSession } from '@dolssh/shared-core';
+import {
+  createVaultKdfDescriptor,
+  type AuthSession,
+  type LoadedManagedSecretPayload,
+} from '@dolssh/shared-core';
 import { APP_VERSION } from '../src/lib/app-metadata';
 import {
   buildBrowserLoginUrl,
   changeRemoteAccountPassword,
+  deriveSecretMetadata,
   fetchExchangeSession,
   getOrCreateClientInstallationId,
   refreshAuthSession,
@@ -256,5 +261,49 @@ describe('mobile vault mutations', () => {
 
     await rejection;
     expect(requestSignal?.aborted).toBe(true);
+  });
+});
+
+// 페이로드→메타데이터 투영이 kind/계정을 빠뜨리면 RDP 자격증명이 SSH 취급으로 강등된다.
+// 데스크톱 sync-service 의 같은 투영에서 실제로 났던 사고라, 모바일 쪽도 같이 잠근다.
+describe('deriveSecretMetadata', () => {
+  it('keeps kind and account fields of an RDP credential', () => {
+    const metadata = deriveSecretMetadata([], {
+      'secret:rdp-cred': {
+        secretRef: 'secret:rdp-cred',
+        label: 'Work PC admin',
+        kind: 'rdp',
+        username: ' admin ',
+        domain: 'WORKGROUP',
+        password: 'hunter2',
+        updatedAt: '2026-08-11T00:00:00.000Z',
+      } as LoadedManagedSecretPayload,
+    });
+
+    expect(metadata).toHaveLength(1);
+    expect(metadata[0]).toMatchObject({
+      kind: 'rdp',
+      username: 'admin',
+      domain: 'WORKGROUP',
+      hasPassword: true,
+    });
+  });
+
+  it('leaves a legacy credential without kind as null', () => {
+    const metadata = deriveSecretMetadata([], {
+      'secret:ssh-cred': {
+        secretRef: 'secret:ssh-cred',
+        label: 'old key',
+        privateKeyPem: '-----BEGIN OPENSSH PRIVATE KEY-----',
+        updatedAt: '2026-08-11T00:00:00.000Z',
+      } as LoadedManagedSecretPayload,
+    });
+
+    expect(metadata[0]).toMatchObject({
+      kind: null,
+      username: null,
+      domain: null,
+      hasManagedPrivateKey: true,
+    });
   });
 });

@@ -37,6 +37,7 @@ import {
   isSshHostRecord,
   normalizeServerUrl,
   parseVaultCacheRecord,
+  projectSecretMetadata,
   SYNC_DATA_FLOOR_HEADER,
   VAULT_EPOCH_HEADER,
   type HostSecretInput,
@@ -1214,23 +1215,14 @@ export function deriveSecretMetadata(
   secretsByRef: ManagedSecretsMap,
 ): SecretMetadataRecord[] {
   return Object.values(secretsByRef)
-    .map(record => ({
-      secretRef: record.secretRef,
-      label: record.label,
-      // RDP 구분(kind)과 계정. 이 투영에서 빠뜨리면 RDP 자격증명이 SSH 취급으로 강등된다
-      // — 데스크톱 sync-service 의 같은 투영과 함께 갱신할 것.
-      kind: record.kind ?? null,
-      username: record.username?.trim() || null,
-      domain: record.domain?.trim() || null,
-      hasPassword: Boolean(record.password),
-      hasPassphrase: Boolean(record.passphrase),
-      hasManagedPrivateKey: Boolean(record.privateKeyPem),
-      hasCertificate: Boolean(record.certificateText),
-      linkedHostCount: hosts.filter(
-        host => isSshHostRecord(host) && host.secretRef === record.secretRef,
-      ).length,
-      updatedAt: record.updatedAt,
-    }))
+    .map(record =>
+      projectSecretMetadata(record, {
+        linkedHostCount: hosts.filter(
+          host => isSshHostRecord(host) && host.secretRef === record.secretRef,
+        ).length,
+        updatedAt: record.updatedAt,
+      }),
+    )
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 

@@ -3,6 +3,7 @@ import {
   isKnownHostKind,
   normalizeGroupPath,
   normalizeJumpHostIds,
+  projectSecretMetadata,
   type AwsProfileMetadataRecord,
   type DnsOverrideRecord,
   type GroupRecord,
@@ -776,29 +777,9 @@ export function buildDolgateHostBundle(
   };
 }
 
+/** 가져온 자격증명의 목록용 메타데이터. 시각은 번들에 적힌 값을 쓴다(페이로드의 값이 아니다). */
 function buildSecretMetadata(secret: ManagedSecretPayload, updatedAt: string): SecretMetadataRecord {
-  return {
-    secretRef: secret.secretRef,
-    label: secret.label,
-    // RDP 구분(kind)과 계정. 빠뜨리면 가져온 RDP 자격증명이 RDP 폼 목록에 안 나온다
-    // (kind 없는 메타데이터는 SSH 로 간주된다). sync-service 의 같은 투영과 함께 갱신할 것.
-    kind: secret.kind ?? null,
-    username: secret.username?.trim() || null,
-    domain: secret.domain?.trim() || null,
-    hasPassword: Boolean(secret.password),
-    hasPassphrase: Boolean(secret.passphrase),
-    hasManagedPrivateKey: Boolean(secret.privateKeyPem),
-    hasCertificate: Boolean(secret.certificateText),
-    privateKeyEncrypted: secret.privateKeyEncrypted,
-    keyAlgorithm: secret.keyAlgorithm,
-    keyCurve: secret.keyCurve,
-    keyBits: secret.keyBits,
-    privateKeyCipher: secret.privateKeyCipher,
-    privateKeyKdfRounds: secret.privateKeyKdfRounds,
-    passphraseSaved: secret.passphraseSaved,
-    linkedHostCount: 0,
-    updatedAt,
-  };
+  return projectSecretMetadata(secret, { linkedHostCount: 0, updatedAt });
 }
 
 export function buildHostTransferImportPlan(
