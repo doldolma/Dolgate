@@ -80,7 +80,7 @@ export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'err
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type SessionConnectionKind = 'local' | 'ssh' | 'mosh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial';
+export type SessionConnectionKind = 'local' | 'ssh' | 'mosh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial' | 'rdp';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpLifecycleStatus = 'connecting' | 'connected' | 'closed' | 'error';
@@ -294,6 +294,21 @@ export interface RdpHostRecord extends HostBaseRecord {
   kind: 'rdp';
   hostname: string;
   port: number;
+  /**
+   * **`username` 을 싣지 않는다.** RDP 계정은 자격증명에 딸려 있어서 쓸 곳이 없고, 넣으면 옛
+   * 빌드가 이 레코드를 SSH 로 바꿔 버린다.
+   *
+   * 왜 이 주석이 여기 있는가: RDP 를 모르는 빌드(1.8.10)는 이 레코드를 받으면
+   * `username.trim()` 에서 던져 창이 빈 화면이 된다. 빈 문자열을 채워 두면 그 크래시는 멈추는데,
+   * 그 빌드의 `normalizeHostRecord` 가 "hostname·port·username 이 다 있으면 SSH" 로 보고
+   * `kind:"ssh"` 로 바꾼 뒤(RDP 필드는 전부 버리고) 전체 스냅샷을 그대로 push 한다. 서버는 같은
+   * `updatedAt` + 다른 내용을 마지막 쓰기 승리로 받으므로, **모든 기기에서 RDP 호스트가 SSH 로
+   * 덮어써진다.** 빈 화면보다 나쁘다 — 필드가 없으면 그 빌드는 레코드를 그냥 버리고(push 는
+   * upsert 라 서버 사본은 남는다) 업데이트하면 그대로 돌아온다.
+   *
+   * 새 호스트 종류를 추가할 때도 같다: 옛 스키마의 필수 필드를 흉내 내 채우지 말 것. 옛 빌드가
+   * "아는 종류" 로 오인해 레코드를 고쳐 쓴다.
+   */
   /**
    * 비밀번호는 레코드가 아니라 시크릿 저장소에 둔다. SSH와 같은 규칙이다 —
    * 호스트 레코드는 동기화·내보내기 대상이라 자격증명이 실리면 안 된다.
@@ -552,6 +567,37 @@ export function isRdpHostRecord(host: HostRecord): host is RdpHostRecord {
   return host.kind === 'rdp';
 }
 
+/**
+ * 이 빌드가 아는 호스트 종류.
+ *
+ * `HostKind` 는 타입이라 런타임에 물어볼 수 없다. 동기화로 받은 레코드는 이 빌드보다 새 버전이
+ * 만든 것일 수 있어서, 그때 "아는 종류인가" 를 실제로 물어봐야 한다.
+ */
+const KNOWN_HOST_KINDS: ReadonlySet<string> = new Set<HostKind>([
+  'ssh',
+  'aws-ec2',
+  'aws-ecs',
+  'warpgate-ssh',
+  'serial',
+  'rdp',
+]);
+
+/**
+ * 이 빌드가 다룰 수 있는 종류인가.
+ *
+ * **동기화로 받은 호스트는 화면에 올리기 전에 이걸 통과해야 한다.** 모르는 종류를 그대로 상태에
+ * 넣으면, 그 레코드의 없는 필드를 읽는 코드가 렌더 중에 던져 목록을 그리다 화면이 통째로 빈다
+ * (1.8.10 이 RDP 호스트를 받고 그렇게 됐다). 호스트 목록은 기기 사이에서 동기화되고 기기마다
+ * 버전이 다르므로, "모르는 종류가 온다" 는 예외가 아니라 정상 상황이다.
+ *
+ * 걸러낸 레코드는 **버리는 것이 아니라 이 기기에서 안 보이게 두는 것**이다 — 서버 push 는
+ * upsert 라서 우리가 안 올린 레코드는 그대로 남고, 업데이트하면 다시 보인다. 대신 정규화해서
+ * 억지로 끼워 맞추지는 않는다. 그러면 모르는 필드를 잃은 채 되올려 원본을 망친다.
+ */
+export function isKnownHostKind(kind: unknown): kind is HostKind {
+  return typeof kind === 'string' && KNOWN_HOST_KINDS.has(kind);
+}
+
 export function isSshHostDraft(host: HostDraft): host is SshHostDraft {
   return host.kind === 'ssh';
 }
@@ -673,9 +719,18 @@ export function getHostSubtitle(host: HostRecord, labels: HostSubtitleLabels): s
       .filter(Boolean)
       .join(' • ');
   }
-  return host.username.trim()
-    ? `${host.username}@${host.hostname}:${host.port}`
-    : `${host.hostname}:${host.port} • ${labels.usernameUnset}`;
+  // 마지막은 SSH 다. 다만 **이 빌드가 모르는 종류도 여기로 떨어진다** — 호스트 목록은 버전
+  // 사이에서 동기화되므로, 새 버전에서 만든 종류를 옛 빌드가 받는 일이 실제로 일어난다.
+  // 그때 없는 필드를 그냥 읽으면 목록을 그리다 렌더러가 죽어 화면이 통째로 빈다(1.8.10 이
+  // RDP 호스트를 받고 `username.trim()` 에서 그렇게 됐다). 한 호스트 때문에 앱이 안 뜨는 것보다
+  // 그 줄만 덜 보여주는 편이 낫다.
+  const username = typeof host.username === 'string' ? host.username.trim() : '';
+  const hostname = typeof host.hostname === 'string' ? host.hostname.trim() : '';
+  if (!hostname) {
+    return host.label;
+  }
+  const address = host.port ? `${hostname}:${host.port}` : hostname;
+  return username ? `${username}@${address}` : `${address} • ${labels.usernameUnset}`;
 }
 
 export function getHostBadgeLabel(host: HostRecord): string {
@@ -1511,6 +1566,16 @@ export interface AuthState {
   // 서버 URL이 바뀌면 /api/info 재조회 전까지 false로 취급한다(서버별 지원이 다르므로).
   capabilities?: {
     webauthn: boolean;
+    /**
+     * 서버가 계정 데이터 수준(sync_data_floor)을 저장·판정할 수 있는가.
+     *
+     * 이걸 못 하는 서버(자체 호스팅 옛 버전)에서는 **옛 클라이언트를 막아 주는 장치가 없다** —
+     * 우리가 보내는 수준 헤더를 아무도 읽지 않으므로, RDP 호스트를 만들면 그 계정의 옛 기기가
+     * 조용히 망가진다. 그래서 이 값이 false 면 RDP 호스트 추가를 열지 않는다.
+     *
+     * 서버 URL 이 바뀌면 /api/info 재조회 전까지 false 로 본다(webauthn 과 같은 규칙).
+     */
+    dataFloor: boolean;
   } | null;
 }
 
@@ -3150,6 +3215,14 @@ export interface TerminalTab {
    * 전체화면에서 화면마다 창을 펼칠지 정하는 데 쓴다 — 1이면 펼칠 것이 없다.
    */
   rdpMonitorCount?: number;
+  /**
+   * 탭 hover 의 대상 표기(user@host)용 계정. RDP 는 계정이 호스트가 아니라 자격증명에
+   * 있어 렌더러가 모르므로, 접속 응답에 실려 온 것을 보관한다. 도메인이 있으면
+   * `DOMAIN\user` 형태다.
+   */
+  rdpUsername?: string;
+  /** 원격 데스크톱의 현재 해상도. 접속 응답에서 채우고 resized 이벤트로 갱신한다. */
+  rdpDesktopSize?: { width: number; height: number };
   /** control mode(tmux -CC) pane일 때만 채워진다. 평시엔 null/undefined. */
   tmux?: TerminalTmuxPaneState | null;
   /** SSH 접속 후 감지한 원격 tmux 정보(하단바 표시용). 미감지면 null/undefined. */

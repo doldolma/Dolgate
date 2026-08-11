@@ -677,6 +677,16 @@
       "lastCommand": "마지막 명령",
       "lastCommandFailed": "{{ago}} · 실패",
       "latency": "지연",
+      "resolution": "해상도",
+      "monitorCount": "모니터 {{count}}개",
+      "drives": "드라이브",
+      "drivesMore": "{{names}} 외 {{count}}개",
+      "driveReadOnly": "{{name}} (읽기 전용)",
+      "audio": "오디오",
+      "clipboard": "클립보드",
+      "adminSession": "관리 세션",
+      "on": "켜짐",
+      "off": "꺼짐",
       "share": "공유",
       "viewers": "관전 {{count}}명",
       "windows": "윈도우",
@@ -895,6 +905,8 @@
       "invalidHost": "Dolgate 파일의 호스트 정보가 올바르지 않습니다.",
       "invalidTailnet": "Dolgate 파일의 Tailnet 정보가 올바르지 않습니다.",
       "tailnetMissing": "{{label}}: 이 호스트가 쓰는 Tailnet 설정이 파일에 없습니다. Tailnet을 등록해야 연결됩니다.",
+      "unknownHostKindSkipped": "이 버전이 모르는 종류의 호스트 {{count}}개를 건너뛰었습니다. 앱을 업데이트하면 가져올 수 있습니다.",
+      "unknownHostKindDependentsSkipped": "건너뛴 호스트에 딸린 항목 {{count}}개(경유 호스트·포트 포워딩·DNS)도 함께 제외했습니다.",
       "invalidSecret": "Dolgate 파일의 자격증명 정보가 올바르지 않습니다.",
       "invalidSecretId": "Dolgate 파일의 자격증명 ID가 올바르지 않습니다.",
       "invalidAwsProfile": "Dolgate 파일의 AWS 프로필 정보가 올바르지 않습니다.",
@@ -1120,7 +1132,8 @@
       "windowsUnsupported": "Windows 미지원",
       "ssmUnavailable": "SSM 사용 불가",
       "blocked": "가져오기 차단됨",
-      "inspect": "SSH 정보 확인"
+      "inspect": "SSH 정보 확인",
+      "addWindows": "SSM 셸로 추가"
     },
     "error": {
       "portRange": "SSH 포트는 1에서 65535 사이 숫자여야 합니다.",
@@ -1168,7 +1181,9 @@
       "doneTitle": "자동으로 SSH 접속 정보를 확인했습니다.",
       "doneHint": "필요하면 아래 값을 바로 수정한 뒤 Host를 등록할 수 있습니다.",
       "usernamePlaceholder": "자동으로 찾은 사용자명이 없으면 비워둘 수 있습니다.",
-      "portPlaceholder": "비워두면 기본값 22를 사용합니다."
+      "portPlaceholder": "비워두면 기본값 22를 사용합니다.",
+      "windowsTitle": "Windows 인스턴스는 SSM 셸(PowerShell)로 연결합니다.",
+      "windowsHint": "SSH 접속 정보 확인을 건너뜁니다. 이 호스트에서는 SFTP·tmux·컨테이너를 쓸 수 없습니다."
     },
     "empty": {
       "noEcsClusters": "이 리전에 가져올 수 있는 ECS 클러스터가 없습니다.",
@@ -1353,44 +1368,117 @@
       "missing": "이 호스트가 지정한 Tailnet 설정이 없습니다. '사용하지 않음'을 선택해 해제하거나 네트워크를 다시 등록하세요."
     },
     "rdp": {
-      "connection": {
-        "title": "Connection"
-      },
-      "port": "Port",
-      "username": "Username",
-      "domain": "Domain",
-      "domainPlaceholder": "Leave blank for a local or Microsoft account",
-      "password": "Password",
-      "passwordKeep": "Leave blank to keep",
+      "domain": "도메인",
+      "domainPlaceholder": "로컬 계정이나 Microsoft 계정이면 비워 둡니다",
       "adminSession": {
-        "label": "Connect to the admin session"
+        "label": "관리 세션으로 연결"
       },
-      "details": {
-        "title": "Details"
-      },
-      "colorQuality": "Color quality",
+      "colorQuality": "색 품질",
       "color32": "32-bit",
       "color16": "16-bit",
       "useAllMonitors": {
-        "label": "Use all monitors"
-      },
-      "preferences": {
-        "title": "Preferences"
+        "label": "모든 모니터 사용"
       },
       "audio": {
-        "label": "Play remote audio"
+        "label": "원격 소리 재생"
       },
       "clipboard": {
-        "label": "Share the clipboard"
+        "label": "클립보드 공유"
       },
       "drive": {
-        "title": "Redirect folders",
-        "readOnly": "Read-only",
-        "add": "Add folder",
-        "remove": "Remove"
+        "title": "폴더 공유",
+        "readOnly": "읽기 전용",
+        "add": "폴더 추가",
+        "remove": "제거"
       },
-      "hostname": "Hostname",
-      "credential": "Credential"
+      "credential": "인증 정보"
+    },
+    "title": "호스트 편집기",
+    "section": {
+      "connection": "Connection",
+      "details": "Details",
+      "preferences": "Preferences"
+    },
+    "save": {
+      "saving": "저장 중…",
+      "saved": "저장됨",
+      "error": "변경 사항을 저장하지 못했습니다"
+    },
+    "action": {
+      "manage": "관리",
+      "refresh": "새로고침",
+      "import": "가져오기"
+    },
+    "placeholder": {
+      "keepBlank": "비워 두면 그대로 유지"
+    },
+    "field": {
+      "awsProfile": "AWS 프로필",
+      "region": "리전",
+      "availabilityZone": "가용 영역",
+      "instanceId": "인스턴스 ID",
+      "instanceName": "인스턴스 이름",
+      "platform": "플랫폼",
+      "privateIp": "사설 IP",
+      "state": "상태",
+      "sshPort": "SSH 포트",
+      "sshUsername": "SSH 사용자 이름",
+      "ecsCluster": "ECS 클러스터",
+      "clusterArn": "클러스터 ARN",
+      "warpgateUrl": "Warpgate URL",
+      "warpgateEndpoint": "Warpgate SSH 엔드포인트",
+      "warpgateTarget": "대상",
+      "warpgateTargetId": "대상 ID",
+      "warpgateUsername": "Warpgate 사용자 이름",
+      "hostname": "호스트 이름",
+      "port": "포트",
+      "username": "사용자 이름",
+      "authType": "인증 방식",
+      "password": "비밀번호",
+      "privateKeyFile": "개인키 파일",
+      "certificateFile": "SSH 인증서 파일",
+      "passphrase": "패스프레이즈",
+      "savedCredentials": "저장된 인증 정보",
+      "tailnet": "Tailnet",
+      "jumpHosts": "점프 호스트",
+      "agentForwarding": "SSH 에이전트 포워딩",
+      "envVars": "환경 변수",
+      "group": "그룹",
+      "tags": "태그",
+      "startupCommand": "시작 명령",
+      "terminalTheme": "터미널 테마",
+      "transport": "전송 방식",
+      "detectedPorts": "감지된 포트",
+      "detectedPortAria": "감지된 시리얼 포트",
+      "devicePath": "장치 경로",
+      "remoteHost": "원격 호스트",
+      "baudRate": "통신 속도(baud)",
+      "dataBits": "데이터 비트",
+      "parity": "패리티",
+      "stopBits": "정지 비트",
+      "flowControl": "흐름 제어",
+      "lineEnding": "전송 줄바꿈",
+      "localEcho": "로컬 에코",
+      "localLineEditing": "로컬 줄 편집"
+    },
+    "option": {
+      "none": "없음",
+      "authPassword": "비밀번호",
+      "authPrivateKey": "개인키",
+      "authCertificate": "인증서",
+      "authAgent": "SSH 에이전트",
+      "transportLocal": "로컬 시리얼 포트",
+      "selectDetectedPort": "감지된 포트 선택",
+      "parityOdd": "홀수",
+      "parityEven": "짝수",
+      "globalTheme": "전체 설정 사용",
+      "startupCommandMode": "명령",
+      "startupSnippet": "Snippet"
+    },
+    "serial": {
+      "loadingPorts": "시리얼 포트를 불러오는 중…",
+      "localEchoDesc": "입력한 문자를 로컬에서 그대로 표시합니다.",
+      "localLineEditingDesc": "백스페이스와 기본 줄 편집을 로컬에서 처리합니다."
     }
   },
   "hostTransfer": {
@@ -1588,9 +1676,17 @@
       "tailnetMissing": "설정 없음 — 연결되지 않습니다",
       "usernameUnset": "미설정",
       "enabled": "사용",
+      "disabled": "사용 안 함",
       "serverProxy": "서버 프록시",
       "startupCommand": "시작 명령",
-      "terminalTheme": "터미널 테마"
+      "terminalTheme": "터미널 테마",
+      "adminSession": "관리 세션",
+      "colorQuality": "색 품질",
+      "allMonitors": "모든 모니터 사용",
+      "remoteAudio": "원격 소리",
+      "clipboard": "클립보드 공유",
+      "redirectedFolders": "공유 폴더",
+      "driveReadOnly": "읽기 전용"
     },
     "env": {
       "heading": "환경 변수 ({{count}})",
@@ -2557,7 +2653,8 @@
     "fallbackFailed": "SSH-over-SSM 연결 실패 후 SSM 셸 폴백도 실패했습니다. SSH-over-SSM: {{primary}} / SSM 셸: {{fallback}}",
     "ecsUseContainers": "ECS 호스트는 세션 연결 대신 Containers 화면에서 엽니다.",
     "fallbackNotice": "SSH-over-SSM 연결에 실패해 SSM 셸로 폴백합니다.",
-    "externalLinkScheme": "외부 링크는 http 또는 https만 열 수 있습니다."
+    "externalLinkScheme": "외부 링크는 http 또는 https만 열 수 있습니다.",
+    "windowsTmuxUnsupported": "Windows 인스턴스는 tmux 연결을 지원하지 않습니다. SSM 셸(PowerShell)로 연결하세요."
   },
   "hostsIpc": {
     "secretSaved": "호스트 secret이 저장되었습니다.",
@@ -2704,9 +2801,9 @@
     "killTitle": "서버의 tmux 세션을 종료합니다(프로세스째 종료, 복원 불가)."
   },
   "hostBrowserEmpty": {
-    "noHostsHint": "New Host로 첫 번째 SSH host를 추가해보세요. 시리얼 연결은 Import Serial에서 시작할 수 있습니다.",
+    "noHostsHint": "New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.",
     "searchHint": "검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.",
-    "addHint": "New Host로 SSH host를 추가하거나, 시리얼 연결이 필요하면 Import Serial을 사용해보세요.",
+    "addHint": "New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.",
     "noHosts": "아직 등록된 호스트가 없습니다.",
     "noResults": "검색 결과가 없습니다.",
     "noHostsHere": "이 위치에는 아직 호스트가 없습니다.",
@@ -3210,6 +3307,10 @@
     "hostKey": "호스트 키 확인",
     "hostKeyPromptDetail": "이 호스트를 신뢰할지 확인해 주세요.",
     "ssh": "SSH 연결",
+    "ssm": "SSM 연결",
+    "rdp": "RDP 연결",
+    "serial": "포트 열기",
+    "ecsExec": "ECS Exec 연결",
     "groupTailscale": "Tailscale",
     "groupHost": "호스트",
     "tailscaleSync": "컨트롤 플레인 동기화",
@@ -3227,5 +3328,12 @@
       "connectingTitle": "연결 중",
       "failedTitle": "연결할 수 없습니다"
     }
+  },
+  "errorBoundary": {
+    "title": "화면을 그리지 못했습니다",
+    "message": "이 창을 그리는 중 오류가 났습니다. 다시 시도해도 같으면 아래 내용을 알려 주세요.",
+    "retry": "다시 시도",
+    "reload": "새로고침",
+    "hostRow": "이 호스트를 표시할 수 없습니다 — {{label}}"
   }
 }

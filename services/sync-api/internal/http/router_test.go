@@ -2192,3 +2192,235 @@ func TestVaultSetupValidationRejectsBadRequests(t *testing.T) {
 		t.Fatalf("expected vault setup to succeed after failed validations, got %d: %s", okRecorder.Code, okRecorder.Body.String())
 	}
 }
+
+// 계정 데이터 수준(users.sync_data_floor) 게이트.
+//
+// 모든 계정에 버전 하한을 걸면 문제 되는 항목을 쓰지도 않는 사용자까지 업데이트를 강요받는다.
+// 그래서 위험한 데이터를 실제로 가진 계정만 막고, 로그인은 건드리지 않는다(로컬 데이터는 계속
+// 볼 수 있어야 한다).
+func TestSyncDataFloorGatesOnlyAffectedAccounts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	signup := func(email string) string {
+		t.Helper()
+		body := bytes.NewBufferString(`{"email":"` + email + `","password":"supersecure"}`)
+		request := httptest.NewRequest(http.MethodPost, "/auth/signup", body)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("signup %s: %d %s", email, recorder.Code, recorder.Body.String())
+		}
+		var response struct {
+			Tokens struct {
+				AccessToken string `json:"accessToken"`
+			} `json:"tokens"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode signup: %v", err)
+		}
+		return response.Tokens.AccessToken
+	}
+
+	syncRequest := func(method string, token string, version string, floor string, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		var reader *bytes.Buffer
+		if body == "" {
+			reader = bytes.NewBufferString("")
+		} else {
+			reader = bytes.NewBufferString(body)
+		}
+		request := httptest.NewRequest(method, "/sync", reader)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("X-Dolgate-Client", "desktop")
+		request.Header.Set("X-Dolgate-Client-Version", version)
+		if floor != "" {
+			request.Header.Set("X-Dolgate-Sync-Data-Floor", floor)
+		}
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	// RDP 를 쓰지 않는 계정: 옛 클라이언트도 그대로 동기화된다.
+	plainToken := signup("plain-floor@example.com")
+	if recorder := syncRequest(http.MethodGet, plainToken, "1.8.10", "", ""); recorder.Code != http.StatusOK {
+		t.Fatalf("floor 0 account should sync on an old client, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	// RDP 를 저장하는 순간(push 헤더) 계정 수준이 올라간다.
+	rdpToken := signup("rdp-floor@example.com")
+	if recorder := syncRequest(http.MethodGet, rdpToken, "1.8.10", "", ""); recorder.Code != http.StatusOK {
+		t.Fatalf("account should start ungated, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	push := syncRequest(http.MethodPost, rdpToken, "1.9.0", "1", `{"hosts":[]}`)
+	// push 는 202(Accepted)로 답한다.
+	if push.Code < 200 || push.Code > 299 {
+		t.Fatalf("push from a current client: %d %s", push.Code, push.Body.String())
+	}
+
+	// 그 뒤로 옛 클라이언트는 426 + 업데이트 안내.
+	blocked := syncRequest(http.MethodGet, rdpToken, "1.8.10", "", "")
+	if blocked.Code != http.StatusUpgradeRequired {
+		t.Fatalf("old client should be gated, got %d: %s", blocked.Code, blocked.Body.String())
+	}
+	if !strings.Contains(blocked.Body.String(), "업데이트") {
+		t.Fatalf("gate response should tell the user to update: %s", blocked.Body.String())
+	}
+	// push 도 막아야 한다 — 옛 클라이언트의 전량 스냅샷이 새 종류를 SSH 로 덮어쓴다.
+	if recorder := syncRequest(http.MethodPost, rdpToken, "1.8.10", "", `{"hosts":[]}`); recorder.Code != http.StatusUpgradeRequired {
+		t.Fatalf("old client push should be gated, got %d", recorder.Code)
+	}
+	// 최신 클라이언트는 계속 정상.
+	if recorder := syncRequest(http.MethodGet, rdpToken, "1.9.0", "", ""); recorder.Code != http.StatusOK {
+		t.Fatalf("current client should sync, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	// 모바일은 게이트 대상이 아니다 — 스토어 배포본이 남아 있고, 모르는 종류를 스스로 걸러낸다.
+	mobile := httptest.NewRequest(http.MethodGet, "/sync", bytes.NewBufferString(""))
+	mobile.Header.Set("Authorization", "Bearer "+rdpToken)
+	mobile.Header.Set("X-Dolgate-Client", "mobile")
+	mobile.Header.Set("X-Dolgate-Client-Version", "1.8.5")
+	mobileRecorder := httptest.NewRecorder()
+	router.ServeHTTP(mobileRecorder, mobile)
+	if mobileRecorder.Code != http.StatusOK {
+		t.Fatalf("mobile should not be gated, got %d: %s", mobileRecorder.Code, mobileRecorder.Body.String())
+	}
+}
+
+// 수준은 올라가기만 한다. 내려가면 옛 클라이언트가 다시 데이터를 망칠 수 있다.
+func TestSyncDataFloorNeverDrops(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	body := bytes.NewBufferString(`{"email":"monotonic-floor@example.com","password":"supersecure"}`)
+	request := httptest.NewRequest(http.MethodPost, "/auth/signup", body)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	var response struct {
+		Tokens struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode signup: %v", err)
+	}
+	token := response.Tokens.AccessToken
+
+	push := func(floor string) {
+		t.Helper()
+		pushRequest := httptest.NewRequest(http.MethodPost, "/sync", bytes.NewBufferString(`{"hosts":[]}`))
+		pushRequest.Header.Set("Content-Type", "application/json")
+		pushRequest.Header.Set("Authorization", "Bearer "+token)
+		pushRequest.Header.Set("X-Dolgate-Client", "desktop")
+		pushRequest.Header.Set("X-Dolgate-Client-Version", "1.9.0")
+		if floor != "" {
+			pushRequest.Header.Set("X-Dolgate-Sync-Data-Floor", floor)
+		}
+		pushRecorder := httptest.NewRecorder()
+		router.ServeHTTP(pushRecorder, pushRequest)
+		if pushRecorder.Code < 200 || pushRecorder.Code > 299 {
+			t.Fatalf("push(floor=%q): %d %s", floor, pushRecorder.Code, pushRecorder.Body.String())
+		}
+	}
+
+	push("1")
+	// RDP 호스트를 다 지운 기기가 헤더 없이(또는 0으로) push 해도 수준은 남아야 한다.
+	push("")
+	push("0")
+
+	gated := httptest.NewRequest(http.MethodGet, "/sync", bytes.NewBufferString(""))
+	gated.Header.Set("Authorization", "Bearer "+token)
+	gated.Header.Set("X-Dolgate-Client", "desktop")
+	gated.Header.Set("X-Dolgate-Client-Version", "1.8.10")
+	gatedRecorder := httptest.NewRecorder()
+	router.ServeHTTP(gatedRecorder, gated)
+	if gatedRecorder.Code != http.StatusUpgradeRequired {
+		t.Fatalf("floor should stay raised, got %d: %s", gatedRecorder.Code, gatedRecorder.Body.String())
+	}
+}
+
+// 옛 클라이언트에게 실제로 안내가 닿는지. /sync 만 막으면 그 빌드에는 동기화 오류를 보여줄 화면이
+// 없어서 조용히 멈춘다 — E2EE 전환 때와 같은 경로(세션 발급 426)로 로그인 화면에 문구를 띄운다.
+func TestSyncDataFloorGatesSessionIssuance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := createTestRouter(t)
+
+	const email = "session-floor@example.com"
+	const password = "supersecure"
+
+	signupBody := bytes.NewBufferString(`{"email":"` + email + `","password":"` + password + `"}`)
+	signupRequest := httptest.NewRequest(http.MethodPost, "/auth/signup", signupBody)
+	signupRequest.Header.Set("Content-Type", "application/json")
+	signupRecorder := httptest.NewRecorder()
+	router.ServeHTTP(signupRecorder, signupRequest)
+	if signupRecorder.Code != http.StatusCreated {
+		t.Fatalf("signup: %d %s", signupRecorder.Code, signupRecorder.Body.String())
+	}
+	var signupResponse struct {
+		Tokens struct {
+			AccessToken  string `json:"accessToken"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(signupRecorder.Body.Bytes(), &signupResponse); err != nil {
+		t.Fatalf("decode signup: %v", err)
+	}
+
+	login := func(version string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := bytes.NewBufferString(`{"email":"` + email + `","password":"` + password + `"}`)
+		request := httptest.NewRequest(http.MethodPost, "/auth/login", body)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Dolgate-Client", "desktop")
+		request.Header.Set("X-Dolgate-Client-Version", version)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	// 수준이 0 인 계정에서는 옛 클라이언트도 로그인된다 — 안 쓰는 사람까지 막지 않는다.
+	if recorder := login("1.8.10"); recorder.Code != http.StatusOK {
+		t.Fatalf("old client should log in to an ungated account: %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	// RDP 저장 = 수준 1 push.
+	push := httptest.NewRequest(http.MethodPost, "/sync", bytes.NewBufferString(`{"hosts":[]}`))
+	push.Header.Set("Content-Type", "application/json")
+	push.Header.Set("Authorization", "Bearer "+signupResponse.Tokens.AccessToken)
+	push.Header.Set("X-Dolgate-Client", "desktop")
+	push.Header.Set("X-Dolgate-Client-Version", "1.9.0")
+	push.Header.Set("X-Dolgate-Sync-Data-Floor", "1")
+	pushRecorder := httptest.NewRecorder()
+	router.ServeHTTP(pushRecorder, push)
+	if pushRecorder.Code < 200 || pushRecorder.Code > 299 {
+		t.Fatalf("push: %d %s", pushRecorder.Code, pushRecorder.Body.String())
+	}
+
+	// 이제 옛 클라이언트는 로그인 단계에서 426 + 안내를 받는다.
+	blocked := login("1.8.10")
+	if blocked.Code != http.StatusUpgradeRequired {
+		t.Fatalf("old client login should be gated: %d %s", blocked.Code, blocked.Body.String())
+	}
+	if !strings.Contains(blocked.Body.String(), "업데이트") {
+		t.Fatalf("login gate should tell the user to update: %s", blocked.Body.String())
+	}
+	// 최신 클라이언트는 그대로 로그인된다.
+	if recorder := login("1.9.0"); recorder.Code != http.StatusOK {
+		t.Fatalf("current client should log in: %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	// 세션 갱신도 막는다 — 이미 로그인해 둔 옛 기기가 15분 뒤 로그인 화면으로 나가며 안내를 본다.
+	refreshBody := bytes.NewBufferString(`{"refreshToken":"` + signupResponse.Tokens.RefreshToken + `"}`)
+	refresh := httptest.NewRequest(http.MethodPost, "/auth/refresh", refreshBody)
+	refresh.Header.Set("Content-Type", "application/json")
+	refresh.Header.Set("X-Dolgate-Client", "desktop")
+	refresh.Header.Set("X-Dolgate-Client-Version", "1.8.10")
+	refreshRecorder := httptest.NewRecorder()
+	router.ServeHTTP(refreshRecorder, refresh)
+	if refreshRecorder.Code != http.StatusUpgradeRequired {
+		t.Fatalf("old client refresh should be gated: %d %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+}

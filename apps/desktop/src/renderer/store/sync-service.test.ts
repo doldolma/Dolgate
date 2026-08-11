@@ -178,6 +178,9 @@ function createSyncService() {
     handleVaultDekRejected: vi.fn().mockResolvedValue(undefined),
     noteServerVaultSupport: vi.fn(),
     noteServerWebauthnSupport: vi.fn(),
+    // 서버가 계정 데이터 수준을 저장할 수 있는지 알려 주는 자리. 목이 이걸 빠뜨리면 /api/info
+    // 판정이 도중에 던져서 지원 여부가 'unknown' 으로 남는다.
+    noteServerDataFloorSupport: vi.fn(),
     refreshSession: vi.fn().mockResolvedValue({
       status: 'authenticated'
     })

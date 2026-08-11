@@ -4,6 +4,7 @@ import { CommandPalette, type CommandPaletteItem } from '../CommandPalette';
 import { ChevronDown, LayoutGrid, List, Search } from '../../ui/icons';
 import { HostListCard } from './HostListCard';
 import { HostListTable } from './HostListTable';
+import { HostRowBoundary } from './HostRowBoundary';
 import { buildHostBrowserCommandPaletteItems } from './commandPaletteItems';
 import {
   Button,
@@ -64,22 +65,18 @@ export function HostListPanel({ hb }: HostListPanelProps) {
       [
         { label: HOST_BROWSER_IMPORT_MENU_LABELS[0], onSelect: hb.onOpenDolgateImport },
         { label: HOST_BROWSER_IMPORT_MENU_LABELS[1], onSelect: hb.onOpenOpenSshImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: hb.onOpenSerialImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: hb.onOpenRdpImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: hb.onOpenTermiusImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[2], onSelect: hb.onOpenTermiusImport },
         ...(desktopPlatform === 'win32'
-          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: hb.onOpenXshellImport }]
+          ? [{ label: HOST_BROWSER_IMPORT_MENU_LABELS[3], onSelect: hb.onOpenXshellImport }]
           : []),
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[6], onSelect: hb.onOpenWarpgateImport },
-        { label: HOST_BROWSER_IMPORT_MENU_LABELS[7], onSelect: hb.onOpenAwsImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[4], onSelect: hb.onOpenWarpgateImport },
+        { label: HOST_BROWSER_IMPORT_MENU_LABELS[5], onSelect: hb.onOpenAwsImport },
       ],
     [
       desktopPlatform,
       hb.onOpenDolgateImport,
       hb.onOpenAwsImport,
       hb.onOpenOpenSshImport,
-      hb.onOpenSerialImport,
-      hb.onOpenRdpImport,
       hb.onOpenTermiusImport,
       hb.onOpenWarpgateImport,
       hb.onOpenXshellImport,
@@ -147,9 +144,16 @@ export function HostListPanel({ hb }: HostListPanelProps) {
   }
 
   function renderHostCard(host: (typeof visibleHosts)[number]) {
+    // 카드 하나가 못 그려져도 나머지 목록은 남아야 한다. 내용을 함수로 넘기는 이유는
+    // HostRowBoundary 주석에 있다(부모 렌더에서 계산하면 바운더리를 지나친다).
+    return (
+      <HostRowBoundary key={host.id} host={host} render={() => renderHostCardBody(host)} />
+    );
+  }
+
+  function renderHostCardBody(host: (typeof visibleHosts)[number]) {
     return (
       <HostListCard
-        key={host.id}
         host={host}
         selected={
           selectedHostIdSet.has(host.id) ||

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
@@ -7,6 +7,58 @@ import { Button } from '../ui';
 import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 import { useTranslation } from 'react-i18next';
+
+type HostCreateKind = 'ssh' | 'serial' | 'rdp';
+
+// 프로토콜 이름이라 번역하지 않는다(이 컴포넌트의 'New Host'·'Create Host' 와 같은 취급).
+const HOST_KIND_TABS: ReadonlyArray<{ kind: HostCreateKind; label: string }> = [
+  { kind: 'ssh', label: 'SSH' },
+  { kind: 'serial', label: 'Serial' },
+  { kind: 'rdp', label: 'RDP' },
+];
+
+/**
+ * 이 서버에서 만들 수 있는 종류만 남긴다.
+ *
+ * RDP 는 서버가 계정 데이터 수준을 저장할 수 있어야 한다. 못 하는 서버(자체 호스팅 옛 버전)에서
+ * 만들면, 같은 계정의 옛 기기가 그 레코드를 받아 조용히 망가진다 — 서버가 막아 줄 수 없는 상태다.
+ * 그래서 여기서 아예 열지 않는다.
+ *
+ * 이미 만들어 둔 RDP 호스트는 그대로 둔다. 이미 올라가 있으므로 숨겨도 위험이 줄지 않고,
+ * 쓰던 것이 사라지는 편이 더 나쁘다.
+ */
+export function resolveCreatableHostKinds(input: {
+  serverSupportsDataFloor: boolean;
+}): ReadonlyArray<{ kind: HostCreateKind; label: string }> {
+  return HOST_KIND_TABS.filter(
+    (tab) => tab.kind !== 'rdp' || input.serverSupportsDataFloor,
+  );
+}
+
+const HOST_KIND_BADGE_LABELS: Record<HostCreateKind, string> = {
+  ssh: 'S',
+  serial: 'SER',
+  rdp: 'RDP',
+};
+
+/**
+ * 종류 세그먼트. 공용 Tabs 프리미티브(알약형)를 쓰지 않는다 — 그건 AWS 임포트·프로필
+ * 위저드·컨테이너 상세가 함께 쓰는 모양이라 여기 맞춰 고치면 그 화면들이 같이 바뀌고,
+ * 좁은 드로어에서는 아래 입력들과 폭·라운드가 어긋나 혼자 떠 보인다.
+ *
+ * 그래서 Input 과 같은 rounded-[10px]·같은 테두리·같은 배경으로 트랙을 만들고 3등분해 풀폭으로
+ * 깐다.
+ *
+ * 선택 표시는 명도가 아니라 강조색 틴트로 한다(--selection-tint/-border). surface-* 토큰들은
+ * 서로 몇 단위 차이라(라이트 elevated 255,255,255 vs strong 250,252,255 / 다크 16,28,43 vs
+ * 18,32,48) 흰 칸을 얹는 방식으로는 어느 테마에서도 보이지 않는다.
+ */
+const KIND_SEGMENT_TRACK_CLASS =
+  'grid grid-cols-3 gap-[0.15rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.2rem]';
+
+// 비활성 칸도 같은 굵기의 투명 테두리를 둬서 선택이 옮겨갈 때 칸 크기가 흔들리지 않게 한다.
+const KIND_SEGMENT_BASE_CLASS =
+  'rounded-[7px] border py-[0.5rem] text-[0.85rem] font-semibold transition-[background-color,border-color,color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent-strong)_45%,transparent)]';
 
 interface HostDrawerProps {
   open: boolean;
@@ -18,7 +70,15 @@ interface HostDrawerProps {
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
-  createKind?: 'ssh' | 'serial' | 'rdp';
+  /** 생성 모드를 열 때의 초기 종류. 이후 종류는 폼 맨 위 셀렉터로 사용자가 고른다. */
+  createKind?: HostCreateKind;
+  /**
+   * 붙어 있는 서버가 계정 데이터 수준을 저장·판정할 수 있는가(resolveCreatableHostKinds 참고).
+   *
+   * 기본 false — 아직 /api/info 를 못 읽었거나 오프라인이면 만들 수 있다고 보지 않는다. 잘못
+   * 열어 주면 같은 계정의 옛 기기가 망가지고, 그건 되돌리기 어렵다.
+   */
+  serverSupportsDataFloor?: boolean;
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   onClose: () => void;
   onSubmit: HostFormProps['onSubmit'];
@@ -39,6 +99,7 @@ export function HostDrawer({
   snippets = [],
   defaultGroupPath = null,
   createKind = 'ssh',
+  serverSupportsDataFloor = false,
   desktopPlatform = 'unknown',
   onClose,
   onSubmit,
@@ -69,13 +130,46 @@ export function HostDrawer({
     setHeaderLabel(value);
     hostFormRef.current?.setLabel(value);
   }, []);
+
+  // 생성 모드는 종류를 폼 안에서 고른다 — SSH·Serial·RDP 마다 따로 있던 입구를 하나로 모은
+  // 자리다. 스토어가 준 createKind 로 시작하고(기본 SSH), 그 뒤로는 이 로컬 상태가 원본이다.
+  // HostForm 은 createKind 가 바뀌면 그 종류의 빈 draft 로 스스로 갈아탄다.
+  const [selectedKind, setSelectedKind] = useState<HostCreateKind>(createKind);
+  const creatableKinds = resolveCreatableHostKinds({ serverSupportsDataFloor });
+  // 드로어를 다시 열면(스토어가 createKind 를 새로 정함) 그 값에서 다시 시작한다.
+  useEffect(() => {
+    setSelectedKind(createKind);
+  }, [createKind]);
+
+  // 종류를 바꾸면 폼이 draft 를 리셋하므로 라벨도 비워진다. 라벨 입력이 셀렉터 바로 위에
+  // 있어서 눈앞에서 사라지면 어색하니, 사용자가 적어 둔 라벨만 되돌려준다.
+  const labelToRestoreRef = useRef<string | null>(null);
+  const handleKindChange = useCallback(
+    (kind: HostCreateKind) => {
+      if (kind === selectedKind) {
+        return;
+      }
+      labelToRestoreRef.current = headerLabel.trim() ? headerLabel : null;
+      setSelectedKind(kind);
+    },
+    [headerLabel, selectedKind],
+  );
+  // 자식(HostForm)의 리셋 이펙트가 부모보다 먼저 도므로, 여기서 되돌리면 리셋 뒤에 적용된다.
+  useEffect(() => {
+    const pendingLabel = labelToRestoreRef.current;
+    if (pendingLabel === null) {
+      return;
+    }
+    labelToRestoreRef.current = null;
+    setHeaderLabel(pendingLabel);
+    hostFormRef.current?.setLabel(pendingLabel);
+  }, [selectedKind]);
   // Overview(HostDetailPanel) 헤더와 같은 뱃지 로직을 써서 편집 헤더도 동일한 모양으로 맞춘다.
-  // 생성 모드는 아직 호스트가 없으므로 createKind 기준 대체 라벨을 보여준다.
+  // 생성 모드는 아직 호스트가 없으므로 지금 고른 종류 기준 대체 라벨을 보여준다(저장 후
+  // getHostBadgeLabel 이 내는 값과 같게 맞춰 뱃지가 바뀌지 않게 한다).
   const headerBadgeLabel = formHost
     ? getHostBadgeLabel(formHost)
-    : createKind === 'serial'
-      ? 'SER'
-      : 'S';
+    : HOST_KIND_BADGE_LABELS[selectedKind];
 
   async function handlePrimaryAction() {
     if (!hostFormRef.current) {
@@ -139,6 +233,30 @@ export function HostDrawer({
         data-testid="drawer-scroll-body"
         className="min-h-0 flex-1 overflow-y-auto px-[0.7rem] pb-[1.3rem] pt-[1.1rem]"
       >
+        {mode === 'create' ? (
+          <div className={cn(KIND_SEGMENT_TRACK_CLASS, 'mb-[1.1rem]')} aria-label="Host type">
+            {creatableKinds.map((tab) => {
+              const isSelected = selectedKind === tab.kind;
+              return (
+                <button
+                  key={tab.kind}
+                  type="button"
+                  aria-pressed={isSelected}
+                  className={cn(
+                    KIND_SEGMENT_BASE_CLASS,
+                    isSelected
+                      ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]'
+                      : 'border-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] hover:text-[var(--text)]',
+                  )}
+                  onClick={() => handleKindChange(tab.kind)}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         <HostForm
           ref={hostFormRef}
           hideTitle
@@ -149,7 +267,7 @@ export function HostDrawer({
           tailnetOptions={tailnetOptions}
           snippets={snippets}
           defaultGroupPath={defaultGroupPath}
-          createKind={createKind}
+          createKind={selectedKind}
           desktopPlatform={desktopPlatform}
           onSubmit={onSubmit}
           onConnect={onConnect}

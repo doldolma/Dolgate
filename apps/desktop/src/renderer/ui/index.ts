@@ -3,6 +3,7 @@ export * from './Button';
 export * from './Card';
 export * from './CloseIcon';
 export * from './EmptyState';
+export * from './ErrorBoundary';
 export * from './FieldGroup';
 export * from './FilterRow';
 export * from './FontSelectField';

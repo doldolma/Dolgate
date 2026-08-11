@@ -389,6 +389,8 @@ export function HomeShell({
           : 'ssh'
       }
       desktopPlatform={desktopPlatform}
+      // 서버가 계정 데이터 수준을 저장할 수 있을 때만 RDP 를 만들 수 있다(HostDrawer 주석 참고).
+      serverSupportsDataFloor={authState.capabilities?.dataFloor === true}
       onClose={homeViewModel.closeHostDrawer}
       onSubmit={async (draft, secrets) => {
         const isEdit = homeViewModel.hostDrawer.mode === 'edit';
@@ -480,16 +482,6 @@ export function HomeShell({
             onOpenDolgateImport={() => {
               resetHostBrowserMessages();
               setIsDolgateImportOpen(true);
-            }}
-            onOpenSerialImport={() => {
-              resetHostBrowserMessages();
-              setSelectedHostId(null);
-              homeViewModel.openCreateSerialDrawer();
-            }}
-            onOpenRdpImport={() => {
-              resetHostBrowserMessages();
-              setSelectedHostId(null);
-              homeViewModel.openCreateRdpDrawer();
             }}
             onOpenAwsImport={() => {
               resetHostBrowserMessages();

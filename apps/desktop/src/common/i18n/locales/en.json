@@ -677,6 +677,16 @@
       "lastCommand": "Last command",
       "lastCommandFailed": "{{ago}} · failed",
       "latency": "Latency",
+      "resolution": "Resolution",
+      "monitorCount": "{{count}} monitors",
+      "drives": "Drives",
+      "drivesMore": "{{names}} +{{count}} more",
+      "driveReadOnly": "{{name}} (read-only)",
+      "audio": "Audio",
+      "clipboard": "Clipboard",
+      "adminSession": "Admin session",
+      "on": "On",
+      "off": "Off",
       "share": "Share",
       "viewers": "{{count}} watching",
       "windows": "Windows",
@@ -895,6 +905,8 @@
       "invalidHost": "The host data in the Dolgate file is not valid.",
       "invalidTailnet": "The tailnet data in the Dolgate file is not valid.",
       "tailnetMissing": "{{label}}: the tailnet this host uses is not in the file. Add the tailnet to connect.",
+      "unknownHostKindSkipped": "Skipped {{count}} host(s) of a kind this version does not recognize. Update the app to import them.",
+      "unknownHostKindDependentsSkipped": "Also excluded {{count}} item(s) that depend on the skipped hosts (jump hosts, port forwards, DNS).",
       "invalidSecret": "The credential data in the Dolgate file is not valid.",
       "invalidSecretId": "The credential ID in the Dolgate file is not valid.",
       "invalidAwsProfile": "The AWS profile data in the Dolgate file is not valid.",
@@ -1120,7 +1132,8 @@
       "windowsUnsupported": "Windows unsupported",
       "ssmUnavailable": "SSM unavailable",
       "blocked": "Import blocked",
-      "inspect": "Check SSH info"
+      "inspect": "Check SSH info",
+      "addWindows": "Add via SSM shell"
     },
     "error": {
       "portRange": "The SSH port must be a number between 1 and 65535.",
@@ -1168,7 +1181,9 @@
       "doneTitle": "The SSH connection details were detected automatically.",
       "doneHint": "Adjust the values below if needed, then register the host.",
       "usernamePlaceholder": "Leave empty if no username was detected.",
-      "portPlaceholder": "Leave empty to use the default, 22."
+      "portPlaceholder": "Leave empty to use the default, 22.",
+      "windowsTitle": "Windows instances connect through the SSM shell (PowerShell).",
+      "windowsHint": "The SSH detection step is skipped. SFTP, tmux and containers are unavailable on this host."
     },
     "empty": {
       "noEcsClusters": "No importable ECS cluster in this region.",
@@ -1353,29 +1368,16 @@
       "missing": "The Tailnet setting selected by this host is missing. Select 'Not used' to clear it, or register the network again."
     },
     "rdp": {
-      "connection": {
-        "title": "Connection"
-      },
-      "port": "Port",
-      "username": "Username",
       "domain": "Domain",
       "domainPlaceholder": "Leave blank for a local or Microsoft account",
-      "password": "Password",
-      "passwordKeep": "Leave blank to keep",
       "adminSession": {
         "label": "Connect to the admin session"
-      },
-      "details": {
-        "title": "Details"
       },
       "colorQuality": "Color quality",
       "color32": "32-bit",
       "color16": "16-bit",
       "useAllMonitors": {
         "label": "Use all monitors"
-      },
-      "preferences": {
-        "title": "Preferences"
       },
       "audio": {
         "label": "Play remote audio"
@@ -1389,8 +1391,94 @@
         "add": "Add folder",
         "remove": "Remove"
       },
-      "hostname": "Hostname",
       "credential": "Credential"
+    },
+    "title": "Host Editor",
+    "section": {
+      "connection": "Connection",
+      "details": "Details",
+      "preferences": "Preferences"
+    },
+    "save": {
+      "saving": "Saving...",
+      "saved": "Saved",
+      "error": "Couldn't save changes"
+    },
+    "action": {
+      "manage": "Manage",
+      "refresh": "Refresh",
+      "import": "Import"
+    },
+    "placeholder": {
+      "keepBlank": "Leave blank to keep"
+    },
+    "field": {
+      "awsProfile": "AWS Profile",
+      "region": "Region",
+      "availabilityZone": "Availability Zone",
+      "instanceId": "Instance ID",
+      "instanceName": "Instance Name",
+      "platform": "Platform",
+      "privateIp": "Private IP",
+      "state": "State",
+      "sshPort": "SSH Port",
+      "sshUsername": "SSH Username",
+      "ecsCluster": "ECS Cluster",
+      "clusterArn": "Cluster ARN",
+      "warpgateUrl": "Warpgate URL",
+      "warpgateEndpoint": "Warpgate SSH Endpoint",
+      "warpgateTarget": "Target",
+      "warpgateTargetId": "Target ID",
+      "warpgateUsername": "Warpgate Username",
+      "hostname": "Hostname",
+      "port": "Port",
+      "username": "Username",
+      "authType": "Auth Type",
+      "password": "Password",
+      "privateKeyFile": "Private key file",
+      "certificateFile": "SSH certificate file",
+      "passphrase": "Passphrase",
+      "savedCredentials": "Saved Credentials",
+      "tailnet": "Tailnet",
+      "jumpHosts": "Jump hosts",
+      "agentForwarding": "SSH Agent Forwarding",
+      "envVars": "Environment Variables",
+      "group": "Group",
+      "tags": "Tags",
+      "startupCommand": "Startup command",
+      "terminalTheme": "Terminal Theme",
+      "transport": "Transport",
+      "detectedPorts": "Detected Ports",
+      "detectedPortAria": "Detected Serial Port",
+      "devicePath": "Device Path",
+      "remoteHost": "Remote Host",
+      "baudRate": "Baud Rate",
+      "dataBits": "Data Bits",
+      "parity": "Parity",
+      "stopBits": "Stop Bits",
+      "flowControl": "Flow Control",
+      "lineEnding": "Line Ending",
+      "localEcho": "Local Echo",
+      "localLineEditing": "Local Line Editing"
+    },
+    "option": {
+      "none": "None",
+      "authPassword": "Password",
+      "authPrivateKey": "Private key",
+      "authCertificate": "Certificate",
+      "authAgent": "SSH Agent",
+      "transportLocal": "Local serial port",
+      "selectDetectedPort": "Select detected port",
+      "parityOdd": "Odd",
+      "parityEven": "Even",
+      "globalTheme": "Use global theme",
+      "startupCommandMode": "Command",
+      "startupSnippet": "Snippet"
+    },
+    "serial": {
+      "loadingPorts": "Loading serial ports...",
+      "localEchoDesc": "Echo typed characters locally.",
+      "localLineEditingDesc": "Handle backspace and basic line editing locally."
     }
   },
   "hostTransfer": {
@@ -1588,9 +1676,17 @@
       "tailnetMissing": "Not configured — connections are refused",
       "usernameUnset": "Not set",
       "enabled": "On",
+      "disabled": "Off",
       "serverProxy": "Server proxy",
       "startupCommand": "Startup command",
-      "terminalTheme": "Terminal theme"
+      "terminalTheme": "Terminal theme",
+      "adminSession": "Admin session",
+      "colorQuality": "Color quality",
+      "allMonitors": "Use all monitors",
+      "remoteAudio": "Remote audio",
+      "clipboard": "Clipboard",
+      "redirectedFolders": "Redirected folders",
+      "driveReadOnly": "Read-only"
     },
     "env": {
       "heading": "Environment variables ({{count}})",
@@ -2557,7 +2653,8 @@
     "fallbackFailed": "The SSH-over-SSM connection failed and the SSM shell fallback failed too. SSH-over-SSM: {{primary}} / SSM shell: {{fallback}}",
     "ecsUseContainers": "ECS hosts open from the Containers screen instead of a session connection.",
     "fallbackNotice": "The SSH-over-SSM connection failed, falling back to the SSM shell.",
-    "externalLinkScheme": "External links can only be opened over http or https."
+    "externalLinkScheme": "External links can only be opened over http or https.",
+    "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead."
   },
   "hostsIpc": {
     "secretSaved": "The host secret was saved.",
@@ -2704,9 +2801,9 @@
     "killTitle": "Ends the tmux session on the server (kills the processes — not recoverable)."
   },
   "hostBrowserEmpty": {
-    "noHostsHint": "Add your first SSH host with New Host. Serial connections start from Import Serial.",
+    "noHostsHint": "Add your first host with New Host. Pick SSH, Serial, or RDP at the top of the form.",
     "searchHint": "Clear the search or look for a different host name.",
-    "addHint": "Add an SSH host with New Host, or use Import Serial if you need a serial connection.",
+    "addHint": "Add a host with New Host. Pick SSH, Serial, or RDP at the top of the form.",
     "noHosts": "No hosts registered yet.",
     "noResults": "No search results.",
     "noHostsHere": "No hosts here yet.",
@@ -3210,6 +3307,10 @@
     "hostKey": "Host key check",
     "hostKeyPromptDetail": "Confirm whether to trust this host.",
     "ssh": "SSH connection",
+    "ssm": "SSM session",
+    "rdp": "RDP connection",
+    "serial": "Opening the port",
+    "ecsExec": "ECS Exec connection",
     "groupTailscale": "Tailscale",
     "groupHost": "Host",
     "tailscaleSync": "Control plane sync",
@@ -3227,5 +3328,12 @@
       "connectingTitle": "Connecting",
       "failedTitle": "Cannot connect"
     }
+  },
+  "errorBoundary": {
+    "title": "Couldn't render this window",
+    "message": "Something failed while drawing this window. If retrying does not help, send us the message below.",
+    "retry": "Retry",
+    "reload": "Reload",
+    "hostRow": "Can't show this host — {{label}}"
   }
 }

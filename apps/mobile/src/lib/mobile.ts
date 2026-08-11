@@ -37,6 +37,7 @@ import {
   isSshHostRecord,
   normalizeServerUrl,
   parseVaultCacheRecord,
+  SYNC_DATA_FLOOR_HEADER,
   VAULT_EPOCH_HEADER,
   type HostSecretInput,
   type MobileSettings,
@@ -950,6 +951,15 @@ export async function postSyncSnapshot(
   // 암호화에 쓴 DEK 의 세대(epoch) — 서버가 트랜잭션 안에서 fence 로 대조해, 다른
   // 기기의 초기화/재설정과 겹친 push 를 커밋 시점에 거부한다(409).
   vaultEpoch?: number | null,
+  /**
+   * 이 기기가 올리는 데이터가 요구하는 클라이언트 수준. 생략하면 0(요구 없음)이다.
+   *
+   * **모바일은 지금 늘 0 이다.** 아는 종류만 로컬에 두기 때문에(decodeSupportedHosts) 옛 클라이언트를
+   * 곤란하게 하는 레코드를 애초에 들고 있지 않다. 인자를 남겨 두는 이유는 모바일이 나중에 그런
+   * 종류를 지원하게 되면 그 자리에서 값을 넘기면 되게 하려는 것이다 — 헤더를 안 보내는 클라이언트가
+   * 있으면, 그 기기가 새 종류를 올리는데 계정 수준은 안 올라가는 구멍이 생긴다.
+   */
+  syncDataFloor?: number | null,
 ): Promise<string | null> {
   const headers: Record<string, string> = {
     authorization: `Bearer ${accessToken}`,
@@ -959,6 +969,13 @@ export async function postSyncSnapshot(
   if (typeof vaultEpoch === 'number' && Number.isSafeInteger(vaultEpoch)) {
     headers[VAULT_EPOCH_HEADER] = String(vaultEpoch);
   }
+  // 항상 보낸다. 서버는 헤더가 없으면 0 으로 보지만, 모든 클라이언트가 자기 수준을 선언하는
+  // 편이 규칙이 단순하다 — "안 보낸 것" 과 "0" 을 구분할 일이 없어진다.
+  headers[SYNC_DATA_FLOOR_HEADER] = String(
+    typeof syncDataFloor === 'number' && Number.isSafeInteger(syncDataFloor) && syncDataFloor > 0
+      ? syncDataFloor
+      : 0,
+  );
   const response = await fetchWithOptions(
     new URL('/sync', normalizeServerUrl(serverUrl)).toString(),
     {

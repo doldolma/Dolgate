@@ -114,6 +114,14 @@ export interface ServerInfoResponse {
   capabilities: {
     sync: {
       awsProfiles: boolean;
+      /**
+       * 서버가 계정 데이터 수준(sync_data_floor)을 저장·판정하는가.
+       *
+       * 이 값이 없는 서버(자체 호스팅 옛 버전)에서는 클라이언트가 보내는 수준 헤더를 아무도
+       * 읽지 않아, 옛 클라이언트를 막아 주는 장치가 조용히 없는 상태가 된다. 화면은 이 값으로
+       * 그 보호가 필요한 기능(RDP 호스트 추가)을 닫는다.
+       */
+      dataFloor?: boolean;
     };
     sessions: {
       awsSsm: boolean;

@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { getParentGroupPath, isAwsEcsHostRecord, normalizeGroupPath } from '@shared';
+import { getParentGroupPath, normalizeGroupPath } from '@shared';
 import { cn } from '../lib/cn';
 import { DialogBackdrop } from './DialogBackdrop';
 import { HostDeleteConfirmDialog } from './HostDeleteConfirmDialog';
 import {
   Button,
+  ErrorBoundary,
   Input,
   ModalBody,
   ModalFooter,
@@ -18,6 +19,11 @@ import { AppWindow, Columns2, Container, Copy, Download, Folder, Pencil, SquareT
 import { HomeSidebar } from './host-browser/HomeSidebar';
 import { HostListPanel } from './host-browser/HostListPanel';
 import { HostDetailPanel } from './host-browser/HostDetailPanel';
+import {
+  hostSupportsContainers,
+  hostSupportsSftp,
+  hostSupportsTmux,
+} from './host-browser/hostCapabilities';
 import {
   getHostBrowserEmptyCalloutMessage,
   getHostBrowserVisibleImportMenuLabels,
@@ -66,12 +72,18 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
   const hb = useHostBrowser(props);
   const { contextMenu, contextMenuStyle, groupModalState, groupDeleteTarget, hostDeleteTarget } =
     hb;
-  // ECS 호스트는 SFTP/tmux/컨테이너를 지원하지 않아 컨텍스트 메뉴에서 숨긴다(단일 선택 기준).
-  const contextMenuHost =
-    contextMenu?.kind === 'host' && contextMenu.hostIds.length === 1
-      ? hb.hosts.find((entry) => entry.id === contextMenu.hostIds[0]) ?? null
-      : null;
-  const contextMenuIsEcs = contextMenuHost ? isAwsEcsHostRecord(contextMenuHost) : false;
+  // SFTP·tmux·컨테이너는 SSH 세션이 있어야 하는 기능이라 호스트 종류마다 되고 안 되고가 갈린다.
+  // 섞어 고른 선택에서는 되는 호스트만 대상으로 좁히고(개수 라벨이 좁혀진 수를 그대로 보여주므로
+  // 몇 대에 걸리는지 눌러 보기 전에 알 수 있다), 대상이 하나도 없으면 항목 자체를 숨긴다.
+  const contextMenuHosts =
+    contextMenu?.kind === 'host'
+      ? hb.hosts.filter((entry) => contextMenu.hostIds.includes(entry.id))
+      : [];
+  const sftpTargetIds = contextMenuHosts.filter(hostSupportsSftp).map((entry) => entry.id);
+  const tmuxTargetIds = contextMenuHosts.filter(hostSupportsTmux).map((entry) => entry.id);
+  const containersTargetIds = contextMenuHosts
+    .filter(hostSupportsContainers)
+    .map((entry) => entry.id);
   const groupExportHostIds =
     contextMenu?.kind === 'group' ? hb.getHostIdsInGroupTrees(contextMenu.groupPaths) : [];
 
@@ -101,7 +113,26 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
             : 'border-l border-[var(--border)] bg-[color-mix(in_srgb,var(--surface-elevated)_92%,var(--app-bg)_8%)] max-[1040px]:hidden',
         )}
       >
-        {hostEditor ?? <HostDetailPanel hb={hb} tmuxPrefixKey={tmuxPrefixKey} />}
+        {/* 상세 패널이 못 그려져도 목록은 계속 쓸 수 있어야 한다 — 이 빌드가 모르는 모양의 호스트를
+            고른 것뿐인데 앱 전체가 멈추면 그 호스트를 고칠 방법도 없다. 호스트를 바꾸면 자동 복구. */}
+        {hostEditor ?? (
+          <ErrorBoundary
+            label="host-detail"
+            resetKey={hb.selectedHostId ?? ''}
+            fallback={() => (
+              <NoticeCard tone="danger" className="m-[0.9rem]" role="alert">
+                {translate('errorBoundary.hostRow', {
+                  label:
+                    hb.hosts.find((entry) => entry.id === hb.selectedHostId)?.label ??
+                    hb.selectedHostId ??
+                    '?',
+                })}
+              </NoticeCard>
+            )}
+          >
+            <HostDetailPanel hb={hb} tmuxPrefixKey={tmuxPrefixKey} />
+          </ErrorBoundary>
+        )}
       </aside>
 
       {contextMenu
@@ -144,13 +175,15 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       {translate('hostBrowser.menu.connectNewWindow')}
                     </button>
                   ) : null}
-                  {!contextMenuIsEcs && hb.onOpenSftp ? (
+                  {sftpTargetIds.length > 0 && hb.onOpenSftp ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
-                      disabled={contextMenu.hostIds.length !== 1}
+                      // SFTP 는 탭 하나에 호스트 하나라 대상이 정확히 1대일 때만 연다. 여러 대가
+                      // 대상이면 어느 쪽을 열지 정할 근거가 없다(tmux·컨테이너처럼 순회할 수 없다).
+                      disabled={sftpTargetIds.length !== 1}
                       onClick={() => {
-                        const targetHostId = contextMenu.hostIds[0];
+                        const targetHostId = sftpTargetIds[0];
                         hb.setContextMenu(null);
                         if (!targetHostId) {
                           return;
@@ -162,35 +195,35 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
                       {translate('hostBrowser.menu.sftp')}
                     </button>
                   ) : null}
-                  {!contextMenuIsEcs && hb.onConnectHostTmux ? (
+                  {tmuxTargetIds.length > 0 && hb.onConnectHostTmux ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
                       onClick={async () => {
-                        await hb.runForOrderedHosts(contextMenu.hostIds, hb.onConnectHostTmux!);
+                        await hb.runForOrderedHosts(tmuxTargetIds, hb.onConnectHostTmux!);
                       }}
                     >
                       <Columns2 className={CTX_ICON} aria-hidden />
-                      {contextMenu.hostIds.length === 1
+                      {tmuxTargetIds.length === 1
                         ? translate('hostBrowser.menu.tmux')
                         : translate('hostBrowser.menu.tmuxMany', {
-                            count: contextMenu.hostIds.length,
+                            count: tmuxTargetIds.length,
                           })}
                     </button>
                   ) : null}
-                  {!contextMenuIsEcs ? (
+                  {containersTargetIds.length > 0 ? (
                     <button
                       type="button"
                       className={CTX_ITEM}
                       onClick={async () => {
-                        await hb.runForOrderedHosts(contextMenu.hostIds, hb.onOpenHostContainers);
+                        await hb.runForOrderedHosts(containersTargetIds, hb.onOpenHostContainers);
                       }}
                     >
                       <Container className={CTX_ICON} aria-hidden />
-                      {contextMenu.hostIds.length === 1
+                      {containersTargetIds.length === 1
                         ? translate('hostBrowser.menu.containers')
                         : translate('hostBrowser.menu.containersMany', {
-                            count: contextMenu.hostIds.length,
+                            count: containersTargetIds.length,
                           })}
                     </button>
                   ) : null}

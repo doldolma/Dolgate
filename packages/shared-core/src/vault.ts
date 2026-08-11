@@ -26,6 +26,21 @@ export const VAULT_KDF_ALGORITHM = "argon2id";
 // 대조해 옛 세대의 쓰기를 커밋 시점에 거부한다.
 export const VAULT_EPOCH_HEADER = "X-Dolgate-Vault-Epoch";
 
+/**
+ * push 시 "이 계정의 데이터를 다루려면 클라이언트가 이 수준이어야 한다" 를 알리는 헤더.
+ *
+ * 서버는 페이로드가 암호문이라 안을 볼 수 없다. 그래서 이 값을 클라이언트가 알려 주고, 서버는
+ * 계정 행에 max 로만 반영한다(단조). 그 수준을 못 갖춘 클라이언트는 동기화가 426 으로 막히고
+ * 업데이트 안내를 받는다 — 계정 단위라, 문제 되는 항목을 쓰지 않는 사용자는 영향이 없다.
+ *
+ * 수준 1 = RDP 호스트가 있다(1.8.10 이하 데스크톱은 모르는 호스트 종류를 SSH 로 간주해 화면이
+ * 비거나 레코드를 고쳐 되올린다).
+ */
+export const SYNC_DATA_FLOOR_HEADER = "X-Dolgate-Sync-Data-Floor";
+
+/** RDP 호스트가 있는 계정의 데이터 수준. */
+export const SYNC_DATA_FLOOR_RDP_HOSTS = 1;
+
 // push 거부 응답의 code — 두 값 모두 "세션을 갱신해 볼트를 재판정하라"로 처리한다.
 // (vault_reset: 볼트 부재(초기화 직후) / vault_dek_mismatch: DEK 세대 불일치)
 export const VAULT_RESET_CODE = "vault_reset";

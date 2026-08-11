@@ -1,5 +1,7 @@
 import { getHostBadgeLabel, normalizeGroupPath } from '@shared';
+import type { HostRecord } from '@shared';
 import { cn } from '../../lib/cn';
+import { HostRowBoundary } from './HostRowBoundary';
 import { ChevronDown, ChevronUp, MoreVertical, Star } from '../../ui/icons';
 import {
   formatLastUsed,
@@ -97,23 +99,56 @@ export function HostListTable({ hb }: HostListTableProps) {
 
       {/* Rows */}
       <div className="flex flex-col divide-y divide-[var(--border)]">
-        {visibleHosts.map((host) => {
-          const isSelected =
-            selectedHostIdSet.has(host.id) ||
-            (selectedHostIds.length === 0 &&
-              selectedGroupPaths.length === 0 &&
-              selectedHostId === host.id);
-          const isFavorite = favoriteHostIdSet.has(host.id);
-          const group = normalizeGroupPath(host.groupName);
-          const address = getHostAddress(host);
-          const lastUsedAt = hb.lastConnectedByHostId.get(host.id);
-          const tags = host.tags ?? [];
-          const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
-          const overflowTagCount = tags.length - visibleTags.length;
+        {visibleHosts.map((host) => (
+          // 행 하나가 못 그려져도 나머지 목록은 남아야 한다. 행 값을 부모의 map 에서 만들면 그
+          // 오류는 부모에서 나므로, 별도 컴포넌트로 빼고 내용을 함수로 넘긴다(HostRowBoundary 참고).
+          <HostRowBoundary
+            key={host.id}
+            host={host}
+            render={() => (
+              <HostListTableRow
+                host={host}
+                hb={hb}
+                isSelected={
+                  selectedHostIdSet.has(host.id) ||
+                  (selectedHostIds.length === 0 &&
+                    selectedGroupPaths.length === 0 &&
+                    selectedHostId === host.id)
+                }
+                isFavorite={favoriteHostIdSet.has(host.id)}
+                onOpenMenu={openHostMenu}
+              />
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
-          return (
+function HostListTableRow({
+  host,
+  hb,
+  isSelected,
+  isFavorite,
+  onOpenMenu,
+}: {
+  host: HostRecord;
+  hb: HostBrowserModel;
+  isSelected: boolean;
+  isFavorite: boolean;
+  onOpenMenu: (host: HostRecord, x: number, y: number) => void;
+}) {
+  const { t: translate } = useTranslation();
+  const group = normalizeGroupPath(host.groupName);
+  const address = getHostAddress(host);
+  const lastUsedAt = hb.lastConnectedByHostId.get(host.id);
+  const tags = host.tags ?? [];
+  const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
+  const overflowTagCount = tags.length - visibleTags.length;
+
+  return (
             <div
-              key={host.id}
               data-host-card="true"
               data-host-id={host.id}
               data-host-card-state={isSelected ? 'selected' : 'idle'}
@@ -133,7 +168,7 @@ export function HostListTable({ hb }: HostListTableProps) {
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
-                openHostMenu(host, event.clientX, event.clientY);
+                onOpenMenu(host, event.clientX, event.clientY);
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -143,7 +178,7 @@ export function HostListTable({ hb }: HostListTableProps) {
               }}
               onDragStart={(event) => {
                 const nextDraggedHostIds = hb.getNextDraggedHostIds(host);
-                if (!selectedHostIdSet.has(host.id)) {
+                if (!hb.selectedHostIdSet.has(host.id)) {
                   hb.selectSingleHost(host.id);
                 }
                 hb.setDraggedGroupPath(null);
@@ -241,15 +276,11 @@ export function HostListTable({ hb }: HostListTableProps) {
                 onClick={(event) => {
                   event.stopPropagation();
                   const rect = event.currentTarget.getBoundingClientRect();
-                  openHostMenu(host, rect.right, rect.bottom);
+                  onOpenMenu(host, rect.right, rect.bottom);
                 }}
               >
                 <MoreVertical className="h-[1.05rem] w-[1.05rem]" />
               </button>
             </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }

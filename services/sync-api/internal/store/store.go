@@ -228,6 +228,12 @@ type Store interface {
 	// GetSyncSnapshot 은 revision + 모든 kind 를 단일 읽기 트랜잭션으로 읽어 일관 스냅샷을 준다.
 	GetSyncSnapshot(ctx context.Context, userID string) (int64, syncmodel.Payload, error)
 
+	// GetSyncDataFloor 는 이 계정의 데이터를 다루는 데 필요한 클라이언트 능력 수준이다.
+	// 0 = 아무 버전이나 괜찮음. 자세한 배경은 userRow.SyncDataFloor 주석에 있다.
+	GetSyncDataFloor(ctx context.Context, userID string) (int, error)
+	// RaiseSyncDataFloor 는 수준을 올리기만 한다(단조). 이미 같거나 높으면 아무 일도 없다.
+	RaiseSyncDataFloor(ctx context.Context, userID string, floor int) error
+
 	// 유저 존재 확인 — 탈퇴 직후 잔여 access 토큰의 sync 재유입(데이터 부활) 차단용.
 	// "행 없음"은 (false, nil), 드라이버 에러만 err 로 돌려준다.
 	UserExists(ctx context.Context, userID string) (bool, error)

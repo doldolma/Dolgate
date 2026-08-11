@@ -610,6 +610,74 @@ describe('HostRepository', () => {
     });
   });
 
+  // RDP 레코드에 username 을 실으면 안 된다. RDP 를 모르는 옛 빌드(1.8.10)의
+  // normalizeHostRecord 가 "hostname·port·username 이 다 있으면 SSH" 로 보고 kind 를 'ssh' 로
+  // 바꿔 RDP 필드를 전부 버린 뒤, 전체 스냅샷을 push 한다 — 서버는 같은 updatedAt + 다른 내용을
+  // 마지막 쓰기 승리로 받으므로 모든 기기에서 그 호스트가 SSH 로 덮어써진다.
+  //
+  // 필드가 없으면 그 빌드는 레코드를 버리기만 한다(push 는 upsert 라 서버 사본은 살아 있다).
+  // 모르는 종류를 SSH 로 바꿔 저장하던 폴백. 이것이 이번 사고의 뿌리다 — RDP 를 모르는 빌드가
+  // RDP 호스트를 `kind:'ssh'` 로 고쳐 쓰고 전량 스냅샷을 push 해서, 다른 기기의 원본까지
+  // 덮어썼다(서버가 같은 타임스탬프 + 다른 내용을 마지막 쓰기 승리로 받는다).
+  //
+  // 종류는 계속 추가되므로 이 빌드도 "다음 종류" 에 대해 같은 짓을 할 수 있다. 모르면 고치지 말고
+  // 버려야 한다 — 버려도 서버 사본은 upsert 라 남고, 업데이트하면 돌아온다.
+  it('모르는 종류의 호스트를 SSH 로 바꾸지 않고 버린다', async () => {
+    await loadRepositories();
+    const storage = await import('./state-storage');
+    storage.getDesktopStateStorage().updateState((state) => {
+      state.data.hosts = [
+        ...state.data.hosts,
+        // 새 버전이 만든 호스트. SSH 로 볼 수 있는 필드를 다 갖췄지만 종류가 다르다.
+        {
+          id: 'future-1',
+          kind: 'telnet',
+          label: 'switch',
+          hostname: 'switch.example.com',
+          port: 23,
+          username: 'admin',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        } as never,
+      ];
+    });
+
+    vi.resetModules();
+    const reloadedStorage = await import('./state-storage');
+    reloadedStorage.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloaded = new databaseModule.HostRepository();
+
+    expect(reloaded.getById('future-1')).toBeNull();
+    // SSH 로 바뀐 사본이 남아 있어도 안 된다 — 그 사본이 동기화로 올라가 원본을 덮는다.
+    expect(reloaded.list().some((host) => host.id === 'future-1')).toBe(false);
+  });
+
+  it('RDP 호스트에 username 을 싣지 않는다', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('rdp-compat-1', {
+      kind: 'rdp',
+      label: 'Win Box',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '10.0.2.181',
+      port: 3389,
+    });
+
+    expect(hosts.getById('rdp-compat-1')).not.toHaveProperty('username');
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloaded = new databaseModule.HostRepository().getById('rdp-compat-1');
+
+    expect(reloaded).toMatchObject({ kind: 'rdp' });
+    expect(reloaded).not.toHaveProperty('username');
+  });
+
   it('keeps the admin session choice across a reload', async () => {
     // 저장·복원 두 계층이 명시한 필드만 통과시키므로, 어느 한쪽을 빠뜨리면 켜 둔 관리 세션이
     // 앱을 껐다 켜면 조용히 꺼진다 — 그러면 라이선스를 쓰는 일반 세션으로 붙는다.

@@ -952,7 +952,17 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
     };
   }
 
-  if (value.kind !== 'ssh' && typeof value.hostname !== 'string') {
+  // 여기까지 온 것은 SSH 이거나, kind 필드가 없던 시절의 옛 레코드다.
+  //
+  // **모르는 종류를 SSH 로 보지 않는다.** 예전에는 이 자리로 떨어진 것을 전부 `kind: 'ssh'` 로
+  // 바꿔 저장했다. 그래서 RDP 를 모르는 빌드(1.8.10)가 동기화로 받은 RDP 호스트를 SSH 로 고쳐
+  // 쓰고, 전량 스냅샷 push + 서버의 같은-타임스탬프 마지막-쓰기-승리로 **다른 기기의 원본까지
+  // 덮어썼다.** 호스트 종류는 계속 추가되므로(RDP 가 그랬고 다음도 있을 것이다) 모르는 것은
+  // 고치지 않고 버린다.
+  //
+  // 버린다고 사라지지 않는다 — 우리가 안 올리면 서버 사본은 upsert 라 그대로 남고, 이 기기를
+  // 업데이트하면 다시 보인다. 억지로 끼워 맞추는 것보다 안 보이는 편이 낫다.
+  if (value.kind !== undefined && value.kind !== null && value.kind !== 'ssh') {
     return null;
   }
 

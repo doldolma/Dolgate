@@ -43,6 +43,19 @@ type userRow struct {
 	// vault_version_floor는 계정이 한 번이라도 사용한 최소 볼트 프로토콜이다. v2 설정 뒤
 	// reset으로 볼트 행이 사라져도 2가 남아 구클라이언트의 v1 lazy 재생성을 막는다.
 	VaultVersionFloor int `gorm:"column:vault_version_floor;not null;default:1"`
+	// sync_data_floor 는 **이 계정의 데이터를 다루려면 클라이언트가 갖춰야 하는 능력 수준**이다.
+	// 0 = 아무 버전이나 괜찮음.
+	//
+	// 왜 필요한가: 옛 클라이언트는 모르는 호스트 종류를 SSH 로 간주해 화면이 비거나(없는 필드를
+	// 읽다 던진다) 레코드를 `kind:"ssh"` 로 고쳐 되올려 다른 기기의 원본까지 덮어쓴다. 그 빌드는
+	// 고칠 수 없으니 서버가 동기화를 끊고 업데이트를 안내해야 하는데, **모든 계정에 하한을 걸면
+	// 그 종류를 쓰지도 않는 사용자까지 업데이트를 강요받는다.** 그래서 위험한 데이터를 실제로
+	// 가진 계정만 표시한다.
+	//
+	// 올리는 쪽은 클라이언트다 — 페이로드가 암호문이라 서버는 안을 볼 수 없다. push 헤더로
+	// 받아 max 로만 갱신한다(단조). 내려가지 않는다: 그 종류를 다 지웠는지 서버가 확인할 방법이
+	// 없고, 잘못 내리면 옛 클라이언트가 다시 데이터를 망칠 수 있다.
+	SyncDataFloor int `gorm:"column:sync_data_floor;not null;default:0"`
 }
 
 func (userRow) TableName() string {
@@ -1264,6 +1277,33 @@ func (s *GormStore) GetSyncRevision(ctx context.Context, userID string) (int64, 
 		return 0, err
 	}
 	return row.SyncRevision, nil
+}
+
+// GetSyncDataFloor 는 이 계정의 데이터가 요구하는 클라이언트 능력 수준이다(userRow 주석 참고).
+// 계정 행이 없으면 0 — 게이트하지 않는다.
+func (s *GormStore) GetSyncDataFloor(ctx context.Context, userID string) (int, error) {
+	var row userRow
+	err := s.db.WithContext(ctx).Select("sync_data_floor").Where("id = ?", userID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return row.SyncDataFloor, nil
+}
+
+// RaiseSyncDataFloor 는 floor 를 올리기만 한다.
+//
+// 단일 UPDATE 의 WHERE 로 단조성을 지킨다 — 앱에서 읽고 비교해 쓰면 동시 push 두 개가 서로의
+// 값을 덮어 낮은 쪽이 이길 수 있다. 이미 같거나 높으면 아무 행도 바뀌지 않는다(오류 아님).
+func (s *GormStore) RaiseSyncDataFloor(ctx context.Context, userID string, floor int) error {
+	if floor <= 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Model(&userRow{}).
+		Where("id = ? AND sync_data_floor < ?", userID, floor).
+		UpdateColumn("sync_data_floor", floor).Error
 }
 
 // bumpSyncRevisionTx 는 주어진 트랜잭션에서 원자적 UPDATE(sync_revision = sync_revision + 1)

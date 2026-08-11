@@ -531,6 +531,10 @@ export class AuthService {
   // 서버 URL과 함께 보관해 서버가 바뀌면 이전 판정을 그대로 쓰지 않는다.
   private serverWebauthnSupported: boolean | null = null;
   private serverWebauthnSupportServerUrl: string | null = null;
+  // 서버가 계정 데이터 수준(sync_data_floor)을 저장·판정할 수 있는지 — sync-service 가 알려준다.
+  // 못 하는 서버에서는 옛 클라이언트를 막아 줄 장치가 없어서, 그 보호가 필요한 기능을 열지 않는다.
+  private serverDataFloorSupported: boolean | null = null;
+  private serverDataFloorSupportServerUrl: string | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private offlineRetryTimer: NodeJS.Timeout | null = null;
   private offlineLeaseExpiryTimer: NodeJS.Timeout | null = null;
@@ -2538,6 +2542,19 @@ export class AuthService {
     this.patchState({});
   }
 
+  noteServerDataFloorSupport(supported: boolean): void {
+    const serverUrl = normalizeServerUrl(this.getServerUrl());
+    if (
+      this.serverDataFloorSupported === supported &&
+      this.serverDataFloorSupportServerUrl === serverUrl
+    ) {
+      return;
+    }
+    this.serverDataFloorSupported = supported;
+    this.serverDataFloorSupportServerUrl = serverUrl;
+    this.patchState({});
+  }
+
   resetServerWebauthnSupport(): void {
     if (
       this.serverWebauthnSupported === null &&
@@ -2664,6 +2681,13 @@ export class AuthService {
           nextStatus === "authenticated" &&
           this.serverWebauthnSupported === true &&
           this.serverWebauthnSupportServerUrl ===
+            normalizeServerUrl(this.getServerUrl()),
+        // 같은 규칙이다 — 서버가 바뀌면 /api/info 재조회 전까지 false 로 본다. 오프라인일 때도
+        // false 인데, 그 상태에서 RDP 호스트를 새로 만들면 어느 서버에 올라갈지 알 수 없다.
+        dataFloor:
+          nextStatus === "authenticated" &&
+          this.serverDataFloorSupported === true &&
+          this.serverDataFloorSupportServerUrl ===
             normalizeServerUrl(this.getServerUrl()),
       },
     };

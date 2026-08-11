@@ -91,6 +91,15 @@ type serverInfoAuthCapabilities struct {
 
 type serverInfoSyncCapabilities struct {
 	AWSProfiles bool `json:"awsProfiles"`
+	// dataFloor: 계정 데이터 수준(users.sync_data_floor)을 저장·판정할 수 있는가.
+	//
+	// 이 서버가 아니면 클라이언트가 보내는 X-Dolgate-Sync-Data-Floor 를 아무도 안 읽어서,
+	// 옛 클라이언트를 막아 주는 장치가 조용히 없는 상태가 된다. 그래서 클라이언트는 이 값이
+	// 없으면 그 보호가 필요한 기능(RDP 호스트 추가)을 아예 열지 않는다.
+	//
+	// 버전 문자열이 아니라 플래그인 이유: 자체 호스팅 서버는 버전 체계가 다를 수 있고,
+	// awsProfiles·e2ee·webauthn 도 같은 방식으로 알린다.
+	DataFloor bool `json:"dataFloor"`
 }
 
 type serverInfoVaultCapabilities struct {
@@ -256,6 +265,105 @@ const (
 var e2eeMinimumClientVersions = map[string]string{
 	"desktop": "1.8.0",
 	"mobile":  "1.8.0",
+}
+
+// 계정의 데이터 수준(users.sync_data_floor)별로, 그 데이터를 다룰 수 있는 최소 클라이언트 버전.
+//
+// **계정 단위인 이유:** 모든 계정에 하한을 걸면 문제 되는 종류를 쓰지도 않는 사용자까지 업데이트를
+// 강요받는다. 위험한 데이터를 실제로 가진 계정만 막는다.
+//
+// floor 1 = RDP 호스트가 있는 계정. 1.8.10 이하 데스크톱은 모르는 종류를 SSH 로 간주해 화면이
+// 비고(없는 필드를 읽다 던진다) 레코드를 `kind:"ssh"` 로 고쳐 되올려 다른 기기의 원본까지
+// 덮어쓴다. 그 빌드는 고칠 수 없으니 여기서 동기화를 끊고 업데이트를 안내한다.
+//
+// **모바일은 넣지 않는다.** 스토어 배포본이 그대로 남아 있고, 모바일은 모르는 종류를 복호화
+// 단계에서 걸러내므로(decodeSupportedHosts) 같은 문제가 없다. 목록에 없는 클라이언트 이름은
+// 게이트하지 않는다 — 새 클라이언트를 붙일 때마다 서버를 먼저 고쳐야 하는 상황을 피한다.
+var syncDataFloorMinimumVersions = map[int]map[string]string{
+	1: {"desktop": "1.9.0"},
+}
+
+// 클라이언트가 push 에 실어 보내는 "이 데이터를 다루려면 필요한 능력 수준". 서버는 페이로드가
+// 암호문이라 안을 볼 수 없으므로 이 값을 신뢰하고 max 로만 반영한다.
+const syncDataFloorHeader = "X-Dolgate-Sync-Data-Floor"
+
+// 계정 하한 미달 클라이언트에 주는 안내. vaultClientOutdatedMessage 와 같은 제약을 따른다 —
+// 데스크톱의 인증 오류 치환 패턴에 걸리지 않아야 원문이 그대로 화면에 뜬다.
+const clientOutdatedMessage = "이 계정에는 최신 버전에서 추가한 항목이 있습니다. 앱을 업데이트한 뒤 다시 시도해 주세요."
+
+// requiredClientVersionForFloor 는 이 요청을 보낸 클라이언트가 갖춰야 하는 최소 버전이다.
+// 게이트 대상이 아니면 빈 문자열.
+func requiredClientVersionForFloor(floor int, clientName string) string {
+	required := ""
+	// floor 는 누적이다 — 1 이면 1 의 요구를, 2 면 1·2 의 요구를 모두 만족해야 한다.
+	for level := 1; level <= floor; level++ {
+		minimums, known := syncDataFloorMinimumVersions[level]
+		if !known {
+			continue
+		}
+		minimum, gated := minimums[clientName]
+		if !gated {
+			continue
+		}
+		if required == "" || !isClientVersionAtLeast(required, minimum) {
+			required = minimum
+		}
+	}
+	return required
+}
+
+// rejectOutdatedClientForFloor 는 계정 하한에 못 미치는 클라이언트를 426 으로 막는다.
+// true 면 응답을 이미 보냈다.
+func rejectOutdatedClientForFloor(ctx *gin.Context, floor int) bool {
+	if floor <= 0 {
+		return false
+	}
+	clientName := strings.TrimSpace(ctx.GetHeader(clientHeaderName))
+	required := requiredClientVersionForFloor(floor, clientName)
+	if required == "" {
+		return false
+	}
+	if isClientVersionAtLeast(ctx.GetHeader(clientVersionHeaderName), required) {
+		return false
+	}
+	ctx.JSON(http.StatusUpgradeRequired, gin.H{"error": clientOutdatedMessage})
+	ctx.Abort()
+	return true
+}
+
+// rejectOutdatedClientForAccount 는 계정 데이터 수준을 읽어, 그 수준을 못 갖춘 클라이언트에게
+// 세션을 주지 않고 업데이트를 안내한다.
+//
+// **세션 발급까지 막는 이유:** /sync 만 막으면 옛 클라이언트는 조용히 동기화가 멈춘다 — 그 빌드에는
+// 동기화 오류를 보여줄 화면이 없어서 사용자는 왜 다른 기기 변경이 안 오는지 알 수 없다. 여기서
+// 막으면 E2EE 전환 때와 같은 경로로 로그인 화면에 안내가 그대로 뜬다(그래서 상태코드도 같은 426 —
+// 401/403 은 클라이언트가 자기 문구로 치환한다).
+//
+// 인증 자체는 먼저 통과시킨다. 어느 계정인지 알아야 그 계정의 수준을 볼 수 있고, 인증 실패와
+// 버전 부족은 사용자가 할 일이 다르다.
+func rejectOutdatedClientForAccount(ctx *gin.Context, store store.Store, userID string) (bool, error) {
+	floor, err := store.GetSyncDataFloor(ctx.Request.Context(), userID)
+	if err != nil {
+		return false, err
+	}
+	return rejectOutdatedClientForFloor(ctx, floor), nil
+}
+
+// parseSyncDataFloorHeader 는 push 헤더의 수준을 읽는다.
+//
+// **없으면 0 이다** — 이 헤더를 모르는 클라이언트도 계속 push 할 수 있어야 한다. 0 은 "요구 없음"
+// 이고 계정 수준을 내리지 않는다(RaiseSyncDataFloor 가 올리기만 한다). 숫자가 아니거나 음수면
+// 클라이언트 버그이므로 무시하고 0 으로 본다 — 잘못된 값으로 계정을 잠그지 않는다.
+func parseSyncDataFloorHeader(value string) int {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
 }
 
 // 구버전 클라이언트에 v2 계정 세션을 거부할 때 내려주는 안내. 데스크톱의
@@ -447,6 +555,7 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 			Capabilities: serverInfoCapabilities{
 				Sync: serverInfoSyncCapabilities{
 					AWSProfiles: true,
+					DataFloor:   true,
 				},
 				Sessions: serverInfoSessionCapabilities{
 					AWSSsm:            config.AwsSsmRuntime.Enabled,
@@ -850,6 +959,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "login"); err != nil {
 			_ = ctx.Error(err)
 		}
+		if rejected, err := rejectOutdatedClientForAccount(ctx, store, session.User.ID); err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		} else if rejected {
+			return
+		}
 		ctx.JSON(http.StatusOK, session)
 	})
 
@@ -875,6 +990,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "exchange"); err != nil {
 			_ = ctx.Error(err)
 		}
+		if rejected, err := rejectOutdatedClientForAccount(ctx, store, session.User.ID); err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		} else if rejected {
+			return
+		}
 		ctx.JSON(http.StatusOK, session)
 	})
 
@@ -899,6 +1020,12 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 		}
 		if err := recordAuthClientObservation(ctx, store, session.User.ID, "refresh"); err != nil {
 			_ = ctx.Error(err)
+		}
+		if rejected, err := rejectOutdatedClientForAccount(ctx, store, session.User.ID); err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			return
+		} else if rejected {
+			return
 		}
 		ctx.JSON(http.StatusOK, session)
 	})
@@ -1450,6 +1577,23 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	syncGroup := router.Group("/sync")
 	syncGroup.Use(authMiddleware(authService))
 	syncGroup.Use(requireExistingUser)
+	// 계정 데이터가 요구하는 수준을 못 갖춘 클라이언트는 여기서 멈춘다.
+	//
+	// **로그인은 막지 않는다.** 세션까지 끊으면 그 기기에서 로컬 데이터도 못 보게 되고, 문제
+	// 되는 종류를 안 쓰는 계정까지 로그아웃 위험에 노출된다. 동기화만 끊으면 앱은 그대로 열리고
+	// 안내 문구가 동기화 상태로 뜬다.
+	syncGroup.Use(func(ctx *gin.Context) {
+		floor, err := store.GetSyncDataFloor(ctx.Request.Context(), ctx.GetString("userId"))
+		if err != nil {
+			logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+			ctx.Abort()
+			return
+		}
+		if rejectOutdatedClientForFloor(ctx, floor) {
+			return
+		}
+		ctx.Next()
+	})
 	syncGroup.GET("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
 
@@ -1473,6 +1617,15 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	})
 	syncGroup.POST("", func(ctx *gin.Context) {
 		userID := ctx.GetString("userId")
+		// 클라이언트가 "이 데이터는 이 수준이 필요하다" 고 알려 주면 계정 하한을 올린다.
+		// 레코드를 받기 전에 올린다 — 순서가 뒤면 그 사이에 붙은 옛 클라이언트가 새 레코드를
+		// 받아 간다. 실패해도 되돌리지 않는다(단조라 높게 남는 편이 안전하다).
+		if floor := parseSyncDataFloorHeader(ctx.GetHeader(syncDataFloorHeader)); floor > 0 {
+			if err := store.RaiseSyncDataFloor(ctx.Request.Context(), userID, floor); err != nil {
+				logAndJSONError(ctx, http.StatusInternalServerError, "서버 오류가 발생했습니다.", err)
+				return
+			}
+		}
 		// 볼트 행이 없으면 push 를 거부한다. 초기화(reset) 직후 다른 기기가 옛 DEK 로
 		// 아직 unlocked 인 채 잔여 access 토큰으로 push 해서 서버를 "옛 키 + 새 키"
 		// 혼합 상태로 오염시키는 레이스를 막는다(그 기기는 409 를 받고 볼트 플로우로

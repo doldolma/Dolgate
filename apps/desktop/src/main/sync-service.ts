@@ -19,8 +19,12 @@ import type {
 } from "@shared";
 import {
   formatSyncRevisionEtag,
+  isKnownHostKind,
+  isRdpHostRecord,
   isVaultEpochRejectionCode,
   parseSyncRevisionEtag,
+  SYNC_DATA_FLOOR_HEADER,
+  SYNC_DATA_FLOOR_RDP_HOSTS,
   VAULT_EPOCH_HEADER,
 } from '@shared';
 import {
@@ -875,6 +879,18 @@ export class SyncService {
     return { payload, etag };
   }
 
+  /**
+   * 이 계정의 데이터를 다루는 데 필요한 클라이언트 수준.
+   *
+   * 페이로드를 다시 복호화해 보는 대신 로컬 저장소를 본다 — 같은 값이고 훨씬 싸다. 다른 기기만
+   * RDP 호스트를 가진 경우는 그 기기가 이미 올려 뒀다(서버는 max 로만 반영한다).
+   */
+  private resolveSyncDataFloor(): number {
+    return this.hosts.list().some((record) => isRdpHostRecord(record))
+      ? SYNC_DATA_FLOOR_RDP_HOSTS
+      : 0;
+  }
+
   private async pushSnapshot(
     payload: SyncPayloadV2,
     lease: SyncLease,
@@ -888,6 +904,15 @@ export class SyncService {
     if (lease.vaultEpoch !== null) {
       headers[VAULT_EPOCH_HEADER] = String(lease.vaultEpoch);
     }
+    // 이 계정의 데이터를 다루는 데 필요한 클라이언트 수준을 알린다. 서버는 페이로드가 암호문이라
+    // 안을 볼 수 없으므로 이 헤더로만 알 수 있고, 값을 올리기만 한다(단조).
+    //
+    // 이게 없으면 옛 클라이언트가 RDP 호스트를 받아 화면이 비거나 레코드를 SSH 로 고쳐 되올린다.
+    // 반대로 계정 전체에 버전 하한을 걸면 RDP 를 안 쓰는 사용자까지 업데이트를 강요받는다.
+    //
+    // 0 이어도 보낸다. 서버는 헤더가 없으면 0 으로 보지만, 모든 클라이언트가 자기 수준을 선언하는
+    // 편이 규칙이 단순하다 — "안 보낸 것" 과 "0" 을 구분할 일이 없어진다.
+    headers[SYNC_DATA_FLOOR_HEADER] = String(this.resolveSyncDataFloor());
     const response = await this.fetchWithAuthRetry(
       lease,
       new URL('/sync', lease.serverUrl),
@@ -1068,6 +1093,11 @@ export class SyncService {
           vaultKeyBase64
         )
       );
+    // **이 빌드가 모르는 종류는 상태에 넣지 않는다.** 다른 기기의 새 버전이 만든 호스트가
+    // 그대로 들어오면, 그 레코드의 없는 필드를 읽는 코드가 렌더 중에 던져 목록을 그리다 화면이
+    // 통째로 빈다(1.8.10 이 RDP 호스트를 받고 그렇게 됐다). 걸러낸 레코드는 버리는 것이 아니라
+    // 안 보이게 두는 것이다 — 우리가 안 올리면 서버 사본은 upsert 라서 그대로 남고, 업데이트하면
+    // 다시 보인다. 억지로 정규화해 끼워 맞추면 모르는 필드를 잃은 채 되올려 원본을 망친다.
     const hosts = payload.hosts
       .filter((record) => !record.deleted_at)
       .map((record) =>
@@ -1075,7 +1105,8 @@ export class SyncService {
           record.encrypted_payload,
           vaultKeyBase64
         )
-      );
+      )
+      .filter((record) => isKnownHostKind(record?.kind));
     const knownHosts = payload.knownHosts
       .filter((record) => !record.deleted_at)
       .map((record) => decodeEncryptedPayload<KnownHostRecord>(record.encrypted_payload, vaultKeyBase64));
@@ -1273,6 +1304,7 @@ export class SyncService {
         if ([404, 405, 501].includes(response.status)) {
           this.authService.noteServerVaultSupport(false);
           this.authService.noteServerWebauthnSupport(false);
+          this.authService.noteServerDataFloorSupport(false);
           return 'unsupported';
         }
         return this.state.awsProfilesServerSupport ?? 'unknown';
@@ -1285,6 +1317,11 @@ export class SyncService {
       );
       this.authService.noteServerWebauthnSupport(
         serverInfo.capabilities?.auth?.webauthn === true
+      );
+      // 이 서버가 계정 데이터 수준을 저장·판정할 수 있는지. 못 하면 옛 클라이언트를 막아 줄
+      // 장치가 없으므로, 화면이 그 보호가 필요한 기능을 닫는다.
+      this.authService.noteServerDataFloorSupport(
+        serverInfo.capabilities?.sync?.dataFloor === true
       );
       return resolveAwsProfilesServerSupport(serverInfo);
     } catch (error) {

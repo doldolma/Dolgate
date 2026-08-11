@@ -1,12 +1,10 @@
-import {
-  getHostSearchText,
-  getHostSubtitle,
-  isAwsEc2HostRecord,
-  isAwsEcsHostRecord,
-  isSshHostRecord,
-  isWarpgateSshHostRecord,
-} from '@shared';
+import { getHostSearchText, getHostSubtitle } from '@shared';
 import type { HostRecord } from '@shared';
+import {
+  hostSupportsContainers,
+  hostSupportsSftp,
+  hostSupportsTerminalConnect,
+} from './hostCapabilities';
 import { matchesKeyboardLayoutQuery } from '../../lib/keyboard-layout-search';
 import {
   formatQuickSshHostLabel,
@@ -37,6 +35,22 @@ function commandItemMatches(item: CommandPaletteItem, query: string): boolean {
 
 function getHostPaletteText(host: HostRecord): string {
   return getHostSearchText(host).join(' ');
+}
+
+/**
+ * 호스트 하나를 다루다 던지면 그 호스트만 건너뛴다.
+ *
+ * 이 빌더는 렌더 중 불리는 순수 함수라, 에러 바운더리로 감싸도 팔레트가 통째로 사라진다 —
+ * 바운더리는 컴포넌트 렌더만 잡는다. 이 빌드가 모르는 모양의 레코드(다른 기기의 새 버전이 만든
+ * 호스트) 하나 때문에 명령 팔레트를 못 쓰는 것보다, 그 호스트만 목록에서 빠지는 편이 낫다.
+ */
+function skipBrokenHost<T>(host: HostRecord, fallback: T, build: () => T): T {
+  try {
+    return build();
+  } catch (error) {
+    console.warn(`[command-palette] 호스트를 건너뜀: ${host?.id}`, error);
+    return fallback;
+  }
 }
 
 function getHostPaletteSubtitle(host: HostRecord, prefix?: string): string {
@@ -75,18 +89,6 @@ function getDefaultHostCandidates(hb: HostBrowserModel): HostRecord[] {
   }
 
   return hb.hosts.filter(hostSupportsTerminalConnect).sort(compare);
-}
-
-function hostSupportsTerminalConnect(host: HostRecord): boolean {
-  return !isAwsEcsHostRecord(host);
-}
-
-function hostSupportsSftp(host: HostRecord): boolean {
-  return isSshHostRecord(host) || isWarpgateSshHostRecord(host) || isAwsEc2HostRecord(host);
-}
-
-function hostSupportsContainers(host: HostRecord): boolean {
-  return isSshHostRecord(host) || isWarpgateSshHostRecord(host) || isAwsEc2HostRecord(host);
 }
 
 // keywords 는 화면에 보이지 않는 검색 별칭이라 번역하지 않는다 — 한글 별칭을 남겨 두면
@@ -204,16 +206,18 @@ export function buildHostBrowserCommandPaletteItems(
   const hostMatches = query
     ? hb.hosts
         .filter((host) =>
-          matchesKeyboardLayoutQuery(
-            [host.label, host.groupName ?? '', getHostPaletteText(host)].join(' '),
-            query,
+          skipBrokenHost(host, false, () =>
+            matchesKeyboardLayoutQuery(
+              [host.label, host.groupName ?? '', getHostPaletteText(host)].join(' '),
+              query,
+            ),
           ),
         )
         .sort(compareHostsByRecentThenName(hb.lastConnectedByHostId))
     : getDefaultHostCandidates(hb);
 
   const hostItems: CommandPaletteItem[] = [];
-  hostMatches.slice(0, MAX_PALETTE_HOSTS).forEach((host) => {
+  hostMatches.slice(0, MAX_PALETTE_HOSTS).forEach((host) => skipBrokenHost(host, undefined, () => {
     if (hostSupportsTerminalConnect(host)) {
       hostItems.push({
         id: `host:connect:${host.id}`,
@@ -250,7 +254,7 @@ export function buildHostBrowserCommandPaletteItems(
         run: () => hb.onOpenHostContainers(host.id),
       });
     }
-  });
+  }));
 
   if (!query) {
     return [...baseItems, ...hostItems.filter((item) => item.id.startsWith('host:connect:'))];
