@@ -1,5 +1,6 @@
 import {
   getParentGroupPath,
+  isKnownHostKind,
   normalizeGroupPath,
   normalizeJumpHostIds,
   type AwsProfileMetadataRecord,
@@ -116,25 +117,10 @@ function parseGroup(value: unknown): GroupRecord {
   };
 }
 
-/**
- * 이 버전이 아는 호스트 종류. parseHost 의 통과 조건이자, 가져오기에서 "모르는 종류라서
- * 건너뛴다"의 판정 기준 — 두 판정이 어긋나면 같은 버전끼리의 내보내기/가져오기가 깨지므로
- * 반드시 한 목록을 같이 쓴다. 새 종류를 추가하면 여기에만 넣으면 된다.
- */
-const KNOWN_HOST_KINDS = new Set([
-  "ssh",
-  "aws-ec2",
-  "aws-ecs",
-  "warpgate-ssh",
-  "serial",
-  "rdp",
-]);
-
 function parseHost(value: unknown): HostRecord {
   if (
     !isObject(value) ||
-    typeof value.kind !== "string" ||
-    !KNOWN_HOST_KINDS.has(value.kind) ||
+    !isKnownHostKind(value.kind) ||
     typeof value.createdAt !== "string" ||
     typeof value.updatedAt !== "string"
   ) {
@@ -334,7 +320,7 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   let unknownKindHostCount = 0;
   const hosts: HostRecord[] = [];
   for (const raw of rawHosts) {
-    if (isObject(raw) && typeof raw.kind === "string" && !KNOWN_HOST_KINDS.has(raw.kind)) {
+    if (isObject(raw) && typeof raw.kind === "string" && !isKnownHostKind(raw.kind)) {
       unknownKindHostCount += 1;
       if (typeof raw.id === "string") {
         skippedHostIds.add(raw.id);

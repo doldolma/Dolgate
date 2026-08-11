@@ -1297,6 +1297,11 @@ func (s *GormStore) GetSyncDataFloor(ctx context.Context, userID string) (int, e
 //
 // 단일 UPDATE 의 WHERE 로 단조성을 지킨다 — 앱에서 읽고 비교해 쓰면 동시 push 두 개가 서로의
 // 값을 덮어 낮은 쪽이 이길 수 있다. 이미 같거나 높으면 아무 행도 바뀌지 않는다(오류 아님).
+//
+// **내리는 길은 없다.** 아직 pull 하지 않은 기기는 그 데이터를 아직 로컬에 안 갖고 있어서 자기
+// 수준을 0 으로 신고한다 — 그 신고로 계정을 내리면 다른 기기가 올린 보호가 사라진다. 그래서 자동
+// 하강을 만들면 안 된다. 대가로, 계정에서 그 종류를 전부 지워도 수준은 남는다(예: RDP 호스트를
+// 다 지운 계정의 옛 기기는 계속 막힌다). 필요해지면 지원용 경로를 따로 만든다.
 func (s *GormStore) RaiseSyncDataFloor(ctx context.Context, userID string, floor int) error {
 	if floor <= 0 {
 		return nil

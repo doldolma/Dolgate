@@ -266,6 +266,77 @@ describe("AuthService offline bootstrap", () => {
     });
   });
 
+  // 화면은 capabilities.dataFloor 로 RDP 호스트 추가를 열고 닫는다. 그 판정이 이번 실행의
+  // /api/info 응답에만 있으면, 오프라인으로 앱을 켠 사용자에게는 어제 있던 기능이 사라진다.
+  describe("dataFloor 능력", () => {
+    async function bootstrapOffline(serverUrl: string) {
+      const created = await createService(serverUrl);
+      const session = createSession(serverUrl);
+      await created.secretStore.save(
+        "auth:refresh-token",
+        session.tokens.refreshToken,
+      );
+      await created.secretStore.save(
+        "auth:offline-session-cache",
+        JSON.stringify({
+          serverUrl: `${serverUrl}/`,
+          user: session.user,
+          vaultBootstrap: session.vaultBootstrap,
+          offlineLease: session.offlineLease,
+          lastOnlineAt: session.syncServerTime,
+        }),
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockRejectedValue(new Error("network down")),
+      );
+      const state = await created.service.bootstrap();
+      expect(state.status).toBe("offline-authenticated");
+      return created.service;
+    }
+
+    it("오프라인 리스에서도 열려 있다", async () => {
+      // 오프라인에서 만든 호스트도 연결이 돌아올 때 수준 헤더와 함께 push 되므로 보호는 성립한다.
+      const service = await bootstrapOffline("https://ssh.doldolma.com");
+
+      service.noteServerDataFloorSupport(true);
+
+      expect(service.getState().status).toBe("offline-authenticated");
+      expect(service.getState().capabilities?.dataFloor).toBe(true);
+    });
+
+    it("오프라인으로 켜도 지난 판정을 기억한다", async () => {
+      const serverUrl = "https://ssh.doldolma.com";
+      const online = await createService(serverUrl);
+      online.service.noteServerDataFloorSupport(true);
+
+      // 같은 사용자 데이터 디렉터리로 앱을 다시 켠다. 이번에는 /api/info 를 못 받는다.
+      const service = await bootstrapOffline(serverUrl);
+
+      expect(service.getState().capabilities?.dataFloor).toBe(true);
+    });
+
+    it("다른 서버의 판정은 쓰지 않는다", async () => {
+      const online = await createService("https://ssh.doldolma.com");
+      online.service.noteServerDataFloorSupport(true);
+
+      // 자체 호스팅 서버로 갈아탔다. 그 서버가 이 장치를 갖췄는지는 아직 모른다.
+      const service = await bootstrapOffline("https://self.hosted.example.com");
+
+      expect(service.getState().capabilities?.dataFloor).toBe(false);
+    });
+
+    it("지원하지 않는다는 답도 기억한다", async () => {
+      const serverUrl = "https://ssh.doldolma.com";
+      const online = await createService(serverUrl);
+      online.service.noteServerDataFloorSupport(false);
+
+      const service = await bootstrapOffline(serverUrl);
+
+      expect(service.getState().capabilities?.dataFloor).toBe(false);
+    });
+  });
+
   it("restores a persisted version-0 reset descriptor as setup-required", async () => {
     const serverUrl = "https://ssh.doldolma.com";
     const { service, secretStore } = await createService(serverUrl);

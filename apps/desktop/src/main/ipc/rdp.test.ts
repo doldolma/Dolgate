@@ -385,6 +385,65 @@ describe("registerRdpIpcHandlers monitor layout", () => {
   });
 });
 
+// 세션이 끝나는 길은 두 갈래다 — 사용자가 탭을 닫으면 disconnect IPC 가 오지만, 원격 로그오프나
+// 서버가 끊은 경우는 코어의 closed 이벤트만 온다. 뒤쪽에서 정리하지 않으면 tailnet 포워드가 남아,
+// 세션은 이미 없는데 그 loopback 포트에 붙는 아무 로컬 프로세스나 tailnet 호스트로 나갈 수 있다.
+describe("registerRdpIpcHandlers session teardown", () => {
+  /** 코어가 올린 세션 이벤트를 그대로 흘려보낸다. 등록은 registerRdpIpcHandlers 가 한다. */
+  function emit(
+    harness: ReturnType<typeof createHarness>,
+    event: Record<string, unknown>,
+  ) {
+    (
+      harness.rdpManager as unknown as {
+        onSessionEvent: (event: Record<string, unknown>) => void;
+      }
+    ).onSessionEvent(event);
+  }
+
+  it("원격이 세션을 끝내면 tailnet 포워드를 닫는다", async () => {
+    const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+    await harness.connectAndVerify();
+
+    emit(harness, { type: "closed", sessionId: "sess-1", graceful: true });
+
+    expect(harness.ctx.coreManager.closeTailnetForward).toHaveBeenCalledWith(
+      "sess-1",
+    );
+  });
+
+  it("error 만으로는 닫지 않는다", async () => {
+    // 코어는 error 뒤에 항상 closed 를 보낸다. 여기서도 닫으면 정리가 두 곳으로 갈린다.
+    const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+    await harness.connectAndVerify();
+
+    emit(harness, { type: "closed", sessionId: "다른-세션" });
+    emit(harness, { type: "error", sessionId: "sess-1", message: "boom" });
+
+    expect(harness.ctx.coreManager.closeTailnetForward).not.toHaveBeenCalled();
+  });
+
+  it("disconnect 와 겹쳐도 포워드를 한 번만 닫는다", async () => {
+    // 사용자가 탭을 닫는 순간 서버도 세션을 끊으면 두 경로가 같이 온다.
+    const harness = createHarness("AA:BB:CC", null, { tailnetId: "net-a" });
+    await harness.connectAndVerify();
+
+    await handlers.get("rdp:disconnect")!({}, "sess-1");
+    emit(harness, { type: "closed", sessionId: "sess-1" });
+
+    expect(harness.ctx.coreManager.closeTailnetForward).toHaveBeenCalledTimes(1);
+  });
+
+  it("포워드를 쓰지 않은 세션은 코어를 부르지 않는다", async () => {
+    const harness = createHarness("AA:BB:CC");
+    await harness.connectAndVerify();
+
+    emit(harness, { type: "closed", sessionId: "sess-1" });
+
+    expect(harness.ctx.coreManager.closeTailnetForward).not.toHaveBeenCalled();
+  });
+});
+
 // 펼침은 창 여러 개가 한 덩어리다. 보조 창 하나에서 빠져나왔는데 메인 창이 전체화면으로 남으면,
 // 원격은 여전히 여러 모니터인데 보이는 화면은 하나뿐이라 되돌릴 곳이 없다.
 describe("registerRdpIpcHandlers monitor spread", () => {

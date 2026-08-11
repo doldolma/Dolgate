@@ -653,6 +653,36 @@ describe('HostRepository', () => {
     expect(reloaded.list().some((host) => host.id === 'future-1')).toBe(false);
   });
 
+  // `kind` 가 아예 없는 레코드도 같다. 이쪽에는 "그 필드가 없던 시절의 옛 레코드" 를 위한 폴백이
+  // 남아 있었는데, 동기화 pull 은 이미 그런 레코드를 버리고 있었다(isKnownHostKind). 판정이 두
+  // 계층에서 갈리면 어느 쪽이 맞는지 알 수 없는 상태로 데이터가 오간다.
+  it('kind 가 없는 레코드를 SSH 로 보지 않는다', async () => {
+    await loadRepositories();
+    const storage = await import('./state-storage');
+    storage.getDesktopStateStorage().updateState((state) => {
+      state.data.hosts = [
+        ...state.data.hosts,
+        {
+          id: 'kindless-1',
+          label: 'legacy',
+          hostname: 'legacy.example.com',
+          port: 22,
+          username: 'root',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        } as never,
+      ];
+    });
+
+    vi.resetModules();
+    const reloadedStorage = await import('./state-storage');
+    reloadedStorage.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+    const reloaded = new databaseModule.HostRepository();
+
+    expect(reloaded.getById('kindless-1')).toBeNull();
+  });
+
   it('RDP 호스트에 username 을 싣지 않는다', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();

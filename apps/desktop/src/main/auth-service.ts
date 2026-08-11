@@ -2552,7 +2552,32 @@ export class AuthService {
     }
     this.serverDataFloorSupported = supported;
     this.serverDataFloorSupportServerUrl = serverUrl;
+    // 다음 실행에서도 안다. 오프라인으로 켜면 /api/info 를 못 받는데, 그때 판정이 비면 화면이
+    // RDP 호스트 추가를 닫아 어제 있던 기능이 사라진 것처럼 보인다(webauthn 과 다르다 — 그쪽은
+    // 서버 왕복이 있어야 쓸 수 있는 기능이라 숨기는 것이 맞다).
+    this.stateStorage.updateSyncDataFloorServerSupport(supported, serverUrl);
     this.patchState({});
+  }
+
+  /**
+   * 저장해 둔 dataFloor 판정을 인메모리로 한 번 끌어올린다.
+   *
+   * 서버 URL 이 같을 때만 쓴다 — 다른 서버로 갈아탔으면 그 서버의 답을 새로 받아야 한다. 이번
+   * 실행에서 이미 /api/info 로 판정했으면(값이 null 이 아니면) 그것이 최신이라 건드리지 않는다.
+   */
+  private hydrateStoredDataFloorSupport(): void {
+    if (this.serverDataFloorSupported !== null) {
+      return;
+    }
+    const stored = this.stateStorage.getSyncDataFloorServerSupport();
+    if (stored.support === "unknown" || !stored.serverUrl) {
+      return;
+    }
+    if (stored.serverUrl !== normalizeServerUrl(this.getServerUrl())) {
+      return;
+    }
+    this.serverDataFloorSupported = stored.support === "supported";
+    this.serverDataFloorSupportServerUrl = stored.serverUrl;
   }
 
   resetServerWebauthnSupport(): void {
@@ -2652,6 +2677,8 @@ export class AuthService {
   private patchState(patch: Partial<AuthState>): void {
     // 패치 적용 후의 status 를 미리 계산한다(capabilities 게이트가 최신 status 를 봐야 하므로).
     const nextStatus = patch.status ?? this.state.status;
+    // 이번 실행에서 아직 /api/info 를 못 받았으면 기억해 둔 판정을 쓴다(오프라인 시작).
+    this.hydrateStoredDataFloorSupport();
     this.state = {
       ...this.state,
       ...patch,
@@ -2682,10 +2709,16 @@ export class AuthService {
           this.serverWebauthnSupported === true &&
           this.serverWebauthnSupportServerUrl ===
             normalizeServerUrl(this.getServerUrl()),
-        // 같은 규칙이다 — 서버가 바뀌면 /api/info 재조회 전까지 false 로 본다. 오프라인일 때도
-        // false 인데, 그 상태에서 RDP 호스트를 새로 만들면 어느 서버에 올라갈지 알 수 없다.
+        // **오프라인 리스도 통과시킨다.** webauthn 과 다르다 — 이 값은 "RDP 호스트를 만들 수
+        // 있는가" 를 정하는데, 오프라인에서 만든 호스트도 로컬에 저장되고 연결이 돌아올 때 수준
+        // 헤더와 함께 push 되므로 보호는 그대로 성립한다. 여기서 닫으면 오프라인이 된 사용자에게
+        // 호스트 종류 하나가 이유 없이 사라진다.
+        //
+        // 서버가 바뀌면 /api/info 재조회 전까지는 false 다(URL 대조). 판정 자체는 기억해 두므로
+        // 오프라인으로 켠 경우에도 같은 서버라면 남아 있다.
         dataFloor:
-          nextStatus === "authenticated" &&
+          (nextStatus === "authenticated" ||
+            nextStatus === "offline-authenticated") &&
           this.serverDataFloorSupported === true &&
           this.serverDataFloorSupportServerUrl ===
             normalizeServerUrl(this.getServerUrl()),

@@ -250,11 +250,40 @@ export function registerRdpIpcHandlers(
   };
 
   /**
+   * 세션에 딸린 자원을 모두 놓는다.
+   *
+   * **끊기는 길이 두 갈래다.** 사용자가 탭을 닫으면 `disconnect` IPC 가 오지만, 원격에서
+   * 로그오프하거나 서버가 세션을 끊으면 코어의 `closed` 이벤트만 온다. 뒤쪽에서 이걸 하지 않으면
+   * tailnet 포워드가 남아, 세션은 이미 없는데 그 loopback 포트에 붙는 아무 로컬 프로세스나 그
+   * tailnet 호스트로 나갈 수 있다.
+   *
+   * 두 경로가 겹쳐도(사용자가 닫는 순간 서버도 끊는 경우) 각 단계가 없는 것을 무시하므로 한 번
+   * 한 것과 같다.
+   */
+  const releaseSession = (sessionId: string): Promise<void> => {
+    // 펼쳐 둔 창도 같이 내린다. 안 그러면 검은 전체화면 창이 화면을 덮은 채 남아 사용자가 닫을
+    // 방법이 없다(프레임이 없어서 닫기 버튼도 없다).
+    forgetSpread(sessionId);
+    displayIdsBySession.delete(sessionId);
+    primaryIndexBySession.delete(sessionId);
+    closeTailnetForward(sessionId);
+    return monitorWindows.close(sessionId);
+  };
+
+  /**
    * 배치가 바뀐 뒤 메인 창 몫을 다시 알린다.
    *
    * 보조 창은 `resized` 로 새 배치를 받지만, 메인 창의 영역은 여기서 보내는 것만 본다.
    */
   rdpManager.onSessionEvent = (event) => {
+    // 세션이 끝났다. `error` 에서는 놓지 않는다 — 코어는 error 뒤에 항상 closed 를 보내므로 한
+    // 곳에서 끝낸다. 자동 재연결이 예약된 경우에도 지금 놓는 것이 맞다: 재연결은 새 sessionId 로
+    // 새 포워드를 연다.
+    if (event.type === "closed") {
+      void releaseSession(event.sessionId);
+      return;
+    }
+
     const state =
       event.sessionId ? spreadBySession.get(event.sessionId) : undefined;
     if (!state) {
@@ -508,13 +537,7 @@ export function registerRdpIpcHandlers(
   );
 
   ipcMain.handle(ipcChannels.rdp.disconnect, async (_event, sessionId: string) => {
-    // 세션이 끊기면 펼쳐 둔 창도 같이 내려야 한다. 안 그러면 검은 전체화면 창이 화면을 덮은 채
-    // 남아 사용자가 닫을 방법이 없다(프레임이 없어서 닫기 버튼도 없다).
-    forgetSpread(sessionId);
-    await monitorWindows.close(sessionId);
-    displayIdsBySession.delete(sessionId);
-    primaryIndexBySession.delete(sessionId);
-    closeTailnetForward(sessionId);
+    await releaseSession(sessionId);
     rdpManager.disconnect(sessionId);
   });
 

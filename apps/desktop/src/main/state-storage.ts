@@ -159,6 +159,16 @@ export interface DesktopStateFile {
     pendingPush: boolean;
     errorMessage: string | null;
     awsProfilesServerSupport: 'unknown' | 'supported' | 'unsupported';
+    /**
+     * 이 서버가 계정 데이터 수준(sync_data_floor)을 저장·판정할 수 있는가.
+     *
+     * 화면은 이 값으로 RDP 호스트 추가를 열고 닫는다. 그래서 기억해 둔다 — 오프라인으로 앱을
+     * 켜면 `/api/info` 를 못 받아 판정이 비고, 그러면 어제 있던 기능이 사라진 것처럼 보인다.
+     *
+     * 어느 서버에 물어본 답인지 같이 둔다. 서버를 갈아타면 그 서버의 답을 새로 받아야 한다.
+     */
+    dataFloorServerSupport: 'unknown' | 'supported' | 'unsupported';
+    dataFloorServerUrl: string | null;
     ownerUserId: string | null;
     ownerServerUrl: string | null;
     updatedAt: string;
@@ -592,6 +602,8 @@ function createDefaultStateFile(): DesktopStateFile {
       pendingPush: false,
       errorMessage: null,
       awsProfilesServerSupport: 'unknown',
+      dataFloorServerSupport: 'unknown',
+      dataFloorServerUrl: null,
       ownerUserId: null,
       ownerServerUrl: null,
       updatedAt: timestamp
@@ -952,17 +964,21 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
     };
   }
 
-  // 여기까지 온 것은 SSH 이거나, kind 필드가 없던 시절의 옛 레코드다.
+  // 여기까지 왔으면 SSH 여야 한다.
   //
-  // **모르는 종류를 SSH 로 보지 않는다.** 예전에는 이 자리로 떨어진 것을 전부 `kind: 'ssh'` 로
-  // 바꿔 저장했다. 그래서 RDP 를 모르는 빌드(1.8.10)가 동기화로 받은 RDP 호스트를 SSH 로 고쳐
-  // 쓰고, 전량 스냅샷 push + 서버의 같은-타임스탬프 마지막-쓰기-승리로 **다른 기기의 원본까지
-  // 덮어썼다.** 호스트 종류는 계속 추가되므로(RDP 가 그랬고 다음도 있을 것이다) 모르는 것은
-  // 고치지 않고 버린다.
+  // **`kind` 를 보고 SSH 로 넘기는 것은 이 한 줄뿐이다.** 예전에는 이 자리로 떨어진 것을 전부
+  // `kind: 'ssh'` 로 바꿔 저장했다(`kind` 가 없거나 모르는 값이어도). 그래서 RDP 를 모르는
+  // 빌드(1.8.10)가 동기화로 받은 RDP 호스트를 SSH 로 고쳐 쓰고, 전량 스냅샷 push + 서버의
+  // 같은-타임스탬프 마지막-쓰기-승리로 **다른 기기의 원본까지 덮어썼다.** 호스트 종류는 계속
+  // 추가되므로(RDP 가 그랬고 다음도 있을 것이다) 모르는 것은 고치지 않고 버린다.
+  //
+  // `kind` 가 없는 레코드도 버린다. 그 필드가 없던 시절의 레코드를 위한 폴백이 있었는데, pull 은
+  // 이미 그런 레코드를 버리고 있어(`isKnownHostKind`) 두 계층의 판정이 갈려 있었다. 판정이 갈리면
+  // 어느 쪽이 맞는지 알 수 없는 상태로 데이터가 오간다.
   //
   // 버린다고 사라지지 않는다 — 우리가 안 올리면 서버 사본은 upsert 라 그대로 남고, 이 기기를
   // 업데이트하면 다시 보인다. 억지로 끼워 맞추는 것보다 안 보이는 편이 낫다.
-  if (value.kind !== undefined && value.kind !== null && value.kind !== 'ssh') {
+  if (value.kind !== 'ssh') {
     return null;
   }
 
@@ -1227,6 +1243,11 @@ function normalizeStateFile(value: unknown): DesktopStateFile {
         sync.awsProfilesServerSupport === 'supported' || sync.awsProfilesServerSupport === 'unsupported'
           ? sync.awsProfilesServerSupport
           : 'unknown',
+      dataFloorServerSupport:
+        sync.dataFloorServerSupport === 'supported' || sync.dataFloorServerSupport === 'unsupported'
+          ? sync.dataFloorServerSupport
+          : 'unknown',
+      dataFloorServerUrl: typeof sync.dataFloorServerUrl === 'string' ? sync.dataFloorServerUrl : null,
       ownerUserId: typeof sync.ownerUserId === 'string' ? sync.ownerUserId : null,
       ownerServerUrl: typeof sync.ownerServerUrl === 'string' ? sync.ownerServerUrl : null,
       updatedAt: typeof sync.updatedAt === 'string' ? sync.updatedAt : fallback.sync.updatedAt
@@ -1556,6 +1577,31 @@ class DesktopStateStorage {
       if (snapshot.awsProfilesServerSupport) {
         draft.sync.awsProfilesServerSupport = snapshot.awsProfilesServerSupport;
       }
+      draft.sync.updatedAt = nowIso();
+    });
+  }
+
+  /**
+   * 기억해 둔 dataFloor 지원 여부와, 그것을 물어본 서버.
+   *
+   * 오프라인으로 앱을 켜면 `/api/info` 를 못 받는다. 그때 판정을 비워 두면 화면이 RDP 호스트 추가를
+   * 닫아, 사용자에겐 어제 있던 기능이 사라진 것으로 보인다.
+   */
+  getSyncDataFloorServerSupport(): {
+    support: DesktopStateFile['sync']['dataFloorServerSupport'];
+    serverUrl: string | null;
+  } {
+    this.ensureLoaded();
+    return {
+      support: this.state.sync.dataFloorServerSupport,
+      serverUrl: this.state.sync.dataFloorServerUrl
+    };
+  }
+
+  updateSyncDataFloorServerSupport(support: boolean, serverUrl: string | null): void {
+    this.updateState((draft) => {
+      draft.sync.dataFloorServerSupport = support ? 'supported' : 'unsupported';
+      draft.sync.dataFloorServerUrl = serverUrl;
       draft.sync.updatedAt = nowIso();
     });
   }

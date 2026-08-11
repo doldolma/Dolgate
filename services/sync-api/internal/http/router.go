@@ -314,6 +314,11 @@ func requiredClientVersionForFloor(floor int, clientName string) string {
 
 // rejectOutdatedClientForFloor 는 계정 하한에 못 미치는 클라이언트를 426 으로 막는다.
 // true 면 응답을 이미 보냈다.
+//
+// **클라이언트 이름을 안 보내면 게이트를 통과한다**(`required` 가 빈 문자열). 페이로드가 암호문이라
+// 서버는 계정에 무엇이 들었는지 볼 수 없어서, 자기신고 외에 판정할 근거가 없다. 목록에 없는 이름을
+// 막지 않는 것은 의도다 — 새 클라이언트를 붙일 때마다 서버를 먼저 고쳐야 하는 상황을 피한다.
+// 우리 앱은 /sync 에도 이 헤더를 싣는다(데스크톱 getClientIdentificationHeaders).
 func rejectOutdatedClientForFloor(ctx *gin.Context, floor int) bool {
 	if floor <= 0 {
 		return false
@@ -354,6 +359,11 @@ func rejectOutdatedClientForAccount(ctx *gin.Context, store store.Store, userID 
 // **없으면 0 이다** — 이 헤더를 모르는 클라이언트도 계속 push 할 수 있어야 한다. 0 은 "요구 없음"
 // 이고 계정 수준을 내리지 않는다(RaiseSyncDataFloor 가 올리기만 한다). 숫자가 아니거나 음수면
 // 클라이언트 버그이므로 무시하고 0 으로 본다 — 잘못된 값으로 계정을 잠그지 않는다.
+//
+// **아는 수준까지만 받는다.** 계정 수준은 올라가기만 하고 내리는 길이 없다(단조). 그래서 아직
+// 뜻이 없는 큰 값을 그대로 저장하면, 나중에 그 수준을 정의하는 순간 그 계정들은 해당 데이터가
+// 없는데도 새 최소 버전을 요구받는다 — 되돌리려면 DB 를 직접 만져야 한다. 우리 클라이언트는
+// 정의된 값만 보내므로(데스크톱 0/1, 모바일 0) 여기서 잘리는 것은 손으로 만든 요청뿐이다.
 func parseSyncDataFloorHeader(value string) int {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -363,7 +373,21 @@ func parseSyncDataFloorHeader(value string) int {
 	if err != nil || parsed < 0 {
 		return 0
 	}
+	if highest := highestKnownSyncDataFloor(); parsed > highest {
+		return highest
+	}
 	return parsed
+}
+
+// highestKnownSyncDataFloor 는 이 서버가 뜻을 아는 가장 높은 데이터 수준이다.
+func highestKnownSyncDataFloor() int {
+	highest := 0
+	for level := range syncDataFloorMinimumVersions {
+		if level > highest {
+			highest = level
+		}
+	}
+	return highest
 }
 
 // 구버전 클라이언트에 v2 계정 세션을 거부할 때 내려주는 안내. 데스크톱의
@@ -1577,11 +1601,14 @@ func NewRouter(store store.Store, authService *auth.Service, config RouterConfig
 	syncGroup := router.Group("/sync")
 	syncGroup.Use(authMiddleware(authService))
 	syncGroup.Use(requireExistingUser)
-	// 계정 데이터가 요구하는 수준을 못 갖춘 클라이언트는 여기서 멈춘다.
+	// 계정 데이터가 요구하는 수준을 못 갖춘 클라이언트는 여기서 멈춘다. pull 도 push 도 막는다 —
+	// 받아서 망가지는 것과 고쳐서 되올리는 것이 같은 사고의 두 면이다.
 	//
-	// **로그인은 막지 않는다.** 세션까지 끊으면 그 기기에서 로컬 데이터도 못 보게 되고, 문제
-	// 되는 종류를 안 쓰는 계정까지 로그아웃 위험에 노출된다. 동기화만 끊으면 앱은 그대로 열리고
-	// 안내 문구가 동기화 상태로 뜬다.
+	// **세션 발급(login·exchange·refresh)도 같이 막는다**(위 핸들러들). 여기만 막으면 옛 빌드는
+	// 동기화가 조용히 멈추는데, 그 빌드에는 동기화 오류를 보여줄 화면이 없어서 사용자는 다른 기기
+	// 변경이 왜 안 오는지 알 수 없다. 세션을 안 주면 E2EE 전환 때와 같은 경로로 로그인 화면에
+	// 안내가 뜬다. 대가는 그 기기가 로그아웃된다는 것이다 — 원인을 모르는 채 데이터가 어긋나는
+	// 쪽보다 낫다고 보고 택했다.
 	syncGroup.Use(func(ctx *gin.Context) {
 		floor, err := store.GetSyncDataFloor(ctx.Request.Context(), ctx.GetString("userId"))
 		if err != nil {
