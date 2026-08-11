@@ -986,6 +986,46 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
     };
   }
 
+  if (value.kind === 'vnc') {
+    // 계정이 없다(비밀번호만 쓴다). RDP 와 같은 이유로 hostname 만 필수다.
+    if (typeof value.hostname !== 'string') {
+      return null;
+    }
+
+    return {
+      id: value.id,
+      kind: 'vnc',
+      label: value.label,
+      groupName: typeof value.groupName === 'string' ? value.groupName : null,
+      tags,
+      terminalThemeId: isTerminalThemeId(value.terminalThemeId) ? value.terminalThemeId : null,
+      hostname: value.hostname,
+      port:
+        typeof value.port === 'number' && Number.isFinite(value.port)
+          ? Math.round(value.port)
+          : 5900,
+      secretRef: typeof value.secretRef === 'string' ? value.secretRef : null,
+      // **명시 필드 화이트리스트다.** 여기 없는 필드는 디스크를 다시 읽는 순간 사라진다 —
+      // 저장은 됐는데 앱을 다시 켜면 설정이 초기값으로 돌아가는 증상이 그것이다.
+      //
+      // 기본값이 "켜짐" 인 것은 false 만 저장한다. null 과 true 를 구분할 필요가 없고, 그래야
+      // 기본값을 나중에 바꿀 여지가 남는다(RDP 의 audioEnabled 와 같은 규칙).
+      shared: value.shared === false ? false : null,
+      viewOnly: value.viewOnly === true ? true : null,
+      tailnetId:
+        typeof value.tailnetId === 'string' && value.tailnetId.trim()
+          ? value.tailnetId.trim()
+          : null,
+      sshTunnelHostId:
+        typeof value.sshTunnelHostId === 'string' && value.sshTunnelHostId.trim()
+          ? value.sshTunnelHostId.trim()
+          : null,
+      favorite: value.favorite === true ? true : null,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()
+    };
+  }
+
   // 여기까지 왔으면 SSH 여야 한다.
   //
   // **`kind` 를 보고 SSH 로 넘기는 것은 이 한 줄뿐이다.** 예전에는 이 자리로 떨어진 것을 전부
@@ -1056,7 +1096,16 @@ function normalizeSecretMetadataRecord(value: unknown): SecretMetadataRecord | n
   return {
     secretRef: value.secretRef,
     label: value.label,
-    kind: value.kind === 'rdp' ? 'rdp' : value.kind === 'ssh' ? 'ssh' : null,
+    // 모르는 값은 null(=SSH 취급)로 떨어진다. 종류를 늘릴 때 여기를 빼먹으면 그 자격증명이
+    // 디스크를 다시 읽는 순간 SSH 로 강등돼 해당 폼의 목록에서 사라진다.
+    kind:
+      value.kind === 'rdp'
+        ? 'rdp'
+        : value.kind === 'vnc'
+          ? 'vnc'
+          : value.kind === 'ssh'
+            ? 'ssh'
+            : null,
     username: typeof value.username === 'string' && value.username.trim() ? value.username : null,
     domain: typeof value.domain === 'string' && value.domain.trim() ? value.domain : null,
     hasPassword: Boolean(value.hasPassword),

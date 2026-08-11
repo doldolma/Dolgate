@@ -16,7 +16,7 @@ use std::thread;
 use serde::Serialize;
 use tracing::warn;
 
-use crate::framing::{write_frame, KIND_CONTROL, KIND_STREAM};
+use core_framing::{write_frame, KIND_CONTROL, KIND_STREAM};
 use crate::protocol::{AudioFramePayload, Event, FramePayload};
 
 /// 쓰기 대기열 깊이(프레임 수).

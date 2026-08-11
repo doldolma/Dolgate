@@ -1,0 +1,8 @@
+# Node(.nvmrc)·Go(go.mod)와 같은 이유로 Rust 도 고정한다 — 릴리스 산출물이 러너의 기본
+# 툴체인에 따라 달라지면 재현이 안 된다.
+#
+# 세 플랫폼 러너에서 각자 빌드하므로 타깃은 여기 나열하지 않는다. 필요한 타깃은
+# scripts/build-rdp-core.cjs 가 `rustup target add` 로 그때그때 붙인다.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"

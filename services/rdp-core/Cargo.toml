@@ -11,6 +11,7 @@ name = "rdp-core"
 path = "src/main.rs"
 
 [dependencies]
+core-framing = { path = "../core-framing" }
 ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "pdu", "core"] }
 ironrdp-blocking = "0.10"
 ironrdp-graphics = "0.9"

@@ -1,4 +1,9 @@
-//! stdio framing, byte-for-byte compatible with `services/ssh-core/internal/protocol`.
+//! stdio framing, byte-for-byte compatible with `services/ssh-core/internal/protocol` (Go) and
+//! `apps/desktop/src/main/core-framing.ts` (TypeScript).
+//!
+//! **왜 별도 크레이트인가:** 이 헤더는 사이드카 세 종류와 데스크톱이 모두 지키는 계약이다. 코어마다
+//! 복사해 두면 한쪽만 고쳐지는 순간 프레임 경계가 어긋나고, 그 증상은 "가끔 화면이 깨진다" 로만
+//! 나타난다. 구현을 한 곳에 두어 그럴 여지를 없앤다.
 //!
 //! Every frame is a 9-byte header followed by JSON metadata and an optional binary payload:
 //!
@@ -10,7 +15,7 @@
 //! ```
 //!
 //! Control frames carry metadata only. Stream frames carry metadata plus raw bytes — for the SSH
-//! core that is terminal output; here it is pixel data.
+//! core that is terminal output; for the RDP/VNC cores it is pixel data or PCM.
 
 use std::io::{self, Read, Write};
 

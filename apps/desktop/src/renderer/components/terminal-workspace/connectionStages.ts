@@ -50,7 +50,8 @@ export type ConnectionTransport =
   | 'ssm'
   | 'serial'
   | 'ecs-exec'
-  | 'rdp';
+  | 'rdp'
+  | 'vnc';
 
 /**
  * 탭과 호스트 종류로 전송 방식을 정한다.
@@ -65,6 +66,9 @@ export function resolveConnectionTransport(
 ): ConnectionTransport {
   if (tab?.paneKind === 'rdp' || hostKind === 'rdp') {
     return 'rdp';
+  }
+  if (tab?.paneKind === 'vnc' || hostKind === 'vnc') {
+    return 'vnc';
   }
   if (tab?.source === 'local') {
     return 'local';
@@ -94,6 +98,8 @@ function transportStageLabel(transport: ConnectionTransport): string | null {
       return t('connectStages.ecsExec');
     case 'rdp':
       return t('connectStages.rdp');
+    case 'vnc':
+      return t('connectStages.vnc');
     case 'ssm':
       return t('connectStages.ssm');
     default:

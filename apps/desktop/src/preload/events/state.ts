@@ -14,6 +14,8 @@ import type {
   TransferJobEvent,
   RdpAudioPayload,
   RdpFramePayload,
+  VncFramePayload,
+  VncSessionEvent,
   RdpSessionEvent,
   UpdateEvent,
   WarpgateImportEvent,
@@ -49,6 +51,8 @@ const rdpEventHub = createListenerHub<RdpSessionEvent>();
 // 프레임은 세션 단위로 흘려보낸다. 창마다 다른 세션을 그리므로 전역 팬아웃은 낭비다.
 const rdpFrameListeners = new Map<string, Set<Listener<RdpFramePayload>>>();
 const rdpAudioListeners = new Map<string, Set<Listener<RdpAudioPayload>>>();
+const vncEventHub = createListenerHub<VncSessionEvent>();
+const vncFrameListeners = new Map<string, Set<Listener<VncFramePayload>>>();
 const transferEventHub = createListenerHub<TransferJobEvent>();
 const sftpConnectionProgressHub =
   createListenerHub<SftpConnectionProgressEvent>();
@@ -209,12 +213,73 @@ export function subscribeRdpAudio(
  * 프레임은 IPC structured clone 이라 창마다 전체 복사본이 생긴다. 안 보내도 되는 창까지
  * 뿌리면 창 수만큼 픽셀 트래픽이 곱해진다 — 1920x1080 전체 갱신 한 번이 8.3MB 다.
  */
+export function emitVncEvent(payload: VncSessionEvent): void {
+  vncEventHub.emit(payload);
+}
+
+export function subscribeVncEvent(listener: Listener<VncSessionEvent>): () => void {
+  return vncEventHub.subscribe(listener);
+}
+
+export function emitVncFrame(payload: VncFramePayload): void {
+  const listeners = vncFrameListeners.get(payload.sessionId);
+  if (!listeners) {
+    // 캔버스가 아직 안 붙었으면 버린다(RDP 와 같은 이유). 픽셀은 쌓아 둘 값이 아니다.
+    return;
+  }
+  for (const listener of listeners) {
+    try {
+      listener(payload);
+    } catch {
+      // 한 구독자가 던져도 나머지에게는 전달돼야 한다.
+    }
+  }
+}
+
 let watchSession: ((sessionId: string, watching: boolean) => void) | null = null;
+let watchVncSession: ((sessionId: string, watching: boolean) => void) | null = null;
 
 export function setRdpFrameWatchNotifier(
   notify: (sessionId: string, watching: boolean) => void,
 ): void {
   watchSession = notify;
+}
+
+export function setVncFrameWatchNotifier(
+  notify: (sessionId: string, watching: boolean) => void,
+): void {
+  watchVncSession = notify;
+}
+
+/**
+ * 이 창이 이 세션의 픽셀을 원한다고 알린다.
+ *
+ * RDP 와 같은 이유로 세션 단위다 — 프레임은 IPC structured clone 이라 창마다 전체 복사본이 생긴다.
+ */
+export function subscribeVncFrame(
+  sessionId: string,
+  listener: Listener<VncFramePayload>,
+): () => void {
+  const listeners =
+    vncFrameListeners.get(sessionId) ?? new Set<Listener<VncFramePayload>>();
+  const first = listeners.size === 0;
+  listeners.add(listener);
+  vncFrameListeners.set(sessionId, listeners);
+  if (first) {
+    watchVncSession?.(sessionId, true);
+  }
+
+  return () => {
+    const current = vncFrameListeners.get(sessionId);
+    if (!current) {
+      return;
+    }
+    current.delete(listener);
+    if (current.size === 0) {
+      vncFrameListeners.delete(sessionId);
+      watchVncSession?.(sessionId, false);
+    }
+  };
 }
 
 export function subscribeRdpFrame(

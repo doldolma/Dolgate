@@ -2412,7 +2412,7 @@ export class SecretMetadataRepository {
   upsert(input: {
     secretRef: string;
     label: string;
-    kind?: 'ssh' | 'rdp';
+    kind?: 'ssh' | 'rdp' | 'vnc';
     username?: string;
     domain?: string;
     hasPassword: boolean;

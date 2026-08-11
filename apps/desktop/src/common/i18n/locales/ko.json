@@ -1423,6 +1423,18 @@
       },
       "credential": "인증 정보"
     },
+    "vnc": {
+      "credential": "VNC 비밀번호",
+      "passwordHint": "VNC 는 비밀번호의 앞 8자만 사용합니다(규격 제한).",
+      "shared": {
+        "label": "화면 공유",
+        "description": "끄면 접속할 때 기존에 붙어 있던 클라이언트를 서버가 끊습니다."
+      },
+      "viewOnly": {
+        "label": "보기 전용",
+        "description": "화면만 보고 마우스·키보드를 원격으로 보내지 않습니다."
+      }
+    },
     "title": "호스트 편집기",
     "section": {
       "connection": "Connection",
@@ -3341,6 +3353,7 @@
     "ssh": "SSH 연결",
     "ssm": "SSM 연결",
     "rdp": "RDP 연결",
+    "vnc": "VNC 연결",
     "serial": "포트 열기",
     "ecsExec": "ECS Exec 연결",
     "groupTailscale": "Tailscale",

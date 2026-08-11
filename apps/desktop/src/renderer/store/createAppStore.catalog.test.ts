@@ -724,6 +724,15 @@ describe("createAppStore catalog and settings", () => {
           secretRef: draft.secretRef ?? null,
         } satisfies HostRecord;
       }
+      if (draft.kind === "vnc") {
+        return {
+          ...recordBase,
+          kind: "vnc",
+          hostname: draft.hostname,
+          port: draft.port,
+          secretRef: draft.secretRef ?? null,
+        } satisfies HostRecord;
+      }
       return {
         ...recordBase,
         kind: "ssh",

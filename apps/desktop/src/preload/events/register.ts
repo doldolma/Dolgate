@@ -15,6 +15,8 @@ import type {
   TailnetStatus,
   TransferJobEvent,
   UpdateEvent,
+  VncFramePayload,
+  VncSessionEvent,
   WarpgateImportEvent,
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -28,6 +30,9 @@ import {
   emitCoreEvent,
   emitPortForwardEvent,
   emitRdpEvent,
+  emitVncEvent,
+  emitVncFrame,
+  setVncFrameWatchNotifier,
   emitRdpAudio,
   emitRdpFrame,
   emitSessionShareChatEvent,
@@ -62,6 +67,13 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
     );
   });
 
+  setVncFrameWatchNotifier((sessionId, watching) => {
+    ipcRenderer.send(
+      watching ? ipcChannels.vnc.watch : ipcChannels.vnc.unwatch,
+      sessionId,
+    );
+  });
+
   ipcRenderer.on(ipcChannels.ssh.event, (_event, payload: CoreEvent) => {
     emitCoreEvent(payload);
   });
@@ -79,6 +91,14 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.rdp.frame, (_event, payload: RdpFramePayload) => {
     emitRdpFrame(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.vnc.event, (_event, payload: VncSessionEvent) => {
+    emitVncEvent(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.vnc.frame, (_event, payload: VncFramePayload) => {
+    emitVncFrame(payload);
   });
 
   ipcRenderer.on(ipcChannels.rdp.audio, (_event, payload: RdpAudioPayload) => {

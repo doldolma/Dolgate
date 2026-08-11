@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import type {
+import type { VncHostRecord,
   AppSettings,
   HostRecord,
   RdpHostRecord,
@@ -8,7 +8,7 @@ import type {
   SessionShareStartInput,
   TerminalTab,
 } from '@shared';
-import { isRdpHostRecord } from '@shared';
+import { isVncHostRecord, isRdpHostRecord } from '@shared';
 import { useTerminalWorkspaceController } from '../controllers/useTerminalWorkspaceController';
 import type {
   WorkspaceDropDirection,
@@ -21,6 +21,7 @@ import {
   resolveTerminalThemeIdForSession,
 } from '../lib/terminal-presets';
 import { RdpSessionCanvas } from './rdp/RdpSessionCanvas';
+import { VncSessionCanvas } from './vnc/VncSessionCanvas';
 import { RdpConnectionOverlay } from './rdp/RdpConnectionOverlay';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
@@ -121,6 +122,14 @@ function rdpHostFor(hosts: HostRecord[], tab: TerminalTab): RdpHostRecord | unde
   }
   const host = hosts.find((record) => record.id === tab.hostId);
   return host && isRdpHostRecord(host) ? host : undefined;
+}
+
+function vncHostFor(hosts: HostRecord[], tab: TerminalTab): VncHostRecord | undefined {
+  if (!tab.hostId) {
+    return undefined;
+  }
+  const host = hosts.find((record) => record.id === tab.hostId);
+  return host && isVncHostRecord(host) ? host : undefined;
 }
 
 function resolveTerminalAppearanceForSession(
@@ -636,7 +645,14 @@ export function TerminalWorkspace({
             onEndSessionDrag();
           }
         : undefined,
-      content: tab.paneKind === 'rdp' ? (
+      content: tab.paneKind === 'vnc' ? (
+        // VNC 탭도 터미널이 아니다. RDP 와 달리 오디오·클립보드 채널이 없어 프롭이 적다.
+        <VncSessionCanvas
+          sessionId={tab.sessionId}
+          visible={visible}
+          viewOnly={vncHostFor(hosts, tab)?.viewOnly === true}
+        />
+      ) : tab.paneKind === 'rdp' ? (
         // RDP 탭은 터미널이 아니다 — xterm 대신 원격 화면 캔버스를 띄운다.
         //
         // 오디오·클립보드는 호스트 설정을 따른다. 코어가 채널을 안 붙였으면 데이터가 오지도

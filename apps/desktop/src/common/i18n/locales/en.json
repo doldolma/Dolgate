@@ -1423,6 +1423,18 @@
       },
       "credential": "Credential"
     },
+    "vnc": {
+      "credential": "VNC password",
+      "passwordHint": "VNC uses only the first 8 characters of the password (protocol limit).",
+      "shared": {
+        "label": "Share the screen",
+        "description": "When off, the server disconnects clients that are already attached."
+      },
+      "viewOnly": {
+        "label": "View only",
+        "description": "Show the screen without sending mouse or keyboard input."
+      }
+    },
     "title": "Host Editor",
     "section": {
       "connection": "Connection",
@@ -3341,6 +3353,7 @@
     "ssh": "SSH connection",
     "ssm": "SSM session",
     "rdp": "RDP connection",
+    "vnc": "VNC connection",
     "serial": "Opening the port",
     "ecsExec": "ECS Exec connection",
     "groupTailscale": "Tailscale",

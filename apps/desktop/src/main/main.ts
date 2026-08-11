@@ -37,6 +37,7 @@ import { CoreManager } from './core-manager';
 import { getMainLocale, initMainI18n, onMainLocaleChanged, t } from './i18n';
 import { registerIpcHandlers } from './ipc';
 import { RdpManager } from './rdp-manager';
+import { VncManager } from './vnc-manager';
 import { collectActiveDnsOverrideEntries, HostsOverrideManager } from './hosts-override-manager';
 import { OpenSshImportService } from './openssh-import-service';
 import { isSecureStorageUsable, SecretStore } from './secret-store';
@@ -269,6 +270,11 @@ if (termiusHelperArgIndex >= 0) {
     getWindows: () => BrowserWindow.getAllWindows(),
     // SSH 세션과 같은 로그 저장소를 쓴다 — RDP 연결도 로그 화면·최근 접속에 함께 보인다.
     upsertLogRecord: upsertActivityLog,
+  });
+
+  // VNC 도 별도 사이드카(services/vnc-core)다. RDP 와 같은 이유로 CoreManager 와 독립적이다.
+  const vncManager = new VncManager({
+    getWindows: () => BrowserWindow.getAllWindows(),
   });
 
   awsSsmTunnelService.setInProcessBackend({
@@ -740,6 +746,7 @@ if (termiusHelperArgIndex >= 0) {
       sessionReplayService,
       tailnetRepository,
       rdpManager,
+      vncManager,
       {
         openWindow: async (intent) => {
           await createWindow(intent);

@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
-import { MAX_HOST_STARTUP_COMMAND_LENGTH, describeRdpDrives, isAwsEc2HostRecord, isAwsEcsHostRecord, isRdpHostDraft, isRdpHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
-import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, RdpHostDraft, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId } from '@shared';
+import { MAX_HOST_STARTUP_COMMAND_LENGTH, describeRdpDrives, isAwsEc2HostRecord, isAwsEcsHostRecord, isRdpHostDraft, isRdpHostRecord, isVncHostDraft, isVncHostRecord, isSerialHostDraft, isSerialHostRecord, isSshHostDraft, isSshHostRecord, isWarpgateSshHostRecord } from '@shared';
+import type { AwsProfileSummary, HostDraft, HostEnvVar, HostRecord, HostSecretInput, HostStartupCommand, RdpHostDraft, SecretMetadataRecord, SerialHostDraft, SerialPortSummary, SnippetRecord, SshAgentProbeResult, SshHostDraft, SshHostRecord, TerminalThemeId, VncHostDraft } from '@shared';
 import { useHostFormController } from '../controllers/useHostFormController';
 import { EnvironmentVariablesEditor } from './EnvironmentVariablesEditor';
 import { loadSavedCredential } from '../services/desktop/settings';
@@ -252,7 +252,33 @@ const defaultRdpDraft: RdpHostDraft = {
   terminalThemeId: null,
 };
 
-function createDraft(defaultGroupPath?: string | null, kind: 'ssh' | 'serial' | 'rdp' = 'ssh'): HostDraft {
+const defaultVncDraft: VncHostDraft = {
+  kind: 'vnc',
+  label: '',
+  tags: [],
+  hostname: '',
+  // RFB 기본 포트. 디스플레이 번호 n 은 5900+n 으로 쓰는 관행이다.
+  port: 5900,
+  secretRef: null,
+  // null 이 "공유(켜짐)"다. 저장 계층이 false 만 기록한다 — RDP 의 audioEnabled 와 같은 규칙.
+  shared: null,
+  viewOnly: null,
+  tailnetId: null,
+  sshTunnelHostId: null,
+  groupName: '',
+  terminalThemeId: null,
+};
+
+function createDraft(
+  defaultGroupPath?: string | null,
+  kind: 'ssh' | 'serial' | 'rdp' | 'vnc' = 'ssh',
+): HostDraft {
+  if (kind === 'vnc') {
+    return {
+      ...defaultVncDraft,
+      groupName: defaultGroupPath ?? '',
+    };
+  }
   if (kind === 'serial') {
     return {
       ...defaultSerialDraft,
@@ -313,7 +339,7 @@ function deriveDefaultHostLabel(draft: HostDraft): string {
     }
     return draft.port ? `${host}:${draft.port}` : host;
   }
-  if (draft.kind === 'rdp') {
+  if (draft.kind === 'rdp' || draft.kind === 'vnc') {
     return draft.hostname.trim();
   }
   if (draft.kind === 'aws-ec2') {
@@ -349,7 +375,7 @@ export interface HostFormProps {
   tailnetOptions?: Array<{ id: string; label: string }>;
   snippets?: SnippetRecord[];
   defaultGroupPath?: string | null;
-  createKind?: 'ssh' | 'serial' | 'rdp';
+  createKind?: 'ssh' | 'serial' | 'rdp' | 'vnc';
   desktopPlatform?: 'darwin' | 'win32' | 'linux' | 'unknown';
   hideTitle?: boolean;
   onSubmit: (draft: HostDraft, secrets?: HostSecretInput) => Promise<void>;
@@ -408,6 +434,16 @@ function isHostDraftValid(draft: HostDraft): boolean {
 
   if (draft.kind === 'rdp') {
     // 계정은 자격증명이 갖는다. 아래 isFormValid 의 hasRequiredRdpCredentials 가 본다.
+    return (
+      Boolean(draft.hostname.trim()) &&
+      Number.isInteger(draft.port) &&
+      draft.port >= 1 &&
+      draft.port <= 65535
+    );
+  }
+
+  if (draft.kind === 'vnc') {
+    // 비밀번호는 서버가 요구할 때만 필요하다(None 으로 열어 둔 서버가 흔하다) — 필수로 두지 않는다.
     return (
       Boolean(draft.hostname.trim()) &&
       Number.isInteger(draft.port) &&
@@ -720,6 +756,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   }, [isAgentAuthDraft, probeSshAgent]);
   const serialDraft = isSerialHostDraft(draft) ? draft : null;
   const rdpDraft = isRdpHostDraft(draft) ? draft : null;
+  const vncDraft = isVncHostDraft(draft) ? draft : null;
   // 원격에 보일 드라이브 이름. 코어로 나가는 값과 같은 함수로 만든다 — 규칙이 두 곳에 있으면
   // 화면에 보여준 이름과 원격에 뜨는 이름이 갈린다.
   const rdpDrives = describeRdpDrives(rdpDraft?.drives);
@@ -794,6 +831,15 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         ? keychainEntries.filter((entry) => entry.kind === 'rdp' && entry.hasPassword)
         : [],
     [keychainEntries, rdpDraft],
+  );
+  // VNC 는 비밀번호 하나만 쓴다(계정도 키도 없다). SSH·RDP 목록에 섞으면 고를 수 없는 항목만
+  // 늘어난다 — 8자만 유효한 비밀번호라 다른 프로토콜에 쓸 수도 없다.
+  const vncReusableEntries = useMemo(
+    () =>
+      vncDraft
+        ? keychainEntries.filter((entry) => entry.kind === 'vnc' && entry.hasPassword)
+        : [],
+    [keychainEntries, vncDraft],
   );
   /**
    * 이 호스트가 가리키는 자격증명이 목록에 없을 때 쓸 항목.
@@ -1013,6 +1059,25 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       nextCredentialMode = host.secretRef ? 'existing' : 'new';
       // 계정은 자격증명에만 있다. 저장된 자격증명을 고른 상태면 그 계정이 쓰이고, 새 자격증명을
       // 만들 때만 아래 칸에 입력한다.
+    } else if (isVncHostRecord(host)) {
+      nextDraft = {
+        kind: 'vnc',
+        label: host.label,
+        tags: host.tags ?? [],
+        groupName: host.groupName ?? '',
+        terminalThemeId: host.terminalThemeId ?? null,
+        hostname: host.hostname,
+        port: host.port,
+        secretRef: host.secretRef,
+        // 이것도 필드 나열 화이트리스트다. 빠뜨리면 편집해 저장할 때마다 그 설정이 조용히
+        // 초기값으로 돌아간다(위 RDP 주석과 같은 이유).
+        shared: host.shared ?? null,
+        viewOnly: host.viewOnly ?? null,
+        tailnetId: host.tailnetId ?? null,
+        sshTunnelHostId: host.sshTunnelHostId ?? null,
+      };
+      nextSelectedSecretRef = host.secretRef ?? '';
+      nextCredentialMode = host.secretRef ? 'existing' : 'new';
     } else {
       nextDraft = {
         kind: 'ssh',
@@ -1265,6 +1330,26 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             ...nextDraft,
             label: deriveDefaultHostLabel(nextDraft)
           }
+        : nextDraft;
+    });
+  }
+
+  function handleVncFieldChange<K extends keyof VncHostDraft>(key: K, value: VncHostDraft[K]) {
+    setDraft((current) => {
+      if (!isVncHostDraft(current)) {
+        return current;
+      }
+      const previousAutoLabel = deriveDefaultHostLabel(current);
+      // 라벨을 손대지 않은 동안에는 호스트명을 따라가게 둔다(다른 종류와 같은 동작).
+      const shouldSyncLabel =
+        !host &&
+        (current.label.trim() === '' || current.label.trim() === previousAutoLabel);
+      const nextDraft: VncHostDraft = {
+        ...current,
+        [key]: value,
+      };
+      return shouldSyncLabel
+        ? { ...nextDraft, label: deriveDefaultHostLabel(nextDraft) }
         : nextDraft;
     });
   }
@@ -2588,6 +2673,134 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
               </SelectField>
             </label>
             {renderTerminalThemeField(serialDraft.terminalThemeId ?? null, (terminalThemeId) => setDraft({ ...serialDraft, terminalThemeId }))}
+          </FormSection>
+        </>
+      ) : vncDraft ? (
+        <>
+          <FormSection
+            title={translate('hostForm.section.connection')}
+            testId="hostform-section-connection"
+          >
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.hostname')}</span>
+              <Input
+                value={vncDraft.hostname}
+                onChange={(event) => handleVncFieldChange('hostname', event.target.value)}
+                placeholder="192.168.0.10"
+                required
+              />
+            </label>
+
+            <label className={fieldClassName}>
+              <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
+              <Input
+                type="number"
+                min={1}
+                max={65535}
+                value={String(vncDraft.port)}
+                onChange={(event) =>
+                  handleVncFieldChange('port', Number.parseInt(event.target.value, 10) || 5900)
+                }
+                required
+              />
+            </label>
+
+            {/* VNC 는 비밀번호 하나만 쓴다 — 계정이라는 개념이 없다. 서버를 인증 없이 열어 둔
+                경우도 흔하므로 비워 둘 수 있다. */}
+            <div className={fieldClassName}>
+              <div className="flex items-center justify-between gap-3">
+                <span className={fieldLabelClassName}>
+                  {translate('hostForm.vnc.credential')}
+                </span>
+                {credentialMode === 'existing' && selectedSecretRef && onEditExistingSecret ? (
+                  <button
+                    type="button"
+                    className="border-0 bg-transparent p-0 text-[0.9rem] font-semibold text-[var(--accent-strong)]"
+                    onClick={() => onEditExistingSecret(selectedSecretRef)}
+                  >
+                    {translate('hostForm.auth.edit')}
+                  </button>
+                ) : null}
+              </div>
+              <SelectField
+                aria-label={translate('hostForm.vnc.credential')}
+                value={
+                  credentialMode === 'existing' ? `existing:${selectedSecretRef}` : credentialMode
+                }
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === 'new') {
+                    setCredentialMode('new');
+                    setSelectedSecretRef('');
+                    return;
+                  }
+                  if (value.startsWith('existing:')) {
+                    setCredentialMode('existing');
+                    setSelectedSecretRef(value.slice('existing:'.length));
+                  }
+                }}
+              >
+                <option value="new">{translate('hostForm.auth.newCredential')}</option>
+                {vncReusableEntries.map((entry) => (
+                  <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
+                    {formatSavedSecretOptionLabel(entry)}
+                  </option>
+                ))}
+              </SelectField>
+            </div>
+
+            {credentialMode === 'new' ? (
+              <label className={fieldClassName}>
+                <span className={fieldLabelClassName}>
+                  {translate('hostForm.field.password')}
+                </span>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                {/* 규격이 DES 키로 쓰려고 8바이트로 자른다. 9자 이상을 넣고 왜 안 되는지 찾는
+                    일이 없도록 미리 말해 준다. */}
+                <span className="text-[0.85rem] text-[var(--text-muted)]">
+                  {translate('hostForm.vnc.passwordHint')}
+                </span>
+              </label>
+            ) : null}
+
+            {renderTailnetField(vncDraft.tailnetId, (tailnetId) =>
+              handleVncFieldChange('tailnetId', tailnetId),
+            )}
+          </FormSection>
+
+          {/* 다른 종류와 같은 순서다: Connection 다음이 Details. */}
+          <FormSection
+            title={translate('hostForm.section.details')}
+            testId="hostform-section-details"
+          >
+            {metadataFields}
+          </FormSection>
+
+          <FormSection
+            title={translate('hostForm.section.preferences')}
+            testId="hostform-section-preferences"
+          >
+            <ToggleSwitch
+              checked={vncDraft.shared !== false}
+              label={translate('hostForm.vnc.shared.label')}
+              description={translate('hostForm.vnc.shared.description')}
+              onClick={() =>
+                handleVncFieldChange('shared', vncDraft.shared === false ? null : false)
+              }
+            />
+
+            <ToggleSwitch
+              checked={vncDraft.viewOnly === true}
+              label={translate('hostForm.vnc.viewOnly.label')}
+              description={translate('hostForm.vnc.viewOnly.description')}
+              onClick={() =>
+                handleVncFieldChange('viewOnly', vncDraft.viewOnly === true ? null : true)
+              }
+            />
           </FormSection>
         </>
       ) : rdpDraft ? (

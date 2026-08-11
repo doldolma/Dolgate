@@ -7,7 +7,21 @@ publish = false
 description = "Headless VNC/RFB sidecar for the Dolgate desktop app"
 
 [dependencies]
+core-framing = { path = "../core-framing" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 # VncAuth 의 DES 챌린지 응답에만 쓴다. RFB 의 비밀번호 인증은 1998년 규격 그대로라 대체 수단이
 # 없다 — 전송 보호는 VeNCrypt(TLS)나 터널이 담당한다.
 des = "0.8"
+# ZRLE·Tight 의 zlib 스트림. **세션 하나에 스트림 하나**이고 사각형마다 새로 만들면 안 된다 —
+# 압축 사전이 이어지므로 두 번째 사각형부터 풀리지 않는다.
+flate2 = "1"
+# VeNCrypt 의 TLS. **rustls 로는 안 된다** — TLSVnc 계열은 인증서 없이 익명 DH(ADH/AECDH)로
+# 붙는데 rustls 는 익명 암호군을 의도적으로 넣지 않았다(실측: TigerVNC 가 TLSVnc 만 제시한다).
+#
+# vendored: 소스에서 함께 빌드한다. 세 플랫폼 러너의 시스템 OpenSSL 버전에 따라 산출물이
+# 달라지지 않게 하려는 것이고, Node·Go·Rust 를 고정한 것과 같은 이유다.
+openssl = { version = "0.10", features = ["vendored"] }

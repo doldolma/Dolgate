@@ -1417,6 +1417,29 @@ export interface DesktopApi {
       listener: (audio: import("./rdp").RdpAudioPayload) => void,
     ) => () => void;
   };
+  // RDP 와 같은 모양이되 RFB 에 없는 것들이 빠져 있다(오디오·클립보드 동기화·모니터 배치).
+  vnc: {
+    connect: (
+      sessionId: string,
+      hostId: string,
+    ) => Promise<import("./vnc").VncConnectedPayload>;
+    disconnect: (sessionId: string) => Promise<void>;
+    sendInput: (
+      sessionId: string,
+      events: import("./vnc").VncInputEvent[],
+    ) => void;
+    /** 이미 붙어 있는 세션의 화면 크기. 뒤늦게 붙는 캔버스가 쓴다. */
+    describeSession: (
+      sessionId: string,
+    ) => Promise<import("./vnc").VncConnectedPayload | null>;
+    onEvent: (
+      listener: (event: import("./vnc").VncSessionEvent) => void,
+    ) => () => void;
+    onFrame: (
+      sessionId: string,
+      listener: (frame: import("./vnc").VncFramePayload) => void,
+    ) => () => void;
+  };
   ssh: {
     connect: (input: DesktopConnectInput) => Promise<{ sessionId: string }>;
     connectLocal: (

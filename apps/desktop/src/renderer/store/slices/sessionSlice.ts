@@ -1075,9 +1075,19 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             if (closingHostId) {
               pushClosedHost(closingHostId);
             }
-            // RDP 는 별도 코어를 쓴다. 아래 경로는 전부 ssh-core 를 향하고, RDP sessionId 는
-            // pending 접두사를 유지하므로 그냥 두면 탭만 사라지고 사이드카 세션은 계속 살아
-            // 프레임을 흘린다.
+            // 원격 화면 세션은 별도 코어를 쓴다. 아래 경로는 전부 ssh-core 를 향하고, 이 세션의
+            // sessionId 는 pending 접두사를 유지하므로 그냥 두면 탭만 사라지고 사이드카 세션은
+            // 계속 살아 프레임을 흘린다.
+            const vncTab = get().tabs.find(
+              (tab) => tab.sessionId === sessionId && tab.paneKind === "vnc",
+            );
+            if (vncTab) {
+              // 사용자가 직접 끊었다. 예약된 자동 재연결이 남아 있으면 닫은 세션이 되살아난다.
+              cancelReconnect(vncTab.stableId, "user-disconnect");
+              await api.vnc.disconnect(sessionId).catch(() => undefined);
+              set((state) => removeSessionFromState(state, sessionId));
+              return;
+            }
             const rdpTab = get().tabs.find(
               (tab) => tab.sessionId === sessionId && tab.paneKind === "rdp",
             );

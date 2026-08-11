@@ -73,9 +73,15 @@ describe("store shared boundary", () => {
   });
 
   it("keeps desktop shared as a facade over shared-core plus IPC types", () => {
-    // ai.ts = AI 어시스턴트, rdp.ts = RDP 세션의 IPC wire 타입(둘 다 ipc.ts 와 같은 범주).
-    // facade 원칙은 유지된다.
-    expect(fs.readdirSync(sharedDir).sort()).toEqual(["ai.ts", "index.ts", "ipc.ts", "rdp.ts"]);
+    // ai.ts = AI 어시스턴트, rdp.ts·vnc.ts = 원격 화면 세션의 IPC wire 타입(모두 ipc.ts 와 같은
+    // 범주). facade 원칙은 유지된다 — 여기 있는 것은 IPC 경계의 타입뿐이고 로직은 shared-core 다.
+    expect(fs.readdirSync(sharedDir).sort()).toEqual([
+      "ai.ts",
+      "index.ts",
+      "ipc.ts",
+      "rdp.ts",
+      "vnc.ts",
+    ]);
   });
 
   it("loads shared-core source directly instead of a stale Vite dependency cache", () => {

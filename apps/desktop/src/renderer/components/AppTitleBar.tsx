@@ -166,8 +166,8 @@ type TitlebarDynamicItem =
       status: TerminalTab['status'];
       active: boolean;
       dotState: TabDotState;
-      /** RDP 세션에만 있는 메뉴를 위해 종류를 구분한다. */
-      paneKind: 'terminal' | 'rdp';
+      /** 원격 화면 세션에만 있는 메뉴를 위해 종류를 구분한다. */
+      paneKind: 'terminal' | 'rdp' | 'vnc';
       rttMs: number | null;
     }
   | {
@@ -1687,7 +1687,8 @@ export function AppTitleBar({
                 onMouseEnter={(event) => showTabHover(targetKey, event.currentTarget)}
                 onMouseLeave={() => hideTabHover(targetKey)}
                 onContextMenu={(event) => {
-                  // 지금은 RDP 세션에만 메뉴가 있다. 다른 탭은 기본 동작을 막지 않는다.
+                  // 지금은 RDP 세션에만 메뉴가 있다(모니터 펼치기). VNC 는 프레임버퍼가 하나라
+                  // 그 메뉴가 성립하지 않는다. 다른 탭은 기본 동작을 막지 않는다.
                   if (item.paneKind !== 'rdp') {
                     return;
                   }

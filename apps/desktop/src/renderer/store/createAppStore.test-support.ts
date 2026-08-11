@@ -722,6 +722,19 @@ export function createMockApi(): DesktopApi {
       onFrame: vi.fn(() => () => {}),
       onAudio: vi.fn(() => () => {}),
     },
+    vnc: {
+      // VNC 는 계정도 모니터 배치도 없다 — 서버가 자기 해상도와 이름만 알려 준다.
+      connect: vi.fn().mockResolvedValue({
+        desktopWidth: 1280,
+        desktopHeight: 800,
+        name: "lab-console",
+      }),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      sendInput: vi.fn(),
+      describeSession: vi.fn().mockResolvedValue(null),
+      onEvent: vi.fn(() => () => {}),
+      onFrame: vi.fn(() => () => {}),
+    },
     serial: {
       connect: vi.fn().mockImplementation(async () => {
         sessionCounter += 1;

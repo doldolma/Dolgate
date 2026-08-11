@@ -6,7 +6,7 @@ export type AuthType =
   | 'keyboardInteractive'
   | 'certificate'
   | 'agent';
-export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial' | 'rdp';
+export type HostKind = 'ssh' | 'aws-ec2' | 'aws-ecs' | 'warpgate-ssh' | 'serial' | 'rdp' | 'vnc';
 export type SerialTransport = 'local' | 'raw-tcp' | 'rfc2217';
 export type SerialDataBits = 5 | 6 | 7 | 8;
 export type SerialParity = 'none' | 'odd' | 'even' | 'mark' | 'space';
@@ -398,6 +398,54 @@ export interface RdpAwsSsmTarget {
   instanceId: string;
 }
 
+/**
+ * VNC(RFB) 호스트.
+ *
+ * **`username` 을 두지 않는다.** RFB 의 기본 인증(VncAuth)은 비밀번호만 쓰고 사용자 이름이라는
+ * 개념이 없다. 그리고 옛 빌드가 "hostname·port·username 이 다 있으면 SSH" 로 오인해 레코드를
+ * 고쳐 되올리는 문제가 있어(RdpHostRecord 주석 참고) 옛 스키마의 필수 필드를 흉내 내면 안 된다.
+ *
+ * RDP 와 겹치는 필드(secretRef·tailnetId)는 이름과 뜻을 그대로 맞춘다 — 두 종류를 함께 다루는
+ * 화면·정규화 코드가 같은 이름을 기대한다.
+ */
+export interface VncHostRecord extends HostBaseRecord {
+  kind: 'vnc';
+  hostname: string;
+  /** RFB 기본 포트는 5900 이다. 디스플레이 번호 n 은 5900+n 으로 쓰는 관행이다. */
+  port: number;
+  /**
+   * 비밀번호는 레코드가 아니라 시크릿 저장소에 둔다. RDP·SSH 와 같은 규칙이다.
+   *
+   * **VNC 비밀번호는 8자만 유효하다** — 규격이 DES 키로 쓰기 위해 잘라낸다. 폼에서 그 사실을
+   * 알려야 사용자가 9자 이상을 넣고 실패 원인을 찾지 못하는 일이 없다.
+   */
+  secretRef?: string | null;
+  /**
+   * 이 세션이 화면을 다른 클라이언트와 공유한다. 없거나 null 이면 공유(true).
+   *
+   * 끄면 서버가 **기존에 붙어 있던 클라이언트를 끊는다.** 남의 세션을 끊는 것은 사용자가 명시적으로
+   * 고를 일이라 기본을 공유로 둔다.
+   */
+  shared?: boolean | null;
+  /**
+   * 화면만 보고 입력은 보내지 않는다. 없거나 null 이면 꺼짐.
+   *
+   * 서버 쪽 view-only 설정과는 별개의, 이 클라이언트에서의 안전장치다 — 운영 중인 콘솔을 실수로
+   * 클릭하는 것을 막는 용도다.
+   */
+  viewOnly?: boolean | null;
+  /** 경유할 tailnet. 없으면 일반 네트워크로 직접 붙는다. SshHostRecord.tailnetId 와 같다. */
+  tailnetId?: string | null;
+  /**
+   * 이 SSH 호스트를 거쳐 포트 포워딩으로 닿는다. 없으면 `hostname` 으로 직접 붙는다.
+   *
+   * **VNC 에서 이 경로가 특히 중요하다.** QEMU·libvirt 콘솔은 5900 을 localhost 에만 바인딩하는
+   * 것이 관행이라 그 경로가 아니면 아예 닿지 않는다. tailnetId 와 같은 성격이다 — 종류가 아니라
+   * 경로이므로 별도 kind 를 만들지 않는다.
+   */
+  sshTunnelHostId?: string | null;
+}
+
 export interface RdpHostDraft extends HostBaseDraft {
   kind: 'rdp';
   hostname: string;
@@ -549,13 +597,29 @@ export interface SerialPortSummary {
 }
 
 // HostRecord는 로컬 스토리지와 sync payload가 공유하는 정규화된 호스트 모델이다.
+export interface VncHostDraft extends HostBaseDraft {
+  kind: 'vnc';
+  hostname: string;
+  port: number;
+
+  secretRef?: string | null;
+  /** 화면을 다른 클라이언트와 공유한다. 기본 켜짐. [[VncHostRecord]] 참고. */
+  shared?: boolean | null;
+  /** 입력을 보내지 않는다. 기본 꺼짐. [[VncHostRecord]] 참고. */
+  viewOnly?: boolean | null;
+  tailnetId?: string | null;
+  /** 이 SSH 호스트를 거쳐 붙는다. [[VncHostRecord]] 참고. */
+  sshTunnelHostId?: string | null;
+}
+
 export type HostRecord =
   | SshHostRecord
   | AwsEc2HostRecord
   | AwsEcsHostRecord
   | WarpgateSshHostRecord
   | SerialHostRecord
-  | RdpHostRecord;
+  | RdpHostRecord
+  | VncHostRecord;
 
 // HostDraft는 생성/수정 폼에서 사용하는 입력 전용 모델이다.
 export type HostDraft =
@@ -564,7 +628,8 @@ export type HostDraft =
   | AwsEcsHostDraft
   | WarpgateSshHostDraft
   | SerialHostDraft
-  | RdpHostDraft;
+  | RdpHostDraft
+  | VncHostDraft;
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -590,6 +655,14 @@ export function isRdpHostRecord(host: HostRecord): host is RdpHostRecord {
   return host.kind === 'rdp';
 }
 
+export function isVncHostRecord(host: HostRecord): host is VncHostRecord {
+  return host.kind === 'vnc';
+}
+
+export function isVncHostDraft(draft: HostDraft): draft is VncHostDraft {
+  return draft.kind === 'vnc';
+}
+
 /**
  * 이 빌드가 아는 호스트 종류.
  *
@@ -603,6 +676,7 @@ const KNOWN_HOST_KINDS: ReadonlySet<string> = new Set<HostKind>([
   'warpgate-ssh',
   'serial',
   'rdp',
+  'vnc',
 ]);
 
 /**
@@ -705,6 +779,16 @@ export function getHostSearchText(host: HostRecord): string[] {
       ...(host.tags ?? []),
     ];
   }
+  if (host.kind === 'vnc') {
+    // 계정이 없다(비밀번호만 쓴다). 주소·포트로 찾을 수 있게 한다.
+    return [
+      host.label,
+      host.hostname,
+      String(host.port),
+      host.groupName ?? '',
+      ...(host.tags ?? []),
+    ];
+  }
   return [host.label, host.hostname, host.username, host.groupName ?? '', ...(host.tags ?? [])];
 }
 
@@ -733,6 +817,10 @@ export function getHostSubtitle(host: HostRecord, labels: HostSubtitleLabels): s
   if (host.kind === 'rdp') {
     // 계정은 자격증명에 있어 레코드에 없다. 여기서는 주소만 보여준다.
     return ['RDP', `${host.hostname}:${host.port}`].join(' • ');
+  }
+  if (host.kind === 'vnc') {
+    // VNC 도 계정이 없다(비밀번호만 쓴다).
+    return ['VNC', `${host.hostname}:${host.port}`].join(' • ');
   }
   if (host.kind === 'serial') {
     if (host.transport === 'local') {
@@ -775,6 +863,9 @@ export function getHostBadgeLabel(host: HostRecord): string {
   }
   if (host.kind === 'rdp') {
     return 'RDP';
+  }
+  if (host.kind === 'vnc') {
+    return 'VNC';
   }
   if (host.authType === 'privateKey') {
     return 'K';
@@ -2607,8 +2698,11 @@ export interface SecretMetadataRecord {
    *
    * 없으면 SSH 로 본다 — 이 필드가 생기기 전에 만든 것은 모두 SSH 용이다. RDP 목록에 SSH 자격증명
    * 이 섞여 나오면 고를 수 없는 항목만 늘어난다(계정이 없으니 붙지 못한다).
+   *
+   * VNC 는 비밀번호 하나뿐이다 — 계정도 키도 쓰지 않고 **8자만 유효하다**(규격이 DES 키로 쓰려고
+   * 잘라낸다). 그래서 SSH·RDP 자격증명과 섞어 보여줄 수 없다.
    */
-  kind?: 'ssh' | 'rdp' | null;
+  kind?: 'ssh' | 'rdp' | 'vnc' | null;
   /**
    * 이 자격증명이 가리키는 계정. RDP 는 계정이 자격증명에 딸린다 — Windows 의
    * `DOMAIN\user`+비밀번호가 본래 한 묶음이고, 같은 계정을 여러 호스트에 쓸 때 다시 적지
@@ -2657,7 +2751,7 @@ export interface ManagedSecretPayload {
   secretRef: string;
   label: string;
   /** 이 자격증명이 어느 프로토콜용인가. [[SecretMetadataRecord]].kind 참고. */
-  kind?: 'ssh' | 'rdp';
+  kind?: 'ssh' | 'rdp' | 'vnc';
   /** 이 자격증명의 계정. [[SecretMetadataRecord]].username 참고. */
   username?: string;
   domain?: string;
@@ -2685,6 +2779,45 @@ export interface ManagedSecretPayload {
 
 export interface LoadedManagedSecretPayload extends ManagedSecretPayload {
   certificateInfo?: SshCertificateInfo;
+}
+
+/**
+ * 자격증명 페이로드를 목록용 메타데이터로 투영한다.
+ *
+ * **왜 공용인가:** 이 투영은 필드를 나열하는 화이트리스트라, 페이로드에 필드가 늘 때 한 곳이라도
+ * 빠뜨리면 그 경로로 들어온 값이 조용히 증발한다. `kind` 가 실제로 그랬다 — pull 한 번에 RDP
+ * 자격증명이 전부 SSH 취급으로 강등돼 RDP 폼 목록에서 사라졌다. 그때 같은 투영이 세 곳(동기화
+ * pull·번들 가져오기·모바일)에 복사돼 있어서 세 곳을 각각 고쳐야 했고, 다음에 또 빠뜨리지 않게
+ * 막는 것은 "함께 갱신할 것" 주석뿐이었다. 한 곳으로 모으면 빠뜨리는 일 자체가 불가능해진다.
+ *
+ * `linkedHostCount`·`updatedAt` 은 페이로드에서 나오지 않으므로 호출부가 준다 — 연결된 호스트
+ * 수는 그 시점의 호스트 목록에서 세고, 시각의 기준은 경로마다 다르다(동기화는 페이로드의 값,
+ * 가져오기는 번들에 적힌 값).
+ */
+export function projectSecretMetadata(
+  secret: ManagedSecretPayload,
+  context: { linkedHostCount: number; updatedAt: string },
+): SecretMetadataRecord {
+  return {
+    secretRef: secret.secretRef,
+    label: secret.label,
+    kind: secret.kind ?? null,
+    username: secret.username?.trim() || null,
+    domain: secret.domain?.trim() || null,
+    hasPassword: Boolean(secret.password),
+    hasPassphrase: Boolean(secret.passphrase),
+    hasManagedPrivateKey: Boolean(secret.privateKeyPem),
+    hasCertificate: Boolean(secret.certificateText),
+    privateKeyEncrypted: secret.privateKeyEncrypted,
+    keyAlgorithm: secret.keyAlgorithm,
+    keyCurve: secret.keyCurve,
+    keyBits: secret.keyBits,
+    privateKeyCipher: secret.privateKeyCipher,
+    privateKeyKdfRounds: secret.privateKeyKdfRounds,
+    passphraseSaved: secret.passphraseSaved,
+    linkedHostCount: context.linkedHostCount,
+    updatedAt: context.updatedAt,
+  };
 }
 
 export interface LinkedHostSummary {
@@ -3258,10 +3391,10 @@ export interface TerminalTab {
    */
   commandState?: 'running' | 'ok' | 'failed' | null;
   /**
-   * 이 탭이 터미널이 아니라 원격 데스크톱(RDP) 화면이면 'rdp'. 없거나 'terminal' 이면 터미널이다.
-   * RDP 세션은 재연결·tmux·셸 통합 같은 터미널 기계를 타지 않으므로 렌더링 분기에 쓴다.
+   * 이 탭이 터미널이 아니라 원격 화면이면 'rdp'·'vnc'. 없거나 'terminal' 이면 터미널이다.
+   * 원격 화면 세션은 재연결·tmux·셸 통합 같은 터미널 기계를 타지 않으므로 렌더링 분기에 쓴다.
    */
-  paneKind?: 'terminal' | 'rdp';
+  paneKind?: 'terminal' | 'rdp' | 'vnc';
   /**
    * RDP 세션이 쓰고 있는 원격 모니터 수. 접속 응답에서 채운다.
    *

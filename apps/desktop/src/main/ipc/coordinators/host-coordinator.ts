@@ -268,7 +268,7 @@ export function createHostCoordinator(deps: {
           : "";
       return `${host.transport} ${targetHost}${targetPort}`.trim() || null;
     }
-    if (host.kind === "rdp") {
+    if (host.kind === "rdp" || host.kind === "vnc") {
       return host.hostname;
     }
     return host.warpgateTargetId;

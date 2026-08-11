@@ -389,6 +389,7 @@ describe("rdp transfer", () => {
           secretRef: "secret:rdp-cred",
           label: "Work PC",
           updatedAt: timestamp,
+          kind: "rdp",
           username: "admin",
           domain: "WORKGROUP",
           password: "hunter2",
@@ -427,6 +428,16 @@ describe("rdp transfer", () => {
 
       const plan = buildHostTransferImportPlan(parsed, stateWithHosts([]));
       expect(plan.hosts.map((record) => record.id)).toEqual(["host-rdp"]);
+      // 메타데이터 투영이 kind/계정을 빠뜨리면 가져온 자격증명이 RDP 폼 목록에 안 나온다
+      // (kind 없는 메타데이터는 SSH 로 간주된다).
+      expect(plan.secretMetadata).toHaveLength(1);
+      expect(plan.secretMetadata[0]).toMatchObject({
+        secretRef: "secret:rdp-cred",
+        kind: "rdp",
+        username: "admin",
+        domain: "WORKGROUP",
+        hasPassword: true,
+      });
     } finally {
       if (previousInsecureOverride === undefined) {
         delete process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS;
@@ -449,10 +460,12 @@ describe("parseDolgateBundle unknown host kinds", () => {
   function unknownKindHost(id: string): HostRecord {
     return {
       id,
-      kind: "vnc",
+      // 실제로 구현될 종류를 예시로 쓰면 그것이 구현되는 날 이 테스트의 뜻이 뒤집힌다
+      // (vnc 가 그랬다). 앞으로도 쓰이지 않을 이름을 고정한다.
+      kind: "will-not-exist",
       label: "From a newer version",
-      secretRef: "secret:vnc-cred",
-      tailnetId: "tailnet-vnc",
+      secretRef: "secret:future-cred",
+      tailnetId: "tailnet-future",
       createdAt: timestamp,
       updatedAt: timestamp,
     } as unknown as HostRecord;
@@ -460,16 +473,16 @@ describe("parseDolgateBundle unknown host kinds", () => {
 
   it("skips unknown-kind hosts and their forwards, DNS, secrets, tailnets", () => {
     const bundle = {
-      ...bundleWithHosts([host("host-ssh", "Kept"), unknownKindHost("host-vnc")]),
-      secrets: [{ secretRef: "secret:vnc-cred", label: "VNC cred", updatedAt: timestamp }],
+      ...bundleWithHosts([host("host-ssh", "Kept"), unknownKindHost("host-future")]),
+      secrets: [{ secretRef: "secret:future-cred", label: "VNC cred", updatedAt: timestamp }],
       tailnets: [
-        { id: "tailnet-vnc", label: "VNC net", createdAt: timestamp, updatedAt: timestamp },
+        { id: "tailnet-future", label: "VNC net", createdAt: timestamp, updatedAt: timestamp },
       ],
       portForwards: [
         {
-          id: "pf-vnc",
-          label: "vnc forward",
-          hostId: "host-vnc",
+          id: "pf-future",
+          label: "future forward",
+          hostId: "host-future",
           transport: "ssh",
           bindAddress: "127.0.0.1",
           bindPort: 5901,
@@ -483,8 +496,8 @@ describe("parseDolgateBundle unknown host kinds", () => {
         {
           id: "dns-linked",
           type: "linked",
-          hostname: "vnc.internal",
-          portForwardRuleId: "pf-vnc",
+          hostname: "future.internal",
+          portForwardRuleId: "pf-future",
           createdAt: timestamp,
           updatedAt: timestamp,
         },
@@ -515,11 +528,11 @@ describe("parseDolgateBundle unknown host kinds", () => {
   });
 
   it("also drops hosts whose jump chain passes through a skipped host", () => {
-    const jumped = { ...host("host-jumped", "Via vnc"), jumpHostIds: ["host-vnc"] };
+    const jumped = { ...host("host-jumped", "Via future"), jumpHostIds: ["host-future"] };
     const chained = { ...host("host-chain", "Via jumped"), jumpHostIds: ["host-jumped"] };
     const bundle = bundleWithHosts([
       host("host-plain", "Kept"),
-      unknownKindHost("host-vnc"),
+      unknownKindHost("host-future"),
       jumped,
       chained,
     ]);
@@ -537,7 +550,7 @@ describe("parseDolgateBundle unknown host kinds", () => {
     process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS = "true";
     try {
       const sharing = {
-        ...unknownKindHost("host-vnc"),
+        ...unknownKindHost("host-future"),
         secretRef: "secret:rdp-cred",
       } as unknown as HostRecord;
       const bundle = {

@@ -1,4 +1,4 @@
-import { isAwsEc2WindowsPlatform, isRdpHostRecord } from "@shared";
+import { isAwsEc2WindowsPlatform, isRdpHostRecord, isVncHostRecord } from "@shared";
 import { markSessionConnected } from "../../lib/terminal-cwd-registry";
 import type {
   HostRecord,
@@ -851,6 +851,91 @@ export function createSessionServices(deps: SliceDeps) {
   };
 
   /**
+   * VNC 세션을 연다.
+   *
+   * RDP 흐름과 같은 모양이다. 다른 점은 RFB 에 없는 것들이 빠진 것뿐이다 — 모니터 배치·사용자
+   * 이름이 없고, 접속 시 화면 크기를 요청하지 않는다(서버가 자기 해상도를 통보한다).
+   */
+  const startVncConnectionFlow = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    host: HostRecord,
+    reuseSessionId?: string,
+  ) => {
+    const sessionId = reuseSessionId ?? createPendingSessionId();
+    if (!reuseSessionId) {
+      const title = buildSessionTitle(
+        host.label,
+        { source: "host", hostId: host.id },
+        get().tabs,
+      );
+
+      const tab = createPendingSessionTab({
+        sessionId,
+        source: "host",
+        hostId: host.id,
+        title,
+        paneKind: "vnc",
+        progress: resolveConnectingProgress(host),
+      });
+
+      set((state) => ({
+        tabs: [...state.tabs, tab],
+        tabStrip: [...state.tabStrip, { kind: "session" as const, sessionId }],
+        ...activateSessionContextInState(state, sessionId),
+      }));
+    }
+
+    updateSessionProgress(
+      set,
+      sessionId,
+      resolveConnectingProgress(host),
+      "connecting",
+    );
+
+    // tailnet 을 경유하는 호스트는 노드가 먼저 올라와 있어야 한다(RDP 와 같은 이유). SSH 의
+    // 호스트 키 probe 는 타지 않는다 — VNC 에는 그 신뢰 체인이 없다.
+    const tailnetReady = await ensureTailnetReady(set, {
+      hostId: host.id,
+      sessionId,
+    });
+    if (!tailnetReady) {
+      return;
+    }
+
+    try {
+      const connected = await api.vnc.connect(sessionId, host.id);
+      markSessionConnected(sessionId);
+      set((state) => ({
+        tabs: state.tabs.map((tab) =>
+          tab.sessionId === sessionId
+            ? {
+                ...tab,
+                status: "connected" as const,
+                errorMessage: undefined,
+                // 붙고 나면 진행 표시는 지운다 — 연결 화면이 캔버스를 가리면 안 된다.
+                connectionProgress: null,
+                // 탭 hover 표기용. VNC 는 계정이 없어 해상도만 싣는다.
+                rdpDesktopSize: {
+                  width: connected.desktopWidth,
+                  height: connected.desktopHeight,
+                },
+                lastEventAt: new Date().toISOString(),
+              }
+            : tab,
+        ),
+      }));
+    } catch (error) {
+      markSessionError(
+        set,
+        sessionId,
+        error instanceof Error ? error.message : String(error),
+        { retryable: false },
+      );
+    }
+  };
+
+  /**
    * RDP 세션을 같은 탭에 다시 붙인다.
    *
    * 재연결은 탭을 유지해야 한다 — 재연결 상태(시도 횟수·백오프)가 `stableId` 에 붙어 있고,
@@ -921,6 +1006,11 @@ export function createSessionServices(deps: SliceDeps) {
 
     if (isRdpHostRecord(host)) {
       await startRdpConnectionFlow(set, get, host);
+      return;
+    }
+
+    if (isVncHostRecord(host)) {
+      await startVncConnectionFlow(set, get, host);
       return;
     }
 

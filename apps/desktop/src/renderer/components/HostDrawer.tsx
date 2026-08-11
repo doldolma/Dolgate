@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getHostBadgeLabel } from '@shared';
+import { LEGACY_TOLERATED_HOST_KINDS, getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
@@ -8,30 +8,36 @@ import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 import { useTranslation } from 'react-i18next';
 
-type HostCreateKind = 'ssh' | 'serial' | 'rdp';
+type HostCreateKind = 'ssh' | 'serial' | 'rdp' | 'vnc';
 
 // 프로토콜 이름이라 번역하지 않는다(이 컴포넌트의 'New Host'·'Create Host' 와 같은 취급).
 const HOST_KIND_TABS: ReadonlyArray<{ kind: HostCreateKind; label: string }> = [
   { kind: 'ssh', label: 'SSH' },
   { kind: 'serial', label: 'Serial' },
   { kind: 'rdp', label: 'RDP' },
+  { kind: 'vnc', label: 'VNC' },
 ];
 
 /**
  * 이 서버에서 만들 수 있는 종류만 남긴다.
  *
- * RDP 는 서버가 계정 데이터 수준을 저장할 수 있어야 한다. 못 하는 서버(자체 호스팅 옛 버전)에서
- * 만들면, 같은 계정의 옛 기기가 그 레코드를 받아 조용히 망가진다 — 서버가 막아 줄 수 없는 상태다.
- * 그래서 여기서 아예 열지 않는다.
+ * 옛 클라이언트가 모르는 종류(RDP·VNC 등)는 서버가 계정 데이터 수준을 저장할 수 있어야 한다. 못
+ * 하는 서버(자체 호스팅 옛 버전)에서 만들면, 같은 계정의 옛 기기가 그 레코드를 받아 조용히
+ * 망가진다 — 서버가 막아 줄 수 없는 상태다. 그래서 여기서 아예 열지 않는다.
  *
- * 이미 만들어 둔 RDP 호스트는 그대로 둔다. 이미 올라가 있으므로 숨겨도 위험이 줄지 않고,
- * 쓰던 것이 사라지는 편이 더 나쁘다.
+ * **판정을 종류 이름으로 하지 않는다.** 예전에는 `kind !== 'rdp'` 였는데, 그러면 새 종류를 만들
+ * 때마다 이 함수를 기억해야 하고 한 번 잊으면 보호 없이 열린다(데이터 수준 판정도 같은 이유로
+ * 일반화했다 — sync-service 의 resolveSyncDataFloor 참고).
+ *
+ * 이미 만들어 둔 호스트는 그대로 둔다. 이미 올라가 있으므로 숨겨도 위험이 줄지 않고, 쓰던 것이
+ * 사라지는 편이 더 나쁘다.
  */
 export function resolveCreatableHostKinds(input: {
   serverSupportsDataFloor: boolean;
 }): ReadonlyArray<{ kind: HostCreateKind; label: string }> {
   return HOST_KIND_TABS.filter(
-    (tab) => tab.kind !== 'rdp' || input.serverSupportsDataFloor,
+    (tab) =>
+      LEGACY_TOLERATED_HOST_KINDS.has(tab.kind) || input.serverSupportsDataFloor,
   );
 }
 
@@ -39,6 +45,7 @@ const HOST_KIND_BADGE_LABELS: Record<HostCreateKind, string> = {
   ssh: 'S',
   serial: 'SER',
   rdp: 'RDP',
+  vnc: 'VNC',
 };
 
 /**
@@ -54,7 +61,9 @@ const HOST_KIND_BADGE_LABELS: Record<HostCreateKind, string> = {
  * 18,32,48) 흰 칸을 얹는 방식으로는 어느 테마에서도 보이지 않는다.
  */
 const KIND_SEGMENT_TRACK_CLASS =
-  'grid grid-cols-3 gap-[0.15rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.2rem]';
+  // 칸 수는 서버 능력에 따라 달라진다(resolveCreatableHostKinds). 3등분으로 고정해 두면 네 번째
+  // 칸이 줄바꿈되므로 자동 열로 둔다.
+  'grid auto-cols-fr grid-flow-col gap-[0.15rem] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.2rem]';
 
 // 비활성 칸도 같은 굵기의 투명 테두리를 둬서 선택이 옮겨갈 때 칸 크기가 흔들리지 않게 한다.
 const KIND_SEGMENT_BASE_CLASS =

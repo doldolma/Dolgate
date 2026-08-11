@@ -106,6 +106,24 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
     };
   }
 
+  if (record.kind === "vnc") {
+    return {
+      kind: "vnc",
+      label,
+      groupName: record.groupName ?? null,
+      tags: record.tags ?? [],
+      terminalThemeId: record.terminalThemeId ?? null,
+      hostname: record.hostname,
+      port: record.port,
+      secretRef: record.secretRef ?? null,
+      // 여기 나열한 것만 복제·그룹 이동에서 살아남는다(위 SSH 주석과 같은 이유).
+      shared: record.shared ?? null,
+      viewOnly: record.viewOnly ?? null,
+      tailnetId: record.tailnetId ?? null,
+      sshTunnelHostId: record.sshTunnelHostId ?? null,
+    };
+  }
+
   return {
     kind: "ssh",
     label,

@@ -11,7 +11,6 @@ mod clipboard;
 mod drive;
 mod egfx;
 mod egfx_surface;
-mod framing;
 mod output;
 mod protocol;
 mod session;
@@ -26,7 +25,7 @@ use std::thread;
 use anyhow::Context as _;
 use tracing::{info, warn};
 
-use crate::framing::{KIND_CONTROL, read_frame};
+use core_framing::{read_frame, KIND_CONTROL};
 use crate::output::Output;
 use crate::protocol::{
     ConnectPayload, EmptyPayload, ErrorPayload, Event, InputEvent, InputPayload, Request,

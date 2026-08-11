@@ -7,7 +7,7 @@
 //! **알파는 우리가 채운다.** RFB 에는 알파가 없고 32비트 픽셀의 남는 바이트는 규격상 정의되지
 //! 않은 패딩이다. 서버가 거기에 0 을 넣으면 알파 0 이 되어 화면이 통째로 투명해진다.
 
-use crate::protocol::{encoding, PixelFormat};
+use crate::rfb::PixelFormat;
 
 /// 화면에서 갱신된 영역. 이 좌표가 그대로 stream frame 메타데이터가 된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,18 +16,6 @@ pub struct Rect {
     pub y: u16,
     pub width: u16,
     pub height: u16,
-}
-
-/// 사각형 하나를 처리한 결과.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RectOutcome {
-    /// 이 영역이 갱신됐다. 호출부가 픽셀을 꺼내 보낸다.
-    Updated(Rect),
-    /// 서버가 프레임버퍼 크기 변경을 알렸다(DesktopSize 의사 인코딩).
-    ///
-    /// 화면 전체가 무효가 되므로 호출부는 크기를 알리고 **증분이 아닌** 갱신을 다시 요청해야
-    /// 한다. VM 콘솔은 부팅 중에 해상도가 여러 번 바뀌므로 흔한 경로다.
-    Resized { width: u16, height: u16 },
 }
 
 #[derive(Debug)]
@@ -91,10 +79,57 @@ impl Framebuffer {
 
     #[cfg(test)]
     fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
+        self.pixel_for_test(x, y)
+    }
+
+    /// 한 픽셀을 읽는다. 다른 모듈의 테스트가 결과를 확인하는 데 쓴다.
+    ///
+    /// 바이너리에서는 쓰이지 않아 죽은 코드로 보인다 — 테스트 전용이라는 사실을 이름과 이 표시로
+    /// 남긴다(cfg(test) 로 감추면 다른 모듈의 테스트에서 못 쓴다).
+    #[doc(hidden)]
+    #[allow(dead_code)]
+    pub fn pixel_for_test(&self, x: u16, y: u16) -> [u8; 4] {
         let start = self.offset(x, y);
         let mut out = [0_u8; 4];
         out.copy_from_slice(&self.pixels[start..start + 4]);
         out
+    }
+
+    /// 사각형을 한 색으로 채운다(ZRLE 단색 타일).
+    pub fn fill(&mut self, rect: Rect, colour: [u8; 4]) -> Result<(), DecodeError> {
+        if !self.contains(rect) {
+            return Err(DecodeError::RectOutOfBounds(rect));
+        }
+        for row in 0..rect.height {
+            let start = self.offset(rect.x, rect.y + row);
+            for pixel in self.pixels[start..start + usize::from(rect.width) * 4].chunks_exact_mut(4)
+            {
+                pixel.copy_from_slice(&colour);
+            }
+        }
+        Ok(())
+    }
+
+    /// 이미 RGBA 로 풀린 사각형을 그대로 옮긴다(디코더가 변환까지 끝낸 경우).
+    pub fn write_rgba(&mut self, rect: Rect, pixels: &[u8]) -> Result<(), DecodeError> {
+        if !self.contains(rect) {
+            return Err(DecodeError::RectOutOfBounds(rect));
+        }
+        let expected = usize::from(rect.width) * usize::from(rect.height) * 4;
+        if pixels.len() != expected {
+            return Err(DecodeError::ShortData {
+                expected,
+                got: pixels.len(),
+            });
+        }
+        let row_bytes = usize::from(rect.width) * 4;
+        for row in 0..rect.height {
+            let source = usize::from(row) * row_bytes;
+            let target = self.offset(rect.x, rect.y + row);
+            self.pixels[target..target + row_bytes]
+                .copy_from_slice(&pixels[source..source + row_bytes]);
+        }
+        Ok(())
     }
 
     /// Raw 인코딩: 사각형 크기만큼의 픽셀이 그대로 온다.
@@ -226,8 +261,10 @@ pub enum DecodeError {
     RectOutOfBounds(Rect),
     ShortData { expected: usize, got: usize },
     UnsupportedPixelFormat(PixelFormat),
-    /// 우리가 요청하지 않은 인코딩이 왔다. 서버 버그이거나 우리가 목록을 잘못 보낸 것이다.
-    UnsupportedEncoding(i32),
+    /// 압축 스트림이나 타일 데이터가 규격과 맞지 않는다. 어디서 어긋났는지 이름을 남긴다.
+    CorruptStream(&'static str),
+    /// 규격에 없는(또는 예약된) ZRLE 타일 방식이다.
+    UnsupportedZrleSubencoding(u8),
 }
 
 impl std::fmt::Display for DecodeError {
@@ -241,27 +278,22 @@ impl std::fmt::Display for DecodeError {
             Self::ShortData { expected, got } => {
                 write!(f, "사각형 데이터 길이가 맞지 않습니다(기대 {expected}, 받음 {got})")
             }
+            Self::CorruptStream(where_) => {
+                write!(f, "서버가 보낸 압축 데이터가 규격과 맞지 않습니다({where_})")
+            }
+            Self::UnsupportedZrleSubencoding(value) => {
+                write!(f, "다룰 수 없는 ZRLE 타일 방식입니다({value})")
+            }
             Self::UnsupportedPixelFormat(format) => write!(
                 f,
                 "다룰 수 없는 픽셀 포맷입니다({}bpp, true_colour={})",
                 format.bits_per_pixel, format.true_colour
             ),
-            Self::UnsupportedEncoding(value) => {
-                write!(f, "요청하지 않은 인코딩이 도착했습니다({value})")
-            }
         }
     }
 }
 
 impl std::error::Error for DecodeError {}
-
-/// 사각형 헤더의 인코딩 번호가 이 단계에서 다룰 수 있는 것인지 판정한다.
-pub fn is_supported_encoding(value: i32) -> bool {
-    matches!(
-        value,
-        encoding::RAW | encoding::COPY_RECT | encoding::DESKTOP_SIZE
-    )
-}
 
 #[cfg(test)]
 mod tests {
@@ -419,15 +451,5 @@ mod tests {
         assert_eq!((framebuffer.width(), framebuffer.height()), (4, 1));
         // 내용은 버린다 — 서버가 곧 전체를 다시 보낸다.
         assert_eq!(framebuffer.pixel(0, 0), [0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn only_the_encodings_we_requested_are_supported() {
-        assert!(is_supported_encoding(encoding::RAW));
-        assert!(is_supported_encoding(encoding::COPY_RECT));
-        assert!(is_supported_encoding(encoding::DESKTOP_SIZE));
-        // Tight(7)·ZRLE(16) 은 다음 단계다. 목록에 넣지 않았으므로 오면 서버 문제다.
-        assert!(!is_supported_encoding(7));
-        assert!(!is_supported_encoding(16));
     }
 }

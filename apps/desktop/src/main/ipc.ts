@@ -3,6 +3,7 @@ import type { AwsSsmTunnelService } from "./aws-ssm-tunnel-service";
 import type { AwsService } from "./aws-service";
 import type { CoreManager } from "./core-manager";
 import type { RdpManager } from "./rdp-manager";
+import type { VncManager } from "./vnc-manager";
 import type {
   ActivityLogRepository,
   DnsOverrideRepository,
@@ -40,6 +41,7 @@ import { registerSessionShareIpcHandlers } from "./ipc/session-shares";
 import { registerSnippetsIpcHandlers } from "./ipc/snippets";
 import { registerSerialIpcHandlers } from "./ipc/serial";
 import { createCertificatePromptBridge, registerRdpIpcHandlers } from "./ipc/rdp";
+import { registerVncIpcHandlers } from "./ipc/vnc";
 import { registerSftpIpcHandlers } from "./ipc/sftp";
 import { registerSshKeyIpcHandlers } from "./ipc/ssh-keys";
 import { registerSshIpcHandlers } from "./ipc/ssh";
@@ -76,6 +78,7 @@ export function registerIpcHandlers(
   sessionReplayService: SessionReplayService,
   tailnets: TailnetRepository,
   rdpManager: RdpManager,
+  vncManager: VncManager,
   windowRuntime?: DesktopWindowIpcRuntime,
 ): void {
   const ctx = createMainIpcContext({
@@ -123,6 +126,7 @@ export function registerIpcHandlers(
   registerRdpIpcHandlers(ctx, rdpManager, {
     askCertificate: certificatePrompts.ask,
   });
+  registerVncIpcHandlers(ctx, vncManager);
   registerContainersIpcHandlers(ctx);
   registerSftpIpcHandlers(ctx);
   registerPortForwardAndDnsIpcHandlers(ctx);

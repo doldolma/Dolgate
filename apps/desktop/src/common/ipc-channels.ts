@@ -140,6 +140,19 @@ export const ipcChannels = {
     // 오디오도 픽셀과 같은 이유로 store 를 거치지 않는다.
     audio: 'rdp:audio'
   },
+  // VNC 는 RDP 와 같은 모양이되 채널이 적다 — RFB 에는 오디오·드라이브·모니터 협상이 없다.
+  vnc: {
+    connect: 'vnc:connect',
+    disconnect: 'vnc:disconnect',
+    input: 'vnc:input',
+    // 이 창이 이 세션의 픽셀을 원한다/그만 원한다(rdp.watch 와 같은 이유).
+    watch: 'vnc:watch',
+    unwatch: 'vnc:unwatch',
+    describeSession: 'vnc:describe-session',
+    event: 'vnc:event',
+    // 픽셀 전용 채널. store 를 거치지 않고 캔버스로 직결한다.
+    frame: 'vnc:frame'
+  },
   ssh: {
     connect: 'ssh:connect',
     connectLocal: 'ssh:connect-local',

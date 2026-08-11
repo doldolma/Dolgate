@@ -143,6 +143,11 @@ function createDependencySet() {
       setCertificateVerifier: vi.fn(),
       emitSessionEvent: vi.fn(),
     } as any,
+    vncManager: {
+      watchSession: vi.fn(),
+      unwatchSession: vi.fn(),
+      describeSession: vi.fn(),
+    } as any,
   };
 }
 
@@ -181,6 +186,7 @@ describe("registerIpcHandlers", () => {
       deps.sessionReplayService,
       deps.tailnets,
       deps.rdpManager,
+      deps.vncManager,
     );
 
     expect(deps.coreManager.setTerminalEventHandler).toHaveBeenCalledTimes(1);

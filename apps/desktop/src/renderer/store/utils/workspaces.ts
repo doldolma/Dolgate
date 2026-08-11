@@ -406,7 +406,7 @@ export function createPendingSessionTab(input: {
   hostId: string | null;
   title: string;
   shellKind?: string;
-  paneKind?: "terminal" | "rdp";
+  paneKind?: "terminal" | "rdp" | "vnc";
   progress: TerminalConnectionProgress;
 }): TerminalTab {
   return {
