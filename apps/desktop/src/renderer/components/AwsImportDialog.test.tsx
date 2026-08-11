@@ -236,10 +236,11 @@ describe('AwsImportDialog', () => {
     // 암호가 없으면 등록할 수 없다.
     expect(screen.getByRole('button', { name: 'Host 등록' })).toBeDisabled();
 
+    // 파일 대신 붙여넣기로 넣는다. 키가 다 들어오면 조회는 저절로 시작한다.
+    fireEvent.click(screen.getByRole('button', { name: '키 내용 직접 붙여넣기' }));
     fireEvent.change(screen.getByLabelText('프라이빗 키'), {
       target: { value: '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '암호 가져오기' }));
 
     await waitFor(() =>
       expect(api.aws.getWindowsPassword).toHaveBeenCalledWith(
@@ -268,6 +269,53 @@ describe('AwsImportDialog', () => {
         { kind: 'rdp', username: 'Administrator', password: 'Init!alPass' },
       ),
     );
+  });
+
+  it('키가 다 들어오기 전에는 조회하지 않는다', async () => {
+    // 붙여넣는 중간 상태로 부르면 매번 실패하고 경고가 번쩍인다. 끝 표시가 있을 때만 시작한다.
+    const api = installMockApi();
+    api.aws.getProfileStatus.mockResolvedValue(
+      createStatus({ isAuthenticated: true, configuredRegion: 'ap-northeast-2' }),
+    );
+    api.aws.listRegions.mockResolvedValue(['ap-northeast-2']);
+    api.aws.listEc2Instances.mockResolvedValue([
+      {
+        instanceId: 'i-win',
+        name: 'test',
+        platform: 'Windows',
+        privateIp: '10.0.2.181',
+        keyName: 'gw-prod-keypair',
+        state: 'running',
+        ssmAvailability: 'ready',
+        ssmAvailabilityReason: null,
+      },
+    ]);
+
+    render(
+      <AwsImportDialog
+        open
+        currentGroupPath={null}
+        onClose={vi.fn()}
+        onImport={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'RDP 로 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '키 내용 직접 붙여넣기' }));
+    fireEvent.change(screen.getByLabelText('프라이빗 키'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\nhalf' },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('프라이빗 키')).toHaveValue(
+      '-----BEGIN RSA PRIVATE KEY-----\nhalf',
+    ));
+    expect(api.aws.getWindowsPassword).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('프라이빗 키'), {
+      target: { value: '-----BEGIN RSA PRIVATE KEY-----\nhalf\n-----END RSA PRIVATE KEY-----' },
+    });
+
+    await waitFor(() => expect(api.aws.getWindowsPassword).toHaveBeenCalledTimes(1));
   });
 
   it('암호를 못 가져오면 이유를 보여주고 직접 입력을 받는다', async () => {
@@ -301,10 +349,10 @@ describe('AwsImportDialog', () => {
 
     // 목록 컨테이너는 카드보다 먼저 뜬다. 버튼 자체를 기다려야 인스턴스가 그려진 뒤다.
     fireEvent.click(await screen.findByRole('button', { name: 'RDP 로 추가' }));
+    fireEvent.click(screen.getByRole('button', { name: '키 내용 직접 붙여넣기' }));
     fireEvent.change(screen.getByLabelText('프라이빗 키'), {
       target: { value: '-----BEGIN RSA PRIVATE KEY-----\nkey\n-----END RSA PRIVATE KEY-----' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '암호 가져오기' }));
 
     // role 로 찾으면 다른 알림이 하나라도 같이 떠 있을 때 던진다. 이 패널 안만 본다.
     await waitFor(() =>

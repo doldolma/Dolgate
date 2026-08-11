@@ -305,6 +305,10 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
   const [rdpFetchStatus, setRdpFetchStatus] = useState<'idle' | 'loading' | 'done'>('idle');
   const [rdpFetchFailure, setRdpFetchFailure] = useState<AwsWindowsPasswordFailure | null>(null);
   const [rdpError, setRdpError] = useState<string | null>(null);
+  const [isRdpKeyPasteOpen, setIsRdpKeyPasteOpen] = useState(false);
+  const rdpPasswordRef = useRef<HTMLInputElement | null>(null);
+  /** 자동 조회를 이미 시도한 키. 같은 키로 두 번 부르지 않기 위한 것이다. */
+  const rdpAttemptedKeyRef = useRef('');
 
   const resetRdpRegistration = () => {
     setRdpTarget(null);
@@ -313,6 +317,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
     setRdpFetchStatus('idle');
     setRdpFetchFailure(null);
     setRdpError(null);
+    setIsRdpKeyPasteOpen(false);
+    rdpAttemptedKeyRef.current = '';
   };
 
   /**
@@ -343,6 +349,8 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       }
       setRdpFetchStatus('idle');
       setRdpFetchFailure(result.reason ?? 'not-available');
+      // 직접 입력으로 넘어가야 하는 상황이다. 어디에 쓰라는 것인지 알려주려면 커서를 옮겨 준다.
+      rdpPasswordRef.current?.focus();
     } catch (error) {
       setRdpFetchStatus('idle');
       setRdpError(
@@ -352,6 +360,30 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
       );
     }
   };
+
+  /**
+   * 키가 다 들어오면 저절로 조회한다.
+   *
+   * 키를 넣은 사람이 암호를 원하지 않을 이유가 없어서 버튼 하나를 없앴다. 붙여넣는 중간 상태로
+   * 부르지 않도록 **끝 표시가 있을 때만** 시작하고, 같은 키로는 다시 부르지 않는다.
+   */
+  useEffect(() => {
+    if (!rdpTarget || rdpFetchStatus === 'loading') {
+      return;
+    }
+    const key = rdpPrivateKey.trim();
+    if (!key || !/-----END [^-]*PRIVATE KEY-----/.test(key)) {
+      return;
+    }
+    if (rdpAttemptedKeyRef.current === key) {
+      return;
+    }
+    rdpAttemptedKeyRef.current = key;
+    void fetchWindowsPassword();
+    // fetchWindowsPassword 는 매 렌더 새로 만들어지므로 의존성에 넣지 않는다 — 넣으면 매 렌더마다
+    // 다시 돈다. 실제 트리거는 키와 대상이다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rdpPrivateKey, rdpTarget, rdpFetchStatus]);
 
   /**
    * Windows 인스턴스를 RDP 호스트 + 자격증명으로 등록한다.
@@ -912,24 +944,24 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                 </CardMain>
               </Card>
 
+              {/* 무엇을 하는 기능인지가 아니라 **무엇을 하면 되는지**를 먼저 말한다. 어느 파일이
+                  필요한지가 첫 문장에 나와야 사용자가 움직일 수 있다. */}
               <NoticeCard tone="info" title={translate('awsImport.rdp.title')}>
-                <p>{translate('awsImport.rdp.hint')}</p>
+                <p>
+                  {rdpTarget.keyName
+                    ? translate('awsImport.rdp.hintWithKey', { keyName: rdpTarget.keyName })
+                    : translate('awsImport.rdp.hintNoKey')}
+                </p>
+                <p className="text-[0.78rem] opacity-70">
+                  {translate('awsImport.rdp.privacyNote')}
+                </p>
               </NoticeCard>
 
-              <FieldGroup label={translate('awsImport.rdp.privateKeyLabel')}>
-                <textarea
-                  className="min-h-[7rem] font-mono text-[0.8rem]"
-                  value={rdpPrivateKey}
-                  onChange={(event) => setRdpPrivateKey(event.target.value)}
-                  placeholder={translate('awsImport.rdp.privateKeyPlaceholder')}
-                  disabled={rdpFetchStatus === 'loading' || isRegistering}
-                  spellCheck={false}
-                />
-              </FieldGroup>
-
+              {/* 파일 버튼이 맨 위 주 버튼이다. 대부분 `.pem` 파일을 갖고 있고, 클립보드에 키를 담아
+                  두는 사람은 소수라 붙여넣기는 접어 둔다. */}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
-                  variant="secondary"
+                  variant="primary"
                   disabled={rdpFetchStatus === 'loading' || isRegistering}
                   onClick={async () => {
                     const picked = await pickPrivateKeyFile();
@@ -941,34 +973,70 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
                   {translate('awsImport.rdp.pickKey')}
                 </Button>
                 <Button
-                  disabled={
-                    !rdpPrivateKey.trim() || rdpFetchStatus === 'loading' || isRegistering
-                  }
-                  onClick={fetchWindowsPassword}
+                  variant="secondary"
+                  disabled={rdpFetchStatus === 'loading' || isRegistering}
+                  onClick={() => setIsRdpKeyPasteOpen((open) => !open)}
                 >
-                  {translate(
-                    rdpFetchStatus === 'loading'
-                      ? 'awsImport.rdp.fetching'
-                      : 'awsImport.rdp.fetch',
-                  )}
+                  {translate('awsImport.rdp.pasteToggle')}
                 </Button>
               </div>
 
-              {rdpFetchFailure ? (
-                <NoticeCard tone="warning" role="alert">
-                  {translate(`awsImport.rdp.failure.${rdpFetchFailure}`)}
-                </NoticeCard>
+              {isRdpKeyPasteOpen ? (
+                <FieldGroup label={translate('awsImport.rdp.privateKeyLabel')}>
+                  <textarea
+                    className="min-h-[7rem] font-mono text-[0.8rem]"
+                    value={rdpPrivateKey}
+                    onChange={(event) => setRdpPrivateKey(event.target.value)}
+                    placeholder={translate('awsImport.rdp.privateKeyPlaceholder')}
+                    disabled={rdpFetchStatus === 'loading' || isRegistering}
+                    spellCheck={false}
+                  />
+                </FieldGroup>
               ) : null}
-              {rdpError ? (
-                <NoticeCard tone="danger" role="alert">
-                  {rdpError}
+
+              {/* 조회는 키가 들어오면 저절로 시작한다(fetchWindowsPassword 를 부르는 효과). 키를 넣은
+                  사람이 암호를 원하지 않을 이유가 없어서 버튼을 하나 없앴다. 실패했을 때만 다시 시도가
+                  나타난다. */}
+              {rdpFetchStatus === 'loading' ? (
+                <NoticeCard tone="info" role="status">
+                  {translate('awsImport.rdp.fetching')}
                 </NoticeCard>
               ) : null}
 
-              {/* 못 가져왔으면 직접 입력한다. 가져왔어도 고칠 수 있어야 한다 — 비밀번호를 바꾼 뒤라면
-                  AWS 가 주는 값은 이미 옛 것이다. */}
-              <FieldGroup label={translate('awsImport.rdp.passwordLabel')}>
+              {rdpFetchStatus === 'done' ? (
+                <NoticeCard role="status">
+                  {translate('awsImport.rdp.fetched')}
+                </NoticeCard>
+              ) : null}
+
+              {rdpFetchFailure || rdpError ? (
+                <NoticeCard tone={rdpError ? 'danger' : 'warning'} role="alert">
+                  <p>
+                    {rdpError ?? translate(`awsImport.rdp.failure.${rdpFetchFailure}`)}
+                  </p>
+                  <div className="mt-2">
+                    <Button
+                      variant="secondary"
+                      disabled={!rdpPrivateKey.trim() || isRegistering}
+                      onClick={fetchWindowsPassword}
+                    >
+                      {translate('awsImport.rdp.retry')}
+                    </Button>
+                  </div>
+                </NoticeCard>
+              ) : null}
+
+              {/* 라벨이 상태를 말한다 — 가져온 값인지, 직접 넣어야 하는지. 가져왔어도 고칠 수 있어야
+                  한다: 암호를 바꾼 뒤라면 AWS 가 주는 값은 이미 옛 것이다. */}
+              <FieldGroup
+                label={translate(
+                  rdpFetchStatus === 'done'
+                    ? 'awsImport.rdp.passwordLabelFetched'
+                    : 'awsImport.rdp.passwordLabel',
+                )}
+              >
                 <input
+                  ref={rdpPasswordRef}
                   type="password"
                   value={rdpPassword}
                   onChange={(event) => setRdpPassword(event.target.value)}
@@ -1224,6 +1292,12 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
         <ModalFooter>
           {rdpTarget ? (
             <>
+              {/* 비활성 버튼만 두면 사용자는 왜 못 누르는지 알 수 없다. */}
+              {!rdpPassword.trim() ? (
+                <span className="mr-auto text-[0.8rem] opacity-70">
+                  {translate('awsImport.rdp.passwordRequired')}
+                </span>
+              ) : null}
               <Button
                 variant="secondary"
                 disabled={rdpFetchStatus === 'loading' || isRegistering}
