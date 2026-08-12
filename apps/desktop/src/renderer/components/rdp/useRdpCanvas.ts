@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { RdpFramePayload } from "@shared";
-import { subscribeRdpFrames } from "../../services/desktop/rdp";
+import { requestRdpRefresh, subscribeRdpFrames } from "../../services/desktop/rdp";
 import { clipToRegion, visibleSize, type RdpCanvasRegion } from "./canvas-region";
 import { createFrameSurface, type FrameSurface } from "./frame-surface";
 
@@ -70,7 +70,18 @@ export function useRdpCanvas(
       return;
     }
     surfaceRef.current?.resize(width, height);
-  }, [width, height]);
+    // **그림을 잃었으니 다시 달라고 한다.**
+    //
+    // 이 효과는 `resized` 이벤트가 스토어를 거쳐 리렌더된 뒤에 실행된다. 그 사이에 도착한 프레임은
+    // 옛 크기 누적본에 쌓였다가 위 resize 에서 통째로 버려지고, 서버는 바뀌지 않은 영역을 다시
+    // 보내지 않는다 — 그 자리가 검은 채로 남는다(VNC 에서 화면 위쪽 띠로 실제로 나타났다).
+    //
+    // RDP 는 접속 시점에 크기가 정해지고 그 뒤 변경은 느린 재협상을 거치므로 이 창이 잘 벌어지지
+    // 않지만, 벌어지면 같은 증상이다. 보조 모니터 창이 열릴 때 쓰는 것과 같은 요청이다.
+    if (sessionId) {
+      requestRdpRefresh(sessionId);
+    }
+  }, [width, height, sessionId]);
 
   // 보이는 캔버스의 크기를 맞추고, 누적본에서 즉시 되칠한다.
   //

@@ -76,6 +76,25 @@ function rdpHost(id: string, label: string): HostRecord {
   } as unknown as HostRecord;
 }
 
+function vncHost(id: string, label: string): HostRecord {
+  return {
+    id,
+    kind: "vnc",
+    label,
+    groupName: null,
+    tags: [],
+    terminalThemeId: null,
+    hostname: "10.0.0.6",
+    port: 5900,
+    secretRef: "secret:vnc-cred",
+    tailnetId: "tailnet-1",
+    imageQuality: "balanced",
+    viewOnly: true,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  } as unknown as HostRecord;
+}
+
 function stateWithHosts(hosts: HostRecord[]): DesktopStateFile {
   return {
     data: {
@@ -399,6 +418,115 @@ describe("rdp transfer", () => {
     };
     return state;
   }
+
+  // VNC 도 자격증명·tailnet 을 참조로 갖는다. 참조를 세는 조건에서 빠지면 **자격증명이 조용히
+  // 빠진 파일**이 만들어진다(아무도 안 쓰는 자격증명으로 걸러진다) — 받는 쪽은 비밀번호 없는
+  // 호스트를 얻는다.
+  it("round-trips a VNC host with its credential and tailnet", () => {
+    const previousInsecureOverride =
+      process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS;
+    process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS = "true";
+    try {
+      const state = stateWithHosts([vncHost("host-vnc", "Lab Screen")]);
+      const { hasAuthKey: _drop, ...tailnetRecord } = rdpTailnet;
+      state.data.tailnets.push({ ...tailnetRecord, hasAuthKey: false });
+      state.secure.managedSecretsByRef["secret:vnc-cred"] = {
+        encrypted: false,
+        value: Buffer.from(
+          JSON.stringify({
+            secretRef: "secret:vnc-cred",
+            label: "Lab Screen",
+            updatedAt: timestamp,
+            kind: "vnc",
+            username: "operator",
+            password: "여덟자넘는긴비밀번호",
+          }),
+          "utf8",
+        ).toString("base64"),
+      };
+
+      const bundle = buildDolgateHostBundle(state, ["host-vnc"]);
+      expect(bundle.hosts).toHaveLength(1);
+      expect(bundle.hosts[0].kind).toBe("vnc");
+      expect(bundle.secrets.map((record) => record.secretRef)).toEqual([
+        "secret:vnc-cred",
+      ]);
+      expect(bundle.tailnets.map((record) => record.id)).toEqual(["tailnet-1"]);
+
+      const parsed = parseDolgateBundle(JSON.parse(JSON.stringify(bundle))).bundle;
+      const host = parsed.hosts[0] as unknown as {
+        kind: string;
+        imageQuality?: string | null;
+        viewOnly?: boolean | null;
+      };
+      expect(host.kind).toBe("vnc");
+      // 화질·보기전용도 살아남아야 한다 — 정규화 화이트리스트가 VNC 필드를 알아야 한다.
+      expect(host.imageQuality).toBe("balanced");
+      expect(host.viewOnly).toBe(true);
+
+      const secret = parsed.secrets[0] as unknown as {
+        username?: string;
+        password?: string;
+      };
+      expect(secret.username).toBe("operator");
+      // 8자 넘는 비밀번호가 잘리지 않아야 한다(VeNCrypt Plain·ARD 로 쓰인다).
+      expect(secret.password).toBe("여덟자넘는긴비밀번호");
+
+      const plan = buildHostTransferImportPlan(parsed, stateWithHosts([]));
+      expect(plan.hosts.map((record) => record.id)).toEqual(["host-vnc"]);
+      expect(plan.secretMetadata[0]).toMatchObject({
+        secretRef: "secret:vnc-cred",
+        kind: "vnc",
+        username: "operator",
+        hasPassword: true,
+      });
+    } finally {
+      if (previousInsecureOverride === undefined) {
+        delete process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS;
+      } else {
+        process.env.DOLSSH_ALLOW_INSECURE_SECRET_STORAGE_FOR_TESTS =
+          previousInsecureOverride;
+      }
+    }
+  });
+
+  // VNC 는 SSH 호스트를 골라 터널로 거친다(QEMU·libvirt 콘솔은 5900 을 localhost 에만 바인딩하는
+  // 것이 관행이다). 그 호스트를 함께 담지 않으면 받는 쪽에서 "경유할 SSH 호스트를 찾을 수 없습니다"
+  // 로 죽는다 — tailnet 등록 정보를 함께 담는 것과 같은 이유다.
+  it("carries the SSH host a VNC host tunnels through", () => {
+    const tunneled = {
+      ...(vncHost("host-vnc", "Lab Screen") as unknown as Record<string, unknown>),
+      secretRef: null,
+      tailnetId: null,
+      sshTunnelHostId: "host-gate",
+    } as unknown as HostRecord;
+    const state = stateWithHosts([tunneled, host("host-gate", "Gate")]);
+
+    // VNC 호스트만 골랐다.
+    const bundle = buildDolgateHostBundle(state, ["host-vnc"]);
+
+    expect(bundle.hosts.map((record) => record.id).sort()).toEqual([
+      "host-gate",
+      "host-vnc",
+    ]);
+    // 고른 것은 VNC 하나뿐이다 — 경유 호스트는 딸려온 것이라 뿌리가 아니다.
+    expect(bundle.rootHostIds).toEqual(["host-vnc"]);
+  });
+
+  // 가리키던 SSH 호스트를 지웠을 수 있다(폼이 경고로 보여 준다). 그 하나 때문에 내보내기 전체가
+  // 막히면 사용자는 호스트를 옮길 방법이 없다.
+  it("still exports a VNC host whose tunnel host is gone", () => {
+    const dangling = {
+      ...(vncHost("host-vnc", "Lab Screen") as unknown as Record<string, unknown>),
+      secretRef: null,
+      tailnetId: null,
+      sshTunnelHostId: "host-deleted",
+    } as unknown as HostRecord;
+
+    const bundle = buildDolgateHostBundle(stateWithHosts([dangling]), ["host-vnc"]);
+
+    expect(bundle.hosts.map((record) => record.id)).toEqual(["host-vnc"]);
+  });
 
   it("round-trips an RDP host with its credential and tailnet", () => {
     const previousInsecureOverride =

@@ -34,6 +34,9 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
     tailnetId ? state.tailnetStatuses[tailnetId] : undefined,
   );
   const retryRdpConnection = useAppStore((state) => state.retryRdpConnection);
+  // Close 는 탭을 닫는다(터미널 오버레이와 같은 뜻이다). 넘기지 않으면 버튼이 그려지긴
+  // 하는데 아무 일도 하지 않는다 — 실제로 그 상태로 나가 있었다.
+  const disconnectTab = useAppStore((state) => state.disconnectTab);
   // 서버 인증서를 신뢰할지 묻는 화면이 떠 있는 동안은 이 오버레이를 그리지 않는다.
   //
   // 둘 다 pane 을 덮는데 이쪽이 나중에 렌더되는 형제라 위에 깔린다. 배경이 반투명이라 아래
@@ -94,6 +97,9 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
       message={message}
       // 재시도는 같은 탭에 다시 붙는다(stableId 유지) — 자동 재연결과 같은 경로다.
       showRetry={failed}
+      onClose={() => {
+        void disconnectTab(sessionId);
+      }}
       onRetry={() => {
         void retryRdpConnection(sessionId);
       }}

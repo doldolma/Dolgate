@@ -11,6 +11,7 @@ vi.mock("../../services/desktop/rdp", () => ({
     return () => eventListeners.delete(listener);
   },
   subscribeRdpFrames: () => () => {},
+  requestRdpRefresh: vi.fn(),
   trustRdpCertificate: vi.fn(),
   resizeRdp: vi.fn(),
   sendRdpInput: vi.fn(),

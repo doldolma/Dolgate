@@ -172,6 +172,48 @@ describe('TailnetSettingsPanel', () => {
     expect(screen.queryByText(/backend=Running/)).not.toBeInTheDocument();
   });
 
+  // SSH 만 세면 그 tailnet 이 "쓰는 호스트 없음" 으로 보인다 — 지울 때 경고가 없고, 지운 뒤 RDP·VNC
+  // 호스트가 조용히 못 붙는다.
+  it('RDP·VNC 호스트도 사용 중으로 센다', async () => {
+    storeState.hosts = [
+      {
+        id: 'host-rdp',
+        kind: 'rdp',
+        label: 'Win Box',
+        hostname: '10.0.2.181',
+        port: 3389,
+        tailnetId: 'net-1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+      {
+        id: 'host-vnc',
+        kind: 'vnc',
+        label: 'Lab Screen',
+        hostname: '10.0.2.90',
+        port: 5900,
+        tailnetId: 'net-1',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
+    ] as HostRecord[];
+    putStatus({
+      id: 'net-1',
+      state: 'running',
+      ready: true,
+      online: true,
+      backendState: 'Running',
+    });
+
+    render(<TailnetSettingsPanel />);
+
+    expect(await screen.findByText('사용 중인 호스트 2개')).toBeInTheDocument();
+    expect(screen.getByText('Win Box')).toBeInTheDocument();
+    // 계정은 SSH 레코드에만 있다 — RDP·VNC 는 주소만 보여준다(계정은 자격증명에 있다).
+    expect(screen.getByText('10.0.2.181:3389')).toBeInTheDocument();
+    expect(screen.getByText('10.0.2.90:5900')).toBeInTheDocument();
+  });
+
   it('refreshes hosts after deleting a network that they use', async () => {
     storeState.hosts = [
       {

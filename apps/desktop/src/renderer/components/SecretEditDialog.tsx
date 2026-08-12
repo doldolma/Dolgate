@@ -76,6 +76,16 @@ export function SecretEditDialog({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [authType, setAuthType] = useState<SecretAuthType>('password');
+  /**
+   * 이 자격증명이 어느 프로토콜용인가.
+   *
+   * **저장할 때 그대로 되돌려 보내야 한다.** 예전에는 이 화면이 kind·계정을 싣지 않아서, RDP
+   * 자격증명을 한 번 편집하면 종류가 SSH 로 강등되고 계정이 지워졌다(그러면 RDP 폼 목록에서
+   * 사라지고 접속도 계정 없이 시도한다).
+   */
+  const [secretKind, setSecretKind] = useState<'ssh' | 'rdp' | 'vnc' | null>(null);
+  const [username, setUsername] = useState('');
+  const [domain, setDomain] = useState('');
 
   const [password, setPassword] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -98,6 +108,9 @@ export function SecretEditDialog({
         setLoadError(null);
         setSubmitError(null);
         setAuthType('password');
+        setSecretKind(null);
+        setUsername('');
+        setDomain('');
         setPassword('');
         setPassphrase('');
         setPrivateKey('');
@@ -137,6 +150,13 @@ export function SecretEditDialog({
             certificateText: nextCertificate,
           }),
         );
+        setSecretKind(
+          loaded.kind === 'rdp' || loaded.kind === 'vnc' || loaded.kind === 'ssh'
+            ? loaded.kind
+            : null,
+        );
+        setUsername(loaded.username ?? '');
+        setDomain(loaded.domain ?? '');
         setPassword(nextPassword);
         setPassphrase(nextPassphrase);
         setPrivateKey(nextPrivateKey);
@@ -182,22 +202,50 @@ export function SecretEditDialog({
     activeRequest.source === 'keychain' &&
     linkedHostCount > 1;
 
-  const replacementSecrets: HostSecretInput = {
-    password: authType === 'password' ? password : undefined,
-    passphrase:
-      authType === 'privateKey' || authType === 'certificate'
-        ? passphrase || undefined
-        : undefined,
-    privateKeyPem:
-      authType === 'privateKey' || authType === 'certificate'
-        ? privateKey || undefined
-        : undefined,
-    certificateText:
-      authType === 'certificate' ? certificate || undefined : undefined,
-    env: envVars.length > 0 ? envVars : undefined,
-  };
+  /**
+   * 원격 화면(RDP·VNC)용 자격증명인가.
+   *
+   * 이 둘은 **비밀번호 하나 + 계정**뿐이다. SSH 의 키·인증서·authType 을 보여주면 쓸 수 없는 칸이
+   * 늘고, 그 칸을 건드리면 접속에 못 쓰는 자격증명이 만들어진다.
+   */
+  const isRemoteScreenSecret = secretKind === 'rdp' || secretKind === 'vnc';
+
+  const replacementSecrets: HostSecretInput = isRemoteScreenSecret
+    ? {
+        // 종류·계정을 **그대로 되돌려 보낸다.** 빠뜨리면 저장하는 순간 SSH 로 강등된다.
+        kind: secretKind ?? undefined,
+        username: username.trim() || undefined,
+        // 도메인은 RDP 만 쓴다(VNC 에는 개념이 없다).
+        domain: secretKind === 'rdp' ? domain.trim() || undefined : undefined,
+        password,
+      }
+    : {
+        kind: secretKind ?? undefined,
+        password: authType === 'password' ? password : undefined,
+        passphrase:
+          authType === 'privateKey' || authType === 'certificate'
+            ? passphrase || undefined
+            : undefined,
+        privateKeyPem:
+          authType === 'privateKey' || authType === 'certificate'
+            ? privateKey || undefined
+            : undefined,
+        certificateText:
+          authType === 'certificate' ? certificate || undefined : undefined,
+        env: envVars.length > 0 ? envVars : undefined,
+      };
 
   function validateSecrets(): string | null {
+    if (isRemoteScreenSecret) {
+      // 비밀번호 없는 자격증명은 인증에 쓸 수 없다. RDP 는 계정도 있어야 한다.
+      if (!password) {
+        return translate('secretEdit.validation.password');
+      }
+      if (secretKind === 'rdp' && !username.trim()) {
+        return translate('secretEdit.validation.account');
+      }
+      return null;
+    }
     if (authType === 'password' && !password) {
       return translate('secretEdit.validation.password');
     }
@@ -295,6 +343,62 @@ export function SecretEditDialog({
 
           {!loading && !loadError ? (
             <div className="grid gap-[0.9rem]">
+              {/* 원격 화면(RDP·VNC) 자격증명은 비밀번호 하나 + 계정뿐이다. SSH 의 인증 방식·키·
+                  인증서 칸을 보여주면 쓸 수 없는 칸이 늘고, 그 칸을 건드리면 접속에 못 쓰는
+                  자격증명이 만들어진다. */}
+              {isRemoteScreenSecret ? (
+                <>
+                  <label className="grid gap-[0.4rem] text-[var(--text)]">
+                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
+                      {translate('secretEdit.account')}
+                    </span>
+                    <Input
+                      value={username}
+                      onChange={(event) => {
+                        setUsername(event.target.value);
+                        setSubmitError(null);
+                      }}
+                      placeholder={
+                        secretKind === 'rdp'
+                          ? translate('secretEdit.accountPlaceholderRdp')
+                          : translate('secretEdit.accountPlaceholderVnc')
+                      }
+                    />
+                  </label>
+                  {/* 도메인은 RDP 만 쓴다 — VNC 에는 개념이 없다. */}
+                  {secretKind === 'rdp' ? (
+                    <label className="grid gap-[0.4rem] text-[var(--text)]">
+                      <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
+                        {translate('secretEdit.domain')}
+                      </span>
+                      <Input
+                        value={domain}
+                        onChange={(event) => {
+                          setDomain(event.target.value);
+                          setSubmitError(null);
+                        }}
+                        placeholder={translate('secretEdit.domainPlaceholder')}
+                      />
+                    </label>
+                  ) : null}
+                  <label className="grid gap-[0.4rem] text-[var(--text)]">
+                    <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
+                      Password
+                    </span>
+                    <Input
+                      type="password"
+                      value={password}
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        setSubmitError(null);
+                      }}
+                      placeholder={translate('secretEdit.passwordPlaceholder')}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              {isRemoteScreenSecret ? null : (
               <label className="grid gap-[0.4rem] text-[var(--text)]">
                 <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                   Auth Type
@@ -318,6 +422,7 @@ export function SecretEditDialog({
                   <option value="certificate">Certificate</option>
                 </SelectField>
               </label>
+              )}
 
               {certificateSummary ? (
                 <div
@@ -334,7 +439,7 @@ export function SecretEditDialog({
                 </div>
               ) : null}
 
-              {authType === 'password' ? (
+              {!isRemoteScreenSecret && authType === 'password' ? (
                 <label className="grid gap-[0.4rem] text-[var(--text)]">
                   <span className="text-[0.82rem] font-semibold uppercase tracking-[0.12em] text-[var(--text-soft)]">
                     Password

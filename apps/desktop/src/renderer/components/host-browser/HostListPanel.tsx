@@ -427,7 +427,17 @@ export function HostListPanel({ hb }: HostListPanelProps) {
         className={cn(
           'min-h-0 flex-1 overflow-y-auto px-[1.1rem] pb-[1.1rem]',
           // 목록(테이블)은 흰 배경, 격자(카드)는 기존 투명 배경 위에 둔다.
-          viewMode === 'list' ? 'bg-[var(--surface-strong)] pt-0' : 'pt-[0.4rem]',
+          viewMode === 'list' && 'bg-[var(--surface-strong)]',
+          // 위 여백은 **무엇을 그리는지**에 달렸다.
+          //
+          // 표는 머리글 행이 위 영역과 맞닿아야 해서 여백을 주지 않는다. 빈 상태는 그 표가 아니라
+          // 안내 박스인데, 같은 컨테이너를 쓰는 탓에 그 pt-0 을 물려받아 툴바에 붙어 있었다.
+          // 다른 화면들은 빈 상태를 PanelSection(gap 0.9rem) 안에 두므로 그 값에 맞춘다.
+          visibleHosts.length === 0
+            ? 'pt-[0.9rem]'
+            : viewMode === 'list'
+              ? 'pt-0'
+              : 'pt-[0.4rem]',
         )}
         data-testid="host-browser-content"
       >

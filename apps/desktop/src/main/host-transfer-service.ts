@@ -9,6 +9,9 @@ import {
   type GroupRecord,
   type HostRecord,
   type KnownHostRecord,
+  type RdpHostRecord,
+  type SshHostRecord,
+  type VncHostRecord,
   type ManagedAwsProfilePayload,
   type ManagedSecretPayload,
   type PortForwardRuleRecord,
@@ -116,6 +119,19 @@ function parseGroup(value: unknown): GroupRecord {
     createdAt: requireString(value.createdAt, "transfer.field.groupCreatedAt"),
     updatedAt: requireString(value.updatedAt, "transfer.field.groupUpdatedAt"),
   };
+}
+
+/**
+ * 자격증명·tailnet 을 **참조로** 갖는 호스트 종류인가.
+ *
+ * 종류를 늘릴 때 여기를 빼먹으면 그 호스트의 자격증명이 내보내기에서 조용히 빠진다 — 참조를 세지
+ * 않으니 "아무도 안 쓰는 자격증명" 으로 걸러지고, 가져오기 쪽 검증도 건너뛴다. VNC 가 실제로
+ * 그랬다. 조건을 여섯 곳에 흩어 두지 않고 이 함수 하나만 고치게 한다.
+ */
+function hasCredentialRefs(
+  host: HostRecord,
+): host is SshHostRecord | RdpHostRecord | VncHostRecord {
+  return host.kind === "ssh" || host.kind === "rdp" || host.kind === "vnc";
 }
 
 function parseHost(value: unknown): HostRecord {
@@ -370,10 +386,10 @@ export function parseDolgateBundle(value: unknown): ParsedDolgateBundle {
   const survivingSecretRefs = new Set<string>();
   const survivingTailnetIds = new Set<string>();
   for (const host of hosts) {
-    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef) {
+    if (hasCredentialRefs(host) && host.secretRef) {
       survivingSecretRefs.add(host.secretRef);
     }
-    if ((host.kind === "ssh" || host.kind === "rdp") && host.tailnetId?.trim()) {
+    if (hasCredentialRefs(host) && host.tailnetId?.trim()) {
       survivingTailnetIds.add(host.tailnetId.trim());
     }
   }
@@ -511,7 +527,7 @@ function assertBundleReferences(bundle: DolgateHostBundleV1): void {
   }
   for (const host of bundle.hosts) {
     // 자격증명을 참조로 갖는 종류는 번들 안에 그 자격증명이 실제로 있어야 한다.
-    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef && !secretIds.has(host.secretRef)) {
+    if (hasCredentialRefs(host) && host.secretRef && !secretIds.has(host.secretRef)) {
       throw new Error(t("transfer.error.missingSecret", { label: host.label }));
     }
     if (host.kind === "ssh") {
@@ -595,6 +611,14 @@ export function buildDolgateHostBundle(
         collectHost(jumpId, visiting);
       }
     }
+    // VNC 는 SSH 호스트를 골라 터널로 거친다. 그 호스트를 함께 담지 않으면 받는 쪽에서 "경유할
+    // SSH 호스트를 찾을 수 없습니다" 로 죽는다 — tailnet 등록 정보를 함께 담는 것과 같은 이유다.
+    //
+    // 있을 때만 따라간다. 가리키는 SSH 호스트를 지웠을 수 있고(폼이 경고로 보여 준다), 그 하나
+    // 때문에 내보내기 전체를 막을 이유는 없다.
+    if (host.kind === "vnc" && host.sshTunnelHostId && hostsById.has(host.sshTunnelHostId)) {
+      collectHost(host.sshTunnelHostId, visiting);
+    }
     visiting.delete(hostId);
     includedHostIds.add(hostId);
   };
@@ -611,7 +635,7 @@ export function buildDolgateHostBundle(
   const availableProfileIdsByHostId = new Map<string, string>();
   const snippetIds = new Set<string>();
   for (const host of selectedHosts) {
-    if ((host.kind === "ssh" || host.kind === "rdp") && host.secretRef) {
+    if (hasCredentialRefs(host) && host.secretRef) {
       secretRefs.add(host.secretRef);
     }
     if (host.kind === "aws-ec2" || host.kind === "aws-ecs") {
@@ -730,7 +754,7 @@ export function buildDolgateHostBundle(
   // 들어간다. 키만 빼면 받는 쪽이 재인증해야 해서 "가져오면 바로 된다"가 성립하지 않는다.
   const tailnetIds = new Set<string>();
   for (const host of hosts) {
-    if ((host.kind === "ssh" || host.kind === "rdp") && host.tailnetId?.trim()) {
+    if (hasCredentialRefs(host) && host.tailnetId?.trim()) {
       tailnetIds.add(host.tailnetId.trim());
     }
   }
@@ -958,7 +982,7 @@ export function buildHostTransferImportPlan(
     ...portForwards.map((record) => record.id),
   ]);
   for (const host of hosts) {
-    if (host.kind === "ssh" || host.kind === "rdp") {
+    if (hasCredentialRefs(host)) {
       if (host.secretRef && !availableSecretIds.has(host.secretRef)) {
         throw new Error(t("transfer.error.unresolvedSecretRef", { label: host.label }));
       }

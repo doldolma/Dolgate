@@ -14,6 +14,8 @@ export function getHostTypeLabel(host: HostRecord): string {
       return 'Serial';
     case 'rdp':
       return 'RDP';
+    case 'vnc':
+      return 'VNC';
     default:
       return 'SSH';
   }
@@ -32,6 +34,8 @@ export function getHostShortType(host: HostRecord): string {
       return 'Serial';
     case 'rdp':
       return 'RDP';
+    case 'vnc':
+      return 'VNC';
     default:
       return 'SSH';
   }
@@ -43,6 +47,10 @@ export function getHostAddress(host: HostRecord): string | null {
     case 'ssh':
       return `${host.hostname}:${host.port}`;
     case 'rdp':
+      return `${host.hostname}:${host.port}`;
+    // 빠뜨리면 default 로 떨어져 **주소가 아예 안 보인다.** 종류를 늘릴 때 여기를 잊는 것이 그
+    // 증상이다(VNC 가 실제로 그랬다) — 카드·표가 이 함수 하나만 본다.
+    case 'vnc':
       return `${host.hostname}:${host.port}`;
     case 'aws-ec2':
       return host.awsPrivateIp || host.awsInstanceId || null;

@@ -1,10 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  isRdpHostRecord,
   isSshHostRecord,
+  isVncHostRecord,
+  type RdpHostRecord,
   type SshHostRecord,
   type TailnetRecord,
   type TailnetStatus,
+  type VncHostRecord,
 } from '@shared';
 import {
   Badge,
@@ -497,9 +501,11 @@ export function TailnetSettingsPanel() {
   }, [pendingRemoval, refresh, refreshHostCatalog]);
 
   const hostsByTailnetId = useMemo(() => {
-    const grouped = new Map<string, SshHostRecord[]>();
+    const grouped = new Map<string, TailnetCapableHost[]>();
     for (const host of hosts) {
-      if (!isSshHostRecord(host)) {
+      // **SSH 만 세면 안 된다.** RDP·VNC 도 tailnetId 를 갖는다. 빠뜨리면 그 tailnet 이 "쓰는 호스트
+      // 없음" 으로 보여서, 지울 때 경고가 없고 지운 뒤 그 호스트들이 조용히 못 붙는다.
+      if (!isSshHostRecord(host) && !isRdpHostRecord(host) && !isVncHostRecord(host)) {
         continue;
       }
       const tailnetId = host.tailnetId?.trim();
@@ -825,7 +831,10 @@ function TailnetIdentity({
   );
 }
 
-function TailnetHostUsage({ hosts }: { hosts: SshHostRecord[] }) {
+/** tailnet 을 경유할 수 있는 호스트 종류. 세 종류가 같은 `tailnetId` 필드를 쓴다. */
+type TailnetCapableHost = SshHostRecord | RdpHostRecord | VncHostRecord;
+
+function TailnetHostUsage({ hosts }: { hosts: TailnetCapableHost[] }) {
   const { t: translate } = useTranslation();
   if (hosts.length === 0) {
     return null;
@@ -838,7 +847,9 @@ function TailnetHostUsage({ hosts }: { hosts: SshHostRecord[] }) {
       </div>
       <ul className="m-0 max-h-32 list-none space-y-1.5 overflow-y-auto p-0 pr-1 text-[0.8rem]">
         {hosts.map((host) => {
-          const endpoint = `${host.username ? `${host.username}@` : ''}${host.hostname}:${host.port}`;
+          // 계정은 SSH 레코드에만 있다. RDP·VNC 는 자격증명에 들어 있어 여기서는 주소만 보여준다.
+          const account = isSshHostRecord(host) && host.username ? `${host.username}@` : '';
+          const endpoint = `${account}${host.hostname}:${host.port}`;
           return (
             <li key={host.id} className="flex min-w-0 items-center gap-2">
               <SquareTerminal

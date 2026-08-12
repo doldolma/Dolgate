@@ -275,6 +275,8 @@ if (termiusHelperArgIndex >= 0) {
   // VNC 도 별도 사이드카(services/vnc-core)다. RDP 와 같은 이유로 CoreManager 와 독립적이다.
   const vncManager = new VncManager({
     getWindows: () => BrowserWindow.getAllWindows(),
+    // RDP·SSH 와 같은 로그 저장소를 쓴다 — VNC 연결도 로그 화면과 **최근 접속 시각**에 함께 보인다.
+    upsertLogRecord: upsertActivityLog,
   });
 
   awsSsmTunnelService.setInProcessBackend({

@@ -6125,6 +6125,14 @@ export class CoreManager {
     if (kind === "mosh") {
       return "Mosh";
     }
+    // 원격 화면은 각자 매니저가 로그를 쓰지만(rdp-manager·vnc-manager), 표에서 종류를 읽는 곳은
+    // 여기 하나다. 빠뜨리면 VNC 세션이 로그에 "SSH" 로 남는다.
+    if (kind === "rdp") {
+      return "RDP";
+    }
+    if (kind === "vnc") {
+      return "VNC";
+    }
     return "SSH";
   }
 

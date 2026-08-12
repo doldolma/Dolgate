@@ -12,7 +12,10 @@ function emitEvent(event: unknown) {
   }
 }
 
+const requestRdpRefresh = vi.fn();
+
 vi.mock("../../services/desktop/rdp", () => ({
+  requestRdpRefresh: (sessionId: string) => requestRdpRefresh(sessionId),
   subscribeRdpFrames: (
     sessionId: string,
     listener: (frame: RdpFramePayload) => void,
@@ -211,5 +214,28 @@ describe("useRdpCanvas", () => {
     });
 
     expect(drawCalls).toHaveLength(0);
+  });
+
+  // 누적본을 버리는 순간 그 전에 도착한 프레임이 사라진다. 서버는 바뀌지 않은 영역을 다시 보내지
+  // 않으므로 그 자리가 검게 남는다 — VNC 에서 화면 위쪽 띠로 실제로 나타난 증상이고, RDP 도 같은
+  // 표면·같은 순서를 쓴다(보조 모니터 창이 열릴 때 쓰는 것과 같은 요청이다).
+  it("크기가 바뀌면 화면 전체를 다시 요청한다", () => {
+    requestRdpRefresh.mockClear();
+    const { rerender } = render(
+      <Harness sessionId="s1" width={1920} height={1080} visible />,
+    );
+    expect(requestRdpRefresh.mock.calls).toEqual([["s1"]]);
+
+    requestRdpRefresh.mockClear();
+    rerender(<Harness sessionId="s1" width={1440} height={900} visible />);
+
+    expect(requestRdpRefresh.mock.calls).toEqual([["s1"]]);
+  });
+
+  it("크기를 아직 모르면 요청하지 않는다", () => {
+    requestRdpRefresh.mockClear();
+    render(<Harness sessionId="s1" width={null} height={null} visible />);
+
+    expect(requestRdpRefresh).not.toHaveBeenCalled();
   });
 });

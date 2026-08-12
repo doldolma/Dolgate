@@ -225,4 +225,81 @@ describe('SecretEditDialog', () => {
     expect(screen.getByText('저장된 인증 정보 편집')).toBeInTheDocument();
     expect(loadSavedCredential).toHaveBeenCalledWith('secret-1');
   });
+
+  // RDP·VNC 자격증명은 비밀번호 하나 + 계정뿐이다. SSH 의 인증 방식·키·인증서 칸을 보여주면 쓸 수
+  // 없는 칸이 늘고, 무엇보다 **저장할 때 kind·계정을 되돌려 보내지 않으면 종류가 SSH 로 강등되고
+  // 계정이 지워진다**(그러면 RDP 폼 목록에서 사라지고 접속도 계정 없이 시도한다).
+  it('RDP 자격증명은 계정·도메인·비밀번호만 보여주고 종류를 지키며 저장한다', async () => {
+    vi.mocked(loadSavedCredential).mockResolvedValue({
+      secretRef: 'secret-rdp',
+      label: 'Win admin',
+      kind: 'rdp',
+      username: 'Administrator',
+      domain: 'CORP',
+      password: 'pw',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+    } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SecretEditDialog
+        request={{
+          source: 'keychain',
+          secretRef: 'secret-rdp',
+          label: 'Win admin',
+          linkedHosts: [],
+          initialMode: 'update-shared',
+          initialHostId: null,
+        }}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(await screen.findByLabelText('계정')).toHaveValue('Administrator');
+    expect(screen.getByLabelText('도메인')).toHaveValue('CORP');
+    // SSH 전용 칸은 아예 없다.
+    expect(screen.queryByLabelText('Auth Type')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('계정'), { target: { value: 'operator' } });
+    fireEvent.click(screen.getByRole('button', { name: '공유 인증 정보 저장' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0].secrets).toMatchObject({
+      kind: 'rdp',
+      username: 'operator',
+      domain: 'CORP',
+      password: 'pw',
+    });
+  });
+
+  it('VNC 자격증명에는 도메인 칸이 없다', async () => {
+    // VNC 에는 도메인 개념이 없다. 칸을 두면 채워도 쓰이지 않는 값이 저장된다.
+    vi.mocked(loadSavedCredential).mockResolvedValue({
+      secretRef: 'secret-vnc',
+      label: 'Lab',
+      kind: 'vnc',
+      username: 'operator',
+      password: 'pw',
+      updatedAt: '2026-04-12T00:00:00.000Z',
+    } as never);
+
+    render(
+      <SecretEditDialog
+        request={{
+          source: 'keychain',
+          secretRef: 'secret-vnc',
+          label: 'Lab',
+          linkedHosts: [],
+          initialMode: 'update-shared',
+          initialHostId: null,
+        }}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByLabelText('계정')).toHaveValue('operator');
+    expect(screen.queryByLabelText('도메인')).not.toBeInTheDocument();
+  });
 });
