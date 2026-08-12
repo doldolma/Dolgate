@@ -79,7 +79,13 @@ enum Seen {
 /// 보내고, 그 caps 를 본 뒤에야 우리도 확장 메시지를 보낼 수 있다. 이 왕복을 세션 수준에서 재는
 /// 테스트가 없어서, 인코딩 번호가 틀렸던 동안(-1063) 확장 경로가 한 번도 실행되지 않았는데도
 /// 단위 테스트는 전부 통과했다.
-fn spawn_extended_clipboard_server() -> (u16, Receiver<Seen>) {
+// `advertise_actions`: caps 로 알릴 동작 비트. 실서버가 갈리는 지점이다 — TigerVNC 는 notify 를
+//   알리고(그래서 우리는 notify 로 알려야 한다), x11vnc 는 알리지 않는다(그래서 provide 를 바로 보낸다).
+// `reply_with_request`: 우리 notify 를 받은 뒤 request 를 보낼지. TigerVNC 는 붙여넣을 때 이걸 보낸다.
+fn spawn_extended_clipboard_server(
+    advertise_actions: u32,
+    reply_with_request: bool,
+) -> (u16, Receiver<Seen>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = channel();
@@ -129,11 +135,13 @@ fn spawn_extended_clipboard_server() -> (u16, Receiver<Seen>) {
             // ServerCutText 의 길이를 음수로 실으면 확장 메시지다. 본문은 flags(4) + 데이터.
             let mut caps = vec![3_u8, 0, 0, 0];
             caps.extend_from_slice(&(-8_i32).to_be_bytes());
-            // caps 동작(1<<24) + 텍스트 형식(1<<0), 그리고 텍스트 한도(형식마다 4바이트).
+            // caps 동작(1<<24) + 알릴 동작들 + 텍스트 형식(1<<0), 그리고 한도(형식마다 4바이트).
             //
             // **번호를 `1 << n` 으로 적는다.** 16진수로 적었더니 표가 한 칸 밀린 것을 아무도
             // 못 알아봤다 — 그 상태로 코드와 테스트가 같이 틀려 통과했다.
-            caps.extend_from_slice(&((1_u32 << 24) | (1 << 0)).to_be_bytes());
+            caps.extend_from_slice(
+                &((1_u32 << 24) | advertise_actions | (1 << 0)).to_be_bytes(),
+            );
             caps.extend_from_slice(&(256_u32 * 1024).to_be_bytes());
             socket.write_all(&caps).unwrap();
         }
@@ -161,7 +169,16 @@ fn spawn_extended_clipboard_server() -> (u16, Receiver<Seen>) {
                 break;
             }
             if length < 0 {
+                let flags = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+                let is_notify = flags & (1 << 27) != 0;
                 tx.send(Seen::ExtendedCutText(body)).ok();
+                // notify 를 받으면 request 로 답한다 — TigerVNC 가 붙여넣을 때 하는 일이다.
+                if reply_with_request && is_notify {
+                    let mut request = vec![3_u8, 0, 0, 0];
+                    request.extend_from_slice(&(-4_i32).to_be_bytes());
+                    request.extend_from_slice(&((1_u32 << 25) | (1 << 0)).to_be_bytes());
+                    socket.write_all(&request).unwrap();
+                }
             }
         }
     });
@@ -933,14 +950,17 @@ fn negotiates_the_cursor_continuous_updates_and_fence_extensions() {
     session.join().unwrap();
 }
 
-/// 확장 클립보드가 켜지면 한글이 UTF-8 로 나간다.
+/// notify 를 아는 서버(TigerVNC)에는 **notify → request → provide** 로 간다.
 ///
-/// 고전 경로 테스트(위)는 한글이 `?` 로 뭉개지는 것을 확인한다. 그 반대편, 즉 **확장이 켜졌을 때**
-/// 를 재는 테스트가 없어서 인코딩 번호가 틀렸던 것을 아무도 잡지 못했다 — 모든 서버에서 확장이
-/// 꺼진 채였는데 고전 경로만 검사하니 전부 통과했다.
+/// 이 순서가 규격의 게으른 흐름이고, **건너뛰면 붙여넣기가 조용히 안 된다** — TigerVNC 서버는
+/// announce(notify) 없이 받은 provide 데이터를 버린다(SConnection::handleClipboardProvide →
+/// VNCServerST 가 clipboardClient 가 아닌 데이터를 무시한다). 실측으로 확인했다: notify 없이
+/// provide 만 보내면 원격 선택 영역의 소유자조차 없다.
 #[test]
-fn sends_utf8_clipboard_once_the_server_offers_caps() {
-    let (port, seen) = spawn_extended_clipboard_server();
+fn announces_with_notify_then_provides_on_request() {
+    // TigerVNC 가 알리는 조합: request·peek·notify·provide.
+    let advertise = (1 << 25) | (1 << 26) | (1 << 27) | (1 << 28);
+    let (port, seen) = spawn_extended_clipboard_server(advertise, true);
     let collected = Collected::default();
     let (session, close, handles) = run_session(port, "", collected.clone());
 
@@ -956,50 +976,106 @@ fn sends_utf8_clipboard_once_the_server_offers_caps() {
         panic!("첫 갱신 요청이 와야 한다");
     };
 
-    // caps 를 받은 뒤 우리 caps 가 먼저 나가고, 그다음 텍스트가 나가야 한다.
     let handle = handles.recv().unwrap();
     handle.send_clipboard("한글 abc".to_owned()).unwrap();
 
+    // 1) 우리 caps. 지원 동작을 비워 보내면 TigerVNC 가 연결을 끊는다(우분투 VM 실측).
     let Seen::ExtendedCutText(ours) = seen.recv().unwrap() else {
         panic!("우리 caps 가 확장 메시지로 나가야 한다");
     };
     let flags = u32::from_be_bytes([ours[0], ours[1], ours[2], ours[3]]);
     assert_ne!(flags & (1 << 24), 0, "첫 확장 메시지는 caps(1<<24) 여야 한다: {flags:#x}");
     assert_ne!(flags & 0x0000_0001, 0, "텍스트 형식을 지원한다고 알려야 한다");
-    // 동작 비트를 비워 보내면 TigerVNC 서버가 연결을 끊는다(우분투 VM 실측). 우리가 처리하는
-    // request·notify·provide 를 그대로 알려야 한다.
     for (bit, name) in [(1 << 25, "request"), (1 << 27, "notify"), (1 << 28, "provide")] {
         assert_ne!(flags & bit, 0, "{name} 를 알려야 한다: {flags:#x}");
     }
 
+    // 2) 텍스트 자체가 아니라 notify 가 먼저 나가야 한다.
+    let Seen::ExtendedCutText(notify) = seen.recv().unwrap() else {
+        panic!("notify 가 나가야 한다");
+    };
+    let flags = u32::from_be_bytes([notify[0], notify[1], notify[2], notify[3]]);
+    assert_ne!(flags & (1 << 27), 0, "notify(1<<27) 여야 한다: {flags:#x}");
+    assert_eq!(notify.len(), 4, "notify 본문은 flags 뿐이다");
+
+    // 3) 서버가 request 로 답하면 그때 provide 를 보낸다.
     let Seen::ExtendedCutText(provide) = seen.recv().unwrap() else {
-        panic!("텍스트가 확장 provide 로 나가야 한다");
+        panic!("request 를 받으면 provide 로 답해야 한다");
     };
     let flags = u32::from_be_bytes([provide[0], provide[1], provide[2], provide[3]]);
     assert_ne!(flags & (1 << 28), 0, "provide(1<<28) 동작이어야 한다: {flags:#x}");
+    assert_eq!(text_from_provide(&provide), "한글 abc");
 
-    // 본문은 zlib 이고 그 안은 크기(4) + UTF-8 텍스트다. 되돌려 한글이 살아 있는지 본다.
+    close.send(()).ok();
+    session.join().unwrap();
+}
+
+/// notify 를 모르는 서버(x11vnc)에는 **고전을 먼저 보내고 확장도 보낸다.**
+///
+/// x11vnc 는 caps 에 provide 를 알리면서도 받은 확장 데이터를 버린다(setXCutTextUTF8 훅이 붙어
+/// 있지 않다 — 실측: 확장만 보내면 선택 영역이 비어 있고, 고전으로 보내면 들어간다). 그래서
+/// 고전이 앞이어야 영문이 동작하고, 확장이 뒤여야 제대로 적용하는 구현에서 UTF-8 이 이긴다.
+#[test]
+fn falls_back_to_classic_first_when_the_server_has_no_notify() {
+    // x11vnc 가 알리는 조합: request·peek·provide (notify 없음).
+    let advertise = (1 << 25) | (1 << 26) | (1 << 28);
+    let (port, seen) = spawn_extended_clipboard_server(advertise, false);
+    let collected = Collected::default();
+    let (session, close, handles) = run_session(port, "", collected.clone());
+
+    let Seen::Encodings(_) = seen.recv().unwrap() else {
+        panic!("첫 관찰은 인코딩 목록이어야 한다");
+    };
+    let Seen::UpdateRequest { .. } = seen.recv().unwrap() else {
+        panic!("첫 갱신 요청이 와야 한다");
+    };
+
+    let handle = handles.recv().unwrap();
+    handle.send_clipboard("한글 abc".to_owned()).unwrap();
+
+    let Seen::ExtendedCutText(caps) = seen.recv().unwrap() else {
+        panic!("우리 caps 가 먼저 나가야 한다");
+    };
+    let flags = u32::from_be_bytes([caps[0], caps[1], caps[2], caps[3]]);
+    assert_ne!(flags & (1 << 24), 0, "caps 여야 한다: {flags:#x}");
+
+    // 고전 ClientCutText 가 먼저(가짜 서버는 확장만 넘겨주므로, 다음 확장 메시지가 provide 라는
+    // 사실과 손실 알림으로 고전이 나갔음을 확인한다).
+    let Seen::ExtendedCutText(provide) = seen.recv().unwrap() else {
+        panic!("확장 provide 도 보내야 한다");
+    };
+    let flags = u32::from_be_bytes([provide[0], provide[1], provide[2], provide[3]]);
+    assert_ne!(flags & (1 << 28), 0, "provide 여야 한다: {flags:#x}");
+    assert_eq!(text_from_provide(&provide), "한글 abc");
+
+    // 고전으로도 보냈으므로 그 경로에서 바뀐 글자 수를 알린다 — 확장을 버리는 서버에서 사용자가
+    // `?` 를 보는 이유가 이 알림이다.
+    let lossy = collected
+        .frames(6)
+        .iter()
+        .map(metadata)
+        .find(|meta| meta["type"] == "clipboardLossy");
+    assert_eq!(
+        lossy.map(|meta| meta["payload"]["replaced"].as_u64()),
+        Some(Some(2)),
+        "한글 두 글자가 고전 경로에서 바뀌었다고 알려야 한다"
+    );
+
+    close.send(()).ok();
+    session.join().unwrap();
+}
+
+/// provide 본문(zlib) 에서 텍스트를 되돌린다.
+fn text_from_provide(provide: &[u8]) -> String {
     let mut plain = Vec::new();
     flate2::read::ZlibDecoder::new(&provide[4..])
         .read_to_end(&mut plain)
         .expect("provide 본문은 zlib 스트림이어야 한다");
     let size = u32::from_be_bytes([plain[0], plain[1], plain[2], plain[3]]) as usize;
-    let text = String::from_utf8(plain[4..4 + size].to_vec()).expect("UTF-8 이어야 한다");
-    // 규격이 와이어에서 CRLF 를 쓰라고 정했다. 한글은 그대로 살아 있어야 한다.
-    assert_eq!(text, "한글 abc", "확장 경로는 한글을 그대로 실어야 한다");
-
-    // 확장으로 갔으므로 "글자가 바뀌었다" 는 알림은 없어야 한다.
-    assert!(
-        collected
-            .frames(1)
-            .iter()
-            .map(metadata)
-            .all(|meta| meta["type"] != "clipboardLossy"),
-        "확장 경로에서는 손실 알림이 없어야 한다"
-    );
-
-    close.send(()).ok();
-    session.join().unwrap();
+    // 규격이 와이어에서 CRLF 를 쓰라고 정했다. 로컬로 되돌릴 때 LF 로 바꾼다.
+    String::from_utf8(plain[4..4 + size].to_vec())
+        .expect("UTF-8 이어야 한다")
+        .replace("\r\n", "\n")
 }
 
 /// macOS 화면 공유 경로. 계정과 비밀번호가 **함께** 암호화되어 가는지, 순서가 맞는지 본다.

@@ -53,7 +53,12 @@ pub enum Incoming {
     /// 고전 CutText. latin-1 로 해석한 텍스트다.
     Classic(String),
     /// 확장을 쓴다는 선언. 이걸 본 뒤에야 우리도 확장을 보낼 수 있다.
-    Caps { formats: u32 },
+    ///
+    /// **동작 비트를 함께 들고 온다.** 어느 동작을 지원하는지가 우리가 보낼 방식을 정한다 —
+    /// notify 를 아는 상대에게는 notify 로 알려야 하고(그래야 그쪽이 선택 영역을 자기 것으로
+    /// 선언한다), 모르는 상대에게는 provide 를 바로 보내야 한다. 예전에는 formats 만 남기고
+    /// 버려서 두 경우를 구분할 수 없었다.
+    Caps { formats: u32, actions: u32, max_unsolicited_text: u32 },
     /// 실제 텍스트가 실려 왔다.
     Provide { text: String },
     /// "가진 것이 있다" — 원하면 request 하라.
@@ -84,7 +89,18 @@ pub fn decode_extended(body: &[u8]) -> Incoming {
     let data = &body[4..];
 
     if flags & ACTION_CAPS != 0 {
-        return Incoming::Caps { formats };
+        // caps 본문은 `flags(4) + 형식마다 최대 크기(4)` 다. 텍스트는 첫 형식(비트 0)이라
+        // 데이터 앞 4바이트가 그 한도다 — 없으면 0 으로 본다(그 상대에게는 provide 를 보내지 않는다).
+        let max_unsolicited_text = if formats & FORMAT_TEXT != 0 && data.len() >= 4 {
+            u32::from_be_bytes([data[0], data[1], data[2], data[3]])
+        } else {
+            0
+        };
+        return Incoming::Caps {
+            formats,
+            actions: flags & !FORMAT_MASK,
+            max_unsolicited_text,
+        };
     }
     if flags & ACTION_PROVIDE != 0 {
         return match inflate_first_text(data, formats) {
@@ -297,6 +313,57 @@ mod tests {
         assert_eq!(body.len(), 4 + 4 * formats);
     }
 
+    /// caps 에서 **동작 비트와 한도까지** 살려야 한다.
+    ///
+    /// 예전에는 형식만 남기고 버려서, notify 를 아는 상대와 모르는 상대를 구분할 수 없었다.
+    /// 그 구분을 못 하면 TigerVNC 에 provide 를 바로 보내게 되고, 그쪽은 announce 없는 데이터를
+    /// 버리므로 **붙여넣기가 조용히 안 된다**.
+    #[test]
+    fn caps_keep_the_peers_actions_and_limit() {
+        let mut body = Vec::new();
+        // TigerVNC 가 보내는 조합: caps|request|peek|notify|provide + 텍스트, 한도 0.
+        let flags = ACTION_CAPS | ACTION_REQUEST | ACTION_PEEK | ACTION_NOTIFY | ACTION_PROVIDE;
+        body.extend_from_slice(&(flags | FORMAT_TEXT).to_be_bytes());
+        body.extend_from_slice(&0_u32.to_be_bytes());
+
+        match decode_extended(&body) {
+            Incoming::Caps {
+                formats,
+                actions,
+                max_unsolicited_text,
+            } => {
+                assert_eq!(formats, FORMAT_TEXT);
+                assert_ne!(actions & ACTION_NOTIFY, 0, "notify 지원이 살아야 한다");
+                assert_ne!(actions & ACTION_PROVIDE, 0);
+                // 동작 비트가 형식으로 섞이면 우리가 형식을 잘못 센다.
+                assert_eq!(formats & !FORMAT_MASK, 0);
+                assert_eq!(max_unsolicited_text, 0, "0 은 '요청 없이는 받지 않는다' 는 뜻이다");
+            }
+            other => panic!("caps 여야 한다: {other:?}"),
+        }
+    }
+
+    /// x11vnc 가 보내는 조합: notify 가 없고 한도는 1MiB.
+    #[test]
+    fn caps_without_notify_keep_the_unsolicited_limit() {
+        let mut body = Vec::new();
+        let flags = ACTION_CAPS | ACTION_REQUEST | ACTION_PEEK | ACTION_PROVIDE;
+        body.extend_from_slice(&(flags | FORMAT_TEXT).to_be_bytes());
+        body.extend_from_slice(&(1024_u32 * 1024).to_be_bytes());
+
+        match decode_extended(&body) {
+            Incoming::Caps {
+                actions,
+                max_unsolicited_text,
+                ..
+            } => {
+                assert_eq!(actions & ACTION_NOTIFY, 0);
+                assert_eq!(max_unsolicited_text, 1024 * 1024);
+            }
+            other => panic!("caps 여야 한다: {other:?}"),
+        }
+    }
+
     #[test]
     fn reads_the_servers_caps() {
         let mut body = (ACTION_CAPS | FORMAT_TEXT).to_be_bytes().to_vec();
@@ -305,7 +372,9 @@ mod tests {
         assert_eq!(
             decode_extended(&body),
             Incoming::Caps {
-                formats: FORMAT_TEXT
+                formats: FORMAT_TEXT,
+                actions: ACTION_CAPS,
+                max_unsolicited_text: 64 * 1024,
             }
         );
     }

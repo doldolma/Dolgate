@@ -171,6 +171,14 @@ enum Outbound {
 struct ClipboardState {
     /// 서버가 확장 텍스트를 지원한다고 알렸나.
     extended: bool,
+    /// 상대가 지원한다고 알린 동작 비트. **이것이 보낼 방식을 정한다.**
+    ///
+    /// notify 를 아는 상대(TigerVNC)에게는 notify 로 알려야 그쪽이 X 선택 영역을 자기 것으로
+    /// 선언한다 — 선언 없이 보낸 provide 는 그냥 버려진다(`Ignoring unexpected clipboard data`).
+    /// notify 를 모르는 상대(LibVNCServer)에게는 provide 를 바로 보내야 한다.
+    peer_actions: u32,
+    /// 상대가 요청 없이 받아 주는 최대 텍스트 크기. 넘으면 notify 로 알리고 기다린다.
+    peer_max_unsolicited: u32,
     /// 우리 caps 를 이미 보냈나. 규격상 한 번이면 된다.
     sent_caps: bool,
     /// caps 를 기다리는 동안 보류한 텍스트(가장 최근 것 하나).
@@ -387,12 +395,40 @@ fn send_clipboard_text(
         rfb::write_client_cut_text(transport, text)?;
         return Ok(());
     }
-    if text.len() as u32 > clipboard::MAX_UNSOLICITED_TEXT {
+    // **notify 를 아는 상대에게는 notify 로 알린다.**
+    //
+    // 규격의 흐름은 게으르다: 알리면 상대가 그 사실로 자기 선택 영역을 갱신하고, 실제로 붙여넣을
+    // 때 request 를 보낸다 — 그때 provide 로 답한다(위 pump 의 Request 처리).
+    //
+    // 이 순서를 건너뛰고 provide 를 바로 보내면 TigerVNC 는 **데이터를 버린다**
+    // (SConnection::handleClipboardProvide → VNCServerST 가 announce 없는 데이터를 무시한다).
+    // 그래서 붙여넣기가 아무 반응 없이 안 됐다.
+    //
+    // notify 를 모르는 상대(LibVNCServer/x11vnc — caps 에 그 비트가 없다)에게는 provide 를 바로
+    // 보내야 한다. 그쪽은 받은 즉시 선택 영역에 넣는다.
+    if clip.peer_actions & clipboard::ACTION_NOTIFY != 0 {
         rfb::write_client_cut_text_extended(transport, &clipboard::encode_notify())?;
         return Ok(());
     }
-    if let Some(body) = clipboard::encode_provide(text) {
-        rfb::write_client_cut_text_extended(transport, &body)?;
+    // notify 를 모르는 상대에게는 **고전을 먼저 보내고 확장도 보낸다.**
+    //
+    // caps 에 provide 를 지원한다고 알리면서 정작 받은 것을 버리는 구현이 실재한다 — x11vnc
+    // (LibVNCServer)는 `setXCutTextUTF8` 훅으로 넘기는데 그 훅이 붙어 있지 않아 선택 영역이
+    // 그대로 비어 있다(실측: 고전으로 보내면 들어가고, 확장으로 보내면 소유자조차 없다).
+    //
+    // 순서가 규칙이다. 둘 다 적용하는 상대에서는 **나중 것이 이긴다** — 확장을 뒤에 두어야
+    // UTF-8 이 남는다. 확장을 버리는 상대에서는 앞의 고전이 남아 영문이 그대로 동작한다.
+    clip.lossy_chars += rfb::count_latin1_losses(text);
+    rfb::write_client_cut_text(transport, text)?;
+
+    // 요청 없이 받아 주는 한도를 넘으면 확장은 보내지 않는다(잘라 보내면 사용자가 모른 채
+    // 반쪽을 붙여넣는다). 고전은 이미 나갔다.
+    let too_big =
+        clip.peer_max_unsolicited > 0 && text.len() as u32 > clip.peer_max_unsolicited;
+    if clip.peer_actions & clipboard::ACTION_PROVIDE != 0 && !too_big {
+        if let Some(body) = clipboard::encode_provide(text) {
+            rfb::write_client_cut_text_extended(transport, &body)?;
+        }
     }
     Ok(())
 }
@@ -1092,11 +1128,22 @@ fn pump(
                                 .session(session_id),
                         )?;
                     }
-                    clipboard::Incoming::Caps { formats } => {
+                    clipboard::Incoming::Caps {
+                        formats,
+                        actions,
+                        max_unsolicited_text,
+                    } => {
                         // **이걸 본 뒤에야 우리도 확장을 보낼 수 있다.** 먼저 보내면 확장을 모르는
                         // 상대가 음수 길이를 거대한 u32 로 읽고 스트림이 깨진다.
-                        debug!(formats, "서버 클립보드 caps");
+                        debug!(
+                            formats,
+                            actions = format_args!("{actions:#010x}"),
+                            max_unsolicited_text,
+                            "서버 클립보드 caps"
+                        );
                         clip.extended = formats & clipboard::FORMAT_TEXT != 0;
+                        clip.peer_actions = actions;
+                        clip.peer_max_unsolicited = max_unsolicited_text;
                         if clip.extended && !clip.sent_caps {
                             clip.sent_caps = true;
                             rfb::write_client_cut_text_extended(
