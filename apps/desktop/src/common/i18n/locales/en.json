@@ -1764,7 +1764,12 @@
       "remoteAudio": "Remote audio",
       "clipboard": "Clipboard",
       "redirectedFolders": "Redirected folders",
-      "driveReadOnly": "Read-only"
+      "driveReadOnly": "Read-only",
+      "sshTunnel": "SSH Tunnel",
+      "imageQuality": "Image Quality",
+      "screenSharing": "Screen Sharing",
+      "viewOnly": "View Only",
+      "deletedSshHost": "Deleted SSH host — will not connect"
     },
     "env": {
       "heading": "Environment variables ({{count}})",
@@ -1787,6 +1792,11 @@
     "close": "Close details",
     "activity": {
       "connectFailed": "{{kind}} · connection failed"
+    },
+    "vncQuality": {
+      "lossless": "Lossless",
+      "balanced": "Balanced",
+      "fast": "Fastest"
     }
   },
   "palette": {
@@ -2741,6 +2751,9 @@
     "externalLinkScheme": "External links can only be opened over http or https.",
     "windowsTmuxUnsupported": "Windows instances do not support tmux connections. Connect with the SSM shell (PowerShell) instead."
   },
+  "rdpIpc": {
+    "certificateTrustRevoked": "Revoked trust for an RDP server certificate."
+  },
   "hostsIpc": {
     "secretSaved": "The host secret was saved.",
     "hostCreated": "Created a host.",
@@ -3152,6 +3165,12 @@
   "snippetVars": {
     "title": "Enter snippet variables",
     "confirm": "Insert"
+  },
+  "rdpCertificates": {
+    "intro": "RDP server certificates you trusted on first connect. Revoking one asks again on the next connection.",
+    "emptyTitle": "No trusted RDP server certificates.",
+    "emptyDescription": "Approving a certificate fingerprint on first connect to an RDP server adds it here.",
+    "revoke": "Revoke trust"
   },
   "knownHosts": {
     "intro": "The trusted host keys. A new connection proceeds only when it matches this list exactly.",

@@ -7,6 +7,30 @@ import { createMockApi } from './createAppStore.test-support';
 // VNC 세션은 터미널이 아니라 원격 화면이다. 탭이 `paneKind: 'vnc'` 로 열려야 렌더러가 xterm 대신
 // 캔버스를 띄우고, 닫을 때 ssh-core 가 아니라 vnc-core 로 끊어야 한다 — 그 두 갈림길을 잠근다.
 
+/** SSH 터널을 경유하는 VNC 호스트. 통로가 SSH 라 그 호스트의 키를 먼저 신뢰해야 한다. */
+const TUNNELED_VNC_HOST: HostRecord = {
+  id: 'vnc-tunnel',
+  kind: 'vnc',
+  label: 'Behind gate',
+  hostname: '127.0.0.1',
+  port: 5901,
+  sshTunnelHostId: 'gate',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+} as HostRecord;
+
+const GATE_HOST: HostRecord = {
+  id: 'gate',
+  kind: 'ssh',
+  label: 'Gate',
+  hostname: 'gate.example.com',
+  port: 22,
+  username: 'ops',
+  authType: 'agent',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+} as HostRecord;
+
 const VNC_HOST: HostRecord = {
   id: 'vnc1',
   kind: 'vnc',
@@ -23,6 +47,110 @@ function seed() {
   store.setState({ hosts: [VNC_HOST] });
   return { api, store };
 }
+
+// 경유 SSH 호스트를 처음 쓰면 그 키를 신뢰할지 물어봐야 한다.
+//
+// 이 관문이 없으면 메인이 포워드를 열다 "Host key is not trusted yet" 로 끝나고, 사용자에게는
+// 신뢰할 기회조차 없어 그 호스트로는 아예 붙을 수 없었다(VNC 자체엔 신뢰 체인이 없지만 통로는 SSH 다).
+describe('SSH 터널을 경유하는 VNC 의 호스트 키 관문', () => {
+  function seedTunneled() {
+    const api = createMockApi();
+    vi.mocked(api.knownHosts.probeHost).mockResolvedValue({
+      hostId: 'gate',
+      hostLabel: 'Gate',
+      host: 'gate.example.com',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      publicKeyBase64: 'AAAAGATE',
+      fingerprintSha256: 'SHA256:gate',
+      status: 'untrusted',
+      existing: null,
+    } as never);
+    // 신뢰한 뒤에는 목록에 그 키가 들어와 있다(메인이 저장하고 스토어가 다시 읽는다).
+    // 이 부분을 흉내내지 않으면 재개 경로가 또 물어보게 되어, 테스트가 실제와 달라진다.
+    vi.mocked(api.knownHosts.trust).mockImplementation(async () => {
+      vi.mocked(api.knownHosts.list).mockResolvedValue([
+        {
+          id: 'known-gate',
+          host: 'gate.example.com',
+          port: 22,
+          algorithm: 'ssh-ed25519',
+          publicKeyBase64: 'AAAAGATE',
+          fingerprintSha256: 'SHA256:gate',
+          tailnetId: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          lastSeenAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ] as never);
+      return undefined as never;
+    });
+    const store = createAppStore(api);
+    store.setState({ hosts: [TUNNELED_VNC_HOST, GATE_HOST] });
+    return { api, store };
+  }
+
+  it('처음 보는 경유 호스트면 접속 전에 신뢰를 묻는다', async () => {
+    const { api, store } = seedTunneled();
+
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+
+    // 프로브 대상은 **경유 SSH 호스트**다. VNC 호스트에는 물어볼 키가 없다.
+    expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: 'gate' }),
+    );
+    // 물어보는 동안 붙지 않는다 — 이 순서가 뒤집히면 메인이 원문 오류로 끝난다.
+    expect(api.vnc.connect).not.toHaveBeenCalled();
+    const prompt = store.getState().pendingHostKeyPrompt;
+    expect(prompt?.probe.status).toBe('untrusted');
+    // 수락한 뒤 무엇을 이어갈지가 여기 담긴다. hostId 는 VNC 호스트다.
+    expect(prompt?.action).toMatchObject({ kind: 'vnc', hostId: 'vnc-tunnel' });
+  });
+
+  it('신뢰하면 같은 탭에서 접속을 이어간다', async () => {
+    const { api, store } = seedTunneled();
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+    const sessionId = store.getState().tabs.at(-1)?.sessionId;
+    const tabCount = store.getState().tabs.length;
+
+    await store.getState().acceptPendingHostKeyPrompt('trust');
+
+    expect(api.knownHosts.trust).toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.vnc.connect).toHaveBeenCalledTimes(1);
+    // 이미 신뢰한 키를 다시 물어보면 안 된다 — 수락하자마자 같은 창이 또 뜬다.
+    expect(api.knownHosts.probeHost).toHaveBeenCalledTimes(1);
+    // 탭을 새로 만들면 멈춰 있던 탭이 그대로 남는다 — 같은 세션으로 이어야 한다.
+    expect(store.getState().tabs).toHaveLength(tabCount);
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.sessionId).toBe(sessionId);
+    expect(tab?.status).toBe('connected');
+  });
+
+  it('거절하면 이유를 남기고 붙지 않는다', async () => {
+    const { api, store } = seedTunneled();
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.vnc.connect).not.toHaveBeenCalled();
+    const tab = store.getState().tabs.at(-1);
+    expect(tab?.status).toBe('error');
+    expect(tab?.errorMessage).toBeTruthy();
+  });
+
+  it('터널을 안 쓰는 VNC 호스트는 프로브하지 않는다', async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    store.setState({ hosts: [VNC_HOST] });
+
+    await store.getState().connectHost('vnc1', 80, 24);
+
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(api.vnc.connect).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('VNC 세션 열기', () => {
   it('원격 화면 탭으로 열고 해상도를 싣는다', async () => {

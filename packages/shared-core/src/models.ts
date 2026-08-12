@@ -392,7 +392,21 @@ export interface RdpHostRecord extends HostBaseRecord {
  * 직접 붙는 경로가 살아 있어야 하고, 인증서 핀의 키도 그 이름이다.
  */
 export interface RdpAwsSsmTarget {
-  /** 로컬 AWS 프로파일 이름. 기기마다 다를 수 있어 이름으로 들고 있는다. */
+  /**
+   * 관리 중인 AWS 프로파일의 id. 이 앱이 만든 프로파일은 동기화되므로 기기 간에 같다.
+   *
+   * **이것이 신원이다.** 이름은 사용자가 바꿀 수 있고, 그러면 이름으로만 찾던 경로가 조용히
+   * 끊긴다(SSO 만료 확인이 그 경로였다). aws-ec2 호스트가 `awsProfileId`·`awsProfileName` 을
+   * 둘 다 두는 것과 같은 이유다.
+   */
+  profileId?: string | null;
+  /**
+   * 로컬 AWS 프로파일 이름.
+   *
+   * id 가 없는 경우를 위해 남긴다 — 이 필드가 생기기 전에 만든 레코드, 그리고 앱이 관리하지 않는
+   * (`~/.aws/config` 에서 온) 프로파일이 그렇다. 접속 시 SSM 터널은 이름으로 프로파일을 고르므로
+   * 이 값은 계속 필요하다.
+   */
   profileName: string;
   region: string;
   instanceId: string;
@@ -908,8 +922,18 @@ export function getHostBadgeLabel(host: HostRecord): string {
   return 'S';
 }
 
+/**
+ * 이 호스트가 가리키는 자격증명. 없으면 null.
+ *
+ * **자격증명 저장소를 쓰는 종류를 여기 다 적어야 한다** — 빠뜨리면 그 종류는 "아무 자격증명도
+ * 안 쓰는 호스트" 로 취급된다. 실제로 VNC 가 그랬다: 호스트를 지울 때 남는 자격증명을 찾지 못해
+ * 쓰는 데 없는 비밀번호가 키체인에 계속 쌓였고, 키체인 화면도 그 항목을 연결된 호스트 0개로
+ * 보여줬다(메인의 `withLinkedHostCount` 는 세 종류를 다 센다 — 판정이 갈리면 안 된다).
+ *
+ * SSM·시리얼처럼 자격증명이 아예 없는 종류만 null 이다.
+ */
 export function getHostSecretRef(host: HostRecord): string | null {
-  if (host.kind === 'ssh' || host.kind === 'rdp') {
+  if (host.kind === 'ssh' || host.kind === 'rdp' || host.kind === 'vnc') {
     return host.secretRef ?? null;
   }
   return null;

@@ -735,6 +735,7 @@ export function HomeShell({
             }
             onUpdateSettings={settingsViewModel.updateSettings}
             onRemoveKnownHost={settingsViewModel.removeKnownHost}
+            onRevokeRdpCertificate={settingsViewModel.revokeRdpCertificateTrust}
             onRemoveSecret={handleRemoveSecret}
             onEditSecret={openKeychainSecretEditor}
             onGenerateSshKey={settingsViewModel.generateSshKey}

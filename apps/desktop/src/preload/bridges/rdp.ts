@@ -1,5 +1,6 @@
 import type { IpcRenderer } from "electron";
 import type {
+  HostRecord,
   RdpConnectedPayload,
   RdpAudioPayload,
   RdpFramePayload,
@@ -20,6 +21,12 @@ export interface RdpBridge {
   disconnect: (sessionId: string) => Promise<void>;
   sendInput: (sessionId: string, events: RdpInputEvent[]) => void;
   trustCertificate: (sessionId: string, accept: boolean) => Promise<void>;
+  /**
+   * 신뢰한 서버 인증서를 해제한다. 갱신된 호스트 레코드를 돌려준다(없거나 RDP 가 아니면 null).
+   *
+   * 설정 › Security 의 목록에서 쓴다. 해제하면 다음 접속에서 인증서를 다시 확인한다.
+   */
+  revokeCertificateTrust: (hostId: string) => Promise<HostRecord | null>;
   requestResize: (sessionId: string, width: number, height: number) => void;
   sendClipboardText: (sessionId: string, text: string) => void;
   syncClipboard: (sessionId: string) => void;
@@ -57,6 +64,8 @@ export function buildRdpBridge(ipcRenderer: IpcRenderer): RdpBridge {
       ipcRenderer.send(ipcChannels.rdp.input, sessionId, events),
     trustCertificate: (sessionId, accept) =>
       ipcRenderer.invoke(ipcChannels.rdp.trustCertificate, sessionId, accept),
+    revokeCertificateTrust: (hostId) =>
+      ipcRenderer.invoke(ipcChannels.rdp.revokeCertificateTrust, hostId),
     requestResize: (sessionId, width, height) =>
       ipcRenderer.send(ipcChannels.rdp.resize, sessionId, width, height),
     sendClipboardText: (sessionId, text) =>

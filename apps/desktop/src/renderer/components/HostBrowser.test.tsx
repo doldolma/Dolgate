@@ -193,6 +193,17 @@ const rdpHost: HostRecord = {
   updatedAt: '2025-01-01T00:00:00.000Z'
 };
 
+const vncHost: HostRecord = {
+  id: 'host-vnc',
+  kind: 'vnc',
+  label: 'Console',
+  hostname: 'kvm.example.com',
+  port: 5901,
+  groupName: 'Servers',
+  createdAt: '2025-01-01T00:00:00.000Z',
+  updatedAt: '2025-01-01T00:00:00.000Z'
+};
+
 const keychainEntries: SecretMetadataRecord[] = [
   {
     secretRef: 'secret:host-1',
@@ -1609,6 +1620,54 @@ describe('HostBrowser dialogs', () => {
       expect(onRemoveHost).toHaveBeenCalledTimes(2);
     });
   });
+
+  // 원격 화면 호스트도 같은 자격증명 저장소를 쓴다. VNC 는 이 제안에서 빠져 있어서, 호스트를
+  // 지워도 쓰는 데 없는 비밀번호가 키체인에 계속 남았다(판정하는 getHostSecretRef 가 vnc 를
+  // 몰랐다). SSH 와 같은 화면·같은 경로여야 한다.
+  it.each([
+    ['RDP', rdpHost, 'WinBox', 'secret:host-rdp'],
+    ['VNC', vncHost, 'Console', 'secret:host-vnc'],
+  ] as const)(
+    '%s 호스트를 지울 때도 남는 자격증명을 함께 지우자고 제안한다',
+    async (_kind, host, cardLabel, secretRef) => {
+      const onRemoveHost = vi.fn().mockResolvedValue(undefined);
+      const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
+
+      renderBrowser({
+        hosts: [...hosts, { ...host, secretRef } as HostRecord],
+        keychainEntries: [
+          ...keychainEntries,
+          {
+            secretRef,
+            label: 'Remote screen password',
+            hasPassword: true,
+            hasPassphrase: false,
+            hasManagedPrivateKey: false,
+            hasCertificate: false,
+            linkedHostCount: 1,
+            updatedAt: '2025-01-01T00:00:00.000Z',
+          },
+        ],
+        onRemoveHost,
+        onRemoveSecret,
+      });
+
+      const card = screen.getByText(cardLabel).closest('article') as HTMLElement;
+      fireEvent.click(card);
+      fireEvent.contextMenu(card);
+      fireEvent.click(screen.getByRole('button', { name: /삭제/ }));
+
+      const checkbox = screen.getByRole('checkbox', {
+        name: '더 이상 사용되지 않는 저장된 인증 정보 1개도 함께 삭제',
+      });
+      expect(checkbox).toBeChecked();
+
+      fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+
+      await waitFor(() => expect(onRemoveHost).toHaveBeenCalledWith(host.id));
+      await waitFor(() => expect(onRemoveSecret).toHaveBeenCalledWith(secretRef));
+    },
+  );
 
   it('offers to remove an unused local secret and keeps the checkbox enabled by default', async () => {
     const onRemoveHost = vi.fn().mockResolvedValue(undefined);

@@ -103,6 +103,15 @@ export function toHostDraft(record: HostRecord, label: string): HostDraft {
       drives: record.drives ?? null,
       adminSession: record.adminSession ?? null,
       monitors: record.monitors ?? null,
+      // 여기 나열한 것만 복제·그룹 이동에서 살아남는다(위 SSH 주석과 같은 이유). 아래 세 줄이
+      // 없어서 SSM 경유 호스트를 복제하면 **사설 IP 로 직접 붙는 호스트**가 됐다 — 닿지 않는
+      // 주소만 남고 왜 안 되는지 알 수 없다.
+      awsSsm: record.awsSsm ?? null,
+      tailnetId: record.tailnetId ?? null,
+      useAllMonitors: record.useAllMonitors ?? null,
+      audioEnabled: record.audioEnabled ?? null,
+      clipboardEnabled: record.clipboardEnabled ?? null,
+      colorDepth: record.colorDepth ?? null,
     };
   }
 

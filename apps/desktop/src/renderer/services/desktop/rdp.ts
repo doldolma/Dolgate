@@ -1,4 +1,5 @@
 import type {
+  HostRecord,
   RdpConnectedPayload,
   RdpAudioPayload,
   RdpFramePayload,
@@ -25,6 +26,16 @@ export function sendRdpInput(sessionId: string, events: RdpInputEvent[]): void {
 
 export function trustRdpCertificate(sessionId: string, accept: boolean): Promise<void> {
   return desktopApi.rdp.trustCertificate(sessionId, accept);
+}
+
+/**
+ * 신뢰한 RDP 서버 인증서를 해제한다. 갱신된 호스트 레코드를 돌려준다.
+ *
+ * 세션이 아니라 호스트를 대상으로 한다 — 설정 › Security 에서 접속하지 않은 호스트의 신뢰를
+ * 걷어내는 용도다.
+ */
+export function revokeRdpCertificateTrust(hostId: string): Promise<HostRecord | null> {
+  return desktopApi.rdp.revokeCertificateTrust(hostId);
 }
 
 export function requestRdpResize(sessionId: string, width: number, height: number): void {

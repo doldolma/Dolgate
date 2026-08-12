@@ -714,6 +714,7 @@ export function createMockApi(): DesktopApi {
       disconnect: vi.fn().mockResolvedValue(undefined),
       sendInput: vi.fn(),
       trustCertificate: vi.fn().mockResolvedValue(undefined),
+      revokeCertificateTrust: vi.fn().mockResolvedValue(null),
       requestResize: vi.fn(),
       sendClipboardText: vi.fn(),
       syncClipboard: vi.fn(),

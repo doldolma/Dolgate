@@ -104,10 +104,29 @@ function createHarness(
     },
     hosts: {
       getById: vi.fn(() => host),
-      updateRdpCertificateFingerprint: vi.fn((_id: string, next: string) => {
+      updateRdpCertificateFingerprint: vi.fn((_id: string, next: string | null) => {
         host.certificateFingerprint = next;
         return host;
       }),
+      fillRdpAwsSsmProfileId: vi.fn((_id: string, profileId: string) => {
+        // 레코드 리터럴에 awsSsm 이 없어(테스트마다 override 로 얹는다) 인덱스로 읽는다.
+        const target = host as unknown as Record<string, unknown>;
+        const awsSsm = target.awsSsm as Record<string, unknown> | undefined;
+        if (awsSsm) {
+          target.awsSsm = { ...awsSsm, profileId };
+        }
+        return host;
+      }),
+    },
+    awsService: {
+      // 프로파일 이름은 설정에서 바뀔 수 있다. 접속 경로는 레코드의 id 로 **현재** 이름을 되찾아야
+      // 하므로, 여기서는 이름이 바뀐 상황을 흉내 낸다.
+      resolveManagedProfileName: vi.fn((profileId: string | null | undefined) =>
+        profileId === "profile-1" ? "renamed-admin" : null,
+      ),
+      resolveManagedProfileId: vi.fn((profileName: string | null | undefined) =>
+        profileName === "gw-prod" ? "profile-1" : null,
+      ),
     },
     loadSecrets: vi.fn(async () => ({ password: "secret" })),
     activityLogs: { append: vi.fn() },
@@ -138,6 +157,7 @@ function createHarness(
     ctx,
     rdpManager,
     askCertificate,
+    handlers,
     host,
     // 인증서 판정은 connect 가 진행되는 도중에 불린다. 그 순서를 그대로 재현한다.
     async connectAndVerify() {
@@ -184,6 +204,44 @@ describe("registerRdpIpcHandlers certificate trust", () => {
     await expect(harness.connectAndVerify()).resolves.toBe(false);
 
     expect(harness.ctx.hosts.updateRdpCertificateFingerprint).not.toHaveBeenCalled();
+    expect(harness.ctx.queueSync).not.toHaveBeenCalled();
+  });
+});
+
+// 신뢰를 되돌리는 경로. 이게 없으면 잘못 신뢰한 인증서를 호스트를 지우고 다시 만드는 것 말고는
+// 걷어낼 방법이 없었다(설정 › Security 목록이 SSH 키만 다뤘다).
+describe("registerRdpIpcHandlers certificate trust revocation", () => {
+  it("핀을 지우고 동기화를 큐에 넣는다", async () => {
+    const harness = createHarness("AA:BB:CC");
+    const revoke = harness.handlers.get("rdp:revoke-certificate-trust")!;
+
+    const next = await revoke({}, "rdp-1");
+
+    expect(harness.ctx.hosts.updateRdpCertificateFingerprint).toHaveBeenCalledWith(
+      "rdp-1",
+      null,
+    );
+    expect((next as { certificateFingerprint: string | null }).certificateFingerprint).toBeNull();
+    // 핀을 적을 때와 같은 이유다 — 밀어 올리지 않으면 다음 pull 이 서버 사본에서 되살린다.
+    expect(harness.ctx.queueSync).toHaveBeenCalled();
+    // 무엇을 신뢰 해제했는지 남는다(지문 포함). 보안 관련 조작이라 감사 로그가 있어야 한다.
+    expect(harness.ctx.activityLogs.append).toHaveBeenCalledWith(
+      "warn",
+      "audit",
+      expect.anything(),
+      expect.objectContaining({ hostId: "rdp-1", fingerprint: "AA:BB:CC" }),
+    );
+  });
+
+  it("신뢰한 적이 없으면 아무것도 건드리지 않는다", async () => {
+    const harness = createHarness(null);
+    const revoke = harness.handlers.get("rdp:revoke-certificate-trust")!;
+
+    await revoke({}, "rdp-1");
+
+    expect(harness.ctx.hosts.updateRdpCertificateFingerprint).not.toHaveBeenCalled();
+    // 빈 해제로 감사 로그를 늘리지 않는다.
+    expect(harness.ctx.activityLogs.append).not.toHaveBeenCalled();
     expect(harness.ctx.queueSync).not.toHaveBeenCalled();
   });
 });
@@ -367,6 +425,9 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     // 로 연결한다.
     const harness = createHarness("AA:BB:CC", null, {
       awsSsm: {
+        profileId: "profile-1",
+        // 레코드에 적힌 이름은 낡을 수 있다(설정에서 바꾼 뒤). 터널은 id 로 되찾은 현재 이름을
+        // 써야 한다 — 이 값을 그대로 쓰면 이름을 바꾼 뒤 이 경로만 조용히 끊긴다.
         profileName: "gw-prod",
         region: "ap-northeast-2",
         instanceId: "i-00c8d7296782e6ad5",
@@ -375,10 +436,13 @@ describe("registerRdpIpcHandlers monitor layout", () => {
 
     await harness.connectAndVerify();
 
+    expect(harness.ctx.awsService.resolveManagedProfileName).toHaveBeenCalledWith(
+      "profile-1",
+    );
     expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
       expect.objectContaining({
         ruleId: "rdp:sess-1",
-        profileName: "gw-prod",
+        profileName: "renamed-admin",
         region: "ap-northeast-2",
         targetId: "i-00c8d7296782e6ad5",
         targetPort: 3389,
@@ -399,6 +463,49 @@ describe("registerRdpIpcHandlers monitor layout", () => {
     );
     // 포트 포워딩 규칙으로 등록하면 사용자 화면에 유령 행이 생긴다. 세션 단위 터널을 써야 한다.
     expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledTimes(1);
+  });
+
+  // 이름만 갖고 있던 옛 레코드는 접속할 때 id 를 채워 넣는다. 그래야 이름 폴백이 그 레코드들과
+  // 함께 사라진다 — 폴백을 영구히 두면 이름을 바꾸는 순간 끊기는 경로가 계속 남는다.
+  it("id 가 없던 레코드는 접속할 때 id 를 채워 넣는다", async () => {
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileName: "gw-prod",
+        region: "ap-northeast-2",
+        instanceId: "i-legacy",
+      },
+    });
+
+    await harness.connectAndVerify();
+
+    expect(harness.ctx.hosts.fillRdpAwsSsmProfileId).toHaveBeenCalledWith(
+      "rdp-1",
+      "profile-1",
+    );
+    // 채워 넣은 값은 동기화돼야 한다 — 다른 기기의 같은 레코드도 이름에서 벗어난다.
+    expect(harness.ctx.queueSync).toHaveBeenCalled();
+    // 그리고 그 id 로 되찾은 현재 이름으로 터널을 연다.
+    expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: "renamed-admin" }),
+    );
+  });
+
+  // 관리하지 않는 프로파일이면 채울 id 가 없다. 그때는 저장된 이름으로 붙는다.
+  it("관리 대상이 아닌 프로파일은 저장된 이름으로 터널을 연다", async () => {
+    const harness = createHarness("AA:BB:CC", null, {
+      awsSsm: {
+        profileName: "external-profile",
+        region: "ap-northeast-2",
+        instanceId: "i-legacy",
+      },
+    });
+
+    await harness.connectAndVerify();
+
+    expect(harness.ctx.hosts.fillRdpAwsSsmProfileId).not.toHaveBeenCalled();
+    expect(harness.ctx.coreManager.startSsmTunnel).toHaveBeenCalledWith(
+      expect.objectContaining({ profileName: "external-profile" }),
+    );
   });
 
   it("closes the SSM tunnel when the session ends", async () => {

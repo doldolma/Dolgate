@@ -1092,7 +1092,10 @@ describe("SftpWorkspace column resizing", () => {
     expect(onNavigateHostGroup).toHaveBeenCalledWith("right", "Production");
   });
 
-  it("shows a disabled reason for unsupported AWS Windows hosts", () => {
+  // 예전에는 비활성 카드로 남겨 사유를 힌트로 보여줬다. 고칠 수 있는 상태가 아니라(EIC 가
+  // Linux 전용이어서 SSH-over-SSM 자체가 성립하지 않는다) 목록에서 아예 뺀다 — 홈 카드·명령
+  // 팔레트가 이미 그렇게 하고 있어, 목록 규칙이 화면마다 달랐던 것을 맞춘 것이다.
+  it("leaves unsupported AWS Windows hosts out of the picker", () => {
     const sftp = createSftpState();
     sftp.rightPane = createHostPickerPane();
 
@@ -1109,12 +1112,9 @@ describe("SftpWorkspace column resizing", () => {
       sftp,
     });
 
-    const awsCard = screen.getByText("AWS Windows").closest('[data-host-card="true"]');
-    expect(awsCard).toBeTruthy();
-    expect((awsCard as HTMLElement | null)?.dataset.hostCardState).toBe("disabled");
-    expect(
-      within(awsCard as HTMLElement).getByText("Windows 인스턴스는 아직 지원하지 않습니다."),
-    ).toBeTruthy();
+    expect(screen.queryByText("AWS Windows")).toBeNull();
+    // 붙을 수 있는 호스트는 그대로 남는다 — 필터가 목록을 통째로 비우지 않는지 확인한다.
+    expect(screen.getByText("Prod SSH")).toBeTruthy();
   });
 
   it("offers a settings shortcut when an AWS host is missing SSH username", async () => {

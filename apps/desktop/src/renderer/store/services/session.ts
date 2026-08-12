@@ -67,6 +67,8 @@ export function createSessionServices(deps: SliceDeps) {
   const { api } = deps;
   const {
     ensureAwsHostAuthentication,
+    ensureAwsSsoAuthenticationByProfileName,
+    ensureAwsSsoProfileAuthenticationIfNeeded,
     ensureTrustedHost,
     recoverFromChangedHostKey,
     ensureTailnetReady,
@@ -800,6 +802,60 @@ export function createSessionServices(deps: SliceDeps) {
       "connecting",
     );
 
+    // SSM 을 경유하는 호스트는 AWS 인증이 먼저 살아 있어야 한다.
+    //
+    // 이 단계가 없으면 SSO 세션이 만료된 채로 접속이 시작되고, 메인이 터널을 열다 SDK 원문 오류
+    // ("The SSO session token associated with profile=... was not found or is invalid")로 끝난다 —
+    // 다른 호스트 종류는 여기서 브라우저 로그인을 띄우는데 RDP 만 그 단계를 건너뛰고 있었다.
+    if (isRdpHostRecord(host) && host.awsSsm) {
+      const { profileId, profileName } = host.awsSsm;
+      const report = (
+        message: string,
+        options?: {
+          blockingKind?: TerminalConnectionProgress["blockingKind"];
+          stage?: TerminalConnectionProgress["stage"];
+        },
+      ) => {
+        updateSessionProgress(
+          set,
+          sessionId,
+          createConnectionProgress(
+            options?.stage ?? "checking-profile",
+            message,
+            options?.blockingKind ? { blockingKind: options.blockingKind } : undefined,
+          ),
+          "connecting",
+        );
+      };
+      try {
+        // id 가 신원이다. 이름은 id 가 없는 레코드(이 필드가 생기기 전에 만든 것)와 앱이 관리하지
+        // 않는 프로파일을 위한 폴백이다 — 이름은 사용자가 바꿀 수 있어서 그것만 믿을 수 없다.
+        if (profileId) {
+          const status = await ensureAwsSsoProfileAuthenticationIfNeeded(
+            profileId,
+            profileName,
+            report,
+          );
+          if (!status.isAuthenticated && !status.isSsoProfile) {
+            throw new Error(
+              status.errorMessage ||
+                t('trustAuth.cliCredentialsNeeded', { profile: profileName }),
+            );
+          }
+        } else {
+          await ensureAwsSsoAuthenticationByProfileName(profileName, report);
+        }
+      } catch (error) {
+        markSessionError(
+          set,
+          sessionId,
+          error instanceof Error ? error.message : String(error),
+          { retryable: true },
+        );
+        return;
+      }
+    }
+
     // tailnet 을 경유하는 호스트는 노드가 먼저 올라와 있어야 한다. 메인이 접속 직전에 로컬
     // 포워드를 여는데, 노드가 내려가 있으면 그 포워드가 곧바로 실패하고 사용자는 이유를
     // "연결할 수 없음" 으로만 본다. 진행 상황은 이 세션의 오버레이에 그대로 나온다.
@@ -841,6 +897,8 @@ export function createSessionServices(deps: SliceDeps) {
         ),
       }));
     } catch (error) {
+      // 원문을 그대로 담는다 — 문장으로 바꾸는 일은 화면이
+      // resolveConnectionFailurePresentation 으로 한다(분류가 한 곳에만 있어야 한다).
       markSessionError(
         set,
         sessionId,
@@ -893,14 +951,34 @@ export function createSessionServices(deps: SliceDeps) {
       "connecting",
     );
 
-    // tailnet 을 경유하는 호스트는 노드가 먼저 올라와 있어야 한다(RDP 와 같은 이유). SSH 의
-    // 호스트 키 probe 는 타지 않는다 — VNC 에는 그 신뢰 체인이 없다.
+    // tailnet 을 경유하는 호스트는 노드가 먼저 올라와 있어야 한다(RDP 와 같은 이유).
     const tailnetReady = await ensureTailnetReady(set, {
       hostId: host.id,
       sessionId,
     });
     if (!tailnetReady) {
       return;
+    }
+
+    // SSH 터널로 경유하면 **그 SSH 호스트의 키를 먼저 신뢰해야** 한다.
+    //
+    // VNC 자체에는 신뢰 체인이 없지만 통로는 SSH 다. 이 관문이 없으면 메인이 포워드를 열다
+    // "Host key is not trusted yet" 로 끝나고, 사용자는 신뢰할지 물어보는 화면을 못 본다 —
+    // 처음 쓰는 경유 호스트에서는 접속이 아예 불가능했다.
+    //
+    // 신뢰 대상은 경유 SSH 호스트이고, 수락한 뒤 이어갈 것은 이 VNC 접속이다(action.kind:
+    // 'vnc'). false 면 프롬프트가 떴다는 뜻이라 여기서 멈춘다 — 수락하면 그쪽에서 다시 부른다.
+    const tunnelHostId = isVncHostRecord(host) ? host.sshTunnelHostId?.trim() : null;
+    if (tunnelHostId) {
+      const trusted = await ensureTrustedHost(set, {
+        hostId: tunnelHostId,
+        sessionId,
+        skipProbeIfAlreadyTrusted: true,
+        action: { kind: "vnc", hostId: host.id },
+      });
+      if (!trusted) {
+        return;
+      }
     }
 
     try {
@@ -926,6 +1004,8 @@ export function createSessionServices(deps: SliceDeps) {
         ),
       }));
     } catch (error) {
+      // 원문을 그대로 담는다 — 문장으로 바꾸는 일은 화면이
+      // resolveConnectionFailurePresentation 으로 한다(분류가 한 곳에만 있어야 한다).
       markSessionError(
         set,
         sessionId,
@@ -1256,6 +1336,9 @@ export function createSessionServices(deps: SliceDeps) {
     markSessionError,
     createPendingSessionTabForHost,
     startRdpConnectionFlow,
+    // 경유 SSH 호스트를 신뢰한 뒤 멈춰 둔 접속을 이어가려면 밖에서 부를 수 있어야 한다
+    // (networkSlice 의 acceptPendingHostKeyPrompt).
+    startVncConnectionFlow,
     retryRdpConnection,
     retryVncConnection,
     createPendingSessionTabForLocal,

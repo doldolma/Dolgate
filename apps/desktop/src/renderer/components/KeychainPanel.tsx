@@ -14,6 +14,7 @@ import type {
   SshKeyMaterialResult,
 } from '@shared';
 import {
+  Badge,
   Button,
   Card,
   CardActions,
@@ -34,7 +35,7 @@ import {
 } from '../ui';
 import { DialogBackdrop } from './DialogBackdrop';
 import { SshKeyGenerateDialog } from './SshKeyGenerateDialog';
-import { describeSecretType } from '../lib/secret-display';
+import { describeSecretType, getSecretKindLabel } from '../lib/secret-display';
 import { matchesKeyboardLayoutQuery } from '../lib/keyboard-layout-search';
 import { copySavedCredentialPassword } from '../services/desktop/settings';
 import { useTranslation } from 'react-i18next';
@@ -66,6 +67,7 @@ function buildKeychainEntrySearchText(
   return [
     entry.label,
     describeSecretType(entry),
+    getSecretKindLabel(entry),
     entry.secretRef,
     ...linkedHosts.flatMap((host) => getHostSearchText(host)),
   ].join(' ');
@@ -290,6 +292,10 @@ export function KeychainPanel({
               <CardMain>
                 <CardTitleRow>
                   <strong>{entry.label}</strong>
+                  {/* 프로토콜 태그. 색이 있는 tone 들은 다른 화면에서 상태(running 등)를
+                      뜻하므로, 상태가 아닌 분류에는 neutral 을 쓴다 — 목록 전체가 초록 알약으로
+                      덮이면 상태처럼 읽힌다. */}
+                  <Badge tone="neutral">{getSecretKindLabel(entry)}</Badge>
                 </CardTitleRow>
                 <CardMeta>
                   <span>{describeSecretType(entry)}</span>

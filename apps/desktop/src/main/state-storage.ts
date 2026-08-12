@@ -658,7 +658,13 @@ function normalizeStoredRdpAwsSsm(value: unknown): RdpAwsSsmTarget | null {
   if (!profileName || !region || !instanceId) {
     return null;
   }
-  return { profileName, region, instanceId };
+  // id 가 없어도 버리지 않는다 — 이 필드가 생기기 전에 만든 레코드와 관리하지 않는 프로파일은
+  // 이름만 갖는다. 다만 여기 적지 않으면 디스크를 다시 읽는 순간 id 가 사라진다.
+  const profileId =
+    typeof value.profileId === 'string' && value.profileId.trim()
+      ? value.profileId.trim()
+      : null;
+  return { profileId, profileName, region, instanceId };
 }
 
 /**

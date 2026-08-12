@@ -1,6 +1,26 @@
 import type { SecretMetadataRecord } from '@shared';
 import { t } from '../i18n';
 
+/**
+ * 이 자격증명이 어느 프로토콜용인지 한 단어로.
+ *
+ * `describeSecretType` 은 **안에 뭐가 들었나**(Password·Private key…)를 말한다. 그것만으로는
+ * SSH·RDP·VNC 비밀번호가 모두 'Password' 로 똑같이 보여서, 목록에서 고를 때 구분할 방법이 없다 —
+ * 종류는 따로 말해야 한다.
+ *
+ * `kind` 가 없으면 SSH 다. 이 필드가 생기기 전에 만든 것은 모두 SSH 용이고, 종류를 잃은 항목은
+ * 메인이 연결된 호스트에서 되짚어 채운다(database 의 `withLinkedHostCount`).
+ */
+export function getSecretKindLabel(entry: SecretMetadataRecord): 'SSH' | 'RDP' | 'VNC' {
+  if (entry.kind === 'rdp') {
+    return 'RDP';
+  }
+  if (entry.kind === 'vnc') {
+    return 'VNC';
+  }
+  return 'SSH';
+}
+
 export function describeSecretType(entry: SecretMetadataRecord): string {
   const labels: string[] = [];
 

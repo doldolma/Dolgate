@@ -455,6 +455,16 @@ export interface PendingHostKeyPrompt {
         kind: "containerShell";
         hostId: string;
         containerId: string;
+      }
+    | {
+        /**
+         * VNC 세션이 경유할 SSH 호스트를 신뢰하는 중.
+         *
+         * `hostId` 는 **VNC 호스트**다(경유 SSH 호스트가 아니다) — 수락한 뒤 이어갈 것이 VNC
+         * 접속이기 때문이다. 신뢰 대상은 프롬프트의 probe 가 이미 들고 있다.
+         */
+        kind: "vnc";
+        hostId: string;
       };
 }
 
@@ -932,6 +942,13 @@ interface AppStateParts {
   startPortForward: (ruleId: string) => Promise<void>;
   stopPortForward: (ruleId: string) => Promise<void>;
   removeKnownHost: (id: string) => Promise<void>;
+  /**
+   * RDP 서버 인증서 신뢰를 해제한다. 다음 접속에서 다시 확인한다.
+   *
+   * 이 신뢰는 known_hosts 가 아니라 호스트 레코드(`certificateFingerprint`)에 있다 — 그래서
+   * 목록·해제도 호스트를 통해 한다.
+   */
+  revokeRdpCertificateTrust: (hostId: string) => Promise<void>;
   clearLogs: () => Promise<void>;
   removeKeychainSecret: (secretRef: string) => Promise<void>;
   updateKeychainSecret: (
@@ -1307,6 +1324,7 @@ export type NetworkSlice = Pick<
   | "startPortForward"
   | "stopPortForward"
   | "removeKnownHost"
+  | "revokeRdpCertificateTrust"
   | "acceptPendingHostKeyPrompt"
   | "dismissPendingHostKeyPrompt"
 >;

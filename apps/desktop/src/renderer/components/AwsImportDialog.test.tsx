@@ -38,7 +38,7 @@ function installMockApi(overrides?: {
       }),
     },
     aws: {
-      listProfiles: vi.fn().mockResolvedValue([{ name: 'default' }]),
+      listProfiles: vi.fn().mockResolvedValue([{ id: 'profile-default', name: 'default' }]),
       createProfile: vi.fn().mockResolvedValue(undefined),
       prepareSsoProfile: vi.fn().mockResolvedValue({
         preparationToken: 'prep-token',
@@ -260,6 +260,10 @@ describe('AwsImportDialog', () => {
           hostname: '10.0.2.181',
           port: 3389,
           awsSsm: {
+            // **id 를 함께 싣는다.** 이름은 사용자가 바꿀 수 있어서, 이름만 저장하면 접속 시
+            // 프로파일을 찾는 경로(SSO 만료 확인)가 조용히 끊긴다. aws-ec2 임포트도 같은 값을
+            // 싣는다.
+            profileId: 'profile-default',
             profileName: 'default',
             region: 'ap-northeast-2',
             instanceId: 'i-win',

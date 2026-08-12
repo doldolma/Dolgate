@@ -158,7 +158,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
     syncOperationalData,
     promptForMissingUsername,
   } = services;
-  const { startPendingSessionConnect } = sessionServices;
+  const { startPendingSessionConnect, startVncConnectionFlow } = sessionServices;
   const {
     clearContainerTabConnectionOverlay,
     startPendingContainerShellConnect,
@@ -340,6 +340,17 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             }));
             await syncOperationalData(set);
           },
+    revokeRdpCertificateTrust: async (hostId) => {
+            const next = await api.rdp.revokeCertificateTrust(hostId);
+            if (!next) {
+              return;
+            }
+            // 돌려받은 레코드로 갈아 끼운다 — 목록을 다시 받아오지 않는다(호스트 전체를 다시
+            // 읽으면 이 화면 말고도 흔들린다). 메인이 동기화·감사 로그를 이미 처리했다.
+            set((state) => ({
+              hosts: state.hosts.map((host) => (host.id === next.id ? next : host)),
+            }));
+          },
     acceptPendingHostKeyPrompt: async (mode) => {
             const pending = get().pendingHostKeyPrompt;
             if (!pending) {
@@ -396,6 +407,16 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                   pending.action.hostId,
                   pending.action.containerId,
                 );
+              }
+              return;
+            }
+            if (pending.action.kind === "vnc") {
+              // 경유 SSH 호스트를 방금 신뢰했다. 멈춰 둔 VNC 접속을 같은 탭에서 이어간다.
+              const host = get().hosts.find(
+                (item) => item.id === pending.action.hostId,
+              );
+              if (host && pending.sessionId) {
+                await startVncConnectionFlow(set, get, host, pending.sessionId);
               }
               return;
             }

@@ -823,7 +823,10 @@ function normalizeRdpAwsSsm(
   if (!profileName || !region || !instanceId) {
     return null;
   }
-  return { profileName, region, instanceId };
+  // **필드를 나열하는 화이트리스트다.** profileId 를 빠뜨리면 임포트가 넣어 준 값이 저장되는
+  // 순간 사라지고, 접속 시 프로파일을 이름으로만 찾게 된다(이름은 바뀔 수 있다).
+  const profileId = target?.profileId?.trim() ?? '';
+  return { profileId: profileId || null, profileName, region, instanceId };
 }
 
 /**
@@ -1031,7 +1034,11 @@ export class HostRepository {
 
   // 사용자가 신뢰한 RDP 서버 인증서 지문을 기록한다. 호스트 폼을 거치지 않는 값이라
   // update() 로 통째로 저장하면 draft 에 없는 이 필드가 날아간다.
-  updateRdpCertificateFingerprint(id: string, fingerprint: string): HostRecord | null {
+  //
+  // `null` 은 신뢰 해제다(설정 › Security 의 목록에서 지울 때). 기록과 해제를 한 메서드로 두는
+  // 이유는 둘이 갈리면 한쪽만 updatedAt·동기화를 놓치기 때문이다 — 핀이 로컬에만 남으면 다음
+  // pull 이 호스트 목록을 서버 사본으로 교체하면서 되살린다.
+  updateRdpCertificateFingerprint(id: string, fingerprint: string | null): HostRecord | null {
     let nextRecord: HostRecord | null = null;
     stateStorage.updateState((state) => {
       state.data.hosts = state.data.hosts.map((entry) => {
@@ -1039,6 +1046,37 @@ export class HostRepository {
           return entry;
         }
         nextRecord = { ...entry, certificateFingerprint: fingerprint, updatedAt: nowIso() };
+        return nextRecord;
+      });
+    });
+    return nextRecord;
+  }
+
+  /**
+   * RDP 호스트의 SSM 프로파일 id 를 채운다.
+   *
+   * 이 필드가 생기기 전에 만든 레코드는 프로파일을 이름으로만 갖는다. 접속할 때 이름으로 한 번
+   * 찾아내면 그 id 를 적어 두어, 다음부터는 이름에 의존하지 않는다 — 이름은 설정에서 바뀔 수 있고
+   * 그러면 이름으로만 찾던 경로가 조용히 끊긴다. 인증서 지문을 접속 중에 저장하는 것과 같은 방식
+   * 이다(updateRdpCertificateFingerprint).
+   *
+   * `updatedAt` 을 올리지 않는다. 사용자가 고친 것이 아니라 우리가 같은 뜻을 더 안전한 형태로 적는
+   * 것이고, 시각을 올리면 마지막-쓰기-승리에서 다른 기기의 실제 편집을 이길 수 있다.
+   */
+  fillRdpAwsSsmProfileId(id: string, profileId: string): HostRecord | null {
+    let nextRecord: HostRecord | null = null;
+    stateStorage.updateState((state) => {
+      state.data.hosts = state.data.hosts.map((entry) => {
+        if (entry.id !== id || entry.kind !== 'rdp' || !entry.awsSsm) {
+          return entry;
+        }
+        if (entry.awsSsm.profileId) {
+          return entry;
+        }
+        nextRecord = {
+          ...entry,
+          awsSsm: { ...entry.awsSsm, profileId },
+        };
         return nextRecord;
       });
     });

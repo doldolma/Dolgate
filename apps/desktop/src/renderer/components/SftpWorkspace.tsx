@@ -101,7 +101,8 @@ import {
 import { cn } from "../lib/cn";
 import { getFormatLocale, t } from '../i18n';
 import { getAwsSftpDiagnosticAction, getAwsSftpDiagnosticTitle } from "../../common/aws-diagnostics";
-import { getAwsEc2SftpDisabledMessage, hostSubtitleLabels } from '../../common/shared-messages';
+import { hostSubtitleLabels } from '../../common/shared-messages';
+import { hostSupportsSftp } from './host-browser/hostCapabilities';
 
 const SFTP_HOST_PICKER_HOST_CARD_MIN_WIDTH_PX = 220;
 const SFTP_HOST_PICKER_HOST_CARD_MAX_WIDTH_PX = 460;
@@ -370,13 +371,26 @@ export function visibleHostPickerHosts(
   return scopedHosts;
 }
 
-export function getSftpHostPickerDisabledReason(
-  host: SftpConnectableHostRecord,
-): string | null {
-  if (isAwsEc2HostRecord(host)) {
-    return getAwsEc2SftpDisabledMessage(host);
-  }
-  return null;
+/**
+ * SFTP 피커에 올릴 호스트만 고른다.
+ *
+ * 종류 판정은 홈 카드·상세·명령 팔레트가 쓰는 `hostSupportsSftp` 로 한다. 여기서만 따로
+ * 나열했더니 Windows EC2 가 목록에 들어와 **영구히 비활성인 카드**로 남았다 — SSH-over-SSM 은
+ * EC2 Instance Connect 로 임시 키를 밀어 넣는데 EIC 가 Linux 전용이라, sshd 를 띄워 놨든
+ * 아니든 이 경로 자체가 성립하지 않는다. 고칠 수 있는 상태가 아니므로 RDP·serial 처럼 아예
+ * 보이지 않는 것이 맞다.
+ *
+ * 접속 시도 경로의 가드(sftpSlice)는 그대로 둔다 — 메타데이터가 나중에 Windows 로 바뀌거나
+ * 저장된 pane 을 복원하는 경우가 있어, 목록에서 빠지는 것과 붙지 못하게 막는 것은 다른 일이다.
+ */
+export function sftpConnectableHosts(hosts: HostRecord[]): SftpConnectableHostRecord[] {
+  return hosts.filter(
+    (host): host is SftpConnectableHostRecord =>
+      hostSupportsSftp(host) &&
+      (isSshHostRecord(host) ||
+        isWarpgateSshHostRecord(host) ||
+        isAwsEc2HostRecord(host)),
+  );
 }
 
 function fallbackEntryLabel(path: string): string {
@@ -2190,26 +2204,20 @@ function HostPicker({
               visibleHosts.map((host) => {
                 const awsHost = isAwsEc2HostRecord(host) ? host : null;
                 const badgeLabel = getHostBadgeLabel(host);
-                const disabledReason = getSftpHostPickerDisabledReason(host);
                 const canOpenHostSettings = awsHost
                   ? !awsHost.awsSshUsername?.trim() || awsHost.awsSshMetadataStatus === "error"
                   : false;
                 const isSelected = pane.selectedHostId === host.id;
                 const isBusy = isConnecting && isSelected;
-                // 홈 호스트 카드(HostListCard)와 통일: "SSH 설정 자동 확인됨" 등 상태 문구는
-                // 노출하지 않는다. 사용 불가 사유(예: Windows 미지원)만 힌트로 남긴다.
-                const hint = disabledReason ?? undefined;
                 return (
                   <HostCard
                     key={host.id}
                     selected={isSelected}
                     busy={isBusy}
-                    disabled={Boolean(disabledReason)}
                     badgeLabel={badgeLabel}
                     title={host.label}
                     subtitle={getHostSubtitle(host, hostSubtitleLabels())}
                     groupLabel={host.groupName || "Ungrouped"}
-                    hint={hint}
                     onClick={() => {
                       if (isConnecting) {
                         return;
@@ -2217,7 +2225,7 @@ function HostPicker({
                       onSelectHost(host.id);
                     }}
                     onDoubleClick={() => {
-                      if (isConnecting || disabledReason) {
+                      if (isConnecting) {
                         return;
                       }
                       void onConnectHost(host.id);
@@ -3095,16 +3103,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   );
   const columnWidthsRef = useRef(columnWidths);
   const panes = [sftp.leftPane, sftp.rightPane] as const;
-  const connectableHosts = useMemo(
-    () =>
-      hosts.filter(
-        (host): host is SftpConnectableHostRecord =>
-          isSshHostRecord(host) ||
-          isWarpgateSshHostRecord(host) ||
-          isAwsEc2HostRecord(host),
-      ),
-    [hosts],
-  );
+  const connectableHosts = useMemo(() => sftpConnectableHosts(hosts), [hosts]);
 
   useEffect(() => {
     if (!ownerDialog) {

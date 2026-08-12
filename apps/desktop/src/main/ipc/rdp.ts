@@ -12,6 +12,7 @@ import type { WebContents } from "electron";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, screen } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
 import type { RdpManager } from "../rdp-manager";
+import { logMessage } from "../activity-log-message";
 import { decideCertificate } from "../rdp-certificate-trust";
 import { setRdpKeyboardCapture } from "../rdp-keyboard-capture";
 import { resolveSelectedDisplays } from "../rdp-monitor-selection";
@@ -91,6 +92,40 @@ export function registerRdpIpcHandlers(
     ),
   );
 
+  /**
+   * 신뢰한 RDP 서버 인증서를 해제한다(설정 › Security).
+   *
+   * 세션과 무관한 호스트 레코드 수정이지만 신뢰를 **기록하는** 쪽이 여기라 같이 둔다 — 두
+   * 방향이 갈리면 감사 로그와 동기화 처리가 한쪽만 남는다.
+   *
+   * 해제한 뒤 다음 접속에서 서버 인증서를 다시 확인한다. 잘못 신뢰했을 때 호스트를 지우고 다시
+   * 만드는 것 말고는 되돌릴 방법이 없던 것을 메꾼다.
+   */
+  ipcMain.handle(
+    ipcChannels.rdp.revokeCertificateTrust,
+    async (event, hostId: string) => {
+      const host = ctx.hosts.getById(hostId);
+      if (!host || !isRdpHostRecord(host)) {
+        return null;
+      }
+      const previous = host.certificateFingerprint ?? null;
+      if (!previous) {
+        // 이미 없다. 감사 로그에 빈 해제를 남기지 않는다.
+        return host;
+      }
+      const next = ctx.hosts.updateRdpCertificateFingerprint(hostId, null);
+      ctx.activityLogs.append("warn", "audit", logMessage('rdpIpc.certificateTrustRevoked'), {
+        hostId,
+        label: host.label,
+        fingerprint: previous,
+      });
+      // 핀 기록과 같은 이유로 동기화한다 — 안 하면 다음 pull 이 서버 사본에서 되살린다.
+      ctx.queueSync();
+      ctx.emitWorkspaceChanged?.(event?.sender);
+      return next;
+    },
+  );
+
   // 디스플레이 목록은 캐시한다.
   //
   // 마우스 이동마다 screen.getAllDisplays() 를 부르면 초당 100번 넘게 OS 를 조회하게 되어
@@ -148,9 +183,26 @@ export function registerRdpIpcHandlers(
       //
       // bindPort 0 = 빈 포트를 OS 가 고른다. 고정 포트를 쓰면 같은 인스턴스에 두 번 붙을 때
       // 충돌하고, 다른 프로그램이 쓰고 있으면 접속이 실패한다.
+      //
+      // **프로파일은 id 로 현재 이름을 되찾아 쓴다.** 이름은 설정에서 바꿀 수 있어서, 레코드에
+      // 적힌 이름을 그대로 쓰면 이름을 바꾼 뒤 이 경로만 조용히 끊긴다(레코드는 동기화되므로
+      // 다른 기기에서도 같이 끊긴다). id 가 없는 레코드는 이 필드가 생기기 전에 만든 것이거나
+      // 앱이 관리하지 않는 프로파일이라 저장된 이름을 쓴다.
+      let profileId = awsSsm.profileId ?? null;
+      if (!profileId) {
+        // 이름만 갖고 있던 옛 레코드다. 지금 한 번 찾아 적어 두면 다음부터는 이름에 의존하지
+        // 않는다 — 폴백은 그 레코드들이 남아 있는 동안만 필요한 것이고, 여기서 스스로 사라진다.
+        profileId = ctx.awsService.resolveManagedProfileId(awsSsm.profileName);
+        if (profileId) {
+          ctx.hosts.fillRdpAwsSsmProfileId(host.id, profileId);
+          ctx.queueSync();
+        }
+      }
+      const profileName =
+        ctx.awsService.resolveManagedProfileName(profileId) ?? awsSsm.profileName;
       const tunnel = await ctx.coreManager.startSsmTunnel({
         ruleId: `rdp:${sessionId}`,
-        profileName: awsSsm.profileName,
+        profileName,
         region: awsSsm.region,
         targetType: "instance",
         targetId: awsSsm.instanceId,

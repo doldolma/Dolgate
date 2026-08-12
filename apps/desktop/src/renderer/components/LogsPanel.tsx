@@ -131,6 +131,11 @@ function getConnectionKindLabel(kind: SessionConnectionKind): string {
   if (kind === 'rdp') {
     return 'RDP';
   }
+  // VNC 를 빼면 폴백에 걸려 **원격 화면 세션이 SSH 로 표기된다** — 실제로 그랬다. SSH 터널을
+  // 경유하는 VNC 는 그 줄만 보고는 구분할 방법이 없어 더 헷갈린다.
+  if (kind === 'vnc') {
+    return 'VNC';
+  }
   return 'SSH';
 }
 

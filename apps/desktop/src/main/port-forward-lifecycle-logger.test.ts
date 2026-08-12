@@ -215,6 +215,10 @@ describe('PortForwardLifecycleLogger', () => {
       'aws-sftp-probe:host-1:ghi',
       'aws-container-shell:host-1:jkl',
       'aws-containers:endpoint-1',
+      // 원격 화면 세션의 전송 터널. 이게 남으면 한 번 접속할 때마다 감사 로그가 두 줄
+      // 생기고, 대응하는 규칙이 없어 라벨은 'vnc:pending:<uuid>' 로, 대상은 "모름" 으로 뜬다.
+      'rdp:pending:mno',
+      'vnc:pending:pqr',
     ]) {
       logger.handleEvent(createEvent('starting', { ruleId: prefix, updatedAt: '2026-04-03T00:00:00.000Z' }));
       logger.handleEvent(createEvent('running', { ruleId: prefix, startedAt: '2026-04-03T00:00:00.000Z' }));
@@ -253,10 +257,31 @@ describe('PortForwardLifecycleLogger', () => {
   });
 });
 
+describe('summarizePortForwardTarget', () => {
+  // 규칙이 없으면 대상을 알 수 없다. 옛 문구('Target unavailable')는 대상에 못 닿았다는 말로
+  // 읽혀서, 멀쩡히 열렸다 닫힌 터널이 실패처럼 보였다.
+  it('규칙이 없는 로컬 포워딩은 실패로 읽히지 않게 적는다', () => {
+    const summary = __testOnly.summarizePortForwardTarget(
+      null,
+      createEvent('running', { ruleId: 'container-service-tunnel:xyz' }).runtime,
+    );
+    expect(summary).toBe('Target not recorded');
+    expect(summary).not.toMatch(/unavailable|failed|error/iu);
+  });
+
+  it('규칙이 있으면 대상을 그대로 적는다', () => {
+    expect(
+      __testOnly.summarizePortForwardTarget(createRule(), createEvent('running').runtime),
+    ).toBe('Remote host db.internal:5432');
+  });
+});
+
 describe('isInternalTransportTunnel', () => {
   it('matches internal transport prefixes but not user rules', () => {
     expect(__testOnly.isInternalTransportTunnel('aws-ec2-ssh:host:uuid')).toBe(true);
     expect(__testOnly.isInternalTransportTunnel('aws-container-shell:host:uuid')).toBe(true);
+    expect(__testOnly.isInternalTransportTunnel('rdp:pending:uuid')).toBe(true);
+    expect(__testOnly.isInternalTransportTunnel('vnc:pending:uuid')).toBe(true);
     expect(__testOnly.isInternalTransportTunnel('container-service-tunnel:uuid')).toBe(false);
     expect(__testOnly.isInternalTransportTunnel('ecs-service-tunnel:uuid')).toBe(false);
     expect(__testOnly.isInternalTransportTunnel('rule-1')).toBe(false);

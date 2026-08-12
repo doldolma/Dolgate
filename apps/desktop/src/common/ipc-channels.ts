@@ -115,6 +115,7 @@ export const ipcChannels = {
     disconnect: 'rdp:disconnect',
     input: 'rdp:input',
     trustCertificate: 'rdp:trust-certificate',
+    revokeCertificateTrust: 'rdp:revoke-certificate-trust',
     resize: 'rdp:resize',
     clipboard: 'rdp:clipboard',
     syncClipboard: 'rdp:sync-clipboard',

@@ -1764,7 +1764,12 @@
       "remoteAudio": "원격 소리",
       "clipboard": "클립보드 공유",
       "redirectedFolders": "공유 폴더",
-      "driveReadOnly": "읽기 전용"
+      "driveReadOnly": "읽기 전용",
+      "sshTunnel": "SSH 터널",
+      "imageQuality": "화질",
+      "screenSharing": "화면 공유",
+      "viewOnly": "보기 전용",
+      "deletedSshHost": "삭제된 SSH 호스트 — 연결되지 않습니다"
     },
     "env": {
       "heading": "환경 변수 ({{count}})",
@@ -1787,6 +1792,11 @@
     "close": "상세 닫기",
     "activity": {
       "connectFailed": "{{kind}} · 연결 실패"
+    },
+    "vncQuality": {
+      "lossless": "무손실",
+      "balanced": "균형",
+      "fast": "속도 우선"
     }
   },
   "palette": {
@@ -2741,6 +2751,9 @@
     "externalLinkScheme": "외부 링크는 http 또는 https만 열 수 있습니다.",
     "windowsTmuxUnsupported": "Windows 인스턴스는 tmux 연결을 지원하지 않습니다. SSM 셸(PowerShell)로 연결하세요."
   },
+  "rdpIpc": {
+    "certificateTrustRevoked": "RDP 서버 인증서 신뢰를 해제했습니다."
+  },
   "hostsIpc": {
     "secretSaved": "호스트 secret이 저장되었습니다.",
     "hostCreated": "호스트를 생성했습니다.",
@@ -3152,6 +3165,12 @@
   "snippetVars": {
     "title": "Snippet 변수 입력",
     "confirm": "삽입"
+  },
+  "rdpCertificates": {
+    "intro": "처음 접속할 때 신뢰한 RDP 서버 인증서입니다. 해제하면 다음 접속에서 다시 확인합니다.",
+    "emptyTitle": "신뢰한 RDP 서버 인증서가 없습니다.",
+    "emptyDescription": "RDP 서버에 처음 접속할 때 인증서 지문을 승인하면 이 목록에 추가됩니다.",
+    "revoke": "신뢰 해제"
   },
   "knownHosts": {
     "intro": "신뢰한 호스트 키 목록입니다. 새 연결은 이 목록과 정확히 일치해야만 진행됩니다.",

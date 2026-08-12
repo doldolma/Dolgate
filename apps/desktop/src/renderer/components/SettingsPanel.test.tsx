@@ -167,6 +167,7 @@ function renderSettingsPanel(
   const onSelectSection = vi.fn();
   const onSavedCredentialsSearchQueryChange = vi.fn();
   const onRemoveKnownHost = vi.fn().mockResolvedValue(undefined);
+  const onRevokeRdpCertificate = vi.fn().mockResolvedValue(undefined);
   const onRemoveSecret = vi.fn().mockResolvedValue(undefined);
   const onEditSecret = vi.fn();
   const onGenerateSshKey = vi.fn().mockResolvedValue({
@@ -223,6 +224,7 @@ function renderSettingsPanel(
         }}
         onUpdateSettings={onUpdateSettings}
         onRemoveKnownHost={onRemoveKnownHost}
+        onRevokeRdpCertificate={onRevokeRdpCertificate}
         onRemoveSecret={onRemoveSecret}
         onEditSecret={onEditSecret}
         onGenerateSshKey={onGenerateSshKey}
@@ -242,6 +244,7 @@ function renderSettingsPanel(
     onSavedCredentialsSearchQueryChange:
       handleSavedCredentialsSearchQueryChange,
     onRemoveKnownHost,
+    onRevokeRdpCertificate,
     onRemoveSecret,
     onEditSecret,
     onGenerateSshKey,

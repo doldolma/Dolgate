@@ -43,6 +43,9 @@ export function useSettingsViewModel() {
     (state) => state.setSavedCredentialsSearchQuery,
   );
   const removeKnownHost = useAppStore((state) => state.removeKnownHost);
+  const revokeRdpCertificateTrust = useAppStore(
+    (state) => state.revokeRdpCertificateTrust,
+  );
   const clearLogs = useAppStore((state) => state.clearLogs);
   const removeKeychainSecret = useAppStore((state) => state.removeKeychainSecret);
   const updateKeychainSecret = useAppStore((state) => state.updateKeychainSecret);
@@ -69,6 +72,7 @@ export function useSettingsViewModel() {
     openSettingsSection,
     setSavedCredentialsSearchQuery,
     removeKnownHost,
+    revokeRdpCertificateTrust,
     clearLogs,
     removeKeychainSecret,
     updateKeychainSecret,

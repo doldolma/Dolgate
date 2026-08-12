@@ -5,6 +5,7 @@ import {
   isAwsEc2HostRecord,
   isAwsEcsHostRecord,
   isRdpHostRecord,
+  isVncHostRecord,
   isSshHostRecord,
   normalizeGroupPath,
 } from '@shared';
@@ -17,8 +18,10 @@ import type {
   SecretMetadataRecord,
   SnippetRecord,
   SshHostRecord,
+  VncHostRecord,
 } from '@shared';
 import { listTailnets } from '../../services/desktop/tailnet';
+import { listAwsProfiles } from '../../services/desktop/imports';
 import { cn } from '../../lib/cn';
 import { Button } from '../../ui';
 import {
@@ -324,12 +327,116 @@ function deriveJumpHostIds(host: SshHostRecord): string[] {
  * 다른 기기일 수 있으므로 어디를 거치는지 보여 준다. 설정이 지워졌으면 라벨을 못 찾는데, 그때는
  * 경고를 보여 준다(연결도 그 상태에서는 거부된다).
  */
+/**
+ * 경유 계층(tailnet·점프 호스트·SSH 터널·SSM)의 행들.
+ *
+ * **새 라벨을 만들지 않는다** — 각 종류가 원래 쓰던 이름과 값을 그대로 모아 준다(Tailnet,
+ * Jump Host, SSH 터널, SSM 경유). 이것들을 한 줄로 합치거나 다른 말로 부르면 두 탭이 같은 값을
+ * 다르게 말하게 된다.
+ *
+ * Overview 와 Connection 이 같이 쓴다. 주소만 보면 직접 붙는 것처럼 보이는 종류가 많아서
+ * (VNC 의 `127.0.0.1`, RDP-over-SSM 의 사설 IP) Overview 에도 있어야 하고, 그렇다고 문구가
+ * 갈리면 안 되므로 자리는 하나다. 순서도 종류별로 원래 있던 그대로다.
+ */
+function buildTransportRows(
+  host: HostRecord,
+  hosts: HostRecord[],
+  tailnets: Array<{ id: string; label: string }>,
+  tailnetsLoaded: boolean,
+  awsProfiles: Array<{ id: string | null; name: string }>,
+): Array<{ label: string; value: React.ReactNode }> {
+  const rows: Array<{ label: string; value: React.ReactNode }> = [];
+  const pushTailnet = (tailnetId: string | null | undefined) => {
+    const row = buildTailnetRow(tailnetId, tailnets, tailnetsLoaded);
+    if (row) {
+      rows.push(row);
+    }
+  };
+
+  if (isSshHostRecord(host)) {
+    const jumpHostIds = deriveJumpHostIds(host);
+    if (jumpHostIds.length > 0) {
+      rows.push({
+        label: jumpHostIds.length > 1 ? 'Jump Hosts' : 'Jump Host',
+        value: (
+          <span className="inline-flex flex-wrap items-center justify-end gap-x-1 gap-y-1">
+            {jumpHostIds.map((jumpId, index) => {
+              // 지워진 홉은 id 를 노출하지 않는다 — 사용자에게 아무 뜻도 없는 문자열이고, 그
+              // 상태로는 접속이 실패한다. VNC 터널 행과 같은 문구를 쓴다(같은 상황, 같은 말).
+              const jumpLabel =
+                hosts.find((entry) => entry.id === jumpId)?.label ??
+                t('hostDetail.row.deletedSshHost');
+              return (
+                <span key={jumpId} className="inline-flex items-center gap-x-1">
+                  {index > 0 ? (
+                    <span aria-hidden="true" className="text-[var(--text-muted)]">
+                      →
+                    </span>
+                  ) : null}
+                  <span className="rounded-[6px] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[0.78rem] font-medium text-[var(--text)]">
+                    {jumpLabel}
+                  </span>
+                </span>
+              );
+            })}
+          </span>
+        ),
+      });
+    }
+    pushTailnet(host.tailnetId);
+    return rows;
+  }
+
+  if (isRdpHostRecord(host)) {
+    pushTailnet(host.tailnetId);
+    // SSM 을 거치는지는 주소만 봐서는 알 수 없다. 사설 IP 가 그대로 적혀 있어서 직접 붙는 것처럼
+    // 보이는데, 실제로는 포트 포워딩을 거친다 — 안 보여주면 왜 사설 IP 로 붙는지 설명이 안 된다.
+    if (host.awsSsm) {
+      // id 로 현재 이름을 찾는다. 못 찾으면(관리하지 않는 프로파일이거나 id 가 없는 옛 레코드)
+      // 저장된 이름을 쓴다 — 접속 경로도 같은 순서로 판단한다.
+      const profileName =
+        awsProfiles.find(
+          (profile) => host.awsSsm?.profileId && profile.id === host.awsSsm.profileId,
+        )?.name ?? host.awsSsm.profileName;
+      rows.push({
+        label: t('hostDetail.row.awsSsm'),
+        value: `${host.awsSsm.instanceId} · ${host.awsSsm.region} · ${profileName}`,
+      });
+    }
+    return rows;
+  }
+
+  if (isVncHostRecord(host)) {
+    const tunnelHostId = host.sshTunnelHostId?.trim();
+    if (tunnelHostId) {
+      // 지워진 호스트를 가리킬 수 있다. 그때는 id 대신 그 사실을 말한다 — 접속도 실패하므로
+      // 여기서 알아채는 것이 가장 이르다.
+      const tunnelHost = hosts.find((entry) => entry.id === tunnelHostId);
+      rows.push({
+        label: t('hostDetail.row.sshTunnel'),
+        value: tunnelHost ? tunnelHost.label : t('hostDetail.row.deletedSshHost'),
+      });
+    }
+    pushTailnet(host.tailnetId);
+    return rows;
+  }
+
+  return rows;
+}
+
 function buildTailnetRow(
   tailnetId: string | null | undefined,
   tailnets: Array<{ id: string; label: string }>,
+  /**
+   * 목록이 도착했는지. **비어 있는 것과 아직 안 온 것을 구분해야 한다.**
+   *
+   * 목록은 비동기로 온다. 오기 전에 "설정 없음 — 연결되지 않습니다" 를 붉게 적으면 화면을 열
+   * 때마다 그 경고가 한 번 스친다 — 정상 상태를 이상 상태로 보여주는 셈이다.
+   */
+  tailnetsLoaded: boolean,
 ): { label: string; value: React.ReactNode } | null {
   const id = tailnetId?.trim();
-  if (!id) {
+  if (!id || !tailnetsLoaded) {
     return null;
   }
   const known = tailnets.find((entry) => entry.id === id);
@@ -368,10 +475,58 @@ function describeToggle(enabled: boolean): string {
   return enabled ? t('hostDetail.row.enabled') : t('hostDetail.row.disabled');
 }
 
+/**
+ * VNC 호스트의 상세 행.
+ *
+ * 경유 계층(SSH 터널·tailnet)은 `buildTransportRows` 가 만든다 — Overview 도 같은 행을 쓴다.
+ *
+ * 문구는 편집 화면(hostForm.vnc)의 것을 그대로 쓴다. 같은 값을 두 화면이 다르게 부르면 안 된다.
+ */
+function buildVncRows(
+  host: VncHostRecord,
+  hosts: HostRecord[],
+  keychainEntries: SecretMetadataRecord[],
+  tailnets: Array<{ id: string; label: string }>,
+  tailnetsLoaded: boolean,
+): Array<{ label: string; value: React.ReactNode }> {
+  const rows: Array<{ label: string; value: React.ReactNode }> = [];
+
+  rows.push({ label: 'Port', value: host.port });
+  rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
+  rows.push(...buildTransportRows(host, hosts, tailnets, tailnetsLoaded, []));
+
+  // 없거나 null 이면 무손실이다(레코드 기본값과 같은 규칙).
+  const QUALITY_KEYS = {
+    lossless: 'hostDetail.vncQuality.lossless',
+    balanced: 'hostDetail.vncQuality.balanced',
+    fast: 'hostDetail.vncQuality.fast',
+  } as const;
+  rows.push({
+    label: t('hostDetail.row.imageQuality'),
+    value: t(QUALITY_KEYS[host.imageQuality ?? 'lossless'] ?? QUALITY_KEYS.lossless),
+  });
+  // 기본이 켜짐인 것은 늘 적고(RDP 의 소리·클립보드와 같은 규칙), 기본이 꺼짐인 것은 켜졌을
+  // 때만 적는다(관리 세션과 같은 규칙).
+  rows.push({
+    label: t('hostDetail.row.screenSharing'),
+    value: describeToggle(host.shared !== false),
+  });
+  if (host.viewOnly === true) {
+    rows.push({
+      label: t('hostDetail.row.viewOnly'),
+      value: t('hostDetail.row.enabled'),
+    });
+  }
+
+  return rows;
+}
+
 function buildRdpRows(
   host: RdpHostRecord,
   keychainEntries: SecretMetadataRecord[],
   tailnets: Array<{ id: string; label: string }>,
+  tailnetsLoaded: boolean,
+  awsProfiles: Array<{ id: string | null; name: string }>,
 ): Array<{ label: string; value: React.ReactNode }> {
   const rows: Array<{ label: string; value: React.ReactNode }> = [];
   const account = buildRdpAccount(host, keychainEntries);
@@ -382,19 +537,7 @@ function buildRdpRows(
   }
   rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
 
-  const tailnetRow = buildTailnetRow(host.tailnetId, tailnets);
-  if (tailnetRow) {
-    rows.push(tailnetRow);
-  }
-
-  // SSM 을 거치는지는 주소만 봐서는 알 수 없다. 사설 IP 가 그대로 적혀 있어서 직접 붙는 것처럼
-  // 보이는데, 실제로는 포트 포워딩을 거친다 — 안 보여주면 왜 사설 IP 로 붙는지 설명이 안 된다.
-  if (host.awsSsm) {
-    rows.push({
-      label: t('hostDetail.row.awsSsm'),
-      value: `${host.awsSsm.instanceId} · ${host.awsSsm.region} · ${host.awsSsm.profileName}`,
-    });
-  }
+  rows.push(...buildTransportRows(host, [], tailnets, tailnetsLoaded, awsProfiles));
 
   if (host.adminSession === true) {
     rows.push({
@@ -463,6 +606,8 @@ function buildConnectionRows(
   snippets: SnippetRecord[] | undefined,
   keychainEntries: SecretMetadataRecord[],
   tailnets: Array<{ id: string; label: string }>,
+  tailnetsLoaded: boolean,
+  awsProfiles: Array<{ id: string | null; name: string }>,
 ): Array<{ label: string; value: React.ReactNode }> {
   const rows: Array<{ label: string; value: React.ReactNode }> = [];
   const address = getHostAddress(host);
@@ -481,36 +626,7 @@ function buildConnectionRows(
       value: host.authType === 'agent' ? 'SSH Agent' : host.authType,
     });
     rows.push({ label: 'Credential', value: buildCredentialValue(host, keychainEntries) });
-    const jumpHostIds = deriveJumpHostIds(host);
-    if (jumpHostIds.length > 0) {
-      rows.push({
-        label: jumpHostIds.length > 1 ? 'Jump Hosts' : 'Jump Host',
-        value: (
-          <span className="inline-flex flex-wrap items-center justify-end gap-x-1 gap-y-1">
-            {jumpHostIds.map((jumpId, index) => {
-              const jumpLabel =
-                hosts.find((entry) => entry.id === jumpId)?.label ?? jumpId;
-              return (
-                <span key={jumpId} className="inline-flex items-center gap-x-1">
-                  {index > 0 ? (
-                    <span aria-hidden="true" className="text-[var(--text-muted)]">
-                      →
-                    </span>
-                  ) : null}
-                  <span className="rounded-[6px] border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-[0.78rem] font-medium text-[var(--text)]">
-                    {jumpLabel}
-                  </span>
-                </span>
-              );
-            })}
-          </span>
-        ),
-      });
-    }
-    const tailnetRow = buildTailnetRow(host.tailnetId, tailnets);
-    if (tailnetRow) {
-      rows.push(tailnetRow);
-    }
+    rows.push(...buildTransportRows(host, hosts, tailnets, tailnetsLoaded, awsProfiles));
     if (host.useMosh) {
       rows.push({ label: 'Mosh', value: t('hostDetail.row.enabled') });
     }
@@ -518,7 +634,9 @@ function buildConnectionRows(
       rows.push({ label: 'Agent Forwarding', value: t('hostDetail.row.enabled') });
     }
   } else if (isRdpHostRecord(host)) {
-    rows.push(...buildRdpRows(host, keychainEntries, tailnets));
+    rows.push(...buildRdpRows(host, keychainEntries, tailnets, tailnetsLoaded, awsProfiles));
+  } else if (isVncHostRecord(host)) {
+    rows.push(...buildVncRows(host, hosts, keychainEntries, tailnets, tailnetsLoaded));
   } else if (host.kind === 'aws-ec2') {
     rows.push({ label: 'Profile', value: host.awsProfileName || 'Not configured' });
     rows.push({ label: 'Instance', value: host.awsInstanceId });
@@ -900,6 +1018,13 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
   // 섹션을 옮겨도 재마운트되지 않아서, 한 번만 읽으면 설정에서 방금 추가한 tailnet 이 계속
   // "설정 없음"으로 보인다.
   const [tailnets, setTailnets] = useState<Array<{ id: string; label: string }>>([]);
+  /**
+   * 목록이 도착했는지. **비어 있는 것과 아직 안 온 것을 구분해야 한다.**
+   *
+   * 목록은 비동기로 오는데, 오기 전에 "이 tailnet 을 모른다" 고 적으면 화면을 열 때마다 그 문구가
+   * 한 번 스친다 — 정상 상태를 이상 상태로 보여주는 셈이다.
+   */
+  const [tailnetsLoaded, setTailnetsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     // 브리지가 없으면 listTailnets 가 동기적으로 던진다 — Promise 로 감싸야 .catch 가 잡는다.
@@ -908,10 +1033,34 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
       .then((records) => {
         if (!cancelled) {
           setTailnets(records.map((record) => ({ id: record.id, label: record.label })));
+          setTailnetsLoaded(true);
         }
       })
       .catch(() => {
         // 목록을 못 읽어도 상세 화면은 그대로 보여야 한다.
+        if (!cancelled) {
+          setTailnetsLoaded(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHostId]);
+
+  // AWS 프로파일 이름은 설정에서 바뀔 수 있다. 레코드에 적힌 이름을 그대로 보여주면 이름을 바꾼
+  // 뒤에도 옛 이름이 남아, 실제 접속(id 로 현재 이름을 찾는다)과 화면이 서로 다른 말을 한다.
+  const [awsProfiles, setAwsProfiles] = useState<Array<{ id: string | null; name: string }>>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve()
+      .then(listAwsProfiles)
+      .then((records) => {
+        if (!cancelled) {
+          setAwsProfiles(records.map((record) => ({ id: record.id, name: record.name })));
+        }
+      })
+      .catch(() => {
+        // 목록을 못 읽어도 상세 화면은 그대로 보여야 한다. 저장된 이름으로 떨어진다.
       });
     return () => {
       cancelled = true;
@@ -934,6 +1083,8 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
   const isFavorite = favoriteHostIdSet.has(host.id);
   const region = getHostRegion(host);
   const address = getHostAddress(host);
+  // 경유 계층 행들. Overview·Connection 이 **같은 행**을 쓴다(라벨·값·순서가 갈리지 않게).
+  const transportRows = buildTransportRows(host, hb.hosts, tailnets, tailnetsLoaded, awsProfiles);
   const group = normalizeGroupPath(host.groupName);
 
   return (
@@ -1021,6 +1172,11 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                   />
                 ) : null}
                 {address ? <InfoRow label="IP / Host" value={address} /> : null}
+                {/* 주소 바로 아래에 둔다 — 이 줄들이 그 주소에 어떻게 닿는지 설명한다.
+                    Connection 탭에 있는 것과 **같은 행**이다(같은 라벨·같은 값). */}
+                {transportRows.map((row) => (
+                  <InfoRow key={row.label} label={row.label} value={row.value} />
+                ))}
                 {region ? <InfoRow label="Region" value={region} /> : null}
                 <InfoRow label="Group" value={group ?? 'Ungrouped'} />
                 {host.tags && host.tags.length > 0 ? (
@@ -1111,6 +1267,8 @@ export function HostDetailPanel({ hb, tmuxPrefixKey }: HostDetailPanelProps) {
                 hb.snippets,
                 hb.keychainEntries,
                 tailnets,
+                tailnetsLoaded,
+                awsProfiles,
               ).map((row) => (
                 <InfoRow key={row.label} label={row.label} value={row.value} />
               ))}

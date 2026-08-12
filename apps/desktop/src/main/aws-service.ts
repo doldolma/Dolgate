@@ -1767,6 +1767,20 @@ export class AwsService {
     return this.profileRepository.resolveNameById(profileId);
   }
 
+  /**
+   * 이름으로 관리 프로파일 id 를 찾는다.
+   *
+   * 이름만 갖고 있던 옛 레코드에 id 를 채워 넣는 데 쓴다(HostRepository.fillRdpAwsSsmProfileId).
+   * 관리하지 않는 프로파일이면 null 이다.
+   */
+  resolveManagedProfileId(profileName: string | null | undefined): string | null {
+    const name = profileName?.trim();
+    if (!name) {
+      return null;
+    }
+    return this.profileRepository.getMetadataByName(name)?.id ?? null;
+  }
+
   requireManagedProfileName(
     profileId: string | null | undefined,
     displayName: string | null | undefined,

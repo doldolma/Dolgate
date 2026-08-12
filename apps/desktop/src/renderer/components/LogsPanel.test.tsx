@@ -202,6 +202,36 @@ describe('LogsPanel', () => {
     expect(screen.getByText('1분 0초')).toBeInTheDocument();
   });
 
+  it('renders a VNC lifecycle row with its own kind badge', () => {
+    render(
+      <LogsPanel
+        logs={[
+          createLifecycleLog({
+            sessionId: 'vnc-session-1',
+            hostId: 'host-3',
+            hostLabel: 'lab-console',
+            title: 'lab-console',
+            // SSH 터널을 경유하면 붙는 주소가 로컬 끝단이다 — 그래서 배지 말고는 종류를 알
+            // 방법이 없다.
+            connectionDetails: '127.0.0.1 · 5901',
+            connectionKind: 'vnc',
+            connectedAt: '2026-03-29T00:00:00.000Z',
+            disconnectedAt: '2026-03-29T00:00:45.000Z',
+            durationMs: 45000,
+            status: 'closed',
+          })
+        ]}
+        onClear={vi.fn().mockResolvedValue(undefined)}
+        onOpenReplay={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText('lab-console')).toBeInTheDocument();
+    // 라벨 폴백이 'SSH' 라서, 케이스가 빠지면 VNC 행이 SSH 로 표시된다(실제로 그랬다).
+    expect(screen.getByText('VNC')).toBeInTheDocument();
+    expect(screen.queryByText('SSH')).not.toBeInTheDocument();
+  });
+
   it('renders a local terminal lifecycle row with replay access', () => {
     const onOpenReplay = vi.fn().mockResolvedValue(undefined);
     render(

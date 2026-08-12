@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SshHostRecord } from '@shared';
+import type { HostRecord, SshHostRecord } from '@shared';
 import type { SftpPaneState } from '../store/createAppStore';
 import {
   breadcrumbParts,
@@ -22,6 +22,7 @@ import {
   parseInternalTransferPayload,
   permissionMatrixFromString,
   permissionMatrixToMode,
+  sftpConnectableHosts,
   visibleEntries,
   visibleHostPickerHosts
 } from './SftpWorkspace';
@@ -159,6 +160,48 @@ function createPaneState(overrides: Partial<SftpPaneState> = {}): SftpPaneState 
     ...overrides
   };
 }
+
+// 피커 목록의 종류 판정. 예전에는 이 파일이 종류를 따로 나열해서 Windows EC2 가 목록에 들어와
+// 영구히 비활성인 카드로 남았다 — 홈 카드·명령 팔레트는 같은 호스트를 이미 빼고 있었다.
+describe('sftpConnectableHosts', () => {
+  const linuxEc2 = {
+    id: 'ec2-linux',
+    kind: 'aws-ec2',
+    label: 'linux box',
+    awsPlatform: 'Linux/UNIX',
+    awsInstanceId: 'i-1',
+    awsRegion: 'ap-northeast-2',
+  } as unknown as HostRecord;
+  const windowsEc2 = {
+    id: 'ec2-win',
+    kind: 'aws-ec2',
+    label: 'win box',
+    awsPlatform: 'windows',
+    awsInstanceId: 'i-2',
+    awsRegion: 'ap-northeast-2',
+  } as unknown as HostRecord;
+  const rdpHost = { id: 'rdp-1', kind: 'rdp', label: 'win desk' } as unknown as HostRecord;
+
+  it('Windows EC2 는 목록에서 뺀다', () => {
+    const ids = sftpConnectableHosts([sshHosts[0], linuxEc2, windowsEc2]).map(
+      (host) => host.id,
+    );
+
+    expect(ids).toContain(linuxEc2.id);
+    expect(ids).not.toContain(windowsEc2.id);
+  });
+
+  it('SFTP 가 없는 종류도 그대로 뺀다', () => {
+    // 종류를 나열하는 규칙이 두 곳에 있으면 새 종류가 한쪽에만 붙는다.
+    expect(sftpConnectableHosts([rdpHost]).map((host) => host.id)).toEqual([]);
+  });
+
+  it('SSH 호스트는 남긴다', () => {
+    expect(sftpConnectableHosts(sshHosts).map((host) => host.id)).toEqual(
+      sshHosts.map((host) => host.id),
+    );
+  });
+});
 
 describe('SftpWorkspace helpers', () => {
   it('groups SSH hosts by group name and falls back to Ungrouped', () => {

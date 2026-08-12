@@ -412,6 +412,9 @@ export function AwsImportDialog({ open, currentGroupPath, onClose, onImport }: A
           hostname: instance.privateIp?.trim() || instance.instanceId,
           port: 3389,
           awsSsm: {
+            // 이름이 아니라 id 가 신원이다(이름은 바뀔 수 있다). 같은 다이얼로그의 aws-ec2
+            // 임포트도 같은 값을 싣는다.
+            profileId: selectedProfileSummary?.id ?? null,
             profileName: selectedProfile,
             region: selectedRegion,
             instanceId: instance.instanceId,

@@ -159,6 +159,42 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     );
   };
 
+  /**
+   * 프로파일 **이름**으로 SSO 로그인을 보장한다.
+   *
+   * RDP 의 SSM 경유 대상은 프로파일을 이름으로만 들고 있다(RdpAwsSsmTarget — 기기마다 id 가 다를 수
+   * 있어서다). 그런데 인증 확인·로그인 API 는 id 로 동작하므로, 여기서 이름 → 상태(id 포함)로 한 번
+   * 바꿔 준다.
+   *
+   * 이게 없으면 SSO 세션이 만료된 채로 접속이 시작되고, 사용자는 브라우저 로그인 대신 SDK 의 원문
+   * 오류("The SSO session token associated with profile=... was not found or is invalid")를 본다 —
+   * 다른 호스트 종류는 접속 전에 이 단계를 거치므로 로그인 창이 뜬다.
+   */
+  const ensureAwsSsoAuthenticationByProfileName = async (
+    profileName: string,
+    reportProgress: (
+      message: string,
+      options?: {
+        blockingKind?: TerminalConnectionProgress["blockingKind"];
+        stage?: TerminalConnectionProgress["stage"];
+      },
+    ) => void,
+  ) => {
+    reportProgress(t('containersStore.checkingProfile', { profile: profileName }));
+    const status = await api.aws.getProfileStatus(profileName);
+    if (status.isAuthenticated) {
+      return;
+    }
+    if (!status.isSsoProfile) {
+      // 정적 자격증명 프로파일이다. 우리가 갱신해 줄 방법이 없으므로 무엇을 해야 하는지 말한다.
+      throw new Error(
+        status.errorMessage ||
+          t('trustAuth.cliCredentialsNeeded', { profile: profileName }),
+      );
+    }
+    await loginAwsSsoProfile(status.id, profileName, reportProgress);
+  };
+
   const ensureAwsHostAuthentication = async (
     host: Extract<HostRecord, { kind: "aws-ec2" }>,
     reportProgress: (
@@ -496,6 +532,7 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
   return {
     loginAwsSsoProfile,
     ensureAwsSsoProfileAuthenticationIfNeeded,
+    ensureAwsSsoAuthenticationByProfileName,
     ensureAwsHostAuthentication,
     ensureTrustedHost,
     recoverFromChangedHostKey,

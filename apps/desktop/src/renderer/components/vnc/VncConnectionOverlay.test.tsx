@@ -75,6 +75,42 @@ describe("VncConnectionOverlay", () => {
     );
   });
 
+  // 스토어에는 IPC 원문이 담긴다. 화면이 공통 분류기를 지나지 않으면 사용자가
+  // "Error invoking remote method 'vnc:connect': Error: ..." 를 그대로 읽게 된다.
+  it("IPC 원문 대신 공통 분류기의 문장을 보여준다", () => {
+    seed(
+      {
+        status: "error",
+        errorMessage:
+          "Error invoking remote method 'vnc:connect': Error: Host key is not trusted yet.",
+        connectionProgress: null,
+      },
+      {},
+    );
+
+    render(<VncConnectionOverlay sessionId="vnc-1" />);
+
+    expect(screen.queryByText(/invoking remote method/u)).toBeNull();
+    expect(
+      screen.getByText(/호스트 키를 아직 신뢰하지 않았습니다/u),
+    ).toBeTruthy();
+  });
+
+  // 진행 중 문구는 우리가 만든 단계 설명이다. 분류기를 태우면 멀쩡한 문장이 바뀐다.
+  it("연결 중 문구는 그대로 둔다", () => {
+    seed(
+      {
+        status: "connecting",
+        connectionProgress: { stage: "connecting", message: "VNC 포트까지 통로 개설" },
+      },
+      {},
+    );
+
+    render(<VncConnectionOverlay sessionId="vnc-1" />);
+
+    expect(screen.getByText("VNC 포트까지 통로 개설")).toBeTruthy();
+  });
+
   it("Close 는 탭을 닫는다", () => {
     // onClose 를 넘기지 않으면 버튼이 그려지긴 하는데 아무 일도 하지 않는다 — 그 상태로 나가 있었다.
     render(<VncConnectionOverlay sessionId="vnc-1" />);

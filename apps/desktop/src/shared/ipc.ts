@@ -1387,6 +1387,12 @@ export interface DesktopApi {
       events: import("./rdp").RdpInputEvent[],
     ) => void;
     trustCertificate: (sessionId: string, accept: boolean) => Promise<void>;
+    /**
+     * 신뢰한 서버 인증서를 해제한다(설정 › Security 목록). 갱신된 호스트 레코드를 돌려준다.
+     *
+     * 이 신뢰는 known_hosts 가 아니라 호스트 레코드에 있어서 세션이 아니라 hostId 를 받는다.
+     */
+    revokeCertificateTrust: (hostId: string) => Promise<HostRecord | null>;
     requestResize: (sessionId: string, width: number, height: number) => void;
     sendClipboardText: (sessionId: string, text: string) => void;
     syncClipboard: (sessionId: string) => void;

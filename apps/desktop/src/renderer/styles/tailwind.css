@@ -209,7 +209,16 @@
     background: none;
   }
 
-  input,
+  /* 텍스트를 입력하는 칸의 모양. **라디오·체크박스·슬라이더·파일은 제외한다.**
+   *
+   * 예전에는 `input` 을 그대로 잡았다. 그러면 라디오·체크박스에도 background·border·color 가
+   * 걸리는데, 그 순간 Chromium 이 네이티브 컨트롤 그리기를 포기하고 우리가 준 색으로 칠한다 —
+   * 라디오가 시꺼먼 원으로 보이던 원인이다(accent-color 는 그때 무시된다). width:100% 와
+   * padding 도 16px 컨트롤에는 맞지 않는다.
+   *
+   * 그 컨트롤들은 각자 `h-4 w-4 accent-[var(--accent-strong)]` 로 네이티브 모양을 쓴다. 슬라이더
+   * (data-replay-scrubber)는 아래에서 자기 모양을 따로 정의하고, 파일 입력은 숨겨서 쓴다. */
+  input:not([type="radio"]):not([type="checkbox"]):not([type="range"]):not([type="file"]),
   select,
   textarea {
     width: 100%;

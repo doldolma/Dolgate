@@ -28,6 +28,11 @@ const INTERNAL_TRANSPORT_TUNNEL_PREFIXES = [
   'aws-sftp-probe:', // AWS SFTP 프리플라이트 프로브 터널
   'aws-container-shell:', // 컨테이너 셸 전송 터널
   'aws-containers:', // 컨테이너 리소스 조회 터널
+  // 원격 화면 세션의 전송 터널. `rdp:<sessionId>`(RDP over SSM)·`vnc:<sessionId>`(VNC over SSH
+  // 터널)로 `ipc/rdp.ts`·`ipc/vnc.ts` 가 연결마다 열고 끊을 때 닫는다. 사용자가 만든 규칙은
+  // randomUUID 라 이 접두사와 겹치지 않는다.
+  'rdp:', // RDP-over-SSM 전송 터널
+  'vnc:', // VNC-over-SSH 전송 터널
 ] as const;
 
 function isInternalTransportTunnel(ruleId: string): boolean {
@@ -185,7 +190,12 @@ function summarizePortForwardTarget(
     if (runtime.mode === 'dynamic') {
       return 'SOCKS proxy';
     }
-    return runtime.mode === 'remote' ? 'Remote forward' : 'Target unavailable';
+    // 규칙이 없으면 대상을 알 방법이 없다 — 런타임 레코드에는 바인드 주소만 있다. 규칙 없이
+    // 열리는 터널(컨테이너 서비스 포트)이거나, 실행 중에 규칙을 지운 경우다.
+    //
+    // 예전 문구가 'Target unavailable' 이었는데 그건 **대상에 못 닿았다는 말로 읽힌다** —
+    // 멀쩡히 열렸다 닫힌 터널이 실패처럼 보였다. 모른다는 사실만 말한다.
+    return runtime.mode === 'remote' ? 'Remote forward' : 'Target not recorded';
   }
 
   if (rule.transport === 'ssh') {

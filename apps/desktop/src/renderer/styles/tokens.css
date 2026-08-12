@@ -1,5 +1,11 @@
 :root {
-  color-scheme: light dark;
+  /* **앱이 고른 테마를 따른다.** 예전에는 `light dark` 로 두어 OS 설정을 따랐는데, 그러면 앱을
+   * 라이트로 쓰는데 OS 가 다크일 때 네이티브 컨트롤만 다크로 그려진다 — 라디오·체크박스가 흰
+   * 배경 위에서 시꺼먼 원으로 보이던 원인이다(테마 토큰은 우리가 칠하므로 이 값과 무관하다).
+   *
+   * 아래 data-theme 선택자가 실제 테마를 확정한다(ThemeBridge 가 붙인다). system 이면 그쪽에서
+   * 이미 해석한 값이 들어온다. */
+  color-scheme: light;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   --chrome-bg: #18345a;
   --chrome-border: rgba(255, 255, 255, 0.08);
@@ -82,6 +88,9 @@
 }
 
 :root[data-theme="dark"] {
+  /* 네이티브 컨트롤(라디오·체크박스·스크롤바)도 다크로 그려지게 한다. 위 :root 가 light 로
+   * 고정하므로 여기서 뒤집지 않으면 다크 테마에서 그것들만 밝게 남는다. */
+  color-scheme: dark;
   --chrome-bg: #0f2546;
   --chrome-border: rgba(255, 255, 255, 0.06);
   --app-bg: #0b1422;

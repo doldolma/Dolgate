@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { isRdpHostRecord } from '@shared';
 import { useAppStore } from '../../store/appStore';
+import { resolveConnectionFailurePresentation } from '../../store/utils';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
 import { ConnectionStatusOverlay } from '../ConnectionStatusOverlay';
 import { resolveConnectionStages } from '../terminal-workspace/connectionStages';
@@ -84,7 +85,21 @@ export function RdpConnectionOverlay({ sessionId }: RdpConnectionOverlayProps) {
   }
 
   const failed = tab.status === 'error';
-  const message = tab.connectionProgress?.message ?? tab.errorMessage ?? '';
+  const rawMessage = tab.connectionProgress?.message ?? tab.errorMessage ?? '';
+  /**
+   * 실패 문구는 공통 분류기를 지난다.
+   *
+   * 스토어에는 원문이 담긴다(분류하는 자리를 한 곳으로 두기 위해서다). 그대로 찍으면
+   * "Error invoking remote method 'rdp:connect': Error: Host key is not trusted yet." 처럼
+   * 우리 내부 사정이 두 겹 붙은 문장이 사용자에게 그대로 보인다 — 터미널·컨테이너 화면은
+   * 이미 이 분류기를 쓴다. 종류를 못 가리는 오류는 래퍼만 벗겨 원문을 남긴다.
+   *
+   * 진행 중 문구는 우리가 만든 단계 설명이라 손대지 않는다.
+   */
+  const message =
+    failed && rawMessage
+      ? resolveConnectionFailurePresentation(rawMessage).message
+      : rawMessage;
 
   return (
     <ConnectionStatusOverlay

@@ -65,9 +65,13 @@ function makeSshHost(): SshHostRecord {
 }
 
 // SFTP·tmux 핸들러는 항상 넘긴다 — 버튼이 사라진다면 핸들러가 없어서가 아니라 호스트 종류 때문이다.
-function renderPanel(host: HostRecord, detailTab: 'overview' | 'connection' = 'connection') {
+function renderPanel(
+  host: HostRecord,
+  detailTab: 'overview' | 'connection' = 'connection',
+  hosts: HostRecord[] = [host],
+) {
   const hb = {
-    hosts: [host],
+    hosts,
     selectedHostId: host.id,
     favoriteHostIdSet: new Set<string>(),
     keychainEntries,
@@ -162,5 +166,113 @@ describe('HostDetailPanel — Overview Quick Actions', () => {
     expect(screen.getByRole('button', { name: 'Open SFTP' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'TMUX Connect' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Containers' })).toBeTruthy();
+  });
+});
+
+// 경유 계층(Tailnet·Jump Host·SSM 경유·SSH 터널)은 Overview 에도 있어야 한다 — 주소만 보면 직접
+// 붙는 것처럼 보이는 종류들이다(RDP-over-SSM 은 사설 IP, SSH 점프는 최종 호스트 주소가 적힌다).
+// **Connection 탭과 같은 행·같은 라벨을 쓴다** — 요약용 새 문구를 만들면 두 탭이 다른 말을 한다.
+describe('HostDetailPanel — Overview 경유 계층', () => {
+  it('SSM 을 거치면 Connection 탭과 같은 SSM 경유 행을 보여준다', () => {
+    renderPanel(
+      makeHost({
+        tailnetId: null,
+        awsSsm: {
+          profileId: 'p-1',
+          profileName: 'admin',
+          region: 'ap-northeast-2',
+          instanceId: 'i-0abc',
+        },
+      }),
+      'overview',
+    );
+
+    expect(rowValue('SSM 경유')).toBe('i-0abc · ap-northeast-2 · admin');
+  });
+
+  it('tailnet 과 SSM 을 함께 쓰면 원래 순서대로 보여준다', async () => {
+    renderPanel(
+      makeHost({
+        awsSsm: {
+          profileId: 'p-1',
+          profileName: 'admin',
+          region: 'ap-northeast-2',
+          instanceId: 'i-0abc',
+        },
+      }),
+      'overview',
+    );
+
+    // 목록이 오기 전에는 Tailnet 행을 넣지 않는다 — 붉은 "설정 없음" 이 스치면 안 된다.
+    expect(screen.queryByText('Tailnet')).toBeNull();
+    expect(rowValue('SSM 경유')).toContain('i-0abc');
+
+    // 도착하면 그 행이 SSM 경유보다 먼저 온다(Connection 탭과 같은 순서).
+    expect(await screen.findByText('corp-tailnet')).toBeTruthy();
+    const labels = screen
+      .getAllByText(/^(Tailnet|SSM 경유)$/u)
+      .map((node) => node.textContent);
+    expect(labels).toEqual(['Tailnet', 'SSM 경유']);
+  });
+
+  it('점프 호스트를 거치면 Jump Host 행을 보여준다', () => {
+    const jump = makeSshHost();
+    const target = {
+      ...makeSshHost(),
+      id: 'h-target',
+      label: 'app',
+      jumpHostIds: [jump.id],
+    } as HostRecord;
+
+    renderPanel(target, 'overview', [target, jump]);
+
+    expect(rowValue('Jump Host')).toBe('linuxbox');
+  });
+
+  // 다단 ProxyJump. 순서가 곧 경로이므로(첫 홉 = 직접 연결 … 마지막 = 대상 바로 앞) 뒤섞이면
+  // 안 되고, 라벨도 개수에 따라 갈린다.
+  it('점프 호스트가 여러 개면 순서대로 이어 붙이고 라벨을 복수로 쓴다', () => {
+    const hops = ['a', 'b', 'c'].map((suffix) => ({
+      ...makeSshHost(),
+      id: `h-${suffix}`,
+      label: `bastion-${suffix}`,
+    })) as HostRecord[];
+    const target = {
+      ...makeSshHost(),
+      id: 'h-target',
+      label: 'app',
+      jumpHostIds: hops.map((hop) => hop.id),
+    } as HostRecord;
+
+    renderPanel(target, 'overview', [target, ...hops]);
+
+    expect(screen.queryByText('Jump Host')).toBeNull();
+    // 칩 사이의 화살표까지 한 줄로 읽힌다 — 순서가 뒤집히면 이 문자열이 달라진다.
+    expect(rowValue('Jump Hosts')).toBe('bastion-a→bastion-b→bastion-c');
+  });
+
+  // 지워진 홉에 id 를 노출하면 사용자에게 아무 뜻도 없는 문자열이 남는다. VNC 터널 행과 같은
+  // 상황이므로 같은 문구를 쓴다.
+  it('점프 호스트가 지워졌으면 id 대신 그 사실을 적는다', () => {
+    const alive = { ...makeSshHost(), id: 'h-a', label: 'bastion-a' } as HostRecord;
+    const target = {
+      ...makeSshHost(),
+      id: 'h-target',
+      label: 'app',
+      jumpHostIds: ['h-a', 'h-gone'],
+    } as HostRecord;
+
+    renderPanel(target, 'overview', [target, alive]);
+
+    const route = rowValue('Jump Hosts');
+    expect(route).toContain('삭제된 SSH 호스트');
+    expect(route).not.toContain('h-gone');
+  });
+
+  it('경유하는 것이 없으면 행을 넣지 않는다', () => {
+    renderPanel(makeSshHost(), 'overview');
+
+    expect(screen.queryByText('Jump Host')).toBeNull();
+    expect(screen.queryByText('Tailnet')).toBeNull();
   });
 });

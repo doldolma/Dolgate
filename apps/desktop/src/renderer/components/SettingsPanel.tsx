@@ -72,6 +72,8 @@ interface SettingsPanelProps {
   onSavedCredentialsSearchQueryChange: (query: string) => void;
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
   onRemoveKnownHost: (id: string) => Promise<void>;
+  /** RDP 서버 인증서 신뢰 해제. 신뢰 목록이 SSH 키만 다루던 것을 메꾼다. */
+  onRevokeRdpCertificate: (hostId: string) => Promise<void>;
   onRemoveSecret: (secretRef: string) => Promise<void>;
   onEditSecret: (secretRef: string) => void;
   onGenerateSshKey: (input: SshKeyGenerateInput) => Promise<SshKeyMaterialResult>;
@@ -256,6 +258,7 @@ export function SettingsPanel({
   onSavedCredentialsSearchQueryChange,
   onUpdateSettings,
   onRemoveKnownHost,
+  onRevokeRdpCertificate,
   onRemoveSecret,
   onEditSecret,
   onGenerateSshKey,
@@ -1596,7 +1599,14 @@ export function SettingsPanel({
         </section>
       ) : null}
 
-      {activeSection === 'security' ? <KnownHostsPanel records={knownHosts} onRemove={onRemoveKnownHost} /> : null}
+      {activeSection === 'security' ? (
+        <KnownHostsPanel
+          records={knownHosts}
+          onRemove={onRemoveKnownHost}
+          hosts={hosts}
+          onRevokeRdpCertificate={onRevokeRdpCertificate}
+        />
+      ) : null}
 
       {activeSection === 'secrets' ? (
         <KeychainPanel
