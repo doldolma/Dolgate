@@ -266,6 +266,48 @@ jobs:
         working-directory: services/rdp-core
         run: cargo test -p ironrdp-rdpdr-native
 
+  vnc-core-test:
+    name: vnc-core test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        # 버전은 services/vnc-core/rust-toolchain.toml 이 정한다(rdp-core 와 같은 채널).
+        run: rustup show active-toolchain || rustup toolchain install
+        working-directory: services/vnc-core
+
+      # vnc-core 는 openssl 을 vendored 로 끌어와 OpenSSL 을 소스에서 빌드한다(VeNCrypt 의
+      # 익명 DH 때문에 rustls 로 대체할 수 없다 — Cargo.toml 주석 참조). 그래서 빌드에 perl 이
+      # 필요하다. ubuntu 러너에는 기본 포함이지만, 러너 이미지가 그것을 빼면 여기서 깨진다.
+      - name: Verify the OpenSSL build prerequisites
+        run: perl --version
+
+      - name: Cache cargo build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            services/vnc-core/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-${{ hashFiles('services/vnc-core/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cargo-vnc-
+
+      # 이 잡이 없던 동안 vnc-core 의 테스트 100여 개가 CI 에서 한 번도 돌지 않았다 —
+      # rdp-core 잡만 있어서 Rust 는 검증되는 것처럼 보였다.
+      - name: Run vnc-core tests
+        working-directory: services/vnc-core
+        run: cargo test
+
+      # core-framing 은 두 사이드카가 공유하는 크레이트인데, 의존하는 쪽에서 cargo test 를
+      # 돌려도 그 크레이트의 테스트는 실행되지 않는다(패키지가 다르다). 잡을 따로 두기엔 작아서
+      # 여기 얹는다 — vnc-core 의 path 의존이라 이미 컴파일돼 있다.
+      - name: Run core-framing tests
+        working-directory: services/core-framing
+        run: cargo test
+
   desktop-test:
     name: desktop test
     runs-on: ubuntu-latest

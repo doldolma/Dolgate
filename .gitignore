@@ -17,6 +17,9 @@ services/ssh-core/bin
 services/ssh-core/build
 services/rdp-core/target
 services/vnc-core/target
+# core-framing 은 두 사이드카의 path 의존이라 의존하는 쪽에서 빌드하면 target 이 생기지 않는데,
+# 이 크레이트의 테스트(#[test])는 여기서 직접 돌려야만 실행된다 — 그때 자기 target 이 생긴다.
+services/core-framing/target
 # 벤더링한 크레이트를 그 디렉터리에서 직접 빌드·테스트하면 각자 target 이 생긴다(합쳐서 GB 단위).
 services/rdp-core/vendor/*/target
 apps/mobile/ios/GoSshEngine/SshCoreEngine.xcframework
