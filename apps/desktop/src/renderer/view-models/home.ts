@@ -57,6 +57,7 @@ export function useHomeViewModel() {
   const stopPortForward = useAppStore((state) => state.stopPortForward);
   const handleCoreEvent = useAppStore((state) => state.handleCoreEvent);
   const handleRdpEvent = useAppStore((state) => state.handleRdpEvent);
+  const handleVncEvent = useAppStore((state) => state.handleVncEvent);
   const handlePortForwardEvent = useAppStore((state) => state.handlePortForwardEvent);
   const handleActivityLogsChanged = useAppStore(
     (state) => state.handleActivityLogsChanged,
@@ -111,6 +112,7 @@ export function useHomeViewModel() {
     stopPortForward,
     handleCoreEvent,
     handleRdpEvent,
+    handleVncEvent,
     handlePortForwardEvent,
     handleActivityLogsChanged,
     openHostInNewWindow,

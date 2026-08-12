@@ -1,3 +1,4 @@
+import { isSplittablePaneKind } from "@shared";
 import type { TabCommandPayload, TerminalTab } from "@shared";
 import type { SliceDeps } from "../services/context";
 import type {
@@ -213,6 +214,12 @@ function isTmuxWindowRecentlyClosed(
   return true;
 }
 
+/** 이 세션 탭을 분할 화면에 넣을 수 있는가. 판정은 shared-core 한 곳에 있다. */
+function isSplittableSession(tabs: TerminalTab[], sessionId: string): boolean {
+  const tab = tabs.find((item) => item.sessionId === sessionId);
+  return isSplittablePaneKind(tab?.paneKind);
+}
+
 export function createSessionSlice(deps: SliceDeps): SessionSlice {
   const { api, set, get } = deps;
   const services = createSessionServices(deps);
@@ -233,6 +240,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     startSessionConnectionFlow,
     startRdpConnectionFlow,
     retryRdpConnection,
+    retryVncConnection,
     promptForMissingUsername,
     startLocalTerminalFlow,
   } = services;
@@ -692,6 +700,9 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
           },
     retryRdpConnection: async (sessionId) => {
             await retryRdpConnection(set, get, sessionId);
+          },
+    retryVncConnection: async (sessionId) => {
+            await retryVncConnection(set, get, sessionId);
           },
     retrySessionConnection: async (sessionId, secrets) => {
             const currentTab = get().tabs.find(
@@ -1353,12 +1364,23 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
               return false;
             }
             const state = get();
+            // 원격 화면(RDP·VNC)은 분할에 넣지 않는다. UI 도 안내선을 막지만(SessionShell) 그것만
+            // 믿을 수는 없다 — 이 액션은 단축키·다른 드롭 경로에서도 불린다.
+            if (!isSplittableSession(state.tabs, sessionId)) {
+              return false;
+            }
             const adjacent = resolveAdjacentTarget(
               state.tabStrip,
               state.workspaces,
               sessionId,
             );
             if (!adjacent) {
+              return false;
+            }
+            if (
+              adjacent.kind === "session" &&
+              !isSplittableSession(state.tabs, adjacent.sessionId)
+            ) {
               return false;
             }
     
@@ -1463,6 +1485,11 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
             targetSessionId,
           ) => {
             const state = get();
+            // 이미 있는 분할 화면으로 끌어 넣는 경로다. 여기도 막지 않으면 원격 화면이 분할 안에
+            // 들어간다.
+            if (!isSplittableSession(state.tabs, sessionId)) {
+              return false;
+            }
             const workspace = state.workspaces.find(
               (item) => item.id === workspaceId,
             );

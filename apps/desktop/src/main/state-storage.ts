@@ -1020,6 +1020,12 @@ export function normalizeHostRecord(value: unknown): HostRecord | null {
         typeof value.sshTunnelHostId === 'string' && value.sshTunnelHostId.trim()
           ? value.sshTunnelHostId.trim()
           : null,
+      // 모르는 값은 무손실(null)로 떨어진다. 여기서 빠뜨리면 화질 설정이 앱을 다시 켜는 순간
+      // 사라진다(위 주석의 그 증상이다).
+      imageQuality:
+        value.imageQuality === 'balanced' || value.imageQuality === 'fast'
+          ? value.imageQuality
+          : null,
       favorite: value.favorite === true ? true : null,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : nowIso(),
       updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso()

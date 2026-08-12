@@ -80,7 +80,7 @@ export type SyncBootstrapStatus = 'idle' | 'syncing' | 'ready' | 'paused' | 'err
 export type AwsProfilesServerSupport = 'unknown' | 'supported' | 'unsupported';
 export type TermiusProbeStatus = 'ready' | 'unsupported' | 'not-installed' | 'no-data' | 'error';
 export type AwsSshMetadataStatus = 'idle' | 'loading' | 'ready' | 'error';
-export type SessionConnectionKind = 'local' | 'ssh' | 'mosh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial' | 'rdp';
+export type SessionConnectionKind = 'local' | 'ssh' | 'mosh' | 'aws-ssm' | 'warpgate' | 'aws-ecs-exec' | 'serial' | 'rdp' | 'vnc';
 export type SessionLifecycleStatus = 'connected' | 'closed' | 'error';
 export type PortForwardLifecycleStatus = 'running' | 'closed' | 'error';
 export type SftpLifecycleStatus = 'connecting' | 'connected' | 'closed' | 'error';
@@ -408,6 +408,9 @@ export interface RdpAwsSsmTarget {
  * RDP 와 겹치는 필드(secretRef·tailnetId)는 이름과 뜻을 그대로 맞춘다 — 두 종류를 함께 다루는
  * 화면·정규화 코드가 같은 이름을 기대한다.
  */
+/** VNC 화면 압축 화질. [[VncHostRecord.imageQuality]] 참고. */
+export type VncImageQuality = 'lossless' | 'balanced' | 'fast';
+
 export interface VncHostRecord extends HostBaseRecord {
   kind: 'vnc';
   hostname: string;
@@ -444,6 +447,18 @@ export interface VncHostRecord extends HostBaseRecord {
    * 경로이므로 별도 kind 를 만들지 않는다.
    */
   sshTunnelHostId?: string | null;
+  /**
+   * 화면 압축 화질. 없거나 null 이면 무손실이다.
+   *
+   * - `lossless` — JPEG 를 쓰지 않는다. 글자가 선명하다.
+   * - `balanced` — 사진 영역을 JPEG 로 보낸다(품질 8). 대역폭이 크게 준다.
+   * - `fast` — 가장 아낀다(품질 4). 사진이 눈에 보이게 뭉개진다.
+   *
+   * **기본을 무손실로 두는 이유**: 서버는 우리가 품질을 선언할 때만 JPEG 를 쓴다(TigerVNC 실측 —
+   * 선언이 없으면 JPEG 사각형이 0개, balanced 로는 81개). 터미널·문서를 보는 세션에서 글자가
+   * 뭉개지면 안 되므로 켜는 것은 사용자가 고를 일이다.
+   */
+  imageQuality?: VncImageQuality | null;
 }
 
 export interface RdpHostDraft extends HostBaseDraft {
@@ -610,6 +625,8 @@ export interface VncHostDraft extends HostBaseDraft {
   tailnetId?: string | null;
   /** 이 SSH 호스트를 거쳐 붙는다. [[VncHostRecord]] 참고. */
   sshTunnelHostId?: string | null;
+  /** 화면 압축 화질. [[VncHostRecord.imageQuality]] 참고. */
+  imageQuality?: VncImageQuality | null;
 }
 
 export type HostRecord =
@@ -630,6 +647,21 @@ export type HostDraft =
   | SerialHostDraft
   | RdpHostDraft
   | VncHostDraft;
+
+/**
+ * 이 탭을 드래그-분할 화면에 넣을 수 있는가.
+ *
+ * **원격 화면(RDP·VNC)은 넣지 않는다.** 프레임버퍼 하나를 반쪽 pane 에 넣으면 글자를 읽을 수 없고,
+ * 창 크기에 맞춰 원격 해상도를 따라가는 기능(자동 리사이즈)이 분할·복원마다 원격 배치를 다시 잡는다.
+ * RDP 는 보조 모니터 창까지 있어 어느 창이 어느 pane 인지도 흐려진다.
+ *
+ * tmux 그룹 탭은 자체 pane 레이아웃을 갖고 있어 이미 별도 경로로 걸러진다(appShellUtils 참고).
+ */
+export function isSplittablePaneKind(
+  paneKind: 'terminal' | 'rdp' | 'vnc' | undefined | null,
+): boolean {
+  return paneKind !== 'rdp' && paneKind !== 'vnc';
+}
 
 export function isSshHostRecord(host: HostRecord): host is SshHostRecord {
   return host.kind === 'ssh';
@@ -3087,6 +3119,15 @@ export type TerminalConnectionStage =
   | 'retrying-session'
   | 'reconnecting'
   | 'connecting'
+  /**
+   * 경유할 SSH 호스트에 붙는 중. VNC 가 SSH 터널로 갈 때 지나는 첫 관문이다.
+   *
+   * 이 두 단계는 세션 자신의 프로토콜이 아니라 그 앞의 통로를 말한다 — 거기서 막히는 일이 흔하고,
+   * 구분하지 않으면 "연결 실패" 가 원격 탓인지 통로 탓인지 알 수 없다.
+   */
+  | 'ssh-tunnel-gateway'
+  /** 터널이 열렸다. 이제 그 로컬 주소로 원격 프로토콜을 협상한다. */
+  | 'ssh-tunnel-open'
   | 'awaiting-credentials'
   | 'waiting-interactive-auth'
   | 'waiting-shell';

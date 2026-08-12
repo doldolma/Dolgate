@@ -691,7 +691,21 @@
       "viewers": "{{count}} watching",
       "windows": "Windows",
       "windowCount": "{{count}}",
-      "pane": "Pane {{index}}"
+      "pane": "Pane {{index}}",
+      "capabilities": "Extensions",
+      "clipboardAscii": "ASCII only (server has no UTF-8)",
+      "clipboardUtf8": "UTF-8",
+      "capabilityCursor": "Cursor",
+      "capabilityResize": "Auto resize",
+      "capabilityContinuous": "Continuous updates",
+      "capabilityNone": "none",
+      "encoding": "Encoding",
+      "capabilityScancode": "Scancode keys",
+      "quality": "Image quality",
+      "qualityBalanced": "Balanced (JPEG)",
+      "qualityFast": "Speed (JPEG)",
+      "viewOnly": "View only",
+      "screenShare": "Screen sharing"
     },
     "update": {
       "checking": "Checking GitHub Releases for a new version.",
@@ -1425,7 +1439,6 @@
     },
     "vnc": {
       "credential": "VNC password",
-      "passwordHint": "VNC uses only the first 8 characters of the password (protocol limit).",
       "shared": {
         "label": "Share the screen",
         "description": "When off, the server disconnects clients that are already attached."
@@ -1433,6 +1446,28 @@
       "viewOnly": {
         "label": "View only",
         "description": "Show the screen without sending mouse or keyboard input."
+      },
+      "account": "Account (optional)",
+      "accountHint": "Only needed when the server uses account-based auth (VeNCrypt Plain). Usually left blank.",
+      "accountNeedsPassword": "An account needs a password as well.",
+      "quality": {
+        "label": "Image quality",
+        "lossless": "Lossless (default)",
+        "balanced": "Balanced — JPEG for photos",
+        "fast": "Speed — photos look blurry",
+        "hint": "Anything but lossless sends photo areas as JPEG: much less bandwidth, blurrier text. Change it only on slow links."
+      },
+      "tunnel": {
+        "label": "SSH tunnel",
+        "none": "Do not use",
+        "hint": "Reaches the server through a saved SSH host. Needed when VNC listens on localhost only (the usual QEMU/libvirt setup).",
+        "empty": "Add an SSH host first to use one as a tunnel.",
+        "missing": "The SSH host saved here is gone. Pick another one, or turn the tunnel off.",
+        "missingOption": "Deleted SSH host",
+        "lockedByTailnet": "Turn the tailnet off to use a tunnel — only one route is used.",
+        "tailnetLocked": "The tunnel already follows its SSH host's tailnet setting.",
+        "targetLabel": "Target address (as seen from the SSH host)",
+        "targetHint": "Use 127.0.0.1 when the SSH host runs the VNC server itself; otherwise the address of the machine behind it."
       }
     },
     "title": "Host Editor",
@@ -2055,7 +2090,8 @@
       "password": "Enter a password.",
       "privateKey": "Enter the private key contents or import a file.",
       "certificate": "Enter the SSH certificate contents or import a file.",
-      "detachHost": "Choose the host to detach."
+      "detachHost": "Choose the host to detach.",
+      "account": "Enter an account."
     },
     "title": "Edit saved credential",
     "intro": "Edits the whole saved credential <label>{{label}}</label>.",
@@ -2074,7 +2110,12 @@
     "envHint": "Injected into the shell on connect. Values are encrypted along with the password when stored and synced.",
     "saveFailed": "An error occurred while updating the saved credential.",
     "submitShared": "Save shared credential",
-    "submitDetach": "Create a host-only credential"
+    "submitDetach": "Create a host-only credential",
+    "account": "Account",
+    "accountPlaceholderRdp": "Administrator",
+    "accountPlaceholderVnc": "Only if the server uses account auth (optional)",
+    "domain": "Domain",
+    "domainPlaceholder": "WORKGROUP (optional)"
   },
   "containersStore": {
     "openingShell": "Opening the container shell for {{label}}.",
@@ -2845,9 +2886,9 @@
     "killTitle": "Ends the tmux session on the server (kills the processes — not recoverable)."
   },
   "hostBrowserEmpty": {
-    "noHostsHint": "Add your first host with New Host. Pick SSH, Serial, or RDP at the top of the form.",
+    "noHostsHint": "Add your first host with New Host. Pick SSH, Serial, RDP, or VNC at the top of the form.",
     "searchHint": "Clear the search or look for a different host name.",
-    "addHint": "Add a host with New Host. Pick SSH, Serial, or RDP at the top of the form.",
+    "addHint": "Add a host with New Host. Pick SSH, Serial, RDP, or VNC at the top of the form.",
     "noHosts": "No hosts registered yet.",
     "noResults": "No search results.",
     "noHostsHere": "No hosts here yet.",
@@ -3366,7 +3407,9 @@
     "tailscaleTargetRelay": "Via relay ({{relay}})",
     "tailscaleTargetNoPath": "Neither a direct connection nor a relay is up.",
     "tailscaleTargetMissing": "That device is not on this Tailscale network.",
-    "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}"
+    "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}",
+    "tunnelGateway": "SSH tunnel via {{label}}",
+    "tunnelOpen": "Tunnel to the VNC port"
   },
   "rdp": {
     "overlay": {
@@ -3380,5 +3423,21 @@
     "retry": "Retry",
     "reload": "Reload",
     "hostRow": "Can't show this host — {{label}}"
+  },
+  "hostDrawer": {
+    "kindNeedsServerUpdate": "Your sync server does not support {{kind}} hosts yet. Update the server to enable it."
+  },
+  "vnc": {
+    "clipboardLossy": "This server only supports an ASCII clipboard — {{count}} character(s) became ?",
+    "overlay": {
+      "failedTitle": "VNC connection failed",
+      "connectingTitle": "Connecting to VNC",
+      "tunnelUnknown": "the SSH host in the settings"
+    },
+    "progress": {
+      "tunnelGateway": "Connecting to the SSH host {{label}} to open the tunnel.",
+      "tunnelOpen": "Tunnel open. Reaching {{target}} through it.",
+      "handshake": "Negotiating the VNC session with {{target}}."
+    }
   }
 }

@@ -790,9 +790,9 @@ describe('HostBrowser helpers', () => {
   });
 
   it('points the empty-state copy at the New Host form instead of an import item', () => {
-    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.');
+    expect(getHostBrowserEmptyCalloutMessage(0, '')).toBe('New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP·VNC를 고를 수 있습니다.');
     expect(getHostBrowserEmptyCalloutMessage(2, 'nas')).toBe('검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.');
-    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.');
+    expect(getHostBrowserEmptyCalloutMessage(2, '')).toBe('New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP·VNC를 고를 수 있습니다.');
   });
 
   it('prioritizes New Host while routing the Import primary action to OpenSSH import', () => {

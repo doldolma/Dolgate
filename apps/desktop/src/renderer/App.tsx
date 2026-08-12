@@ -366,6 +366,7 @@ export function App() {
       <DesktopEventBridge
         onCoreEvent={homeViewModel.handleCoreEvent}
         onRdpEvent={homeViewModel.handleRdpEvent}
+        onVncEvent={homeViewModel.handleVncEvent}
         onSftpConnectionProgress={sftpViewModel.handleSftpConnectionProgressEvent}
         onContainerConnectionProgress={
           containersViewModel.handleContainerConnectionProgressEvent

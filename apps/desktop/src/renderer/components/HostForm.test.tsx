@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRef, type RefObject } from 'react';
-import type { AwsEc2HostRecord, SecretMetadataRecord, SnippetRecord, SshHostRecord } from '@shared';
+import type { AwsEc2HostRecord, HostRecord, SecretMetadataRecord, SnippetRecord, SshHostRecord } from '@shared';
 import { HostForm, getJumpHostCandidates, type HostFormHandle } from './HostForm';
 
 // 편집 폼은 자동저장하지 않으므로, 명시적 저장(submit)을 ref로 트리거한다.
@@ -103,6 +103,34 @@ function createHost(overrides: Partial<SshHostRecord> = {}): SshHostRecord {
     updatedAt: '2026-03-25T00:00:00.000Z',
     ...overrides
   };
+}
+
+/**
+ * 검색 가능한 목록에서 하나 고른다.
+ *
+ * 평범한 select 가 아니라 버튼 + listbox 라 `change` 이벤트가 없다 — 열고 골라야 한다(점프 호스트
+ * 목록과 같은 컴포넌트다).
+ */
+function pickFromSearchableSelect(ariaLabel: string, optionName: string) {
+  fireEvent.click(screen.getByRole('button', { name: ariaLabel }));
+  fireEvent.click(screen.getByRole('option', { name: new RegExp(optionName) }));
+}
+
+function createVncHost(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'vnc-1',
+    kind: 'vnc',
+    label: 'Lab',
+    hostname: '10.0.0.6',
+    port: 5900,
+    secretRef: null,
+    groupName: null,
+    tags: [],
+    terminalThemeId: null,
+    createdAt: '2026-03-25T00:00:00.000Z',
+    updatedAt: '2026-03-25T00:00:00.000Z',
+    ...overrides,
+  } as unknown as HostRecord;
 }
 
 function createAwsHost(
@@ -791,6 +819,31 @@ describe('HostForm', () => {
     expect(detailsSection.compareDocumentPosition(preferencesSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  // 그룹·태그는 Details 카드 안에만 있어야 한다. 폼 맨 위에도 그려지면(카드 밖) 같은 입력이 두 벌
+  // 보이고, 위쪽 것을 고쳐도 아래쪽이 그대로여서 어느 쪽이 저장되는지 알 수 없다. RDP·VNC 를 추가할
+  // 때 각각 한 번씩 이렇게 새어 나왔다.
+  it.each(['ssh', 'serial', 'rdp', 'vnc'] as const)(
+    '%s 폼은 그룹·태그를 Details 안에 한 번만 그린다',
+    (kind) => {
+      render(
+        <HostForm
+          host={null}
+          createKind={kind}
+          keychainEntries={reusableKeychainEntries}
+          groupOptions={groupOptions}
+          onSubmit={vi.fn().mockResolvedValue(undefined)}
+        />,
+      );
+
+      expect(screen.getAllByLabelText('그룹')).toHaveLength(1);
+      expect(screen.getAllByLabelText('태그')).toHaveLength(1);
+
+      const detailsSection = screen.getByTestId('hostform-section-details');
+      expect(within(detailsSection).getByLabelText('그룹')).toBeInTheDocument();
+      expect(within(detailsSection).getByLabelText('태그')).toBeInTheDocument();
+    },
+  );
+
   it('places auth credentials before saved secret and terminal theme in the SSH form', () => {
     render(
       <HostForm
@@ -1036,6 +1089,41 @@ describe('HostForm RDP credential selection', () => {
     expect(select.value).toBe('existing:secret:rdp');
   });
 
+  // RDP 와 같은 증상이 VNC 에서도 났다. 같은 헬퍼를 쓰는지 여기서 본다 — 한쪽만 고치면 반복된다.
+  it('VNC 도 목록에 없는 저장된 자격증명을 그대로 보여준다', () => {
+    render(
+      <HostForm
+        host={
+          {
+            ...createRdpHost(),
+            id: 'vnc-1',
+            kind: 'vnc',
+            port: 5900,
+            secretRef: 'secret:vnc',
+          } as never
+        }
+        keychainEntries={[
+          {
+            // kind 가 'vnc' 가 아니라 vncReusableEntries 필터에서 빠진다.
+            secretRef: 'secret:vnc',
+            label: 'VNC 화면',
+            hasPassword: true,
+            hasPassphrase: false,
+            hasManagedPrivateKey: false,
+            hasCertificate: false,
+            linkedHostCount: 1,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ]}
+        groupOptions={groupOptions}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    const select = screen.getByLabelText('VNC 비밀번호') as HTMLSelectElement;
+    expect(select.value).toBe('existing:secret:vnc');
+  });
+
   it('saves a newly entered account and password', async () => {
     // 자격증명이 없다고 저장을 막아 두면 버튼을 눌러도 아무 일이 없는데 이유를 알 수 없다.
     // 계정은 호스트 레코드가 아니라 자격증명(secrets)으로 나가야 한다.
@@ -1067,6 +1155,430 @@ describe('HostForm RDP credential selection', () => {
         domain: 'CORP',
         password: 'pw',
       }),
+    );
+  });
+
+  // 생성 경로가 SSH 만 자격증명을 다루던 탓에 RDP 도 같이 새고 있었다. 종류별로 갈리지 않는지
+  // 여기서 함께 본다.
+  it('RDP 생성에서 입력한 비밀번호가 자격증명으로 나간다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="rdp"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '10.0.2.181' },
+    });
+    fireEvent.change(screen.getByLabelText('사용자 이름'), {
+      target: { value: 'Administrator' },
+    });
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'pw' } });
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'rdp' }),
+      expect.objectContaining({
+        kind: 'rdp',
+        username: 'Administrator',
+        password: 'pw',
+      }),
+    );
+  });
+
+  // 편집 저장은 진작 되고 있었지만 생성은 아니었다. 두 경로를 따로 본다.
+  it('VNC 생성에서 입력한 비밀번호가 자격증명으로 나간다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '192.168.0.10' },
+    });
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'secret12' } });
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc' }),
+      expect.objectContaining({ kind: 'vnc', password: 'secret12' }),
+    );
+  });
+
+  // 입력 순서가 결과를 바꾸면 안 된다. useCallback 의존성이 빠져 있으면 마지막으로 콜백이 다시
+  // 만들어진 시점의 값으로 굳는데, 그 증상이 정확히 "나중에 적은 칸만 저장되지 않는다" 다.
+  it('RDP 편집에서 계정을 비밀번호보다 나중에 적어도 저장된다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={createRdpHost({ secretRef: null }) as never}
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'pw' } });
+    fireEvent.change(screen.getByLabelText('사용자 이름'), {
+      target: { value: 'Administrator' },
+    });
+
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'rdp' }),
+      expect.objectContaining({ username: 'Administrator', password: 'pw' }),
+    );
+  });
+
+  // 화질은 기본이 무손실이어야 한다. 켜는 것은 사용자가 고를 일이고, 저장 경로가 값을 흘리면
+  // 느린 회선에서 그 설정이 아무 효과가 없다.
+  it('VNC 화질을 고르면 draft 에 실리고 무손실은 저장하지 않는다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '192.168.0.10' },
+    });
+    // 기본값은 무손실이다.
+    expect((screen.getByLabelText('화질') as HTMLSelectElement).value).toBe('lossless');
+
+    fireEvent.change(screen.getByLabelText('화질'), { target: { value: 'balanced' } });
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc', imageQuality: 'balanced' }),
+      undefined,
+    );
+
+    // 무손실로 되돌리면 null 로 나간다 — 기본값을 저장하지 않는 규칙이다.
+    onSubmit.mockClear();
+    fireEvent.change(screen.getByLabelText('화질'), { target: { value: 'lossless' } });
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ imageQuality: null }),
+      undefined,
+    );
+  });
+
+  // QEMU·libvirt 콘솔은 5900 을 localhost 에만 바인딩하는 것이 관행이라, 터널을 고를 수 없으면
+  // 그 서버에는 아예 닿지 못한다. 필드가 없어서 DB 를 직접 만지지 않으면 켤 수 없던 기능이다.
+  it('VNC SSH 터널을 고르면 draft 에 실리고 대상 주소가 채워진다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        jumpHostOptions={[
+          { value: 'ssh-1', label: 'bastion', description: 'ops@bastion.example:22' },
+        ]}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    pickFromSearchableSelect('SSH 터널', 'bastion');
+
+    // 터널 뒤의 VNC 서버는 대개 경유 서버 자신이다. 비워 두면 required 에 걸려 저장이 막힌다.
+    expect((screen.getByLabelText('대상 주소(경유 서버에서 본)') as HTMLInputElement).value).toBe(
+      '127.0.0.1',
+    );
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'vnc',
+        sshTunnelHostId: 'ssh-1',
+        hostname: '127.0.0.1',
+      }),
+      undefined,
+    );
+  });
+
+  // 이미 적어 둔 주소는 경유 서버 뒤의 다른 기기를 가리킬 수 있다. 덮어쓰면 그 구성을 못 쓴다.
+  it('VNC 터널을 켤 때 적어 둔 대상 주소는 덮지 않는다', () => {
+    render(
+      <HostForm
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        jumpHostOptions={[{ value: 'ssh-1', label: 'bastion' }]}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '10.0.0.9' },
+    });
+    pickFromSearchableSelect('SSH 터널', 'bastion');
+
+    expect((screen.getByLabelText('대상 주소(경유 서버에서 본)') as HTMLInputElement).value).toBe(
+      '10.0.0.9',
+    );
+  });
+
+  // 접속 경로(ipc/vnc.ts 의 openForward)가 tailnetId 를 먼저 보고 끝내므로, 둘 다 정하면 터널이
+  // 조용히 무시된다. 배타로 두어도 잃는 것이 없다 — 터널은 그 SSH 호스트의 tailnet 설정을 탄다.
+  it('VNC 터널과 tailnet 은 서로를 잠근다', () => {
+    render(
+      <HostForm
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        jumpHostOptions={[{ value: 'ssh-1', label: 'bastion' }]}
+        tailnetOptions={[{ id: 'net-corp', label: 'corp' }]}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const tunnelTrigger = () =>
+      screen.getByRole('button', { name: 'SSH 터널' }) as HTMLButtonElement;
+    // tailnet 은 평범한 select 다(등록된 tailnet 은 몇 개뿐이라 검색이 필요 없다).
+    const tailnet = screen
+      .getByRole('option', { name: 'corp' })
+      .closest('select') as HTMLSelectElement;
+
+    // 처음에는 둘 다 고를 수 있다.
+    expect(tunnelTrigger().disabled).toBe(false);
+    expect(tailnet.disabled).toBe(false);
+
+    pickFromSearchableSelect('SSH 터널', 'bastion');
+    expect(tailnet.disabled).toBe(true);
+    expect(screen.getByText('터널이 그 SSH 호스트의 tailnet 설정을 그대로 탑니다.')).toBeTruthy();
+
+    // 터널을 끄면 tailnet 이 다시 열리고, tailnet 을 고르면 이번엔 터널이 잠긴다.
+    pickFromSearchableSelect('SSH 터널', '쓰지 않음');
+    expect(tailnet.disabled).toBe(false);
+    fireEvent.change(tailnet, { target: { value: 'net-corp' } });
+    expect(tunnelTrigger().disabled).toBe(true);
+  });
+
+  // 가리키던 SSH 호스트를 지웠을 수 있다. 목록에서 빼면 "안 쓰는 것" 으로 보여 조용히 직접 접속으로
+  // 바뀐다 — 그대로 남겨 두고 경고해야 사용자가 고칠 수 있다.
+  it('지워진 터널 호스트를 그대로 보여주고 경고한다', () => {
+    render(
+      <HostForm
+        host={createVncHost({ sshTunnelHostId: 'ssh-gone' })}
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        jumpHostOptions={[{ value: 'ssh-1', label: 'bastion' }]}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // 트리거에 그 항목이 그대로 보인다(값이 살아 있다는 증거다).
+    expect(screen.getByRole('button', { name: 'SSH 터널' }).textContent).toContain(
+      '삭제된 SSH 호스트',
+    );
+    expect(
+      screen.getByText('여기 저장된 SSH 호스트가 없습니다. 다시 고르거나 터널을 끄세요.'),
+    ).toBeTruthy();
+  });
+
+  // 계정만 넣으면 자격증명이 만들어지지 않는다. 그것을 말해 주지 않으면 입력한 계정이 조용히
+  // 사라지고 저장은 성공한 것처럼 보인다(실제로 그렇게 겪었다).
+  it('계정만 넣고 저장하면 이유를 보여주고 막는다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '192.168.0.10' },
+    });
+    fireEvent.change(screen.getByLabelText('계정 (선택)'), {
+      target: { value: 'operator' },
+    });
+
+    expect(screen.getByText('계정을 쓰려면 비밀번호도 함께 입력해야 합니다.')).toBeTruthy();
+    expect((screen.getByLabelText('비밀번호') as HTMLInputElement).required).toBe(true);
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // 비밀번호를 넣으면 막지 않는다.
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'pw' } });
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc' }),
+      expect.objectContaining({ username: 'operator', password: 'pw' }),
+    );
+  });
+
+  // 계정은 VeNCrypt Plain 계열에서만 쓰인다. 폼이 값을 흘리면 8자 넘는 비밀번호를 쓰는 서버에
+  // 붙을 방법이 없어진다.
+  it('VNC 계정을 자격증명에 함께 싣는다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '192.168.0.10' },
+    });
+    fireEvent.change(screen.getByLabelText('비밀번호'), {
+      target: { value: '여덟자넘는비밀번호' },
+    });
+    fireEvent.change(screen.getByLabelText('계정 (선택)'), {
+      target: { value: 'operator' },
+    });
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc' }),
+      expect.objectContaining({
+        kind: 'vnc',
+        username: 'operator',
+        password: '여덟자넘는비밀번호',
+      }),
+    );
+  });
+
+  // 기존 자격증명을 고르면 그 ref 가 draft 에 실려야 한다. 예전에는 셀렉트 상태만 바뀌고 draft 는
+  // 그대로여서, 저장한 뒤 편집 화면에 들어가면 아무것도 선택돼 있지 않았다.
+  it('VNC 생성에서 고른 기존 자격증명이 draft 에 실린다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={null}
+        createKind="vnc"
+        keychainEntries={[
+          {
+            secretRef: 'secret:vnc-1',
+            label: 'Lab VNC',
+            kind: 'vnc',
+            hasPassword: true,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          } as never,
+        ]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('호스트 이름'), {
+      target: { value: '192.168.0.10' },
+    });
+    fireEvent.change(screen.getByLabelText('VNC 비밀번호'), {
+      target: { value: 'existing:secret:vnc-1' },
+    });
+
+    await act(async () => {
+      await ref.current?.submitCreate();
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc', secretRef: 'secret:vnc-1' }),
+      // 기존 것을 골랐으므로 새 자격증명을 만들지 않는다.
+      undefined,
+    );
+  });
+
+  // VNC 도 같은 경로를 타야 한다. 이 분기가 RDP 만 보고 있어서 VNC 비밀번호는 폼을 벗어나지
+  // 못했다 — 호스트는 저장되고 자격증명만 조용히 사라졌다.
+  it('VNC 비밀번호를 자격증명으로 넘긴다', async () => {
+    const ref = createRef<HostFormHandle>();
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <HostForm
+        ref={ref}
+        host={
+          {
+            id: 'vnc-1',
+            kind: 'vnc' as const,
+            label: 'Lab VNC',
+            tags: [],
+            hostname: '192.168.0.10',
+            port: 5900,
+            secretRef: null,
+            groupName: null,
+            terminalThemeId: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          } as never
+        }
+        keychainEntries={[]}
+        groupOptions={groupOptions}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'secret12' } });
+
+    await saveEdit(ref);
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'vnc' }),
+      // 종류가 'rdp' 로 굳어 있으면 VNC 자격증명이 RDP 목록에 섞인다.
+      expect.objectContaining({ kind: 'vnc', password: 'secret12' }),
     );
   });
 });

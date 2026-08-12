@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DesktopWindowState, HostRecord, RdpMonitorSelection, SessionConnectionKind, TailnetPeer, TailnetStatus, TerminalTab, UpdateState } from '@shared';
-import { describeRdpDrives, isRdpHostRecord, isSshHostRecord } from '@shared';
+import { describeRdpDrives, isRdpHostRecord, isSshHostRecord, isVncHostRecord } from '@shared';
 import type {
   DynamicTabStripItem,
   TmuxSessionGroup,
@@ -19,6 +19,7 @@ import {
   getSessionCwd,
   getSessionLastCommandAt,
 } from '../lib/terminal-cwd-registry';
+import { getVncCapabilities } from '../lib/vnc-capability-registry';
 import { listWorkspaceSessionIds } from './terminal-workspace/terminalWorkspaceLayout';
 import { Badge, Button, IconButton, TabButton, Tabs, Tooltip } from '../ui';
 import { ArrowUpRight, Bell, Columns2, Container, Download, Folder, Home, Plus, RefreshCw, Rows2, X } from '../ui/icons';
@@ -213,6 +214,8 @@ function connectionKindLabel(kind: SessionConnectionKind): string {
       return t('titleBar.kind.serial');
     case 'rdp':
       return 'RDP';
+    case 'vnc':
+      return 'VNC';
     default:
       return kind;
   }
@@ -245,6 +248,8 @@ function deriveSessionConnectionKind(
       return 'aws-ssm';
     case 'rdp':
       return 'rdp';
+    case 'vnc':
+      return 'vnc';
     case 'ssh':
       return host.useMosh || tab.moshState != null ? 'mosh' : 'ssh';
     default:
@@ -260,6 +265,7 @@ function formatHostTarget(host: HostRecord): string | null {
     // 계정은 자격증명에만 있어 여기선 모른다 — 세션 탭 hover 는 접속 응답에 실려 온
     // rdpUsername 으로 user@host 를 따로 만든다(buildTabHoverInfo 참고).
     case 'rdp':
+    case 'vnc':
       return `${host.hostname}:${host.port}`;
     case 'warpgate-ssh':
       return `${host.warpgateUsername}@${host.warpgateSshHost}:${host.warpgateSshPort}`;
@@ -362,12 +368,31 @@ type TailnetPathInfo = {
 
 const TAILNET_PATH_POLL_MS = 5_000;
 
+/**
+ * 이 호스트가 경유하는 tailnet id. 세 종류가 같은 필드를 쓴다.
+ *
+ * 판정을 한 곳에 두는 이유는 이 조회가 두 단계(구독할 목록 + 개별 조회)이고, 한쪽만 고치면 상태는
+ * 받아 오는데 표시가 안 되거나 그 반대가 되기 때문이다.
+ */
+export function tailnetIdOf(host: HostRecord | undefined | null): string {
+  if (!host) {
+    return '';
+  }
+  if (isSshHostRecord(host) || isRdpHostRecord(host) || isVncHostRecord(host)) {
+    return host.tailnetId?.trim() ?? '';
+  }
+  return '';
+}
+
 function useTailnetPathLookup(tabs: TerminalTab[], hosts: HostRecord[]): TailnetPathLookup {
   const tailnetIdsInUse = useMemo(() => {
     const ids = new Set<string>();
     for (const tab of tabs) {
       const host = hosts.find((candidate) => candidate.id === tab.hostId);
-      const tailnetId = host && isSshHostRecord(host) ? host.tailnetId?.trim() : '';
+      // **SSH 만 보면 안 된다.** RDP·VNC 도 tailnet 을 경유해 붙는다(ipc/rdp·ipc/vnc 의
+      // openForward). 여기서 빼면 그 세션의 상태를 아예 조회하지 않아 hover 에 경로가 안 뜬다 —
+      // "느린데 릴레이 경유인지 직결인지" 를 그 줄에서만 알 수 있다.
+      const tailnetId = tailnetIdOf(host);
       if (tailnetId) {
         ids.add(tailnetId);
       }
@@ -420,11 +445,13 @@ function useTailnetPathLookup(tabs: TerminalTab[], hosts: HostRecord[]): Tailnet
 
   return useCallback(
     (host: HostRecord): TailnetPathInfo | null => {
-      if (!isSshHostRecord(host)) {
+      const tailnetId = tailnetIdOf(host);
+      if (!tailnetId) {
         return null;
       }
-      const tailnetId = host.tailnetId?.trim();
-      if (!tailnetId) {
+      // 주소도 종류별로 다른 필드에 있다. tailnet 을 쓰는 세 종류는 모두 hostname 이지만,
+      // 그 사실을 여기서 좁혀 두지 않으면 AWS 레코드까지 들어와 타입이 안 맞는다.
+      if (!isSshHostRecord(host) && !isRdpHostRecord(host) && !isVncHostRecord(host)) {
         return null;
       }
       const label = labels.get(tailnetId) ?? tailnetId;
@@ -573,7 +600,43 @@ function tailnetPathRow(info: TailnetPathInfo): TabHoverRow {
   };
 }
 
-function buildTabHoverInfo(
+/**
+ * VNC 세션에서 실제로 켜진 확장을 hover 행으로 만든다.
+ *
+ * **선언과 실제가 다르다.** 코어는 늘 같은 목록을 선언하지만 켜지는 것은 서버마다 갈리고, 그
+ * 결과를 볼 방법이 지금까지 없었다. 특히 클립보드는 여기서만 설명된다 — 서버가 UTF-8 확장을
+ * 지원하지 않으면 한글을 붙여넣을 수 없고 우리가 할 수 있는 일이 없다.
+ */
+export function vncCapabilityRows(sessionId: string): TabHoverRow[] {
+  const capabilities = getVncCapabilities(sessionId);
+  if (!capabilities) {
+    return [];
+  }
+  const rows: TabHoverRow[] = [];
+  const enabled = [
+    capabilities.cursor ? t('titleBar.hover.capabilityCursor') : null,
+    capabilities.desktopResize ? t('titleBar.hover.capabilityResize') : null,
+    capabilities.continuousUpdates ? t('titleBar.hover.capabilityContinuous') : null,
+    capabilities.qemuKeys ? t('titleBar.hover.capabilityScancode') : null,
+  ].filter((name): name is string => name !== null);
+  rows.push({
+    label: t('titleBar.hover.capabilities'),
+    value: enabled.length > 0 ? enabled.join(' · ') : t('titleBar.hover.capabilityNone'),
+  });
+  rows.push({
+    label: t('titleBar.hover.clipboard'),
+    value: capabilities.extendedClipboard
+      ? t('titleBar.hover.clipboardUtf8')
+      : t('titleBar.hover.clipboardAscii'),
+  });
+  // 인코딩은 대역폭을 설명한다 — Raw 만 오면 화면 한 장이 수 MB 다. 아직 픽셀을 못 받았으면 뺀다.
+  if (capabilities.encoding) {
+    rows.push({ label: t('titleBar.hover.encoding'), value: capabilities.encoding });
+  }
+  return rows;
+}
+
+export function buildTabHoverInfo(
   item: TitlebarDynamicItem,
   tabs: TerminalTab[],
   hosts: HostRecord[],
@@ -683,6 +746,49 @@ function buildTabHoverInfo(
       if (host.adminSession === true) {
         rows.push({ label: t('titleBar.hover.adminSession'), value: t('titleBar.hover.on') });
       }
+    }
+    // VNC 는 RDP 와 같은 순서로 읽는다 — **무엇이 보이는가(해상도)** 다음에 **내가 바꾼 설정**,
+    // 마지막에 **협상 결과**다. 설정은 기본값과 다를 때만 넣는다: 아무것도 안 바꾼 세션에서 행이
+    // 늘면 정작 다른 값이 묻힌다(RDP 블록과 같은 규칙).
+    if (tab && host && isVncHostRecord(host)) {
+      if (tab.rdpDesktopSize) {
+        rows.push({
+          label: t('titleBar.hover.resolution'),
+          value: `${tab.rdpDesktopSize.width}×${tab.rdpDesktopSize.height}`,
+        });
+      }
+      if (host.imageQuality === 'balanced' || host.imageQuality === 'fast') {
+        rows.push({
+          label: t('titleBar.hover.quality'),
+          value: t(
+            host.imageQuality === 'balanced'
+              ? 'titleBar.hover.qualityBalanced'
+              : 'titleBar.hover.qualityFast',
+          ),
+        });
+      }
+      if (host.viewOnly === true) {
+        rows.push({
+          label: t('titleBar.hover.viewOnly'),
+          value: t('titleBar.hover.on'),
+        });
+      }
+      if (host.shared === false) {
+        rows.push({
+          label: t('titleBar.hover.screenShare'),
+          value: t('titleBar.hover.off'),
+        });
+      }
+      // SSH 터널을 경유하면 그 호스트를 이름으로 보여준다 — 주소만 보면 왜 localhost 로 붙는지
+      // 알 수 없다(SSH 의 점프 행과 같은 뜻이라 같은 라벨을 쓴다).
+      if (host.sshTunnelHostId) {
+        const tunnel = hosts.find((candidate) => candidate.id === host.sshTunnelHostId);
+        rows.push({
+          label: t('titleBar.hover.jump'),
+          value: tunnel?.label ?? host.sshTunnelHostId,
+        });
+      }
+      rows.push(...vncCapabilityRows(item.sessionId));
     }
     // 지연 바로 위에 둔다. "느리다"를 판단할 때 이 둘을 같이 읽어야 한다 — 릴레이 경유면
     // 지연이 큰 이유가 설명되고, 직결인데도 크면 원인이 다른 데 있다.

@@ -4,9 +4,10 @@ import {
   type SshHostRecord,
   type VncInputEvent,
 } from "@shared";
-import { ipcMain } from "electron";
+import { clipboard, ipcMain } from "electron";
 
 import { ipcChannels } from "../../common/ipc-channels";
+import { t } from "../i18n";
 import { resolveLocalAgentEndpoint } from "./agent-endpoint";
 import type { VncManager } from "../vnc-manager";
 import type { MainIpcContext } from "./context";
@@ -65,6 +66,15 @@ export function registerVncIpcHandlers(
     }
 
     const sshHost = jumpTarget as SshHostRecord;
+    // 여기서부터 통로를 여는 데 시간이 걸린다 — tailnet 을 쓰는 경유 호스트면 노드를 세우고
+    // 로그인까지 기다린다. 말하지 않으면 화면은 그냥 멈춘 것으로 보인다.
+    vncManager.reportProgress(
+      sessionId,
+      "ssh-tunnel-gateway",
+      t("vnc.progress.tunnelGateway", {
+        label: sshHost.label?.trim() || sshHost.hostname,
+      }),
+    );
     const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
     const username = ctx.requireConfiguredSshUsername(sshHost);
     const { secrets } = await ctx.resolveRuntimeSshSecrets(sshHost);
@@ -102,6 +112,14 @@ export function registerVncIpcHandlers(
       targetPort: host.port,
     });
     forwardBySession.set(sessionId, { kind: "ssh", ruleId });
+    // 통로가 열렸다. 이 다음의 실패는 원격 VNC 쪽이라는 뜻이고, 그 구분이 이 줄의 값이다.
+    vncManager.reportProgress(
+      sessionId,
+      "ssh-tunnel-open",
+      t("vnc.progress.tunnelOpen", {
+        target: `${host.hostname}:${host.port}`,
+      }),
+    );
     return { host: runtime.bindAddress, port: runtime.bindPort };
   };
 
@@ -138,13 +156,38 @@ export function registerVncIpcHandlers(
       let forwarded: { host: string; port: number } | null = null;
       try {
         forwarded = await openForward(sessionId, host);
-        return await vncManager.connect({
+        // 통로가 정해졌으니 이제 RFB 협상이다. 경유가 없으면 이것이 유일한 진행 보고다.
+        vncManager.reportProgress(
           sessionId,
-          host: forwarded?.host ?? host.hostname,
-          port: forwarded?.port ?? host.port,
-          password: secrets.password,
-          shared: host.shared !== false,
-        });
+          "connecting",
+          t("vnc.progress.handshake", {
+            target: `${host.hostname}:${host.port}`,
+          }),
+        );
+        return await vncManager.connect(
+          {
+            sessionId,
+            host: forwarded?.host ?? host.hostname,
+            port: forwarded?.port ?? host.port,
+            password: secrets.password,
+            // 자격증명에 계정이 있으면 넘긴다. 쓸지 말지는 코어가 협상 결과로 판단한다 —
+            // VncAuth 는 계정을 쓰지 않고, Plain 계열만 쓴다.
+            username: secrets.username,
+            // 화질. 없으면 무손실이다 — 코어가 모르는 값도 무손실로 떨어뜨린다.
+            imageQuality: host.imageQuality ?? undefined,
+            shared: host.shared !== false,
+          },
+          // 세션 lifecycle 로그(연결·종료·시간)용 호스트 정체. RDP·SSH 와 같은
+          // `호스트 · 포트 · 사용자` 형식을 쓴다 — 계정은 자격증명에만 있고 대개 비어 있다.
+          {
+            hostId: host.id,
+            hostLabel: host.label,
+            title: host.label,
+            connectionDetails: `${host.hostname} · ${host.port}${
+              secrets.username?.trim() ? ` · ${secrets.username.trim()}` : ""
+            }`,
+          },
+        );
       } catch (error) {
         // 접속이 실패하면 열어 둔 통로를 닫는다. 안 닫으면 실패한 시도마다 리스너가 남는다.
         closeForward(sessionId);
@@ -165,6 +208,36 @@ export function registerVncIpcHandlers(
       vncManager.sendInput(sessionId, events);
     },
   );
+
+  // 원격에서 복사된 텍스트를 로컬 클립보드에 넣는다. 클립보드는 메인 프로세스가 소유한다.
+  vncManager.onRemoteClipboardText = (text) => {
+    // 같은 값을 다시 쓰면 우리가 포커스 때 그것을 또 원격으로 올려 한 바퀴 돈다.
+    if (clipboard.readText() !== text) {
+      clipboard.writeText(text);
+    }
+  };
+
+  // 원격 화면에 포커스가 갈 때 로컬 클립보드를 밀어 넣는다.
+  //
+  // 붙여넣는 순간에 읽을 수는 없다 — 키를 원격으로 보내려면 keydown 에서 preventDefault 를 해야
+  // 하고 그러면 브라우저가 paste 이벤트를 만들지 않는다(RDP 와 같은 제약, useRdpClipboard 참고).
+  ipcMain.on(ipcChannels.vnc.syncClipboard, (_event, sessionId: string) => {
+    const text = clipboard.readText();
+    if (text) {
+      vncManager.sendClipboardText(sessionId, text);
+    }
+  });
+
+  ipcMain.on(
+    ipcChannels.vnc.setDesktopSize,
+    (_event, sessionId: string, width: number, height: number) => {
+      vncManager.requestDesktopSize(sessionId, width, height);
+    },
+  );
+
+  ipcMain.on(ipcChannels.vnc.refresh, (_event, sessionId: string) => {
+    vncManager.refreshScreen(sessionId);
+  });
 
   ipcMain.on(ipcChannels.vnc.watch, (event, sessionId: string) => {
     vncManager.watchSession(sessionId, event.sender.id);

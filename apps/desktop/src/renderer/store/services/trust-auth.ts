@@ -22,6 +22,7 @@ import {
   isChangedHostKeyErrorMessage,
   normalizeRemoteInvokeErrorMessage,
 } from "../utils";
+import { resolveHostTailnetId } from '../../lib/host-tailnet';
 import { t } from '../../i18n';
 
 type StoreSetter = SliceDeps["set"];
@@ -283,13 +284,11 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
       endpointId?: string | null;
     },
   ): Promise<boolean> => {
-    const host = get().hosts.find((item) => item.id === input.hostId);
-    // SSH·RDP 가 같은 필드를 쓴다. 한쪽만 보면 그 종류는 노드가 내려간 상태로 붙으려 하고,
-    // 실패 이유가 "연결할 수 없음" 으로만 보인다.
-    const tailnetId =
-      host && (isSshHostRecord(host) || isRdpHostRecord(host))
-        ? (host as { tailnetId?: string | null }).tailnetId?.trim()
-        : undefined;
+    const hosts = get().hosts;
+    const tailnetId = resolveHostTailnetId(
+      hosts.find((item) => item.id === input.hostId),
+      hosts,
+    );
     if (!tailnetId) {
       return Promise.resolve(true);
     }

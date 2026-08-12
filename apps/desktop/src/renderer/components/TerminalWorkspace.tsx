@@ -22,6 +22,7 @@ import {
 } from '../lib/terminal-presets';
 import { RdpSessionCanvas } from './rdp/RdpSessionCanvas';
 import { VncSessionCanvas } from './vnc/VncSessionCanvas';
+import { VncConnectionOverlay } from './vnc/VncConnectionOverlay';
 import { RdpConnectionOverlay } from './rdp/RdpConnectionOverlay';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
@@ -647,11 +648,16 @@ export function TerminalWorkspace({
         : undefined,
       content: tab.paneKind === 'vnc' ? (
         // VNC 탭도 터미널이 아니다. RDP 와 달리 오디오·클립보드 채널이 없어 프롭이 적다.
-        <VncSessionCanvas
-          sessionId={tab.sessionId}
-          visible={visible}
-          viewOnly={vncHostFor(hosts, tab)?.viewOnly === true}
-        />
+        <>
+          <VncSessionCanvas
+            sessionId={tab.sessionId}
+            visible={visible}
+            viewOnly={vncHostFor(hosts, tab)?.viewOnly === true}
+          />
+          {/* 연결 진행·실패·재연결을 pane 위에 덮는다. 이게 없으면 끊긴 세션에서 다시 시도할
+              방법이 없고, 재연결 중이라는 것도 보이지 않는다. */}
+          {visible ? <VncConnectionOverlay sessionId={tab.sessionId} /> : null}
+        </>
       ) : tab.paneKind === 'rdp' ? (
         // RDP 탭은 터미널이 아니다 — xterm 대신 원격 화면 캔버스를 띄운다.
         //

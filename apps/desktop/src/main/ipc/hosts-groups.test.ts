@@ -147,6 +147,43 @@ describe("registerHostsGroupsIpcHandlers", () => {
     );
   });
 
+  // VNC 도 비밀번호를 자격증명으로 저장한다. 생성 경로가 RDP 만 보고 있어서 VNC 비밀번호는 조용히
+  // 사라졌다 — 종류가 늘 때 이 자리를 같이 고쳐야 한다는 것을 두 번째로 보여 준 사례다.
+  it("VNC 비밀번호도 자격증명으로 저장한다", async () => {
+    const ctx = createContext();
+    const draft = {
+      kind: "vnc",
+      label: "Lab VNC",
+      tags: [],
+      hostname: "192.168.0.10",
+      port: 5900,
+      secretRef: null,
+      groupName: "",
+      terminalThemeId: null,
+    } as const;
+
+    ctx.persistSecret.mockResolvedValue("secret:vnc");
+    ctx.hosts.create.mockReturnValue({ id: "vnc-1", ...draft });
+
+    registerHostsGroupsIpcHandlers(ctx);
+    const createHandler = getRegisteredHandler(ipcChannels.hosts.create);
+
+    await createHandler({}, draft, { kind: "vnc", password: "secret12" });
+
+    // kind 가 'rdp' 로 굳어 있으면 VNC 자격증명이 RDP 목록에 섞인다.
+    expect(ctx.persistSecret).toHaveBeenCalledWith("Test Host", {
+      kind: "vnc",
+      username: undefined,
+      domain: undefined,
+      password: "secret12",
+    });
+    expect(ctx.hosts.create).toHaveBeenCalledWith(
+      expect.any(String),
+      draft,
+      "secret:vnc",
+    );
+  });
+
   it("stores the whole RDP credential when the password is replaced", async () => {
     const ctx = createContext();
     const draft = {

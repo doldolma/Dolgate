@@ -319,6 +319,9 @@ function createDolsshApi(options: {
     rdp: {
       onEvent: vi.fn(() => vi.fn()),
     },
+    vnc: {
+      onEvent: vi.fn(() => vi.fn()),
+    },
     containers: {
       onConnectionProgress: vi.fn(() => off.containersProgress),
     },

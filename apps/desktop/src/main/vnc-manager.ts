@@ -4,13 +4,17 @@ import path from "node:path";
 import { app } from "electron";
 
 import type {
+  ActivityLogRecord,
+  SessionLifecycleLogMetadata,
   VncConnectedPayload,
   VncInputEvent,
+  VncConnectStage,
   VncSessionEvent,
 } from "@shared";
 
 import { CoreFrameParser, encodeControlFrameOf } from "./core-framing";
 import { ipcChannels } from "../common/ipc-channels";
+import { logMessage } from "./activity-log-message";
 
 // vnc-core 사이드카를 다루는 얇은 계층.
 //
@@ -31,12 +35,36 @@ interface VncFrameMetadata {
   height: number;
 }
 
+/**
+ * 커서 모양. 픽셀과 같은 stream 경로로 오고 `type` 으로 갈린다.
+ *
+ * 코어가 Cursor 의사 인코딩을 선언했으면 서버는 커서를 화면에 그려 주지 않는다 — 이걸 렌더러까지
+ * 전달하지 않으면 원격 커서가 아예 보이지 않는다.
+ */
+interface VncCursorMetadata {
+  type: "vncCursor";
+  sessionId: string;
+  hotspotX: number;
+  hotspotY: number;
+  width: number;
+  height: number;
+}
+
 
 export interface VncConnectOptions {
   sessionId: string;
   host: string;
   port: number;
   password?: string;
+  /**
+   * 계정. VeNCrypt 의 Plain 계열에서만 쓰인다(코어가 판단한다).
+   *
+   * 비어 있으면 코어가 계정을 요구하는 방식을 고르지 않는다 — 빈 계정으로 붙으려다 실패하면 그
+   * 이유가 비밀번호 오류와 구분되지 않는다.
+   */
+  username?: string;
+  /** 화면 압축 화질. 없으면 무손실(JPEG 없음). */
+  imageQuality?: string;
   shared?: boolean;
 }
 
@@ -45,6 +73,25 @@ export interface VncLaunchConfig {
   args: string[];
   cwd: string;
   env?: Record<string, string>;
+}
+
+/** 연결 하나를 로그로 남기는 데 필요한 호스트 정체. IPC 계층이 호스트 레코드에서 채운다. */
+export interface VncSessionLifecycleInfo {
+  hostId: string;
+  hostLabel: string;
+  title: string;
+  connectionDetails: string | null;
+}
+
+interface VncLifecycleState extends VncSessionLifecycleInfo {
+  /**
+   * 로그 행의 id. 자동 재연결이 sessionId 를 재사용하므로 세션 id 로만 잡으면 재연결마다 이전
+   * 기록이 덮어써진다 — 시도마다 고유한 requestId 를 붙여 시도 하나 = 로그 행 하나로 만든다
+   * (rdp-manager 와 같은 이유·같은 방식).
+   */
+  logId: string;
+  connectedAt: string | null;
+  disconnectedAt: string | null;
 }
 
 export interface VncManagerOptions {
@@ -59,6 +106,13 @@ export interface VncManagerOptions {
   /** 테스트에서 실제 프로세스 대신 가짜를 넣기 위한 구멍. */
   spawnProcess?: (config: VncLaunchConfig) => ChildProcessWithoutNullStreams;
   resolveLaunchConfig?: () => VncLaunchConfig;
+  /**
+   * 세션 lifecycle 을 활동 로그로 남길 싱크.
+   *
+   * CoreManager 가 SSH 에 쓰는 것과 같은 저장소를 물려받는다 — 그래야 VNC 도 로그 화면과 **최근
+   * 접속 시각**에 함께 보인다(최근 접속은 category 'session' 로그에서 계산된다).
+   */
+  upsertLogRecord?: (record: ActivityLogRecord) => void;
 }
 
 interface PendingConnect {
@@ -80,6 +134,7 @@ export class VncManager {
    * 창에 보내면 그만큼 직렬화·복사가 늘고, 그 비용은 메인 프로세스 이벤트 루프에서 나간다.
    */
   private readonly watchersBySession = new Map<string, Set<number>>();
+  private readonly lifecycleBySession = new Map<string, VncLifecycleState>();
 
   constructor(private readonly options: VncManagerOptions) {}
 
@@ -87,10 +142,22 @@ export class VncManager {
     return this.connectedBySession.get(sessionId) ?? null;
   }
 
-  async connect(options: VncConnectOptions): Promise<VncConnectedPayload> {
+  async connect(
+    options: VncConnectOptions,
+    lifecycle?: VncSessionLifecycleInfo,
+  ): Promise<VncConnectedPayload> {
     const child = this.ensureProcess();
     const id = `vnc-${++this.requestSeq}`;
     this.sessions.add(options.sessionId);
+
+    if (lifecycle) {
+      this.lifecycleBySession.set(options.sessionId, {
+        ...lifecycle,
+        logId: `session:${options.sessionId}:${id}`,
+        connectedAt: null,
+        disconnectedAt: null,
+      });
+    }
 
     return await new Promise<VncConnectedPayload>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -103,12 +170,20 @@ export class VncManager {
             host: options.host,
             port: options.port,
             password: options.password ?? "",
+            username: options.username ?? "",
+            imageQuality: options.imageQuality ?? "",
             // 기본은 공유다. 끄면 서버가 기존 클라이언트를 끊는다.
             shared: options.shared !== false,
           },
         }),
       );
-    });
+    })
+      .catch((error) => {
+        // 연결에 이르지 못한 시도는 로그를 남기지 않는다 — 자동 재연결이 백오프로 반복하는 동안
+        // 실패 행이 로그를 채운다(rdp-manager 와 같은 규칙). 실패는 세션 오버레이가 보여준다.
+        this.lifecycleBySession.delete(options.sessionId);
+        throw error;
+      });
   }
 
   disconnect(sessionId: string): void {
@@ -122,6 +197,26 @@ export class VncManager {
       encodeControlFrameOf({
         id: `vnc-${++this.requestSeq}`,
         type: "disconnectVnc",
+        sessionId,
+      }),
+    );
+  }
+
+  /**
+   * 화면 전체를 다시 받는다.
+   *
+   * 캔버스는 크기가 바뀌면 내용이 지워지는데, 그 리사이즈는 프레임 도착과 순서가 보장되지 않는다
+   * (React 상태를 거친다). 그 사이에 온 프레임은 버려지고 서버는 정적인 영역을 다시 보내지 않아
+   * 그 자리가 검게 남는다 — 잃은 쪽이 다시 달라고 해야 한다.
+   */
+  refreshScreen(sessionId: string): void {
+    if (!this.process || !this.sessions.has(sessionId)) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameOf({
+        id: `vnc-${++this.requestSeq}`,
+        type: "vncRefresh",
         sessionId,
       }),
     );
@@ -142,6 +237,57 @@ export class VncManager {
         type: "vncInput",
         sessionId,
         payload: { events },
+      }),
+    );
+  }
+
+  /**
+   * 로컬 클립보드를 원격에 알린다.
+   *
+   * 클립보드는 메인 프로세스가 소유한다(RDP 와 같은 규칙) — 코어는 OS 클립보드를 만지지 않고
+   * 받은 문자열만 전송한다. 빈 문자열도 보낸다: 원격에서 "비웠다" 도 상태 변화다.
+   */
+  /**
+   * 창 크기에 맞춰 원격 화면 크기를 요청한다.
+   *
+   * 서버가 `ExtendedDesktopSize` 를 쓰지 않으면 코어가 조용히 버린다 — 크기를 못 바꾸는 서버가
+   * 정상적으로 존재하므로(x11vnc 로 실제 화면을 미러링하는 경우 등) 오류로 다루지 않는다.
+   */
+  requestDesktopSize(sessionId: string, width: number, height: number): void {
+    if (!this.process || !this.sessions.has(sessionId)) {
+      return;
+    }
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameOf({
+        id: `vnc-${++this.requestSeq}`,
+        type: "vncSetDesktopSize",
+        sessionId,
+        payload: { width: Math.round(width), height: Math.round(height) },
+      }),
+    );
+  }
+
+  /**
+   * 원격에서 복사된 텍스트. 메인 프로세스가 로컬 클립보드에 넣는다.
+   *
+   * 이벤트로 렌더러까지 보내지 않는 이유: 클립보드 소유자가 둘이 되면 같은 값이 원격↔로컬을
+   * 왕복한다.
+   */
+  onRemoteClipboardText: ((text: string) => void) | null = null;
+
+  sendClipboardText(sessionId: string, text: string): void {
+    if (!this.process || !this.sessions.has(sessionId)) {
+      return;
+    }
+    this.process.stdin.write(
+      encodeControlFrameOf({
+        id: `vnc-${++this.requestSeq}`,
+        type: "vncClipboard",
+        sessionId,
+        payload: { text },
       }),
     );
   }
@@ -194,7 +340,7 @@ export class VncManager {
     });
 
     // 읽지 않으면 파이프 버퍼가 차서 코어가 쓰기에서 멈춘다. 진단도 여기로만 나온다
-    // (DOLGATE_VNC_LOG=vnc_core=debug 로 인코딩별 계수까지 볼 수 있다).
+    // (DOLGATE_VNC_LOG=vnc_core=debug 로 협상·인코딩 요약, trace 로 갱신 하나하나).
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       for (const line of chunk.split("\n")) {
@@ -206,8 +352,12 @@ export class VncManager {
 
     child.on("exit", (code) => {
       for (const sessionId of this.sessions) {
+        // 코어가 죽으면 closed 이벤트가 오지 않는다. 마감하지 않으면 그 연결이 로그에 "접속 중" 인
+        // 채로 영구히 남는다.
+        this.finalizeLifecycle(sessionId, "error", `VNC core exited (code ${code ?? "unknown"})`);
         this.emitEvent({ type: "closed", sessionId });
       }
+      this.lifecycleBySession.clear();
       this.sessions.clear();
       this.connectedBySession.clear();
       this.rejectAllPending(new Error(`VNC core exited (code ${code ?? "unknown"})`));
@@ -242,9 +392,13 @@ export class VncManager {
 
     for (const frame of frames) {
       if (frame.kind === "stream") {
-        const metadata = frame.metadata as unknown as VncFrameMetadata;
+        const metadata = frame.metadata as unknown as
+          | VncFrameMetadata
+          | VncCursorMetadata;
         if (metadata?.type === "vncFrame") {
           this.handleFrame(metadata, frame.payload);
+        } else if (metadata?.type === "vncCursor") {
+          this.handleCursor(metadata, frame.payload);
         }
         continue;
       }
@@ -260,6 +414,17 @@ export class VncManager {
       width: metadata.width,
       height: metadata.height,
       // 픽셀은 그대로 넘긴다. 여기서 형변환하면 화면 한 장마다 복사가 한 번 더 붙는다.
+      pixels,
+    });
+  }
+
+  private handleCursor(metadata: VncCursorMetadata, pixels: Uint8Array): void {
+    this.sendToWatchers(metadata.sessionId, ipcChannels.vnc.cursor, {
+      sessionId: metadata.sessionId,
+      hotspotX: metadata.hotspotX,
+      hotspotY: metadata.hotspotY,
+      width: metadata.width,
+      height: metadata.height,
       pixels,
     });
   }
@@ -285,6 +450,7 @@ export class VncManager {
           name: typeof payload.name === "string" ? payload.name : "",
         };
         this.connectedBySession.set(sessionId, connected);
+        this.markLifecycleConnected(sessionId);
         this.emitEvent({ type: "connected", sessionId, payload: connected });
         if (requestId) {
           this.pending.get(requestId)?.resolve(connected);
@@ -314,6 +480,47 @@ export class VncManager {
         });
         return;
       }
+      case "capabilities": {
+        if (!sessionId) {
+          return;
+        }
+        // 협상 결과는 접속 뒤에 하나씩 드러난다(어떤 것은 서버가 그 기능을 실제로 쓸 때 비로소).
+        // 코어가 바뀔 때만 보내므로 여기서 걸러낼 것이 없다.
+        this.emitEvent({
+          type: "capabilities",
+          sessionId,
+          payload: {
+            extendedClipboard: Boolean(payload.extendedClipboard),
+            desktopResize: Boolean(payload.desktopResize),
+            cursor: Boolean(payload.cursor),
+            continuousUpdates: Boolean(payload.continuousUpdates),
+            qemuKeys: Boolean(payload.qemuKeys),
+            tls: Boolean(payload.tls),
+            encoding: typeof payload.encoding === "string" ? payload.encoding : "",
+          },
+        });
+        return;
+      }
+      case "clipboardLossy": {
+        if (!sessionId) {
+          return;
+        }
+        this.emitEvent({
+          type: "clipboardLossy",
+          sessionId,
+          replaced: Number(payload.replaced ?? 0),
+        });
+        return;
+      }
+      case "clipboard": {
+        // 렌더러로 보내지 않는다 — 클립보드는 메인 프로세스가 소유하고, 두 곳에서 쓰면 값이
+        // 왕복한다(RDP 와 같은 규칙: onRemoteClipboardText 훅 하나만 둔다).
+        const text = typeof payload.text === "string" ? payload.text : "";
+        if (text) {
+          this.onRemoteClipboardText?.(text);
+        }
+        return;
+      }
       case "error": {
         const message =
           typeof payload.message === "string" && payload.message.trim()
@@ -326,6 +533,7 @@ export class VncManager {
         }
         if (sessionId) {
           this.sessions.delete(sessionId);
+          this.finalizeLifecycle(sessionId, "error", message);
           this.emitEvent({ type: "error", sessionId, message });
         }
         return;
@@ -336,6 +544,8 @@ export class VncManager {
         }
         this.sessions.delete(sessionId);
         this.connectedBySession.delete(sessionId);
+        this.finalizeLifecycle(sessionId, "closed", null);
+        this.lifecycleBySession.delete(sessionId);
         this.emitEvent({ type: "closed", sessionId });
         return;
       }
@@ -344,8 +554,102 @@ export class VncManager {
     }
   }
 
+  /**
+   * 붙는 동안 지금 어느 관문에 있는지 알린다.
+   *
+   * 경유(tailnet·SSH 터널) 배선은 이 클래스가 아니라 IPC 계층에 있다 — 거기서 호스트 설정을 읽고
+   * ssh-core 에 통로를 여는데, 그 시간이 실제로 길고 거기서 막히는 일이 흔하다. 그래서 이 창구만
+   * 열어 준다.
+   */
+  reportProgress(sessionId: string, stage: VncConnectStage, message: string): void {
+    this.emitEvent({ type: "progress", sessionId, stage, message });
+  }
+
   private emitEvent(event: VncSessionEvent): void {
     this.broadcast(ipcChannels.vnc.event, event);
+  }
+
+  private markLifecycleConnected(sessionId: string): void {
+    const lifecycle = this.lifecycleBySession.get(sessionId);
+    if (!lifecycle || lifecycle.connectedAt) {
+      return;
+    }
+    const connectedAt = new Date().toISOString();
+    lifecycle.connectedAt = connectedAt;
+    this.upsertLifecycleLog(sessionId, lifecycle, {
+      status: "connected",
+      disconnectedAt: null,
+      durationMs: null,
+      disconnectReason: null,
+      updatedAt: connectedAt,
+    });
+  }
+
+  private finalizeLifecycle(
+    sessionId: string,
+    status: "closed" | "error",
+    disconnectReason: string | null,
+  ): void {
+    const lifecycle = this.lifecycleBySession.get(sessionId);
+    // 연결에 이르지 못했거나(connectedAt 없음) 이미 마감된 시도는 건너뛴다 — error 뒤에 closed 가
+    // 따라와도 행 하나로 끝난다.
+    if (!lifecycle || !lifecycle.connectedAt || lifecycle.disconnectedAt) {
+      return;
+    }
+    const disconnectedAt = new Date().toISOString();
+    lifecycle.disconnectedAt = disconnectedAt;
+    this.upsertLifecycleLog(sessionId, lifecycle, {
+      status,
+      disconnectedAt,
+      durationMs: Math.max(
+        0,
+        new Date(disconnectedAt).getTime() - new Date(lifecycle.connectedAt).getTime(),
+      ),
+      disconnectReason,
+      updatedAt: disconnectedAt,
+    });
+  }
+
+  private upsertLifecycleLog(
+    sessionId: string,
+    lifecycle: VncLifecycleState,
+    state: {
+      status: "connected" | "closed" | "error";
+      disconnectedAt: string | null;
+      durationMs: number | null;
+      disconnectReason: string | null;
+      updatedAt: string;
+    },
+  ): void {
+    if (!this.options.upsertLogRecord || !lifecycle.connectedAt) {
+      return;
+    }
+    const metadata: SessionLifecycleLogMetadata = {
+      sessionId,
+      hostId: lifecycle.hostId,
+      hostLabel: lifecycle.hostLabel,
+      title: lifecycle.title,
+      connectionDetails: lifecycle.connectionDetails,
+      connectionKind: "vnc",
+      connectedAt: lifecycle.connectedAt,
+      disconnectedAt: state.disconnectedAt,
+      durationMs: state.durationMs,
+      status: state.status,
+      disconnectReason: state.disconnectReason,
+      // 화면 녹화는 터미널 세션만 남긴다(원격 화면은 프레임이라 그 저장소를 쓰지 않는다).
+      recordingId: null,
+      hasReplay: false,
+    };
+    this.options.upsertLogRecord({
+      id: lifecycle.logId,
+      level: state.status === "error" ? "error" : "info",
+      category: "session",
+      kind: "session-lifecycle",
+      ...logMessage("core.sessionLog", { kind: "VNC" }),
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: lifecycle.connectedAt,
+      updatedAt: state.updatedAt,
+    });
   }
 
   private broadcast(channel: string, payload: unknown): void {
@@ -415,11 +719,14 @@ export function resolveVncLaunchConfig(): VncLaunchConfig {
         command: candidate,
         args: [],
         cwd: serviceDir,
-        // 개발 중에는 인코딩별 계수가 보이게 한다. 압축이 실제로 쓰이는지 확인할 유일한 자리다
-        // (rdp-core 의 DOLGATE_RDP_LOG 와 같은 이유). 겉으로 쓰는 값은 그대로 존중한다.
-        env: process.env.DOLGATE_VNC_LOG
-          ? undefined
-          : { DOLGATE_VNC_LOG: "vnc_core=debug" },
+        // **로그 수준을 여기서 정하지 않는다.** 예전에는 개발 중 `vnc_core=debug` 를 넣었는데,
+        // 화면 갱신 로그가 초당 수십 줄이라 정작 무언가 잘못됐을 때 그 줄을 찾을 수 없었다.
+        // 코어 기본값(warn)이 평시에 맞고, 필요하면 겉에서 켠다:
+        //
+        //   DOLGATE_VNC_LOG=vnc_core=debug npm run dev     협상·인코딩 요약·클립보드
+        //   DOLGATE_VNC_LOG=vnc_core=trace npm run dev     갱신 하나하나
+        //
+        // env 를 넘기지 않으면 spawn 이 process.env 를 그대로 물려주므로 그 값이 코어까지 간다.
       };
     }
   }

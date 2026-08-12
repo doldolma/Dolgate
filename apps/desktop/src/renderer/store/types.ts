@@ -11,6 +11,7 @@ import type {
   CoreEvent,
   RdpCertificatePrompt,
   RdpSessionEvent,
+  VncSessionEvent,
   DesktopApi,
   DnsOverrideDraft,
   DnsOverrideResolvedRecord,
@@ -746,6 +747,8 @@ interface AppStateParts {
   ) => Promise<void>;
   /** RDP 세션을 같은 탭에 다시 붙인다. 재연결 오케스트레이터와 오버레이의 재시도가 쓴다. */
   retryRdpConnection: (sessionId: string) => Promise<void>;
+  /** VNC 세션을 같은 탭에 다시 붙인다(재연결 시도 횟수를 유지한다). */
+  retryVncConnection: (sessionId: string) => Promise<void>;
   startSessionShare: (input: SessionShareStartInput) => Promise<void>;
   updateSessionShareSnapshot: (
     input: SessionShareSnapshotInput,
@@ -986,6 +989,8 @@ interface AppStateParts {
   markSessionOutput: (sessionId: string, chunk?: Uint8Array) => void;
   handleCoreEvent: (event: CoreEvent<Record<string, unknown>>) => void;
   handleRdpEvent: (event: RdpSessionEvent) => void;
+  /** VNC 세션 이벤트. 끊긴 세션을 되살리거나 왜 끊겼는지 탭에 남긴다. */
+  handleVncEvent: (event: VncSessionEvent) => void;
   /**
    * 이 세션의 호스트가 쓸 로컬 모니터를 정하고 다시 붙는다.
    *
@@ -1164,6 +1169,7 @@ export type SessionSlice = Pick<
   | "connectHost"
   | "retrySessionConnection"
   | "retryRdpConnection"
+  | "retryVncConnection"
   | "startSessionShare"
   | "updateSessionShareSnapshot"
   | "setSessionShareInputEnabled"
@@ -1340,6 +1346,7 @@ export type RuntimeEventSlice = Pick<
   AppStateParts,
   | "handleCoreEvent"
   | "handleRdpEvent"
+  | "handleVncEvent"
   | "handleSessionShareEvent"
   | "handleSessionShareChatEvent"
   | "dismissSessionShareChatNotification"

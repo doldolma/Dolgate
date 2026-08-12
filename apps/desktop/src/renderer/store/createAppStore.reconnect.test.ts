@@ -579,6 +579,105 @@ describe("connection hop progress (runtimeEventSlice)", () => {
   });
 });
 
+// VNC 도 RDP 와 같은 엔진에 핸들러만 따로 등록한다. 판정만 여기서 검증한다.
+//
+// 이 배선이 없던 동안에는 VNC 이벤트가 스토어에 오지 않아서, 붙어 있던 세션이 끊기면 화면만 멈추고
+// 탭은 초록색으로 남았다(재연결도, 다시 시도할 방법도 없었다).
+describe("VNC auto-reconnect trigger", () => {
+  const VNC_HOST: HostRecord = {
+    id: "vnc1",
+    kind: "vnc",
+    label: "Lab VNC",
+    hostname: "10.0.2.90",
+    port: 5900,
+    createdAt: "2025-01-01T00:00:00.000Z",
+    updatedAt: "2025-01-01T00:00:00.000Z",
+  } as HostRecord;
+
+  function seedVncStore() {
+    const store = createAppStore(createMockApi());
+    const tab = {
+      sessionId: "vnc-s1",
+      stableId: "vnc-stable-1",
+      title: "Lab VNC",
+      status: "connected",
+      source: "host",
+      hostId: "vnc1",
+      paneKind: "vnc",
+      lastEventAt: "2025-01-01T00:00:00.000Z",
+    } as unknown as TerminalTab;
+    store.setState({
+      hosts: [VNC_HOST],
+      tabs: [tab],
+      tabStrip: [{ kind: "session", sessionId: tab.sessionId }],
+    });
+    return store;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    __resetReconnectOrchestratorForTest();
+    initReconnectOrchestrator(() => ({
+      autoReconnectEnabled: true,
+      autoReconnectMaxAttempts: 10,
+      autoReconnectBaseDelayMs: 1000,
+      autoReconnectMaxDelayMs: 30000,
+    }));
+    registerReconnectHandler("vnc", {
+      renderScheduled: () => undefined,
+      perform: async () => undefined,
+      renderGaveUp: () => undefined,
+      isStillPresent: () => true,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("붙어 있던 세션이 끊기면 되살린다", () => {
+    // 서버 재부팅·네트워크 끊김·다른 클라이언트의 독점 접속. 탭을 지우면 사용자는 이유도 모른 채
+    // 창이 사라진 것만 본다.
+    const store = seedVncStore();
+
+    store.getState().handleVncEvent({ type: "closed", sessionId: "vnc-s1" });
+
+    expect(isReconnecting("vnc-stable-1")).toBe(true);
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === "vnc-s1"),
+    ).toBeDefined();
+  });
+
+  it("인증 실패는 재시도하지 않는다", () => {
+    // 반복하면 서버 계정이 잠긴다 — VeNCrypt Plain 은 PAM 을 타므로 실제로 잠긴다.
+    const store = seedVncStore();
+
+    store.getState().handleVncEvent({
+      type: "error",
+      sessionId: "vnc-s1",
+      message: "Authentication failed (계정 또는 비밀번호를 확인하세요)",
+    });
+
+    expect(isReconnecting("vnc-stable-1")).toBe(false);
+    expect(
+      store.getState().tabs.find((tab) => tab.sessionId === "vnc-s1")?.status,
+    ).toBe("error");
+  });
+
+  it("네트워크 오류는 재시도한다", () => {
+    // 모르는 오류는 재시도하는 쪽이다 — 확실히 영구인 것만 제외한다.
+    const store = seedVncStore();
+
+    store.getState().handleVncEvent({
+      type: "error",
+      sessionId: "vnc-s1",
+      message: "10.0.2.90:5900 에 연결할 수 없습니다",
+    });
+
+    expect(isReconnecting("vnc-stable-1")).toBe(true);
+  });
+});
+
 // RDP 는 터미널과 다른 코어를 쓰므로 재연결 핸들러가 따로 등록돼 있다. 판정만 여기서 검증한다.
 describe("RDP auto-reconnect trigger", () => {
   const RDP_HOST: HostRecord = {

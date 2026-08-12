@@ -219,10 +219,10 @@ describe('HostDrawer close behavior', () => {
         hostname: 'new.example.com',
         username: '',
       }),
-      expect.objectContaining({
-        password: undefined,
-        passphrase: undefined,
-      }),
+      // 아무것도 입력하지 않았으니 자격증명 인자가 아예 없다. 예전에는 값이 전부 undefined 인
+      // 껍데기를 보냈다 — 생성이 저장과 같은 함수를 쓰게 되면서 저장 쪽 규칙(빈 자격증명은
+      // 만들지 않는다)을 따른다.
+      undefined,
     );
   });
 
@@ -257,11 +257,44 @@ describe('HostDrawer close behavior', () => {
 // 서버가 계정 데이터 수준을 저장할 수 없으면 RDP 는 만들 수 없다 — 만들어도 서버가 옛 기기를
 // 막아 주지 못해, 같은 계정의 옛 기기가 그 레코드를 받아 조용히 망가진다.
 describe('HostDrawer host kinds by server capability', () => {
-  it('서버가 지원하지 않으면 RDP 탭이 없다', () => {
+  // 숨기지 않고 비활성으로 둔다. 칸이 사라지면 사용자는 그 기능이 없는 줄 알거나, 다른 기기에서는
+  // 보이는데 여기서는 안 보이는 이유를 알 수 없다.
+  it('서버가 지원하지 않으면 RDP·VNC 탭이 비활성으로 남는다', () => {
     renderDrawer({ mode: 'create', serverSupportsDataFloor: false });
 
-    expect(screen.getByRole('button', { name: 'SSH' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Serial' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'RDP' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SSH' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Serial' })).toBeEnabled();
+
+    const rdp = screen.getByRole('button', { name: 'RDP' });
+    const vnc = screen.getByRole('button', { name: 'VNC' });
+    expect(rdp).toBeDisabled();
+    expect(vnc).toBeDisabled();
+  });
+
+  // `title` 은 비활성 컨트롤에서 뜨지 않는다 — 브라우저가 마우스 이벤트를 주지 않기 때문이다.
+  // 그래서 감싼 Tooltip 이 실제로 뜨는지를 봐야 한다(전에는 커서를 올려도 아무것도 안 나왔다).
+  it('비활성 탭에 커서를 올리면 서버 업데이트가 필요하다고 알린다', () => {
+    renderDrawer({ mode: 'create', serverSupportsDataFloor: false });
+    const rdp = screen.getByRole('button', { name: 'RDP' });
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    // 툴팁을 띄우는 것은 버튼이 아니라 그것을 감싼 요소다.
+    fireEvent.mouseEnter(rdp.parentElement as HTMLElement);
+
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip).toHaveTextContent('업데이트');
+    expect(tooltip).toHaveTextContent('RDP');
+
+    fireEvent.mouseLeave(rdp.parentElement as HTMLElement);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('서버가 지원하면 네 탭 모두 고를 수 있다', () => {
+    renderDrawer({ mode: 'create', serverSupportsDataFloor: true });
+
+    for (const label of ['SSH', 'Serial', 'RDP', 'VNC']) {
+      expect(screen.getByRole('button', { name: label })).toBeEnabled();
+    }
   });
 });

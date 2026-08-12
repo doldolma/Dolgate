@@ -1428,6 +1428,19 @@ export interface DesktopApi {
       sessionId: string,
       events: import("./vnc").VncInputEvent[],
     ) => void;
+    /**
+     * 지금 로컬 클립보드를 원격에 올려 달라. 값은 메인이 읽는다 — 클립보드 소유자가 하나여야
+     * 값이 왕복하지 않는다.
+     */
+    syncClipboard: (sessionId: string) => void;
+    /** 창 크기에 맞춰 원격 화면 크기를 요청한다. 서버가 지원하지 않으면 코어가 버린다. */
+    requestDesktopSize: (
+      sessionId: string,
+      width: number,
+      height: number,
+    ) => void;
+    /** 화면 전체를 다시 받는다. 캔버스가 크기 변경으로 그림을 잃었을 때 쓴다. */
+    refreshScreen: (sessionId: string) => void;
     /** 이미 붙어 있는 세션의 화면 크기. 뒤늦게 붙는 캔버스가 쓴다. */
     describeSession: (
       sessionId: string,
@@ -1438,6 +1451,11 @@ export interface DesktopApi {
     onFrame: (
       sessionId: string,
       listener: (frame: import("./vnc").VncFramePayload) => void,
+    ) => () => void;
+    /** 서버가 보낸 커서 모양. 이걸 그리지 않으면 원격 커서가 아예 보이지 않는다. */
+    onCursor: (
+      sessionId: string,
+      listener: (cursor: import("./vnc").VncCursorPayload) => void,
     ) => () => void;
   };
   ssh: {

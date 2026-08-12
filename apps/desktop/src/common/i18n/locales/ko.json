@@ -691,7 +691,21 @@
       "viewers": "관전 {{count}}명",
       "windows": "윈도우",
       "windowCount": "{{count}}개",
-      "pane": "패널 {{index}}"
+      "pane": "패널 {{index}}",
+      "capabilities": "확장 기능",
+      "clipboardAscii": "ASCII 전용(서버가 UTF-8 미지원)",
+      "clipboardUtf8": "UTF-8",
+      "capabilityCursor": "커서",
+      "capabilityResize": "자동 크기",
+      "capabilityContinuous": "연속 갱신",
+      "capabilityNone": "없음",
+      "encoding": "인코딩",
+      "capabilityScancode": "스캔코드 키",
+      "quality": "화질",
+      "qualityBalanced": "균형 (JPEG)",
+      "qualityFast": "속도 우선 (JPEG)",
+      "viewOnly": "보기 전용",
+      "screenShare": "화면 공유"
     },
     "update": {
       "checking": "GitHub Releases에서 새 버전을 확인하고 있습니다.",
@@ -1425,7 +1439,6 @@
     },
     "vnc": {
       "credential": "VNC 비밀번호",
-      "passwordHint": "VNC 는 비밀번호의 앞 8자만 사용합니다(규격 제한).",
       "shared": {
         "label": "화면 공유",
         "description": "끄면 접속할 때 기존에 붙어 있던 클라이언트를 서버가 끊습니다."
@@ -1433,6 +1446,28 @@
       "viewOnly": {
         "label": "보기 전용",
         "description": "화면만 보고 마우스·키보드를 원격으로 보내지 않습니다."
+      },
+      "account": "계정 (선택)",
+      "accountHint": "서버가 계정 기반 인증(VeNCrypt Plain)을 쓸 때만 필요합니다. 대부분은 비워 둡니다.",
+      "accountNeedsPassword": "계정을 쓰려면 비밀번호도 함께 입력해야 합니다.",
+      "quality": {
+        "label": "화질",
+        "lossless": "무손실 (기본)",
+        "balanced": "균형 — 사진을 JPEG 로",
+        "fast": "속도 우선 — 사진이 뭉개짐",
+        "hint": "무손실이 아니면 사진·영상 영역을 JPEG 로 받아 대역폭이 크게 줄지만 글자가 뭉개집니다. 느린 회선에서만 바꾸세요."
+      },
+      "tunnel": {
+        "label": "SSH 터널",
+        "none": "쓰지 않음",
+        "hint": "저장된 SSH 호스트를 거쳐 붙습니다. VNC 가 localhost 에만 열려 있을 때 필요합니다(QEMU·libvirt 의 기본 구성).",
+        "empty": "터널로 쓸 SSH 호스트를 먼저 추가하세요.",
+        "missing": "여기 저장된 SSH 호스트가 없습니다. 다시 고르거나 터널을 끄세요.",
+        "missingOption": "삭제된 SSH 호스트",
+        "lockedByTailnet": "터널을 쓰려면 tailnet 을 끄세요 — 경로는 하나만 씁니다.",
+        "tailnetLocked": "터널이 그 SSH 호스트의 tailnet 설정을 그대로 탑니다.",
+        "targetLabel": "대상 주소(경유 서버에서 본)",
+        "targetHint": "경유 서버 자신이 VNC 서버면 127.0.0.1, 그 뒤의 다른 기기면 그 기기 주소입니다."
       }
     },
     "title": "호스트 편집기",
@@ -2055,7 +2090,8 @@
       "password": "비밀번호를 입력해 주세요.",
       "privateKey": "개인키 내용을 입력하거나 파일을 가져와 주세요.",
       "certificate": "SSH 인증서 내용을 입력하거나 파일을 가져와 주세요.",
-      "detachHost": "분리할 호스트를 선택해 주세요."
+      "detachHost": "분리할 호스트를 선택해 주세요.",
+      "account": "계정을 입력하세요."
     },
     "title": "저장된 인증 정보 편집",
     "intro": "<label>{{label}}</label> 저장된 인증 정보 전체를 수정합니다.",
@@ -2074,7 +2110,12 @@
     "envHint": "연결 시 셸에 주입됩니다. 값은 비밀번호와 함께 암호화되어 저장·동기화됩니다.",
     "saveFailed": "저장된 인증 정보를 수정하는 중 오류가 발생했습니다.",
     "submitShared": "공유 인증 정보 저장",
-    "submitDetach": "호스트 전용 인증 정보 생성"
+    "submitDetach": "호스트 전용 인증 정보 생성",
+    "account": "계정",
+    "accountPlaceholderRdp": "Administrator",
+    "accountPlaceholderVnc": "서버가 계정 인증을 쓸 때만 (선택)",
+    "domain": "도메인",
+    "domainPlaceholder": "WORKGROUP (선택)"
   },
   "containersStore": {
     "openingShell": "{{label}} 컨테이너 셸을 여는 중입니다.",
@@ -2845,9 +2886,9 @@
     "killTitle": "서버의 tmux 세션을 종료합니다(프로세스째 종료, 복원 불가)."
   },
   "hostBrowserEmpty": {
-    "noHostsHint": "New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.",
+    "noHostsHint": "New Host로 첫 번째 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP·VNC를 고를 수 있습니다.",
     "searchHint": "검색어를 지우거나 다른 호스트명으로 다시 찾아보세요.",
-    "addHint": "New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP를 고를 수 있습니다.",
+    "addHint": "New Host로 호스트를 추가해보세요. 폼 맨 위에서 SSH·Serial·RDP·VNC를 고를 수 있습니다.",
     "noHosts": "아직 등록된 호스트가 없습니다.",
     "noResults": "검색 결과가 없습니다.",
     "noHostsHere": "이 위치에는 아직 호스트가 없습니다.",
@@ -3366,7 +3407,9 @@
     "tailscaleTargetRelay": "릴레이 경유 ({{relay}})",
     "tailscaleTargetNoPath": "직접 연결도 릴레이도 서지 않았습니다.",
     "tailscaleTargetMissing": "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다.",
-    "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}"
+    "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}",
+    "tunnelGateway": "{{label}} 경유 SSH 터널",
+    "tunnelOpen": "VNC 포트까지 통로 개설"
   },
   "rdp": {
     "overlay": {
@@ -3380,5 +3423,21 @@
     "retry": "다시 시도",
     "reload": "새로고침",
     "hostRow": "이 호스트를 표시할 수 없습니다 — {{label}}"
+  },
+  "hostDrawer": {
+    "kindNeedsServerUpdate": "동기화 서버가 {{kind}} 호스트를 지원하지 않습니다. 서버를 업데이트하면 열립니다."
+  },
+  "vnc": {
+    "clipboardLossy": "이 서버는 ASCII 클립보드만 지원합니다 — 담을 수 없는 글자 {{count}}개가 ? 로 바뀌었습니다",
+    "overlay": {
+      "failedTitle": "VNC 연결 실패",
+      "connectingTitle": "VNC 연결 중",
+      "tunnelUnknown": "설정된 경유 SSH 호스트"
+    },
+    "progress": {
+      "tunnelGateway": "터널을 열기 위해 경유 SSH 호스트 {{label}} 에 접속합니다.",
+      "tunnelOpen": "터널이 열렸습니다. 이 통로로 {{target}} 에 닿습니다.",
+      "handshake": "{{target}} 와 VNC 세션을 협상합니다."
+    }
   }
 }

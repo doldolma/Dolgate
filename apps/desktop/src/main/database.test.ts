@@ -685,6 +685,65 @@ describe('HostRepository', () => {
 
   // 레코드를 만드는 변환(toRdpHostRecord)과 읽는 정규화(normalizeHostRecord) 둘 다 필드를 나열해
   // 새 객체를 만든다. 어느 한쪽에서 빠뜨리면 "저장은 되는데 다시 켜면 사라지는" 증상이 된다.
+  // VNC 는 호스트 종류가 늘어날 때 저장 계층 양쪽(쓰기 toHostRecord / 읽기 normalizeHostRecord)을
+  // 다 채워야 한다는 것을 보여 준 사례다. 쓰기 분기가 없어서 "Create Host" 가 아무 반응 없이
+  // 실패했다(Unsupported host draft type).
+  it('VNC 호스트를 저장하고 다시 읽는다', async () => {
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('vnc-1', {
+      kind: 'vnc',
+      label: '',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '192.168.0.10',
+      port: 5900,
+      shared: false,
+      viewOnly: true,
+    });
+
+    // 라벨을 비워 두면 호스트 이름을 쓴다(다른 종류와 같은 규칙).
+    expect(hosts.getById('vnc-1')).toMatchObject({
+      kind: 'vnc',
+      label: '192.168.0.10',
+      hostname: '192.168.0.10',
+      port: 5900,
+      shared: false,
+      viewOnly: true,
+    });
+
+    vi.resetModules();
+    const stateStorageModule = await import('./state-storage');
+    stateStorageModule.resetDesktopStateStorageForTests();
+    const databaseModule = await import('./database');
+
+    // 다시 읽어도 같아야 한다 — 읽기 쪽 화이트리스트가 빠뜨리면 여기서 초기값으로 돌아간다.
+    expect(new databaseModule.HostRepository().getById('vnc-1')).toMatchObject({
+      kind: 'vnc',
+      hostname: '192.168.0.10',
+      shared: false,
+      viewOnly: true,
+    });
+  });
+
+  it('VNC 기본값은 저장하지 않는다', async () => {
+    // 기본값이 "켜짐" 인 것은 false 만 저장한다. true/null 을 둘 다 쓰면 기본값을 나중에 바꿀 수 없다.
+    const { HostRepository } = await loadRepositories();
+    const hosts = new HostRepository();
+
+    hosts.create('vnc-2', {
+      kind: 'vnc',
+      label: 'plain',
+      tags: [],
+      terminalThemeId: null,
+      hostname: '192.168.0.11',
+      port: 5901,
+    });
+
+    expect(hosts.getById('vnc-2')).toMatchObject({ shared: null, viewOnly: null });
+  });
+
   it('SSM 경유 정보를 저장하고 다시 읽는다', async () => {
     const { HostRepository } = await loadRepositories();
     const hosts = new HostRepository();
@@ -2028,6 +2087,136 @@ describe('SecretMetadataRepository credential kind', () => {
       domain: 'CORP',
       hasPassword: true,
     });
+  });
+
+  // 화질은 디스크를 다시 읽어도 남아야 한다. 화이트리스트에서 빠지면 앱을 다시 켜는 순간
+  // 무손실로 돌아가고, 사용자는 설정이 저장된 줄 안다.
+  it('VNC 화질이 디스크 왕복을 견딘다', async () => {
+    const loaded = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      data: {
+        groups: [],
+        hosts: [
+          {
+            id: 'h-vnc',
+            kind: 'vnc',
+            label: 'Lab',
+            tags: [],
+            hostname: '10.0.0.6',
+            port: 5900,
+            imageQuality: 'balanced',
+            groupName: null,
+            terminalThemeId: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'h-vnc2',
+            kind: 'vnc',
+            label: 'Lab2',
+            tags: [],
+            hostname: '10.0.0.7',
+            port: 5900,
+            // 모르는 값은 무손실로 떨어져야 한다 — 조용히 뭉개진 화면을 보여주지 않는다.
+            imageQuality: 'ultra',
+            groupName: null,
+            terminalThemeId: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        knownHosts: [],
+        portForwards: [],
+        secretMetadata: [],
+        syncOutbox: [],
+      },
+      secure: { refreshToken: null, managedSecretsByRef: {} },
+    });
+
+    const hosts = new loaded.HostRepository().list();
+    const first = hosts.find((host) => host.id === 'h-vnc');
+    const second = hosts.find((host) => host.id === 'h-vnc2');
+    expect(first && 'imageQuality' in first ? first.imageQuality : undefined).toBe('balanced');
+    expect(second && 'imageQuality' in second ? second.imageQuality : undefined).toBeNull();
+  });
+
+  // 옛 빌드의 동기화 투영이 metadata 의 kind 를 떨어뜨린 적이 있다(실측: 86개 전부). 그러면
+  // RDP·VNC 폼의 자격증명 목록이 비어 보인다 — 연결된 호스트의 종류로 되짚는다.
+  it('kind 를 잃은 자격증명을 연결된 호스트로 되짚는다', async () => {
+    const loaded = await loadRepositoriesWithStateFile({
+      schemaVersion: 1,
+      data: {
+        groups: [],
+        hosts: [
+          {
+            id: 'h-rdp',
+            kind: 'rdp',
+            label: 'Win',
+            tags: [],
+            hostname: '10.0.0.5',
+            port: 3389,
+            secretRef: 'secret:lost-rdp',
+            groupName: null,
+            terminalThemeId: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            id: 'h-vnc',
+            kind: 'vnc',
+            label: 'Lab',
+            tags: [],
+            hostname: '10.0.0.6',
+            port: 5900,
+            secretRef: 'secret:lost-vnc',
+            groupName: null,
+            terminalThemeId: null,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        knownHosts: [],
+        portForwards: [],
+        secretMetadata: [
+          {
+            secretRef: 'secret:lost-rdp',
+            label: 'Win admin',
+            hasPassword: true,
+            hasPassphrase: false,
+            linkedHostCount: 0,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            secretRef: 'secret:lost-vnc',
+            label: 'Lab screen',
+            hasPassword: true,
+            hasPassphrase: false,
+            linkedHostCount: 0,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+          {
+            secretRef: 'secret:orphan',
+            label: '아무 호스트도 안 씀',
+            hasPassword: true,
+            hasPassphrase: false,
+            linkedHostCount: 0,
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        syncOutbox: [],
+      },
+      secure: { refreshToken: null, managedSecretsByRef: {} },
+    });
+
+    const entries = new loaded.SecretMetadataRepository().list();
+    const find = (ref: string) => entries.find((entry) => entry.secretRef === ref);
+
+    expect(find('secret:lost-rdp')?.kind).toBe('rdp');
+    expect(find('secret:lost-vnc')?.kind).toBe('vnc');
+    // 아무 호스트도 안 쓰면 판단하지 않는다 — 틀린 종류를 씌우면 엉뚱한 폼에 나타난다.
+    expect(find('secret:orphan')?.kind ?? null).toBeNull();
+    // VNC 도 연결 수에 세어야 한다. 안 세면 "연결된 호스트 0개" 로 보여 지울 때 경고가 없다.
+    expect(find('secret:lost-vnc')?.linkedHostCount).toBe(1);
   });
 
   it('treats a credential without a kind as SSH', async () => {

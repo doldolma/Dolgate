@@ -16,6 +16,8 @@
 export type ReconnectKind =
   | "session"
   | "rdp"
+  // VNC 도 같은 엔진에 핸들러만 따로 등록한다(RDP 와 같은 이유 — perform 이 다른 코어를 향한다).
+  | "vnc"
   | "sftp"
   | "portForward"
   | "tmux";

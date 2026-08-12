@@ -1,5 +1,12 @@
 import type { GroupRemoveMode, HostDraft, HostSecretInput } from "@shared";
-import { isRdpHostDraft, isRdpHostRecord, isSshHostDraft, isSshHostRecord } from "@shared";
+import {
+  isRdpHostDraft,
+  isRdpHostRecord,
+  isSshHostDraft,
+  isSshHostRecord,
+  isVncHostDraft,
+  isVncHostRecord,
+} from "@shared";
 import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -8,15 +15,22 @@ import { t } from '../i18n';
 import { logMessage } from "../activity-log-message";
 
 /**
- * RDP 자격증명으로 저장할 값.
+ * 비밀번호로 붙는 종류(RDP·VNC)의 자격증명으로 저장할 값.
  *
  * 필드를 하나하나 나열해 넘기던 자리였는데, 그러다 계정(`username`/`domain`)과 종류(`kind`)를
- * 빠뜨려서 **저장해도 목록에 안 나오는** 상태가 됐다(kind 가 없으면 RDP 목록 필터에 안 걸린다).
+ * 빠뜨려서 **저장해도 목록에 안 나오는** 상태가 됐다(kind 가 없으면 목록 필터에 안 걸린다).
  * 한 곳으로 모아 다시 빠뜨리지 않게 한다.
+ *
+ * `kind` 는 호출부가 넘긴다 — 종류마다 자격증명 목록이 갈리므로 여기서 'rdp' 로 굳히면 VNC
+ * 자격증명이 RDP 목록에 섞인다. VNC 는 계정이 없는 경우가 많지만(VncAuth 는 비밀번호만) 폼이
+ * 넘긴 값은 그대로 실어 보낸다 — VeNCrypt 의 Plain 계열은 계정을 쓴다.
  */
-function rdpSecrets(secrets: HostSecretInput): HostSecretInput {
+function passwordSecrets(
+  kind: 'rdp' | 'vnc',
+  secrets: HostSecretInput,
+): HostSecretInput {
   return {
-    kind: 'rdp',
+    kind,
     username: secrets.username,
     domain: secrets.domain,
     password: secrets.password,
@@ -48,9 +62,17 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
       const hostId = randomUUID();
       // RDP 도 비밀번호를 시크릿 저장소에 둔다. SSH 처럼 키/인증서까지 다루지는 않으므로
       // 관리형 키 해석 없이 비밀번호만 넣는다.
+      // RDP·VNC 는 비밀번호를 자격증명으로 저장한다. 한쪽만 보면 다른 쪽 비밀번호가 조용히
+      // 사라진다(RDP 에서 한 번 겪었고, VNC 를 추가할 때 같은 자리에서 또 새어 나왔다).
+      // boolean 별칭을 따로 둔다 — 종류 문자열로는 draft 유니온이 좁혀지지 않아서 아래에서
+      // draft.secretRef 를 읽을 수 없다(TS 의 aliased condition 은 boolean 에만 적용된다).
       const isRdpDraft = isRdpHostDraft(draft);
+      const isVncDraft = isVncHostDraft(draft);
+      const passwordKind = isRdpDraft ? ('rdp' as const) : isVncDraft ? ('vnc' as const) : null;
       const existingSecretRef =
-        isSshHostDraft(draft) || isRdpDraft ? (draft.secretRef ?? null) : null;
+        isSshHostDraft(draft) || isRdpDraft || isVncDraft
+          ? (draft.secretRef ?? null)
+          : null;
       const resolvedSecrets: HostSecretInput = isSshHostDraft(draft)
         ? {
             ...secrets,
@@ -63,8 +85,11 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
             ctx.describeHostLabel(draft),
             resolvedSecrets,
           )
-        : isRdpDraft && secrets?.password
-          ? await ctx.persistSecret(ctx.describeHostLabel(draft), rdpSecrets(secrets))
+        : passwordKind && secrets?.password
+          ? await ctx.persistSecret(
+              ctx.describeHostLabel(draft),
+              passwordSecrets(passwordKind, secrets),
+            )
           : null;
       const secretRef = createdSecretRef ?? existingSecretRef;
       if (secretRef) {
@@ -96,8 +121,14 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         throw new Error("Host not found");
       }
       const isRdpUpdate = isRdpHostDraft(draft) && isRdpHostRecord(current);
+      const isVncUpdate = isVncHostDraft(draft) && isVncHostRecord(current);
+      const passwordUpdateKind = isRdpUpdate
+        ? ('rdp' as const)
+        : isVncUpdate
+          ? ('vnc' as const)
+          : null;
       let secretRef =
-        (isSshHostDraft(draft) && isSshHostRecord(current)) || isRdpUpdate
+        (isSshHostDraft(draft) && isSshHostRecord(current)) || isRdpUpdate || isVncUpdate
           ? draft.secretRef !== undefined
             ? draft.secretRef
             : (current.secretRef ?? null)
@@ -146,11 +177,11 @@ export function registerHostsGroupsIpcHandlers(ctx: MainIpcContext): void {
         });
       } else if (isSshHostDraft(draft) && secrets) {
         secretRef = isSshHostRecord(current) ? (current.secretRef ?? null) : null;
-      } else if (isRdpUpdate && secrets?.password) {
+      } else if (passwordUpdateKind && secrets?.password) {
         // 새 비밀번호를 받은 경우에만 다시 저장한다. 비워 두면 기존 ref 를 그대로 유지한다.
         secretRef = await ctx.persistSecret(
           ctx.describeHostLabel(draft),
-          rdpSecrets(secrets),
+          passwordSecrets(passwordUpdateKind, secrets),
         );
         ctx.activityLogs.append("info", "audit", logMessage('hostsIpc.secretUpdated'), {
           hostId: id,

@@ -6,6 +6,7 @@ import { desktopApi } from '../store/appStore';
 interface DesktopEventBridgeProps {
   onCoreEvent: (event: any) => void;
   onRdpEvent: (event: any) => void;
+  onVncEvent: (event: any) => void;
   onSftpConnectionProgress: (event: any) => void;
   onContainerConnectionProgress: (event: any) => void;
   onActivityLogsChanged: () => void;
@@ -21,6 +22,7 @@ interface DesktopEventBridgeProps {
 export function DesktopEventBridge({
   onCoreEvent,
   onRdpEvent,
+  onVncEvent,
   onSftpConnectionProgress,
   onContainerConnectionProgress,
   onActivityLogsChanged,
@@ -34,6 +36,7 @@ export function DesktopEventBridge({
 }: DesktopEventBridgeProps) {
   const handleCoreEvent = useEffectEvent(onCoreEvent);
   const handleRdpEvent = useEffectEvent(onRdpEvent);
+  const handleVncEvent = useEffectEvent(onVncEvent);
   const handleSftpConnectionProgress = useEffectEvent(onSftpConnectionProgress);
   const handleContainerConnectionProgress = useEffectEvent(
     onContainerConnectionProgress,
@@ -53,6 +56,11 @@ export function DesktopEventBridge({
     });
     const offRdp = desktopApi.rdp.onEvent((event) => {
       handleRdpEvent(event);
+    });
+    // VNC 도 스토어까지 올린다. 예전에는 캔버스만 구독해서, 붙어 있던 세션이 끊기면 화면만 멈추고
+    // 탭은 초록색으로 남았다(재연결도 없었다).
+    const offVnc = desktopApi.vnc.onEvent((event) => {
+      handleVncEvent(event);
     });
     const offSftpProgress =
       typeof desktopApi.sftp.onConnectionProgress === "function"
@@ -113,6 +121,7 @@ export function DesktopEventBridge({
     return () => {
       offCore();
       offRdp();
+      offVnc();
       offSftpProgress();
       offContainersProgress();
       offActivityLogsChanged();

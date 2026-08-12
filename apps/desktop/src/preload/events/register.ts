@@ -15,6 +15,7 @@ import type {
   TailnetStatus,
   TransferJobEvent,
   UpdateEvent,
+  VncCursorPayload,
   VncFramePayload,
   VncSessionEvent,
   WarpgateImportEvent,
@@ -31,6 +32,7 @@ import {
   emitPortForwardEvent,
   emitRdpEvent,
   emitVncEvent,
+  emitVncCursor,
   emitVncFrame,
   setVncFrameWatchNotifier,
   emitRdpAudio,
@@ -99,6 +101,10 @@ export function registerPreloadEventBindings(ipcRenderer: IpcRenderer): void {
 
   ipcRenderer.on(ipcChannels.vnc.frame, (_event, payload: VncFramePayload) => {
     emitVncFrame(payload);
+  });
+
+  ipcRenderer.on(ipcChannels.vnc.cursor, (_event, payload: VncCursorPayload) => {
+    emitVncCursor(payload);
   });
 
   ipcRenderer.on(ipcChannels.rdp.audio, (_event, payload: RdpAudioPayload) => {

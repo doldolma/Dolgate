@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { VncConnectedPayload, VncInputEvent, VncSessionEvent } from '@shared';
 
 import { cn } from '../../lib/cn';
+import { createWheelAccumulator, takeWheelNotches } from '../../lib/wheel';
+import {
+  clearVncCapabilities,
+  setVncCapabilities,
+} from '../../lib/vnc-capability-registry';
 import { subscribeVncEvents, sendVncInput } from '../../services/desktop/vnc';
+import { scancodeFor } from '../rdp/scancodes';
 import { keysymFromEvent, keysymsFromComposedText } from './keysym';
 import { useVncCanvas } from './useVncCanvas';
+import { useVncAutoResize } from './useVncAutoResize';
+import { useVncClipboard } from './useVncClipboard';
+import { useVncCursor } from './useVncCursor';
 
 interface VncSessionCanvasProps {
   sessionId: string;
@@ -44,8 +54,17 @@ export function VncSessionCanvas({
   connected,
   viewOnly = false,
 }: VncSessionCanvasProps) {
+  const { t: translate } = useTranslation();
   const [desktop, setDesktop] = useState<VncConnectedPayload | null>(connected ?? null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 클립보드가 깎여 나갔다는 알림. 잠깐 띄우고 사라진다.
+   *
+   * 서버가 UTF-8 확장을 지원하지 않으면 한글이 `?` 가 되는데, 그것을 말해 주지 않으면 사용자는
+   * 원격의 `?` 만 보고 이유를 알 수 없다(탭 hover 에도 같은 사실이 있지만 복사하는 순간에는 안
+   * 보인다). 세션을 막지 않도록 배너로 띄우고 스스로 사라지게 한다.
+   */
+  const [clipboardNotice, setClipboardNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setDesktop(connected ?? null);
@@ -70,13 +89,32 @@ export function VncSessionCanvas({
               }
             : current,
         );
+      } else if (event.type === 'capabilities') {
+        // 협상 결과는 화면에 직접 쓰지 않고 레지스트리에만 남긴다 — 읽는 곳은 탭 hover 하나이고,
+        // state 로 들고 있으면 확장 하나가 켜질 때마다 캔버스가 다시 그려진다.
+        setVncCapabilities(sessionId, event.payload);
+      } else if (event.type === 'clipboardLossy') {
+        setClipboardNotice(
+          translate('vnc.clipboardLossy', { count: event.replaced }),
+        );
       } else if (event.type === 'error') {
         setError(event.message);
       } else if (event.type === 'closed') {
         setDesktop(null);
+        clearVncCapabilities(sessionId);
       }
     });
-  }, [sessionId]);
+  }, [sessionId, translate]);
+
+  // 알림은 스스로 사라진다. 닫기 버튼을 두면 그것을 누르는 일이 하나 더 늘고, 이 알림은 조치를
+  // 요구하지 않는다(서버가 못 하는 것이라 사용자가 할 수 있는 일이 없다).
+  useEffect(() => {
+    if (!clipboardNotice) {
+      return;
+    }
+    const timer = window.setTimeout(() => setClipboardNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [clipboardNotice]);
 
   const { canvasRef } = useVncCanvas(
     sessionId,
@@ -84,6 +122,19 @@ export function VncSessionCanvas({
     desktop?.desktopHeight ?? null,
     visible,
   );
+
+  // pane 크기에 맞춰 원격 화면 크기를 따라가게 한다. 서버가 못 하면 코어가 조용히 버린다.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useVncAutoResize(sessionId, containerRef, visible && Boolean(desktop));
+
+  // 로컬 클립보드를 미리 올려 둔다. view-only 여도 올린다 — 보기 전용은 **우리 입력**을 막는
+  // 것이고, 원격에서 우리 클립보드를 붙여넣는 것은 원격 사용자의 일이다.
+  useVncClipboard(sessionId, canvasRef, visible && Boolean(desktop));
+
+  // 원격 커서 모양을 캔버스의 CSS 커서로 붙인다. 코어가 커서 의사 인코딩을 선언했으므로 서버는
+  // 커서를 화면에 그려 주지 않는다 — 이게 없으면 포인터가 어디 있는지 보이지 않는다.
+  // view-only 여도 붙인다: 모양은 보는 것이고, 막는 것은 입력이다.
+  useVncCursor(sessionId, canvasRef, visible && Boolean(desktop));
 
   // 입력을 보낼 수 있는 상태인지. 숨은 pane 과 view-only 는 보내지 않는다.
   const inputEnabled = visible && !viewOnly && Boolean(desktop);
@@ -96,6 +147,11 @@ export function VncSessionCanvas({
     }
     sendVncInput(sessionId, events);
   };
+
+  // 소수 노치를 모아 둔다. RFB 의 휠은 버튼 누름이라 "몇 칸" 만 의미가 있고, 브라우저가 주는
+  // deltaY 는 소수다 — 그대로 보내면 코어가 정수를 기대하다 **묶음 전체를 버린다**(실제로 스크롤이
+  // 하나도 전달되지 않았다).
+  const wheelRef = useRef(createWheelAccumulator());
 
   const pointerFrom = (event: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
@@ -113,6 +169,7 @@ export function VncSessionCanvas({
     // 숨은 pane 은 display:none 이어야 한다. absolute inset-0 인 채로 남겨두면 다른 탭을 골라도
     // 이 pane 이 그 위를 덮는다.
     <div
+      ref={containerRef}
       className={cn(
         'absolute inset-0 items-center justify-center overflow-hidden bg-black',
         visible ? 'flex' : 'hidden',
@@ -120,6 +177,15 @@ export function VncSessionCanvas({
     >
       {error ? (
         <div className="p-4 text-sm text-[var(--color-danger,#ef4444)]">{error}</div>
+      ) : null}
+
+      {clipboardNotice ? (
+        <div
+          data-testid="vnc-clipboard-notice"
+          className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-[8px] bg-[rgba(0,0,0,0.78)] px-3 py-2 text-[0.85rem] text-white shadow-[var(--shadow-floating)]"
+        >
+          {clipboardNotice}
+        </div>
       ) : null}
 
       {/* 원격 해상도가 창보다 클 수 있어 비율을 유지한 채 맞춘다. tabIndex 가 있어야 키 이벤트가
@@ -182,13 +248,27 @@ export function VncSessionCanvas({
             return;
           }
           event.preventDefault();
+          const notches = takeWheelNotches(wheelRef.current, event);
           const events: VncInputEvent[] = [];
-          if (event.deltaY !== 0) {
+          // 노치 하나가 버튼 한 번이다. 여러 칸이면 그만큼 반복해서 보낸다.
+          for (let step = 0; step < Math.abs(notches.vertical); step += 1) {
             // 화면 좌표계는 아래가 양수, 휠 버튼은 위가 4번이다 — 부호를 뒤집는다.
-            events.push({ kind: 'wheel', vertical: true, delta: -event.deltaY, x: point.x, y: point.y });
+            events.push({
+              kind: 'wheel',
+              vertical: true,
+              delta: notches.vertical > 0 ? -1 : 1,
+              x: point.x,
+              y: point.y,
+            });
           }
-          if (event.deltaX !== 0) {
-            events.push({ kind: 'wheel', vertical: false, delta: event.deltaX, x: point.x, y: point.y });
+          for (let step = 0; step < Math.abs(notches.horizontal); step += 1) {
+            events.push({
+              kind: 'wheel',
+              vertical: false,
+              delta: notches.horizontal > 0 ? 1 : -1,
+              x: point.x,
+              y: point.y,
+            });
           }
           send(events);
         }}
@@ -200,7 +280,11 @@ export function VncSessionCanvas({
           }
           // 원격이 키를 받으므로 브라우저 기본 동작(탭 이동·검색 등)은 막는다.
           event.preventDefault();
-          send([{ kind: 'key', keysym, pressed: true }]);
+          // 스캔코드를 함께 싣는다. 쓸지 말지는 코어가 협상 결과로 판단한다 — 서버가 QEMU 확장
+          // 키를 쓰지 않으면 keysym 만 나간다. RDP 와 같은 표라 여기서 그대로 가져다 쓴다.
+          send([
+            { kind: 'key', keysym, pressed: true, keycode: scancodeFor(event.code) ?? 0 },
+          ]);
         }}
         onKeyUp={(event) => {
           const keysym = keysymFromEvent(event);
@@ -208,7 +292,9 @@ export function VncSessionCanvas({
             return;
           }
           event.preventDefault();
-          send([{ kind: 'key', keysym, pressed: false }]);
+          send([
+            { kind: 'key', keysym, pressed: false, keycode: scancodeFor(event.code) ?? 0 },
+          ]);
         }}
         onCompositionEnd={(event) => {
           // 한글 등 조합 입력. 조합 중에는 아무것도 보내지 않고(keysym.ts), 완성된 글자만 여기서

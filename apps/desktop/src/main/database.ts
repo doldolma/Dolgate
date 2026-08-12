@@ -24,11 +24,16 @@ import {
   isGroupWithinPath,
   isWarpgateSshHostDraft,
   isRdpHostDraft,
+  isVncHostDraft,
   type RdpHostDraft,
   type RdpHostRecord,
+  type VncHostDraft,
+  type VncHostRecord,
   isSerialHostDraft,
   isSshHostDraft,
   isRdpHostRecord,
+  isVncHostRecord,
+  type VncImageQuality,
   isSshHostRecord,
   isSerialHostRecord,
   normalizeAiBaseUrl,
@@ -749,6 +754,58 @@ function toRdpHostRecord(
   };
 }
 
+/**
+ * VNC 드래프트를 레코드로.
+ *
+ * **이 변환도 필드를 나열하는 화이트리스트다.** 읽는 쪽(state-storage 의 normalizeHostRecord)과
+ * 짝이 맞아야 한다 — 한쪽에서 빠뜨리면 "저장은 되는데 앱을 다시 켜면 초기값" 이 된다.
+ *
+ * 계정은 없다. RFB 의 VncAuth 는 비밀번호만 쓰고, VeNCrypt 의 Plain 계열은 계정을 자격증명에
+ * 둔다(SSH·RDP 와 같은 저장소).
+ */
+function toVncHostRecord(
+  id: string,
+  draft: VncHostDraft,
+  secretRef: string | null,
+  timestamp: string,
+  current?: VncHostRecord,
+): VncHostRecord {
+  return {
+    id,
+    kind: 'vnc',
+    label: draft.label.trim() || draft.hostname.trim(),
+    hostname: draft.hostname.trim(),
+    port: Number.isFinite(draft.port) ? Math.round(draft.port) : 5900,
+    // SSH·RDP 와 같은 규칙: 호출자가 넘긴 ref 가 우선이고, 없으면 draft 가 들고 있던 것을 유지한다.
+    secretRef: secretRef ?? draft.secretRef ?? null,
+    // 기본값이 "켜짐" 인 것은 false 만 저장한다 — null 과 true 를 구분할 필요가 없고, 그래야 기본값을
+    // 나중에 바꿀 여지가 남는다(RDP 의 audioEnabled 와 같은 규칙).
+    shared: draft.shared === false ? false : null,
+    viewOnly: draft.viewOnly === true ? true : null,
+    tailnetId: draft.tailnetId?.trim() || null,
+    sshTunnelHostId: draft.sshTunnelHostId?.trim() || null,
+    // 무손실이 기본이다 — 그 값은 저장하지 않는다(위 shared·viewOnly 와 같은 규칙).
+    imageQuality: normalizeVncImageQuality(draft.imageQuality),
+    groupName: normalizeGroupPath(draft.groupName),
+    tags: normalizeTags(draft.tags),
+    terminalThemeId: normalizeTerminalThemeId(draft.terminalThemeId),
+    favorite: current?.favorite ?? null,
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+/**
+ * 화질 값을 정규화한다. 모르는 값과 무손실은 null 로 떨어진다.
+ *
+ * 기본값을 저장하지 않는 이유는 다른 토글과 같다 — 나중에 기본을 바꿀 여지를 남긴다.
+ */
+function normalizeVncImageQuality(
+  value: VncImageQuality | null | undefined,
+): VncImageQuality | null {
+  return value === 'balanced' || value === 'fast' ? value : null;
+}
+
 // RDP 화면 크기는 200~8192 이고 폭은 홀수를 허용하지 않는다([MS-RDPEDISP] 2.2.2.2.1).
 // 규격을 벗어난 값은 연결 시점에 거부되므로 저장 전에 맞춰 둔다.
 /**
@@ -826,20 +883,51 @@ function toHostRecord(id: string, draft: HostDraft, secretRef: string | null, ti
   if (isRdpHostDraft(draft)) {
     return toRdpHostRecord(id, draft, secretRef, timestamp, current && current.kind === 'rdp' ? current : undefined);
   }
+  if (isVncHostDraft(draft)) {
+    return toVncHostRecord(id, draft, secretRef, timestamp, current && current.kind === 'vnc' ? current : undefined);
+  }
   throw new Error('Unsupported host draft type');
 }
 
 function withLinkedHostCount(record: SecretMetadataRecord, hosts: HostRecord[]): SecretMetadataRecord {
+  // SSH·RDP·VNC 가 같은 자격증명 저장소를 쓴다. 하나라도 빼먹으면 그 자격증명이 "연결된 호스트
+  // 0개"로 보여서, 지워도 아무 경고가 없고 지운 뒤 그 호스트가 조용히 못 붙는다.
+  const linked = hosts.filter((host) => {
+    if (isSshHostRecord(host) || isRdpHostRecord(host) || isVncHostRecord(host)) {
+      return host.secretRef === record.secretRef;
+    }
+    return false;
+  });
   return {
     ...record,
-    // SSH·RDP 가 같은 자격증명 저장소를 쓴다. RDP 를 빼먹으면 그 자격증명이 "연결된 호스트
-    // 0개"로 보여서, 지워도 아무 경고가 없고 지운 뒤 그 호스트가 조용히 못 붙는다.
-    linkedHostCount: hosts.filter(
-      (host) =>
-        (isSshHostRecord(host) || isRdpHostRecord(host)) &&
-        host.secretRef === record.secretRef
-    ).length
+    linkedHostCount: linked.length,
+    // **종류를 잃은 항목을 연결된 호스트로 되짚는다.**
+    //
+    // 옛 빌드의 동기화 투영이 metadata 에서 kind 를 떨어뜨린 적이 있다(실측: 86개 전부 유실).
+    // 그러면 RDP·VNC 폼의 자격증명 목록이 그 항목을 걸러내 비어 보인다. 암호화된 페이로드에는
+    // 종류가 남아 있지만 목록을 그리려고 전부 복호화할 수는 없다 — 대신 그 자격증명을 가리키는
+    // 호스트의 종류가 같은 사실을 알려 준다(평문이고 이미 여기 있다).
+    kind: record.kind ?? inferSecretKindFromHosts(linked)
   };
+}
+
+/**
+ * 이 자격증명을 쓰는 호스트들의 종류가 하나로 모이면 그것이 자격증명의 종류다.
+ *
+ * 섞여 있거나(같은 비밀번호를 SSH·RDP 에 함께 쓰는 경우) 아무 호스트도 없으면 판단하지 않는다 —
+ * 틀린 종류를 씌우면 그 항목이 엉뚱한 폼의 목록에 나타난다.
+ */
+function inferSecretKindFromHosts(hosts: HostRecord[]): 'ssh' | 'rdp' | 'vnc' | null {
+  if (hosts.length === 0) {
+    return null;
+  }
+  const kinds = new Set(
+    hosts.map((host) => (isRdpHostRecord(host) ? 'rdp' : isVncHostRecord(host) ? 'vnc' : 'ssh'))
+  );
+  if (kinds.size !== 1) {
+    return null;
+  }
+  return [...kinds][0] as 'ssh' | 'rdp' | 'vnc';
 }
 
 const DEFAULT_GLOBAL_TERMINAL_THEME_ID: GlobalTerminalThemeId = 'system';

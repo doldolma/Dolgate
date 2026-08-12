@@ -145,13 +145,21 @@ export const ipcChannels = {
     connect: 'vnc:connect',
     disconnect: 'vnc:disconnect',
     input: 'vnc:input',
+    // 렌더러 → 메인: 지금 로컬 클립보드를 원격에 올려 달라. 값은 메인이 읽는다(클립보드 소유자).
+    syncClipboard: 'vnc:sync-clipboard',
+    // 창 크기에 맞춰 원격 화면 크기를 바꿔 달라(서버가 지원할 때만 실제로 나간다).
+    setDesktopSize: 'vnc:set-desktop-size',
+    // 화면 전체를 다시 보내 달라. 캔버스가 그림을 잃었을 때(크기 변경으로 지워졌을 때) 쓴다.
+    refresh: 'vnc:refresh',
     // 이 창이 이 세션의 픽셀을 원한다/그만 원한다(rdp.watch 와 같은 이유).
     watch: 'vnc:watch',
     unwatch: 'vnc:unwatch',
     describeSession: 'vnc:describe-session',
     event: 'vnc:event',
     // 픽셀 전용 채널. store 를 거치지 않고 캔버스로 직결한다.
-    frame: 'vnc:frame'
+    frame: 'vnc:frame',
+    // 커서 모양. 픽셀과 같은 이유로 store 를 거치지 않는다(모양이 자주 바뀐다).
+    cursor: 'vnc:cursor'
   },
   ssh: {
     connect: 'ssh:connect',

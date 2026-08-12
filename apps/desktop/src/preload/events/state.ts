@@ -14,6 +14,7 @@ import type {
   TransferJobEvent,
   RdpAudioPayload,
   RdpFramePayload,
+  VncCursorPayload,
   VncFramePayload,
   VncSessionEvent,
   RdpSessionEvent,
@@ -53,6 +54,7 @@ const rdpFrameListeners = new Map<string, Set<Listener<RdpFramePayload>>>();
 const rdpAudioListeners = new Map<string, Set<Listener<RdpAudioPayload>>>();
 const vncEventHub = createListenerHub<VncSessionEvent>();
 const vncFrameListeners = new Map<string, Set<Listener<VncFramePayload>>>();
+const vncCursorListeners = new Map<string, Set<Listener<VncCursorPayload>>>();
 const transferEventHub = createListenerHub<TransferJobEvent>();
 const sftpConnectionProgressHub =
   createListenerHub<SftpConnectionProgressEvent>();
@@ -219,6 +221,47 @@ export function emitVncEvent(payload: VncSessionEvent): void {
 
 export function subscribeVncEvent(listener: Listener<VncSessionEvent>): () => void {
   return vncEventHub.subscribe(listener);
+}
+
+/**
+ * 커서 모양.
+ *
+ * 픽셀과 달리 watch 알림을 걸지 않는다 — 커서는 프레임과 같은 구독자 목록으로 오므로, 캔버스가
+ * 프레임을 구독하는 것으로 이미 켜져 있다. 여기서 또 알리면 같은 세션을 두 번 세게 된다.
+ */
+export function emitVncCursor(payload: VncCursorPayload): void {
+  const listeners = vncCursorListeners.get(payload.sessionId);
+  if (!listeners) {
+    return;
+  }
+  for (const listener of listeners) {
+    try {
+      listener(payload);
+    } catch {
+      // 한 구독자가 던져도 나머지에게는 전달돼야 한다.
+    }
+  }
+}
+
+export function subscribeVncCursor(
+  sessionId: string,
+  listener: Listener<VncCursorPayload>,
+): () => void {
+  const listeners =
+    vncCursorListeners.get(sessionId) ?? new Set<Listener<VncCursorPayload>>();
+  listeners.add(listener);
+  vncCursorListeners.set(sessionId, listeners);
+
+  return () => {
+    const current = vncCursorListeners.get(sessionId);
+    if (!current) {
+      return;
+    }
+    current.delete(listener);
+    if (current.size === 0) {
+      vncCursorListeners.delete(sessionId);
+    }
+  };
 }
 
 export function emitVncFrame(payload: VncFramePayload): void {

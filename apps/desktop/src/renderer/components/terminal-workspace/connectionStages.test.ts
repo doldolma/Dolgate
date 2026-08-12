@@ -565,4 +565,102 @@ describe('resolveConnectionStages', () => {
 
     expect(stateOf(stages, 'rdp')).toBe('pending');
   });
+  // 터널 관문 두 개. 이 둘의 실패가 사용자에게 완전히 다르다 — 경유 서버에 못 붙었으면 그쪽
+  // 자격증명 문제이고, 통로는 열렸는데 그 뒤가 막혔으면 원격에 VNC 가 안 떠 있다는 뜻이다.
+  it('SSH 터널을 거치면 관문 두 개가 순서대로 진행한다', () => {
+    const gateway = resolveConnectionStages({
+      tab: createTab({
+        paneKind: 'vnc',
+        status: 'pending',
+        connectionProgress: {
+          stage: 'ssh-tunnel-gateway',
+          message: '경유 중',
+          blockingKind: 'none',
+          retryable: true,
+        },
+      }),
+      hasTailscale: false,
+      hostKind: 'vnc',
+      tunnelLabel: 'Gate',
+      failureLayer: null,
+    });
+    expect(stateOf(gateway, 'ssh-tunnel-gateway')).toBe('active');
+    expect(stateOf(gateway, 'ssh-tunnel')).toBe('pending');
+    // 통로가 아직 없으면 그 뒤의 VNC 협상은 시작조차 못 한다.
+    expect(stateOf(gateway, 'vnc')).toBe('pending');
+
+    const opened = resolveConnectionStages({
+      tab: createTab({
+        paneKind: 'vnc',
+        status: 'pending',
+        connectionProgress: {
+          stage: 'ssh-tunnel-open',
+          message: '통로 열림',
+          blockingKind: 'none',
+          retryable: true,
+        },
+      }),
+      hasTailscale: false,
+      hostKind: 'vnc',
+      tunnelLabel: 'Gate',
+      failureLayer: null,
+    });
+    expect(stateOf(opened, 'ssh-tunnel-gateway')).toBe('done');
+    expect(stateOf(opened, 'ssh-tunnel')).toBe('done');
+    expect(stateOf(opened, 'vnc')).toBe('active');
+  });
+
+  // 터널을 안 쓰는 연결에 없는 관문을 세우면 무엇을 기다리는지 오히려 헷갈린다.
+  it('터널을 안 쓰면 그 관문이 아예 없다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ paneKind: 'vnc' }),
+      hasTailscale: false,
+      hostKind: 'vnc',
+      failureLayer: null,
+    });
+
+    expect(stages.map((stage) => stage.id)).toEqual(['vnc']);
+  });
+
+  // tailnet 을 지나야 통로를 열 수 있다. 그 전에 "진행 중" 으로 그리면 순서가 거꾸로 보인다.
+  it('tailnet 이 아직이면 터널 관문은 기다린다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ paneKind: 'vnc' }),
+      hasTailscale: true,
+      hostKind: 'vnc',
+      tailnetStatus: createStatus({ state: 'needsAuth', ready: false, authorized: false }),
+      tunnelLabel: 'Gate',
+      failureLayer: null,
+    });
+
+    expect(stateOf(stages, 'ssh-tunnel-gateway')).toBe('pending');
+    expect(stateOf(stages, 'ssh-tunnel')).toBe('pending');
+  });
+
+  // 분류되지 않은 실패는 진행 중이던 관문에 붙는다(마지막 정리). 통로를 여는 중에 실패하면 그
+  // 사실이 어디서 났는지 이 줄이 말한다.
+  it('경유 중 실패는 그 관문에 붙는다', () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({
+        paneKind: 'vnc',
+        status: 'error',
+        connectionProgress: {
+          stage: 'ssh-tunnel-gateway',
+          message: '경유 중',
+          blockingKind: 'none',
+          retryable: true,
+        },
+      }),
+      hasTailscale: false,
+      hostKind: 'vnc',
+      tunnelLabel: 'Gate',
+      failureLayer: null,
+      failureMessage: 'ssh: handshake failed',
+    });
+
+    expect(stateOf(stages, 'ssh-tunnel-gateway')).toBe('failed');
+    expect(stages.find((stage) => stage.id === 'ssh-tunnel-gateway')?.detail).toBe(
+      'ssh: handshake failed',
+    );
+  });
 });

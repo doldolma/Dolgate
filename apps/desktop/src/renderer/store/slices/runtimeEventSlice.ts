@@ -191,6 +191,26 @@ function isRdpErrorFinal(message: string): boolean {
   ].some((marker) => upper.includes(marker));
 }
 
+/**
+ * 다시 시도해도 결과가 같은 VNC 오류인지.
+ *
+ * RDP 와 같은 이유로 **확실히 영구인 것만 제외**한다(모르는 오류는 재시도). VNC 의 인증 실패를
+ * 반복하면 서버 쪽 계정이 잠길 수 있다 — VeNCrypt Plain 은 PAM 을 타므로 실제로 잠긴다.
+ * vnc-core 가 문구를 만드니 그 문구로 가른다(session.rs·vencrypt.rs).
+ */
+function isVncErrorFinal(message: string): boolean {
+  return [
+    // 비밀번호·계정 문제.
+    '비밀번호',
+    '계정',
+    'Authentication failed',
+    'authentication failed',
+    // 우리가 못 세우는 방식만 제시된 경우 — 재시도해도 같은 목록이 온다.
+    '지원하지 않습니다',
+    '거절했습니다',
+  ].some((marker) => message.includes(marker));
+}
+
 // AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
 const AWS_SSM_SESSION_EXIT_PATTERN = /AWS SSM session exited with code\s+(-?\d+)/i;
 
@@ -434,6 +454,122 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
               });
             }
           },
+    /**
+     * VNC 세션 이벤트. RDP 와 같은 이유로 SSH 기계를 타지 않는다.
+     *
+     * 여기서 하는 일은 하나다 — **끊긴 세션을 되살리거나, 왜 끊겼는지 남기는 것.** 예전에는 VNC
+     * 이벤트가 스토어에 아예 오지 않아서, 붙어 있던 세션이 끊기면 화면만 멈추고 탭은 초록색으로
+     * 남았다(재연결도 없었다).
+     */
+    handleVncEvent: (event) => {
+      // 재연결 예약은 set 밖에서 한다 — 예약이 다시 스토어를 갱신하므로(핸들러의 renderScheduled)
+      // set 안에서 부르면 갱신이 겹친다. 타입을 명시하는 이유는 RDP 쪽과 같다(추론이 never 로
+      // 좁혀져 아래 할당이 막힌다).
+      let scheduleFor: { stableId: string; hostId: string } | null =
+        null as { stableId: string; hostId: string } | null;
+
+      if (event.type === "error" || event.type === "closed") {
+        clearSessionCwd(event.sessionId);
+      }
+
+      set((state) => {
+        const tab = state.tabs.find((item) => item.sessionId === event.sessionId);
+        if (!tab) {
+          return state;
+        }
+
+        if (event.type === "progress") {
+          // 결과가 난 탭에는 얹지 않는다. 통로를 여는 보고는 접속 요청 안에서 나오므로, 실패한
+          // 뒤에 도착하는 순서가 실제로 생긴다 — 그러면 방금 띄운 이유가 진행 문구로 덮인다.
+          if (tab.status === "connected" || tab.status === "error") {
+            return state;
+          }
+          return {
+            tabs: state.tabs.map((item) =>
+              item.sessionId === event.sessionId
+                ? {
+                    ...item,
+                    connectionProgress: createConnectionProgress(
+                      event.stage,
+                      event.message,
+                    ),
+                    lastEventAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          };
+        }
+
+        if (event.type === "resized") {
+          // 탭 hover 의 해상도 표기. VNC 는 프레임버퍼가 하나라 모니터 수는 없다.
+          return {
+            tabs: state.tabs.map((item) =>
+              item.sessionId === event.sessionId
+                ? {
+                    ...item,
+                    rdpDesktopSize: {
+                      width: event.desktopWidth,
+                      height: event.desktopHeight,
+                    },
+                    lastEventAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          };
+        }
+
+        if (event.type === "error") {
+          if (
+            get().settings.autoReconnectEnabled &&
+            tab.hostId &&
+            !isVncErrorFinal(event.message)
+          ) {
+            scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
+          }
+          return {
+            tabs: state.tabs.map((item) =>
+              item.sessionId === event.sessionId
+                ? {
+                    ...item,
+                    status: "error" as const,
+                    errorMessage: event.message,
+                    connectionProgress: resolveErrorProgress(event.message, true),
+                    lastEventAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          };
+        }
+
+        if (event.type === "closed") {
+          // 실패 뒤에는 error 다음에 closed 가 온다. 무조건 지우면 방금 띄운 이유가 스쳐 지나간다.
+          if (tab.status === "error") {
+            return state;
+          }
+          // 붙어 있던 세션이 갑자기 닫혔다 = 서버 재부팅·네트워크 끊김·다른 클라이언트가 독점
+          // 접속(shared 를 끈 클라이언트가 붙으면 서버가 우리를 끊는다).
+          if (
+            tab.status === "connected" &&
+            get().settings.autoReconnectEnabled &&
+            tab.hostId
+          ) {
+            scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
+            return state;
+          }
+          return removeSessionFromState(state, event.sessionId);
+        }
+
+        return state;
+      });
+
+      if (scheduleFor) {
+        scheduleReconnect({
+          kind: "vnc",
+          key: scheduleFor.stableId,
+          meta: { hostId: scheduleFor.hostId },
+        });
+      }
+    },
     handleCoreEvent: (event) => {
             const sessionId = event.sessionId;
             const endpointId = event.endpointId;

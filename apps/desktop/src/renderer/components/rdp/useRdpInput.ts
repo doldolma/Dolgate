@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { RdpInputEvent } from "@shared";
 import { sendRdpInput } from "../../services/desktop/rdp";
+import { wheelDeltaToNotches } from "../../lib/wheel";
 import { scancodeFor } from "./scancodes";
 
 /**
@@ -40,14 +41,6 @@ export function resolveRemoteKeyCode(code: string, isMac: boolean): string {
 const WHEEL_UNITS_PER_NOTCH = 120;
 
 /**
- * 노치 하나에 해당하는 픽셀 수(deltaMode = pixel 일 때).
- *
- * 휠 한 칸을 굴리면 브라우저가 대략 100px 를 준다. 트랙패드는 같은 단위로 훨씬 작은 값을 훨씬
- * 자주 준다 — 그래서 이벤트마다 노치 하나씩 보내면 짧게 쓸어도 수백 줄이 넘어간다.
- */
-const WHEEL_PIXELS_PER_NOTCH = 100;
-
-/**
  * 누른 뒤 이만큼(로컬 CSS 픽셀) 움직이기 전까지는 이동을 보내지 않는다 — 드래그 임계값이다.
  *
  * 캔버스는 축소되어 그려진다. 원격 1920 폭을 960 폭 창에 넣으면 로컬 1픽셀이 원격 2픽셀이라,
@@ -58,10 +51,6 @@ const WHEEL_PIXELS_PER_NOTCH = 100;
  */
 const CLICK_SLOP_PX = 3;
 
-/** deltaMode = line 일 때 노치 하나에 해당하는 줄 수. 윈도우 기본값과 같다. */
-const WHEEL_LINES_PER_NOTCH = 3;
-
-/** 브라우저가 준 스크롤량을 노치 수로 옮긴다. */
 /**
  * 한 번에 실어 보낼 회전량.
  *
@@ -81,16 +70,9 @@ export function clampWheelUnits(units: number): number {
   return whole;
 }
 
-export function wheelDeltaToNotches(delta: number, deltaMode: number): number {
-  if (deltaMode === 1) {
-    return delta / WHEEL_LINES_PER_NOTCH;
-  }
-  if (deltaMode === 2) {
-    // 페이지 단위. 한 페이지를 한 노치로 보면 너무 굼떠서 화면 한 장을 여러 노치로 나눈다.
-    return delta * WHEEL_LINES_PER_NOTCH;
-  }
-  return delta / WHEEL_PIXELS_PER_NOTCH;
-}
+// 환산 표는 VNC 와 공용이다(renderer/lib/wheel.ts). 여기서 다시 내보내는 것은 이 훅의 테스트가
+// 예전부터 이 이름으로 가져다 쓰기 때문이다.
+export { wheelDeltaToNotches };
 
 interface RdpInputOptions {
   sessionId: string;

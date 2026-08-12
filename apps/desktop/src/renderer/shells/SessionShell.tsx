@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { AuthState } from '@shared';
+import { isSplittablePaneKind, type AuthState } from '@shared';
 import { TerminalWorkspace } from '../components/TerminalWorkspace';
 import { TmuxWindowBar } from '../components/terminal-workspace/TmuxWindowBar';
 import { TerminalHostStatusBar } from '../components/terminal-workspace/TerminalHostStatusBar';
@@ -131,15 +131,37 @@ export function SessionShell({
     if (draggedSession?.source !== 'standalone-tab') {
       return false;
     }
-
-    return Boolean(
-      resolveAdjacentTabCandidate(
-        sessionViewModel.tabStrip,
-        sessionViewModel.workspaces,
-        draggedSession.sessionId,
-      ),
+    // 원격 화면(RDP·VNC)은 분할에 참여하지 않는다. **끌고 있는 쪽에서 먼저 막는다** — 여기서
+    // 걸러야 드롭 안내선이 아예 뜨지 않는다(안내선을 보여주고 아무 일도 안 하면 고장으로 보인다).
+    const dragged = sessionViewModel.tabs.find(
+      (tab) => tab.sessionId === draggedSession.sessionId,
     );
-  }, [draggedSession, sessionViewModel.tabStrip, sessionViewModel.workspaces]);
+    if (!isSplittablePaneKind(dragged?.paneKind)) {
+      return false;
+    }
+
+    const candidate = resolveAdjacentTabCandidate(
+      sessionViewModel.tabStrip,
+      sessionViewModel.workspaces,
+      draggedSession.sessionId,
+    );
+    if (!candidate) {
+      return false;
+    }
+    // 받는 쪽도 본다. SSH 탭을 VNC 탭 위로 끌면 그 분할 안에 원격 화면이 들어간다.
+    if (candidate.kind === 'session') {
+      const target = sessionViewModel.tabs.find(
+        (tab) => tab.sessionId === candidate.sessionId,
+      );
+      return isSplittablePaneKind(target?.paneKind);
+    }
+    return true;
+  }, [
+    draggedSession,
+    sessionViewModel.tabs,
+    sessionViewModel.tabStrip,
+    sessionViewModel.workspaces,
+  ]);
 
   const workspaceEl = (
     <TerminalWorkspace

@@ -528,10 +528,13 @@ function buildHostFormSubmission(input: {
                 : null,
         }
       : input.draft;
-  // RDP도 비밀번호를 시크릿 저장소에 둔다(SSH와 같은 규칙). 아래 SSH 전용 경로는 키/인증서까지
-  // 다루므로 재사용하지 않고, 비밀번호만 취급하는 짧은 경로를 따로 둔다.
-  if (isRdpHostDraft(normalizedDraft)) {
-    const nextDraft: RdpHostDraft = {
+  // RDP·VNC 도 비밀번호를 시크릿 저장소에 둔다(SSH 와 같은 규칙). 아래 SSH 전용 경로는 키/인증서
+  // 까지 다루므로 재사용하지 않고, 비밀번호만 취급하는 짧은 경로를 따로 둔다.
+  //
+  // **두 종류를 한 분기에서 처리한다.** RDP 만 보던 자리인데 VNC 를 추가할 때 여기를 잊어서
+  // 비밀번호가 폼을 벗어나지 못했다 — 호스트는 저장되고 자격증명만 조용히 사라진다.
+  if (isRdpHostDraft(normalizedDraft) || isVncHostDraft(normalizedDraft)) {
+    const nextDraft: RdpHostDraft | VncHostDraft = {
       ...normalizedDraft,
       label: nextLabel,
       tags: nextTags,
@@ -550,8 +553,11 @@ function buildHostFormSubmission(input: {
       // hasSecretValue 도 그렇게 판단한다.
       secrets: input.password
         ? {
-            kind: 'rdp' as const,
+            // 종류를 그대로 실어 보낸다. 'rdp' 로 굳히면 VNC 자격증명이 RDP 목록에 섞인다.
+            kind: normalizedDraft.kind,
             password: input.password,
+            // VNC 폼에는 계정 칸이 없어서 지금은 비어 온다. VeNCrypt 의 Plain 계열을 지원하게
+            // 되면 그때 폼만 채우면 이 경로는 그대로 쓴다.
             username: username || undefined,
             domain: domain || undefined,
           }
@@ -760,6 +766,45 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   // 원격에 보일 드라이브 이름. 코어로 나가는 값과 같은 함수로 만든다 — 규칙이 두 곳에 있으면
   // 화면에 보여준 이름과 원격에 뜨는 이름이 갈린다.
   const rdpDrives = describeRdpDrives(rdpDraft?.drives);
+  // VNC 의 경로 두 개. 상호배타라서 서로의 잠금 조건이 된다.
+  const vncTunnelHostId = vncDraft?.sshTunnelHostId?.trim() ?? '';
+  const vncTailnetId = vncDraft?.tailnetId?.trim() ?? '';
+  const vncTunnelMissing =
+    vncTunnelHostId !== '' &&
+    !jumpHostOptions.some((option) => option.value === vncTunnelHostId);
+  const vncTunnelOptions: SearchableSelectOption[] = [
+    // 끄는 것도 목록 안에 둔다 — 검색 목록에는 값을 비울 다른 방법이 없다.
+    { value: '', label: translate('hostForm.vnc.tunnel.none') },
+    ...jumpHostOptions,
+    // 저장된 터널 호스트가 지워졌을 수 있다. 목록에서 빼면 "안 쓰는 것" 으로 보여 조용히 직접
+    // 접속으로 바뀐다 — 그대로 남겨 두고 경고한다.
+    ...(vncTunnelMissing
+      ? [
+          {
+            value: vncTunnelHostId,
+            label: translate('hostForm.vnc.tunnel.missingOption'),
+          },
+        ]
+      : []),
+  ];
+  /**
+   * 터널을 고르거나 끈다.
+   *
+   * 켤 때 주소가 비어 있으면 `127.0.0.1` 을 채운다 — 터널 뒤의 VNC 서버는 대개 경유 서버 자신이고,
+   * 빈 칸으로 두면 required 에 걸려 저장이 막힌다. 이미 적어 둔 주소는 건드리지 않는다(경유 서버
+   * 뒤의 다른 기기를 가리킬 수 있다).
+   */
+  const selectVncTunnelHost = (hostId: string | null) => {
+    if (!vncDraft) {
+      return;
+    }
+    setDraft({
+      ...vncDraft,
+      sshTunnelHostId: hostId,
+      hostname:
+        hostId && vncDraft.hostname.trim() === '' ? '127.0.0.1' : vncDraft.hostname,
+    });
+  };
   const jumpHostChain = sshDraft ? deriveJumpChain(sshDraft) : [];
   const commitJumpHostChain = (ids: string[]) => {
     if (!sshDraft) {
@@ -846,27 +891,37 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
    *
    * kind 가 없는 옛 항목이거나 목록 갱신이 늦은 경우다. 그냥 빼 버리면 셀렉트가 "새 자격증명"으로
    * 돌아가 **저장한 것이 풀린 것처럼 보인다**(실제로 그렇게 보였다). 있는 그대로 보여준다.
+   *
+   * RDP·VNC 가 같은 함수를 쓴다 — 한쪽에만 두면 다른 쪽에서 같은 증상이 다시 난다.
    */
-  const rdpSelectedMissingEntry = useMemo(() => {
-    if (!rdpDraft || credentialMode !== 'existing' || !selectedSecretRef) {
-      return null;
-    }
-    if (rdpReusableEntries.some((entry) => entry.secretRef === selectedSecretRef)) {
-      return null;
-    }
-    return (
-      keychainEntries.find((entry) => entry.secretRef === selectedSecretRef) ?? {
-        secretRef: selectedSecretRef,
-        label: selectedSecretRef,
+  const findSelectedMissingEntry = useCallback(
+    (active: boolean, entries: SecretMetadataRecord[]) => {
+      if (!active || credentialMode !== 'existing' || !selectedSecretRef) {
+        return null;
       }
-    );
-  }, [
-    credentialMode,
-    keychainEntries,
-    rdpDraft,
-    rdpReusableEntries,
-    selectedSecretRef,
-  ]);
+      if (entries.some((entry) => entry.secretRef === selectedSecretRef)) {
+        return null;
+      }
+      return (
+        keychainEntries.find((entry) => entry.secretRef === selectedSecretRef) ?? {
+          secretRef: selectedSecretRef,
+          label: selectedSecretRef,
+        }
+      );
+    },
+    [credentialMode, keychainEntries, selectedSecretRef],
+  );
+  // 계정을 적었는데 비밀번호가 없는 상태. 이대로 저장하면 자격증명이 만들어지지 않는다.
+  const accountNeedsPassword =
+    credentialMode === 'new' && credentialUsername.trim().length > 0 && !password;
+  const rdpSelectedMissingEntry = useMemo(
+    () => findSelectedMissingEntry(Boolean(rdpDraft), rdpReusableEntries),
+    [findSelectedMissingEntry, rdpDraft, rdpReusableEntries],
+  );
+  const vncSelectedMissingEntry = useMemo(
+    () => findSelectedMissingEntry(Boolean(vncDraft), vncReusableEntries),
+    [findSelectedMissingEntry, vncDraft, vncReusableEntries],
+  );
   const awsProfileOptions = useMemo<AwsProfileSelectOption[]>(() => {
     if (!isAwsDraft) {
       return [];
@@ -1459,6 +1514,10 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
       };
 
       if (!isFormValid(nextDraft)) {
+        // **왜 막혔는지 브라우저가 말해 주게 한다.** 생성 경로(reportCurrentValidity)는 이걸
+        // 부르는데 저장 경로는 부르지 않아서, 필수 칸이 비면 저장 버튼을 눌러도 아무 일도
+        // 일어나지 않고 이유도 보이지 않았다.
+        formRef.current?.reportValidity();
         return false;
       }
 
@@ -1505,8 +1564,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         setSaveInFlight(false);
       }
     },
+    // submitCreate 와 같은 규칙이다: buildHostFormSubmission 이 읽는 값이 전부 들어 있어야 한다.
+    // 계정·도메인이 빠져 있어서, 비밀번호를 먼저 넣고 계정을 나중에 적으면 계정만 빈 값으로
+    // 저장됐다(RDP 편집에서도 같은 자리다).
     [
+      credentialDomain,
       credentialMode,
+      credentialUsername,
       draft,
       envVars,
       host,
@@ -1543,6 +1607,13 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
   const renderTailnetField = (
     currentTailnetId: string | null | undefined,
     onChange: (tailnetId: string | null) => void,
+    /**
+     * 이 호스트가 이미 다른 경로로 가도록 정해져 있으면 그 이유. 넘기면 칸을 잠근다.
+     *
+     * VNC 의 SSH 터널이 이 자리를 쓴다 — 둘 다 정하면 접속 경로가 tailnet 만 보고 끝나서 터널이
+     * 조용히 무시된다(ipc/vnc.ts 의 openForward).
+     */
+    lockedReason?: string | null,
   ) => {
     const selected = currentTailnetId?.trim() ?? '';
     // 저장된 tailnet 이 이 기기에 없을 수 있다(다른 기기에서 등록). 지워진 것처럼 보이지 않게
@@ -1567,7 +1638,7 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         </div>
         <SelectField
           value={selected}
-          disabled={tailnetOptions.length === 0 && !missing}
+          disabled={Boolean(lockedReason) || (tailnetOptions.length === 0 && !missing)}
           onChange={(event) => onChange(event.target.value || null)}
         >
           <option value="">{translate('hostForm.tailnet.none')}</option>
@@ -1582,7 +1653,9 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
         </SelectField>
         {/* 고를 것이 있으면 설명을 붙이지 않는다. 비어 있을 때만 안내가 필요하다 —
             tailnet 은 기기마다 따로 등록해야 해서 "다른 PC 에는 있는데" 로 헷갈린다. */}
-        {missing ? (
+        {lockedReason ? (
+          <span className="text-[0.82rem] text-[var(--text-soft)]">{lockedReason}</span>
+        ) : missing ? (
           <span className="text-[0.82rem] text-[var(--danger)]">
             {translate('hostForm.tailnet.missing')}
           </span>
@@ -1775,34 +1848,36 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     }
 
     const nextTags = appendPendingTag(tagTokens, tagInput);
-    if (!isSshHostDraft(draft)) {
-      await onSubmit({
-        ...draft,
-        tags: nextTags
-      });
-      return true;
-    }
-
-    const nextDraft: HostDraft = {
-      ...draft,
+    // **저장(편집)과 같은 함수를 쓴다.**
+    //
+    // 예전에는 여기서 SSH 만 자격증명을 다루고 나머지 종류는 draft 만 보냈다. 그래서 New Host 로
+    // RDP·VNC 를 만들면서 비밀번호를 넣거나 기존 자격증명을 골라도 **아무것도 저장되지 않았다** —
+    // 편집 화면에 들어가면 선택이 비어 있었다. 종류별 처리를 한 곳(buildHostFormSubmission)에만
+    // 두면 생성과 편집이 갈릴 수 없다.
+    const submission = buildHostFormSubmission({
+      draft,
       tags: nextTags,
-      secretRef: credentialMode === 'existing' ? selectedSecretRef || null : null
-    };
-    await onSubmit(
-      nextDraft,
-      credentialMode === 'new'
-        ? {
-            password: password || undefined,
-            passphrase: passphrase || undefined,
-            privateKeyPem: privateKeyFile?.content,
-            certificateText: certificateFile?.content
-          }
-        : undefined
-    );
+      credentialMode,
+      selectedSecretRef,
+      credentialUsername,
+      credentialDomain,
+      password,
+      passphrase,
+      privateKeyPem: privateKeyFile?.content,
+      certificateText: certificateFile?.content,
+      env: envVars,
+    });
+    await onSubmit(submission.draft, submission.secrets);
     return true;
+    // **buildHostFormSubmission 이 읽는 값이 전부 들어 있어야 한다.** 하나라도 빠지면 그 값은
+    // 마지막으로 콜백이 다시 만들어진 시점의 것으로 굳는다 — 계정을 비밀번호보다 나중에 입력하면
+    // 계정만 조용히 빈 값으로 저장됐다(그렇게 새고 있었다).
   }, [
+    credentialDomain,
     credentialMode,
+    credentialUsername,
     draft,
+    envVars,
     isEditMode,
     onSubmit,
     passphrase,
@@ -1879,10 +1954,12 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
     >
       {hideTitle ? null : <div className="section-title">{translate('hostForm.title')}</div>}
       {/* 종류별 폼이 Details 섹션 안에서 직접 그린다. 여기 남은 것은 아직 옮기지 않은 종류를
-          위한 자리다 — 목록에 없는 종류만 폼 맨 위에 그룹·태그가 카드 밖으로 나온다. */}
-      {sshDraft || serialDraft || isAwsEc2Draft || isAwsEcsDraft || rdpDraft
-        ? null
-        : metadataFields}
+          위한 자리다 — 그 종류만 폼 맨 위에 그룹·태그가 카드 밖으로 나온다.
+
+          **옮긴 종류를 빼는 방식으로 쓰지 않는다.** 그렇게 두면 새 종류를 추가할 때마다 이 조건을
+          기억해야 하고, 한 번 잊으면 그룹·태그가 두 번 그려진다(RDP·VNC 가 실제로 그랬다). 아직
+          안 옮긴 종류를 적어 두면 새 종류는 저절로 제외된다. */}
+      {draft.kind === 'warpgate-ssh' ? metadataFields : null}
 
       {isAwsEc2Draft ? (
         <>
@@ -2681,15 +2758,35 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             title={translate('hostForm.section.connection')}
             testId="hostform-section-connection"
           >
-            <label className={fieldClassName}>
-              <span className={fieldLabelClassName}>{translate('hostForm.field.hostname')}</span>
+            {/* 터널을 거치면 이 주소의 뜻이 바뀐다 — **경유 서버에서 본** 대상이다. 라벨을 그대로
+                두면 사용자는 자기 PC 에서 닿는 주소를 넣고 "왜 안 되지" 가 된다. */}
+            <div className={fieldClassName}>
+              <label className={fieldLabelClassName} htmlFor="hostform-vnc-hostname">
+                {vncTunnelHostId
+                  ? translate('hostForm.vnc.tunnel.targetLabel')
+                  : translate('hostForm.field.hostname')}
+              </label>
               <Input
+                id="hostform-vnc-hostname"
                 value={vncDraft.hostname}
                 onChange={(event) => handleVncFieldChange('hostname', event.target.value)}
-                placeholder="192.168.0.10"
+                placeholder={vncTunnelHostId ? '127.0.0.1' : '192.168.0.10'}
+                aria-describedby={
+                  vncTunnelHostId ? 'hostform-vnc-target-hint' : undefined
+                }
                 required
               />
-            </label>
+              {/* 설명은 label 밖에 둔다. 안에 넣으면 이 칸의 이름이 "대상 주소…설명" 전체가 된다
+                  — 화면 낭독기와 테스트가 칸을 못 찾는다. */}
+              {vncTunnelHostId ? (
+                <span
+                  id="hostform-vnc-target-hint"
+                  className="text-[0.82rem] text-[var(--text-soft)]"
+                >
+                  {translate('hostForm.vnc.tunnel.targetHint')}
+                </span>
+              ) : null}
+            </div>
 
             <label className={fieldClassName}>
               <span className={fieldLabelClassName}>{translate('hostForm.field.port')}</span>
@@ -2741,6 +2838,11 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 }}
               >
                 <option value="new">{translate('hostForm.auth.newCredential')}</option>
+                {vncSelectedMissingEntry ? (
+                  <option value={`existing:${vncSelectedMissingEntry.secretRef}`}>
+                    {vncSelectedMissingEntry.label}
+                  </option>
+                ) : null}
                 {vncReusableEntries.map((entry) => (
                   <option key={entry.secretRef} value={`existing:${entry.secretRef}`}>
                     {formatSavedSecretOptionLabel(entry)}
@@ -2750,25 +2852,98 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
             </div>
 
             {credentialMode === 'new' ? (
-              <label className={fieldClassName}>
-                <span className={fieldLabelClassName}>
+              <div className={fieldClassName}>
+                {/* 길이 제한을 안내하지 않는다. 8바이트로 자르는 것은 VncAuth 뿐이고 서버도 같이
+                    자르니 실패하지 않으며, ARD(macOS 화면 공유)는 비밀번호 전체를 쓴다. 어느
+                    인증을 쓸지는 접속해 봐야 정해지므로 여기서 말할 수 있는 사실이 아니다. */}
+                <label
+                  className={fieldLabelClassName}
+                  htmlFor="hostform-vnc-password"
+                >
                   {translate('hostForm.field.password')}
-                </span>
+                </label>
                 <Input
+                  id="hostform-vnc-password"
                   type="password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
+                  // 계정만 넣으면 자격증명을 만들지 않는다(비밀번호 없는 자격증명은 인증에 쓸 수
+                  // 없다). 그런데 그것을 말해 주지 않으면 입력한 계정이 조용히 사라진다 —
+                  // 여기서 막고 위 문구로 이유를 보여 준다.
+                  required={accountNeedsPassword}
                 />
-                {/* 규격이 DES 키로 쓰려고 8바이트로 자른다. 9자 이상을 넣고 왜 안 되는지 찾는
-                    일이 없도록 미리 말해 준다. */}
-                <span className="text-[0.85rem] text-[var(--text-muted)]">
-                  {translate('hostForm.vnc.passwordHint')}
+                {/* 계정은 서버가 VeNCrypt 의 Plain 계열을 쓸 때만 필요하다. 대부분의 VNC 서버는
+                    비밀번호만 쓰므로 비워 두는 것이 기본이고, 비어 있으면 코어가 계정을 요구하는
+                    방식을 아예 고르지 않는다 — 빈 계정으로 붙으려다 실패하면 그 이유가 비밀번호
+                    오류와 구분되지 않는다. */}
+                <label
+                  className={fieldLabelClassName}
+                  htmlFor="hostform-vnc-username"
+                >
+                  {translate('hostForm.vnc.account')}
+                </label>
+                <Input
+                  id="hostform-vnc-username"
+                  aria-describedby="hostform-vnc-username-hint"
+                  value={credentialUsername}
+                  onChange={(event) => setCredentialUsername(event.target.value)}
+                />
+                <span
+                  id="hostform-vnc-username-hint"
+                  className={`text-[0.85rem] ${
+                    accountNeedsPassword
+                      ? 'text-[var(--danger,#e2504a)]'
+                      : 'text-[var(--text-muted)]'
+                  }`}
+                >
+                  {accountNeedsPassword
+                    ? translate('hostForm.vnc.accountNeedsPassword')
+                    : translate('hostForm.vnc.accountHint')}
                 </span>
-              </label>
+              </div>
             ) : null}
 
-            {renderTailnetField(vncDraft.tailnetId, (tailnetId) =>
-              handleVncFieldChange('tailnetId', tailnetId),
+            {/* SSH 터널. QEMU·libvirt 콘솔은 5900 을 localhost 에만 바인딩하는 것이 관행이라
+                이 경로가 아니면 아예 닿지 않는다.
+
+                tailnet 과 상호배타다. 접속 경로(ipc/vnc.ts 의 openForward)가 tailnetId 를 먼저
+                보고 거기서 끝내므로 둘 다 정하면 터널이 조용히 무시된다. 그리고 배타로 두어도
+                잃는 것이 없다 — 터널은 고른 SSH 호스트의 tailnet 설정을 그대로 타므로
+                (resolveTailnetRoute) tailnet 뒤의 VNC 서버도 터널로 닿는다. */}
+            <div className={fieldClassName}>
+              <span className={fieldLabelClassName}>
+                {translate('hostForm.vnc.tunnel.label')}
+              </span>
+              {/* 점프 호스트와 같은 검색 가능한 목록을 쓴다 — 호스트가 늘면 평범한 select 에서는
+                  찾을 수 없고, 고르는 대상이 같은 종류(저장된 SSH 호스트)라 조작도 같아야 한다. */}
+              <SearchableSelect
+                ariaLabel={translate('hostForm.vnc.tunnel.label')}
+                placeholder={translate('hostForm.vnc.tunnel.none')}
+                searchPlaceholder={translate('hostForm.jump.searchPlaceholder')}
+                value={vncTunnelHostId}
+                options={vncTunnelOptions}
+                disabled={jumpHostOptions.length === 0 || Boolean(vncTailnetId)}
+                onChange={(next) => selectVncTunnelHost(next || null)}
+              />
+              <span
+                className={`text-[0.82rem] ${
+                  vncTunnelMissing ? 'text-[var(--danger)]' : 'text-[var(--text-soft)]'
+                }`}
+              >
+                {vncTunnelMissing
+                  ? translate('hostForm.vnc.tunnel.missing')
+                  : jumpHostOptions.length === 0
+                    ? translate('hostForm.vnc.tunnel.empty')
+                    : vncTailnetId
+                      ? translate('hostForm.vnc.tunnel.lockedByTailnet')
+                      : translate('hostForm.vnc.tunnel.hint')}
+              </span>
+            </div>
+
+            {renderTailnetField(
+              vncDraft.tailnetId,
+              (tailnetId) => handleVncFieldChange('tailnetId', tailnetId),
+              vncTunnelHostId ? translate('hostForm.vnc.tunnel.tailnetLocked') : null,
             )}
           </FormSection>
 
@@ -2801,6 +2976,37 @@ export const HostForm = forwardRef<HostFormHandle, HostFormProps>(function HostF
                 handleVncFieldChange('viewOnly', vncDraft.viewOnly === true ? null : true)
               }
             />
+
+            {/* 화질. 기본은 무손실이다 — 서버는 우리가 품질을 선언할 때만 JPEG 를 쓴다(실측:
+                선언 없으면 JPEG 0개, balanced 로 81개). 글자가 뭉개지는 것은 사용자가 고를 일이다. */}
+            <div className={fieldClassName}>
+              <label className={fieldLabelClassName} htmlFor="hostform-vnc-quality">
+                {translate('hostForm.vnc.quality.label')}
+              </label>
+              <SelectField
+                id="hostform-vnc-quality"
+                value={vncDraft.imageQuality ?? 'lossless'}
+                onChange={(event) =>
+                  handleVncFieldChange(
+                    'imageQuality',
+                    event.target.value === 'lossless'
+                      ? null
+                      : (event.target.value as 'balanced' | 'fast'),
+                  )
+                }
+              >
+                <option value="lossless">
+                  {translate('hostForm.vnc.quality.lossless')}
+                </option>
+                <option value="balanced">
+                  {translate('hostForm.vnc.quality.balanced')}
+                </option>
+                <option value="fast">{translate('hostForm.vnc.quality.fast')}</option>
+              </SelectField>
+              <span className="text-[0.85rem] text-[var(--text-muted)]">
+                {translate('hostForm.vnc.quality.hint')}
+              </span>
+            </div>
           </FormSection>
         </>
       ) : rdpDraft ? (

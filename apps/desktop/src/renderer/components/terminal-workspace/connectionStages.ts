@@ -1,5 +1,10 @@
 import { isAwsEc2WindowsPlatform } from '@shared';
-import type { HostRecord, TailnetStatus, TerminalTab } from '@shared';
+import type {
+  HostRecord,
+  TailnetStatus,
+  TerminalConnectionStage,
+  TerminalTab,
+} from '@shared';
 import { t } from '../../i18n';
 
 /**
@@ -298,6 +303,13 @@ export function resolveConnectionStages(input: {
   failureLayer: ConnectionFailureLayer;
   failureMessage?: string;
   hostKeyPrompted?: boolean;
+  /**
+   * 경유하는 SSH 호스트의 이름. 있으면 터널 관문 두 개가 선다.
+   *
+   * 호스트 종류로 유추하지 않는다 — 같은 VNC 호스트가 직접 붙기도 하고 터널로 붙기도 하며, 그
+   * 판단은 접속 경로가 한다(`ipc/vnc.ts` 의 `openForward`).
+   */
+  tunnelLabel?: string | null;
 }): ConnectionStage[] {
   const { tab, tailnetStatus, hasTailscale, failureLayer, failureMessage } = input;
   const transport = resolveConnectionTransport(tab, input.hostKind, input.awsPlatform);
@@ -355,8 +367,24 @@ export function resolveConnectionStages(input: {
     });
   }
 
+  // SSH 터널을 거치는 종류(VNC)는 통로가 열려야 원격 프로토콜을 시작할 수 있다.
+  //
+  // 관문을 둘로 나누는 이유는 이 둘의 실패가 사용자에게 완전히 다르기 때문이다 — 경유 서버에
+  // 못 붙은 것이면 그쪽 자격증명 문제이고, 통로는 열렸는데 그 뒤가 막힌 것이면 원격에 VNC 가
+  // 안 떠 있다는 뜻이다. 상태는 메인이 보내는 진행 단계로만 채운다(추측하지 않는다).
+  const tunnelStages = input.tunnelLabel
+    ? resolveTunnelStages(input.tunnelLabel, stage, tailscaleReady, connected, failed)
+    : [];
+  stages.push(...tunnelStages);
+  const tunnelOpen =
+    !input.tunnelLabel ||
+    connected ||
+    stage === 'connecting' ||
+    stage === 'ssh-tunnel-open';
+
   // 앞에 관문이 없는 종류는 tailnet 만 지나면 바로 붙는 중이다.
-  const readyToConnect = checksHostKey ? hostKeyDone : tailscaleReady;
+  const readyToConnect =
+    (checksHostKey ? hostKeyDone : tailscaleReady) && tunnelOpen;
   const transportLabel = transportStageLabel(transport);
   if (transportLabel) {
     stages.push({
@@ -392,6 +420,47 @@ export function resolveConnectionStages(input: {
   }
 
   return stages;
+}
+
+/**
+ * SSH 터널 관문 둘 — 경유 서버 접속, 그리고 통로 개설.
+ *
+ * 실패는 진행 중이던 관문에 붙는다(호출자의 마지막 정리가 한다). 여기서는 어디까지 갔는지만
+ * 정한다: 메인은 통로를 열기 전에 `ssh-tunnel-gateway`, 열린 뒤에 `ssh-tunnel-open` 을 보낸다.
+ */
+function resolveTunnelStages(
+  label: string,
+  stage: TerminalConnectionStage | undefined,
+  tailscaleReady: boolean,
+  connected: boolean,
+  failed: boolean,
+): ConnectionStage[] {
+  // 통로가 열렸다는 보고를 받았거나, 이미 그 뒤로 넘어갔으면 첫 관문은 끝난 것이다.
+  const openReported =
+    connected || stage === 'ssh-tunnel-open' || stage === 'connecting';
+  const gatewayActive = stage === 'ssh-tunnel-gateway';
+  return [
+    {
+      id: 'ssh-tunnel-gateway',
+      group: 'host',
+      label: t('connectStages.tunnelGateway', { label }),
+      state: openReported
+        ? 'done'
+        : gatewayActive
+          ? 'active'
+          : // tailnet 이 아직 안 끝났으면 이 관문은 시작조차 못 한다. 실패로 앉은 화면에서도
+            // "진행 중" 으로 그리면 기다리면 될 것처럼 보인다.
+            !tailscaleReady || failed
+            ? 'pending'
+            : 'active',
+    },
+    {
+      id: 'ssh-tunnel',
+      group: 'host',
+      label: t('connectStages.tunnelOpen'),
+      state: openReported ? 'done' : 'pending',
+    },
+  ];
 }
 
 /**

@@ -984,6 +984,54 @@ export function createSessionServices(deps: SliceDeps) {
     await startRdpConnectionFlow(set, get, host, pendingSessionId);
   };
 
+  /**
+   * VNC 세션을 같은 탭에 다시 붙인다.
+   *
+   * RDP 와 같은 모양이고 같은 이유다 — 재연결 상태(시도 횟수·백오프)가 `stableId` 에 붙어 있어서
+   * 새 탭을 만들면 그 카운터를 잃는다.
+   */
+  const retryVncConnection = async (
+    set: StoreSetter,
+    get: StoreGetter,
+    sessionId: string,
+  ) => {
+    const tab = get().tabs.find((item) => item.sessionId === sessionId);
+    if (!tab || tab.paneKind !== "vnc" || !tab.hostId) {
+      return;
+    }
+    const host = get().hosts.find((item) => item.id === tab.hostId);
+    if (!host || !isVncHostRecord(host)) {
+      return;
+    }
+
+    const pendingSessionId = createPendingSessionId();
+    set((state) => ({
+      ...replaceSessionReferencesInState(
+        state,
+        sessionId,
+        pendingSessionId,
+        (current) =>
+          createPendingSessionTab({
+            sessionId: pendingSessionId,
+            // 이것이 재연결 상태의 키다. 잃으면 시도 횟수가 처음부터 다시 센다.
+            stableId: current.stableId,
+            source: "host",
+            hostId: host.id,
+            title: current.title,
+            paneKind: "vnc",
+            progress: resolveConnectingProgress(host),
+          }),
+      ),
+    }));
+
+    // 아직 코어에 붙지 않은 세션(pending)은 끊을 것이 없다.
+    if (!isPendingSessionId(sessionId)) {
+      await api.vnc.disconnect(sessionId).catch(() => undefined);
+    }
+
+    await startVncConnectionFlow(set, get, host, pendingSessionId);
+  };
+
   const startSessionConnectionFlow = async (
     set: StoreSetter,
     get: StoreGetter,
@@ -1209,6 +1257,7 @@ export function createSessionServices(deps: SliceDeps) {
     createPendingSessionTabForHost,
     startRdpConnectionFlow,
     retryRdpConnection,
+    retryVncConnection,
     createPendingSessionTabForLocal,
     createPendingSessionTabForContainerShell,
     createPendingSessionTabForEcsShell,

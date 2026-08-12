@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { LEGACY_TOLERATED_HOST_KINDS, getHostBadgeLabel } from '@shared';
 import type { HostRecord, SecretMetadataRecord, SnippetRecord } from '@shared';
 import { HostForm, type HostFormActionState, type HostFormHandle, type HostFormProps } from './HostForm';
 import { cn } from '../lib/cn';
-import { Button } from '../ui';
+import { Button, Tooltip } from '../ui';
 import { X } from '../ui/icons';
 import type { SearchableSelectOption } from '../ui';
 import { useTranslation } from 'react-i18next';
@@ -19,26 +19,31 @@ const HOST_KIND_TABS: ReadonlyArray<{ kind: HostCreateKind; label: string }> = [
 ];
 
 /**
- * 이 서버에서 만들 수 있는 종류만 남긴다.
+ * 종류 칸 목록과, 각 칸을 지금 고를 수 있는지.
  *
  * 옛 클라이언트가 모르는 종류(RDP·VNC 등)는 서버가 계정 데이터 수준을 저장할 수 있어야 한다. 못
  * 하는 서버(자체 호스팅 옛 버전)에서 만들면, 같은 계정의 옛 기기가 그 레코드를 받아 조용히
- * 망가진다 — 서버가 막아 줄 수 없는 상태다. 그래서 여기서 아예 열지 않는다.
+ * 망가진다 — 서버가 막아 줄 수 없는 상태다.
+ *
+ * **숨기지 않고 비활성으로 둔다.** 없애면 사용자는 그 기능이 아예 없는 줄 알거나, 다른 기기에서는
+ * 보이는데 여기서는 안 보이는 이유를 알 수 없다. 비활성 칸에 마우스를 올리면 서버를 업데이트하면
+ * 된다고 알려 준다(호출부가 `disabledReason` 을 쓴다).
  *
  * **판정을 종류 이름으로 하지 않는다.** 예전에는 `kind !== 'rdp'` 였는데, 그러면 새 종류를 만들
  * 때마다 이 함수를 기억해야 하고 한 번 잊으면 보호 없이 열린다(데이터 수준 판정도 같은 이유로
  * 일반화했다 — sync-service 의 resolveSyncDataFloor 참고).
  *
- * 이미 만들어 둔 호스트는 그대로 둔다. 이미 올라가 있으므로 숨겨도 위험이 줄지 않고, 쓰던 것이
+ * 이미 만들어 둔 호스트는 그대로 둔다. 이미 올라가 있으므로 가려도 위험이 줄지 않고, 쓰던 것이
  * 사라지는 편이 더 나쁘다.
  */
 export function resolveCreatableHostKinds(input: {
   serverSupportsDataFloor: boolean;
-}): ReadonlyArray<{ kind: HostCreateKind; label: string }> {
-  return HOST_KIND_TABS.filter(
-    (tab) =>
-      LEGACY_TOLERATED_HOST_KINDS.has(tab.kind) || input.serverSupportsDataFloor,
-  );
+}): ReadonlyArray<{ kind: HostCreateKind; label: string; disabled: boolean }> {
+  return HOST_KIND_TABS.map((tab) => ({
+    ...tab,
+    disabled:
+      !LEGACY_TOLERATED_HOST_KINDS.has(tab.kind) && !input.serverSupportsDataFloor,
+  }));
 }
 
 const HOST_KIND_BADGE_LABELS: Record<HostCreateKind, string> = {
@@ -246,21 +251,51 @@ export function HostDrawer({
           <div className={cn(KIND_SEGMENT_TRACK_CLASS, 'mb-[1.1rem]')} aria-label="Host type">
             {creatableKinds.map((tab) => {
               const isSelected = selectedKind === tab.kind;
-              return (
+              const disabledReason = tab.disabled
+                ? translate('hostDrawer.kindNeedsServerUpdate', { kind: tab.label })
+                : undefined;
+              const button = (
                 <button
-                  key={tab.kind}
                   type="button"
                   aria-pressed={isSelected}
+                  disabled={tab.disabled}
+                  title={disabledReason}
                   className={cn(
                     KIND_SEGMENT_BASE_CLASS,
-                    isSelected
-                      ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]'
-                      : 'border-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] hover:text-[var(--text)]',
+                    'w-full',
+                    tab.disabled
+                      ? // 비활성도 자리를 지킨다 — 칸이 사라지면 다른 기기와 화면이 달라 보인다.
+                        //
+                        // pointer-events-none 이 필요하다: 비활성 버튼은 마우스 이벤트를 삼켜서
+                        // 감싼 span 의 hover 가 안 잡히고, 그러면 툴팁이 뜨지 않는다.
+                        // 커서 모양은 감싼 래퍼가 낸다 — pointer-events-none 인 요소에는
+                        // cursor 가 적용되지 않는다.
+                        'pointer-events-none border-transparent text-[var(--text-soft)] opacity-45'
+                      : isSelected
+                        ? 'border-[var(--selection-border)] bg-[var(--selection-tint)] text-[var(--accent-strong)]'
+                        : 'border-transparent text-[var(--text-soft)] hover:bg-[color-mix(in_srgb,var(--surface-muted)_70%,transparent_30%)] hover:text-[var(--text)]',
                   )}
                   onClick={() => handleKindChange(tab.kind)}
                 >
                   {tab.label}
                 </button>
+              );
+
+              if (!tab.disabled) {
+                return <Fragment key={tab.kind}>{button}</Fragment>;
+              }
+              // 왜 못 고르는지 말해 준다. 비활성 버튼만 두면 사용자는 고장으로 읽는다.
+              //
+              // `title` 은 비활성 컨트롤에서 뜨지 않으므로(브라우저가 마우스 이벤트를 주지 않는다)
+              // 실제로 보이는 것은 이 Tooltip 이다. title 은 접근성 도구용으로 남긴다.
+              return (
+                <Tooltip
+                  key={tab.kind}
+                  className="w-full cursor-not-allowed"
+                  label={disabledReason ?? ''}
+                >
+                  {button}
+                </Tooltip>
               );
             })}
           </div>
