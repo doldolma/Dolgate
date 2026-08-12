@@ -147,7 +147,11 @@ pub mod encoding {
     /// **이 선언이 협상의 시작이다.** 이것을 목록에 넣은 것을 본 서버만 caps 를 보내고, 그 caps 를
     /// 받은 뒤에야 우리가 확장 메시지를 보낼 수 있다. 선언을 빼먹으면 clipboard.rs 전체가 죽은
     /// 코드가 되고 한글이 고전 경로에서 `?` 로 뭉개진다 — 실제로 그런 상태였다.
-    pub const EXTENDED_CLIPBOARD: i32 = -1063;
+    ///
+    /// **값은 `0xc0a1e5ce` 다.** 다른 의사 인코딩처럼 작은 음수가 아니라서, 줄여 적으면(-1063 을
+    /// 넣어 뒀었다) 아무 서버도 알아보지 못하는 번호가 된다 — 선언을 빼먹은 것과 결과가 같아서
+    /// 어느 서버에 붙어도 "UTF-8 클립보드 미지원" 으로만 보인다. 눈으로 대조할 수 있게 16진수로 쓴다.
+    pub const EXTENDED_CLIPBOARD: i32 = 0xc0a1_e5ceu32 as i32;
 }
 
 /// 화질 단계. 서버가 Tight 를 어떻게 쓸지 정한다.
@@ -952,6 +956,40 @@ mod tests {
     ///
     /// 확장 클립보드가 실제로 이렇게 빠져 있었다. 서버는 이 선언을 본 뒤에만 caps 를 보내므로,
     /// 선언이 없으면 clipboard.rs 가 한 줄도 실행되지 않는데 컴파일도 테스트도 통과한다.
+    /// 의사 인코딩 번호를 규격 값에 못박는다.
+    ///
+    /// 목록에 들어 있는지만 보면 **번호가 틀려도 통과한다.** 확장 클립보드가 실제로 그랬다:
+    /// `-1063` 이 들어가 있어서(규격은 `0xc0a1e5ce`) 선언은 나가는데 어느 서버도 알아보지
+    /// 못했고, 모든 서버가 UTF-8 미지원으로만 보였다 — 맥·리눅스·TigerVNC 전부.
+    ///
+    /// 그래서 목록 여부와 별개로 값 자체를 대조한다. 다른 확장도 같은 방식으로 틀릴 수 있어
+    /// 함께 적어 둔다(출처: RFB 규격 / TigerVNC rfbproto.h).
+    #[test]
+    fn pseudo_encoding_numbers_match_the_spec() {
+        assert_eq!(encoding::EXTENDED_CLIPBOARD, 0xc0a1_e5ceu32 as i32);
+        assert_eq!(encoding::EXTENDED_CLIPBOARD, -1_063_131_698);
+        assert_eq!(encoding::CURSOR, -239);
+        assert_eq!(encoding::DESKTOP_SIZE, -223);
+        assert_eq!(encoding::EXTENDED_DESKTOP_SIZE, -308);
+        assert_eq!(encoding::FENCE, -312);
+        assert_eq!(encoding::CONTINUOUS_UPDATES, -313);
+        assert_eq!(encoding::QEMU_KEY_EVENT, -258);
+    }
+
+    /// 선언이 실제로 바이트로 나가는지.
+    ///
+    /// 상수만 맞아도 SetEncodings 에 안 실리면 의미가 없다 — 그 메시지를 그대로 읽어 확인한다.
+    #[test]
+    fn set_encodings_carries_the_extended_clipboard_number() {
+        let mut wire = Vec::new();
+        write_set_encodings(&mut wire, &client_encodings(ImageQuality::default())).unwrap();
+        let spec = (0xc0a1_e5ceu32).to_be_bytes();
+        assert!(
+            wire.windows(4).any(|chunk| chunk == spec),
+            "SetEncodings 에 0xc0a1e5ce 가 없다 — 서버는 caps 를 보내지 않는다"
+        );
+    }
+
     #[test]
     fn declares_every_extension_we_implement() {
         for (value, name) in [

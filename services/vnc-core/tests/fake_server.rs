@@ -69,6 +69,101 @@ enum Seen {
     AfterContinuousUpdates(Vec<u8>),
     /// ARD 로 받아 복호화한 계정·비밀번호.
     ArdCredentials { username: String, password: String },
+    /// 확장 ClientCutText(음수 길이) 의 본문. flags 와 데이터를 그대로 담는다.
+    ExtendedCutText(Vec<u8>),
+}
+
+/// 확장 클립보드를 쓰는 서버.
+///
+/// **caps 를 보내는 쪽이 협상을 시작한다.** 우리가 목록에 `0xc0a1e5ce` 를 실어야 서버가 caps 를
+/// 보내고, 그 caps 를 본 뒤에야 우리도 확장 메시지를 보낼 수 있다. 이 왕복을 세션 수준에서 재는
+/// 테스트가 없어서, 인코딩 번호가 틀렸던 동안(-1063) 확장 경로가 한 번도 실행되지 않았는데도
+/// 단위 테스트는 전부 통과했다.
+fn spawn_extended_clipboard_server() -> (u16, Receiver<Seen>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = channel();
+
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket.set_nodelay(true).ok();
+
+        socket.write_all(b"RFB 003.008\n").unwrap();
+        let mut client_version = [0_u8; 12];
+        socket.read_exact(&mut client_version).unwrap();
+        socket.write_all(&[1, 1]).unwrap();
+        let mut chosen = [0_u8; 1];
+        socket.read_exact(&mut chosen).unwrap();
+        socket.write_all(&0_u32.to_be_bytes()).unwrap();
+        let mut shared = [0_u8; 1];
+        socket.read_exact(&mut shared).unwrap();
+
+        let mut init = Vec::new();
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&PixelFormat::rgba32().to_bytes());
+        init.extend_from_slice(&4_u32.to_be_bytes());
+        init.extend_from_slice(b"fake");
+        socket.write_all(&init).unwrap();
+
+        let mut set_format = [0_u8; 20];
+        socket.read_exact(&mut set_format).unwrap();
+
+        let mut head = [0_u8; 4];
+        socket.read_exact(&mut head).unwrap();
+        let count = u16::from_be_bytes([head[2], head[3]]);
+        let mut encodings = Vec::new();
+        for _ in 0..count {
+            let mut raw = [0_u8; 4];
+            socket.read_exact(&mut raw).unwrap();
+            encodings.push(i32::from_be_bytes(raw));
+        }
+        // 실서버와 같은 조건: 목록에서 확장 클립보드를 **본 뒤에만** caps 를 보낸다.
+        let advertised = encodings.contains(&(0xc0a1_e5ceu32 as i32));
+        tx.send(Seen::Encodings(encodings)).ok();
+
+        let incremental = read_update_request(&mut socket);
+        tx.send(Seen::UpdateRequest { incremental }).ok();
+
+        if advertised {
+            // ServerCutText 의 길이를 음수로 실으면 확장 메시지다. 본문은 flags(4) + 데이터.
+            let mut caps = vec![3_u8, 0, 0, 0];
+            caps.extend_from_slice(&(-8_i32).to_be_bytes());
+            // caps 동작 + 텍스트 형식, 그리고 텍스트 한도(형식마다 4바이트).
+            caps.extend_from_slice(&0x1000_0001_u32.to_be_bytes());
+            caps.extend_from_slice(&(256_u32 * 1024).to_be_bytes());
+            socket.write_all(&caps).unwrap();
+        }
+
+        // 클라이언트가 보내는 것을 모아 넘긴다. 확장 ClientCutText 만 골라낸다.
+        socket.set_read_timeout(Some(Duration::from_secs(3))).ok();
+        loop {
+            let mut kind = [0_u8; 1];
+            if socket.read_exact(&mut kind).is_err() {
+                break;
+            }
+            if kind[0] != 6 {
+                // 이 테스트는 클립보드만 본다. 다른 메시지는 길이를 알아야 건너뛸 수 있어
+                // 여기서 멈춘다 — 세션은 클립보드 외에 아무것도 보내지 않는다.
+                break;
+            }
+            let mut rest = [0_u8; 7];
+            if socket.read_exact(&mut rest).is_err() {
+                break;
+            }
+            let length = i32::from_be_bytes([rest[3], rest[4], rest[5], rest[6]]);
+            let size = length.unsigned_abs() as usize;
+            let mut body = vec![0_u8; size];
+            if socket.read_exact(&mut body).is_err() {
+                break;
+            }
+            if length < 0 {
+                tx.send(Seen::ExtendedCutText(body)).ok();
+            }
+        }
+    });
+
+    (port, rx)
 }
 
 /// 협상을 마치고 화면 한 장을 보내는 서버를 띄운다.
@@ -712,8 +807,12 @@ fn negotiates_the_cursor_continuous_updates_and_fence_extensions() {
     let Seen::Encodings(encodings) = seen.recv().unwrap() else {
         panic!("첫 관찰은 인코딩 목록이어야 한다");
     };
+    // 번호를 손으로 적는다 — 코드의 상수를 그대로 쓰면 상수가 틀렸을 때 같이 틀린다. 실제로
+    // 여기 확장 클립보드를 `-1063` 으로 적어 뒀었고(규격은 `0xc0a1e5ce` = -1063131698), 코드도
+    // 같은 값이어서 이 테스트가 통과했다. 그 결과 어느 서버도 우리 선언을 알아보지 못했다.
+    // 출처: RFB 규격 / TigerVNC rfbproto.h.
     for (value, name) in [
-        (-1063_i32, "확장 클립보드"),
+        (0xc0a1_e5ceu32 as i32, "확장 클립보드"),
         (-239, "커서"),
         (-312, "울타리"),
         (-313, "연속 갱신"),
@@ -825,6 +924,70 @@ fn negotiates_the_cursor_continuous_updates_and_fence_extensions() {
         lossy.map(|meta| meta["payload"]["replaced"].as_u64()),
         Some(Some(2)),
         "한글 두 글자가 바뀌었다고 알려야 한다"
+    );
+
+    close.send(()).ok();
+    session.join().unwrap();
+}
+
+/// 확장 클립보드가 켜지면 한글이 UTF-8 로 나간다.
+///
+/// 고전 경로 테스트(위)는 한글이 `?` 로 뭉개지는 것을 확인한다. 그 반대편, 즉 **확장이 켜졌을 때**
+/// 를 재는 테스트가 없어서 인코딩 번호가 틀렸던 것을 아무도 잡지 못했다 — 모든 서버에서 확장이
+/// 꺼진 채였는데 고전 경로만 검사하니 전부 통과했다.
+#[test]
+fn sends_utf8_clipboard_once_the_server_offers_caps() {
+    let (port, seen) = spawn_extended_clipboard_server();
+    let collected = Collected::default();
+    let (session, close, handles) = run_session(port, "", collected.clone());
+
+    let Seen::Encodings(encodings) = seen.recv().unwrap() else {
+        panic!("첫 관찰은 인코딩 목록이어야 한다");
+    };
+    // 이 서버는 목록에서 규격 번호를 본 뒤에만 caps 를 보낸다(실서버와 같은 조건).
+    assert!(
+        encodings.contains(&(0xc0a1_e5ceu32 as i32)),
+        "확장 클립보드 번호(0xc0a1e5ce)가 없으면 서버는 caps 를 보내지 않는다: {encodings:?}"
+    );
+    let Seen::UpdateRequest { .. } = seen.recv().unwrap() else {
+        panic!("첫 갱신 요청이 와야 한다");
+    };
+
+    // caps 를 받은 뒤 우리 caps 가 먼저 나가고, 그다음 텍스트가 나가야 한다.
+    let handle = handles.recv().unwrap();
+    handle.send_clipboard("한글 abc".to_owned()).unwrap();
+
+    let Seen::ExtendedCutText(ours) = seen.recv().unwrap() else {
+        panic!("우리 caps 가 확장 메시지로 나가야 한다");
+    };
+    let flags = u32::from_be_bytes([ours[0], ours[1], ours[2], ours[3]]);
+    assert_ne!(flags & 0x1000_0000, 0, "첫 확장 메시지는 caps 여야 한다: {flags:#x}");
+    assert_ne!(flags & 0x0000_0001, 0, "텍스트 형식을 지원한다고 알려야 한다");
+
+    let Seen::ExtendedCutText(provide) = seen.recv().unwrap() else {
+        panic!("텍스트가 확장 provide 로 나가야 한다");
+    };
+    let flags = u32::from_be_bytes([provide[0], provide[1], provide[2], provide[3]]);
+    assert_ne!(flags & 0x0800_0000, 0, "provide 동작이어야 한다: {flags:#x}");
+
+    // 본문은 zlib 이고 그 안은 크기(4) + UTF-8 텍스트다. 되돌려 한글이 살아 있는지 본다.
+    let mut plain = Vec::new();
+    flate2::read::ZlibDecoder::new(&provide[4..])
+        .read_to_end(&mut plain)
+        .expect("provide 본문은 zlib 스트림이어야 한다");
+    let size = u32::from_be_bytes([plain[0], plain[1], plain[2], plain[3]]) as usize;
+    let text = String::from_utf8(plain[4..4 + size].to_vec()).expect("UTF-8 이어야 한다");
+    // 규격이 와이어에서 CRLF 를 쓰라고 정했다. 한글은 그대로 살아 있어야 한다.
+    assert_eq!(text, "한글 abc", "확장 경로는 한글을 그대로 실어야 한다");
+
+    // 확장으로 갔으므로 "글자가 바뀌었다" 는 알림은 없어야 한다.
+    assert!(
+        collected
+            .frames(1)
+            .iter()
+            .map(metadata)
+            .all(|meta| meta["type"] != "clipboardLossy"),
+        "확장 경로에서는 손실 알림이 없어야 한다"
     );
 
     close.send(()).ok();
