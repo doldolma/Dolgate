@@ -141,6 +141,10 @@ export function restoreWindow() {
   return desktopApi.window.restore();
 }
 
+export function toggleFullScreenWindow() {
+  return desktopApi.window.toggleFullScreen();
+}
+
 export function closeWindow() {
   return desktopApi.window.close();
 }

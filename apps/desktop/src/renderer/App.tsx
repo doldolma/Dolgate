@@ -430,8 +430,7 @@ export function App() {
           windowState={windowState}
           onLogout={loginController.logout}
           onMinimizeWindow={loginController.minimizeWindow}
-          onMaximizeWindow={loginController.maximizeWindow}
-          onRestoreWindow={loginController.restoreWindow}
+          onToggleFullScreenWindow={loginController.toggleFullScreenWindow}
           onCloseWindow={loginController.closeWindow}
         />
       </>

@@ -64,8 +64,7 @@ function renderTitleBar(overrides: Partial<AppTitleBarPropsForTest> = {}) {
     onDismissUpdate: vi.fn().mockResolvedValue(undefined),
     onOpenReleasePage: vi.fn().mockResolvedValue(undefined),
     onMinimizeWindow: vi.fn().mockResolvedValue(undefined),
-    onMaximizeWindow: vi.fn().mockResolvedValue(undefined),
-    onRestoreWindow: vi.fn().mockResolvedValue(undefined),
+    onToggleFullScreenWindow: vi.fn().mockResolvedValue(undefined),
     onCloseWindow: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -217,8 +216,7 @@ describe('AppTitleBar update popover', () => {
         onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
         onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
@@ -277,22 +275,23 @@ describe('AppTitleBar update popover', () => {
 
   it('renders custom window controls on Linux', () => {
     const onMinimizeWindow = vi.fn().mockResolvedValue(undefined);
-    const onMaximizeWindow = vi.fn().mockResolvedValue(undefined);
+    const onToggleFullScreenWindow = vi.fn().mockResolvedValue(undefined);
     const onCloseWindow = vi.fn().mockResolvedValue(undefined);
 
     renderTitleBar({
       desktopPlatform: 'linux',
       onMinimizeWindow,
-      onMaximizeWindow,
+      onToggleFullScreenWindow,
       onCloseWindow,
     });
 
     fireEvent.click(screen.getByRole('button', { name: '최소화' }));
-    fireEvent.click(screen.getByRole('button', { name: '최대화' }));
+    // 가운데 버튼은 최대화가 아니라 전체화면이다. 최대화는 드래그 영역 더블클릭으로 OS 가 해 준다.
+    fireEvent.click(screen.getByRole('button', { name: '전체화면 (F11)' }));
     fireEvent.click(screen.getByRole('button', { name: '닫기' }));
 
     expect(onMinimizeWindow).toHaveBeenCalledTimes(1);
-    expect(onMaximizeWindow).toHaveBeenCalledTimes(1);
+    expect(onToggleFullScreenWindow).toHaveBeenCalledTimes(1);
     expect(onCloseWindow).toHaveBeenCalledTimes(1);
   });
 
@@ -359,8 +358,7 @@ describe('AppTitleBar update popover', () => {
         onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
         onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
@@ -464,8 +462,7 @@ describe('AppTitleBar update popover', () => {
         onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
         onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
@@ -525,8 +522,7 @@ describe('AppTitleBar update popover', () => {
         onDismissUpdate={vi.fn().mockResolvedValue(undefined)}
         onOpenReleasePage={vi.fn().mockResolvedValue(undefined)}
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
         onSetRdpMonitors={vi.fn()}
         resolveRdpMonitors={() => null}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
@@ -570,5 +566,91 @@ describe('AppTitleBar update popover', () => {
     fireEvent.scroll(tabStrip);
     expect(screen.getByTestId('titlebar-tab-strip-fade-left')).toBeInTheDocument();
     expect(screen.getByTestId('titlebar-tab-strip-fade-right')).toBeInTheDocument();
+  });
+});
+
+// 전체화면에서 이 바는 상단 가장자리에 마우스를 올려야 내려온다. 그렇게 불러낸 바에서 나가는 길이
+// 버튼 하나뿐이면 F11 을 모르는 사용자는 갇힌다. 창 모드의 캡션 더블클릭(최대화)과 같은 자리·같은
+// 동작이라 배우지 않아도 짚인다.
+describe('AppTitleBar full-screen exit by double click', () => {
+  // 배경은 헤더·탭 영역·스트립·여백이 겹쳐 만드는 면이다. 어디를 더블클릭하든 한 번만 먹어야 한다 —
+  // 처음에는 요소마다 핸들러를 붙여서 버블링으로 두 번 불렸고, 전체화면이 나갔다 다시 들어왔다.
+  it.each([
+    ['tab region', 'titlebar-tab-region'],
+    ['tab strip', null],
+  ])('leaves full screen once when the %s background is double clicked', (_label, testId) => {
+    const onToggleFullScreenWindow = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderTitleBar({
+      desktopPlatform: 'win32',
+      windowState: { isMaximized: false, isFullScreen: true },
+      onToggleFullScreenWindow,
+    });
+
+    const target = testId
+      ? screen.getByTestId(testId)
+      : container.querySelector('[data-titlebar-tab-strip="true"]');
+    expect(target).not.toBeNull();
+    fireEvent.doubleClick(target as Element);
+
+    expect(onToggleFullScreenWindow).toHaveBeenCalledTimes(1);
+  });
+
+  // 탭은 div 라서 button 검사만으로는 걸리지 않는다. 탭을 두 번 눌러 전체화면이 꺼지면, 탭을 빠르게
+  // 두 번 고르는 평범한 조작이 화면 모드를 바꿔 버린다.
+  it('ignores a double click on a tab', () => {
+    const onToggleFullScreenWindow = vi.fn().mockResolvedValue(undefined);
+    const { container } = renderTitleBar({
+      desktopPlatform: 'win32',
+      windowState: { isMaximized: false, isFullScreen: true },
+      tabs: [createSessionTab()],
+      tabStrip: [{ kind: 'session', sessionId: 'session-1' }],
+      onToggleFullScreenWindow,
+    });
+
+    const tab = container.querySelector('[data-titlebar-tab-item]');
+    expect(tab).not.toBeNull();
+    fireEvent.doubleClick(tab as Element);
+
+    expect(onToggleFullScreenWindow).not.toHaveBeenCalled();
+  });
+
+  // 창 모드에서는 그 자리가 OS 캡션이다(드래그·더블클릭 최대화를 Windows 가 처리한다). 우리가
+  // 가로채면 최대화가 전체화면으로 바뀌어, 사용자가 기대한 것과 다른 일이 일어난다.
+  it('leaves the windowed double click to the OS', () => {
+    const onToggleFullScreenWindow = vi.fn().mockResolvedValue(undefined);
+    renderTitleBar({
+      desktopPlatform: 'win32',
+      windowState: { isMaximized: false, isFullScreen: false },
+      onToggleFullScreenWindow,
+    });
+
+    fireEvent.doubleClick(screen.getByTestId('titlebar-tab-region'));
+
+    expect(onToggleFullScreenWindow).not.toHaveBeenCalled();
+  });
+
+  // 드래그 영역이 켜져 있으면 그 배경은 OS 캡션으로 취급돼 더블클릭이 페이지까지 오지 않는다.
+  // 전체화면에서는 창을 옮길 수 없으므로 드래그를 끄고 더블클릭을 받는다 — 이 클래스가 되돌아가면
+  // 위 동작이 조용히 죽는다.
+  it('drops the drag region while full screen so the double click reaches us', () => {
+    const { container } = renderTitleBar({
+      desktopPlatform: 'win32',
+      windowState: { isMaximized: false, isFullScreen: true },
+    });
+
+    const header = container.querySelector('header');
+    expect(header?.className).toContain('[-webkit-app-region:no-drag]');
+    expect(header?.className).not.toContain('[-webkit-app-region:drag]');
+  });
+
+  it('keeps the drag region in windowed mode', () => {
+    const { container } = renderTitleBar({
+      desktopPlatform: 'win32',
+      windowState: { isMaximized: false, isFullScreen: false },
+    });
+
+    expect(container.querySelector('header')?.className).toContain(
+      '[-webkit-app-region:drag]',
+    );
   });
 });

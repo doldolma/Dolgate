@@ -533,8 +533,22 @@ export function TerminalWorkspace({
     Boolean(activeWorkspace) &&
     draggedSession.workspaceId === activeWorkspace?.id;
 
+  // 보이는 pane 이 모두 원격 화면(RDP·VNC)인가.
+  //
+  // 그 경우 카드 테두리를 두르지 않는다. 터미널은 앱의 한 패널이라 카드로 보이는 것이 맞지만,
+  // 원격 화면은 그 자체가 남의 데스크톱이다 — 1px 테두리와 10px 모서리가 화면 가장자리를 깎아,
+  // 작업표시줄이나 창 테두리를 조작할 때 실제로 방해가 된다. 하나라도 터미널이 섞여 있으면 그대로
+  // 둔다(분할 화면에서 한쪽만 테두리가 없으면 그게 더 어색하다).
+  const remoteScreenOnly =
+    visibleSessionIds.size > 0 &&
+    [...visibleSessionIds].every((sessionId) => {
+      const kind = tabs.find((tab) => tab.sessionId === sessionId)?.paneKind;
+      return kind === 'rdp' || kind === 'vnc';
+    });
+
   const workspaceClassName = cn(
-    'relative h-full min-h-0 overflow-hidden rounded-[10px] border border-[var(--border)] shadow-[var(--shadow)]',
+    'relative h-full min-h-0 overflow-hidden shadow-[var(--shadow)]',
+    !remoteScreenOnly && 'rounded-[10px] border border-[var(--border)]',
     activeWorkspace ? '' : '',
     ((draggedSession?.source === 'standalone-tab' && canDropDraggedSession) ||
       canRearrangeActiveWorkspace) &&

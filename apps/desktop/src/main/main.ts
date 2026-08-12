@@ -469,18 +469,41 @@ if (termiusHelperArgIndex >= 0) {
   }
 
   function wireWindowStateEvents(window: BrowserWindow): void {
+    // 마지막으로 보낸 상태. resize 는 드래그 한 번에 수십 번 오므로, 값이 실제로 바뀔 때만 보낸다.
+    let last: DesktopWindowState | null = null;
     const emitState = () => {
       if (window.isDestroyed()) {
         return;
       }
-      window.webContents.send(ipcChannels.window.stateChanged, buildWindowState(window));
+      const state = buildWindowState(window);
+      if (
+        last &&
+        last.isMaximized === state.isMaximized &&
+        last.isFullScreen === state.isFullScreen
+      ) {
+        return;
+      }
+      last = state;
+      window.webContents.send(ipcChannels.window.stateChanged, state);
     };
 
+    // 어느 이벤트 하나에 기대지 않는다.
+    //
+    // 렌더러가 들고 있는 창 상태는 거울일 뿐이라, 전이 이벤트를 한 번 놓치면 그 뒤로 계속 어긋난
+    // 채 남는다 — 전체화면인데 탭이 보이고, 창으로 돌아오면 탭이 사라지는 뒤집힘이 그것이다.
+    // Windows 의 frame:false 창에서는 전체화면 전이가 enter/leave 없이 크기 변화로만 오는 경우가
+    // 있어서(실측) 그 상황이 실제로 일어난다.
+    //
+    // 그래서 창의 기하·표시가 바뀔 수 있는 이벤트를 모두 듣는다. 위의 중복 제거가 있어 값이 실제로
+    // 바뀔 때만 한 번 나가므로, resize 처럼 자주 오는 것을 넣어도 비용이 없다.
     window.on('maximize', emitState);
     window.on('unmaximize', emitState);
-    // 전체화면 진입/이탈은 별도 이벤트다. 이걸 놓치면 타이틀바가 숨은 채로 남는다.
     window.on('enter-full-screen', emitState);
     window.on('leave-full-screen', emitState);
+    window.on('resize', emitState);
+    window.on('restore', emitState);
+    window.on('show', emitState);
+    window.on('focus', emitState);
   }
 
   async function createWindow(

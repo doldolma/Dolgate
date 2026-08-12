@@ -21,8 +21,7 @@ interface VaultGateShellProps {
   windowState: DesktopWindowState;
   onLogout: () => Promise<void>;
   onMinimizeWindow: () => Promise<void>;
-  onMaximizeWindow: () => Promise<void>;
-  onRestoreWindow: () => Promise<void>;
+  onToggleFullScreenWindow: () => Promise<void>;
   onCloseWindow: () => Promise<void>;
 }
 
@@ -37,8 +36,7 @@ export function VaultGateShell({
   windowState,
   onLogout,
   onMinimizeWindow,
-  onMaximizeWindow,
-  onRestoreWindow,
+  onToggleFullScreenWindow,
   onCloseWindow,
 }: VaultGateShellProps) {
   const { t: translate } = useTranslation();
@@ -125,8 +123,7 @@ export function VaultGateShell({
           desktopPlatform={desktopPlatform}
           windowState={windowState}
           onMinimizeWindow={onMinimizeWindow}
-          onMaximizeWindow={onMaximizeWindow}
-          onRestoreWindow={onRestoreWindow}
+          onToggleFullScreenWindow={onToggleFullScreenWindow}
           onCloseWindow={onCloseWindow}
         />
       </div>

@@ -200,4 +200,71 @@ describe("registerWindowUpdaterSettingsFilesIpcHandlers", () => {
       hostId: "host-1",
     });
   });
+
+  function createFullScreenWindow(state: { full: boolean; max: boolean }) {
+    return {
+      isFullScreen: vi.fn(() => state.full),
+      isMaximized: vi.fn(() => state.max),
+      unmaximize: vi.fn(() => {
+        state.max = false;
+      }),
+      setFullScreen: vi.fn((next: boolean) => {
+        state.full = next;
+      }),
+    };
+  }
+
+  // 최대화된 창을 곧바로 전체화면으로 넘기면 안 된다. 실측(Windows 11, Electron 42, frame:false):
+  // 화면은 그대로인데 isFullScreen() 만 true 가 되고 enter-full-screen 이 오지 않아서, 상단바는
+  // 탭을 계속 보여주다가 창을 되돌리는 순간 작은 창에서 탭이 사라졌다. 최대화를 먼저 푸는 것이
+  // 그 어긋남을 없앤 수정이므로, 지워지면 같은 증상이 돌아온다.
+  it("drops the maximized state before entering full screen", async () => {
+    const ctx = createContext();
+    const window = createFullScreenWindow({ full: false, max: true });
+    ctx.resolveWindowFromSender.mockReturnValue(window);
+
+    registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
+    const toggle = getRegisteredHandler(ipcChannels.window.toggleFullScreen);
+
+    await toggle({ sender: {} });
+
+    expect(window.unmaximize).toHaveBeenCalledTimes(1);
+    expect(window.setFullScreen).toHaveBeenCalledWith(true);
+    expect(window.unmaximize.mock.invocationCallOrder[0]).toBeLessThan(
+      window.setFullScreen.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not touch the maximized state when leaving full screen", async () => {
+    const ctx = createContext();
+    const window = createFullScreenWindow({ full: true, max: true });
+    ctx.resolveWindowFromSender.mockReturnValue(window);
+
+    registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
+    const toggle = getRegisteredHandler(ipcChannels.window.toggleFullScreen);
+
+    await toggle({ sender: {} });
+
+    expect(window.unmaximize).not.toHaveBeenCalled();
+    expect(window.setFullScreen).toHaveBeenCalledWith(false);
+  });
+
+  // 방향은 메인이 정한다. 렌더러가 방향을 실어 보내면 F11 로 방금 바뀐 뒤의 낡은 값으로 같은
+  // 상태를 다시 세팅해, 버튼이 안 먹는 것처럼 보인다.
+  it("toggles against the live window state on each call", async () => {
+    const ctx = createContext();
+    const window = createFullScreenWindow({ full: false, max: false });
+    ctx.resolveWindowFromSender.mockReturnValue(window);
+
+    registerWindowUpdaterSettingsFilesIpcHandlers(ctx);
+    const toggle = getRegisteredHandler(ipcChannels.window.toggleFullScreen);
+
+    await toggle({ sender: {} });
+    await toggle({ sender: {} });
+
+    expect(window.setFullScreen.mock.calls.map(([next]) => next)).toEqual([
+      true,
+      false,
+    ]);
+  });
 });

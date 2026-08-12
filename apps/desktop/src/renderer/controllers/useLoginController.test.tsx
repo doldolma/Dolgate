@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
   restoreWindow: vi.fn(),
   retryOnline: vi.fn(),
+  toggleFullScreenWindow: vi.fn(),
 }));
 
 vi.mock('../services/desktop/auth-window-updater', () => mocks);

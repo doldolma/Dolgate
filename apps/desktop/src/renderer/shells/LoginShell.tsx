@@ -51,8 +51,7 @@ export function LoginShell({
           desktopPlatform={desktopPlatform}
           windowState={windowState}
           onMinimizeWindow={loginController.minimizeWindow}
-          onMaximizeWindow={loginController.maximizeWindow}
-          onRestoreWindow={loginController.restoreWindow}
+          onToggleFullScreenWindow={loginController.toggleFullScreenWindow}
           onCloseWindow={loginController.closeWindow}
         />
       </div>

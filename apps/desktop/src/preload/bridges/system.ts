@@ -41,6 +41,8 @@ export function buildWindowBridge(
     minimize: () => ipcRenderer.invoke(ipcChannels.window.minimize),
     maximize: () => ipcRenderer.invoke(ipcChannels.window.maximize),
     restore: () => ipcRenderer.invoke(ipcChannels.window.restore),
+    toggleFullScreen: () =>
+      ipcRenderer.invoke(ipcChannels.window.toggleFullScreen),
     close: () => ipcRenderer.invoke(ipcChannels.window.close),
     onStateChanged: (listener) => subscribeWindowState(listener),
     onCloseActiveTab: (listener) => subscribeCloseActiveTab(listener),

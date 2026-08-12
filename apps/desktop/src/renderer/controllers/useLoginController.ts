@@ -20,6 +20,7 @@ import {
   reopenBrowserLogin,
   restoreWindow,
   retryOnline,
+  toggleFullScreenWindow,
 } from '../services/desktop/auth-window-updater';
 import { t } from '../i18n';
 
@@ -86,6 +87,7 @@ export function useLoginController({
     minimizeWindow,
     maximizeWindow,
     restoreWindow,
+    toggleFullScreenWindow,
     closeWindow,
     openExternalUrl,
     checkForUpdates: () => runUpdaterAction(checkForUpdates),

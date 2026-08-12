@@ -57,8 +57,7 @@ function renderShell(
       windowState={windowState}
       onLogout={vi.fn().mockResolvedValue(undefined)}
       onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-      onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-      onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+      onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
       onCloseWindow={vi.fn().mockResolvedValue(undefined)}
     />,
   );
@@ -115,8 +114,7 @@ describe('VaultGateShell', () => {
         windowState={windowState}
         onLogout={vi.fn().mockResolvedValue(undefined)}
         onMinimizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onMaximizeWindow={vi.fn().mockResolvedValue(undefined)}
-        onRestoreWindow={vi.fn().mockResolvedValue(undefined)}
+        onToggleFullScreenWindow={vi.fn().mockResolvedValue(undefined)}
         onCloseWindow={vi.fn().mockResolvedValue(undefined)}
       />,
     );

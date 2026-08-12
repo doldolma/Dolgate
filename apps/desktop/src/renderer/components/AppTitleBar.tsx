@@ -76,8 +76,7 @@ interface AppTitleBarProps {
   onDismissUpdate: (version: string) => Promise<void>;
   onOpenReleasePage: (url: string) => Promise<void>;
   onMinimizeWindow: () => Promise<void>;
-  onMaximizeWindow: () => Promise<void>;
-  onRestoreWindow: () => Promise<void>;
+  onToggleFullScreenWindow: () => Promise<void>;
   onCloseWindow: () => Promise<void>;
 }
 
@@ -1049,8 +1048,7 @@ export function AppTitleBar({
   onInstallUpdate,
   onOpenReleasePage,
   onMinimizeWindow,
-  onMaximizeWindow,
-  onRestoreWindow,
+  onToggleFullScreenWindow,
   onCloseWindow
 }: AppTitleBarProps) {
   const { t: translate } = useTranslation();
@@ -1081,6 +1079,53 @@ export function AppTitleBar({
   // 전체화면에서는 타이틀바를 감추고 상단 가장자리에서만 부른다.
   const titleBar = useTitleBarAutoHide(
     titleBarMode(windowState.isFullScreen, desktopPlatform),
+  );
+
+  /**
+   * 상단바의 빈 배경이 창 드래그 영역인지.
+   *
+   * 전체화면에서는 드래그 영역을 두지 않는다. 창을 옮길 수 없으므로 잃는 것이 없고, 대신 이 배경이
+   * **더블클릭을 받을 수 있게** 된다 — `-webkit-app-region: drag` 영역은 OS 캡션으로 취급돼서
+   * 더블클릭이 페이지까지 오지 않는다(그 자리에서 OS 가 최대화를 시도한다). 그래서 드래그를 켠 채로는
+   * "빈 곳 더블클릭으로 전체화면 종료" 를 만들 수 없다.
+   */
+  const chromeDragRegion = windowState.isFullScreen
+    ? '[-webkit-app-region:no-drag]'
+    : '[-webkit-app-region:drag]';
+
+  /**
+   * 상단바 빈 곳 더블클릭 → 전체화면 종료.
+   *
+   * 전체화면에서 이 바는 상단 가장자리에 마우스를 올려야 내려온다. 그렇게 불러낸 바에서 나가는
+   * 방법이 버튼 하나뿐이면, 그 버튼을 못 찾은 사용자는 F11 을 모르는 한 갇힌다. 창 모드에서 캡션
+   * 더블클릭이 최대화인 것과 같은 자리, 같은 동작이라 배우지 않아도 짚인다.
+   *
+   * **헤더 한 곳에만 붙인다.** 배경을 이루는 요소마다 붙이면 버블링으로 같은 더블클릭이 여러 번
+   * 들어와 전체화면이 나갔다 다시 들어온다(테스트에서 2회 호출로 잡혔다).
+   */
+  const handleChromeDoubleClick = useCallback(
+    (event: { target: EventTarget | null }) => {
+      if (!windowState.isFullScreen) {
+        return;
+      }
+      // 조작 가능한 것 위에서만 비켜난다(거부 목록).
+      //
+      // 처음에는 반대로 했다 — "이벤트 대상이 이 배경 자신일 때만" 이라는 화이트리스트였는데, 그러면
+      // 자식이 덮은 자리가 전부 빠져서 실제로 먹는 곳이 바 양 끝 몇 px 뿐이었다. 배경은 한 요소가
+      // 아니라 헤더·탭 영역·스트립·여백이 겹쳐 만드는 면이라, 그것을 일일이 나열하는 방식은 새는
+      // 곳이 계속 생긴다. 탭은 div 라서 button 검사만으로는 걸리지 않아 마커를 붙였다.
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[data-titlebar-tab-item], button, a, input, select, textarea, [role="button"]',
+        )
+      ) {
+        return;
+      }
+      void onToggleFullScreenWindow();
+    },
+    [onToggleFullScreenWindow, windowState.isFullScreen],
   );
 
   // 모니터 배치도를 띄운 RDP 세션. null 이면 닫혀 있다.
@@ -1563,10 +1608,12 @@ export function AppTitleBar({
     <header
       onPointerEnter={titleBar.onPointerEnter}
       onPointerLeave={titleBar.onPointerLeave}
+      onDoubleClick={handleChromeDoubleClick}
       className={cn(
         // 상단바 chrome 배경 전체를 창 드래그 영역으로 둔다(macOS·Windows 공통). 실제 탭/버튼처럼
         // 조작 가능한 요소만 no-drag 로 좁혀, 같은 배경처럼 보이는 빈 영역은 일관되게 창을 움직인다.
-        'fixed inset-x-0 top-0 z-[7] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem] [-webkit-app-region:drag]',
+        'fixed inset-x-0 top-0 z-[7] flex min-h-[2.95rem] select-none items-stretch gap-4 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--chrome-bg)_94%,white_6%),color-mix(in_srgb,var(--chrome-bg)_98%,black_2%))] px-[0.9rem] pt-[0.42rem] pb-0 text-[#f3f7fb] max-[760px]:px-[0.9rem] max-[760px]:pr-[0.9rem]',
+        chromeDragRegion,
         // 신호등 자리는 창 모드에서만 비워둔다. macOS 전체화면에서는 신호등이 OS 오버레이로
         // 올라가 우리 바에 없다 — 그대로 두면 왼쪽이 이유 없이 5.7rem 비어 보인다.
         desktopPlatform === 'darwin' &&
@@ -1583,7 +1630,7 @@ export function AppTitleBar({
       {desktopPlatform === 'darwin' && !windowState.isFullScreen ? (
         <div
           aria-hidden
-          className="absolute left-0 top-0 bottom-0 w-[5.7rem] max-[1040px]:w-[5.1rem] [-webkit-app-region:drag]"
+          className={cn('absolute left-0 top-0 bottom-0 w-[5.7rem] max-[1040px]:w-[5.1rem]', chromeDragRegion)}
         />
       ) : null}
       <div
@@ -1591,7 +1638,7 @@ export function AppTitleBar({
         className={cn(
           'relative flex min-w-0 flex-1 self-stretch transition-[background-color,box-shadow] duration-140',
           !isTitlebarInternalDragActive
-            ? '[-webkit-app-region:drag]'
+            ? chromeDragRegion
             : '[-webkit-app-region:no-drag]',
           isDetachHovering &&
             'bg-[rgba(142,209,194,0.08)] shadow-[inset_0_0_0_1px_rgba(142,209,194,0.16)]',
@@ -1698,7 +1745,7 @@ export function AppTitleBar({
             className={cn(
               'flex min-w-0 items-stretch gap-[0.3rem] overflow-x-auto overflow-y-hidden pl-1.5 h-full',
               !isTitlebarInternalDragActive
-                ? '[-webkit-app-region:drag]'
+                ? chromeDragRegion
                 : '[-webkit-app-region:no-drag]',
             )}
             style={{ maskImage: stripMaskImage, WebkitMaskImage: stripMaskImage }}
@@ -1784,6 +1831,7 @@ export function AppTitleBar({
                       titlebarTabItemRefs.current[targetKey] = node;
                     }}
                     style={tabSlideStyle}
+                    data-titlebar-tab-item="true"
                     className={cn(
                       'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
                       getTitlebarDynamicTabContainerClass(item.active),
@@ -1874,6 +1922,7 @@ export function AppTitleBar({
                   titlebarTabItemRefs.current[tmuxTargetKey] = node;
                 }}
                 style={tabSlideStyle}
+                data-titlebar-tab-item="true"
                 className={cn(
                   'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
                   getTitlebarDynamicTabContainerClass(item.active),
@@ -1965,6 +2014,7 @@ export function AppTitleBar({
                 titlebarTabItemRefs.current[targetKey] = node;
               }}
               style={tabSlideStyle}
+              data-titlebar-tab-item="true"
               className={cn(
                 'group relative flex flex-none items-center gap-1 self-center mb-[0.42rem] rounded-[10px] border pr-1.5 scroll-mx-2 transition-[box-shadow,background-color,border-color,transform] duration-150 [-webkit-app-region:no-drag]',
                 getTitlebarDynamicTabContainerClass(item.active),
@@ -2080,7 +2130,7 @@ export function AppTitleBar({
           항상 드래그 영역이 남는다. 스크롤 스트립과 겹치지 않는 형제라 안전. */}
       <div
         aria-hidden
-        className="min-w-16 flex-none self-stretch [-webkit-app-region:drag]"
+        className={cn('min-w-16 flex-none self-stretch', chromeDragRegion)}
       />
       <div className="relative flex items-center self-center mb-[0.42rem] gap-[0.55rem] [-webkit-app-region:no-drag]">
         <div className="relative [-webkit-app-region:no-drag]" ref={updateMenuRef}>
@@ -2192,8 +2242,7 @@ export function AppTitleBar({
           desktopPlatform={desktopPlatform}
           windowState={windowState}
           onMinimizeWindow={onMinimizeWindow}
-          onMaximizeWindow={onMaximizeWindow}
-          onRestoreWindow={onRestoreWindow}
+          onToggleFullScreenWindow={onToggleFullScreenWindow}
           onCloseWindow={onCloseWindow}
         />
       </div>

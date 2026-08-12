@@ -3086,6 +3086,8 @@
     "minimize": "Minimize",
     "restore": "Restore",
     "maximize": "Maximize",
+    "enterFullScreen": "Full screen (F11)",
+    "exitFullScreen": "Exit full screen (F11)",
     "close": "Close",
     "aria": "Window controls"
   },

@@ -221,6 +221,9 @@ export const ipcChannels = {
     minimize: 'window:minimize',
     maximize: 'window:maximize',
     restore: 'window:restore',
+    // 전체화면은 최대화와 다른 상태다. 최대화는 작업 영역을 채우고 작업표시줄을 남기지만,
+    // 전체화면은 화면 전체를 덮고 상단바(탭 포함)를 접는다 — 한 세션에 집중하는 모드다.
+    toggleFullScreen: 'window:toggle-full-screen',
     close: 'window:close',
     stateChanged: 'window:state-changed',
     // 메뉴(Cmd+W)에서 렌더러로: 현재 활성 탭을 닫으라는 신호.

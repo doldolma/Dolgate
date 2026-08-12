@@ -50,6 +50,27 @@ export function registerWindowUpdaterSettingsFilesIpcHandlers(
     ctx.resolveWindowFromSender(event.sender).restore();
   });
 
+  // 토글을 메인에서 판정한다. 렌더러가 "지금 전체화면인가" 를 들고 와서 반대로 세팅하면, 그 값이
+  // 낡았을 때(F11 로 이미 바뀐 직후 등) 같은 상태를 다시 세팅해 버튼이 먹지 않는다.
+  ipcMain.handle(ipcChannels.window.toggleFullScreen, async (event) => {
+    const window = ctx.resolveWindowFromSender(event.sender);
+    const wasFullScreen = window.isFullScreen();
+
+    // **최대화 상태에서 곧바로 전체화면으로 넘기지 않는다.** 실측으로 확인한 동작이다
+    // (Windows 11, Electron 42, frame:false):
+    //
+    //   최대화된 창에 setFullScreen(true) → 화면은 그대로인데 isFullScreen() 만 true 가 되고
+    //   enter-full-screen 이 오지 않는다. 상단바는 그 사실을 모르니 탭이 그대로 보이고, 나중에
+    //   창을 되돌리면 unmaximize 이벤트에 실려 온 "여전히 true" 를 보고 작은 창에서 탭이 사라진다.
+    //   그 뒤로는 아이콘도 계속 "전체화면 종료" 에 머문다.
+    //
+    // 최대화를 먼저 풀어 정상 창 상태에서 전이시키면 전이와 이벤트가 모두 제대로 일어난다.
+    if (!wasFullScreen && window.isMaximized()) {
+      window.unmaximize();
+    }
+    window.setFullScreen(!wasFullScreen);
+  });
+
   ipcMain.handle(ipcChannels.window.close, async (event) => {
     ctx.resolveWindowFromSender(event.sender).close();
   });

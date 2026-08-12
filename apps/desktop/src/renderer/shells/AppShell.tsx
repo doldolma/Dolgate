@@ -259,8 +259,7 @@ export function AppShell({
             );
           }}
           onMinimizeWindow={loginController.minimizeWindow}
-          onMaximizeWindow={loginController.maximizeWindow}
-          onRestoreWindow={loginController.restoreWindow}
+          onToggleFullScreenWindow={loginController.toggleFullScreenWindow}
           onSetRdpMonitors={(sessionId, monitors) => {
             void sessionViewModel.setRdpMonitors(sessionId, monitors);
           }}

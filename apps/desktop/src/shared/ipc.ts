@@ -1540,6 +1540,13 @@ export interface DesktopApi {
     minimize: () => Promise<void>;
     maximize: () => Promise<void>;
     restore: () => Promise<void>;
+    /**
+     * 전체화면을 켜고 끈다. 최대화와 다른 상태다 — 화면 전체를 덮고 상단바(탭 포함)가 접힌다.
+     *
+     * 판정은 메인이 한다(현재 상태의 반대로). 렌더러가 방향을 정하면 F11 로 방금 바뀐 뒤의
+     * 낡은 값으로 같은 상태를 다시 세팅해, 버튼이 안 먹는 것처럼 보인다.
+     */
+    toggleFullScreen: () => Promise<void>;
     close: () => Promise<void>;
     onStateChanged: (
       listener: (state: DesktopWindowState) => void,
