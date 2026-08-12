@@ -83,7 +83,9 @@ fn main() {
         host: host.clone(),
         port,
         password,
-        username: String::new(),
+        // VeNCrypt Plain 계열은 계정으로 인증한다. 계정을 넘길 방법이 없으면 그 조합을 아예
+        // 검증할 수 없다 — 실제로 TLSPlain 서버를 "실패" 로 잘못 읽었다.
+        username: std::env::var("VNC_PROBE_USER").unwrap_or_default(),
         image_quality: String::new(),
         shared: true,
     };
@@ -94,15 +96,39 @@ fn main() {
             "req".to_owned(),
             payload,
             output,
-            |_handle| {},
+            |handle| {
+                // 클립보드를 **여러 번** 보내 본다. 확장 클립보드는 provide 마다 zlib 스트림을
+                // 새로 만드는지/이어 가는지가 갈리는 지점이라, 한 번만 보내면 그 차이가 드러나지
+                // 않는다 — 실제로 "붙었다가 몇 초 뒤 끊김" 을 그렇게 놓쳤다.
+                if let Ok(list) = std::env::var("VNC_PROBE_CLIP") {
+                    let handle = handle.clone();
+                    thread::spawn(move || {
+                        for (index, text) in list.split(',').enumerate() {
+                            thread::sleep(Duration::from_millis(1500));
+                            eprintln!("[probe] 클립보드 전송 #{}: {text}", index + 1);
+                            handle.send_clipboard(text.to_owned()).ok();
+                        }
+                    });
+                }
+            },
         ) {
             eprintln!("세션 오류: {error:#}");
         }
     });
 
     // 더 이상 바이트가 늘지 않으면 화면이 안정된 것으로 본다.
-    let quiet = Duration::from_millis(1500);
-    let deadline = Instant::now() + Duration::from_secs(20);
+    //
+    // **붙잡고 있어야 보이는 것이 있다.** 첫 화면을 받은 직후 종료하면 그 뒤에 끊기는 세션을
+    // 정상으로 오판한다 — 실제로 확장 클립보드 결함을 그렇게 놓쳤다(화면은 왔고, 몇 초 뒤에
+    // 서버가 끊었다). `VNC_PROBE_HOLD_SECS` 로 그 구간까지 지켜본다.
+    let hold = std::env::var("VNC_PROBE_HOLD_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok());
+    let quiet = match hold {
+        Some(_) => Duration::from_secs(u64::MAX / 4),
+        None => Duration::from_millis(1500),
+    };
+    let deadline = Instant::now() + Duration::from_secs(hold.unwrap_or(20));
     let mut screen: Option<Screen> = None;
     let mut encodings: HashMap<String, usize> = HashMap::new();
     let mut consumed = 0_usize;

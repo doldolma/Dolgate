@@ -14,19 +14,29 @@ use std::io::Write as _;
 use flate2::write::ZlibEncoder;
 use flate2::{Compression, Decompress, FlushDecompress};
 
-/// 형식 비트(하위 24비트). 우리는 텍스트만 다룬다.
-pub const FORMAT_TEXT: u32 = 0x0000_0001;
-
-/// 동작 비트(상위 8비트).
+/// 형식 비트(하위 16비트). 우리는 텍스트만 다룬다.
 ///
-/// 지금 쓰지 않는 것도 표에 남긴다 — 번호 표가 반쪽이면 다음 사람이 규격을 다시 찾아야 한다.
+/// 동작 비트는 24번부터라 겹치지 않는다. 마스크를 24비트로 잡으면 상대의 동작 비트가 형식으로
+/// 섞여 들어온다 — 규격의 구분대로 16비트만 본다.
+pub const FORMAT_TEXT: u32 = 1 << 0;
+pub const FORMAT_MASK: u32 = 0x0000_FFFF;
+
+
+/// 동작 비트.
+///
+/// **`caps` 가 24번, `provide` 가 28번이다.** 이 표가 한 칸씩 밀려 있었다(caps=1<<28 … provide=1<<27).
+/// 그러면 우리가 보내는 provide 가 상대에게는 notify 로 읽힌다 — notify 의 본문은 flags 뿐이라
+/// 서버가 zlib 바이트를 읽지 않고 남기고, 그 첫 바이트(`0x78`)가 다음 메시지 종류로 해석되면서
+/// **연결이 끊긴다**(TigerVNC 로그: `unknown message type 120`). 클립보드를 한 번 보내면 죽었다.
+///
+/// 값을 `1 << n` 으로 적어 둔다 — 16진수로 적었을 때 한 칸 밀린 것을 아무도 못 알아봤다.
+/// 지금 쓰지 않는 것도 표에 남긴다(번호 표가 반쪽이면 다음 사람이 규격을 다시 찾아야 한다).
+pub const ACTION_CAPS: u32 = 1 << 24;
+pub const ACTION_REQUEST: u32 = 1 << 25;
 #[allow(dead_code)]
-pub const ACTION_CAPS: u32 = 0x1000_0000;
-pub const ACTION_REQUEST: u32 = 0x0100_0000;
-#[allow(dead_code)]
-pub const ACTION_PEEK: u32 = 0x0200_0000;
-pub const ACTION_NOTIFY: u32 = 0x0400_0000;
-pub const ACTION_PROVIDE: u32 = 0x0800_0000;
+pub const ACTION_PEEK: u32 = 1 << 26;
+pub const ACTION_NOTIFY: u32 = 1 << 27;
+pub const ACTION_PROVIDE: u32 = 1 << 28;
 
 /// 상대가 요청 없이 바로 보내도 되는 최대 크기(우리 caps 에 싣는 값).
 ///
@@ -68,7 +78,9 @@ pub fn decode_extended(body: &[u8]) -> Incoming {
         return Incoming::Ignored;
     }
     let flags = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
-    let formats = flags & 0x00FF_FFFF;
+    // 어느 동작·형식을 알려 왔는지 그대로 남긴다. 비트 위치가 틀렸을 때 이 줄이 유일한 증거다.
+    tracing::trace!(flags = format_args!("{flags:#010x}"), "확장 클립보드 수신 flags");
+    let formats = flags & FORMAT_MASK;
     let data = &body[4..];
 
     if flags & ACTION_CAPS != 0 {
@@ -108,6 +120,15 @@ fn inflate_first_text(data: &[u8], formats: u32) -> Option<String> {
     Some(String::from_utf8_lossy(text).replace("\r\n", "\n"))
 }
 
+/// 확장 클립보드의 zlib 본문을 푼다.
+///
+/// **두 형태를 모두 받아야 한다.**
+///
+/// - 완결 스트림: LibVNCServer(x11vnc)는 one-shot `compress()` 로 보내 마지막 블록·Adler32 가 붙는다
+/// - 미완결 스트림: TigerVNC 는 `flush()` 만 해서 sync flush 표시(`00 00 ff ff`)로 끝난다
+///
+/// 완결만 받아들이면 TigerVNC 에서 **원격의 복사가 조용히 안 들어온다**. 미완결만 받아들이면
+/// x11vnc 쪽을 놓친다. 그래서 `StreamEnd` 와 "입력을 다 먹고 더 낼 것이 없음" 을 모두 성공으로 본다.
 fn inflate(input: &[u8]) -> Option<Vec<u8>> {
     let mut stream = Decompress::new(true);
     let mut out = Vec::with_capacity(input.len() * 4);
@@ -117,7 +138,7 @@ fn inflate(input: &[u8]) -> Option<Vec<u8>> {
         let before_out = stream.total_out();
         out.reserve(8 * 1024);
         let status = stream
-            .decompress_vec(&input[consumed..], &mut out, FlushDecompress::Finish)
+            .decompress_vec(&input[consumed..], &mut out, FlushDecompress::Sync)
             .ok()?;
         consumed += (stream.total_in() - before_in) as usize;
         let produced = stream.total_out() - before_out;
@@ -125,9 +146,13 @@ fn inflate(input: &[u8]) -> Option<Vec<u8>> {
             return None;
         }
         match status {
+            // 완결 스트림(x11vnc).
             flate2::Status::StreamEnd => return Some(out),
-            // 더 나아가지 못하는데 끝도 아니면 잘린 스트림이다.
-            _ if produced == 0 && consumed >= input.len() => return None,
+            // 미완결 스트림(TigerVNC): 입력을 다 먹었고 더 낼 것이 없다 = 이 메시지의 끝이다.
+            // 아무것도 못 뽑았으면 잘린 것이므로 버린다(길이 필드조차 없다).
+            _ if consumed >= input.len() && produced == 0 => {
+                return if out.is_empty() { None } else { Some(out) };
+            }
             _ => {}
         }
     }
@@ -173,9 +198,19 @@ pub fn encode_provide(text: &str) -> Option<Vec<u8>> {
     plain.extend_from_slice(&(wire.len() as u32).to_be_bytes());
     plain.extend_from_slice(wire.as_bytes());
 
+    // **스트림을 끝내지 않는다(flush 만 한다).**
+    //
+    // `finish()` 는 마지막 블록과 Adler32 를 붙여 스트림을 완결한다. 그러면 받는 쪽 `inflate` 가
+    // 마지막 조각에서 `Z_STREAM_END` 를 돌려주는데, LibVNCServer(x11vnc)는 **`Z_OK` 가 아니면
+    // 오류로 보고 연결을 끊는다**(실측 로그: `rfbProcessExtendedServerCutTextData: zlib inflation
+    // error`). 클립보드를 한 번 보내면 세션이 죽었다.
+    //
+    // TigerVNC 도 같은 방식으로 보낸다(CMsgWriter::writeClipboardProvide 는 ZlibOutStream 을
+    // `flush()` 만 한다) — 즉 미완결 스트림이 이 확장의 관행이다.
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(&plain).ok()?;
-    let compressed = encoder.finish().ok()?;
+    encoder.flush().ok()?;
+    let compressed = std::mem::take(encoder.get_mut());
 
     let mut body = Vec::with_capacity(4 + compressed.len());
     body.extend_from_slice(&(ACTION_PROVIDE | FORMAT_TEXT).to_be_bytes());
@@ -200,6 +235,41 @@ fn to_crlf(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 동작 비트의 **위치**를 규격 값으로 못박는다.
+    ///
+    /// 상수를 참조해 만든 테스트는 상수가 틀렸을 때 같이 틀린다 — 이 표가 한 칸 밀려 있었고
+    /// (caps=1<<28 … provide=1<<27) 코드와 테스트가 같은 값을 공유해 전부 통과했다. 그 결과
+    /// 우리 provide 가 상대에게 notify 로 읽혀 zlib 바이트가 스트림에 남고, 서버가
+    /// `unknown message type 120`(=0x78, zlib 헤더) 으로 연결을 끊었다.
+    ///
+    /// 출처: RFB 확장 클립보드 규격 / TigerVNC rfb/clipboardTypes.h.
+    #[test]
+    fn action_bit_positions_match_the_spec() {
+        assert_eq!(ACTION_CAPS, 1 << 24);
+        assert_eq!(ACTION_REQUEST, 1 << 25);
+        assert_eq!(ACTION_PEEK, 1 << 26);
+        assert_eq!(ACTION_NOTIFY, 1 << 27);
+        assert_eq!(ACTION_PROVIDE, 1 << 28);
+        // 형식은 하위 16비트다. 동작 비트가 형식 마스크에 걸리면 상대의 동작이 형식으로 섞인다.
+        assert_eq!(FORMAT_TEXT, 1 << 0);
+        assert_eq!(FORMAT_MASK & ACTION_CAPS, 0);
+        assert_eq!(FORMAT_MASK & ACTION_PROVIDE, 0);
+    }
+
+    /// provide 메시지의 flags 가 실제로 provide 여야 한다.
+    ///
+    /// 여기가 끊김의 자리였다 — notify 로 읽히면 서버가 본문(zlib)을 읽지 않는다.
+    #[test]
+    fn provide_uses_the_provide_action() {
+        let body = encode_provide("한글").expect("본문이 만들어져야 한다");
+        let flags = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+        assert_ne!(flags & (1 << 28), 0, "provide(1<<28) 여야 한다: {flags:#x}");
+        assert_ne!(flags & FORMAT_TEXT, 0);
+        // 본문 뒤는 zlib 스트림이다. 첫 바이트가 0x78 인 것이 그 증거이고, 그 바이트가 메시지
+        // 종류로 읽히면 서버가 끊는다.
+        assert_eq!(body[4], 0x78, "flags 뒤부터 zlib 이어야 한다");
+    }
 
     #[test]
     fn caps_advertise_the_actions_we_handle() {

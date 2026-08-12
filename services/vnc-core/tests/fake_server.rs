@@ -129,8 +129,11 @@ fn spawn_extended_clipboard_server() -> (u16, Receiver<Seen>) {
             // ServerCutText 의 길이를 음수로 실으면 확장 메시지다. 본문은 flags(4) + 데이터.
             let mut caps = vec![3_u8, 0, 0, 0];
             caps.extend_from_slice(&(-8_i32).to_be_bytes());
-            // caps 동작 + 텍스트 형식, 그리고 텍스트 한도(형식마다 4바이트).
-            caps.extend_from_slice(&0x1000_0001_u32.to_be_bytes());
+            // caps 동작(1<<24) + 텍스트 형식(1<<0), 그리고 텍스트 한도(형식마다 4바이트).
+            //
+            // **번호를 `1 << n` 으로 적는다.** 16진수로 적었더니 표가 한 칸 밀린 것을 아무도
+            // 못 알아봤다 — 그 상태로 코드와 테스트가 같이 틀려 통과했다.
+            caps.extend_from_slice(&((1_u32 << 24) | (1 << 0)).to_be_bytes());
             caps.extend_from_slice(&(256_u32 * 1024).to_be_bytes());
             socket.write_all(&caps).unwrap();
         }
@@ -961,12 +964,11 @@ fn sends_utf8_clipboard_once_the_server_offers_caps() {
         panic!("우리 caps 가 확장 메시지로 나가야 한다");
     };
     let flags = u32::from_be_bytes([ours[0], ours[1], ours[2], ours[3]]);
-    assert_ne!(flags & 0x1000_0000, 0, "첫 확장 메시지는 caps 여야 한다: {flags:#x}");
+    assert_ne!(flags & (1 << 24), 0, "첫 확장 메시지는 caps(1<<24) 여야 한다: {flags:#x}");
     assert_ne!(flags & 0x0000_0001, 0, "텍스트 형식을 지원한다고 알려야 한다");
     // 동작 비트를 비워 보내면 TigerVNC 서버가 연결을 끊는다(우분투 VM 실측). 우리가 처리하는
     // request·notify·provide 를 그대로 알려야 한다.
-    for (bit, name) in [(0x0100_0000, "request"), (0x0400_0000, "notify"), (0x0800_0000, "provide")]
-    {
+    for (bit, name) in [(1 << 25, "request"), (1 << 27, "notify"), (1 << 28, "provide")] {
         assert_ne!(flags & bit, 0, "{name} 를 알려야 한다: {flags:#x}");
     }
 
@@ -974,7 +976,7 @@ fn sends_utf8_clipboard_once_the_server_offers_caps() {
         panic!("텍스트가 확장 provide 로 나가야 한다");
     };
     let flags = u32::from_be_bytes([provide[0], provide[1], provide[2], provide[3]]);
-    assert_ne!(flags & 0x0800_0000, 0, "provide 동작이어야 한다: {flags:#x}");
+    assert_ne!(flags & (1 << 28), 0, "provide(1<<28) 동작이어야 한다: {flags:#x}");
 
     // 본문은 zlib 이고 그 안은 크기(4) + UTF-8 텍스트다. 되돌려 한글이 살아 있는지 본다.
     let mut plain = Vec::new();

@@ -1576,6 +1576,12 @@ fn read_server_cut_text(stream: &mut Transport) -> Result<clipboard::Incoming> {
     let mut body = vec![0_u8; length];
     stream.read_exact(&mut body)?;
 
+    // 클립보드 문제는 바이트를 봐야 갈린다 — 확장 협상이 서버마다 다르게 반쪽인 경우가 있다.
+    trace!(
+        raw_length = raw,
+        head = format_args!("{:02x?}", &body[..body.len().min(8)]),
+        "ServerCutText"
+    );
     if raw < 0 {
         Ok(clipboard::decode_extended(&body))
     } else {
