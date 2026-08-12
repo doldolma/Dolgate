@@ -963,6 +963,12 @@ fn sends_utf8_clipboard_once_the_server_offers_caps() {
     let flags = u32::from_be_bytes([ours[0], ours[1], ours[2], ours[3]]);
     assert_ne!(flags & 0x1000_0000, 0, "첫 확장 메시지는 caps 여야 한다: {flags:#x}");
     assert_ne!(flags & 0x0000_0001, 0, "텍스트 형식을 지원한다고 알려야 한다");
+    // 동작 비트를 비워 보내면 TigerVNC 서버가 연결을 끊는다(우분투 VM 실측). 우리가 처리하는
+    // request·notify·provide 를 그대로 알려야 한다.
+    for (bit, name) in [(0x0100_0000, "request"), (0x0400_0000, "notify"), (0x0800_0000, "provide")]
+    {
+        assert_ne!(flags & bit, 0, "{name} 를 알려야 한다: {flags:#x}");
+    }
 
     let Seen::ExtendedCutText(provide) = seen.recv().unwrap() else {
         panic!("텍스트가 확장 provide 로 나가야 한다");

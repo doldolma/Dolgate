@@ -133,12 +133,22 @@ fn inflate(input: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-/// 우리 능력을 알린다(caps). 텍스트 하나만 지원한다.
+/// 우리 능력을 알린다(caps). 형식은 텍스트 하나다.
 ///
-/// 본문은 `flags(4) + 지원 형식마다 최대 크기(4)` 다.
+/// 본문은 `flags(4) + 지원 형식마다 최대 크기(4)` 다. 크기는 **형식 비트(하위 16비트)마다** 하나이고
+/// 동작 비트는 개수에 들어가지 않는다 — 상대가 그렇게 센다.
+///
+/// **지원하는 동작을 반드시 함께 싣는다.** 형식만 싣고 동작을 비워 보냈더니 TigerVNC 서버가 그
+/// 메시지를 받고 **연결을 끊었다**(실측: 우분투 VM 의 Xtigervnc — 첫 화면 사각형 하나만 받고 EOF.
+/// 데비안 12 의 같은 서버는 관대해서 그냥 붙었다 — 버전에 따라 갈린다). 우리는 request·notify·
+/// provide 를 모두 처리하므로 그대로 알린다. peek 은 처리하지 않아 넣지 않는다 — 알리면 상대가
+/// 그 동작을 보내고 우리는 답하지 못한다.
 pub fn encode_caps() -> Vec<u8> {
     let mut body = Vec::with_capacity(8);
-    body.extend_from_slice(&(ACTION_CAPS | FORMAT_TEXT).to_be_bytes());
+    body.extend_from_slice(
+        &(ACTION_CAPS | ACTION_REQUEST | ACTION_NOTIFY | ACTION_PROVIDE | FORMAT_TEXT)
+            .to_be_bytes(),
+    );
     body.extend_from_slice(&MAX_UNSOLICITED_TEXT.to_be_bytes());
     body
 }
@@ -190,6 +200,32 @@ fn to_crlf(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caps_advertise_the_actions_we_handle() {
+        let body = encode_caps();
+        let flags = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+
+        assert_ne!(flags & ACTION_CAPS, 0, "caps 동작이 서 있어야 한다");
+        assert_ne!(flags & FORMAT_TEXT, 0, "텍스트 형식을 지원한다고 알려야 한다");
+
+        // **동작 비트를 비워 보내면 TigerVNC 서버가 연결을 끊는다**(우분투 VM 실측). 우리가
+        // 처리하는 동작은 그대로 알려야 한다.
+        for (bit, name) in [
+            (ACTION_REQUEST, "request"),
+            (ACTION_NOTIFY, "notify"),
+            (ACTION_PROVIDE, "provide"),
+        ] {
+            assert_ne!(flags & bit, 0, "{name} 를 알리지 않으면 상대가 그 동작을 쓰지 않는다");
+        }
+        // 처리하지 않는 동작은 알리지 않는다 — 알리면 상대가 보내고 우리는 답할 수 없다.
+        assert_eq!(flags & ACTION_PEEK, 0, "peek 은 처리하지 않으므로 알리면 안 된다");
+
+        // 크기는 형식 비트 개수만큼 붙는다(동작 비트는 세지 않는다). 어긋나면 상대가 본문 길이를
+        // 검사하다 메시지를 버리거나 끊는다.
+        let formats = (flags & 0x0000_FFFF).count_ones() as usize;
+        assert_eq!(body.len(), 4 + 4 * formats);
+    }
 
     #[test]
     fn reads_the_servers_caps() {
