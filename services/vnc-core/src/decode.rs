@@ -195,6 +195,23 @@ impl Framebuffer {
     }
 }
 
+/// 서버 포맷 픽셀을 RGBA 로 옮긴다. 알파는 전부 불투명(0xFF)이다.
+///
+/// 프레임버퍼를 거치지 않는 픽셀(커서 모양)이 쓴다 — 변환 규칙을 한 곳에 두려고 노출한다. 사각형이
+/// 아니므로 stride 개념이 없고, 들어온 픽셀 수만큼 그대로 돌려준다.
+pub fn to_rgba(source: &[u8], pixels: usize, format: PixelFormat) -> Result<Vec<u8>, DecodeError> {
+    let expected = pixels * format.bytes_per_pixel();
+    if source.len() < expected {
+        return Err(DecodeError::ShortData {
+            expected,
+            got: source.len(),
+        });
+    }
+    let mut out = vec![0_u8; pixels * 4];
+    convert_row(&source[..expected], &mut out, format)?;
+    Ok(out)
+}
+
 /// 한 행을 서버 포맷에서 RGBA 로 옮긴다.
 fn convert_row(source: &[u8], target: &mut [u8], format: PixelFormat) -> Result<(), DecodeError> {
     if !format.true_colour {

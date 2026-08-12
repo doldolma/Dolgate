@@ -83,6 +83,8 @@ fn main() {
         host: host.clone(),
         port,
         password,
+        username: String::new(),
+        image_quality: String::new(),
         shared: true,
     };
 

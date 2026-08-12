@@ -14,7 +14,7 @@ use std::thread;
 use serde::Serialize;
 use tracing::warn;
 
-use crate::protocol::{Event, FramePayload};
+use crate::protocol::{CursorPayload, Event, FramePayload};
 use core_framing::{write_frame, KIND_CONTROL, KIND_STREAM};
 
 /// 쓰기 대기열 깊이(프레임 수).
@@ -103,6 +103,29 @@ impl Output {
                     height = meta.height,
                     "stdout 대기열이 차서 프레임을 버렸다"
                 );
+                Ok(())
+            }
+            Err(TrySendError::Disconnected(_)) => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "stdout writer 가 멈췄다",
+            )),
+        }
+    }
+    /// 커서 모양.
+    ///
+    /// 픽셀 프레임과 같은 경로다 — 막히면 버린다. 커서 하나를 잃으면 다음 모양 변경까지 옛 모양이
+    /// 남는 것이 전부이고, 여기서 기다리면 소켓 읽기가 멈춘다.
+    pub fn send_cursor(&self, meta: &CursorPayload, rgba: &[u8]) -> io::Result<()> {
+        let metadata = serde_json::to_vec(meta)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        match self.tx.try_send(Outgoing {
+            kind: KIND_STREAM,
+            metadata,
+            payload: rgba.to_vec(),
+        }) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                warn!("stdout 대기열이 차서 커서를 버렸다");
                 Ok(())
             }
             Err(TrySendError::Disconnected(_)) => Err(io::Error::new(

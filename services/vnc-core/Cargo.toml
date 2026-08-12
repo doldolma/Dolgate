@@ -25,3 +25,4 @@ flate2 = "1"
 # vendored: 소스에서 함께 빌드한다. 세 플랫폼 러너의 시스템 OpenSSL 버전에 따라 산출물이
 # 달라지지 않게 하려는 것이고, Node·Go·Rust 를 고정한 것과 같은 이유다.
 openssl = { version = "0.10", features = ["vendored"] }
+zune-jpeg = "0.5"

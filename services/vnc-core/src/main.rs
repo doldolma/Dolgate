@@ -4,12 +4,16 @@
 //! 이 스레드는 명령만 처리하고, 세션은 각자 스레드에서 돈다. 명령 처리 중에 소켓을 기다리면
 //! 세션 하나가 나머지 전부를 멈춘다.
 
+mod ard;
 mod auth;
+mod clipboard;
+mod cursor;
 mod decode;
 mod output;
 mod protocol;
 mod rfb;
 mod session;
+mod tight;
 mod tls;
 mod transport;
 mod vencrypt;
@@ -24,7 +28,8 @@ use tracing::{debug, warn};
 
 use crate::output::Output;
 use crate::protocol::{
-    ConnectPayload, ErrorPayload, Event, InputBatch, ReadyPayload, Request, StatusPayload,
+    ClipboardPayload, ConnectPayload, ErrorPayload, Event, InputBatch, ReadyPayload, Request,
+    SetDesktopSizePayload, StatusPayload,
 };
 use crate::session::SessionHandle;
 use core_framing::{read_frame, KIND_CONTROL};
@@ -165,6 +170,67 @@ fn handle_request(request: Request, output: &Output, sessions: &Sessions) {
             if let Some(handle) = handle {
                 if let Err(error) = handle.send_input(&batch.events) {
                     debug!(%error, session = %session_id, "입력을 보낼 수 없다");
+                }
+            }
+        }
+        // 로컬 클립보드를 원격에 알린다. 데스크톱이 클립보드를 소유하므로(RDP 와 같은 규칙) 값은
+        // 메인 프로세스가 읽어서 넘긴다 — 코어는 OS 클립보드를 만지지 않는다.
+        "vncClipboard" => {
+            let Some(session_id) = request.session_id.as_deref() else {
+                return;
+            };
+            let payload: ClipboardPayload = match serde_json::from_value(request.payload) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    warn!(%error, "클립보드 요청을 해석할 수 없다");
+                    return;
+                }
+            };
+            let handle = sessions
+                .lock()
+                .ok()
+                .and_then(|map| map.get(session_id).cloned());
+            // 세션이 이미 끝났을 수 있다. 입력과 같은 이유로 오류가 아니다.
+            if let Some(handle) = handle {
+                if let Err(error) = handle.send_clipboard(payload.text) {
+                    debug!(%error, session = %session_id, "클립보드를 보낼 수 없다");
+                }
+            }
+        }
+        // 창 크기에 맞춰 원격 화면 크기를 요청한다.
+        // 화면 전체를 다시 받는다. 캔버스가 그림을 잃었을 때(크기 변경으로 지워졌을 때) 부른다.
+        "vncRefresh" => {
+            let Some(session_id) = request.session_id.as_deref() else {
+                return;
+            };
+            let handle = sessions
+                .lock()
+                .ok()
+                .and_then(|map| map.get(session_id).cloned());
+            if let Some(handle) = handle {
+                if let Err(error) = handle.refresh_screen() {
+                    debug!(%error, session = %session_id, "화면 갱신을 요청할 수 없다");
+                }
+            }
+        }
+        "vncSetDesktopSize" => {
+            let Some(session_id) = request.session_id.as_deref() else {
+                return;
+            };
+            let payload: SetDesktopSizePayload = match serde_json::from_value(request.payload) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    warn!(%error, "화면 크기 요청을 해석할 수 없다");
+                    return;
+                }
+            };
+            let handle = sessions
+                .lock()
+                .ok()
+                .and_then(|map| map.get(session_id).cloned());
+            if let Some(handle) = handle {
+                if let Err(error) = handle.request_desktop_size(payload.width, payload.height) {
+                    debug!(%error, session = %session_id, "화면 크기를 요청할 수 없다");
                 }
             }
         }

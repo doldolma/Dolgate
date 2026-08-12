@@ -12,7 +12,13 @@
 //! 모듈 이름은 rdp-core 와 같은 뜻으로 쓴다 — `protocol` 은 데스크톱과 주고받는 제어 프로토콜이고,
 //! RFB 와이어는 `rfb` 다. 두 코어를 함께 읽는 사람이 같은 단어를 다른 뜻으로 만나지 않게 한다.
 
+/// Apple Remote Desktop 인증(macOS 화면 공유).
+pub mod ard;
 pub mod auth;
+/// 클립보드: 고전 CutText 와 ExtendedClipboard.
+pub mod clipboard;
+/// 커서 모양(Cursor 의사 인코딩).
+pub mod cursor;
 pub mod decode;
 pub mod output;
 pub mod session;
@@ -26,5 +32,7 @@ pub mod transport;
 pub mod tls;
 /// VeNCrypt 협상.
 pub mod vencrypt;
+/// Tight 디코더.
+pub mod tight;
 /// ZRLE 디코더.
 pub mod zrle;

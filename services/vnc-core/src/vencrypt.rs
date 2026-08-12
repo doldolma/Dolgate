@@ -77,6 +77,11 @@ impl SubType {
     }
 
     /// 인증서 없이 익명 DH 로 TLS 를 세우는 계열인가.
+    /// 익명 DH 계열인가.
+    ///
+    /// 지금 문구를 만들 때 쓰지 않는다(그 안내를 지웠다). 남겨 두는 이유는 인증서 계열과 짝이고,
+    /// 서버 신원을 따지는 판단이 생길 때 다시 필요한 구분이기 때문이다.
+    #[allow(dead_code)]
     pub fn is_anonymous_tls(self) -> bool {
         matches!(self, Self::TlsNone | Self::TlsVnc | Self::TlsPlain | Self::TlsSasl)
     }
@@ -165,22 +170,51 @@ pub fn select(stream: &mut (impl Read + Write), subtype: SubType) -> io::Result<
     Ok(())
 }
 
+/// Plain 인증: 계정과 비밀번호를 그대로 보낸다.
+///
+/// **TLS 안에서만 부른다.** 이 메시지에는 어떤 해시도 챌린지도 없어서, 평문 통로에서 쓰면 비밀번호가
+/// 그대로 흘러간다(그래서 `pick` 이 맨 Plain(256) 을 고르지 않는다).
+///
+/// 얻는 것은 두 가지다 — 계정 기반 인증(서버의 PAM·LDAP 사용자)과 **8자 제한이 없는 비밀번호**.
+/// VncAuth 는 DES 키로 쓰려고 앞 8바이트만 쓰는데 여기에는 그 제약이 없다.
+pub fn write_plain_credentials(
+    stream: &mut (impl Read + Write),
+    username: &str,
+    password: &str,
+) -> io::Result<()> {
+    let user = username.as_bytes();
+    let secret = password.as_bytes();
+    let mut message = Vec::with_capacity(8 + user.len() + secret.len());
+    message.extend_from_slice(&(user.len() as u32).to_be_bytes());
+    message.extend_from_slice(&(secret.len() as u32).to_be_bytes());
+    // 길이가 먼저 **둘 다** 온 뒤에 본문 둘이 이어진다. 길이-본문-길이-본문 순서로 보내면 서버가
+    // 두 번째 길이를 본문의 일부로 읽는다.
+    message.extend_from_slice(user);
+    message.extend_from_slice(secret);
+    stream.write_all(&message)?;
+    stream.flush()
+}
+
 /// 아직 세울 수 없는 서브타입뿐일 때 사용자에게 보일 문구.
 ///
-/// **무엇을 요구했는지 이름으로 말한다.** "붙지 않는다" 만 말하면 서버 설정을 어떻게 바꿔야 할지
-/// 알 수 없다 — TLSVnc 인지 X509Vnc 인지에 따라 할 일이 다르다.
+/// **이름까지만 말한다.** 무엇을 요구했는지는 알려야 검색이라도 할 수 있지만, "이렇게 바꾸면 붙는다"
+/// 는 조언은 붙이지 않는다 — 대개 보안을 낮추는 타협이고(보안 타입 쪽 주석 참고), 문구만 길어진다.
+///
+/// 예외는 맨 `Plain` 이다. 그건 **우리가 할 수 있는데 거절한** 경우라, 이유를 말하지 않으면
+/// "지원하지 않는다" 가 거짓말이 된다.
 pub fn describe_unsupported(offered: &[SubType]) -> String {
     let names: Vec<String> = offered.iter().map(|subtype| subtype.label()).collect();
-    let anonymous = offered.iter().any(|subtype| subtype.is_anonymous_tls());
-    let mut message = format!(
+    let message = format!(
         "이 서버의 VeNCrypt 방식을 아직 지원하지 않습니다: {}",
         names.join(", ")
     );
-    if anonymous {
-        // 사용자가 실제로 할 수 있는 일을 적는다. 서버에 X509 인증서를 붙이면 지금 스택으로 붙는다.
-        message.push_str(
-            " — TLS 계열은 인증서 없이 익명 DH 로 붙는 방식이라 지원 준비가 필요합니다. \
-             서버에 X509 인증서를 설정하면(X509Vnc) 붙을 수 있습니다",
+    if offered.contains(&SubType::Plain)
+        && !offered
+            .iter()
+            .any(|subtype| matches!(subtype, SubType::TlsPlain | SubType::X509Plain))
+    {
+        return format!(
+            "{message} — 암호화 없는 통로로 비밀번호를 그대로 보내는 방식이라 쓰지 않습니다"
         );
     }
     message
@@ -276,11 +310,48 @@ mod tests {
         assert_eq!(SubType::from_u32(9999), SubType::Unknown(9999));
     }
 
-    // 문구가 사용자가 할 수 있는 일을 말해야 한다.
+    /// 문구가 **이름까지만** 말하는지.
+    ///
+    /// 예전에는 "TLS 계열은 지원 준비가 필요하다 / X509 인증서를 설정하면 붙는다" 를 덧붙였는데,
+    /// 그 말은 이제 사실이 아니다 — TLSVnc·TLSNone·TLSPlain 을 다 지원한다. 실제로 붙는 방식을
+    /// 두고 "지원 준비가 필요하다" 고 말하는 문구가 남아 있었다.
     #[test]
-    fn unsupported_message_names_the_methods_and_a_way_out() {
-        let message = describe_unsupported(&[SubType::TlsVnc]);
-        assert!(message.contains("TLSVnc"), "{message}");
-        assert!(message.contains("X509"), "다른 길을 알려줘야 한다: {message}");
+    fn unsupported_message_names_the_methods_without_advice() {
+        let message = describe_unsupported(&[SubType::TlsSasl]);
+        assert!(message.contains("TLSSASL"), "{message}");
+        assert!(!message.contains("X509 인증서"), "{message}");
+        assert!(!message.contains("지원 준비"), "{message}");
+    }
+
+    #[test]
+    fn writes_the_plain_credentials_in_spec_order() {
+        // 길이 둘이 먼저, 그 뒤에 본문 둘이다. 순서를 섞으면 서버가 두 번째 길이를 본문으로 읽는다.
+        let mut pipe = Pipe {
+            input: std::io::Cursor::new(Vec::new()),
+            output: Vec::new(),
+        };
+        write_plain_credentials(&mut pipe, "operator", "긴-비밀번호").unwrap();
+
+        let user = "operator".as_bytes();
+        let secret = "긴-비밀번호".as_bytes();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&(user.len() as u32).to_be_bytes());
+        expected.extend_from_slice(&(secret.len() as u32).to_be_bytes());
+        expected.extend_from_slice(user);
+        expected.extend_from_slice(secret);
+        assert_eq!(pipe.output, expected);
+        // 길이는 **바이트** 수다. 글자 수로 세면 한글 비밀번호에서 어긋난다.
+        assert_eq!(secret.len(), 16);
+    }
+
+    #[test]
+    fn explains_that_bare_plain_is_refused() {
+        // 맨 Plain 은 **할 수 있는데 거절한** 경우다. 이유를 말하지 않으면 "지원하지 않는다" 가
+        // 거짓말이 된다 — 다른 방식들과 다르게 이 한 줄은 남긴다.
+        let message = describe_unsupported(&[SubType::Plain]);
+        assert!(message.contains("비밀번호를 그대로"), "{message}");
+        // TLSPlain 이 함께 제시되면 그쪽을 고르므로 이 문구는 나오지 않는다.
+        let with_tls = describe_unsupported(&[SubType::Plain, SubType::TlsPlain]);
+        assert!(!with_tls.contains("비밀번호를 그대로"), "{with_tls}");
     }
 }

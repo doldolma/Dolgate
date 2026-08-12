@@ -12,6 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use core_framing::{read_frame, Frame, KIND_CONTROL, KIND_STREAM};
+use openssl::bn::{BigNum, BigNumContext};
 use vnc_core::output::Output;
 use vnc_core::protocol::{ConnectPayload, InputEvent};
 use vnc_core::rfb::PixelFormat;
@@ -60,6 +61,14 @@ enum Seen {
     Encodings(Vec<i32>),
     UpdateRequest { incremental: bool },
     Input(Vec<u8>),
+    /// 연속 갱신을 켜는 메시지(150). 영역이 화면 크기와 같아야 한다.
+    EnableContinuousUpdates { enable: bool, width: u16, height: u16 },
+    /// 울타리 응답. 서버가 보낸 payload 를 그대로 돌려줬는지 본다.
+    FenceReply { flags: u32, payload: Vec<u8> },
+    /// 연속 갱신을 켠 뒤에 클라이언트가 보낸 나머지 바이트 전부.
+    AfterContinuousUpdates(Vec<u8>),
+    /// ARD 로 받아 복호화한 계정·비밀번호.
+    ArdCredentials { username: String, password: String },
 }
 
 /// 협상을 마치고 화면 한 장을 보내는 서버를 띄운다.
@@ -183,11 +192,274 @@ fn spawn_server(security: u8, password_ok: bool) -> (u16, Receiver<Seen>) {
                 break;
             }
             rest.extend_from_slice(&buffer[..read]);
-            if rest.len() >= 6 {
+            // **포인터 이벤트 두 개(12바이트)를 다 모은다.** 6에서 멈추면 두 메시지가 한 번의 TCP
+            // 읽기로 합쳐질 때만 통과하는 동전 던지기가 된다 — 병렬 테스트가 늘자 실제로 갈렸다.
+            if rest.len() >= 12 {
                 break;
             }
         }
         tx.send(Seen::Input(rest)).ok();
+    });
+
+    (port, rx)
+}
+
+/// 확장(커서·연속 갱신·울타리)을 쓰는 서버.
+///
+/// 이 세 가지는 **주고받는 순서 자체가 규격**이라 단위 테스트로 나눌 수 없다. 특히 연속 갱신은
+/// "켠 뒤에는 요청을 보내지 않는다" 가 핵심인데, 그것은 보내지 **않은** 것을 확인해야 알 수 있다.
+fn spawn_extension_server() -> (u16, Receiver<Seen>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = channel();
+
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket.set_nodelay(true).ok();
+
+        socket.write_all(b"RFB 003.008\n").unwrap();
+        let mut client_version = [0_u8; 12];
+        socket.read_exact(&mut client_version).unwrap();
+
+        socket.write_all(&[1, 1]).unwrap(); // 보안 타입 None 하나
+        let mut chosen = [0_u8; 1];
+        socket.read_exact(&mut chosen).unwrap();
+        socket.write_all(&0_u32.to_be_bytes()).unwrap(); // SecurityResult
+
+        let mut shared = [0_u8; 1];
+        socket.read_exact(&mut shared).unwrap();
+
+        let mut init = Vec::new();
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&PixelFormat::rgba32().to_bytes());
+        init.extend_from_slice(&4_u32.to_be_bytes());
+        init.extend_from_slice(b"fake");
+        socket.write_all(&init).unwrap();
+
+        let mut set_format = [0_u8; 20];
+        socket.read_exact(&mut set_format).unwrap();
+
+        let mut head = [0_u8; 4];
+        socket.read_exact(&mut head).unwrap();
+        let count = u16::from_be_bytes([head[2], head[3]]);
+        let mut encodings = Vec::new();
+        for _ in 0..count {
+            let mut raw = [0_u8; 4];
+            socket.read_exact(&mut raw).unwrap();
+            encodings.push(i32::from_be_bytes(raw));
+        }
+        tx.send(Seen::Encodings(encodings)).ok();
+
+        // 첫 요청(전체)을 받는다. 여기까지는 요청 기반이다.
+        let incremental = read_update_request(&mut socket);
+        tx.send(Seen::UpdateRequest { incremental }).ok();
+
+        // **연속 갱신을 안다고 알린다.** 규격이 이 메시지를 지원 통보로 정해 두었다.
+        socket.write_all(&[150]).unwrap();
+
+        // 클라이언트가 켜는 메시지를 보내야 한다.
+        let mut enable = [0_u8; 10];
+        socket.read_exact(&mut enable).unwrap();
+        assert_eq!(enable[0], 150, "EnableContinuousUpdates 여야 한다");
+        tx.send(Seen::EnableContinuousUpdates {
+            enable: enable[1] != 0,
+            width: u16::from_be_bytes([enable[6], enable[7]]),
+            height: u16::from_be_bytes([enable[8], enable[9]]),
+        })
+        .ok();
+
+        // 커서 모양 + QEMU 키 선언 + 화면 한 장을 한 갱신에 담아 보낸다.
+        let mut update = Vec::new();
+        update.push(0); // FramebufferUpdate
+        update.push(0);
+        update.extend_from_slice(&3_u16.to_be_bytes()); // 사각형 3개
+
+        // 0) QEMU 확장 키: 본문이 없는 의사 인코딩이다.
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&(-258_i32).to_be_bytes());
+
+        // 1) 커서: 2x1, 핫스팟 (1,0), 왼쪽만 불투명.
+        update.extend_from_slice(&1_u16.to_be_bytes()); // x = 핫스팟 x
+        update.extend_from_slice(&0_u16.to_be_bytes()); // y = 핫스팟 y
+        update.extend_from_slice(&2_u16.to_be_bytes());
+        update.extend_from_slice(&1_u16.to_be_bytes());
+        update.extend_from_slice(&(-239_i32).to_be_bytes());
+        update.extend_from_slice(&[9, 8, 7, 0]); // 왼쪽 픽셀
+        update.extend_from_slice(&[6, 5, 4, 0]); // 오른쪽 픽셀
+        update.push(0b1000_0000); // 마스크
+
+        // 2) 화면: Raw 2x2.
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&0_u16.to_be_bytes());
+        update.extend_from_slice(&2_u16.to_be_bytes());
+        update.extend_from_slice(&2_u16.to_be_bytes());
+        update.extend_from_slice(&0_i32.to_be_bytes());
+        for index in 0..4_u8 {
+            update.extend_from_slice(&[index + 1, index + 2, index + 3, 0]);
+        }
+        socket.write_all(&update).unwrap();
+
+        // 울타리를 request 비트와 함께 보낸다. 답하지 않으면 실서버는 갱신을 멈춘다.
+        let mut fence = vec![248_u8, 0, 0, 0];
+        fence.extend_from_slice(&(1_u32 << 31 | 1).to_be_bytes());
+        fence.push(4);
+        fence.extend_from_slice(b"ping");
+        socket.write_all(&fence).unwrap();
+
+        // 시간 제한을 먼저 걸어 둔다. 답하지 않는 회귀가 생겼을 때 여기서 영원히 막히면 CI 는
+        // 실패가 아니라 **정지**로 끝나 원인을 알 수 없다.
+        socket
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .ok();
+        let mut reply = [0_u8; 9];
+        socket
+            .read_exact(&mut reply)
+            .expect("울타리 응답이 와야 한다 — 답하지 않으면 서버가 갱신을 멈춘 채 기다린다");
+        assert_eq!(reply[0], 248, "울타리 응답이어야 한다");
+        let mut payload = vec![0_u8; usize::from(reply[8])];
+        socket.read_exact(&mut payload).unwrap();
+        tx.send(Seen::FenceReply {
+            flags: u32::from_be_bytes([reply[4], reply[5], reply[6], reply[7]]),
+            payload,
+        })
+        .ok();
+
+        // 이 뒤로는 아무것도 오지 않아야 한다 — 연속 갱신이 켜져 있으면 요청을 보내지 않는다.
+        let mut rest = Vec::new();
+        let mut buffer = [0_u8; 64];
+        socket
+            .set_read_timeout(Some(Duration::from_millis(600)))
+            .ok();
+        while let Ok(read) = socket.read(&mut buffer) {
+            if read == 0 {
+                break;
+            }
+            rest.extend_from_slice(&buffer[..read]);
+        }
+        tx.send(Seen::AfterContinuousUpdates(rest)).ok();
+    });
+
+    (port, rx)
+}
+
+/// ARD(보안 타입 30)를 요구하는 서버. macOS 화면 공유가 이 경로다.
+///
+/// **순서 자체가 규격이다.** generator·keyLength·modulus·serverPublic 을 보내고, 클라이언트가
+/// `암호화된 자격증명(128) + 공개키(keyLength)` 를 그 순서로 보내야 한다. 하나라도 뒤집히면 서버는
+/// "비밀번호가 틀렸다" 만 말하므로 단위 테스트로는 잡히지 않는다.
+fn spawn_ard_server() -> (u16, Receiver<Seen>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, rx) = channel();
+
+    thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket.set_nodelay(true).ok();
+
+        socket.write_all(b"RFB 003.008\n").unwrap();
+        let mut client_version = [0_u8; 12];
+        socket.read_exact(&mut client_version).unwrap();
+
+        // 보안 타입 30(ARD) 하나만 제시한다.
+        socket.write_all(&[1, 30]).unwrap();
+        let mut chosen = [0_u8; 1];
+        socket.read_exact(&mut chosen).unwrap();
+        assert_eq!(chosen[0], 30, "ARD 를 골라야 한다");
+
+        // RFC 2409 Oakley Group 2(1024비트). macOS 가 쓰는 것과 같은 크기다.
+        let modulus = BigNum::from_hex_str(
+            "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74\
+             020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437\
+             4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED\
+             EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF",
+        )
+        .unwrap();
+        let key_len = modulus.to_vec().len();
+        let generator = BigNum::from_u32(2).unwrap();
+        let mut context = BigNumContext::new().unwrap();
+        let mut private = BigNum::new().unwrap();
+        private
+            .rand(256, openssl::bn::MsbOption::MAYBE_ZERO, false)
+            .unwrap();
+        let mut public = BigNum::new().unwrap();
+        public
+            .mod_exp(&generator, &private, &modulus, &mut context)
+            .unwrap();
+
+        let mut head = Vec::new();
+        head.extend_from_slice(&2_u16.to_be_bytes()); // generator
+        head.extend_from_slice(&(key_len as u16).to_be_bytes());
+        head.extend_from_slice(&modulus.to_vec_padded(key_len as i32).unwrap());
+        head.extend_from_slice(&public.to_vec_padded(key_len as i32).unwrap());
+        socket.write_all(&head).unwrap();
+
+        // 자격증명 128바이트 + 공개키 key_len 바이트.
+        let mut credentials = [0_u8; 128];
+        socket.read_exact(&mut credentials).unwrap();
+        let mut client_public = vec![0_u8; key_len];
+        socket.read_exact(&mut client_public).unwrap();
+
+        let mut shared = BigNum::new().unwrap();
+        shared
+            .mod_exp(
+                &BigNum::from_slice(&client_public).unwrap(),
+                &private,
+                &modulus,
+                &mut context,
+            )
+            .unwrap();
+        let key = openssl::hash::hash(
+            openssl::hash::MessageDigest::md5(),
+            &shared.to_vec_padded(key_len as i32).unwrap(),
+        )
+        .unwrap();
+
+        let cipher = openssl::symm::Cipher::aes_128_ecb();
+        let mut crypter =
+            openssl::symm::Crypter::new(cipher, openssl::symm::Mode::Decrypt, &key, None).unwrap();
+        crypter.pad(false);
+        let mut plain = vec![0_u8; credentials.len() + cipher.block_size()];
+        let mut count = crypter.update(&credentials, &mut plain).unwrap();
+        count += crypter.finalize(&mut plain[count..]).unwrap();
+        plain.truncate(count);
+
+        let field = |slot: &[u8]| {
+            let end = slot.iter().position(|byte| *byte == 0).unwrap_or(slot.len());
+            String::from_utf8_lossy(&slot[..end]).to_string()
+        };
+        tx.send(Seen::ArdCredentials {
+            username: field(&plain[..64]),
+            password: field(&plain[64..]),
+        })
+        .ok();
+
+        socket.write_all(&0_u32.to_be_bytes()).unwrap(); // SecurityResult 성공
+
+        // 여기까지 오면 인증은 끝났다. 화면은 이 테스트의 관심이 아니라 최소만 보낸다.
+        let mut shared_flag = [0_u8; 1];
+        socket.read_exact(&mut shared_flag).unwrap();
+        let mut init = Vec::new();
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&2_u16.to_be_bytes());
+        init.extend_from_slice(&PixelFormat::rgba32().to_bytes());
+        init.extend_from_slice(&4_u32.to_be_bytes());
+        init.extend_from_slice(b"mac1");
+        socket.write_all(&init).unwrap();
+
+        // 클라이언트가 끊을 때까지 읽어 준다(파이프가 차면 코어가 쓰기에서 멈춘다).
+        let mut buffer = [0_u8; 256];
+        socket
+            .set_read_timeout(Some(Duration::from_millis(800)))
+            .ok();
+        while let Ok(read) = socket.read(&mut buffer) {
+            if read == 0 {
+                break;
+            }
+        }
     });
 
     (port, rx)
@@ -200,22 +472,44 @@ fn read_update_request(socket: &mut TcpStream) -> bool {
     message[1] != 0
 }
 
-fn run_session(port: u16, password: &str, collected: Collected) -> (thread::JoinHandle<()>, Sender<()>) {
+/// 세션을 띄우고 (조인 핸들, 닫기 신호, 세션 손잡이) 를 돌려준다.
+///
+/// 세션 손잡이가 필요한 이유는 입력을 넣어 봐야 하는 테스트가 있기 때문이다 — 입력 경로는 세션
+/// 스레드가 통로를 혼자 쥐는 구조라 손잡이 없이는 건드릴 수 없다.
+fn run_session(
+    port: u16,
+    password: &str,
+    collected: Collected,
+) -> (thread::JoinHandle<()>, Sender<()>, Receiver<session::SessionHandle>) {
+    run_session_as(port, password, "", collected)
+}
+
+/// 계정까지 지정해 세션을 띄운다. ARD·VeNCrypt Plain 처럼 계정을 쓰는 방식용이다.
+fn run_session_as(
+    port: u16,
+    password: &str,
+    username: &str,
+    collected: Collected,
+) -> (thread::JoinHandle<()>, Sender<()>, Receiver<session::SessionHandle>) {
     let output = Output::with_writer(collected);
     let payload = ConnectPayload {
         host: "127.0.0.1".to_owned(),
         port,
         password: password.to_owned(),
+        username: username.to_owned(),
+        image_quality: String::new(),
         shared: true,
     };
     let (close_tx, close_rx) = channel::<()>();
-    let handle = thread::spawn(move || {
+    let (handle_tx, handle_rx) = channel::<session::SessionHandle>();
+    let joined = thread::spawn(move || {
         let _ = session::run(
             "sess-1".to_owned(),
             "req-1".to_owned(),
             payload,
             output,
             move |handle| {
+                handle_tx.send(handle.clone()).ok();
                 // 세션이 등록되면 닫기 신호를 기다리는 스레드를 붙인다.
                 thread::spawn(move || {
                     if close_rx.recv().is_ok() {
@@ -225,21 +519,25 @@ fn run_session(port: u16, password: &str, collected: Collected) -> (thread::Join
             },
         );
     });
-    (handle, close_tx)
+    (joined, close_tx, handle_rx)
 }
 
 #[test]
 fn negotiates_and_delivers_the_first_screen() {
     let (port, seen) = spawn_server(1, true);
     let collected = Collected::default();
-    let (session, close) = run_session(port, "", collected.clone());
+    let (session, close, _handles) = run_session(port, "", collected.clone());
 
-    // connected 이벤트 + 픽셀 프레임.
-    let frames = collected.frames(2);
+    // connected 이벤트 + 픽셀 프레임. 사이에 다른 제어 이벤트(capabilities)가 끼므로 **종류로**
+    // 찾는다 — 순번으로 집으면 이벤트를 하나 더 보낼 때마다 이 테스트가 깨진다.
+    let frames = collected.frames(3);
     assert!(frames.len() >= 2, "프레임이 두 개는 와야 한다: {frames:?}");
 
-    let connected = metadata(&frames[0]);
-    assert_eq!(frames[0].kind, KIND_CONTROL);
+    let connected_frame = frames
+        .iter()
+        .find(|frame| frame.kind == KIND_CONTROL && metadata(frame)["type"] == "connected")
+        .expect("connected 이벤트가 있어야 한다");
+    let connected = metadata(connected_frame);
     assert_eq!(connected["type"], "connected");
     assert_eq!(connected["sessionId"], "sess-1");
     assert_eq!(connected["requestId"], "req-1");
@@ -247,8 +545,10 @@ fn negotiates_and_delivers_the_first_screen() {
     assert_eq!(connected["payload"]["desktopHeight"], 2);
     assert_eq!(connected["payload"]["name"], "fake");
 
-    let frame = &frames[1];
-    assert_eq!(frame.kind, KIND_STREAM);
+    let frame = frames
+        .iter()
+        .find(|frame| frame.kind == KIND_STREAM)
+        .expect("픽셀 프레임이 있어야 한다");
     let meta = metadata(frame);
     assert_eq!(meta["type"], "vncFrame");
     assert_eq!((meta["x"].as_u64(), meta["y"].as_u64()), (Some(0), Some(0)));
@@ -277,7 +577,7 @@ fn negotiates_and_delivers_the_first_screen() {
                 assert!(list.contains(&16), "ZRLE");
                 // **해독할 수 있는 것만 요청한다.** 목록에 넣으면 서버가 그것으로 보내므로, 아직
                 // 없는 디코더를 광고하면 첫 화면부터 끊긴다.
-                assert!(!list.contains(&7), "Tight 는 아직 없다");
+                assert!(list.contains(&7), "Tight");
                 assert!(!list.contains(&5), "Hextile 은 아직 없다");
                 // 선호도는 순서다. ZRLE 가 Raw 보다 앞이어야 서버가 압축을 고른다.
                 let zrle = list.iter().position(|value| *value == 16);
@@ -285,7 +585,8 @@ fn negotiates_and_delivers_the_first_screen() {
                 assert!(zrle < raw, "ZRLE 가 Raw 보다 앞이어야 한다: {list:?}");
             }
             Seen::UpdateRequest { incremental } => requests.push(incremental),
-            Seen::Input(_) => break,
+            // 이 서버는 확장을 쓰지 않으므로 나머지는 오지 않는다.
+            _ => break,
         }
         if requests.len() >= 2 {
             break;
@@ -305,7 +606,7 @@ fn negotiates_and_delivers_the_first_screen() {
 fn vnc_auth_password_is_accepted_by_a_server_that_checks_it() {
     let (port, _seen) = spawn_server(2, true);
     let collected = Collected::default();
-    let (session, close) = run_session(port, "hunter2", collected.clone());
+    let (session, close, _handles) = run_session(port, "hunter2", collected.clone());
 
     let frames = collected.frames(1);
     let connected = metadata(&frames[0]);
@@ -323,7 +624,7 @@ fn vnc_auth_password_is_accepted_by_a_server_that_checks_it() {
 fn surfaces_the_servers_authentication_failure_reason() {
     let (port, _seen) = spawn_server(2, false);
     let collected = Collected::default();
-    let (session, _close) = run_session(port, "hunter2", collected.clone());
+    let (session, _close, _handles) = run_session(port, "hunter2", collected.clone());
 
     let frames = collected.frames(1);
     let error = metadata(&frames[0]);
@@ -348,6 +649,8 @@ fn pointer_state_carries_the_pressed_button_into_later_moves() {
         host: "127.0.0.1".to_owned(),
         port,
         password: String::new(),
+        username: String::new(),
+        image_quality: String::new(),
         shared: true,
     };
     let (handle_tx, handle_rx) = channel();
@@ -392,5 +695,195 @@ fn pointer_state_carries_the_pressed_button_into_later_moves() {
     assert_eq!(&input[6..12], &[5, 1, 0, 2, 0, 2]);
 
     handle.close();
+    session.join().unwrap();
+}
+
+/// 확장 세 가지를 한 번에 본다: 선언 → 커서 → 연속 갱신 → 울타리.
+///
+/// **선언은 이 테스트에서만 와이어로 확인된다.** 상수에 값을 넣어도 SetEncodings 에 싣지 않으면
+/// 아무 확장도 켜지지 않는데, 그 상태로도 컴파일과 단위 테스트는 전부 통과한다(실제로 확장
+/// 클립보드가 그랬다).
+#[test]
+fn negotiates_the_cursor_continuous_updates_and_fence_extensions() {
+    let (port, seen) = spawn_extension_server();
+    let collected = Collected::default();
+    let (session, close, handles) = run_session(port, "", collected.clone());
+
+    let Seen::Encodings(encodings) = seen.recv().unwrap() else {
+        panic!("첫 관찰은 인코딩 목록이어야 한다");
+    };
+    for (value, name) in [
+        (-1063_i32, "확장 클립보드"),
+        (-239, "커서"),
+        (-312, "울타리"),
+        (-313, "연속 갱신"),
+    ] {
+        assert!(
+            encodings.contains(&value),
+            "{name}({value}) 를 선언하지 않으면 서버는 그 확장을 시작하지 않는다: {encodings:?}"
+        );
+    }
+
+    let Seen::UpdateRequest { incremental } = seen.recv().unwrap() else {
+        panic!("첫 갱신 요청이 와야 한다");
+    };
+    assert!(!incremental, "첫 요청은 전체여야 한다");
+
+    // EndOfContinuousUpdates 를 본 뒤에만 켜는 메시지를 보낸다.
+    let Seen::EnableContinuousUpdates {
+        enable,
+        width,
+        height,
+    } = seen.recv().unwrap()
+    else {
+        panic!("연속 갱신을 켜야 한다");
+    };
+    assert!(enable);
+    assert_eq!((width, height), (2, 2), "켜는 영역은 화면 전체여야 한다");
+
+    // 울타리에 답해야 한다 — 답하지 않는 클라이언트는 서버가 갱신을 멈춘 채 기다린다.
+    let Seen::FenceReply { flags, payload } = seen.recv().unwrap() else {
+        panic!("울타리에 답해야 한다");
+    };
+    assert_eq!(payload, b"ping", "payload 는 그대로 돌려줘야 한다");
+    assert_eq!(flags, 0, "지키지 못할 flags 를 세워 답하지 않는다");
+
+    // 커서 모양이 stream frame 으로 올라온다.
+    let frames = collected.frames(5);
+    let cursor = frames
+        .iter()
+        .find(|frame| metadata(frame)["type"] == "vncCursor")
+        .expect("커서 프레임이 있어야 한다");
+    let meta = metadata(cursor);
+    assert_eq!(meta["hotspotX"], 1);
+    assert_eq!(meta["hotspotY"], 0);
+    assert_eq!((meta["width"].as_u64(), meta["height"].as_u64()), (Some(2), Some(1)));
+    // 마스크가 0 인 픽셀은 알파가 0 이어야 한다. 안 그러면 커서 바깥이 검은 사각형으로 남는다.
+    assert_eq!(cursor.payload, vec![9, 8, 7, 0xFF, 6, 5, 4, 0x00]);
+
+    // 화면도 그대로 온다(커서 사각형이 프레임 경계를 어긋내지 않았다는 증거다).
+    assert!(
+        frames
+            .iter()
+            .any(|frame| metadata(frame)["type"] == "vncFrame"),
+        "화면 프레임도 와야 한다: {frames:?}"
+    );
+
+    // 협상 결과가 데스크톱까지 올라가야 탭 hover 가 그것을 보여줄 수 있다.
+    const CAPABILITY_KIND: &str = "capabilities";
+    let latest = frames
+        .iter()
+        .filter(|frame| metadata(frame)["type"] == CAPABILITY_KIND)
+        .next_back()
+        .map(metadata);
+    let capabilities = latest.expect("capabilities 이벤트가 있어야 한다");
+    let payload = &capabilities["payload"];
+    assert_eq!(payload["cursor"], true, "커서 사각형을 받았으니 켜져 있어야 한다");
+    assert_eq!(payload["continuousUpdates"], true);
+    assert_eq!(payload["encoding"], "raw", "이 서버는 Raw 로 보냈다");
+    assert_eq!(payload["extendedClipboard"], false, "이 서버는 caps 를 보내지 않았다");
+
+    // 서버가 QEMU 확장 키 사각형을 보냈으니, 스캔코드가 있는 키는 그 메시지로 나가야 한다.
+    let handle = handles.recv().unwrap();
+    // 이 서버는 확장 클립보드 caps 를 보내지 않았다 → 고전 latin-1 경로다. 한글을 보내면 담을 수
+    // 없는 글자를 셌다고 알려야 한다(알리지 않으면 사용자는 원격의 `?` 만 보고 이유를 모른다).
+    handle.send_clipboard("한글 abc".to_owned()).unwrap();
+    handle
+        .send_input(&[InputEvent::Key {
+            keysym: 0xFF0D,
+            pressed: true,
+            keycode: 0x1C,
+        }])
+        .unwrap();
+
+    let Seen::AfterContinuousUpdates(rest) = seen.recv().unwrap() else {
+        panic!("나머지 바이트를 받아야 한다");
+    };
+    assert!(
+        !rest.contains(&3),
+        "연속 갱신이 켜진 뒤에는 갱신 요청(3)을 보내지 않아야 한다: {rest:?}"
+    );
+    let qemu_key = [255, 0, 0, 1, 0, 0, 0xFF, 0x0D, 0, 0, 0, 0x1C];
+    assert!(
+        rest.ends_with(&qemu_key),
+        "keysym 만 담은 고전 KeyEvent(4) 가 아니라 스캔코드가 실린 QEMU 메시지여야 한다: {rest:?}"
+    );
+    // 그 앞은 고전 ClientCutText 다. 담을 수 없는 한글이 `?`(0x3F) 로 바뀐 것이 와이어에 보인다 —
+    // 확장을 쓰지 않는 서버에서 무엇이 실제로 나가는지가 여기서 드러난다.
+    assert_eq!(
+        &rest[..rest.len() - qemu_key.len()],
+        &[6, 0, 0, 0, 0, 0, 0, 6, 0x3F, 0x3F, b' ', b'a', b'b', b'c'],
+        "고전 경로는 latin-1 이라 한글이 ? 로 나간다: {rest:?}"
+    );
+
+    let lossy = collected
+        .frames(9)
+        .iter()
+        .map(metadata)
+        .find(|meta| meta["type"] == "clipboardLossy");
+    assert_eq!(
+        lossy.map(|meta| meta["payload"]["replaced"].as_u64()),
+        Some(Some(2)),
+        "한글 두 글자가 바뀌었다고 알려야 한다"
+    );
+
+    close.send(()).ok();
+    session.join().unwrap();
+}
+
+/// macOS 화면 공유 경로. 계정과 비밀번호가 **함께** 암호화되어 가는지, 순서가 맞는지 본다.
+#[test]
+fn authenticates_with_apple_remote_desktop() {
+    let (port, seen) = spawn_ard_server();
+    let collected = Collected::default();
+    let (session, close, _handles) =
+        run_session_as(port, "긴-비밀번호-8자넘음", "operator", collected.clone());
+
+    let Seen::ArdCredentials { username, password } = seen.recv().unwrap() else {
+        panic!("ARD 자격증명을 받아야 한다");
+    };
+    assert_eq!(username, "operator");
+    // VncAuth 라면 8바이트로 잘렸을 값이다. ARD 는 그 제약이 없다.
+    assert_eq!(password, "긴-비밀번호-8자넘음");
+
+    // 인증이 통과하면 connected 이벤트가 올라온다.
+    let connected = collected
+        .frames(2)
+        .iter()
+        .map(metadata)
+        .find(|meta| meta["type"] == "connected");
+    assert_eq!(
+        connected.map(|meta| meta["payload"]["name"].as_str().map(str::to_owned)),
+        Some(Some("mac1".to_owned())),
+        "ARD 인증 뒤 세션이 붙어야 한다"
+    );
+
+    close.send(()).ok();
+    session.join().unwrap();
+}
+
+/// 계정 없이 ARD 서버에 붙으면 무엇을 해야 하는지 말해 줘야 한다.
+#[test]
+fn explains_that_apple_remote_desktop_needs_an_account() {
+    let (port, _seen) = spawn_ard_server();
+    let collected = Collected::default();
+    let (session, close, _handles) = run_session(port, "비밀번호", collected.clone());
+
+    let error = collected
+        .frames(1)
+        .iter()
+        .map(metadata)
+        .find(|meta| meta["type"] == "error")
+        .and_then(|meta| meta["payload"]["message"].as_str().map(str::to_owned))
+        .unwrap_or_default();
+    assert!(
+        error.contains("계정"),
+        "계정이 필요하다고 알려야 한다: {error}"
+    );
+    // 이 서버는 VncAuth 를 제시하지 않았으므로 "계정을 비우면 VNC 암호로" 안내는 나오지 않아야
+    // 한다 — 그 길이 없는데 알려주면 사용자가 없는 설정을 찾는다.
+    assert!(!error.contains("VNC 암호"), "{error}");
+
+    close.send(()).ok();
     session.join().unwrap();
 }
