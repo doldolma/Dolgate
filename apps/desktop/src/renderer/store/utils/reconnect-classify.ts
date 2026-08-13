@@ -96,3 +96,46 @@ export function classifyReconnect(input: unknown): ReconnectClassification {
 export function isCoreExitedMessage(input: unknown): boolean {
   return CORE_EXITED_PATTERN.test(toMessage(input).toLowerCase());
 }
+
+/**
+ * 원격 화면(RDP·VNC)에서 다시 시도해도 결과가 같은 오류인지.
+ *
+ * **확실히 영구인 것만 걸러낸다** — 모르는 오류는 재시도하는 쪽이 낫다. 코어들이 아직 오류를
+ * 코드로 분류하지 않고 원문을 올리므로 문자열로 가른다(rdp-core, vnc-core 의 session.rs·
+ * vencrypt.rs).
+ *
+ * 위의 SSH 분류기를 먼저 통과시킨다 — 호스트 키·알고리즘 협상처럼 영구인 것을 이미 알고 있고,
+ * VNC 는 SSH 터널을 거칠 수 있어 그쪽 문구가 그대로 올라온다. 아래 목록은 원격 화면 고유의
+ * 것들만이다. SSH 쪽 목록에 넣지 않는 이유는 '계정' 처럼 넓은 낱말이 섞여 있어서, 공용으로
+ * 쓰면 관계없는 SSH 오류의 재연결까지 막을 수 있기 때문이다.
+ */
+const REMOTE_SCREEN_PERMANENT_PATTERNS: RegExp[] = [
+  // RDP: rdp-core 가 올리는 NTSTATUS 계열 문자열.
+  /LOGON_FAILURE/i,
+  /ACCOUNT_LOCKED/i,
+  /ACCOUNT_DISABLED/i,
+  /ACCOUNT_RESTRICTION/i,
+  /ACCOUNT_EXPIRED/i,
+  /PASSWORD_EXPIRED/i,
+  /PASSWORD_MUST_CHANGE/i,
+  /ACCESS_DENIED/i,
+  /CERTIFICATE/i,
+  // VNC: vnc-core 의 한국어 문구.
+  /비밀번호/,
+  /계정/,
+  /지원하지 않습니다/,
+  /거절했습니다/,
+  /authentication (failed|or authorization failure)/i,
+];
+
+export function isRemoteScreenErrorFinal(input: unknown): boolean {
+  const message = toMessage(input);
+  if (!message.trim()) {
+    return false;
+  }
+  if (classifyReconnect(message) === "permanent") {
+    return true;
+  }
+  return REMOTE_SCREEN_PERMANENT_PATTERNS.some((pattern) => pattern.test(message));
+}
+

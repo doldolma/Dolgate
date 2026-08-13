@@ -175,9 +175,10 @@ export function VncSessionCanvas({
         visible ? 'flex' : 'hidden',
       )}
     >
-      {error ? (
-        <div className="p-4 text-sm text-[var(--color-danger,#ef4444)]">{error}</div>
-      ) : null}
+      {/* 오류 문구는 여기서 그리지 않는다. VncConnectionOverlay 가 같은 pane 을 덮으면서 같은
+          내용을 제목·본문·재시도 버튼으로 보여주는데, 이 문구는 그 dialog **뒤에** 깔려서
+          가려진 채 양옆으로만 삐져나왔다(실제로 그렇게 보였다). error 상태는 아래 캔버스를
+          감추는 데 계속 쓴다. */}
 
       {clipboardNotice ? (
         <div

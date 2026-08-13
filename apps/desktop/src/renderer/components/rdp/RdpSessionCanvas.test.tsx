@@ -206,7 +206,10 @@ describe("RdpSessionCanvas visibility", () => {
   });
 
   it("shows the error inside the same root instead of a second absolute layer", () => {
-    const { container } = render(<RdpSessionCanvas sessionId="s1" visible />);
+    // 보조 모니터 창의 배치다(showError). 레이어를 하나 더 얹으면 그 창에서 프레임 위에 겹친다.
+    const { container } = render(
+      <RdpSessionCanvas sessionId="s1" visible showError />,
+    );
 
     emit({ type: "error", sessionId: "s1", message: "연결 실패" } as never);
 
@@ -214,6 +217,19 @@ describe("RdpSessionCanvas visibility", () => {
     expect(container.childElementCount).toBe(1);
     expect(root.textContent).toContain("연결 실패");
     expect(root.classList.contains("absolute")).toBe(true);
+  });
+
+  // 메인 창에는 RdpConnectionOverlay 가 같은 pane 을 덮으면서 같은 내용을 제목·본문·재시도
+  // 버튼으로 보여준다. 캔버스가 또 그리면 그 dialog 뒤에 깔려 가려진 채 양옆으로만 삐져나온다.
+  it("기본값에서는 오류 문구를 그리지 않는다", () => {
+    const { container } = render(<RdpSessionCanvas sessionId="s1" visible />);
+
+    emit({ type: "error", sessionId: "s1", message: "연결 실패" } as never);
+
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.textContent).not.toContain("연결 실패");
+    // 캔버스를 감추는 것은 그대로다 — 실패한 세션의 마지막 화면을 남겨 두지 않는다.
+    expect(container.querySelector("canvas")?.classList.contains("hidden")).toBe(true);
   });
 
   it("stays hidden when an error arrives on a background tab", () => {

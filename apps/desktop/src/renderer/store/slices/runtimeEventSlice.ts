@@ -159,7 +159,10 @@ import {
   isReconnecting,
   scheduleReconnect,
 } from "../services/reconnect-orchestrator";
-import { classifyReconnect } from "../utils/reconnect-classify";
+import {
+  classifyReconnect,
+  isRemoteScreenErrorFinal,
+} from "../utils/reconnect-classify";
 import {
   isAutoRecoveredTransferJob,
   isTerminalUploadJob,
@@ -170,45 +173,28 @@ import type { CoreEvent, HostRecord } from "@shared";
 import { t } from "../../i18n";
 
 /**
- * 다시 시도해도 결과가 같은 RDP 오류인지.
+ * 원격 화면(RDP·VNC)의 예기치 않은 오류를 자동 재연결할지.
  *
- * 인증 실패를 반복하면 계정이 잠긴다. 인증서 변경도 자동 재시도하면 신뢰 프롬프트가 무한히 다시
- * 뜬다. rdp-core 가 아직 오류를 코드로 분류하지 않고 원문을 올리므로, 지금은 문자열로 가른다 —
- * 확실히 아닌 것만 재시도하는 쪽이 아니라 **확실히 영구인 것만 제외**한다(모르는 오류는 재시도).
- */
-function isRdpErrorFinal(message: string): boolean {
-  const upper = message.toUpperCase();
-  return [
-    'LOGON_FAILURE',
-    'ACCOUNT_LOCKED',
-    'ACCOUNT_DISABLED',
-    'ACCOUNT_RESTRICTION',
-    'ACCOUNT_EXPIRED',
-    'PASSWORD_EXPIRED',
-    'PASSWORD_MUST_CHANGE',
-    'ACCESS_DENIED',
-    'CERTIFICATE',
-  ].some((marker) => upper.includes(marker));
-}
-
-/**
- * 다시 시도해도 결과가 같은 VNC 오류인지.
+ * **붙었던 적이 없는 연결은 되살리지 않는다.** SSH 가 쓰는 규칙과 같다(shouldAutoReconnectSession
+ * 의 `status !== "connected"` 게이트). 첫 시도가 실패하는 흔한 이유는 설정이 틀린 것이고 — 포트를
+ * 잘못 넣은 경우가 실제로 그랬다 — 그것을 열 번 반복하면 사용자는 자기 오타를 볼 기회를 잃는다.
+ * 실패한 채로 앉혀 두면 재시도 버튼이 그 자리에 있다.
  *
- * RDP 와 같은 이유로 **확실히 영구인 것만 제외**한다(모르는 오류는 재시도). VNC 의 인증 실패를
- * 반복하면 서버 쪽 계정이 잠길 수 있다 — VeNCrypt Plain 은 PAM 을 타므로 실제로 잠긴다.
- * vnc-core 가 문구를 만드니 그 문구로 가른다(session.rs·vencrypt.rs).
+ * 다만 재연결 주기 안의 실패는 이어 가야 한다(서버 재부팅은 여러 번 거절한다). 주기 여부는 탭이
+ * 아니라 오케스트레이터에 묻는다 — 재시도는 세션 id 를 새로 만들고 그때 탭의 reconnect 요약이
+ * 비므로, 탭만 보면 시도 1회에서 멈춘다. 오케스트레이터는 stableId 로 키잉해 그 교체를 넘어간다.
+ *
+ * 오류 종류로도 한 번 더 막는다: 인증 실패를 반복하면 계정이 잠기고(VeNCrypt Plain 은 PAM 을
+ * 타므로 실제로 잠긴다) 인증서 변경은 신뢰 프롬프트를 무한히 다시 띄운다.
  */
-function isVncErrorFinal(message: string): boolean {
-  return [
-    // 비밀번호·계정 문제.
-    '비밀번호',
-    '계정',
-    'Authentication failed',
-    'authentication failed',
-    // 우리가 못 세우는 방식만 제시된 경우 — 재시도해도 같은 목록이 온다.
-    '지원하지 않습니다',
-    '거절했습니다',
-  ].some((marker) => message.includes(marker));
+function shouldAutoReconnectRemoteScreen(
+  tab: TerminalTab,
+  message: string,
+): boolean {
+  if (tab.status !== "connected" && !isReconnecting(tab.stableId)) {
+    return false;
+  }
+  return !isRemoteScreenErrorFinal(message);
 }
 
 // AWS SSM 세션 종료 메시지에서 종료 코드를 뽑는다(예: "AWS SSM session exited with code 1").
@@ -398,7 +384,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
                 if (
                   get().settings.autoReconnectEnabled &&
                   tab.hostId &&
-                  !isRdpErrorFinal(event.message)
+                  shouldAutoReconnectRemoteScreen(tab, event.message)
                 ) {
                   scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
                 }
@@ -522,7 +508,7 @@ export function createRuntimeEventSlice(deps: SliceDeps): RuntimeEventSlice {
           if (
             get().settings.autoReconnectEnabled &&
             tab.hostId &&
-            !isVncErrorFinal(event.message)
+            shouldAutoReconnectRemoteScreen(tab, event.message)
           ) {
             scheduleFor = { stableId: tab.stableId, hostId: tab.hostId };
           }

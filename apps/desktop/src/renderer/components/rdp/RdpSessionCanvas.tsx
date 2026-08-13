@@ -44,11 +44,23 @@ interface RdpSessionCanvasProps {
   audio?: boolean;
   /** 로컬 → 원격 클립보드 전달. 호스트에서 끄면 false 다. */
   clipboard?: boolean;
+  /**
+   * 오류 문구를 이 캔버스가 직접 그릴지.
+   *
+   * 메인 창에서는 꺼야 한다 — `RdpConnectionOverlay` 가 같은 pane 을 덮으면서 같은 내용을
+   * 제목·본문·재시도 버튼으로 보여주고, 이 문구는 그 dialog **뒤에** 깔려 가려진 채 양옆으로만
+   * 삐져나온다(실제로 그렇게 보였다).
+   *
+   * 보조 모니터 창에서는 켜야 한다. 그 창은 별도 BrowserWindow 라 스토어(탭·호스트)가 없어서
+   * 오버레이를 올릴 수 없고, 여기가 이유를 말할 유일한 자리다.
+   */
+  showError?: boolean;
 }
 
 // 원격 화면을 그리는 표면. 키보드·마우스 입력, 창 크기 연동, 클립보드(텍스트)를 함께 다룬다.
 export function RdpSessionCanvas({
   sessionId,
+  showError = false,
   visible = true,
   connected,
   region: regionProp = null,
@@ -190,7 +202,7 @@ export function RdpSessionCanvas({
             void trustRdpCertificate(certificatePrompt.sessionId, accept);
           }}
         />
-      ) : error ? (
+      ) : showError && error ? (
         <div className="p-4 text-sm text-[var(--color-danger,#ef4444)]">{error}</div>
       ) : null}
 

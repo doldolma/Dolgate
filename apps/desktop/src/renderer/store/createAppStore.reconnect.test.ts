@@ -594,13 +594,15 @@ describe("VNC auto-reconnect trigger", () => {
     updatedAt: "2025-01-01T00:00:00.000Z",
   } as HostRecord;
 
-  function seedVncStore() {
+  const vncScheduled = vi.fn();
+
+  function seedVncStore(status: string = "connected") {
     const store = createAppStore(createMockApi());
     const tab = {
       sessionId: "vnc-s1",
       stableId: "vnc-stable-1",
       title: "Lab VNC",
-      status: "connected",
+      status,
       source: "host",
       hostId: "vnc1",
       paneKind: "vnc",
@@ -623,8 +625,10 @@ describe("VNC auto-reconnect trigger", () => {
       autoReconnectBaseDelayMs: 1000,
       autoReconnectMaxDelayMs: 30000,
     }));
+    vncScheduled.mockClear();
     registerReconnectHandler("vnc", {
-      renderScheduled: () => undefined,
+      // 예약마다 불린다 — 예약이 실제로 일어났는지 세는 데 쓴다.
+      renderScheduled: () => vncScheduled(),
       perform: async () => undefined,
       renderGaveUp: () => undefined,
       isStillPresent: () => true,
@@ -676,6 +680,50 @@ describe("VNC auto-reconnect trigger", () => {
 
     expect(isReconnecting("vnc-stable-1")).toBe(true);
   });
+
+  // 첫 연결 실패는 되살리지 않는다 — SSH 와 같은 규칙이다(shouldAutoReconnectSession 의
+  // status 게이트). 흔한 이유는 설정이 틀린 것이고(포트 오타가 실제로 그랬다), 그것을 열 번
+  // 반복하면 사용자는 자기 오타를 볼 기회를 잃는다.
+  it("붙어 본 적 없는 연결은 되살리지 않는다", () => {
+    const store = seedVncStore("pending");
+
+    store.getState().handleVncEvent({
+      type: "error",
+      sessionId: "vnc-s1",
+      message: "connect: TCP connect: connection refused",
+    });
+
+    expect(isReconnecting("vnc-stable-1")).toBe(false);
+    expect(vncScheduled).not.toHaveBeenCalled();
+    // 탭은 남는다 — 실패한 자리에서 재시도할 수 있어야 한다.
+    const tab = store.getState().tabs.find((item) => item.sessionId === "vnc-s1");
+    expect(tab?.status).toBe("error");
+  });
+
+  // 재연결 주기 안의 실패는 이어 가야 한다(서버 재부팅은 여러 번 거절한다). 재시도는 세션 id 를
+  // 새로 만들고 그때 탭의 status 가 connecting 이라, 상태만 보면 시도 1회에서 멈춘다.
+  it("재연결 주기 안에서는 상태가 connecting 이어도 이어 간다", () => {
+    const store = seedVncStore();
+    store.getState().handleVncEvent({ type: "closed", sessionId: "vnc-s1" });
+    expect(vncScheduled).toHaveBeenCalledTimes(1);
+
+    store.setState({
+      tabs: store
+        .getState()
+        .tabs.map((item) =>
+          item.sessionId === "vnc-s1"
+            ? ({ ...item, status: "connecting" } as typeof item)
+            : item,
+        ),
+    });
+    store.getState().handleVncEvent({
+      type: "error",
+      sessionId: "vnc-s1",
+      message: "connect: TCP connect: connection refused",
+    });
+
+    expect(vncScheduled).toHaveBeenCalledTimes(2);
+  });
 });
 
 // RDP 는 터미널과 다른 코어를 쓰므로 재연결 핸들러가 따로 등록돼 있다. 판정만 여기서 검증한다.
@@ -690,13 +738,13 @@ describe("RDP auto-reconnect trigger", () => {
     updatedAt: "2025-01-01T00:00:00.000Z",
   } as HostRecord;
 
-  function seedRdpStore() {
+  function seedRdpStore(status: string = "connected") {
     const store = createAppStore(createMockApi());
     const tab = {
       sessionId: "rdp-s1",
       stableId: "rdp-stable-1",
       title: "Win Box",
-      status: "connected",
+      status,
       source: "host",
       hostId: "rdp1",
       paneKind: "rdp",
@@ -785,5 +833,21 @@ describe("RDP auto-reconnect trigger", () => {
     });
 
     expect(isReconnecting("rdp-stable-1")).toBe(true);
+  });
+
+  // VNC 와 같은 규칙이다. 붙어 본 적 없는 연결을 열 번 되살리면 사용자는 자기 설정이 틀렸다는
+  // 것을 알 수 없다 — 포트를 잘못 넣은 첫 시도가 실제로 그랬다.
+  it("붙어 본 적 없는 연결은 되살리지 않는다", () => {
+    const store = seedRdpStore("pending");
+
+    store.getState().handleRdpEvent({
+      type: "error",
+      sessionId: "rdp-s1",
+      message: "connect: TCP connect: 연결이 끊어졌습니다. (os error 10060)",
+    } as never);
+
+    expect(isReconnecting("rdp-stable-1")).toBe(false);
+    const tab = store.getState().tabs.find((item) => item.sessionId === "rdp-s1");
+    expect(tab?.status).toBe("error");
   });
 });
