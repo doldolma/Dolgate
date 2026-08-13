@@ -889,4 +889,33 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('user@example.com')).toBeInTheDocument();
     expect(screen.getByText('https://ssh.doldolma.com')).toBeInTheDocument();
   });
+  // 등록한 브라우저와 로그인하는 브라우저가 다르면(크롬은 패스키를 프로필별로 저장한다) 서버에는
+  // 자격증명이 남고 로그인에서는 찾지 못한다. 이름·등록일만 보여주면 쓰이는 것과 못 쓰는 것이
+  // 똑같아 보여서, 로그인이 안 될 때 무엇을 지워야 할지 알 수 없다 — 실제로 그 상태를 겪었다.
+  it('한 번도 쓰이지 않은 패스키를 구분해 보여준다', async () => {
+    const unused = {
+      id: 'cred-unused',
+      name: '맥북',
+      createdAt: '2026-08-13T01:00:00.000Z',
+      // 서버는 등록할 때 lastUsedAt 을 createdAt 으로 채운다(SaveWebAuthnCredential).
+      lastUsedAt: '2026-08-13T01:00:00.000Z',
+    };
+    const used = {
+      id: 'cred-used',
+      name: '맥북 크롬',
+      createdAt: '2026-08-13T02:00:00.000Z',
+      lastUsedAt: '2026-08-13T03:30:00.000Z',
+    };
+
+    renderSettingsPanel({
+      activeSection: 'account',
+      webauthnSupported: true,
+      // 섹션은 목록과 추가가 함께 있을 때만 그려진다.
+      onAddPasskey: async () => undefined,
+      onListPasskeys: async () => [unused, used],
+    });
+
+    expect(await screen.findByText('아직 로그인에 쓰이지 않음')).toBeTruthy();
+    expect(screen.getByText('마지막 사용 2026-08-13')).toBeTruthy();
+  });
 });

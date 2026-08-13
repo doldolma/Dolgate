@@ -57,7 +57,9 @@
       "loading": "불러오는 중…",
       "empty": "등록된 패스키가 없습니다.",
       "add": "패스키 추가",
-      "refresh": "새로고침"
+      "refresh": "새로고침",
+      "lastUsedAt": "마지막 사용 {{date}}",
+      "neverUsed": "아직 로그인에 쓰이지 않음"
     },
     "accountPassword": {
       "changed": "로그인 비밀번호를 변경했습니다.",

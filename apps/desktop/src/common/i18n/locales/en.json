@@ -57,7 +57,9 @@
       "loading": "Loading…",
       "empty": "No passkeys registered.",
       "add": "Add passkey",
-      "refresh": "Refresh"
+      "refresh": "Refresh",
+      "lastUsedAt": "Last used {{date}}",
+      "neverUsed": "Not used for sign-in yet"
     },
     "accountPassword": {
       "changed": "Your sign-in password has been changed.",

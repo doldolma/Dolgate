@@ -174,6 +174,25 @@ function renderTerminalThemePreview(
   );
 }
 
+/**
+ * 등록만 되고 한 번도 로그인에 쓰이지 않은 패스키인지.
+ *
+ * 서버는 등록할 때 `lastUsedAt` 을 `createdAt` 으로 채우고(gorm_store 의 SaveWebAuthnCredential),
+ * 로그인 성공 때만 갱신한다. 그래서 두 값이 같으면 아직 안 쓰인 것이다.
+ *
+ * **이 표시가 필요한 이유:** 등록한 브라우저와 로그인하는 브라우저가 다르면 — 크롬은 패스키를
+ * 프로필별로 저장한다 — 서버에는 자격증명이 남고 로그인 화면에서는 찾지 못한다. 이름과 등록일만
+ * 보여주면 쓰이는 것과 못 쓰는 것이 똑같아 보여서, 로그인이 안 될 때 무엇을 지워야 할지 알 수 없다.
+ */
+function isPasskeyUnused(passkey: PasskeyCredential): boolean {
+  const created = Date.parse(passkey.createdAt);
+  const lastUsed = Date.parse(passkey.lastUsedAt);
+  if (Number.isNaN(created) || Number.isNaN(lastUsed)) {
+    return false;
+  }
+  return lastUsed <= created;
+}
+
 function renderTerminalThemePreviewChrome(accent?: string) {
   return (
     <>
@@ -1166,6 +1185,17 @@ export function SettingsPanel({
                         </span>
                         <span className="text-[0.78rem] text-[var(--text-soft)]">
                           {translate('settings.passkey.registeredAt', { date: passkey.createdAt.slice(0, 10) })}
+                        </span>
+                        {/* 마지막 사용 시각. 등록만 되고 한 번도 안 쓰인 패스키를 드러내는 유일한
+                            단서다 — 등록한 브라우저 프로필과 로그인하는 프로필이 다르면(크롬은
+                            패스키를 프로필별로 저장한다) 서버에는 남고 로그인에서는 안 보인다.
+                            이름·등록일만 있으면 쓰이는 것과 못 쓰는 것이 똑같아 보인다. */}
+                        <span className="text-[0.78rem] text-[var(--text-soft)]">
+                          {isPasskeyUnused(passkey)
+                            ? translate('settings.passkey.neverUsed')
+                            : translate('settings.passkey.lastUsedAt', {
+                                date: passkey.lastUsedAt.slice(0, 10),
+                              })}
                         </span>
                       </div>
                       <Button
