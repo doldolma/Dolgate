@@ -1,10 +1,23 @@
 name: Repository Release
-run-name: Repository Release • ${{ github.ref_name }}
+# 태그가 아니면 릴리스가 아니다. 실행 목록에서 그 둘이 섞이면 어느 것이 사용자에게 나간
+# 빌드인지 알 수 없다.
+run-name: ${{ startsWith(github.ref, 'refs/tags/') && 'Repository Release' || 'Manual build (no release)' }} • ${{ github.ref_name }}
 
 on:
   push:
     tags:
       - "v*"
+  # 태그 없이 손으로 돌리는 빌드. **릴리스를 만들지 않는다** — 산출물은 이 실행의 아티팩트로만
+  # 남으므로 업데이트 피드에 보이지 않는다(publish-release 가 태그 푸시에서만 돈다).
+  #
+  # 릴리스 전에 자기 기계에서 먼저 써 보려는 용도다. 서명·공증은 릴리스와 같은 시크릿을 쓰므로
+  # 산출물이 정식 빌드와 같다 — 로컬 빌드로는 그것까지 맞추기 어렵다.
+  workflow_dispatch:
+    inputs:
+      include_android:
+        description: "안드로이드 APK 도 함께 빌드(느리다 — 데스크톱만 필요하면 끈다)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -33,17 +46,26 @@ jobs:
       - name: Verify repository version matches tag
         id: version
         shell: bash
+        env:
+          # 수동 실행에는 태그가 없다. 버전 정합성 검사(version:check)는 그대로 하고, 태그와의
+          # 대조만 건너뛴다 — 태그가 없는데 대조하면 손으로 돌릴 방법이 아예 없어진다.
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
           npm run version:check
           node - <<'NODE'
           const rootVersion = require('./package.json').version;
-          const tagName = process.env.GITHUB_REF_NAME;
-          const expectedTag = `v${rootVersion}`;
-          if (tagName !== expectedTag) {
-            console.error(`Repository version mismatch: expected ${expectedTag}, got ${tagName}`);
-            process.exit(1);
+          const isTag = process.env.IS_TAG === 'true';
+          if (isTag) {
+            const tagName = process.env.GITHUB_REF_NAME;
+            const expectedTag = `v${rootVersion}`;
+            if (tagName !== expectedTag) {
+              console.error(`Repository version mismatch: expected ${expectedTag}, got ${tagName}`);
+              process.exit(1);
+            }
+            console.log(`Repository version ${rootVersion} matches ${tagName}`);
+          } else {
+            console.log(`Manual build of repository version ${rootVersion} (no tag to match).`);
           }
-          console.log(`Repository version ${rootVersion} matches ${tagName}`);
           require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, `version=${rootVersion}\n`);
           NODE
 
@@ -486,6 +508,9 @@ jobs:
 
   build-android:
     runs-on: ubuntu-latest
+    # 태그 릴리스에는 항상 넣는다. 수동 빌드에서는 기본으로 뺀다 — 데스크톱만 확인하려는 경우가
+    # 대부분이고 이 잡이 가장 오래 걸린다(러너 디스크가 빠듯해 간헐 실패도 여기서 난다).
+    if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.include_android }}
     needs:
       - verify-version
       - mobile-test
@@ -595,6 +620,9 @@ jobs:
 
   publish-release:
     runs-on: ubuntu-latest
+    # **수동 빌드는 여기 오지 않는다.** 산출물을 이 실행의 아티팩트로만 남기는 것이 목적이다 —
+    # 릴리스를 만들면 그 순간 사용자 앱의 업데이트 확인에 걸린다.
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs:
       - verify-version
       - build-mac
