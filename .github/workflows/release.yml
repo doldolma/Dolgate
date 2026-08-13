@@ -230,11 +230,18 @@ jobs:
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
+          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
+          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
+          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
+          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+            services/vnc-core/target
+          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
+          # 그 위에 다시 빌드한다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
 
       # 러너 번들 npm 이 codex 도입 후의 lock 그래프에서 hoist 된 7zip-bin 바이너리를
       # 누락 설치할 수 있어, 로컬에서 이 lock 을 올바르게 설치함을 검증한 npm 으로 고정한다.
@@ -334,11 +341,18 @@ jobs:
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
+          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
+          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
+          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
+          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+            services/vnc-core/target
+          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
+          # 그 위에 다시 빌드한다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
 
       # build-mac 과 동일한 가드 — 러너 npm 이 7zip-bin(win/x64/7za.exe)을 누락 설치하는
       # 사례 대응. path7za 가 플랫폼별 경로를 해석하므로 같은 스니펫을 그대로 쓴다.
@@ -428,11 +442,18 @@ jobs:
       - name: Cache cargo build
         uses: actions/cache@v4
         with:
+          # 두 코어를 함께 담는다. vnc-core 가 빠져 있던 동안에는 릴리스마다 그 크레이트를 처음부터
+          # 컴파일했고, 거기에는 vendored OpenSSL 소스 빌드가 딸려 있다(mac 은 universal 이라 2아치를
+          # 각각). core-framing·vendor/ironrdp-* 는 경로 의존이라 참조하는 쪽 target 에 들어가므로
+          # 이 둘로 덮인다.
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             services/rdp-core/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock') }}
+            services/vnc-core/target
+          # 두 lock 을 함께 해시한다. rdp 쪽만 보면 vnc 의존성이 바뀐 뒤에도 낡은 캐시를 복원하고
+          # 그 위에 다시 빌드한다.
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('services/rdp-core/Cargo.lock', 'services/vnc-core/Cargo.lock') }}
 
       - name: Install the aarch64 cross toolchain
         # 이 러너는 x64 인데 릴리스는 linux/arm64 도 낸다. ssh-core 는 GOARCH 만 바꾸면 되지만
