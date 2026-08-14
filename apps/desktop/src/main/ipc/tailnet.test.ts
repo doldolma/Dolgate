@@ -274,6 +274,20 @@ describe('tailnet ipc handlers', () => {
     expect(ctx.tailnets.remove).not.toHaveBeenCalled();
   });
 
+  // 몇 개가 붙잡고 있는지 말해야 한다.
+  //
+  // "연결이 있습니다" 만 보여 주면, 이미 다 닫았다고 믿는 사용자는 무엇을 더 닫아야 하는지 알 수
+  // 없다 — 실기기에서 그 막다른 곳에 있었다. 코어가 세어 준 값을 그대로 옮긴다.
+  it('연결 종료가 거절되면 몇 개가 쓰는 중인지 말한다', async () => {
+    ctx.coreManager.disconnectTailnet.mockRejectedValue(
+      new Error('tailnet node is in use: "net-1" (leases=3)'),
+    );
+
+    await expect(
+      invoke(ipcChannels.tailnet.disconnect, 'net-1'),
+    ).rejects.toThrow('3');
+  });
+
   // 그 외의 실패는 설정 삭제를 막지 않는다 — 남은 노드는 콘솔에서 지울 수 있다.
   it('still deletes the config when the node merely cannot be reached', async () => {
     ctx.coreManager.forgetTailnet.mockRejectedValue(

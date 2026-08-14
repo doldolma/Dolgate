@@ -50,6 +50,12 @@ import { getAwsSftpDiagnosticMessage } from "../../../common/aws-diagnostics";
 
 export interface HostCoordinator {
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
+  /** 신뢰 중인 키들(없으면 빈 배열). 연결 중 신뢰를 묻는 경로가 쓴다. */
+  resolveTrustedHostKeys: (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }) => string[];
   requireTrustedHostKeys: (host: {
     hostname: string;
     port: number;
@@ -112,7 +118,16 @@ export function createHostCoordinator(deps: {
     ensureCertificateAuthReady,
   } = deps;
 
-  const requireTrustedHostKeys = (host: {
+  /**
+   * 지금 신뢰하고 있는 키들. **없어도 오류가 아니다.**
+   *
+   * 호스트 키 확인은 ssh-core 가 연결 도중 한다(hostKeyTrustChallenge) — 처음 보는 호스트면 그
+   * 자리에서 사용자에게 묻는다. 그래서 여기서 막으면 코어가 물어볼 기회 자체가 없어진다. 예전에는
+   * 연결 전에 키를 미리 읽어 왔기 때문에(프로브) 이 자리에서 "신뢰되지 않음" 을 단정할 수 있었다.
+   *
+   * 코어가 묻지 못하는 경로(원격 키 설치 등)는 아래 requireTrustedHostKeys 를 그대로 쓴다.
+   */
+  const resolveTrustedHostKeys = (host: {
     hostname: string;
     port: number;
     // 신뢰는 tailnet 범위 안에서만 유효하다. 이것을 안 넘기면 다른 tailnet(또는 일반
@@ -122,10 +137,30 @@ export function createHostCoordinator(deps: {
     const tailnetId = host.tailnetId ?? undefined;
     const trusted = knownHosts.listByHostPort(host.hostname, host.port, tailnetId);
     if (trusted.length === 0) {
-      throw new Error("Host key is not trusted yet.");
+      return [];
     }
     knownHosts.touch(host.hostname, host.port, undefined, tailnetId);
     return trusted.map((record) => record.publicKeyBase64);
+  };
+
+  /**
+   * 신뢰된 키를 **요구**한다. 없으면 연결을 시작하지 않는다.
+   *
+   * 코어가 물을 수 없는 경로만 이것을 쓴다:
+   *   - 원격 키 설치(대화형 세션이 아니다)
+   *   - AWS SSM(키를 저장하는 이름이 dial 주소와 다르다 — 코어는 자기가 붙은 주소만 안다)
+   * 그 밖의 연결은 resolveTrustedHostKeys 로 통과시키고, 처음 보는 키는 연결 안에서 묻는다.
+   */
+  const requireTrustedHostKeys = (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }): string[] => {
+    const trusted = resolveTrustedHostKeys(host);
+    if (trusted.length === 0) {
+      throw new Error("Host key is not trusted yet.");
+    }
+    return trusted;
   };
 
   /**
@@ -595,7 +630,7 @@ export function createHostCoordinator(deps: {
       if (!isSshHostRecord(jumpHost)) {
         throw new Error(t("hostIpc.jumpHostMustBeSsh"));
       }
-      const trustedHostKeysBase64 = requireTrustedHostKeys(jumpHost);
+      const trustedHostKeysBase64 = resolveTrustedHostKeys(jumpHost);
       const username = requireConfiguredSshUsername(jumpHost);
       const { secrets } = await resolveRuntimeSshSecrets(jumpHost);
       await ensureCertificateAuthReady(jumpHost, secrets);
@@ -619,6 +654,7 @@ export function createHostCoordinator(deps: {
   return {
     requireTrustedHostKey: (host) => requireTrustedHostKeys(host)[0],
     requireTrustedHostKeys,
+    resolveTrustedHostKeys,
     requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys,
     assertSshHost,

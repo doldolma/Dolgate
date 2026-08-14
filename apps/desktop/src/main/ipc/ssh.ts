@@ -6,6 +6,7 @@ import {
   isWarpgateSshHostRecord,
   type DesktopConnectInput,
   type DesktopLocalConnectInput,
+  type HostKeyTrustRespondInput,
   type KeyboardInteractiveRespondInput,
   type ServerInfoResponse,
 } from "@shared";
@@ -74,8 +75,11 @@ function buildAwsEc2SshOverSsmSignature(host: AwsEc2HostRecord): string {
   ]);
 }
 
-// renderer는 이 에러 메시지로 호스트 키 신뢰 프롬프트를 띄운다(host-coordinator의
-// requireTrustedHostKeys). 폴백해 버리면 사용자가 신뢰 후 SSH로 붙을 기회가 사라진다.
+// 호스트 키 관련 실패는 SSM 셸로 폴백하지 않는다.
+//
+// 신뢰를 묻는 자리는 두 곳이다: 연결 안에서 코어가 묻거나(hostKeyTrustChallenge), 연결 전에
+// 신뢰된 키를 요구하거나(host-coordinator 의 requireTrustedHostKeys — AWS SSM·원격 키 설치).
+// 어느 쪽이든 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을 기회가 사라진다.
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -304,7 +308,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isWarpgateSshHostRecord(host)) {
-        const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+        const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys({
           hostname: host.warpgateSshHost,
           port: host.warpgateSshPort,
         });
@@ -335,7 +339,7 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
-      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
+      const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost, input.secrets);
@@ -519,6 +523,13 @@ export function registerSshIpcHandlers(ctx: MainIpcContext): void {
     ipcChannels.ssh.respondKeyboardInteractive,
     async (_event, input: KeyboardInteractiveRespondInput) => {
       await ctx.coreManager.respondKeyboardInteractive(input);
+    },
+  );
+
+  ipcMain.handle(
+    ipcChannels.ssh.respondHostKeyTrust,
+    async (_event, input: HostKeyTrustRespondInput) => {
+      await ctx.coreManager.respondHostKeyTrust(input);
     },
   );
 

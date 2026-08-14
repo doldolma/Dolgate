@@ -18,6 +18,7 @@ import {
   loadScrollbackFromSession,
   registerTerminalHooks,
   saveScrollbackSnapshot,
+  writeTerminalNotice,
   takeScrollbackSnapshot,
   unregisterTerminalHooks,
   type TerminalHooks,
@@ -261,6 +262,16 @@ export function useTerminalSessionViewController({
   const chatNotificationTimeoutsRef = useRef<Map<string, number>>(new Map());
   const e2eTerminalHookEnabledRef = useRef(hasE2ETerminalHook());
   const [promptResponses, setPromptResponses] = useState<string[]>([]);
+  /**
+   * 칸별로 "저장된 비밀번호를 쓴다" 표시.
+   *
+   * 비밀번호 값은 렌더러로 내려오지 않는다. 어느 칸에 넣을지는 **사용자가** 버튼으로 지목하고,
+   * 우리는 그 인덱스만 코어에 넘긴다 — 라벨을 해석해 우리가 고르면, 서버가 `Password:` 라고 써 놓고
+   * 두 번째 요소를 묻는 경우에 비밀번호를 그 칸으로 보낸다.
+   */
+  const [storedPasswordPrompts, setStoredPasswordPrompts] = useState<boolean[]>(
+    [],
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
@@ -543,10 +554,12 @@ export function useTerminalSessionViewController({
   useEffect(() => {
     if (!interactiveAuth || interactiveAuth.sessionId !== sessionId) {
       setPromptResponses([]);
+      setStoredPasswordPrompts([]);
       return;
     }
 
     setPromptResponses(interactiveAuth.prompts.map(() => ''));
+    setStoredPasswordPrompts(interactiveAuth.prompts.map(() => false));
   }, [interactiveAuth, sessionId]);
 
   useEffect(() => {
@@ -567,6 +580,29 @@ export function useTerminalSessionViewController({
       markSessionConnected(sessionId);
     }
   }, [host?.label, sessionId, tab?.sessionShare?.status, tab?.status, title]);
+
+  /**
+   * 서버 배너를 찍어 둔 화면을 연결이 되면 지운다.
+   *
+   * 배너는 "이 주소에서 승인하라"처럼 **연결되기 전에** 할 일을 알리는 글이다. 승인이 끝나 셸이
+   * 열리면 그 글은 역할을 다했고, 그대로 남기면 프롬프트가 안내문 아래에서 시작해 스크롤백이
+   * 어긋난 것처럼 보인다.
+   *
+   * 한 번만 지운다 — 재렌더마다 지우면 셸이 이미 그린 화면을 날린다.
+   */
+  const bannerClearedRef = useRef(false);
+  useEffect(() => {
+    if (tab?.status !== 'connected' || tab?.serverBannerShown !== true) {
+      return;
+    }
+    if (bannerClearedRef.current) {
+      return;
+    }
+    bannerClearedRef.current = true;
+    // 화면 + 스크롤백을 지우고 커서를 원점으로. 셸 통합(OSC 133)은 코어 쪽 필터가 담당하므로
+    // 이 쓰기와 무관하다.
+    writeTerminalNotice(stableId, '\x1b[2J\x1b[3J\x1b[H');
+  }, [stableId, tab?.serverBannerShown, tab?.status]);
 
   useEffect(() => {
     liveAppearanceRef.current = appearance;
@@ -1669,6 +1705,33 @@ export function useTerminalSessionViewController({
         nextResponses[index] = value;
         return nextResponses;
       });
+      // 직접 타이핑하면 저장된 비밀번호 지목을 거둔다. 안 그러면 코어가 그 값을 덮어써서,
+      // 화면에 보이는 것과 보내는 것이 달라진다.
+      setStoredPasswordPrompts((current) => {
+        if (!current[index]) {
+          return current;
+        }
+        const next = [...current];
+        next[index] = false;
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleInteractiveAuthStoredPasswordToggle = useCallback(
+    (index: number) => {
+      setStoredPasswordPrompts((current) => {
+        const next = [...current];
+        next[index] = !next[index];
+        return next;
+      });
+      // 지목한 칸의 입력값은 비운다 — 어차피 코어가 채우고, 남겨 두면 무엇이 나가는지 헷갈린다.
+      setPromptResponses((current) => {
+        const next = [...current];
+        next[index] = '';
+        return next;
+      });
     },
     [],
   );
@@ -1678,11 +1741,23 @@ export function useTerminalSessionViewController({
       return Promise.resolve();
     }
 
+    const storedPasswordIndexes = storedPasswordPrompts.reduce<number[]>(
+      (indexes, useStored, index) =>
+        useStored ? [...indexes, index] : indexes,
+      [],
+    );
+
     return onRespondInteractiveAuth(
       interactiveAuth.challengeId,
       promptResponses,
+      storedPasswordIndexes,
     );
-  }, [interactiveAuth, onRespondInteractiveAuth, promptResponses]);
+  }, [
+    interactiveAuth,
+    onRespondInteractiveAuth,
+    promptResponses,
+    storedPasswordPrompts,
+  ]);
 
   const handleCopyInteractiveAuthApprovalUrl = useCallback(async () => {
     await navigator.clipboard.writeText(interactiveAuth?.approvalUrl ?? '');
@@ -1764,7 +1839,9 @@ export function useTerminalSessionViewController({
     handleSetSessionShareInputMode,
     handleOpenShareChatWindow,
     handleStopShare,
+    storedPasswordPrompts,
     handleInteractiveAuthPromptChange,
+    handleInteractiveAuthStoredPasswordToggle,
     handleInteractiveAuthSubmit,
     handleCopyInteractiveAuthApprovalUrl,
     findPreviousSearchMatch: () => {

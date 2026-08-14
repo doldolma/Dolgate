@@ -5,6 +5,7 @@ import type {
   WorkspaceTab,
 } from '../store/createAppStore';
 import { useAppStore } from '../store/appStore';
+import { findSessionPendingInteractiveAuth } from '../store/utils';
 import {
   resizeTerminal,
   subscribeToTerminalData,
@@ -32,7 +33,9 @@ export function useTerminalWorkspaceController({
   activeWorkspace,
   tabs,
 }: UseTerminalWorkspaceControllerInput) {
-  const pendingInteractiveAuth = useAppStore((state) => state.pendingInteractiveAuth);
+  const pendingInteractiveAuths = useAppStore(
+    (state) => state.pendingInteractiveAuths,
+  );
   const respondInteractiveAuth = useAppStore((state) => state.respondInteractiveAuth);
   const reopenInteractiveAuthUrl = useAppStore(
     (state) => state.reopenInteractiveAuthUrl,
@@ -68,16 +71,10 @@ export function useTerminalWorkspaceController({
 
   const getInteractiveAuth = useCallback(
     (sessionId: string): PendingSessionInteractiveAuth | null => {
-      if (
-        pendingInteractiveAuth?.source === 'ssh' &&
-        pendingInteractiveAuth.sessionId === sessionId
-      ) {
-        return pendingInteractiveAuth;
-      }
-
-      return null;
+      // 이 탭의 것만 고른다. 다른 탭·SFTP 의 인증 요청이 이 카드를 밀어내지 않는다.
+      return findSessionPendingInteractiveAuth(pendingInteractiveAuths, sessionId);
     },
-    [pendingInteractiveAuth],
+    [pendingInteractiveAuths],
   );
 
   const getSessionShareChatNotifications = useCallback(

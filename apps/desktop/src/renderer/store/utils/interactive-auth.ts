@@ -1,5 +1,9 @@
 import { isWarpgateSshHostRecord } from "@shared";
-import type { HostRecord, KeyboardInteractiveChallenge } from "@shared";
+import type {
+  HostRecord,
+  KeyboardInteractiveChallenge,
+  KeyboardInteractiveHop,
+} from "@shared";
 import type {
   PendingContainersInteractiveAuth,
   PendingInteractiveAuth,
@@ -34,6 +38,126 @@ export function isPendingPortForwardInteractiveAuth(
 
 export function normalizeInteractiveText(value: string | undefined | null): string {
   return (value ?? "").trim();
+}
+
+/**
+ * 이 인증 요청이 어느 대상의 것인지. 같은 대상의 새 요청은 앞의 것을 대체한다.
+ *
+ * 세션은 sessionId, 나머지(SFTP·컨테이너·포워딩)는 endpointId 가 대상이다 — 코어가 챌린지를 올릴
+ * 때 쓰는 상관 ID 와 같다.
+ */
+export function interactiveAuthScope(auth: PendingInteractiveAuth): string {
+  return auth.source === "ssh"
+    ? `session:${auth.sessionId}`
+    : `endpoint:${auth.endpointId}`;
+}
+
+/** 같은 대상의 것을 갈아 끼우고, 없으면 뒤에 붙인다. */
+export function upsertPendingInteractiveAuth(
+  auths: PendingInteractiveAuth[],
+  auth: PendingInteractiveAuth,
+): PendingInteractiveAuth[] {
+  const scope = interactiveAuthScope(auth);
+  const others = auths.filter((item) => interactiveAuthScope(item) !== scope);
+  return [...others, auth];
+}
+
+/** 그 대상의 것을 내린다. 다른 대상의 것은 그대로 둔다. */
+export function clearSessionPendingInteractiveAuth(
+  auths: PendingInteractiveAuth[],
+  sessionId: string,
+): PendingInteractiveAuth[] {
+  return auths.filter(
+    (auth) => !(auth.source === "ssh" && auth.sessionId === sessionId),
+  );
+}
+
+/** 그 엔드포인트의 것을 내린다(SFTP·컨테이너·포워딩 공통). */
+export function clearEndpointPendingInteractiveAuth(
+  auths: PendingInteractiveAuth[],
+  endpointId: string,
+): PendingInteractiveAuth[] {
+  return auths.filter(
+    (auth) => auth.source === "ssh" || auth.endpointId !== endpointId,
+  );
+}
+
+/** 이 세션이 답을 기다리는 인증. 없으면 null. */
+export function findSessionPendingInteractiveAuth(
+  auths: PendingInteractiveAuth[],
+  sessionId: string | null | undefined,
+): PendingSessionInteractiveAuth | null {
+  if (!sessionId) {
+    return null;
+  }
+  return (
+    auths.find(
+      (auth): auth is PendingSessionInteractiveAuth =>
+        auth.source === "ssh" && auth.sessionId === sessionId,
+    ) ?? null
+  );
+}
+
+/** 이 엔드포인트가 답을 기다리는 인증. 없으면 null. */
+export function findEndpointPendingInteractiveAuth(
+  auths: PendingInteractiveAuth[],
+  endpointId: string | null | undefined,
+): PendingInteractiveAuth | null {
+  if (!endpointId) {
+    return null;
+  }
+  return (
+    auths.find(
+      (auth) => auth.source !== "ssh" && auth.endpointId === endpointId,
+    ) ?? null
+  );
+}
+
+/** 챌린지 ID 로 찾는다. 응답을 보낼 때 어느 대상의 것인지 알아야 한다. */
+export function findPendingInteractiveAuthByChallengeId(
+  auths: PendingInteractiveAuth[],
+  challengeId: string,
+): PendingInteractiveAuth | null {
+  return auths.find((auth) => auth.challengeId === challengeId) ?? null;
+}
+
+/**
+ * 코어가 보낸 홉 정보를 옮긴다. 호스트가 없으면 null — 표시할 것이 없는데 빈 칸을 그리면
+ * "누구인지 모른다" 를 "이름 없는 홉" 으로 잘못 보여준다.
+ */
+export function toKeyboardInteractiveHop(
+  value: unknown,
+): KeyboardInteractiveHop | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  const host = normalizeInteractiveText(
+    typeof candidate.host === "string" ? candidate.host : null,
+  );
+  if (!host) {
+    return null;
+  }
+  const port = Number(candidate.port);
+  return {
+    host,
+    username: normalizeInteractiveText(
+      typeof candidate.username === "string" ? candidate.username : null,
+    ),
+    port: Number.isFinite(port) && port > 0 ? port : undefined,
+  };
+}
+
+/** 홉을 `user@host:port` 로 적는다. 없는 부분은 생략한다. */
+export function formatInteractiveHop(
+  hop: KeyboardInteractiveHop | null | undefined,
+): string {
+  if (!hop?.host) {
+    return "";
+  }
+  const user = hop.username ? `${hop.username}@` : "";
+  const port = hop.port ? `:${hop.port}` : "";
+  return `${user}${hop.host}${port}`;
 }
 
 export function parseWarpgateApprovalUrl(

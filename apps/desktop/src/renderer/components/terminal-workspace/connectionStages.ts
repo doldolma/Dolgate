@@ -463,11 +463,59 @@ function resolveTunnelStages(
   ];
 }
 
+/** IPv4·IPv6 주소처럼 보이는지. 이름(MagicDNS)과 주소는 없을 때의 뜻이 다르다. */
+function looksLikeIpAddress(value: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(value) || value.includes(':');
+}
+
+/**
+ * 주소가 이 CIDR 안에 있는지.
+ *
+ * IPv4 만 계산한다. IPv6 서브넷 라우팅은 이 화면의 판정 대상이 아니고, 잘못 계산해서 "경로 있음" 을
+ * 거짓으로 말하는 것보다 모른다고 두는 편이 낫다.
+ */
+function addressWithinRoute(address: string, route: string): boolean {
+  const [network, prefixText] = route.split('/');
+  const prefix = Number(prefixText);
+  if (!looksLikeIpAddress(address) || address.includes(':') || !network || network.includes(':')) {
+    return false;
+  }
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return false;
+  }
+  const toNumber = (value: string): number | null => {
+    const parts = value.split('.');
+    if (parts.length !== 4) {
+      return null;
+    }
+    let result = 0;
+    for (const part of parts) {
+      const octet = Number(part);
+      if (!Number.isInteger(octet) || octet < 0 || octet > 255) {
+        return null;
+      }
+      result = result * 256 + octet;
+    }
+    return result;
+  };
+  const target = toNumber(address);
+  const base = toNumber(network);
+  if (target === null || base === null) {
+    return false;
+  }
+  // prefix 0 은 전체(0.0.0.0/0)다. 시프트 32 는 정의되지 않으므로 따로 다룬다.
+  const mask = prefix === 0 ? 0 : (-1 << (32 - prefix)) >>> 0;
+  return (target & mask) === (base & mask);
+}
+
 /**
  * 대상 기기까지의 경로.
  *
  * 주소는 MagicDNS 짧은 이름·FQDN·tailnet IP 중 무엇이든 올 수 있어서 셋 다 본다. 넷맵을 아직
  * 못 받았으면(기기 목록이 비었으면) 판정하지 않는다 — 그건 앞 단계가 말하고 있다.
+ *
+ * 기기 목록에 없을 때는 서브넷 라우터가 광고한 대역도 본다. 사내 랜 주소는 기기가 아니라 그 대역을
+ * 통해 닿기 때문이다.
  */
 function resolveTargetStage(target: string, status: TailnetStatus | undefined): ConnectionStage {
   const stage: ConnectionStage = {
@@ -492,7 +540,28 @@ function resolveTargetStage(target: string, status: TailnetStatus | undefined): 
   );
 
   if (!peer) {
-    // 넷맵은 받았는데 대상이 그 안에 없다. 그 기기가 이 네트워크에 없거나 꺼져 있다.
+    // 기기 목록에 없다고 곧바로 실패는 아니다.
+    //
+    // tailnet 안의 주소는 기기 자신의 것만이 아니다. 서브넷 라우터가 광고한 대역(예: 사내
+    // 192.168.x.x)도 이 네트워크를 통해 닿는다. 그 대역을 담당하는 기기가 있으면 경로는 있는 것이다.
+    const via = peers.find((candidate) =>
+      (candidate.routes ?? []).some((route) => addressWithinRoute(wanted, route)),
+    );
+    if (via) {
+      return {
+        ...stage,
+        state: 'done',
+        detail: t('connectStages.tailscaleTargetViaSubnet', {
+          peer: via.hostName || via.dnsName || t('connectStages.tailscaleTargetSubnetRouter'),
+        }),
+      };
+    }
+    // 대역도 없고 기기도 아니다. 이름(MagicDNS)으로 지정했다면 그 기기가 이 네트워크에 없다는
+    // 뜻이므로 실패다. 하지만 IP 주소라면 tailnet 을 통하지 않는 경로(점프 호스트 뒤의 망, 지금
+    // 붙어 있는 랜)로 갈 수 있다 — 그것을 실패로 그리면 멀쩡한 연결을 의심하게 만든다.
+    if (looksLikeIpAddress(wanted)) {
+      return { ...stage, state: 'warn', detail: t('connectStages.tailscaleTargetNotInTailnet') };
+    }
     return { ...stage, state: 'failed', detail: t('connectStages.tailscaleTargetMissing') };
   }
 

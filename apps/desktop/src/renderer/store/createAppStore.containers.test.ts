@@ -20,6 +20,14 @@ import {
   flushMicrotasks,
 } from "./createAppStore.test-support";
 
+// (삭제) 연결 전 호스트 키 preflight 를 전제한 7개 테스트를 걷어냈다.
+//
+// 호스트 키 확인은 이제 연결 안에서 한다(코어의 hostKeyTrustChallenge) — 컨테이너 연결도 ssh-core 가
+// 열기 때문이다. 그래서 "preflight 가 다시 돈다", "probe 타임아웃이 탭에 뜬다", "신뢰 프롬프트에서
+// 멈춘다" 같은 계약은 대상이 사라졌다. 살아 있는 계약은 다른 곳이 덮는다:
+//   - 신뢰 질의 → 프롬프트 → 수락/거절: createAppStore.session.test.ts 의 세 테스트
+//   - 거절이 연결을 끝내는 것: 코어의 TestDecliningTheHostKeyEndsTheConnection
+//   - 연결 실패가 탭에 남는 것: 이 파일의 containersError 테스트들
 describe("createAppStore containers", () => {
   it("updates the containers tab progress from host-scoped connection events", async () => {
     const store = createAppStore(createMockApi());
@@ -1095,7 +1103,7 @@ describe("createAppStore containers", () => {
     await store.getState().openHostContainersTab("host-1");
 
     store.setState({
-      pendingInteractiveAuth: {
+      pendingInteractiveAuths: [{
         source: "containers",
         endpointId: "containers:host-1",
         hostId: "host-1",
@@ -1107,7 +1115,7 @@ describe("createAppStore containers", () => {
         approvalUrl: "https://warpgate.example.com/authorize",
         authCode: "ABCD-1234",
         autoSubmitted: false,
-      },
+        }],
     });
 
     store.setState((state) => ({
@@ -1131,7 +1139,7 @@ describe("createAppStore containers", () => {
     expect(
       store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
     ).toBeUndefined();
-    expect(store.getState().pendingInteractiveAuth).toBeNull();
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
     expect(store.getState().activeWorkspaceTab).toBe("containers");
     expect(store.getState().activeContainerHostId).toBe("host-2");
   });
@@ -1199,36 +1207,6 @@ describe("createAppStore containers", () => {
     expect(store.getState().tabs[0]?.status).toBe("disconnecting");
   });
 
-  it("surfaces AWS host-key probe timeouts on the containers tab instead of leaving the overlay stuck", async () => {
-    const api = createMockApi();
-    vi.mocked(api.knownHosts.probeHost).mockRejectedValue(
-      new Error("Timed out waiting for SSH core response: probeHostKey"),
-    );
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    store.setState((state) => ({
-      hosts: [...state.hosts, createAwsEc2Host()],
-    }));
-
-    await expect(
-      store.getState().openHostContainersTab("aws-host-1"),
-    ).resolves.toBeUndefined();
-
-    const containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "aws-host-1");
-
-    expect(store.getState().activeWorkspaceTab).toBe("containers");
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
-    expect(containerTab?.errorMessage).toBe(
-      "Timed out waiting for SSH core response: probeHostKey",
-    );
-  });
-
-  // 터미널·SFTP와 같은 계약: 이미 신뢰된 호스트의 키가 바뀌면 탭을 오류로 남기지 않고 교체
-  // 프롬프트를 띄우고, 수락하면 이 탭의 목록 조회를 이어간다.
   it("re-prompts to replace the key when a trusted host's key changed on containers connect", async () => {
     const api = createMockApi();
     api.knownHosts.list = vi.fn().mockResolvedValue([
@@ -1295,101 +1273,6 @@ describe("createAppStore containers", () => {
       .getState()
       .containerTabs.find((tab) => tab.hostId === "host-1");
     expect(recoveredTab?.errorMessage).toBeUndefined();
-  });
-
-  it("runs host-key preflight again when refreshing host containers", async () => {
-    const api = createMockApi();
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    await store.getState().openHostContainersTab("host-1");
-    vi.mocked(api.knownHosts.probeHost).mockClear();
-    vi.mocked(api.containers.list).mockClear();
-
-    await store.getState().refreshHostContainers("host-1");
-
-    expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        hostId: "host-1",
-        endpointId: "containers:host-1",
-      }),
-    );
-    expect(api.containers.list).toHaveBeenCalledWith("host-1");
-  });
-
-  it("stops container refresh at the known-host prompt when the host key is not trusted", async () => {
-    const api = createMockApi();
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValueOnce(
-      createUntrustedHostProbe(),
-    );
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    await store.getState().refreshHostContainers("host-1");
-
-    expect(api.containers.list).not.toHaveBeenCalled();
-    expect(store.getState().pendingHostKeyPrompt).toMatchObject({
-      action: {
-        kind: "containers",
-        hostId: "host-1",
-      },
-      probe: {
-        status: "untrusted",
-      },
-    });
-    expect(
-      store.getState().containerTabs.find((tab) => tab.hostId === "host-1"),
-    ).toMatchObject({
-      isLoading: false,
-      connectionProgress: null,
-    });
-  });
-
-  it("marks the pending AWS container shell session as error when host-key probing times out", async () => {
-    const api = createMockApi();
-    vi.mocked(api.containers.list).mockResolvedValue({
-      hostId: "aws-host-1",
-      runtime: "docker",
-      containers: [createContainerSummary()],
-    });
-    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValueOnce({
-      hostId: "aws-host-1",
-      hostLabel: "AWS Linux",
-      host: "aws-ssm://i-aws",
-      port: 22,
-      algorithm: "ssh-ed25519",
-      publicKeyBase64: "AAAATEST",
-      fingerprintSha256: "SHA256:test",
-      status: "trusted",
-      existing: null,
-    });
-    vi.mocked(api.knownHosts.probeHost).mockRejectedValueOnce(
-      new Error("Timed out waiting for SSH core response: probeHostKey"),
-    );
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    store.setState((state) => ({
-      hosts: [...state.hosts, createAwsEc2Host()],
-    }));
-    await store.getState().openHostContainersTab("aws-host-1");
-
-    await expect(
-      store.getState().openHostContainerShell("aws-host-1", "container-1"),
-    ).resolves.toBeUndefined();
-
-    const containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "aws-host-1");
-
-    expect(api.containers.openShell).not.toHaveBeenCalled();
-    expect(store.getState().tabs[0]?.status).toBe("error");
-    expect(store.getState().tabs[0]?.errorMessage).toBe(
-      "Timed out waiting for SSH core response: probeHostKey",
-    );
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
   });
 
   it("forwards AWS container-shell progress events into the pending session tab", async () => {
@@ -1484,172 +1367,6 @@ describe("createAppStore containers", () => {
 
     openShellDeferred.resolve({ sessionId: "session-container-1" });
     await openShellPromise;
-  });
-
-  it("keeps a loaded containers tab visible while container shell waits for host trust", async () => {
-    const api = createMockApi();
-    vi.mocked(api.containers.list).mockResolvedValue({
-      hostId: "host-1",
-      runtime: "docker",
-      containers: [createContainerSummary()],
-    });
-    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    await store.getState().openHostContainersTab("host-1");
-
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
-      createUntrustedHostProbe(),
-    );
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "probing-host-key",
-      message: "SSH 호스트 키를 확인하는 중입니다.",
-    });
-
-    await store.getState().openHostContainerShell("host-1", "container-1");
-
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "opening-tunnel",
-      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
-    });
-
-    const containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "host-1");
-
-    expect(api.containers.openShell).not.toHaveBeenCalled();
-    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("untrusted");
-    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
-      "awaiting-host-trust",
-    );
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
-    expect(containerTab?.details?.id).toBe("container-1");
-  });
-
-  it("keeps the containers tab visible after trusting a container shell host key", async () => {
-    const api = createMockApi();
-    const openShellDeferred = createDeferred<{ sessionId: string }>();
-    vi.mocked(api.containers.list).mockResolvedValue({
-      hostId: "host-1",
-      runtime: "docker",
-      containers: [createContainerSummary()],
-    });
-    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
-    vi.mocked(api.containers.openShell).mockReturnValue(openShellDeferred.promise);
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    await store.getState().openHostContainersTab("host-1");
-
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
-      createUntrustedHostProbe(),
-    );
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "probing-host-key",
-      message: "SSH 호스트 키를 확인하는 중입니다.",
-    });
-
-    await store.getState().openHostContainerShell("host-1", "container-1");
-
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "opening-tunnel",
-      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
-    });
-
-    const acceptPromise = store.getState().acceptPendingHostKeyPrompt("trust");
-    await flushMicrotasks();
-
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "connecting-containers",
-      message: "Prod 컨테이너 런타임 연결을 준비하는 중입니다.",
-    });
-
-    let containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "host-1");
-
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
-    expect(store.getState().activeWorkspaceTab).toContain("session:");
-
-    openShellDeferred.resolve({ sessionId: "session-container-1" });
-    await acceptPromise;
-
-    containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "host-1");
-
-    expect(api.knownHosts.trust).toHaveBeenCalled();
-    expect(api.containers.openShell).toHaveBeenCalledWith(
-      "host-1",
-      "container-1",
-    );
-    expect(store.getState().pendingHostKeyPrompt).toBeNull();
-    expect(store.getState().tabs[0]?.sessionId).toBe("session-container-1");
-    expect(store.getState().tabs[0]?.status).toBe("connecting");
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
-    expect(containerTab?.details?.id).toBe("container-1");
-  });
-
-  it("clears the containers tab overlay when container shell host trust is dismissed", async () => {
-    const api = createMockApi();
-    vi.mocked(api.containers.list).mockResolvedValue({
-      hostId: "host-1",
-      runtime: "docker",
-      containers: [createContainerSummary()],
-    });
-    vi.mocked(api.containers.inspect).mockResolvedValue(createContainerDetails());
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    await store.getState().openHostContainersTab("host-1");
-
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValue(
-      createUntrustedHostProbe(),
-    );
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "probing-host-key",
-      message: "SSH 호스트 키를 확인하는 중입니다.",
-    });
-
-    await store.getState().openHostContainerShell("host-1", "container-1");
-
-    store.getState().handleContainerConnectionProgressEvent({
-      endpointId: "containers:host-1",
-      hostId: "host-1",
-      stage: "opening-tunnel",
-      message: "SSH 호스트 키 확인을 위한 내부 터널을 여는 중입니다.",
-    });
-
-    store.getState().dismissPendingHostKeyPrompt();
-
-    const containerTab = store
-      .getState()
-      .containerTabs.find((tab) => tab.hostId === "host-1");
-
-    expect(store.getState().pendingHostKeyPrompt).toBeNull();
-    expect(store.getState().tabs[0]?.status).toBe("error");
-    expect(store.getState().tabs[0]?.errorMessage).toContain(
-      "호스트 키 확인이 취소되었습니다.",
-    );
-    expect(containerTab?.isLoading).toBe(false);
-    expect(containerTab?.connectionProgress).toBeNull();
-    expect(containerTab?.details?.id).toBe("container-1");
   });
 
   it("keeps container-shell retry context until the first shell output arrives", async () => {

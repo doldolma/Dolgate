@@ -29,6 +29,8 @@ import {
   isPendingEcsShellAttempt,
   normalizeEcsExecShellPermissionMessage,
   isPendingSessionId,
+  isPendingSessionInteractiveAuth,
+  clearSessionPendingInteractiveAuth,
   replaceSessionReferencesInState,
   resolveAwaitingHostTrustProgress,
   resolveConnectingProgress,
@@ -110,14 +112,24 @@ export function createSessionServices(deps: SliceDeps) {
     } = {},
   ) => {
     set((state) => {
+      // 이 연결에 걸려 있던 인증 카드는 함께 내린다.
+      //
+      // 남겨 두면 답을 받을 곳이 없는 카드가 화면에 계속 떠 있다 — 사용자는 코드를 넣고 보내지만
+      // 아무 일도 일어나지 않는다. 실기기에서 OTP 를 늦게 넣었을 때 겪은 그 상태다.
+      const interactiveAuths = clearSessionPendingInteractiveAuth(
+        state.pendingInteractiveAuths,
+        sessionId,
+      );
       if (!state.tabs.some((tab) => tab.sessionId === sessionId)) {
         return {
+          pendingInteractiveAuths: interactiveAuths,
           pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
             (attempt) => attempt.sessionId !== sessionId,
           ),
         };
       }
       return {
+        pendingInteractiveAuths: interactiveAuths,
         tabs: state.tabs.map((tab) =>
           tab.sessionId === sessionId
             ? {
@@ -549,7 +561,6 @@ export function createSessionServices(deps: SliceDeps) {
         // 이미 신뢰된 타깃은 재-probe하지 않는다. 안 그러면 프로브가 점프 체인을 한 번 더
         // 순회해(홉 UI가 같은 단계를 반복 표시) 실연결과 합쳐 여러 바퀴처럼 보인다. 키 변경은
         // 실연결의 strict host-key 검사가 잡으므로 신뢰된 경우 프로브는 불필요하다.
-        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "ssh",
           hostId,
@@ -973,7 +984,6 @@ export function createSessionServices(deps: SliceDeps) {
       const trusted = await ensureTrustedHost(set, {
         hostId: tunnelHostId,
         sessionId,
-        skipProbeIfAlreadyTrusted: true,
         action: { kind: "vnc", hostId: host.id },
       });
       if (!trusted) {
@@ -1212,7 +1222,6 @@ export function createSessionServices(deps: SliceDeps) {
               hostId,
               sessionId,
               endpointId: `aws-ec2-ssh:${hostId}`,
-              skipProbeIfAlreadyTrusted: true,
               action: {
                 kind: "ssh",
                 hostId,
@@ -1254,7 +1263,6 @@ export function createSessionServices(deps: SliceDeps) {
         sessionId,
         // 이미 신뢰된 호스트는 프로브를 생략한다(startPendingSessionConnect의 재확인과 겹쳐
         // 점프 체인을 중복 순회하던 문제 제거 — 홉 UI가 여러 바퀴 도는 원인이었다).
-        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "ssh",
           hostId,

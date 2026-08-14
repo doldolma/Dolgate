@@ -207,7 +207,7 @@ function createProps(
     host: createHost(),
     tab,
     isActive: true,
-    interactiveAuth: null,
+    interactiveAuths: [],
     onRefresh: vi.fn().mockResolvedValue(undefined),
     onRetryConnection: vi.fn().mockResolvedValue(undefined),
     onClose: vi.fn().mockResolvedValue(undefined),

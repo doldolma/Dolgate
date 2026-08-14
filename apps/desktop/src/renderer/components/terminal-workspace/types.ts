@@ -110,9 +110,14 @@ export interface TerminalSessionPaneProps {
   onRespondInteractiveAuth: (
     challengeId: string,
     responses: string[],
+    /** 저장된 비밀번호로 채울 칸(프롬프트 인덱스). 값은 코어에만 있으므로 지목만 넘긴다. */
+    storedPasswordIndexes?: number[],
   ) => Promise<void>;
   onReopenInteractiveAuthUrl: () => Promise<void> | void;
-  onClearPendingInteractiveAuth: () => Promise<void> | void;
+  /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
+  onClearPendingInteractiveAuth: (
+    challengeId?: string,
+  ) => Promise<void> | void;
   onSessionData: (
     sessionId: string,
     listener: (chunk: Uint8Array) => void,

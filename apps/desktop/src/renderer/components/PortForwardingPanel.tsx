@@ -38,7 +38,7 @@ import type {
   PendingHostKeyPrompt,
   PendingPortForwardInteractiveAuth
 } from '../store/createAppStore';
-import { normalizeErrorMessage } from '../store/utils';
+import { formatInteractiveHop, normalizeErrorMessage } from '../store/utils';
 import { cn } from '../lib/cn';
 import { usePortForwardingPanelController } from '../controllers/usePortForwardingPanelController';
 import {
@@ -102,7 +102,8 @@ interface PortForwardingPanelProps {
   onStop: (ruleId: string) => Promise<void>;
   onRespondInteractiveAuth: (challengeId: string, responses: string[]) => Promise<void>;
   onReopenInteractiveAuthUrl: () => Promise<void>;
-  onClearInteractiveAuth: () => void;
+  /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
+  onClearInteractiveAuth: (challengeId?: string) => void;
 }
 
 interface InteractiveAuthFormProps {
@@ -110,7 +111,14 @@ interface InteractiveAuthFormProps {
   title: string;
   onRespond: (challengeId: string, responses: string[]) => Promise<void>;
   onReopenUrl: () => Promise<void>;
-  onClear: () => void;
+  /**
+   * 취소/닫기. **인자를 받지 않는 형태로 유지한다.**
+   *
+   * 예전에는 이 함수를 Button 의 onClick 에 그대로 넘겨서 클릭 이벤트가 첫 인자로 들어갔고,
+   * clearPendingInteractiveAuth(challengeId?) 가 그 이벤트를 challengeId 로 받아 아무것도 지우지
+   * 못했다 — 실기기에서 취소 버튼이 먹통이었다. 호출은 항상 `() => onCancel()` 로 감싼다.
+   */
+  onCancel: () => void;
 }
 
 type InteractivePromptResponses = Record<string, string>;
@@ -555,7 +563,23 @@ function isDnsHostname(hostname: string): boolean {
   return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
 }
 
-function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: InteractiveAuthFormProps) {
+/** 이 인증을 요구하는 포워딩의 이름. 규칙 라벨 → 호스트 라벨 → 이름 없는 문구 순으로 고른다. */
+function resolveForwardAuthTitle(
+  translate: (key: string, values?: Record<string, string>) => string,
+  rules: PortForwardRuleRecord[],
+  hosts: HostRecord[],
+  auth: PendingPortForwardInteractiveAuth,
+): string {
+  const label =
+    rules.find((rule) => rule.id === auth.ruleId)?.label?.trim() ||
+    hosts.find((host) => host.id === auth.hostId)?.label?.trim() ||
+    '';
+  return label
+    ? translate('portForward.waiting.forwardAuth', { label })
+    : translate('portForward.waiting.forwardAuthUnnamed');
+}
+
+function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onCancel }: InteractiveAuthFormProps) {
   const { t: translate } = useTranslation();
   const [responses, setResponses] = useState<InteractivePromptResponses>({});
   const warpgateResponses = useMemo(
@@ -567,8 +591,19 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
     setResponses({});
   }, [auth.challengeId]);
 
+  // 점프 체인에서 누구의 코드를 묻는지. 없으면 베스천과 최종 대상을 구분할 수 없다.
+  const hopLabel = formatInteractiveHop(auth.hop);
+
   return (
     <NoticeCard title={title} className="mt-4">
+      {hopLabel ? (
+        <p className="mb-3 flex flex-wrap items-baseline gap-2 text-sm text-[var(--text-soft)]">
+          <span>{translate('authOverlay.hopLabel')}</span>
+          <code className="rounded-[6px] bg-[color-mix(in_srgb,var(--surface)_88%,transparent_12%)] px-1.5 py-0.5 text-[0.82rem] break-all text-[var(--text)]">
+            {hopLabel}
+          </code>
+        </p>
+      ) : null}
       {auth.provider === 'warpgate' ? (
         <>
           <p>{translate('portForward.warpgate.browserHint')}</p>
@@ -587,7 +622,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
                 {translate('portForward.warpgate.reopenBrowser')}
               </Button>
             ) : null}
-            <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => onCancel()}>
               {translate('common.close')}
             </Button>
           </div>
@@ -608,7 +643,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
           <Button type="button" variant="secondary" size="sm" onClick={() => void onReopenUrl()}>
             {translate('portForward.warpgate.reopenBrowser')}
           </Button>
-          <Button type="button" variant="ghost" size="sm" onClick={onClear}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => onCancel()}>
             {translate('common.close')}
           </Button>
         </div>
@@ -621,7 +656,10 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
               label={prompt.label || `Prompt ${index + 1}`}
             >
               <Input
-                type={prompt.echo ? 'text' : 'password'}
+                // 가릴지는 코어가 판정한다(prompt.masked). 일회용 코드는 가리지 않는다 —
+                // 서버가 echo 를 끄고 보내지만, 그것까지 가리면 여섯 자리를 확인하지 못한 채
+                // 보내야 한다. 비밀번호는 그대로 가린다.
+                type={prompt.masked ? 'password' : 'text'}
                 value={responses[index] ?? ''}
                 onChange={(event) =>
                   setResponses((current) => ({
@@ -633,7 +671,7 @@ function InteractiveAuthCard({ auth, title, onRespond, onReopenUrl, onClear }: I
             </FieldGroup>
           ))}
           <div className="mt-3 flex items-center justify-end gap-3">
-            <Button type="button" variant="secondary" onClick={onClear}>
+            <Button type="button" variant="secondary" onClick={() => onCancel()}>
               {translate('common.cancel')}
             </Button>
             <Button
@@ -1892,10 +1930,16 @@ export function PortForwardingPanel({
       {interactiveAuth ? (
         <InteractiveAuthCard
           auth={interactiveAuth}
-          title={translate('portForward.waiting.containerTunnel')}
+          // 어느 포워딩이 묻는지 제목에서 말한다. 규칙이 여러 개 떠 있을 때 "Container tunnel" 처럼
+          // 무관한 문구를 보여주면 어느 것을 위한 코드인지 알 수 없다.
+          title={resolveForwardAuthTitle(translate, rules, hosts, interactiveAuth)}
           onRespond={onRespondInteractiveAuth}
           onReopenUrl={onReopenInteractiveAuthUrl}
-          onClear={onClearInteractiveAuth}
+          onCancel={() => {
+            // 규칙을 멈추면 진행 중인 dial·핸드셰이크와 사람 대기가 함께 끊긴다(코어의 선-중단).
+            void onStop(interactiveAuth.ruleId);
+            onClearInteractiveAuth(interactiveAuth.challengeId);
+          }}
         />
       ) : null}
 
@@ -1905,7 +1949,7 @@ export function PortForwardingPanel({
           title={translate('portForward.waiting.containerRuntime')}
           onRespond={onRespondInteractiveAuth}
           onReopenUrl={onReopenInteractiveAuthUrl}
-          onClear={onClearInteractiveAuth}
+          onCancel={onClearInteractiveAuth}
         />
       ) : null}
 
@@ -2210,7 +2254,7 @@ export function PortForwardingPanel({
                       title={translate('portForward.waiting.containerLookup')}
                       onRespond={onRespondInteractiveAuth}
                       onReopenUrl={onReopenInteractiveAuthUrl}
-                      onClear={onClearInteractiveAuth}
+                      onCancel={onClearInteractiveAuth}
                     />
                   ) : null}
 

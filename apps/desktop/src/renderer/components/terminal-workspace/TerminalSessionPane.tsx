@@ -6,6 +6,7 @@ import {
   isWarpgateSshHostRecord,
 } from '@shared';
 import { cn } from '../../lib/cn';
+import { resolveTailnetTargetAddress } from '../../lib/host-tailnet';
 import { useAppStore } from '../../store/appStore';
 import { cancelTailnet, listTailnets } from '../../services/desktop/tailnet';
 import { acquireTailnetWatch } from '../../services/desktop/tailnet-watch';
@@ -86,6 +87,8 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
   // 전달한다.
   const tailnetIdOfHost =
     props.host && isSshHostRecord(props.host) ? props.host.tailnetId?.trim() : undefined;
+  // 진단줄이 넷맵에서 찾아야 하는 기기를 고르는 데 쓴다(점프가 있으면 첫 홉).
+  const hosts = useAppStore((state) => state.hosts);
 
 
   const connectHost = useAppStore((state) => state.connectHost);
@@ -438,8 +441,9 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         hasTailscale: Boolean(tailnetIdOfHost),
         // 대상 주소로 넷맵에서 그 기기를 찾아 경로를 보여준다 — Tailscale 이 붙어 있어도 대상에
         // 못 가는 경우가 있고, 그것을 안 보여주면 "설정은 연결됨인데 왜 안 되지" 가 된다.
-        targetAddress:
-          props.host && isSshHostRecord(props.host) ? props.host.hostname : undefined,
+        // 점프 호스트가 있으면 tailnet 이 닿아야 하는 기기는 첫 홉이다 — 헬퍼가 그 판정을
+        // 갖고 있다(VNC 터널에서 같은 거짓 진단을 겪고 만든 것).
+        targetAddress: resolveTailnetTargetAddress(props.host, hosts),
         // 종류에 따라 호스트 계층 단계가 달라진다 — 로컬 셸에 "SSH 연결" 을 세우면 안 된다.
         hostKind: props.host?.kind,
         // Windows EC2 는 같은 aws-ec2 라도 SSM 셸로 붙어서 SSH·호스트 키 관문이 없다.
@@ -705,7 +709,11 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         <TerminalInteractiveAuthOverlay
           interactiveAuth={interactiveAuth}
           promptResponses={controller.promptResponses}
+          storedPasswordPrompts={controller.storedPasswordPrompts}
           onPromptResponseChange={controller.handleInteractiveAuthPromptChange}
+          onStoredPasswordToggle={
+            controller.handleInteractiveAuthStoredPasswordToggle
+          }
           onSubmit={() => {
             void controller.handleInteractiveAuthSubmit();
           }}
@@ -714,7 +722,7 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
             void onReopenInteractiveAuthUrl();
           }}
           onClose={() => {
-            void onClearPendingInteractiveAuth();
+            void onClearPendingInteractiveAuth(interactiveAuth.challengeId);
           }}
         />
       ) : null}

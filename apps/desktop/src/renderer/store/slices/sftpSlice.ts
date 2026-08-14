@@ -240,11 +240,9 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
             };
     
             set((state) => ({
-              pendingInteractiveAuth:
-                isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
-                state.pendingInteractiveAuth.paneId === paneId
-                  ? null
-                  : state.pendingInteractiveAuth,
+              pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+                (auth) => !(isPendingSftpInteractiveAuth(auth) && auth.paneId === paneId),
+              ),
               sftp: updatePaneState(state, paneId, nextBasePane),
             }));
     
@@ -265,11 +263,9 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
               await api.sftp.disconnect(pane.endpoint.id);
             }
             set((state) => ({
-              pendingInteractiveAuth:
-                isPendingSftpInteractiveAuth(state.pendingInteractiveAuth) &&
-                state.pendingInteractiveAuth.paneId === paneId
-                  ? null
-                  : state.pendingInteractiveAuth,
+              pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+                (auth) => !(isPendingSftpInteractiveAuth(auth) && auth.paneId === paneId),
+              ),
               sftp: updatePaneState(state, paneId, buildSftpHostPickerPane(getPane(state, paneId))),
             }));
           },
@@ -376,7 +372,6 @@ export function createSftpSlice(deps: SliceDeps): SftpSlice {
                 endpointId,
                 // 이미 신뢰된 호스트/베스천은 재-probe 생략(터미널과 동일). 실연결이 strict
                 // host-key 검사를 하므로 안전하고, 다단 ProxyJump에서 프로브+실연결 중복 순회를 막는다.
-                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "sftp",
                   paneId,

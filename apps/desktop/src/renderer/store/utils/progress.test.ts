@@ -67,6 +67,52 @@ describe("progress utils", () => {
       }
     });
 
+    it("does NOT prompt credential retry when the handshake stalled", () => {
+      // The server went silent waiting for a browser approval (Tailscale SSH check
+      // mode sends the URL as a banner). Our error carries "ssh handshake failed"
+      // as well, so without this guard a stall opens the password re-entry dialog —
+      // which can never resolve it.
+      for (const message of [
+        "ssh handshake failed: ssh: handshake failed: read tcp 100.75.131.45:48501->100.113.87.118:22: i/o timeout",
+        "ssh handshake failed: read tcp: i/o timeout — 인증 단계에서 서버 응답이 없습니다. 서버가 보낸 안내:\n# To authenticate, visit: https://login.tailscale.com/a/le7a9c3c3519ae",
+        "ssh handshake failed: read tcp: i/o timeout — 키 교환 단계에서 서버 응답이 없습니다",
+      ]) {
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "password" }), message),
+          message,
+        ).toBeNull();
+        expect(
+          resolveCredentialRetryKind(sshHost({ authType: "privateKey" }), message),
+          message,
+        ).toBeNull();
+      }
+    });
+
+    it("does NOT prompt credential retry when the server only takes keyboard-interactive", () => {
+      // PAM/2FA 서버는 keyboard-interactive 만 제시한다. 계정·비밀번호를 다시 받아도 그 방식은
+      // 시도조차 되지 않으므로(x/crypto 는 서버가 제시한 방식만 쓴다) 이 창은 소용이 없다.
+      const message =
+        "ssh handshake failed: ssh: handshake failed: ssh: unable to authenticate," +
+        " attempted methods [none keyboard-interactive], no supported methods remain";
+
+      expect(
+        resolveCredentialRetryKind(sshHost({ authType: "password" }), message),
+      ).toBeNull();
+      expect(
+        resolveCredentialRetryKind(sshHost({ authType: "privateKey" }), message),
+      ).toBeNull();
+    });
+
+    it("still prompts credential retry when password was actually attempted", () => {
+      // 같은 문구 모양이지만 서버가 password 를 제시했고 그것이 틀린 경우다 — 다시 받는 것이 맞다.
+      expect(
+        resolveCredentialRetryKind(
+          sshHost({ authType: "password" }),
+          "ssh: unable to authenticate, attempted methods [none password], no supported methods remain",
+        ),
+      ).toBe("auth");
+    });
+
     it("still prompts credential retry for genuine auth failures", () => {
       expect(
         resolveCredentialRetryKind(

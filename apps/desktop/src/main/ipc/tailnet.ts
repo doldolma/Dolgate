@@ -23,7 +23,18 @@ function toUserFacingTailnetError(cause: unknown): Error {
   // Go 의 tailnet.ErrNodeInUse. 노드에 얹힌 세션이 있으면 끊지 않는다 — 그 밑에서 내리면
   // 그 세션이 죽는다.
   if (message.includes("node is in use")) {
-    return new Error(t("tailnetIpc.nodeInUse"));
+    // 코어가 함께 보낸 숫자를 그대로 말한다. "연결이 있습니다" 만 보여 주면 사용자는 이미 다 닫았다고
+    // 믿는 상태에서 무엇을 더 닫아야 하는지 알 수 없다 — 실제로 그 막다른 곳에 있었다.
+    //
+    // 원문(ASCII)을 로그에 먼저 남긴다. 던진 오류는 Electron 이 그대로 찍는데, 한국어 문장은 콘솔
+    // 코드페이지에 따라 깨져서(cp949) 증거로 쓸 수 없다.
+    const leases = Number(/leases=(\d+)/.exec(message)?.[1] ?? "0");
+    console.warn(`[tailnet] disconnect refused: ${message}`);
+    return new Error(
+      leases > 0
+        ? t("tailnetIpc.nodeInUseCount", { count: leases })
+        : t("tailnetIpc.nodeInUse"),
+    );
   }
   return cause instanceof Error ? cause : new Error(message);
 }

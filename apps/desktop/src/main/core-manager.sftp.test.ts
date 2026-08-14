@@ -534,6 +534,29 @@ describe("CoreManager SFTP sessions", () => {
     });
   });
 
+  // 이 표시를 빠뜨리면 코어가 채울 칸을 몰라서, 화면이 비워 둔 그 칸이 빈 비밀번호로 서버에
+  // 나간다. keyboard-interactive 는 방식당 한 번만 시도되므로 그 자리에서 인증이 끝난다
+  // ("no supported methods remain") — 실기기에서 OTP 서버가 그렇게 깨졌다.
+  it("forwards the stored-password slots so the core knows which prompt to fill", async () => {
+    const fakeProcess = createFakeChildProcess();
+    spawnMock.mockReturnValue(fakeProcess.child);
+
+    const manager = new CoreManager();
+    await manager.respondKeyboardInteractive({
+      sessionId: "session-1",
+      challengeId: "challenge-1",
+      responses: [""],
+      storedPasswordIndexes: [0],
+    });
+
+    const request = decodeControlFrame(fakeProcess.writes[0]);
+    expect(request.payload).toMatchObject({
+      challengeId: "challenge-1",
+      responses: [""],
+      storedPasswordIndexes: [0],
+    });
+  });
+
   it("routes owned SFTP lifecycle and transfer events only to their window", async () => {
     const fakeProcess = createFakeChildProcess();
     spawnMock.mockReturnValue(fakeProcess.child);

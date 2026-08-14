@@ -48,99 +48,68 @@ function seed() {
   return { api, store };
 }
 
-// 경유 SSH 호스트를 처음 쓰면 그 키를 신뢰할지 물어봐야 한다.
+// 경유 SSH 호스트를 처음 쓰면 그 키를 신뢰할지 물어봐야 한다 — 다만 **연결 안에서** 묻는다.
 //
-// 이 관문이 없으면 메인이 포워드를 열다 "Host key is not trusted yet" 로 끝나고, 사용자에게는
-// 신뢰할 기회조차 없어 그 호스트로는 아예 붙을 수 없었다(VNC 자체엔 신뢰 체인이 없지만 통로는 SSH 다).
-describe('SSH 터널을 경유하는 VNC 의 호스트 키 관문', () => {
+// 화면은 vnc-core 가 그리지만 통로는 ssh-core 가 연다(ipc/vnc.ts 의 startPortForward). 그래서
+// 처음 보는 경유 호스트의 키도 그 연결 도중에 올라온다(hostKeyTrustChallenge). 예전에는 연결 전에
+// 키를 미리 읽었는데, 그 프로브가 경유 호스트에 다시 인증해서 OTP 호스트에서는 코드를 두 번
+// 넣어야 했다.
+describe('SSH 터널을 경유하는 VNC 의 호스트 키', () => {
   function seedTunneled() {
     const api = createMockApi();
-    vi.mocked(api.knownHosts.probeHost).mockResolvedValue({
-      hostId: 'gate',
-      hostLabel: 'Gate',
-      host: 'gate.example.com',
-      port: 22,
-      algorithm: 'ssh-ed25519',
-      publicKeyBase64: 'AAAAGATE',
-      fingerprintSha256: 'SHA256:gate',
-      status: 'untrusted',
-      existing: null,
-    } as never);
-    // 신뢰한 뒤에는 목록에 그 키가 들어와 있다(메인이 저장하고 스토어가 다시 읽는다).
-    // 이 부분을 흉내내지 않으면 재개 경로가 또 물어보게 되어, 테스트가 실제와 달라진다.
-    vi.mocked(api.knownHosts.trust).mockImplementation(async () => {
-      vi.mocked(api.knownHosts.list).mockResolvedValue([
-        {
-          id: 'known-gate',
-          host: 'gate.example.com',
-          port: 22,
-          algorithm: 'ssh-ed25519',
-          publicKeyBase64: 'AAAAGATE',
-          fingerprintSha256: 'SHA256:gate',
-          tailnetId: null,
-          createdAt: '2026-01-01T00:00:00.000Z',
-          lastSeenAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-        },
-      ] as never);
-      return undefined as never;
-    });
     const store = createAppStore(api);
     store.setState({ hosts: [TUNNELED_VNC_HOST, GATE_HOST] });
     return { api, store };
   }
 
-  it('처음 보는 경유 호스트면 접속 전에 신뢰를 묻는다', async () => {
+  it('연결 전에 키를 읽지 않는다', async () => {
     const { api, store } = seedTunneled();
 
     await store.getState().connectHost('vnc-tunnel', 80, 24);
 
-    // 프로브 대상은 **경유 SSH 호스트**다. VNC 호스트에는 물어볼 키가 없다.
-    expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
-      expect.objectContaining({ hostId: 'gate' }),
-    );
-    // 물어보는 동안 붙지 않는다 — 이 순서가 뒤집히면 메인이 원문 오류로 끝난다.
-    expect(api.vnc.connect).not.toHaveBeenCalled();
-    const prompt = store.getState().pendingHostKeyPrompt;
-    expect(prompt?.probe.status).toBe('untrusted');
-    // 수락한 뒤 무엇을 이어갈지가 여기 담긴다. hostId 는 VNC 호스트다.
-    expect(prompt?.action).toMatchObject({ kind: 'vnc', hostId: 'vnc-tunnel' });
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(api.vnc.connect).toHaveBeenCalledTimes(1);
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
-  it('신뢰하면 같은 탭에서 접속을 이어간다', async () => {
+  it('터널을 여는 중에 물으면 그 자리에서 답한다', async () => {
     const { api, store } = seedTunneled();
+
     await store.getState().connectHost('vnc-tunnel', 80, 24);
-    const sessionId = store.getState().tabs.at(-1)?.sessionId;
-    const tabCount = store.getState().tabs.length;
+    // 통로를 여는 것은 포워딩이라 sessionId 가 없다 — 규칙 id 로만 상관된다. 이 질문이 화면까지
+    // 오지 않으면 사용자는 아무 창도 못 보고 6분을 기다린다.
+    store.getState().handleCoreEvent({
+      type: 'hostKeyTrustChallenge',
+      endpointId: 'vnc:session-1',
+      payload: {
+        challengeId: 'hostkey-trust-vnc',
+        hop: { username: 'ops', host: 'gate.example.com', port: 22 },
+        algorithm: 'ssh-ed25519',
+        fingerprintSha256: 'SHA256:gate',
+        publicKeyBase64: 'AAAAGATE',
+        mismatch: false,
+      },
+    } as never);
+
+    const prompt = store.getState().pendingHostKeyPrompt;
+    // 묻는 대상은 **경유 SSH 호스트**다. VNC 호스트에는 물어볼 키가 없다.
+    expect(prompt?.probe.hostId).toBe('gate');
+    expect(prompt?.probe.status).toBe('untrusted');
 
     await store.getState().acceptPendingHostKeyPrompt('trust');
 
-    expect(api.knownHosts.trust).toHaveBeenCalled();
-    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+    expect(api.knownHosts.trust).toHaveBeenCalledWith(
+      expect.objectContaining({ hostId: 'gate', host: 'gate.example.com' }),
+    );
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: 'hostkey-trust-vnc',
+      trust: true,
+    });
+    // 다시 붙지 않는다 — 통로를 여는 연결이 이미 그 자리에서 기다린다.
     expect(api.vnc.connect).toHaveBeenCalledTimes(1);
-    // 이미 신뢰한 키를 다시 물어보면 안 된다 — 수락하자마자 같은 창이 또 뜬다.
-    expect(api.knownHosts.probeHost).toHaveBeenCalledTimes(1);
-    // 탭을 새로 만들면 멈춰 있던 탭이 그대로 남는다 — 같은 세션으로 이어야 한다.
-    expect(store.getState().tabs).toHaveLength(tabCount);
-    const tab = store.getState().tabs.at(-1);
-    expect(tab?.sessionId).toBe(sessionId);
-    expect(tab?.status).toBe('connected');
   });
 
-  it('거절하면 이유를 남기고 붙지 않는다', async () => {
-    const { api, store } = seedTunneled();
-    await store.getState().connectHost('vnc-tunnel', 80, 24);
-
-    store.getState().dismissPendingHostKeyPrompt();
-
-    expect(store.getState().pendingHostKeyPrompt).toBeNull();
-    expect(api.vnc.connect).not.toHaveBeenCalled();
-    const tab = store.getState().tabs.at(-1);
-    expect(tab?.status).toBe('error');
-    expect(tab?.errorMessage).toBeTruthy();
-  });
-
-  it('터널을 안 쓰는 VNC 호스트는 프로브하지 않는다', async () => {
+  it('터널을 안 쓰는 VNC 호스트도 그냥 붙는다', async () => {
     const api = createMockApi();
     const store = createAppStore(api);
     store.setState({ hosts: [VNC_HOST] });
@@ -149,6 +118,99 @@ describe('SSH 터널을 경유하는 VNC 의 호스트 키 관문', () => {
 
     expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
     expect(api.vnc.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 경유 호스트가 OTP 를 요구하면 그 코드를 넣을 창이 VNC 탭 위에 떠야 한다.
+//
+// 터널의 상관 값은 `vnc:<sessionId>` 규칙 ID 뿐이다(사용자가 만든 포워딩 규칙이 아니다). 예전에는
+// 그 ID 를 아무도 못 알아봐서 질문이 버려졌고, 실기기에서 VNC 를 열면 코드를 물어보는 창이 뜨지 않고
+// 진행만 멈춰 있었다.
+describe('SSH 터널을 경유하는 VNC 의 대화형 인증', () => {
+  function seedTunneled() {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    store.setState({ hosts: [TUNNELED_VNC_HOST, GATE_HOST] });
+    return { api, store };
+  }
+
+  function otpChallenge(sessionId: string) {
+    return {
+      type: 'keyboardInteractiveChallenge',
+      endpointId: `vnc:${sessionId}`,
+      payload: {
+        challengeId: `vnc:${sessionId}-1`,
+        attempt: 1,
+        instruction: '',
+        prompts: [{ label: 'Verification code:', echo: false }],
+        hop: { username: 'ops', host: 'gate.example.com', port: 22 },
+      },
+    } as never;
+  }
+
+  it('터널의 OTP 질문을 그 VNC 세션의 카드로 세운다', async () => {
+    const { api, store } = seedTunneled();
+
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+    const sessionId = store.getState().tabs.at(-1)?.sessionId ?? '';
+    store.getState().handleCoreEvent(otpChallenge(sessionId));
+
+    const auth = store.getState().pendingInteractiveAuths.at(-1);
+    expect(auth).toMatchObject({
+      source: 'vncTunnel',
+      sessionId,
+      endpointId: `vnc:${sessionId}`,
+      // 묻는 쪽은 경유 SSH 호스트다 — 카드가 그 이름을 말해야 어느 코드인지 알 수 있다.
+      hostId: 'gate',
+    });
+    expect(auth?.hop).toMatchObject({ host: 'gate.example.com' });
+    expect(auth?.prompts).toHaveLength(1);
+
+    await store
+      .getState()
+      .respondInteractiveAuth(auth?.challengeId ?? '', ['123456']);
+
+    // 답은 **endpointId** 로 간다. 터널을 여는 것은 포워딩 서비스라 코어의 대기표가 거기 걸려 있다 —
+    // sessionId 로 보내면 세션 매니저에서 버려지고 코어는 계속 기다린다.
+    expect(api.ssh.respondKeyboardInteractive).toHaveBeenCalledWith({
+      endpointId: `vnc:${sessionId}`,
+      challengeId: auth?.challengeId,
+      responses: ['123456'],
+    });
+  });
+
+  it('인증이 끝나면 카드를 내린다', async () => {
+    const { store } = seedTunneled();
+
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+    const sessionId = store.getState().tabs.at(-1)?.sessionId ?? '';
+    store.getState().handleCoreEvent(otpChallenge(sessionId));
+    expect(store.getState().pendingInteractiveAuths).toHaveLength(1);
+
+    store.getState().handleCoreEvent({
+      type: 'keyboardInteractiveResolved',
+      endpointId: `vnc:${sessionId}`,
+      payload: {},
+    } as never);
+
+    expect(store.getState().pendingInteractiveAuths).toHaveLength(0);
+  });
+
+  it('터널이 실패하면 남은 카드를 내린다', async () => {
+    const { store } = seedTunneled();
+
+    await store.getState().connectHost('vnc-tunnel', 80, 24);
+    const sessionId = store.getState().tabs.at(-1)?.sessionId ?? '';
+    store.getState().handleCoreEvent(otpChallenge(sessionId));
+
+    store.getState().handleCoreEvent({
+      type: 'portForwardError',
+      endpointId: `vnc:${sessionId}`,
+      payload: { message: 'ssh: handshake failed' },
+    } as never);
+
+    // 답을 받아 줄 연결이 없는 입력창을 남기지 않는다.
+    expect(store.getState().pendingInteractiveAuths).toHaveLength(0);
   });
 });
 

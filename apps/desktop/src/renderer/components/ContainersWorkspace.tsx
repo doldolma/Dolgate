@@ -76,7 +76,8 @@ interface ContainersWorkspaceProps {
   host: HostRecord;
   tab: HostContainersTabState;
   isActive: boolean;
-  interactiveAuth: PendingContainersInteractiveAuth | null;
+  /** 답을 기다리는 컨테이너 인증들. 탭마다 자기 호스트의 것을 고른다. */
+  interactiveAuths: PendingContainersInteractiveAuth[];
   onRefresh: (hostId: string) => Promise<void>;
   onRetryConnection: (hostId: string) => Promise<void>;
   onClose: (hostId: string) => Promise<void>;
@@ -110,7 +111,8 @@ interface ContainersWorkspaceProps {
     responses: string[],
   ) => Promise<void>;
   onReopenInteractiveAuthUrl: () => Promise<void>;
-  onClearInteractiveAuth: () => void;
+  /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
+  onClearInteractiveAuth: (challengeId?: string) => void;
 }
 
 type ContainerStatusTone = "running" | "starting" | "paused" | "stopped";
@@ -1355,7 +1357,7 @@ export function ContainersWorkspace({
   host,
   tab,
   isActive,
-  interactiveAuth,
+  interactiveAuths,
   onRefresh,
   onRetryConnection,
   onClose,
@@ -1413,7 +1415,7 @@ export function ContainersWorkspace({
   const logsFocusModeActive =
     logsFocusMode && isLogsPanel && Boolean(selectedContainer);
   const matchingInteractiveAuth =
-    interactiveAuth?.hostId === host.id ? interactiveAuth : null;
+    interactiveAuths.find((auth) => auth.hostId === host.id) ?? null;
   const shouldShowConnectingOverlay = tab.isLoading && !matchingInteractiveAuth;
   const connectionFailurePresentation = useMemo(
     () =>
@@ -2822,7 +2824,7 @@ export function ContainersWorkspace({
               void onReopenInteractiveAuthUrl();
             }}
             onClose={() => {
-              onClearInteractiveAuth();
+              onClearInteractiveAuth(matchingInteractiveAuth.challengeId);
             }}
           />
         </div>

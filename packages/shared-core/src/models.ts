@@ -2290,6 +2290,32 @@ export interface WarpgateImportEvent {
 export interface KeyboardInteractivePrompt {
   label: string;
   echo: boolean;
+  /**
+   * 이 칸에 "저장된 비밀번호 사용" 을 내밀어도 되는지. 판정은 코어가 하고 화면은 그린다.
+   *
+   * 칸마다 다르다 — 인증 코드 칸에 그 버튼이 붙으면 사용자가 코드 자리에 비밀번호를 보낼 수
+   * 있고, keyboard-interactive 는 방식당 한 번만 시도되므로 그걸로 연결이 끝난다.
+   */
+  allowStoredPassword?: boolean;
+  /**
+   * 입력을 가려서 보여줄지. 판정은 코어가 한다.
+   *
+   * 서버의 `echo` 를 그대로 쓰지 않는다 — 일회용 코드도 echo 를 끄고 오는데, 그것까지 가리면
+   * 사용자가 여섯 자리를 확인하지 못한 채 보내야 한다. 비밀번호는 그대로 가린다.
+   */
+  masked?: boolean;
+}
+
+/**
+ * 프롬프트를 낸 홉.
+ *
+ * 점프 체인에서 이것이 없으면 사용자가 **누구의** 코드를 넣는지 알 수 없다 — 베스천과 최종 대상이
+ * 각각 OTP 를 물으면 화면에는 똑같은 "Verification code:" 만 두 번 뜬다.
+ */
+export interface KeyboardInteractiveHop {
+  username?: string;
+  host?: string;
+  port?: number;
 }
 
 export interface KeyboardInteractiveChallenge {
@@ -2300,6 +2326,13 @@ export interface KeyboardInteractiveChallenge {
   name?: string | null;
   instruction: string;
   prompts: KeyboardInteractivePrompt[];
+  /**
+   * 이 연결에 쓸 수 있는 저장된 비밀번호가 있는지. 화면은 이 값이 참일 때만 "저장된 비밀번호
+   * 사용" 을 내민다 — 비밀번호 자체는 코어 밖으로 나오지 않는다.
+   */
+  hasStoredPassword?: boolean;
+  /** 이 프롬프트를 낸 홉(점프 체인에서 누구의 코드인지). */
+  hop?: KeyboardInteractiveHop | null;
 }
 
 interface PortForwardRuleBaseRecord {
@@ -3444,6 +3477,14 @@ export interface TerminalTab {
   reconnect?: TerminalReconnectState | null;
   sessionShare?: SessionShareState | null;
   hasReceivedOutput?: boolean;
+  /**
+   * 서버가 인증 단계에 보낸 배너(RFC 4252 §5.4)를 이 탭의 터미널에 찍었는지.
+   *
+   * 배너는 사람에게 할 일을 알리는 데 쓰인다(예: Tailscale SSH 의 `check` 모드가 승인 주소를
+   * 이렇게 보낸다). 그 시점엔 진행 오버레이가 추적하던 것이 모두 끝나 있으므로(tailnet·TCP·
+   * 키 교환·호스트 키) 카드를 접어 안내가 보이게 한다 — 그래서 이 표시가 필요하다.
+   */
+  serverBannerShown?: boolean;
   /** mosh 세션의 연결 상태(하단 상태바 표시용). mosh가 아니면 null/undefined. */
   moshState?: 'connected' | 'reconnecting' | 'disconnected' | null;
   /** 마지막으로 mosh 서버 응답을 받은 시각(RFC3339). "N초 전 응답" 표시에 쓴다. */

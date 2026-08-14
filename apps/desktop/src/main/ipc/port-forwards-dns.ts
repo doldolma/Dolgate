@@ -622,7 +622,7 @@ export function registerPortForwardAndDnsIpcHandlers(
 
       ctx.assertSshHost(host);
       const sshHost = host as SshHostRecord;
-      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
+      const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);

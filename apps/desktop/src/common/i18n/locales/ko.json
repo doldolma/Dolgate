@@ -327,6 +327,8 @@
       "dnsDisableFailed": "DNS Override를 비활성화하지 못했습니다."
     },
     "waiting": {
+      "forwardAuth": "{{label}} 포워딩이 추가 인증을 기다리는 중입니다.",
+      "forwardAuthUnnamed": "포워딩이 추가 인증을 기다리는 중입니다.",
       "containerTunnel": "Container tunnel 승인을 기다리는 중입니다.",
       "containerRuntime": "컨테이너 런타임 연결 승인을 기다리는 중입니다.",
       "containerLookup": "컨테이너 조회를 위한 승인을 기다리는 중입니다."
@@ -2527,7 +2529,8 @@
     "tailnetAuthInFlight": "이 Tailnet 의 인증이 진행 중입니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
     "tailscaleNeedsAuth": "Tailscale 인증이 끝나지 않았습니다. 브라우저에서 로그인을 마치면 연결이 이어집니다.",
     "tailscaleNeedsApproval": "이 기기가 관리자 승인을 기다리는 중입니다. 승인되면 연결할 수 있습니다.",
-    "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요."
+    "tailscaleMismatch": "설정에 지정된 Tailscale 네트워크가 아닌 곳에 연결돼 있습니다. 로그인한 계정을 확인해 주세요.",
+    "serverNotice": "서버가 보낸 안내:\n{{notice}}"
   },
   "knownHostsIpc": {
     "noSecrets": "저장할 인증 정보가 없습니다.",
@@ -2625,7 +2628,12 @@
     "reopenBrowser": "브라우저 다시 열기",
     "copyLink": "링크 복사",
     "extraAuthTitle": "추가 인증 입력이 필요합니다.",
-    "sendResponse": "응답 보내기"
+    "hopLabel": "요청한 호스트",
+    "sendResponse": "응답 보내기",
+    "deliveryFailed": "이 인증 요청은 더 이상 기다리지 않습니다 — 연결이 끝났습니다. 다시 연결한 뒤 시도해 주세요.",
+    "storedPasswordUse": "저장된 비밀번호 사용",
+    "storedPasswordCancel": "직접 입력",
+    "storedPasswordInUse": "저장된 비밀번호를 보냅니다"
   },
   "sidebar": {
     "sortName": "정렬: 이름순",
@@ -3395,7 +3403,8 @@
     "unknownError": "알 수 없는 오류가 발생했습니다."
   },
   "tailnetIpc": {
-    "nodeInUse": "이 Tailnet 을 사용하는 연결이 있습니다. 해당 세션·SFTP·포트포워딩을 먼저 닫아 주세요."
+    "nodeInUse": "이 Tailnet 을 사용하는 연결이 있습니다. 해당 세션·SFTP·포트포워딩을 먼저 닫아 주세요.",
+    "nodeInUseCount": "이 Tailnet 을 사용하는 연결이 {{count}}개 있습니다. 해당 세션·SFTP·포트포워딩을 먼저 닫아 주세요."
   },
   "connectStages": {
     "tailscaleNode": "Tailscale 노드 시작",
@@ -3430,6 +3439,9 @@
     "tailscaleTargetRelay": "릴레이 경유 ({{relay}})",
     "tailscaleTargetNoPath": "직접 연결도 릴레이도 서지 않았습니다.",
     "tailscaleTargetMissing": "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다.",
+    "tailscaleTargetViaSubnet": "서브넷 라우터 {{peer}} 경유",
+    "tailscaleTargetSubnetRouter": "서브넷 라우터",
+    "tailscaleTargetNotInTailnet": "이 tailnet 의 기기 주소가 아닙니다 — 점프 호스트나 지금 붙어 있는 망으로 갑니다.",
     "tailscaleTargetTraffic": "보냄 {{tx}} · 받음 {{rx}}",
     "tunnelGateway": "{{label}} 경유 SSH 터널",
     "tunnelOpen": "VNC 포트까지 통로 개설"

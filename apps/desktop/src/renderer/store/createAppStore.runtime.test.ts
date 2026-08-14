@@ -122,7 +122,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
       },
     });
 
-    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
       source: "sftp",
       paneId: "right",
       endpointId,
@@ -146,7 +146,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
       },
     });
 
-    expect(store.getState().pendingInteractiveAuth).toBeNull();
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
   });
 
   it("does not reopen the same Warpgate approval URL repeatedly for a saved port forward", async () => {
@@ -267,7 +267,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
 
     expect(store.getState().activeWorkspaceTab).toBe("sftp");
     expect(store.getState().activeContainerHostId).toBeNull();
-    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
       source: "containers",
       endpointId: "containers:host-1",
       hostId: "host-1",
@@ -296,7 +296,7 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
       },
     });
 
-    expect(store.getState().pendingInteractiveAuth).toMatchObject({
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
       source: "ssh",
       sessionId: "session-1",
       challengeId: "challenge-ssh-1",
@@ -839,6 +839,110 @@ describe("createAppStore runtime, workspaces, and sharing", () => {
     expect(api.knownHosts.replace).toHaveBeenCalled();
     expect(api.portForwards.start).toHaveBeenCalledWith("pf-1");
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  // 실기기 증상: 정지를 눌러 포워딩이 멈춘 뒤에도 "코드를 입력하세요" 카드가 그대로 남았다.
+  // 코어의 portForwardStopped 는 메인에서 런타임 레코드로 바뀌어 이 핸들러로 오므로(그 지점에서
+  // return 한다), handleCoreEvent 쪽 정리 코드는 실기기에서 도달하지 않는다.
+  it("takes down the auth card when the forward stops", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      portForwards: [createSshForwardRule()],
+      pendingInteractiveAuths: [{
+        source: "portForward",
+        endpointId: "pf-1",
+        ruleId: "pf-1",
+        hostId: "host-1",
+        challengeId: "pf-1-1",
+        name: null,
+        instruction: "",
+        prompts: [{ label: "Verification code:", echo: false }],
+        provider: "generic",
+        autoSubmitted: false,
+        }],
+    });
+
+    store.getState().handlePortForwardEvent({
+      runtime: {
+        ruleId: "pf-1",
+        hostId: "host-1",
+        transport: "ssh" as const,
+        mode: "local" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 8080,
+        status: "stopped" as const,
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
+  });
+
+  // 다른 규칙의 카드는 건드리지 않는다.
+  it("keeps another rule's auth card when one forward stops", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      pendingInteractiveAuths: [{
+        source: "portForward",
+        endpointId: "pf-2",
+        ruleId: "pf-2",
+        hostId: "host-1",
+        challengeId: "pf-2-1",
+        name: null,
+        instruction: "",
+        prompts: [{ label: "Verification code:", echo: false }],
+        provider: "generic",
+        autoSubmitted: false,
+        }],
+    });
+
+    store.getState().handlePortForwardEvent({
+      runtime: {
+        ruleId: "pf-1",
+        hostId: "host-1",
+        transport: "ssh" as const,
+        mode: "local" as const,
+        bindAddress: "127.0.0.1",
+        bindPort: 8080,
+        status: "stopped" as const,
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      },
+    });
+
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
+      challengeId: "pf-2-1",
+    });
+  });
+
+  // 실기기 증상: 시작을 눌러도 화면이 그대로여서 눌렸는지 알 수 없었다. 아래에는 호스트 키 확인과
+  // 코어의 SSH 연결(OTP 대기 포함)이 있어 몇십 초가 걸린다 — 누른 즉시 상태가 바뀌어야 한다.
+  it("shows starting as soon as start is pressed", async () => {
+    const api = createMockApi();
+    // 코어 요청을 붙잡아 둔다 — 시작을 누른 직후의 화면 상태를 보려는 것이다.
+    const start = createDeferred<Awaited<ReturnType<DesktopApi["portForwards"]["start"]>>>();
+    api.portForwards.start = vi.fn().mockReturnValue(start.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({ portForwards: [createSshForwardRule()] });
+
+    const starting = store.getState().startPortForward("pf-1");
+    await flushMicrotasks();
+
+    // 코어가 아직 답하지 않았는데도 상태가 이미 바뀌어 있어야 한다. 이 아래에는 SSH 연결이 있고,
+    // OTP 를 묻는 호스트면 사람이 답할 때까지 몇십 초가 걸린다 — 그동안 화면이 그대로면 사용자는
+    // 버튼이 눌렸는지 알 수 없다.
+    expect(
+      store.getState().portForwardRuntimes.find((runtime) => runtime.ruleId === "pf-1")
+        ?.status,
+    ).toBe("starting");
+
+    start.reject(new Error("ssh handshake failed"));
+    await starting.catch(() => undefined);
   });
 
   it("leaves an ordinary port forward failure alone", async () => {

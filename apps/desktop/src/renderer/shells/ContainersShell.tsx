@@ -427,11 +427,9 @@ export function ContainersShell({
                     host={host}
                     tab={tab}
                     isActive={active && isActiveTab}
-                    interactiveAuth={
-                      modalViewModel.pendingInteractiveAuth?.source === 'containers'
-                        ? modalViewModel.pendingInteractiveAuth
-                        : null
-                    }
+                    interactiveAuths={modalViewModel.pendingInteractiveAuths.filter(
+                      (auth) => auth.source === 'containers',
+                    )}
                     onRefresh={containersViewModel.refreshHostContainers}
                     onRetryConnection={containersViewModel.refreshHostContainers}
                     onClose={containersViewModel.closeHostContainersTab}

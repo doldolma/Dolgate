@@ -312,7 +312,7 @@ export function createContainerRuntimeCoordinator(deps: {
     }
 
     if (isWarpgateSshHostRecord(host)) {
-      const trustedHostKeysBase64 = hostCoordinator.requireTrustedHostKeys({
+      const trustedHostKeysBase64 = hostCoordinator.resolveTrustedHostKeys({
         hostname: host.warpgateSshHost,
         port: host.warpgateSshPort,
       });
@@ -335,7 +335,7 @@ export function createContainerRuntimeCoordinator(deps: {
       };
     }
 
-    const trustedHostKeysBase64 = hostCoordinator.requireTrustedHostKeys(host);
+    const trustedHostKeysBase64 = hostCoordinator.resolveTrustedHostKeys(host);
     const username = hostCoordinator.requireConfiguredSshUsername(host);
     const { secrets, shouldPersistHostSecret } =
       await secretCoordinator.resolveRuntimeSshSecrets(host);

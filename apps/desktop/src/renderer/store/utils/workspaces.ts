@@ -15,7 +15,10 @@ import type {
   WorkspaceTab,
   WorkspaceTabId,
 } from "../types";
-import { isPendingSessionInteractiveAuth } from "./interactive-auth";
+import {
+  clearSessionPendingInteractiveAuth,
+  isPendingSessionInteractiveAuth,
+} from "./interactive-auth";
 import {
   clearSessionShareChatNotifications,
   createInactiveSessionShareState,
@@ -594,14 +597,13 @@ export function replaceSessionReferencesInState(
             sessionId: nextSessionId,
           }
         : state.activeCredentialRetryAttempt,
-    pendingInteractiveAuth:
-      isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
-      state.pendingInteractiveAuth.sessionId === previousSessionId
-        ? {
-            ...state.pendingInteractiveAuth,
-            sessionId: nextSessionId,
-          }
-        : state.pendingInteractiveAuth,
+    // 대상 ID 가 바뀌면 그 대상의 인증 요청도 새 ID 로 따라가야 한다. 안 그러면 카드가 어느
+    // 세션의 것도 아니게 되어 화면에서 사라진다.
+    pendingInteractiveAuths: state.pendingInteractiveAuths.map((auth) =>
+      isPendingSessionInteractiveAuth(auth) && auth.sessionId === previousSessionId
+        ? { ...auth, sessionId: nextSessionId }
+        : auth,
+    ),
     sessionReturnTargets: nextSessionReturnTargets,
     resolvedStartupCommandsBySessionId: nextResolvedStartupCommands,
   };
@@ -776,11 +778,10 @@ export function removeSessionFromState(
       state.activeCredentialRetryAttempt?.sessionId === sessionId
         ? null
         : state.activeCredentialRetryAttempt,
-    pendingInteractiveAuth:
-      isPendingSessionInteractiveAuth(state.pendingInteractiveAuth) &&
-      state.pendingInteractiveAuth.sessionId === sessionId
-        ? null
-        : state.pendingInteractiveAuth,
+    pendingInteractiveAuths: clearSessionPendingInteractiveAuth(
+      state.pendingInteractiveAuths,
+      sessionId,
+    ),
     pendingConnectionAttempts: state.pendingConnectionAttempts.filter(
       (attempt) => attempt.sessionId !== sessionId,
     ),

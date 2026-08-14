@@ -75,7 +75,7 @@ export function registerVncIpcHandlers(
         label: sshHost.label?.trim() || sshHost.hostname,
       }),
     );
-    const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
+    const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
     const username = ctx.requireConfiguredSshUsername(sshHost);
     const { secrets } = await ctx.resolveRuntimeSshSecrets(sshHost);
     await ctx.ensureCertificateAuthReady(sshHost, secrets);
@@ -84,6 +84,12 @@ export function registerVncIpcHandlers(
       sshHost.authType === "agent" ? await resolveLocalAgentEndpoint() : null;
 
     // bindPort 0 = 빈 포트를 OS 가 고른다. 고정 포트면 같은 대상에 두 번 붙을 때 충돌한다.
+    //
+    // `vnc:<sessionId>` 형식은 **화면과의 약속**이다. 코어가 이 터널에 대해 올리는 질문(OTP·호스트
+    // 키)은 이 규칙 ID 를 상관 값으로 달고 오는데, 사용자가 만든 포워딩 규칙이 아니라서 화면의 규칙
+    // 목록에는 없다. 렌더러는 이 접두어에서 세션을 되꺼내 그 VNC 탭 위에 입력창을 띄운다
+    // (`store/utils/vnc.ts` 의 resolveVncTunnelSessionId). 형식을 바꾸면 그쪽도 같이 바꿔야 한다 —
+    // 안 그러면 OTP 창이 다시 사라진다.
     const ruleId = `vnc:${sessionId}`;
     const runtime = await ctx.coreManager.startPortForward({
       ruleId,

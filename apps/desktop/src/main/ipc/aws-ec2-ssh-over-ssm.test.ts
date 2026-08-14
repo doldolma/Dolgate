@@ -53,6 +53,7 @@ describe("connectAwsEc2OverSsm", () => {
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       },
       requireTrustedHostKeys: vi.fn().mockReturnValue(["TRUSTED_KEY"]),
+      resolveTrustedHostKeys: vi.fn().mockReturnValue(["TRUSTED_KEY"]),
       createEphemeralAwsSftpKeyPair: vi.fn().mockReturnValue({
         privateKeyPem: "PRIVATE_KEY",
         publicKey: "PUBLIC_KEY",
@@ -150,6 +151,7 @@ describe("connectAwsEc2OverSsm", () => {
         sendSshPublicKey: vi.fn().mockResolvedValue(undefined),
       },
       requireTrustedHostKeys: vi.fn().mockReturnValue(["TRUSTED_KEY"]),
+      resolveTrustedHostKeys: vi.fn().mockReturnValue(["TRUSTED_KEY"]),
       createEphemeralAwsSftpKeyPair: vi.fn().mockReturnValue({
         privateKeyPem: "PRIVATE_KEY",
         publicKey: "PUBLIC_KEY",

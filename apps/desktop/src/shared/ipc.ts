@@ -224,6 +224,7 @@ export type CoreCommandType =
   | "inspectPrivateKey"
   | "installAuthorizedKey"
   | "keyboardInteractiveRespond"
+  | "hostKeyTrustRespond"
   | "tailnetTest"
   | "tailnetForget"
   | "tailnetDisconnect"
@@ -498,7 +499,11 @@ export type CoreEventType =
   | "privateKeyInspected"
   | "authorizedKeyInstalled"
   | "keyboardInteractiveChallenge"
+  // 연결 도중 처음 보는(또는 바뀐) 서버 키를 만나 사람의 판단을 기다린다.
+  | "hostKeyTrustChallenge"
   | "keyboardInteractiveResolved"
+  // 서버가 인증 단계에 보낸 배너(RFC 4252 §5.4). 원문을 그대로 나른다 — 화면이 터미널에 찍는다.
+  | "sshBanner"
   | "portForwardStarted"
   | "portForwardStopped"
   | "portForwardError"
@@ -827,11 +832,44 @@ export interface AwsEcsEphemeralTunnelStartInput {
   bindPort: number;
 }
 
+/** 프롬프트·신뢰 질의를 낸 홉. 점프 체인에서 누구의 것인지 구분한다. */
+export interface KeyboardInteractiveHopRef {
+  username?: string;
+  host: string;
+  port?: number;
+}
+
+/** 연결 도중 올라온 호스트 키 신뢰 질의. 화면은 이것으로 기존 신뢰 대화상자를 채운다. */
+export interface HostKeyTrustChallengePayload {
+  challengeId: string;
+  hop?: KeyboardInteractiveHopRef | null;
+  algorithm: string;
+  fingerprintSha256: string;
+  publicKeyBase64: string;
+  /** 이미 저장된 키가 있는데 다른 키가 왔다는 뜻. 화면은 "교체" 로 묻는다. */
+  mismatch: boolean;
+}
+
+/** 그 답. trust 가 거짓이면 코어가 그 연결을 끊는다. */
+export interface HostKeyTrustRespondInput {
+  challengeId: string;
+  trust: boolean;
+}
+
 export interface KeyboardInteractiveRespondInput {
   sessionId?: string;
   endpointId?: string;
   challengeId: string;
   responses: string[];
+  /**
+   * "이 칸은 저장된 비밀번호로 채워라" 는 표시(프롬프트 인덱스).
+   *
+   * 값이 아니라 인덱스만 보내는 이유가 둘이다. 비밀번호를 렌더러로 내려받지 않는 것, 그리고
+   * 어느 칸이 비밀번호인지 **우리가 판정하지 않는 것.** 라벨을 정규식으로 골라내면 서버가
+   * `Password:` 라고 써 놓고 두 번째 요소를 묻는 경우에 비밀번호를 그 칸으로 보내게 되고,
+   * 인증 기회가 한 번뿐이라 그걸로 연결이 끝난다. 그 판단은 사용자가 버튼으로 한다.
+   */
+  storedPasswordIndexes?: number[];
 }
 
 export interface ControlSignalPayload {
@@ -1482,6 +1520,8 @@ export interface DesktopApi {
     respondKeyboardInteractive: (
       input: KeyboardInteractiveRespondInput,
     ) => Promise<void>;
+    /** 연결 도중 올라온 호스트 키 신뢰 질의에 답한다. */
+    respondHostKeyTrust: (input: HostKeyTrustRespondInput) => Promise<void>;
     // SSH Agent 인증 설정 시 로컬 ssh-agent 상태(도달 여부·키 개수)를 조회한다.
     probeAgent: () => Promise<SshAgentProbeResult>;
     // tmux control mode 명령. sessionId 는 pane 가상 세션 id("tmux:<controlSessionId>:<paneNum>")다.

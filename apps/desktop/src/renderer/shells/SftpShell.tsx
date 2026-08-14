@@ -61,11 +61,10 @@ export function SftpShell({
           sftp={sftpViewModel.sftpState}
           transfers={sftpViewModel.transfers}
           settings={settingsViewModel.settings}
-          interactiveAuth={
-            modalViewModel.pendingInteractiveAuth?.source === 'sftp'
-              ? modalViewModel.pendingInteractiveAuth
-              : null
-          }
+          // 판마다 자기 엔드포인트의 것을 고른다 — 다른 판·터미널의 요청이 이 카드를 밀어내지 않는다.
+          interactiveAuths={modalViewModel.pendingInteractiveAuths.filter(
+            (auth) => auth.source === 'sftp',
+          )}
           onActivatePaneSource={sftpViewModel.setSftpPaneSource}
           onDisconnectPane={sftpViewModel.disconnectSftpPane}
           onPaneFilterChange={sftpViewModel.setSftpPaneFilter}

@@ -122,7 +122,8 @@ interface SftpWorkspaceProps {
   >;
   transfers: TransferJob[];
   settings: AppSettings;
-  interactiveAuth: PendingSftpInteractiveAuth | null;
+  /** 답을 기다리는 SFTP 인증들. 판마다 자기 엔드포인트의 것을 고른다. */
+  interactiveAuths: PendingSftpInteractiveAuth[];
   onActivatePaneSource: (
     paneId: SftpPaneId,
     sourceKind: SftpSourceKind,
@@ -197,7 +198,8 @@ interface SftpWorkspaceProps {
     responses: string[],
   ) => Promise<void>;
   onReopenInteractiveAuthUrl: () => Promise<void>;
-  onClearInteractiveAuth: () => void;
+  /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
+  onClearInteractiveAuth: (challengeId?: string) => void;
   onUpdateSettings: (input: Partial<AppSettings>) => Promise<void>;
 }
 
@@ -1816,6 +1818,7 @@ interface HostPickerProps {
   pane: SftpPaneState;
   groups: GroupRecord[];
   hosts: SftpConnectableHostRecord[];
+  /** 이 판이 답을 기다리는 인증(호출부가 골라 준다). */
   interactiveAuth: PendingSftpInteractiveAuth | null;
   onActivatePaneSource: (sourceKind: SftpSourceKind) => Promise<void>;
   onHostSearchChange: (query: string) => void;
@@ -1828,7 +1831,8 @@ interface HostPickerProps {
     responses: string[],
   ) => Promise<void>;
   onReopenInteractiveAuthUrl: () => Promise<void>;
-  onClearInteractiveAuth: () => void;
+  /** 카드를 내린다. 어느 것인지 반드시 지목한다 — 인자가 없으면 스토어가 전부 비운다. */
+  onClearInteractiveAuth: (challengeId?: string) => void;
 }
 
 function AwsSftpFailureDiagnosticCard({
@@ -1970,9 +1974,10 @@ function HostPicker({
     pane.isLoading;
   const activeEndpointId =
     pane.connectingEndpointId ?? pane.endpoint?.id ?? null;
+  // 호출부가 이 판의 것을 골라 준다. 여기서는 지금 붙는 중인 엔드포인트의 것인지, 사용자가 이미
+  // 닫은 것은 아닌지만 확인한다.
   const matchingInteractiveAuth =
     interactiveAuth &&
-    interactiveAuth.paneId === pane.id &&
     interactiveAuth.endpointId === activeEndpointId &&
     interactiveAuth.endpointId !== dismissedInteractiveEndpointId
       ? interactiveAuth
@@ -2293,7 +2298,7 @@ function HostPicker({
               setDismissedInteractiveEndpointId(
                 matchingInteractiveAuth.endpointId,
               );
-              onClearInteractiveAuth();
+              onClearInteractiveAuth(matchingInteractiveAuth.challengeId);
             }}
           />
         </div>
@@ -3048,7 +3053,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
   groups,
   sftp,
   settings,
-  interactiveAuth,
+  interactiveAuths,
   onActivatePaneSource,
   onDisconnectPane,
   onPaneFilterChange,
@@ -3393,7 +3398,7 @@ const SftpWorkspacePanes = memo(function SftpWorkspacePanes({
                   groups={groups}
                   hosts={connectableHosts}
                   interactiveAuth={
-                    interactiveAuth?.paneId === pane.id ? interactiveAuth : null
+                    interactiveAuths.find((auth) => auth.paneId === pane.id) ?? null
                   }
                   onActivatePaneSource={connectActions.onActivatePaneSource}
                   onHostSearchChange={(query) =>

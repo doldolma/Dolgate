@@ -418,6 +418,57 @@ describe('resolveConnectionStages', () => {
     expect(stateOf(stages, 'tailscale-target')).toBe('failed');
   });
 
+  // 서브넷 라우터가 광고한 대역은 기기 목록에 없지만 이 네트워크로 닿는다. 그것을 "기기를 찾을 수
+  // 없습니다" 로 말하면 멀쩡한 경로를 실패로 그린다 — 실기기에서 사내 192.168.x 주소가 그랬다.
+  it("서브넷 라우터가 담당하는 대역은 경로가 있는 것으로 본다", () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ status: 'connected' }),
+      hasTailscale: true,
+      targetAddress: '192.168.200.37',
+      tailnetStatus: createStatus({
+        peers: [
+          { direct: true, hostName: 'router-1', routes: ['192.168.200.0/24'] },
+          { direct: true, hostName: 'agt-1' },
+        ],
+      }),
+      failureLayer: null,
+    });
+
+    expect(stateOf(stages, 'tailscale-target')).toBe('done');
+    expect(stages.find((stage) => stage.id === 'tailscale-target')?.detail).toContain('router-1');
+  });
+
+  // 기기도 아니고 담당 대역도 없는 IP 는 tailnet 밖 경로(점프 뒤의 망·지금 붙어 있는 랜)로 갈 수
+  // 있다. 실패로 단정하면 사용자가 엉뚱한 곳을 의심한다.
+  it("담당 대역이 없는 IP 는 실패로 단정하지 않는다", () => {
+    const stages = resolveConnectionStages({
+      tab: createTab({ status: 'connected' }),
+      hasTailscale: true,
+      targetAddress: '10.9.9.9',
+      tailnetStatus: createStatus({
+        peers: [{ direct: true, hostName: 'router-1', routes: ['192.168.200.0/24'] }],
+      }),
+      failureLayer: null,
+    });
+
+    expect(stateOf(stages, 'tailscale-target')).toBe('warn');
+  });
+
+  // 이름(MagicDNS)으로 지정한 대상이 넷맵에 없으면 그건 여전히 실패다 — 기다려도 되지 않는다.
+  it("이름으로 지정한 대상이 없으면 여전히 실패다", () => {
+    const stages = resolveConnectionStages({
+      tab: createTab(),
+      hasTailscale: true,
+      targetAddress: 'ghost',
+      tailnetStatus: createStatus({
+        peers: [{ direct: true, hostName: 'router-1', routes: ['192.168.200.0/24'] }],
+      }),
+      failureLayer: null,
+    });
+
+    expect(stateOf(stages, 'tailscale-target')).toBe('failed');
+  });
+
   // 이미 분류된 실패가 있으면 그것을 덮지 않는다. 덮으면 Tailscale 실패가 SSH 실패로 옮겨져서,
   // 사용자가 엉뚱한 계층을 의심한다.
   it("이미 분류된 실패를 다른 단계로 옮기지 않는다", () => {

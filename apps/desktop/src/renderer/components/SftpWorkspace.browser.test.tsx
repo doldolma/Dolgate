@@ -319,7 +319,7 @@ function renderWorkspace(
       sftp={sftp}
       transfers={transfers}
       settings={baseSettings}
-      interactiveAuth={null}
+      interactiveAuths={[]}
       onActivatePaneSource={vi.fn().mockResolvedValue(undefined)}
       onDisconnectPane={onDisconnectPane}
       onPaneFilterChange={vi.fn()}
@@ -465,7 +465,7 @@ describe("SftpWorkspace column resizing", () => {
           ...baseSettings,
           sftpBrowserColumnWidths: { ...DEFAULT_SFTP_BROWSER_COLUMN_WIDTHS },
         }}
-        interactiveAuth={null}
+        interactiveAuths={[]}
         onActivatePaneSource={vi.fn().mockResolvedValue(undefined)}
         onDisconnectPane={vi.fn().mockResolvedValue(undefined)}
         onPaneFilterChange={vi.fn()}
@@ -1309,7 +1309,7 @@ describe("SftpWorkspace column resizing", () => {
       hosts: connectableHosts,
       groups: hostGroups,
       sftp,
-      interactiveAuth: {
+      interactiveAuths: [{
         source: "sftp",
         paneId: "right",
         endpointId: "endpoint-warp",
@@ -1323,7 +1323,7 @@ describe("SftpWorkspace column resizing", () => {
         approvalUrl: "https://warpgate.example.com/authorize",
         authCode: "ABCD-1234",
         autoSubmitted: true,
-      } satisfies PendingSftpInteractiveAuth,
+      }] satisfies PendingSftpInteractiveAuth[],
       onReopenInteractiveAuthUrl,
       onClearInteractiveAuth,
     });

@@ -618,7 +618,6 @@ export function createSftpServices(deps: SliceDeps) {
         const trusted = await ensureTrustedHost(set, {
           hostId,
           endpointId,
-          skipProbeIfAlreadyTrusted: true,
           action: options.trustAction,
         });
         if (!trusted) {

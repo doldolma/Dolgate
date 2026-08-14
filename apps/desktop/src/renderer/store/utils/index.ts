@@ -10,6 +10,7 @@ export {
   isSerialHostRecord,
   isSshHostDraft,
   isSshHostRecord,
+  isVncHostRecord,
   isWarpgateSshHostRecord,
   normalizeGroupPath,
   rebaseGroupPath,
@@ -26,4 +27,5 @@ export * from "./session-share";
 export * from "./settings";
 export * from "./sftp";
 export * from "./sorting";
+export * from "./vnc";
 export * from "./workspaces";

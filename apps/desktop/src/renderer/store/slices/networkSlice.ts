@@ -275,6 +275,41 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             if (!rule) {
               return;
             }
+            // 누른 즉시 상태를 바꾼다.
+            //
+            // 이 아래에는 호스트 키 확인(프로브)과 코어의 SSH 연결이 있고, OTP 를 묻는 호스트면
+            // 사람이 답할 때까지 몇십 초가 걸린다. 그동안 화면이 그대로면 사용자는 버튼이 눌렸는지
+            // 알 수 없다 — 실기기에서 "start 가 눌린 건가?" 로 겪은 그 상태다.
+            //
+            // 중간에 멈추면(사용자명·호스트 키 프롬프트) 또는 실패하면 원래 상태로 되돌린다.
+            // 되돌리지 않으면 아무 일도 진행되지 않는데 화면만 "starting" 으로 남는다.
+            const previousRuntime = get().portForwardRuntimes.find(
+              (runtime) => runtime.ruleId === ruleId,
+            );
+            const restoreRuntime = () => {
+              set((state) => ({
+                portForwardRuntimes: previousRuntime
+                  ? upsertForwardRuntime(state.portForwardRuntimes, previousRuntime)
+                  : state.portForwardRuntimes.filter(
+                      (runtime) => runtime.ruleId !== ruleId,
+                    ),
+              }));
+            };
+            set((state) => ({
+              portForwardRuntimes: upsertForwardRuntime(state.portForwardRuntimes, {
+                ...(previousRuntime ?? {
+                  ruleId,
+                  hostId: rule.hostId,
+                  transport: rule.transport,
+                  bindAddress: "bindAddress" in rule ? rule.bindAddress : "127.0.0.1",
+                  bindPort: "bindPort" in rule ? rule.bindPort : 0,
+                }),
+                status: "starting",
+                message: undefined,
+                updatedAt: new Date().toISOString(),
+              }),
+            }));
+
             const host = get().hosts.find((item) => item.id === rule.hostId);
             if (
               host &&
@@ -284,6 +319,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
                 ruleId,
               })
             ) {
+              restoreRuntime();
               return;
             }
             const requiresTrustedHost =
@@ -294,17 +330,26 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               (host?.kind === "aws-ec2" &&
                 host.awsSsmServerProxyEnabled === true);
             if (requiresTrustedHost) {
-              const trusted = await ensureTrustedHost(set, {
-                hostId: rule.hostId,
-                // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
-                skipProbeIfAlreadyTrusted: true,
-                action: {
-                  kind: "portForward",
-                  ruleId,
+              let trusted = false;
+              try {
+                trusted = await ensureTrustedHost(set, {
                   hostId: rule.hostId,
-                },
-              });
+                  // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
+                  action: {
+                    kind: "portForward",
+                    ruleId,
+                    hostId: rule.hostId,
+                  },
+                });
+              } catch (error) {
+                // 프로브 실패(도달 불가·점프 인증 실패 등). 이유는 활동 로그에 남고, 여기서는
+                // 화면을 원래대로 돌려 놓는다.
+                restoreRuntime();
+                throw error;
+              }
               if (!trusted) {
+                // 호스트 키 신뢰 프롬프트가 떴다 — 사용자가 수락하면 그 경로가 다시 시작한다.
+                restoreRuntime();
                 return;
               }
             }
@@ -363,6 +408,15 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             }
             set({ pendingHostKeyPrompt: null });
             await syncOperationalData(set);
+            // 연결이 이 답을 기다리는 중이면 여기서 끝난다 — 다시 연결하지 않는다. 그것이 이 흐름의
+            // 요점이다(다시 연결하면 OTP 를 한 번 더 물어야 한다).
+            if (pending.liveChallengeId) {
+              await api.ssh.respondHostKeyTrust({
+                challengeId: pending.liveChallengeId,
+                trust: true,
+              });
+              return;
+            }
             if (pending.action.kind === "ssh") {
               if (pending.sessionId) {
                 await startPendingSessionConnect(
@@ -423,6 +477,13 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             await startTrustedPortForward(set, get, pending.action.ruleId);
           },
     dismissPendingHostKeyPrompt: () => {
+            // 살아 있는 질의는 거절을 코어에 알려야 그 연결이 끝난다(안 알리면 계속 기다린다).
+            const pendingLive = get().pendingHostKeyPrompt?.liveChallengeId;
+            if (pendingLive) {
+              void api.ssh
+                .respondHostKeyTrust({ challengeId: pendingLive, trust: false })
+                .catch(() => undefined);
+            }
             const pending = get().pendingHostKeyPrompt;
             if (pending?.action.kind === "containerShell" && pending.sessionId) {
               const message = t('networkSlice.hostKeyCancelled', { label: pending.probe.hostLabel });

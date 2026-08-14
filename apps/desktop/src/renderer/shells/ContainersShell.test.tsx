@@ -119,7 +119,7 @@ function ContainersShellHarness({
   } as any;
 
   const modalViewModel = {
-    pendingInteractiveAuth: null,
+    pendingInteractiveAuths: [],
     respondInteractiveAuth: vi.fn(),
     reopenInteractiveAuthUrl: vi.fn(),
     clearPendingInteractiveAuth: vi.fn(),

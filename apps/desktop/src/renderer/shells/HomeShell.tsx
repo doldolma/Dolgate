@@ -676,14 +676,14 @@ export function HomeShell({
             dnsOverrides={homeViewModel.dnsOverrides}
             runtimes={homeViewModel.portForwardRuntimes}
             interactiveAuth={
-              modalViewModel.pendingInteractiveAuth?.source === 'portForward'
-                ? modalViewModel.pendingInteractiveAuth
-                : null
+              modalViewModel.pendingInteractiveAuths.find(
+                (auth) => auth.source === 'portForward',
+              ) ?? null
             }
             discoveryInteractiveAuth={
-              modalViewModel.pendingInteractiveAuth?.source === 'containers'
-                ? modalViewModel.pendingInteractiveAuth
-                : null
+              modalViewModel.pendingInteractiveAuths.find(
+                (auth) => auth.source === 'containers',
+              ) ?? null
             }
             onSave={homeViewModel.savePortForward}
             onSaveDnsOverride={homeViewModel.saveDnsOverride}

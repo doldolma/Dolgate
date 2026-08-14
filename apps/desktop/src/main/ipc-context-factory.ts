@@ -192,6 +192,8 @@ export function createMainIpcContext(
     hosts,
     persistSecret: secretCoordinator.persistSecret,
     loadSecrets: secretCoordinator.loadSecrets,
+    // 원격 키 설치는 코어가 신뢰를 묻지 못한다(대화형 세션이 아니다) — 신뢰된 키를 요구하는
+    // 쪽을 그대로 쓴다.
     requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
     requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
@@ -292,6 +294,7 @@ export function createMainIpcContext(
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
     requireTrustedHostKey: hostCoordinator.requireTrustedHostKey,
     requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
+    resolveTrustedHostKeys: hostCoordinator.resolveTrustedHostKeys,
     resolveTailnetRoute: hostCoordinator.resolveTailnetRoute,
     requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
     buildKnownSshDuplicateKeys: hostCoordinator.buildKnownSshDuplicateKeys,

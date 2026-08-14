@@ -75,6 +75,44 @@ describe("resolveConnectionFailurePresentation", () => {
     ).toBe("10.0.0.10:22 연결 시간이 초과되었습니다.");
   });
 
+  it("keeps the server notice verbatim instead of collapsing it into a timeout", () => {
+    // 터미널이 없는 경로(SFTP·포트포워딩·컨테이너)는 이 문구가 배너를 받는 유일한 수단이다.
+    // 내용을 해석하지 않고 원문을 그대로 싣는지 본다 — 승인 주소인지 정책 안내인지는 사용자가
+    // 읽고 판단할 몫이다.
+    const presentation = resolveConnectionFailurePresentation(
+      "ssh handshake failed: read tcp 10.0.0.10:22: i/o timeout" +
+        " — 인증 단계에서 서버 응답이 없습니다. 서버가 보낸 안내:\n" +
+        "# Tailscale SSH requires an additional check.\n" +
+        "# To authenticate, visit: https://login.tailscale.com/a/le7a9c3c3519ae",
+    );
+
+    expect(presentation.message).toContain(
+      "https://login.tailscale.com/a/le7a9c3c3519ae",
+    );
+    // 분류된 문구는 그대로 살린다 — 배너는 덧붙는 것이고 대체하는 것이 아니다.
+    expect(presentation.message).toContain("연결 시간이 초과");
+  });
+
+  it("does not repeat the server notice on unclassified failures", () => {
+    // 분류가 안 되는 실패는 원문을 그대로 문구로 쓴다. 안내를 떼어 두지 않으면 같은 글이 두 번 나온다.
+    const presentation = resolveConnectionFailurePresentation(
+      "something odd happened 서버가 보낸 안내:\n# please read https://example.test/policy",
+    );
+
+    const occurrences = presentation.message.split(
+      "https://example.test/policy",
+    ).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("adds no notice wording when the server sent none", () => {
+    expect(
+      resolveConnectionFailurePresentation(
+        "dial failed: dial tcp 10.0.0.10:22: i/o timeout",
+      ).message,
+    ).toBe("10.0.0.10:22 연결 시간이 초과되었습니다.");
+  });
+
   it("presents EOF errors as interrupted connections", () => {
     expect(resolveConnectionFailurePresentation("ssh handshake failed: EOF")).toEqual({
       title: "Connection Failed",

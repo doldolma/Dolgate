@@ -25,6 +25,7 @@ import {
   mergeContainerLogLines,
   normalizeRemoteInvokeErrorMessage,
   normalizeErrorMessage,
+  findPendingInteractiveAuthByChallengeId,
   isAwsSsoAuthenticationErrorMessage,
   arePortForwardRuntimeRecordsEqual,
   areEcsTunnelTabStatesEqual,
@@ -263,7 +264,7 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     activeCredentialRetryAttempt: null,
     pendingMissingUsernamePrompt: null,
     pendingStartupCommandPrompt: null,
-    pendingInteractiveAuth: null,
+    pendingInteractiveAuths: [],
     pendingConnectionAttempts: [],
     resolvedStartupCommandsBySessionId: {},
     sessionReturnTargets: {},
@@ -823,7 +824,6 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
                 sessionId: pendingSessionId,
                 endpointId: buildContainersEndpointId(currentAttempt.hostId),
                 // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
-                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "containerShell",
                   hostId: currentAttempt.hostId,
@@ -2358,33 +2358,75 @@ export function createSessionSlice(deps: SliceDeps): SessionSlice {
     cancelStartupCommandPrompt: () => {
             set({ pendingStartupCommandPrompt: null });
           },
-    respondInteractiveAuth: async (challengeId, responses) => {
-            const pending = get().pendingInteractiveAuth;
-            if (!pending || pending.challengeId !== challengeId) {
+    respondInteractiveAuth: async (
+            challengeId,
+            responses,
+            storedPasswordIndexes,
+          ) => {
+            // 어느 대상의 요청인지는 챌린지 ID 로 찾는다 — 화면이 여러 개 떠 있어도 답이 자기
+            // 연결로 간다.
+            const pending = findPendingInteractiveAuthByChallengeId(
+              get().pendingInteractiveAuths,
+              challengeId,
+            );
+            if (!pending) {
               return;
             }
-            await api.ssh.respondKeyboardInteractive(
-              pending.source === "ssh"
-                ? {
-                    sessionId: pending.sessionId,
-                    challengeId,
-                    responses,
-                  }
-                : {
-                    endpointId: pending.endpointId,
-                    challengeId,
-                    responses,
-                  },
-            );
+            try {
+              await api.ssh.respondKeyboardInteractive(
+                pending.source === "ssh"
+                  ? {
+                      sessionId: pending.sessionId,
+                      challengeId,
+                      responses,
+                      // 세션 경로만 코어에서 대입을 처리한다. SFTP·컨테이너·포워딩은 각자 다른
+                      // 서비스를 타므로 인덱스를 보내도 채워지지 않는다 — 그래서 보내지 않는다.
+                      ...(storedPasswordIndexes?.length
+                        ? { storedPasswordIndexes }
+                        : {}),
+                    }
+                  : {
+                      endpointId: pending.endpointId,
+                      challengeId,
+                      responses,
+                    },
+              );
+            } catch (error) {
+              // 받을 곳이 없어졌을 때(연결이 이미 끝났거나 코어가 그 챌린지를 버렸을 때) 조용히
+              // 넘기면 버튼이 먹통으로 보인다. 이유를 카드에 남긴다.
+              set((state) => ({
+                pendingInteractiveAuths: state.pendingInteractiveAuths.map((auth) =>
+                  auth.challengeId === challengeId
+                    ? {
+                        ...auth,
+                        deliveryError: normalizeErrorMessage(
+                          error,
+                          t('authOverlay.deliveryFailed'),
+                        ),
+                      }
+                    : auth,
+                ),
+              }));
+            }
           },
-    reopenInteractiveAuthUrl: async () => {
-            const pending = get().pendingInteractiveAuth;
+    reopenInteractiveAuthUrl: async (challengeId) => {
+            const auths = get().pendingInteractiveAuths;
+            const pending = challengeId
+              ? findPendingInteractiveAuthByChallengeId(auths, challengeId)
+              : (auths.find((auth) => auth.approvalUrl) ?? null);
             if (!pending?.approvalUrl) {
               return;
             }
             await api.shell.openExternal(pending.approvalUrl);
           },
-    clearPendingInteractiveAuth: () => set({ pendingInteractiveAuth: null }),
+    clearPendingInteractiveAuth: (challengeId) =>
+            set((state) => ({
+              pendingInteractiveAuths: challengeId
+                ? state.pendingInteractiveAuths.filter(
+                    (auth) => auth.challengeId !== challengeId,
+                  )
+                : [],
+            })),
     updatePendingConnectionSize: (sessionId, cols, rows) => {
             set((state) => ({
               pendingConnectionAttempts: state.pendingConnectionAttempts.map(

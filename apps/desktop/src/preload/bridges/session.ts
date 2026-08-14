@@ -7,6 +7,7 @@ import type {
   DesktopSerialControlInput,
   DesktopSerialConnectInput,
   DesktopSftpConnectInput,
+  HostKeyTrustRespondInput,
   KeyboardInteractiveRespondInput,
 } from "@shared";
 import { ipcChannels } from "../../common/ipc-channels";
@@ -48,6 +49,8 @@ export function buildSshBridge(ipcRenderer: IpcRenderer): DesktopApi["ssh"] {
       ipcRenderer.invoke(ipcChannels.ssh.completionQuery, sessionId, command),
     respondKeyboardInteractive: (input: KeyboardInteractiveRespondInput) =>
       ipcRenderer.invoke(ipcChannels.ssh.respondKeyboardInteractive, input),
+    respondHostKeyTrust: (input: HostKeyTrustRespondInput) =>
+      ipcRenderer.invoke(ipcChannels.ssh.respondHostKeyTrust, input),
     probeAgent: () => ipcRenderer.invoke(ipcChannels.ssh.probeAgent),
     tmuxSplitPane: (sessionId: string, direction: "h" | "v") =>
       ipcRenderer.invoke(ipcChannels.ssh.tmuxSplitPane, sessionId, direction),

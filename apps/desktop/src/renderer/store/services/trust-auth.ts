@@ -43,6 +43,13 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     );
   };
 
+  /**
+   * 이 호스트의 키를 이미 신뢰하고 있는가.
+   *
+   * 연결 전 확인이 남아 있는 경로(AWS SSM, 아래 참조)에서만 쓴다 — 신뢰하고 있으면 프로브를
+   * 건너뛴다. 조회 범위(tailnet)를 메인과 똑같이 계산해야 한다. 어긋나면 렌더러는 "신뢰함" 이라
+   * 넘기는데 메인은 거부해서, 신뢰할 방법이 없는 막다른 오류가 된다.
+   */
   const hasTrustedHostKey = (hostId: string): boolean => {
     const state = get();
     const host = state.hosts.find((item) => item.id === hostId);
@@ -92,6 +99,20 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
         record.port === target.port &&
         (record.tailnetId ?? "").trim() === scope,
     );
+  };
+
+  /**
+   * 연결 전에 서버 키를 읽어야 하는 호스트인가.
+   *
+   * 보통은 아니다 — 코어가 핸드셰이크 도중 묻는다. AWS SSM 은 예외다: 키를 저장하는 이름이
+   * 인스턴스 신원(aws-ssm:프로필:리전:i-…)인데 실제로 붙는 주소는 로컬 터널
+   * (127.0.0.1:임의포트)이다. 코어는 자기가 붙은 주소만 아니까 연결 중에 물으면 그 임시 주소로
+   * 저장돼 다음 연결에서 또 묻는다. 이 경로는 인증이 임시 EIC 키라서 미리 읽어도 사람을 두 번
+   * 부르지 않는다(OTP 점프 호스트가 문제였다).
+   */
+  const readsHostKeyBeforeConnect = (hostId: string): boolean => {
+    const host = get().hosts.find((item) => item.id === hostId);
+    return host !== undefined && isAwsEc2HostRecord(host);
   };
 
   const loginAwsSsoProfile = async (
@@ -226,30 +247,44 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     hostId: string;
     sessionId?: string | null;
     endpointId?: string | null;
-    skipProbeIfAlreadyTrusted?: boolean;
     /**
-     * 이미 신뢰된 호스트라도 probe를 강제한다(점프 체인의 홉까지).
+     * 지금 서버 키를 읽어서 저장된 값과 대조한다.
      *
-     * 키가 바뀐 뒤 복구할 때만 쓴다 — skipProbeIfAlreadyTrusted 를 이기므로, 저장된 레코드가
-     * 있어도 현재 서버 키와 대조해 mismatch 를 확인할 수 있다.
+     * 연결 경로는 이걸 켜지 않는다 — 키 확인은 연결 안에서 한다. 키가 바뀐 뒤 복구할 때만 쓴다:
+     * 저장된 지문과 현재 지문을 나란히 보여 주려면 연결 밖에서 읽어야 한다.
      */
     forceProbe?: boolean;
     action: PendingHostKeyPrompt["action"];
   };
 
-  // Probe + (if needed) prompt for a single host's key. The main process probes
-  // a host that has a jumpHostId THROUGH its (already-trusted) jump host, so the
-  // jump must be trusted before this is called for such a target.
+  /**
+   * 이 호스트의 키를 확인하고, 필요하면 프롬프트를 세운다.
+   *
+   * 연결 경로에서는 아무것도 하지 않는다(아래 참조). forceProbe 일 때만 실제로 서버 키를 읽는다 —
+   * 점프를 경유하는 호스트는 메인이 (이미 신뢰된) 점프를 통해 프로브한다.
+   */
   const ensureTrustedHostKey = async (
     set: StoreSetter,
     input: EnsureTrustedHostInput,
   ): Promise<boolean> => {
-    if (
-      !input.forceProbe &&
-      input.skipProbeIfAlreadyTrusted &&
-      hasTrustedHostKey(input.hostId)
-    ) {
-      return true;
+    // 모르는 키는 **연결 중에** 묻는다 — 이 경로에서는 프로브를 돌리지 않는다.
+    //
+    // 프로브는 대상까지 가는 또 하나의 연결이고, 점프 호스트에 다시 인증해야 한다. OTP 를 요구하는
+    // 베스천이면 코드를 두 번 넣어야 하는데 TOTP 는 한 번 쓰면 무효하고 30초마다 바뀐다 — 실기기에서
+    // 그 때문에 첫 연결이 통과하지 못했다. 코어가 핸드셰이크 도중 키를 보여 주고 신뢰를 받는다
+    // (hostKeyTrustChallenge). 그러면 인증은 한 번뿐이다.
+    //
+    // VNC 도 같다: 화면은 vnc-core 가 그리지만 경유 터널은 ssh-core 가 연다(ipc/vnc.ts 의
+    // startPortForward) — 즉 SSH 홉의 키는 그 안에서 물을 수 있다.
+    //
+    // 예외 둘: forceProbe(키 변경 복구)와 AWS SSM(저장 이름이 dial 주소와 다르다).
+    if (!input.forceProbe) {
+      if (!readsHostKeyBeforeConnect(input.hostId)) {
+        return true;
+      }
+      if (hasTrustedHostKey(input.hostId)) {
+        return true;
+      }
     }
 
     const probe = await api.knownHosts.probeHost({
@@ -463,13 +498,12 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     set: StoreSetter,
     input: EnsureTrustedHostInput,
   ): Promise<boolean> => {
-    // 타깃이 점프(베스천)를 경유하면, 그 베스천들을 먼저 신뢰해야 main이 경유해 타깃 키를
-    // probe할 수 있다. 다단 ProxyJump는 체인 전체를 첫 홉부터 순서대로 신뢰한다 — 각 홉은
-    // 자신의 설정으로 probe되며, 미신뢰 홉이 있으면 그 홉에서 신뢰 프롬프트가 뜬다(Termius식
-    // 홉별 trust). 이미 신뢰된 홉은 재-probe를 생략(중복 순회·pre-auth 몰림 방지, 실연결의
-    // strict host-key 검사가 안전을 보장) — forceProbe면 홉까지 다시 probe한다(키가 바뀐 게
-    // 베스천일 수 있다). 점프가 없는 일반 경로는 inner 프로미스를 그대로
-    // 반환해 추가 마이크로태스크 없이 기존 타이밍을 유지한다.
+    // forceProbe(키 변경 복구)에서만 의미가 있다 — 바뀐 키가 대상이 아니라 베스천일 수 있으므로
+    // 체인을 첫 홉부터 순서대로 확인한다. 메인은 각 홉을 그 앞 홉을 경유해 프로브하므로 순서를
+    // 지켜야 한다. 연결 경로에서는 홉의 키도 코어가 핸드셰이크 중에 묻는다.
+    //
+    // 점프가 없는 경로는 inner 프로미스를 그대로 반환해 추가 마이크로태스크 없이 기존 타이밍을
+    // 유지한다(중간 상태를 관찰하는 화면이 있다).
     const targetHost = get().hosts.find((item) => item.id === input.hostId);
     if (targetHost && isSshHostRecord(targetHost)) {
       const chain = deriveJumpChain(targetHost).filter(
@@ -481,7 +515,6 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
             const jumpTrusted = await ensureTrustedHostKey(set, {
               ...input,
               hostId: jumpHostId,
-              skipProbeIfAlreadyTrusted: true,
             });
             if (!jumpTrusted) {
               return false;
@@ -498,8 +531,8 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
   /**
    * 연결이 호스트 키 불일치로 실패한 뒤, 교체 프롬프트로 되돌린다.
    *
-   * 정상 경로는 저장된 키가 있으면 probe를 건너뛰므로(중복 순회·pre-auth 몰림 방지), 키가 바뀐
-   * 사실은 실연결의 strict host-key 검사가 처음 알린다. 그 오류는 자동 재연결 금지 대상이고
+   * 정상 경로는 연결 전에 서버 키를 읽지 않으므로(인증을 두 번 요구하게 된다), 키가 바뀐
+   * 사실은 실연결의 호스트 키 검사가 처음 알린다. 그 오류는 자동 재연결 금지 대상이고
    * (reconnect-classify의 permanent) 자격증명 프롬프트 대상도 아니라서, 여기서 다시 probe하지
    * 않으면 known host 레코드를 손으로 지우는 것 말고는 빠져나갈 길이 없다.
    *

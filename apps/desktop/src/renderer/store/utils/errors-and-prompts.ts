@@ -5,6 +5,15 @@ import {
 } from "@dolssh/shared-core";
 import { t } from '../../i18n';
 
+/**
+ * ssh-core 가 실패 문구에 서버 배너를 붙일 때 앞에 두는 표식(`internal/sshconn/banner.go`).
+ *
+ * 이 문자열을 바꾸려면 두 곳을 같이 바꿔야 한다. 배너 내용을 해석하지 않고 잘라내기만 하려고
+ * 표식을 두었다 — 문구에서 URL 을 찾아 의도를 추측하면 회사 경고문의 정책 링크를 승인 요청으로
+ * 잘못 안내한다.
+ */
+const SERVER_NOTICE_MARKER = "서버가 보낸 안내:";
+
 export function normalizeRemoteInvokeErrorMessage(message: string): string {
   return message
     .replace(/^Error invoking remote method '[^']+':\s*/u, "")
@@ -113,6 +122,31 @@ export function resolveConnectionFailurePresentation(
   // 규칙을 써야 해서 코드만 돌려받고 문구는 이 앱이 붙인다. 규칙을 두 벌로 두면 한쪽만
   // 고쳐진다.
   const reason = getConnectionFailureReason(normalized);
+
+  /**
+   * 서버가 인증 단계에 보낸 배너가 실패 문구에 실려 있으면 그 **원문**을 함께 보여준다.
+   *
+   * 내용을 해석하지 않는다. 문구에서 URL 을 찾아 "승인하라"고 말하면, 회사 서버가 MOTD 에 넣어 둔
+   * 정책 안내 링크를 승인 요청으로 잘못 안내하게 된다 — 무엇을 하라는 글인지는 사용자가 읽고
+   * 판단할 몫이다. 그래서 ssh-core 가 붙이는 표식만 보고 잘라낸다.
+   *
+   * 터미널이 있는 세션은 이 배너를 화면에 그대로 받으므로(runtimeEventSlice) 여기까지 오지 않는다.
+   * 이 경로는 SFTP·포트포워딩·컨테이너처럼 글을 쓸 터미널이 없는 곳을 위한 것이다.
+   */
+  const noticeIndex = normalized.indexOf(SERVER_NOTICE_MARKER);
+  const serverNotice =
+    noticeIndex >= 0
+      ? normalized.slice(noticeIndex + SERVER_NOTICE_MARKER.length).trim()
+      : "";
+  // 원문에서 안내 부분을 떼어 둔다. 아래 fallback 은 원문을 그대로 쓰므로, 떼지 않으면 같은 글이
+  // 두 번 나온다.
+  const withoutServerNotice =
+    noticeIndex >= 0 ? normalized.slice(0, noticeIndex).trim() : normalized;
+  const withServerNotice = (message: string): string =>
+    serverNotice
+      ? `${message}\n${t('connectFailure.serverNotice', { notice: serverNotice })}`
+      : message;
+
   const MESSAGES: Record<
     Exclude<ConnectionFailureCode, "unknown">,
     () => string
@@ -137,7 +171,7 @@ export function resolveConnectionFailurePresentation(
   if (reason.code !== "unknown") {
     return {
       title: TITLES[reason.code] ?? "Connection Failed",
-      message: MESSAGES[reason.code](),
+      message: withServerNotice(MESSAGES[reason.code]()),
       ...(reason.code === "tailnet-expired"
         ? { kind: "tailscale-expired" as const }
         : {}),
@@ -149,7 +183,9 @@ export function resolveConnectionFailurePresentation(
   }
   return {
     title: "Connection Failed",
-    message: normalized || t('connectFailure.generic'),
+    message: withServerNotice(
+      withoutServerNotice || t('connectFailure.generic'),
+    ),
   };
 }
 

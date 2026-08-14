@@ -267,6 +267,11 @@ export interface MainIpcContext {
     secrets: HostSecretInput,
   ) => Promise<SshCertificateInfo | null>;
   requireTrustedHostKey: (host: { hostname: string; port: number }) => string;
+  resolveTrustedHostKeys: (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }) => string[];
   requireTrustedHostKeys: (host: {
     hostname: string;
     port: number;

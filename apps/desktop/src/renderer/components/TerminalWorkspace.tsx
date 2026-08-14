@@ -23,6 +23,7 @@ import {
 import { RdpSessionCanvas } from './rdp/RdpSessionCanvas';
 import { VncSessionCanvas } from './vnc/VncSessionCanvas';
 import { VncConnectionOverlay } from './vnc/VncConnectionOverlay';
+import { VncTunnelAuthOverlay } from './vnc/VncTunnelAuthOverlay';
 import { RdpConnectionOverlay } from './rdp/RdpConnectionOverlay';
 import { TerminalSessionPane } from './terminal-workspace/TerminalSessionPane';
 import { TerminalWorkspaceLayoutView } from './terminal-workspace/TerminalWorkspaceLayoutView';
@@ -671,6 +672,9 @@ export function TerminalWorkspace({
           {/* 연결 진행·실패·재연결을 pane 위에 덮는다. 이게 없으면 끊긴 세션에서 다시 시도할
               방법이 없고, 재연결 중이라는 것도 보이지 않는다. */}
           {visible ? <VncConnectionOverlay sessionId={tab.sessionId} /> : null}
+          {/* 경유 SSH 터널이 OTP 를 물으면 그 입력창을 진행 카드 위에 띄운다. 이게 없으면 코드를
+              넣을 곳이 없어 연결이 그냥 멈춰 있다(코어는 답을 기다린다). */}
+          {visible ? <VncTunnelAuthOverlay sessionId={tab.sessionId} /> : null}
         </>
       ) : tab.paneKind === 'rdp' ? (
         // RDP 탭은 터미널이 아니다 — xterm 대신 원격 화면 캔버스를 띄운다.

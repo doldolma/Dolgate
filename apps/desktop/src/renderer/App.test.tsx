@@ -162,7 +162,7 @@ function createMockStoreState(overrides: Record<string, unknown> = {}) {
     pendingCredentialRetry: null,
     activeCredentialRetryAttempt: null,
     pendingAwsSftpConfigRetry: null,
-    pendingInteractiveAuth: null,
+    pendingInteractiveAuths: [],
     sftp: {
       localHomePath: '/',
       leftPane: null,

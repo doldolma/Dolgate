@@ -77,6 +77,17 @@ export function shouldShowSessionOverlay(
     return false;
   }
 
+  /**
+   * 서버가 배너로 사람에게 할 일을 말했고, 그 글이 터미널에 찍혀 있다.
+   *
+   * 그 시점엔 이 오버레이가 추적하는 것이 **모두 끝나 있다** — tailnet, TCP, 키 교환, 호스트 키.
+   * 남은 단계는 서버가 사람을 기다리는 것뿐이고, 카드로 화면을 덮으면 정작 그 안내를 가린다.
+   * 실패로 끝나면(아래 error 분기) 다시 보여 준다.
+   */
+  if (tab.serverBannerShown && tab.status !== 'error') {
+    return false;
+  }
+
   if (
     tab.status === 'pending' ||
     tab.status === 'connecting' ||

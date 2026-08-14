@@ -14,8 +14,8 @@ export function useAppModalViewModel() {
   const pendingStartupCommandPrompt = useAppStore(
     (state) => state.pendingStartupCommandPrompt,
   );
-  const pendingInteractiveAuth = useAppStore(
-    (state) => state.pendingInteractiveAuth,
+  const pendingInteractiveAuths = useAppStore(
+    (state) => state.pendingInteractiveAuths,
   );
   const acceptPendingHostKeyPrompt = useAppStore(
     (state) => state.acceptPendingHostKeyPrompt,
@@ -59,7 +59,7 @@ export function useAppModalViewModel() {
     pendingAwsSftpConfigRetry,
     pendingMissingUsernamePrompt,
     pendingStartupCommandPrompt,
-    pendingInteractiveAuth,
+    pendingInteractiveAuths,
     acceptPendingHostKeyPrompt,
     dismissPendingHostKeyPrompt,
     dismissPendingCredentialRetry,

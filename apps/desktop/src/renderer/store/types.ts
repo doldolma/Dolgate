@@ -30,6 +30,7 @@ import type {
   HostKeyProbeResult,
   HostRecord,
   HostSecretInput,
+  KeyboardInteractiveHop,
   KeyboardInteractivePrompt,
   KnownHostRecord,
   PortForwardDraft,
@@ -420,6 +421,16 @@ export interface PendingConflictDialog {
 export interface PendingHostKeyPrompt {
   sessionId?: string | null;
   probe: HostKeyProbeResult;
+  /**
+   * 연결이 이 창의 답을 기다리고 있으면 그 질의 ID.
+   *
+   * 있으면 수락·거절이 **코어로 답을 보내는 것**이다 — 다시 연결하지 않는다(연결은 이미 그 자리에서
+   * 기다린다). 없으면 예전 흐름이다: 신뢰를 저장한 뒤 action 으로 연결을 시작한다.
+   *
+   * 이 구분이 필요한 이유: 키를 미리 읽어 오는 별도 연결(프로브)을 없애면서, 처음 보는 호스트에서
+   * 인증을 두 번 요구하던 문제를 없앴다. OTP 는 30초마다 바뀌어 두 번 넣을 수 없다.
+   */
+  liveChallengeId?: string | null;
   action:
     | {
         kind: "ssh";
@@ -530,6 +541,23 @@ interface PendingInteractiveAuthBase {
   approvalUrl?: string | null;
   authCode?: string | null;
   autoSubmitted: boolean;
+  /**
+   * 이 연결에 저장된 비밀번호가 있는지. 참이면 인증 창이 칸마다 "저장된 비밀번호 사용" 을 내민다.
+   * 값은 코어 밖으로 나오지 않으므로, 누르면 그 칸의 인덱스만 코어로 돌아간다.
+   */
+  hasStoredPassword?: boolean;
+  /**
+   * 이 프롬프트를 낸 홉. 점프 체인에서 누구의 코드를 묻는지 화면이 말할 수 있게 한다 — 없으면
+   * 베스천과 최종 대상의 "Verification code:" 가 구분되지 않는다.
+   */
+  hop?: KeyboardInteractiveHop | null;
+  /**
+   * 답을 코어에 전달하지 못한 이유. 카드에 그대로 보여 준다.
+   *
+   * 이것이 없으면 "응답 보내기" 가 아무 반응 없는 버튼이 된다 — 요청이 이미 끝나서 받을 곳이
+   * 없을 때 조용히 실패했었다.
+   */
+  deliveryError?: string | null;
 }
 
 export interface PendingSessionInteractiveAuth
@@ -560,11 +588,27 @@ export interface PendingPortForwardInteractiveAuth
   hostId: string;
 }
 
+/**
+ * VNC 세션의 경유 터널이 묻는 인증.
+ *
+ * 두 ID 를 다 갖는 유일한 종류다. **답은 endpointId 로** 보내야 한다(터널을 여는 것은 포워딩
+ * 서비스라 코어의 대기표가 그 ID 에 걸려 있다). **카드는 sessionId 로** 그린다 — VNC 탭 위에
+ * 띄워야 사용자가 본다. 하나만 들고 있으면 답이 사라지거나 카드가 사라진다.
+ */
+export interface PendingVncTunnelInteractiveAuth
+  extends PendingInteractiveAuthBase {
+  source: "vncTunnel";
+  endpointId: string;
+  sessionId: string;
+  hostId: string;
+}
+
 export type PendingInteractiveAuth =
   | PendingSessionInteractiveAuth
   | PendingSftpInteractiveAuth
   | PendingContainersInteractiveAuth
-  | PendingPortForwardInteractiveAuth;
+  | PendingPortForwardInteractiveAuth
+  | PendingVncTunnelInteractiveAuth;
 
 export interface PendingConnectionAttempt {
   sessionId: string;
@@ -678,7 +722,15 @@ interface AppStateParts {
   pendingAwsSftpConfigRetry: PendingAwsSftpConfigRetry | null;
   pendingMissingUsernamePrompt: PendingMissingUsernamePrompt | null;
   pendingStartupCommandPrompt: PendingStartupCommandPrompt | null;
-  pendingInteractiveAuth: PendingInteractiveAuth | null;
+  /**
+   * 지금 답을 기다리는 대화형 인증들. **대상(세션·엔드포인트)마다 하나씩** 담는다.
+   *
+   * 예전에는 앱 전체에 슬롯이 하나였다. 그래서 두 번째 챌린지가 오면 먼저 뜬 카드가 사라지고,
+   * 그 연결은 아무 표시 없이 영원히 기다렸다 — 실기기에서 터미널 연결이 "추가 인증 응답이
+   * 필요합니다" 만 띄운 채 멈춘 원인이다. 화면은 자기 대상의 것을 골라 그린다(utils 의
+   * findSessionPendingInteractiveAuth·findEndpointPendingInteractiveAuth).
+   */
+  pendingInteractiveAuths: PendingInteractiveAuth[];
   pendingConnectionAttempts: PendingConnectionAttempt[];
   resolvedStartupCommandsBySessionId: Record<string, string>;
   sessionReturnTargets: Record<string, SessionReturnTarget>;
@@ -995,9 +1047,15 @@ interface AppStateParts {
   respondInteractiveAuth: (
     challengeId: string,
     responses: string[],
+    /** 저장된 비밀번호로 채울 칸(프롬프트 인덱스). 값이 아니라 인덱스만 보낸다 — 코어가 채운다. */
+    storedPasswordIndexes?: number[],
   ) => Promise<void>;
-  reopenInteractiveAuthUrl: () => Promise<void>;
-  clearPendingInteractiveAuth: () => void;
+  /**
+   * 승인 링크를 다시 연다. challengeId 를 주면 그 요청의 것, 안 주면 링크가 있는 첫 요청의 것이다.
+   */
+  reopenInteractiveAuthUrl: (challengeId?: string) => Promise<void>;
+  /** 인증 카드를 내린다. challengeId 를 주면 그것만, 안 주면 전부. */
+  clearPendingInteractiveAuth: (challengeId?: string) => void;
   updatePendingConnectionSize: (
     sessionId: string,
     cols: number,
@@ -1178,7 +1236,7 @@ export type SessionSlice = Pick<
   | "activeCredentialRetryAttempt"
   | "pendingMissingUsernamePrompt"
   | "pendingStartupCommandPrompt"
-  | "pendingInteractiveAuth"
+  | "pendingInteractiveAuths"
   | "pendingConnectionAttempts"
   | "resolvedStartupCommandsBySessionId"
   | "sessionReturnTargets"

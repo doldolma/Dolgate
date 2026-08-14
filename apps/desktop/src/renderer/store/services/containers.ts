@@ -731,11 +731,10 @@ export function createContainersServices(deps: SliceDeps) {
           activeContainerHostId: hostId,
           homeSection: "hosts",
           hostDrawer: { mode: "closed" },
-          pendingInteractiveAuth:
-            isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
-            state.pendingInteractiveAuth.hostId === hostId
-              ? null
-              : state.pendingInteractiveAuth,
+          pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+            (auth) =>
+              !(isPendingContainersInteractiveAuth(auth) && auth.hostId === hostId),
+          ),
           containerTabs: upsertContainersTab(state.containerTabs, {
             ...currentTab,
             title: buildContainersTabTitle(host),
@@ -855,11 +854,10 @@ export function createContainersServices(deps: SliceDeps) {
         const currentTab =
           findContainersTab(state, hostId) ?? createEmptyContainersTabState(host);
         return {
-          pendingInteractiveAuth:
-            isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
-            state.pendingInteractiveAuth.hostId === hostId
-              ? null
-              : state.pendingInteractiveAuth,
+          pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+            (auth) =>
+              !(isPendingContainersInteractiveAuth(auth) && auth.hostId === hostId),
+          ),
           containerTabs: upsertContainersTab(state.containerTabs, {
             ...currentTab,
             title: buildContainersTabTitle(host),

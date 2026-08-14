@@ -1397,40 +1397,113 @@ describe("createAppStore sessions and auth recovery", () => {
     expect(store.getState().activeWorkspaceTab).toBe("session:session-2");
   });
 
-  it("waits for host key trust when the server is not trusted yet", async () => {
+  // 호스트 키 확인은 이제 **연결 안에서** 한다. 예전에는 연결 전에 키를 미리 읽어 왔고(프로브),
+  // 그 프로브도 점프 호스트에 인증해야 해서 OTP 호스트에서는 코드를 두 번 넣어야 했다 — TOTP 는
+  // 한 번 쓰면 무효라 통과할 수 없었다.
+  it("connects first and answers the host key question in place", async () => {
     const api = createMockApi();
-    api.knownHosts.probeHost = vi.fn().mockResolvedValue({
-      hostId: "host-1",
-      hostLabel: "Prod",
-      host: "prod.example.com",
-      port: 22,
-      algorithm: "ssh-ed25519",
-      publicKeyBase64: "AAAATEST",
-      fingerprintSha256: "SHA256:test",
-      status: "untrusted",
-      existing: null,
-    });
     const store = createAppStore(api);
 
     await store.getState().bootstrap();
     await store.getState().connectHost("host-1", 120, 32);
 
-    expect(store.getState().tabs[0]?.sessionId.startsWith("pending:")).toBe(
-      true,
-    );
-    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
-      "awaiting-host-trust",
-    );
+    // 키를 미리 읽지 않고 곧바로 연결을 시작한다.
+    expect(api.knownHosts.probeHost).not.toHaveBeenCalled();
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
+
+    const sessionId = store.getState().tabs[0]?.sessionId;
+    store.getState().handleCoreEvent({
+      type: "hostKeyTrustChallenge",
+      sessionId: sessionId!,
+      payload: {
+        challengeId: "hostkey-trust-1",
+        hop: { username: "ubuntu", host: "prod.example.com", port: 22 },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: "SHA256:test",
+        publicKeyBase64: "AAAATEST",
+        mismatch: false,
+      },
+    });
+
     expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe(
       "untrusted",
     );
-    expect(api.ssh.connect).not.toHaveBeenCalled();
+    expect(store.getState().pendingHostKeyPrompt?.probe.fingerprintSha256).toBe(
+      "SHA256:test",
+    );
 
     await store.getState().acceptPendingHostKeyPrompt("trust");
 
+    // 저장하고 코어에 답한다. **다시 연결하지 않는다** — 연결은 이미 그 자리에서 기다린다.
     expect(api.knownHosts.trust).toHaveBeenCalled();
-    expect(api.ssh.connect).toHaveBeenCalled();
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: "hostkey-trust-1",
+      trust: true,
+    });
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  // 거절하면 코어에 알려야 그 연결이 끝난다. 안 알리면 코어가 계속 기다린다.
+  it("tells the core when the host key is declined", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    const sessionId = store.getState().tabs[0]?.sessionId;
+    store.getState().handleCoreEvent({
+      type: "hostKeyTrustChallenge",
+      sessionId: sessionId!,
+      payload: {
+        challengeId: "hostkey-trust-2",
+        hop: { username: "ubuntu", host: "prod.example.com", port: 22 },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: "SHA256:test",
+        publicKeyBase64: "AAAATEST",
+        mismatch: false,
+      },
+    });
+
+    store.getState().dismissPendingHostKeyPrompt();
+
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: "hostkey-trust-2",
+      trust: false,
+    });
+    expect(store.getState().pendingHostKeyPrompt).toBeNull();
+  });
+
+  // 이미 저장된 키와 다른 키가 오면 "교체" 로 묻는다(기존 제품 결정 그대로).
+  it("asks to replace when the key changed", async () => {
+    const api = createMockApi();
+    const store = createAppStore(api);
+
+    await store.getState().bootstrap();
+    await store.getState().connectHost("host-1", 120, 32);
+    const sessionId = store.getState().tabs[0]?.sessionId;
+    store.getState().handleCoreEvent({
+      type: "hostKeyTrustChallenge",
+      sessionId: sessionId!,
+      payload: {
+        challengeId: "hostkey-trust-3",
+        hop: { username: "ubuntu", host: "prod.example.com", port: 22 },
+        algorithm: "ssh-ed25519",
+        fingerprintSha256: "SHA256:new",
+        publicKeyBase64: "AAAANEW",
+        mismatch: true,
+      },
+    });
+
+    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe("mismatch");
+
+    await store.getState().acceptPendingHostKeyPrompt("replace");
+
+    expect(api.knownHosts.replace).toHaveBeenCalled();
+    expect(api.ssh.respondHostKeyTrust).toHaveBeenCalledWith({
+      challengeId: "hostkey-trust-3",
+      trust: true,
+    });
   });
 
   // 이미 신뢰된 호스트는 연결 전 probe를 건너뛰므로(중복 순회 방지), 키가 바뀐 사실은 실연결의
@@ -1584,30 +1657,23 @@ describe("createAppStore sessions and auth recovery", () => {
 
     await store.getState().connectHost("aws-host-1", 120, 32);
 
-    // 일반 SSH와 동일하게, 미신뢰 EC2 호스트는 연결 전에 신뢰 프롬프트를 띄운다.
+    // AWS SSM 은 키를 인스턴스 신원(aws-ssm:…)으로 저장하는데 실제로 붙는 주소는 로컬 터널이다.
+    // 코어는 자기가 붙은 주소만 아니까 연결 중에 물으면 그 임시 주소로 저장된다 — 그래서 이 경로만
+    // 예전처럼 연결 전에 읽고 묻는다(임시 EIC 키로 인증하므로 사람을 두 번 부르지 않는다).
     expect(api.knownHosts.probeHost).toHaveBeenCalledWith(
-      expect.objectContaining({
-        hostId: "aws-host-1",
-        endpointId: "aws-ec2-ssh:aws-host-1",
-      }),
-    );
-    expect(store.getState().pendingHostKeyPrompt?.probe.status).toBe(
-      "untrusted",
-    );
-    expect(store.getState().pendingHostKeyPrompt?.action).toMatchObject({
-      kind: "ssh",
-      hostId: "aws-host-1",
-    });
-    expect(store.getState().tabs[0]?.connectionProgress?.stage).toBe(
-      "awaiting-host-trust",
+      expect.objectContaining({ hostId: "aws-host-1" }),
     );
     expect(api.ssh.connect).not.toHaveBeenCalled();
+    const prompt = store.getState().pendingHostKeyPrompt;
+    expect(prompt?.probe.status).toBe("untrusted");
+    expect(prompt?.probe.host).toBe("aws-ssm:default:ap-northeast-2:i-aws");
+    // 살아 있는 질의가 아니다 — 수락하면 그때 연결을 시작한다.
+    expect(prompt?.liveChallengeId ?? null).toBeNull();
 
-    // 수락하면 신뢰 목록에 저장하고 SSH-over-SSM 연결로 이어진다.
     await store.getState().acceptPendingHostKeyPrompt("trust");
 
     expect(api.knownHosts.trust).toHaveBeenCalled();
-    expect(api.ssh.connect).toHaveBeenCalled();
+    expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().pendingHostKeyPrompt).toBeNull();
   });
 
@@ -2273,5 +2339,72 @@ describe("createAppStore sessions and auth recovery", () => {
 
     expect(api.ssh.connect).toHaveBeenCalledTimes(1);
     expect(store.getState().pendingConnectionAttempts).toEqual([]);
+  });
+  // 실기기 증상: OTP 를 늦게 넣었더니 뒤에서 연결이 "시간 초과" 로 끝났는데 인증 카드는 그대로
+  // 남았고, 코드를 넣고 누른 "응답 보내기" 는 아무 일도 하지 않았다. 받을 요청이 이미 없었다.
+  it("takes down the auth card when the connect step gives up", async () => {
+    const api = createMockApi();
+    const connect = createDeferred<{ sessionId: string }>();
+    api.ssh.connect = vi.fn().mockReturnValue(connect.promise);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    const connecting = store.getState().connectHost("host-1", 120, 32);
+    await flushMicrotasks();
+
+    const sessionId = store.getState().tabs[0]?.sessionId;
+    expect(sessionId).toBeTruthy();
+
+    // 코어가 점프 호스트의 OTP 를 물었다 — 프로브 요청 도중에 온다.
+    store.getState().handleCoreEvent({
+      type: "keyboardInteractiveChallenge",
+      sessionId: sessionId!,
+      payload: {
+        challengeId: "hostkey-1",
+        attempt: 1,
+        instruction: "",
+        prompts: [{ label: "Verification code:", echo: false, masked: false }],
+        hop: { username: "ubuntu", host: "192.168.200.37", port: 22 },
+      },
+    });
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
+      challengeId: "hostkey-1",
+    });
+
+    connect.reject(new Error("ssh handshake failed: connection reset"));
+    await connecting;
+
+    expect(store.getState().pendingInteractiveAuths).toEqual([]);
+    expect(store.getState().tabs[0]?.status).toBe("error");
+  });
+
+  it("says so when the answer can no longer be delivered", async () => {
+    const api = createMockApi();
+    api.ssh.respondKeyboardInteractive = vi
+      .fn()
+      .mockRejectedValue(new Error("challenge hostkey-1 not found"));
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    store.setState({
+      pendingInteractiveAuths: [{
+        source: "ssh",
+        sessionId: "session-1",
+        challengeId: "hostkey-1",
+        name: null,
+        instruction: "",
+        prompts: [{ label: "Verification code:", echo: false }],
+        provider: "generic",
+        autoSubmitted: false,
+        }],
+    });
+
+    await store.getState().respondInteractiveAuth("hostkey-1", ["443626"]);
+
+    // 카드는 남지만 이유를 말한다 — 조용히 실패하면 버튼이 먹통으로 보인다.
+    expect(store.getState().pendingInteractiveAuths[0]).toMatchObject({
+      challengeId: "hostkey-1",
+      deliveryError: expect.stringContaining("hostkey-1"),
+    });
   });
 });

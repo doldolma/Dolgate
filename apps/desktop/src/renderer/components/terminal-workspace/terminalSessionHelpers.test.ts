@@ -8,6 +8,7 @@ import {
   resolveTailnetFailureGuidance,
   resolveTailnetLoginRejectedGuidance,
   resolveTailnetPhaseMessage,
+  shouldShowSessionOverlay,
 } from "./terminalSessionHelpers";
 
 function createErrorTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
@@ -33,6 +34,32 @@ function createErrorTab(overrides: Partial<TerminalTab> = {}): TerminalTab {
     ...overrides,
   } as TerminalTab;
 }
+
+describe("shouldShowSessionOverlay", () => {
+  it("folds the overlay once the server banner is on the terminal", () => {
+    // 배너가 찍힌 시점엔 이 오버레이가 추적하는 것이 모두 끝나 있다(tailnet·TCP·키 교환·호스트 키).
+    // 남은 것은 서버가 사람을 기다리는 일뿐인데, 카드가 덮으면 정작 그 안내를 가린다.
+    const tab = createErrorTab({
+      status: "connecting",
+      errorMessage: undefined,
+      serverBannerShown: true,
+    });
+
+    expect(shouldShowSessionOverlay(tab, null)).toBe(false);
+  });
+
+  it("still shows the overlay when the attempt failed after the banner", () => {
+    const tab = createErrorTab({ serverBannerShown: true });
+
+    expect(shouldShowSessionOverlay(tab, null)).toBe(true);
+  });
+
+  it("shows the overlay while connecting without a banner", () => {
+    const tab = createErrorTab({ status: "connecting", errorMessage: undefined });
+
+    expect(shouldShowSessionOverlay(tab, null)).toBe(true);
+  });
+});
 
 describe("terminalSessionHelpers connection error presentation", () => {
   it("uses friendly connection failure copy for terminal error overlays", () => {

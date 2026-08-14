@@ -254,7 +254,6 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
         hostId,
         endpointId: buildContainersEndpointId(hostId),
         // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
-        skipProbeIfAlreadyTrusted: true,
         action: {
           kind: "containers",
           hostId,
@@ -350,11 +349,10 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                   (tab) => tab.hostId !== hostId,
                 ),
                 activeContainerHostId: nextActiveContainerHostId,
-                pendingInteractiveAuth:
-                  isPendingContainersInteractiveAuth(state.pendingInteractiveAuth) &&
-                  state.pendingInteractiveAuth.hostId === hostId
-                    ? null
-                    : state.pendingInteractiveAuth,
+                pendingInteractiveAuths: state.pendingInteractiveAuths.filter(
+                  (auth) =>
+                    !(isPendingContainersInteractiveAuth(auth) && auth.hostId === hostId),
+                ),
               };
             });
           },
@@ -716,7 +714,6 @@ export function createContainersSlice(deps: SliceDeps): ContainersSlice {
                 sessionId,
                 endpointId: buildContainersEndpointId(hostId),
                 // 이미 신뢰된 호스트/베스천은 재-probe 생략(중복 순회 방지, 실연결이 strict 검사).
-                skipProbeIfAlreadyTrusted: true,
                 action: {
                   kind: "containerShell",
                   hostId,

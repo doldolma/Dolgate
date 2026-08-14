@@ -228,6 +228,7 @@ function renderPanel(options?: {
   const onRemoveDnsOverride = vi.fn().mockResolvedValue(undefined);
   const onStart = vi.fn().mockResolvedValue(undefined);
   const onStop = vi.fn().mockResolvedValue(undefined);
+  const onClearInteractiveAuth = vi.fn();
   const view = render(
     <PortForwardingPanel
       hosts={options?.hosts ?? hosts}
@@ -246,7 +247,7 @@ function renderPanel(options?: {
       onStop={onStop}
       onRespondInteractiveAuth={vi.fn().mockResolvedValue(undefined)}
       onReopenInteractiveAuthUrl={vi.fn().mockResolvedValue(undefined)}
-      onClearInteractiveAuth={vi.fn()}
+      onClearInteractiveAuth={onClearInteractiveAuth}
     />
   );
 
@@ -258,7 +259,8 @@ function renderPanel(options?: {
     onRemove,
     onRemoveDnsOverride,
     onStart,
-    onStop
+    onStop,
+    onClearInteractiveAuth
   };
 }
 
@@ -1465,6 +1467,34 @@ describe('PortForwardingPanel dialog', () => {
     expect(screen.getByText('Open browser approval')).toBeInTheDocument();
   });
 
+  it('취소는 그 포워딩을 멈추고 카드를 내린다', () => {
+    const { onStop, onClearInteractiveAuth } = renderPanel({
+      interactiveAuth: {
+        source: 'portForward',
+        endpointId: 'ssh-rule-1',
+        ruleId: 'ssh-rule-1',
+        hostId: 'ssh-host-1',
+        challengeId: 'challenge-cancel-1',
+        instruction: '',
+        prompts: [{ label: 'Verification code:', echo: false }],
+        provider: 'generic',
+        autoSubmitted: false,
+      },
+    });
+
+    // 어느 포워딩이 묻는지 제목이 말해야 한다.
+    expect(
+      screen.getByText('SSH Rule 포워딩이 추가 인증을 기다리는 중입니다.'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+
+    // 규칙을 멈춘다 — 카드만 감추면 코어는 계속 답을 기다리고 규칙은 Starting 에 앉아 있다.
+    expect(onStop).toHaveBeenCalledWith('ssh-rule-1');
+    // 이 카드만 내린다(인자 없이 부르면 스토어가 다른 연결의 카드까지 비운다).
+    expect(onClearInteractiveAuth).toHaveBeenCalledWith('challenge-cancel-1');
+  });
+
   it('renders warpgate container tunnel auth without manual prompt inputs', () => {
     renderPanel({
       interactiveAuth: {
@@ -1484,7 +1514,9 @@ describe('PortForwardingPanel dialog', () => {
       },
     });
 
-    expect(screen.getByText('Container tunnel 승인을 기다리는 중입니다.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Warpgate 포워딩이 추가 인증을 기다리는 중입니다.'),
+    ).toBeInTheDocument();
     expect(screen.getByText(/앱이 자동으로 다음 단계를 진행합니다/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Press Enter when done:')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();

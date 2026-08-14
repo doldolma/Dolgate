@@ -27,6 +27,9 @@ import { connectAwsEc2OverSsm } from "./aws-ec2-ssh-over-ssm";
 const connectAwsEc2OverSsmMock = vi.mocked(connectAwsEc2OverSsm);
 
 function createContext() {
+  // 신뢰 키 조회는 두 이름으로 불린다(엄격/관대). 테스트는 값 하나만 세우면 되도록 같은 mock 을
+  // 공유한다 — ssh-core 가 붙는 경로는 관대한 쪽을, AWS SSM·키 설치는 엄격한 쪽을 쓴다.
+  const trustedHostKeys = vi.fn();
   return {
     hosts: {
       getById: vi.fn(),
@@ -58,7 +61,8 @@ function createContext() {
     assertSshHost: vi.fn(),
     requireTrustedHostKey: vi.fn(),
     resolveTailnetRoute: vi.fn(() => ({})),
-    requireTrustedHostKeys: vi.fn(),
+    requireTrustedHostKeys: trustedHostKeys,
+    resolveTrustedHostKeys: trustedHostKeys,
     requireConfiguredSshUsername: vi.fn(),
     resolveRuntimeSshSecrets: vi.fn(),
     resolveJumpHostTarget: vi.fn().mockResolvedValue(undefined),

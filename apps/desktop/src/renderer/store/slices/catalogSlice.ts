@@ -342,7 +342,7 @@ export function createCatalogSlice(deps: SliceDeps): CatalogSlice {
               pendingCredentialRetry: null,
               pendingAwsSftpConfigRetry: null,
               pendingMissingUsernamePrompt: null,
-              pendingInteractiveAuth: null,
+              pendingInteractiveAuths: [],
               pendingConnectionAttempts: [],
               sftp: {
                 localHomePath: snapshot.localHomePath,

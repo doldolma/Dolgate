@@ -691,6 +691,7 @@ export function createMockApi(): DesktopApi {
       resize: vi.fn().mockResolvedValue(undefined),
       disconnect: vi.fn().mockResolvedValue(undefined),
       respondKeyboardInteractive: vi.fn().mockResolvedValue(undefined),
+      respondHostKeyTrust: vi.fn().mockResolvedValue(undefined),
       tmuxSplitPane: vi.fn().mockResolvedValue(undefined),
       tmuxNewWindow: vi.fn().mockResolvedValue(undefined),
       tmuxSelectWindow: vi.fn().mockResolvedValue(undefined),

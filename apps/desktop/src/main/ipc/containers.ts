@@ -523,7 +523,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       }
 
       if (isWarpgateSshHostRecord(typedHost)) {
-        const trustedHostKeysBase64 = ctx.requireTrustedHostKeys({
+        const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys({
           hostname: typedHost.warpgateSshHost,
           port: typedHost.warpgateSshPort,
         });
@@ -545,7 +545,7 @@ export function registerContainersIpcHandlers(ctx: MainIpcContext): void {
       }
 
       const sshHost = typedHost as SshHostRecord;
-      const trustedHostKeysBase64 = ctx.requireTrustedHostKeys(sshHost);
+      const trustedHostKeysBase64 = ctx.resolveTrustedHostKeys(sshHost);
       const username = ctx.requireConfiguredSshUsername(sshHost);
       const { secrets, shouldPersistHostSecret } =
         await ctx.resolveRuntimeSshSecrets(sshHost);

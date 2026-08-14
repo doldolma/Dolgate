@@ -327,6 +327,8 @@
       "dnsDisableFailed": "Could not disable the DNS override."
     },
     "waiting": {
+      "forwardAuth": "The {{label}} forward is waiting for extra authentication.",
+      "forwardAuthUnnamed": "This forward is waiting for extra authentication.",
       "containerTunnel": "Waiting for the container tunnel to be approved.",
       "containerRuntime": "Waiting for the container runtime connection to be approved.",
       "containerLookup": "Waiting for approval to look up containers."
@@ -2527,7 +2529,8 @@
     "tailnetAuthInFlight": "This tailnet is being authenticated. Finish the browser login and the connection will continue.",
     "tailscaleNeedsAuth": "Tailscale authentication has not finished. Finish the browser login and the connection will continue.",
     "tailscaleNeedsApproval": "This device is waiting for administrator approval. You can connect once it is approved.",
-    "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in."
+    "tailscaleMismatch": "You are connected to a different Tailscale network than the one configured. Check which account is logged in.",
+    "serverNotice": "The server sent this notice:\n{{notice}}"
   },
   "knownHostsIpc": {
     "noSecrets": "There is no credential to save.",
@@ -2625,7 +2628,12 @@
     "reopenBrowser": "Reopen browser",
     "copyLink": "Copy link",
     "extraAuthTitle": "Additional authentication input is required.",
-    "sendResponse": "Send response"
+    "hopLabel": "Asked by",
+    "sendResponse": "Send response",
+    "deliveryFailed": "This authentication request is no longer waiting — the connection ended. Reconnect and try again.",
+    "storedPasswordUse": "Use saved password",
+    "storedPasswordCancel": "Type instead",
+    "storedPasswordInUse": "Sending the saved password"
   },
   "sidebar": {
     "sortName": "Sort: by name",
@@ -3395,7 +3403,8 @@
     "unknownError": "Something went wrong."
   },
   "tailnetIpc": {
-    "nodeInUse": "Something is still connected through this tailnet. Close those sessions, SFTP tabs, or port forwards first."
+    "nodeInUse": "Something is still connected through this tailnet. Close those sessions, SFTP tabs, or port forwards first.",
+    "nodeInUseCount": "{{count}} connection(s) still run through this tailnet. Close those sessions, SFTP tabs, or port forwards first."
   },
   "connectStages": {
     "tailscaleNode": "Starting Tailscale node",
@@ -3430,6 +3439,9 @@
     "tailscaleTargetRelay": "Via relay ({{relay}})",
     "tailscaleTargetNoPath": "Neither a direct connection nor a relay is up.",
     "tailscaleTargetMissing": "That device is not on this Tailscale network.",
+    "tailscaleTargetViaSubnet": "Reached through the subnet router {{peer}}.",
+    "tailscaleTargetSubnetRouter": "a subnet router",
+    "tailscaleTargetNotInTailnet": "Not a device address in this tailnet — reached through a jump host or the local network.",
     "tailscaleTargetTraffic": "sent {{tx}} · received {{rx}}",
     "tunnelGateway": "SSH tunnel via {{label}}",
     "tunnelOpen": "Tunnel to the VNC port"

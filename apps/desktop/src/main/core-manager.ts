@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, ContainerLifecycleTransport, ContainerWorkspaceKind, ControlSignalPayload, CoreEvent, CoreEventType, CoreRequest, CoreStreamFrame, DirectoryListing, FileEntry, HostContainerAction, HostContainerDetails, HostContainerListResult, HostContainerLogSearchResult, HostContainerLogsSnapshot, HostContainerRuntime, HostContainerStatsSample, HostKeyProbeResult, KeyboardInteractiveRespondInput, PortForwardMode, PortForwardRuntimeEvent, PortForwardRuntimeRecord, PortForwardTransport, ResolvedAuthorizedKeyInstallPayload, ResolvedAuthorizedKeyInstallResult, ResolvedAwsConnectPayload, ResolvedCertificateInspectPayload, ResolvedContainersConnectPayload, ResolvedCoreConnectPayload, ResolvedHostKeyProbePayload, ResolvedLocalConnectPayload, ResolvedPortForwardStartPayload, ResolvedPrivateKeyGeneratePayload, ResolvedPrivateKeyGenerateResult, ResolvedPrivateKeyInspectPayload, ResolvedPrivateKeyInspectResult, ResolvedSerialConnectPayload, ResolvedSerialControlPayload, ResolvedSerialControlResult, ResolvedSerialListPortsPayload, ResolvedSftpConnectPayload, ResolvedSsmPortForwardStartPayload, SerialPortSummary, SessionConnectionKind, SessionLifecycleLogMetadata, SessionShareControlSignal, SftpChmodInput, SftpChownInput, SftpDeleteInput, SftpEndpointSummary, SftpLifecycleLogMetadata, SftpListInput, SftpListPrincipalsInput, SftpMkdirInput, SftpPrincipal, SftpReadFileInput, SftpReadFileResult, SftpRenameInput, SftpWriteFileInput, SshCertificateInfo, TailnetConfig, TailnetPeer, TailnetSnapshot, TailnetState, TailnetStatus, TerminalTab, TransferFailedItem, TransferJob, TransferJobEvent, TransferStartInput } from "@shared";
+import type { ActivityLogRecord, ContainerActionLogMetadata, ContainerLifecycleLogMetadata, ContainerLifecycleTransport, ContainerWorkspaceKind, ControlSignalPayload, CoreEvent, CoreEventType, CoreRequest, CoreStreamFrame, DirectoryListing, FileEntry, HostContainerAction, HostContainerDetails, HostContainerListResult, HostContainerLogSearchResult, HostContainerLogsSnapshot, HostContainerRuntime, HostContainerStatsSample, HostKeyProbeResult, HostKeyTrustRespondInput, KeyboardInteractiveRespondInput, PortForwardMode, PortForwardRuntimeEvent, PortForwardRuntimeRecord, PortForwardTransport, ResolvedAuthorizedKeyInstallPayload, ResolvedAuthorizedKeyInstallResult, ResolvedAwsConnectPayload, ResolvedCertificateInspectPayload, ResolvedContainersConnectPayload, ResolvedCoreConnectPayload, ResolvedHostKeyProbePayload, ResolvedLocalConnectPayload, ResolvedPortForwardStartPayload, ResolvedPrivateKeyGeneratePayload, ResolvedPrivateKeyGenerateResult, ResolvedPrivateKeyInspectPayload, ResolvedPrivateKeyInspectResult, ResolvedSerialConnectPayload, ResolvedSerialControlPayload, ResolvedSerialControlResult, ResolvedSerialListPortsPayload, ResolvedSftpConnectPayload, ResolvedSsmPortForwardStartPayload, SerialPortSummary, SessionConnectionKind, SessionLifecycleLogMetadata, SessionShareControlSignal, SftpChmodInput, SftpChownInput, SftpDeleteInput, SftpEndpointSummary, SftpLifecycleLogMetadata, SftpListInput, SftpListPrincipalsInput, SftpMkdirInput, SftpPrincipal, SftpReadFileInput, SftpReadFileResult, SftpRenameInput, SftpWriteFileInput, SshCertificateInfo, TailnetConfig, TailnetPeer, TailnetSnapshot, TailnetState, TailnetStatus, TerminalTab, TransferFailedItem, TransferJob, TransferJobEvent, TransferStartInput } from "@shared";
 import { MAX_HOST_STARTUP_COMMAND_LENGTH } from "@shared";
 import { ipcChannels } from "../common/ipc-channels";
 import {
@@ -22,6 +22,30 @@ import { t } from "./i18n";
 import { logMessage } from "./activity-log-message";
 
 const TERMINAL_COMPLETION_QUERY_TIMEOUT_MS = 10_000;
+
+/**
+ * 사람에게 인증을 묻는 동안 요청에 주는 예산.
+ *
+ * 왜 필요한가: 요청·응답 한 번짜리 작업(호스트 키 프로브 등)도 도중에 대화형 인증을 물을 수 있다.
+ * 점프 호스트가 OTP 를 요구하면 코어는 사람의 답을 기다리는데, 여기 예산은 기계 시간(기본 8초)이라
+ * **핸드폰을 찾는 사이에 요청이 죽었다.** 그러면 화면에는 "연결 시간 초과" 가 뜨고, 코어는 아직
+ * 기다리는 중이라 인증 카드는 남고, 뒤늦게 누른 "응답 보내기" 는 아무 일도 하지 않는다(받을 요청이
+ * 이미 없다).
+ *
+ * 코어의 대기 한도(sshconn.HandshakeApprovalTimeout, 5분)보다 **길게** 잡는다. 그래야 사람이 끝내
+ * 답하지 않은 경우를 코어가 판정해서 이유가 있는 실패로 올려 보낸다 — 여기서 먼저 끊으면 그
+ * 요청이 왜 죽었는지 아무도 설명하지 못한다.
+ */
+const INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS = 6 * 60_000;
+
+/**
+ * 사람이 답한 뒤 코어에 다시 주는 예산.
+ *
+ * 답을 받은 코어는 아직 할 일이 남아 있다(핸드셰이크 마무리, 점프 뒤 채널 열기, 키 읽기). 기본
+ * 8초는 사람이 끼지 않는 프로브를 기준으로 잡은 값이라 여기에 그대로 쓰면 빠듯하다. 그래도 상한은
+ * 둔다 — 답을 받은 뒤로는 기계 시간이고, 멈춘 것을 영원히 기다릴 이유가 없다.
+ */
+const POST_INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS = 30_000;
 // AI run_command 기본 타임아웃(모델이 지정 안 하면). Go 코어가 최대 120s 로 상한을 건다.
 const AI_RUN_COMMAND_DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -617,6 +641,8 @@ interface PendingResponse<TPayload> {
   reject: (error: Error) => void;
   expectedTypes: Set<CoreEventType>;
   timeout: NodeJS.Timeout;
+  /** 남은 예산을 다시 잡는다. 사람을 기다리는 구간에 쓴다(rearmForInteractiveAuth 참고). */
+  rearm: (timeoutMs: number) => void;
   /**
    * 같은 requestId 로 여러 번 오는 진행 이벤트를 흘려보낸다. 설정 없으면 첫 매칭 이벤트에
    * 곧바로 resolve 하는 기존 동작 그대로다.
@@ -4429,6 +4455,24 @@ export class CoreManager {
     });
   }
 
+  /**
+   * 연결 도중 올라온 호스트 키 신뢰 질의에 답한다.
+   *
+   * 상관 ID 를 싣지 않는다 — 코어가 대기표를 하나만 두고 챌린지 ID 로 찾기 때문이다(그래야 어느
+   * 서비스의 연결인지 고르는 분기가 생기지 않는다).
+   */
+  async respondHostKeyTrust(input: HostKeyTrustRespondInput): Promise<void> {
+    await this.start();
+    this.sendControl({
+      id: randomUUID(),
+      type: "hostKeyTrustRespond",
+      payload: {
+        challengeId: input.challengeId,
+        trust: input.trust,
+      },
+    });
+  }
+
   async respondKeyboardInteractive(
     input: KeyboardInteractiveRespondInput,
   ): Promise<void> {
@@ -4450,6 +4494,10 @@ export class CoreManager {
       payload: {
         challengeId: input.challengeId,
         responses: input.responses,
+        // 이 표시를 빠뜨리면 코어가 채울 칸을 몰라서, 화면이 비워 둔 그 칸이 **빈 비밀번호로**
+        // 서버에 나간다. keyboard-interactive 는 방식당 한 번만 시도되므로 그 자리에서 인증이
+        // 끝난다("no supported methods remain") — 실기기에서 그렇게 깨졌다.
+        storedPasswordIndexes: input.storedPasswordIndexes,
       },
     });
   }
@@ -5244,18 +5292,29 @@ export class CoreManager {
 
     return new Promise<TPayload>((resolve, reject) => {
       const timeoutMs = options?.timeoutMs ?? 8000;
-      const timeout = setTimeout(() => {
-        this.pendingResponses.delete(request.id);
-        reject(
-          new Error(`Timed out waiting for SSH core response: ${request.type}`),
-        );
-      }, timeoutMs);
+      const armTimeout = (ms: number): NodeJS.Timeout =>
+        setTimeout(() => {
+          this.pendingResponses.delete(request.id);
+          reject(
+            new Error(`Timed out waiting for SSH core response: ${request.type}`),
+          );
+        }, ms);
 
       this.pendingResponses.set(request.id, {
         resolve: (payload) => resolve(payload as TPayload),
         reject,
         expectedTypes: new Set(expectedTypes),
-        timeout,
+        timeout: armTimeout(timeoutMs),
+        // 예산을 다시 잡는다. 이미 걸린 타이머를 지우고 새로 거는 것이 핵심이다 — 남은 시간을
+        // 늘리는 방법이 없으므로 새 한도로 다시 시작한다.
+        rearm: (ms: number) => {
+          const entry = this.pendingResponses.get(request.id);
+          if (!entry) {
+            return;
+          }
+          clearTimeout(entry.timeout);
+          entry.timeout = armTimeout(ms);
+        },
         onProgress: options?.onProgress,
         isTerminal: options?.isTerminal,
       });
@@ -5286,6 +5345,22 @@ export class CoreManager {
       pending.reject(
         new Error(String(event.payload.message ?? "SSH core error")),
       );
+      return;
+    }
+
+    // 코어가 사람에게 물었다 — 이 요청의 예산을 사람 시간으로 바꾼다.
+    //
+    // 이 두 이벤트는 어떤 요청의 expectedTypes 에도 없으므로 아래 검사에서 걸러진다. 예산만
+    // 갈아 주고 해석은 렌더러에 맡긴다(판정을 두 곳에 두지 않는다).
+    if (
+      event.type === "keyboardInteractiveChallenge" ||
+      event.type === "hostKeyTrustChallenge"
+    ) {
+      pending.rearm(INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS);
+      return;
+    }
+    if (event.type === "keyboardInteractiveResolved") {
+      pending.rearm(POST_INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS);
       return;
     }
 

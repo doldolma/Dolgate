@@ -64,7 +64,31 @@ export function resolveTailnetTargetAddress(
       return tunnelHost.hostname;
     }
   }
-  if (isSshHostRecord(host) || isRdpHostRecord(host) || isVncHostRecord(host)) {
+  if (isSshHostRecord(host)) {
+    // 점프 호스트가 있으면 tailnet 이 닿아야 하는 기기는 **첫 홉**이다.
+    //
+    // 최종 대상은 그 홉의 망에서 보이는 주소라(사내 LAN 등) 넷맵에 있을 이유가 없다. 그대로
+    // 넘기면 "이 Tailscale 네트워크에서 그 기기를 찾을 수 없습니다" 가 거짓으로 뜬다 — 터널을
+    // 쓰는 VNC 에서 이미 같은 거짓 진단을 겪어 위쪽에서 처리한 것과 같은 문제다.
+    const chain =
+      Array.isArray(host.jumpHostIds) && host.jumpHostIds.length > 0
+        ? host.jumpHostIds
+        : host.jumpHostId
+          ? [host.jumpHostId]
+          : [];
+    // 체인의 첫 항목이 클라이언트가 직접 붙는 홉이다(뒤로 갈수록 대상에 가깝다).
+    const entryJumpId = chain.find(
+      (id): id is string => typeof id === 'string' && id.length > 0,
+    );
+    const entryJump = entryJumpId
+      ? hosts.find((candidate) => candidate.id === entryJumpId)
+      : undefined;
+    if (entryJump && isSshHostRecord(entryJump)) {
+      return entryJump.hostname;
+    }
+    return host.hostname;
+  }
+  if (isRdpHostRecord(host) || isVncHostRecord(host)) {
     return host.hostname;
   }
   return undefined;

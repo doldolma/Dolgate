@@ -189,6 +189,7 @@ describe('registerPortForwardAndDnsIpcHandlers', () => {
       },
       resolveAwsSftpPreflight: vi.fn().mockResolvedValue(awsHost),
       requireTrustedHostKeys: vi.fn(() => ['trusted']),
+      resolveTrustedHostKeys: vi.fn(() => ['trusted']),
       createEphemeralAwsSftpKeyPair: vi.fn(() => ({
         privateKeyPem: 'priv',
         publicKey: 'pub',

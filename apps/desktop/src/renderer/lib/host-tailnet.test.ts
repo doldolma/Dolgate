@@ -99,3 +99,24 @@ describe('resolveTailnetTargetAddress', () => {
     expect(resolveTailnetTargetAddress(vncHost(), [])).toBe('10.0.0.6');
   });
 });
+
+// 점프 호스트가 있으면 tailnet 이 닿아야 하는 기기는 첫 홉이다. 최종 대상은 그 홉의 망에서 보이는
+// 주소라(사내 랜 등) 넷맵에 있을 이유가 없다 — 그대로 넘기면 거짓 실패가 뜬다.
+describe('점프 호스트가 있는 SSH 대상', () => {
+  it('첫 홉의 주소를 찾는다', () => {
+    const jump = sshHost({ id: 'jump-1', hostname: 'bastion.example.ts.net' });
+    const target = sshHost({
+      id: 'ssh-2',
+      hostname: '192.168.200.4',
+      jumpHostId: 'jump-1',
+      jumpHostIds: ['jump-1'],
+    });
+
+    expect(resolveTailnetTargetAddress(target, [jump, target])).toBe('bastion.example.ts.net');
+  });
+
+  it('점프가 없으면 자기 주소를 그대로 쓴다', () => {
+    const target = sshHost({ id: 'ssh-3', hostname: 'agt-1' });
+    expect(resolveTailnetTargetAddress(target, [target])).toBe('agt-1');
+  });
+});

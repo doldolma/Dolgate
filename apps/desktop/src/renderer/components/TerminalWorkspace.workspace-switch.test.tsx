@@ -252,7 +252,7 @@ function createMockStoreState() {
     hosts: [],
     sessionShareChatNotifications: {},
     dismissSessionShareChatNotification: vi.fn(),
-    pendingInteractiveAuth: null,
+    pendingInteractiveAuths: [],
     respondInteractiveAuth: vi.fn(),
     reopenInteractiveAuthUrl: vi.fn(),
     clearPendingInteractiveAuth: vi.fn(),
@@ -1232,7 +1232,7 @@ describe('TerminalWorkspace workspace switching', () => {
         }
       ],
       dismissSessionShareChatNotification: vi.fn(),
-      pendingInteractiveAuth: null,
+      pendingInteractiveAuths: [],
       respondInteractiveAuth: vi.fn(),
       reopenInteractiveAuthUrl: vi.fn(),
       clearPendingInteractiveAuth: vi.fn(),

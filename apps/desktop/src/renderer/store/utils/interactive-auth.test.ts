@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { HostRecord, KeyboardInteractiveChallenge } from "@shared";
 import {
+  clearEndpointPendingInteractiveAuth,
+  clearSessionPendingInteractiveAuth,
+  findEndpointPendingInteractiveAuth,
+  findPendingInteractiveAuthByChallengeId,
+  findSessionPendingInteractiveAuth,
+  formatInteractiveHop,
   parseWarpgateApprovalUrl,
   parseWarpgateAuthCode,
   resolveInteractiveAuthUiState,
+  toKeyboardInteractiveHop,
+  upsertPendingInteractiveAuth,
 } from "./interactive-auth";
 
 const warpgateHost = (
@@ -58,5 +66,115 @@ describe("interactive-auth utils", () => {
       autoResponses: ["ABCD-1234", ""],
       autoSubmitted: true,
     });
+  });
+
+  it("labels the hop that asked so a jump chain is unambiguous", () => {
+    const hop = toKeyboardInteractiveHop({
+      username: "ubuntu",
+      host: "192.168.200.37",
+      port: 22,
+    });
+    expect(hop).toEqual({
+      username: "ubuntu",
+      host: "192.168.200.37",
+      port: 22,
+    });
+    expect(formatInteractiveHop(hop)).toBe("ubuntu@192.168.200.37:22");
+  });
+
+  it("drops a hop with no host instead of showing an empty name", () => {
+    expect(toKeyboardInteractiveHop({ username: "ubuntu", port: 22 })).toBeNull();
+    expect(toKeyboardInteractiveHop(undefined)).toBeNull();
+    expect(formatInteractiveHop(null)).toBe("");
+  });
+
+  it("omits the parts the core did not send", () => {
+    expect(formatInteractiveHop(toKeyboardInteractiveHop({ host: "bastion" }))).toBe(
+      "bastion",
+    );
+    expect(
+      formatInteractiveHop(
+        toKeyboardInteractiveHop({ host: "bastion", port: 0, username: "  " }),
+      ),
+    ).toBe("bastion");
+  });
+});
+
+// 실기기 증상: 터미널이 "추가 인증 응답이 필요합니다" 만 띄운 채 멈췄다. 슬롯이 앱 전체에 하나여서
+// 다른 대상(실패한 프로브)의 챌린지가 먼저 뜬 카드를 밀어냈고, 그 연결은 아무 표시 없이 기다렸다.
+describe("여러 대상이 동시에 인증을 기다릴 때", () => {
+  const sessionAuth = {
+    source: "ssh" as const,
+    sessionId: "session-1",
+    challengeId: "session-1-1",
+    name: null,
+    instruction: "",
+    prompts: [],
+    provider: "generic" as const,
+    autoSubmitted: false,
+  };
+  const sftpAuth = {
+    source: "sftp" as const,
+    paneId: "left" as const,
+    endpointId: "endpoint-1",
+    hostId: "host-1",
+    challengeId: "endpoint-1-1",
+    name: null,
+    instruction: "",
+    prompts: [],
+    provider: "generic" as const,
+    autoSubmitted: false,
+  };
+
+  it("서로를 밀어내지 않는다", () => {
+    const auths = upsertPendingInteractiveAuth(
+      upsertPendingInteractiveAuth([], sessionAuth),
+      sftpAuth,
+    );
+
+    expect(auths).toHaveLength(2);
+    expect(findSessionPendingInteractiveAuth(auths, "session-1")?.challengeId).toBe(
+      "session-1-1",
+    );
+    expect(findEndpointPendingInteractiveAuth(auths, "endpoint-1")?.challengeId).toBe(
+      "endpoint-1-1",
+    );
+  });
+
+  it("같은 대상의 새 요청은 앞의 것을 갈아 끼운다", () => {
+    const auths = upsertPendingInteractiveAuth(
+      upsertPendingInteractiveAuth([], sessionAuth),
+      { ...sessionAuth, challengeId: "session-1-2" },
+    );
+
+    expect(auths).toHaveLength(1);
+    expect(auths[0]?.challengeId).toBe("session-1-2");
+  });
+
+  it("한 대상을 내려도 다른 대상은 남는다", () => {
+    const auths = upsertPendingInteractiveAuth(
+      upsertPendingInteractiveAuth([], sessionAuth),
+      sftpAuth,
+    );
+
+    const afterSession = clearSessionPendingInteractiveAuth(auths, "session-1");
+    expect(afterSession).toHaveLength(1);
+    expect(afterSession[0]?.challengeId).toBe("endpoint-1-1");
+
+    const afterEndpoint = clearEndpointPendingInteractiveAuth(auths, "endpoint-1");
+    expect(afterEndpoint).toHaveLength(1);
+    expect(afterEndpoint[0]?.challengeId).toBe("session-1-1");
+  });
+
+  it("답을 보낼 때 챌린지 ID 로 그 요청을 찾는다", () => {
+    const auths = upsertPendingInteractiveAuth(
+      upsertPendingInteractiveAuth([], sessionAuth),
+      sftpAuth,
+    );
+
+    expect(
+      findPendingInteractiveAuthByChallengeId(auths, "endpoint-1-1")?.source,
+    ).toBe("sftp");
+    expect(findPendingInteractiveAuthByChallengeId(auths, "nobody")).toBeNull();
   });
 });

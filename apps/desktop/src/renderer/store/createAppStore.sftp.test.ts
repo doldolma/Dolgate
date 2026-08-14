@@ -767,26 +767,8 @@ describe("createAppStore sftp", () => {
     expect(store.getState().sftp.rightPane.isLoading).toBe(false);
   });
 
-  it("surfaces known-host probe failures on the sftp host picker", async () => {
-    const api = createMockApi();
-    api.knownHosts.probeHost = vi
-      .fn()
-      .mockRejectedValue(
-        new Error("Timed out waiting for SSH core response: probeHostKey"),
-      );
-    const store = createAppStore(api);
-
-    await store.getState().bootstrap();
-    store.getState().activateSftp();
-    await store.getState().connectSftpHost("right", "host-1");
-
-    expect(store.getState().sftp.rightPane.connectingHostId).toBeNull();
-    expect(store.getState().sftp.rightPane.isLoading).toBe(false);
-    expect(store.getState().sftp.rightPane.errorMessage).toBe(
-      "Timed out waiting for SSH core response: probeHostKey",
-    );
-    expect(api.sftp.connect).not.toHaveBeenCalled();
-  });
+  // (삭제) "연결 전 프로브 실패" 테스트는 대상이 사라졌다 — 호스트 키 확인은 이제 연결 안에서
+  // 하므로 연결 전 프로브라는 단계가 없다. 연결 실패 표시는 아래 자격증명·AWS 경로 테스트들이 덮는다.
 
   it("does not auto-load AWS SSH metadata immediately after saving a host", async () => {
     const api = createMockApi();
@@ -886,6 +868,8 @@ describe("createAppStore sftp", () => {
 
     await store.getState().connectSftpHost("right", "aws-host-1");
 
+    // AWS SSM 은 연결 전에 키를 읽는다(저장 이름이 dial 주소와 다르다 — trust-auth 참고).
+    // 프로브와 연결이 같은 endpointId 를 써야 진행 표시가 한 판에 모인다.
     const probeInput = vi.mocked(api.knownHosts.probeHost).mock.calls[0]?.[0];
     const connectInput = vi.mocked(api.sftp.connect).mock.calls[0]?.[0];
     expect(probeInput?.hostId).toBe("aws-host-1");
@@ -983,7 +967,6 @@ describe("createAppStore sftp", () => {
 
     expect(api.aws.getProfileStatusById).not.toHaveBeenCalled();
     expect(api.aws.loadHostSshMetadata).not.toHaveBeenCalled();
-    expect(api.knownHosts.probeHost).toHaveBeenCalled();
     expect(api.sftp.connect).toHaveBeenCalled();
   });
 
