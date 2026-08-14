@@ -14,6 +14,7 @@ import {
   getCommandBlocks,
   type TerminalCommandBlockState,
 } from '../lib/terminal-command-blocks';
+import { shouldShowStickyBlockHeader } from './stickyBlockVisibility';
 
 /** 툴바 위에서는 hover 대상을 다시 계산하지 않는다(버튼을 누르러 가다 블록이 바뀌는 것 방지). */
 export const BLOCK_TOOLBAR_ATTRIBUTE = 'data-terminal-block-toolbar';
@@ -60,6 +61,8 @@ interface Geometry {
   cellHeight: number;
   rows: number;
   viewportY: number;
+  /** 셸이 지금 쓰고 있는 행. 화면이 지워졌는지 판단하는 근거다(stickyBlockVisibility 참고). */
+  cursorLine: number;
 }
 
 function readGeometry(
@@ -81,6 +84,7 @@ function readGeometry(
       cellHeight: screenBounds.height / terminal.rows,
       rows: terminal.rows,
       viewportY: terminal.buffer.active.viewportY,
+      cursorLine: terminal.buffer.active.baseY + terminal.buffer.active.cursorY,
     },
     screenBoundsTop: screenBounds.top,
   };
@@ -181,8 +185,15 @@ export function useTerminalBlockOverlay({
     }
     const { geometry } = read;
     const block = getCommandBlockAtLine(sessionIdRef.current, geometry.viewportY);
-    // 명령 줄이 아직 화면에 보이면 붙일 필요가 없다.
-    if (!block || block.marker.line < 0 || block.marker.line >= geometry.viewportY) {
+    if (
+      !block ||
+      !shouldShowStickyBlockHeader({
+        blockStart: block.marker.line,
+        blockEnd: block.endLine,
+        viewportY: geometry.viewportY,
+        cursorLine: geometry.cursorLine,
+      })
+    ) {
       setSticky(null);
       return;
     }

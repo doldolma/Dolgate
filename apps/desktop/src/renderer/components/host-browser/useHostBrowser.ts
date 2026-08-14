@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Fuse from 'fuse.js';
+import { resolveContextMenuPosition } from './contextMenuPosition';
 import {
   collectGroupPaths,
   countHostsInGroupTree,
@@ -434,6 +436,10 @@ export function useHostBrowser(params: UseHostBrowserParams) {
   const [isRemovingHost, setIsRemovingHost] = useState(false);
   const [removeUnusedSecretsOnHostDelete, setRemoveUnusedSecretsOnHostDelete] = useState(true);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenuStyle, setContextMenuStyle] = useState<CSSProperties | null>(
+    null,
+  );
   const [dragTargetGroupPath, setDragTargetGroupPath] = useState<string | null>(null);
   const [draggedHostIds, setDraggedHostIds] = useState<string[]>([]);
   const [draggedGroupPath, setDraggedGroupPath] = useState<string | null>(null);
@@ -697,12 +703,39 @@ export function useHostBrowser(params: UseHostBrowserParams) {
         : [],
     [hostDeleteTarget, hosts, keychainEntries],
   );
-  const contextMenuStyle = contextMenu
-    ? {
-        left: `${Math.max(12, Math.min(contextMenu.x, window.innerWidth - 172))}px`,
-        top: `${Math.max(12, Math.min(contextMenu.y, window.innerHeight - 72))}px`,
-      }
-    : null;
+  /**
+   * 메뉴가 뜨면 **실제로 렌더된 크기를 재서** 화면 안으로 접어 넣는다.
+   *
+   * 항목 수가 대상(호스트/그룹)과 선택 개수에 따라 달라지므로 상수 추정은 맞을 수가 없다 — 예전에는
+   * 높이를 72px 로 어림해서, 목록 아래쪽 호스트를 우클릭하면 메뉴가 화면 밖으로 잘렸다.
+   *
+   * useLayoutEffect 라 paint 전에 보정 위치가 적용돼 깜빡임이 없다(SFTP 판의 메뉴와 같은 방식).
+   */
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setContextMenuStyle(null);
+      return;
+    }
+    const element = contextMenuRef.current;
+    const placement = resolveContextMenuPosition({
+      x: contextMenu.x,
+      y: contextMenu.y,
+      width: element?.offsetWidth || 196,
+      // scrollHeight 를 함께 본다: 앞서 열린 메뉴가 화면보다 커서 maxHeight 로 접혔다면 이번 첫
+      // 프레임에도 그 값이 남아 있어 offsetHeight 가 접힌 높이로 나온다. 그 값으로 자리를 잡으면
+      // 실제보다 짧다고 보고 아래로 펼쳐서 다시 잘린다.
+      height: Math.max(element?.scrollHeight ?? 0, element?.offsetHeight ?? 0) || 220,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    });
+    setContextMenuStyle({
+      left: placement.left,
+      top: placement.top,
+      maxHeight: placement.maxHeight,
+      // 화면보다 큰 메뉴만 스크롤된다. 잘라 버리면 마지막 항목을 누를 방법이 없다.
+      overflowY: 'auto',
+    });
+  }, [contextMenu]);
 
   useEffect(() => {
     setCollapsedTreeGroupPaths((current) =>
@@ -1257,6 +1290,8 @@ export function useHostBrowser(params: UseHostBrowserParams) {
     contextMenu,
     setContextMenu,
     contextMenuStyle,
+    // 크기를 재려면 실제 노드가 필요하다(항목 수가 대상마다 다르다).
+    contextMenuRef,
     // import menu
     isImportMenuOpen,
     setIsImportMenuOpen,

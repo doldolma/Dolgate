@@ -138,6 +138,9 @@ export function HostBrowser({ hostEditor, tmuxPrefixKey, ...props }: HostBrowser
       {contextMenu
         ? createPortal(
             <div
+              // 크기를 재서 화면 안으로 접어 넣는다(useHostBrowser 의 layout effect). 이 ref 가
+              // 없으면 높이를 알 수 없어 아래쪽 호스트의 메뉴가 잘린다.
+              ref={hb.contextMenuRef}
               className="fixed z-[24] min-w-[148px] rounded-[10px] border border-[var(--border)] bg-[var(--surface-strong)] p-[0.4rem] shadow-[var(--shadow-floating)]"
               style={contextMenuStyle ?? undefined}
               role="menu"
