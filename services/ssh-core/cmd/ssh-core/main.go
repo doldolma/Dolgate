@@ -60,6 +60,10 @@ type coreRuntime interface {
 	InspectPrivateKey(requestID string, payload protocol.PrivateKeyInspectPayload) error
 	InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error
 	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
+	// RespondHostKeyTrust 는 연결 중 신뢰 질의의 답이다(호스트 키를 이 연결 안에서 확인한다).
+	RespondHostKeyTrust(payload protocol.HostKeyTrustRespondPayload) error
+	// CancelInFlight 는 정지·종료 명령을 배차하기 전에 진행 중인 작업을 끊는다(router.go 참고).
+	CancelInFlight(sessionID, endpointID string)
 	ConnectContainers(endpointID, requestID string, payload protocol.ContainersConnectPayload) error
 	DisconnectContainers(endpointID, requestID string) error
 	ListContainers(endpointID, requestID string) error
@@ -141,6 +145,10 @@ func main() {
 
 	core.EmitReady()
 
+	// 읽기 고루틴은 읽고 배차만 한다. 핸들러를 여기서 실행하면 느린 작업 하나가 다른 모든 요청을
+	// 막고, 사람의 답을 기다리는 작업은 그 답(다음 프레임)을 읽을 주체가 없어 교착이 된다.
+	router := newFrameRouter(core, writer)
+
 	for {
 		frame, err := protocol.ReadFrame(os.Stdin)
 		if err != nil {
@@ -156,26 +164,7 @@ func main() {
 			return
 		}
 
-		if err := dispatchFrame(core, writer, frame); err != nil {
-			eventType := protocol.EventError
-			if isSFTPCommand(frame) {
-				eventType = protocol.EventSFTPError
-			} else if isContainersCommand(frame) {
-				eventType = protocol.EventContainersError
-			} else if isPortForwardCommand(frame) {
-				eventType = protocol.EventPortForwardError
-			}
-			writer.emit(protocol.Event{
-				Type:       eventType,
-				RequestID:  frameRequestID(frame),
-				SessionID:  frameSessionID(frame),
-				EndpointID: frameEndpointID(frame),
-				JobID:      frameJobID(frame),
-				Payload: protocol.ErrorPayload{
-					Message: err.Error(),
-				},
-			})
-		}
+		router.route(frame)
 	}
 }
 
@@ -345,6 +334,11 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
+		// 프로브는 점프 호스트의 대화형 인증(OTP) 때문에 사람을 기다릴 수 있다. 그 답은 다음
+		// 프레임으로 오므로, 읽기 고루틴에서 실행하면 서로를 영원히 기다린다.
+		//
+		// 격리는 라우터가 한다 — 이 명령은 `probe:<requestID>` 라는 자기 줄에서 돌아서 다른 요청을
+		// 막지 않는다(router.go 의 frameScope 참고). 그래서 여기서는 평범하게 부른다.
 		return core.ProbeHostKey(request.ID, payload)
 	case protocol.CommandInspectCertificate:
 		var payload protocol.CertificateInspectPayload
@@ -496,6 +490,13 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 			return err
 		}
 		return core.RespondKeyboardInteractive(request.SessionID, request.EndpointID, payload)
+	case protocol.CommandHostKeyTrustRespond:
+		var payload protocol.HostKeyTrustRespondPayload
+		if err := json.Unmarshal(request.Payload, &payload); err != nil {
+			return err
+		}
+		// 대기표가 하나뿐이라 상관 ID 없이 챌린지 ID 로 찾는다.
+		return core.RespondHostKeyTrust(payload)
 	case protocol.CommandContainersConnect:
 		var payload protocol.ContainersConnectPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

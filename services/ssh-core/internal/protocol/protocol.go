@@ -30,6 +30,7 @@ const (
 	CommandSerialListPorts             = coretypes.CommandSerialListPorts
 	CommandSerialControl               = coretypes.CommandSerialControl
 	CommandKeyboardInteractiveRespond  = coretypes.CommandKeyboardInteractiveRespond
+	CommandHostKeyTrustRespond         = coretypes.CommandHostKeyTrustRespond
 	CommandControlSignal               = coretypes.CommandControlSignal
 	CommandResize                      = coretypes.CommandResize
 	CommandDisconnect                  = coretypes.CommandDisconnect
@@ -104,7 +105,9 @@ const (
 	EventPrivateKeyInspected            = coretypes.EventPrivateKeyInspected
 	EventAuthorizedKeyInstalled         = coretypes.EventAuthorizedKeyInstalled
 	EventKeyboardInteractiveChallenge   = coretypes.EventKeyboardInteractiveChallenge
+	EventHostKeyTrustChallenge          = coretypes.EventHostKeyTrustChallenge
 	EventKeyboardInteractiveResolved    = coretypes.EventKeyboardInteractiveResolved
+	EventSSHBanner                      = coretypes.EventSSHBanner
 	EventPortForwardStarted             = coretypes.EventPortForwardStarted
 	EventPortForwardStopped             = coretypes.EventPortForwardStopped
 	EventPortForwardError               = coretypes.EventPortForwardError
@@ -207,6 +210,9 @@ type KeyboardInteractivePrompt = coretypes.KeyboardInteractivePrompt
 type AgentForwardingStatusPayload = coretypes.AgentForwardingStatusPayload
 type KeyboardInteractiveChallengePayload = coretypes.KeyboardInteractiveChallengePayload
 type KeyboardInteractiveRespondPayload = coretypes.KeyboardInteractiveRespondPayload
+type HostKeyTrustChallengePayload = coretypes.HostKeyTrustChallengePayload
+type HostKeyTrustRespondPayload = coretypes.HostKeyTrustRespondPayload
+type SSHBannerPayload = coretypes.SSHBannerPayload
 type ControlSignalPayload = coretypes.ControlSignalPayload
 type ResizePayload = coretypes.ResizePayload
 type SFTPListPayload = coretypes.SFTPListPayload

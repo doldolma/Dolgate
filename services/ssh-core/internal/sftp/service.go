@@ -15,6 +15,8 @@ import (
 	sftppkg "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 
+	"dolssh/services/ssh-core/internal/hostkeytrust"
+	"dolssh/services/ssh-core/internal/inflight"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sftpedit"
 	"dolssh/services/ssh-core/internal/sshcmd"
@@ -53,6 +55,12 @@ type Service struct {
 	pendingChallenges map[string]*pendingChallenge
 	emit              EventEmitter
 	tailnetDial       sshconn.TailnetDialResolver
+	// starting 은 아직 붙는 중인 연결을 대상별로 들고 있다 — 정지·종료가 그것을 끊을 수 있게 한다.
+	// 사람의 답을 기다리는 구간은 대기표를 닫아 풀지만, dial·핸드셰이크처럼 기계를 기다리는 구간은
+	// ctx 취소만이 끊는다.
+	starting *inflight.Registry
+	// hostKeyTrustPrompt 는 연결 중 신뢰를 묻는 창구다(런타임이 주입한다).
+	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
 }
 
 // SetTailnetDial 은 tailnet 경로를 raw dialer 로 바꾸는 함수를 주입한다.
@@ -63,6 +71,33 @@ func (s *Service) SetTailnetDial(resolve sshconn.TailnetDialResolver) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tailnetDial = resolve
+}
+
+// SetHostKeyTrustPrompt 는 연결 중 신뢰 질의 창구를 주입한다.
+//
+// 생성자에서 받지 않는 이유는 대기표가 런타임 소유이고, 서비스가 런타임보다 먼저 만들어지기
+// 때문이다(SetTailnetDial 과 같은 이유).
+func (s *Service) SetHostKeyTrustPrompt(
+	prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc,
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hostKeyTrustPrompt = prompt
+}
+
+// hostKeyTrust 는 이 연결의 질의 함수를 만든다. 창구가 없으면 nil — 그때는 신뢰되지 않은 키에서
+// 예전처럼 연결이 끝난다.
+func (s *Service) hostKeyTrust(
+	ctx context.Context,
+	correlation hostkeytrust.Correlation,
+) sshconn.HostKeyTrustFunc {
+	s.mu.RLock()
+	prompt := s.hostKeyTrustPrompt
+	s.mu.RUnlock()
+	if prompt == nil {
+		return nil
+	}
+	return prompt(ctx, correlation)
 }
 
 // tailnetDialer 는 이 연결에 쓸 dialer 를 만든다. 경로가 없으면 nil 이라 평소대로 나간다.
@@ -78,6 +113,7 @@ func New(emit EventEmitter) *Service {
 		endpoints:         make(map[string]*endpointHandle),
 		transfers:         make(map[string]*transferHandle),
 		pendingChallenges: make(map[string]*pendingChallenge),
+		starting:          inflight.New(),
 		emit:              emit,
 	}
 }
@@ -115,6 +151,10 @@ func (s *Service) Shutdown() {
 }
 
 func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPConnectPayload) error {
+	// 붙는 동안 연결을 닫으면 이 ctx 가 취소돼 dial·핸드셰이크가 즉시 끝난다.
+	ctx, release := s.starting.Begin(endpointID)
+	defer release()
+
 	attempt := 0
 	target := sshconn.Target{
 		Host:                  payload.Host,
@@ -140,7 +180,12 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 		return dialErr
 	}
 	config.Dial = dial
-	client, err := sshconn.DialClient(context.Background(), target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+	// 처음 보는 서버 키는 이 연결 안에서 묻는다(별도 프로브 연결 없음 → OTP 한 번).
+	config.HostKeyTrust = s.hostKeyTrust(ctx, hostkeytrust.Correlation{
+		RequestID:  requestID,
+		EndpointID: endpointID,
+	})
+	client, err := sshconn.DialClient(ctx, target, config, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
 		attempt += 1
 		challengeID := fmt.Sprintf("%s-%d", endpointID, attempt)
 		responseCh := make(chan []string, 1)
@@ -162,6 +207,9 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 			prompts = append(prompts, protocol.KeyboardInteractivePrompt{
 				Label: prompt.Label,
 				Echo:  prompt.Echo,
+				// 판정은 sshconn 이 홉마다 내린다 — 화면은 그대로 그린다.
+				AllowStoredPassword: prompt.AllowStoredPassword,
+				Masked:              prompt.Masked,
 			})
 		}
 
@@ -171,6 +219,8 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 			EndpointID: endpointID,
 			Payload: protocol.KeyboardInteractiveChallengePayload{
 				ChallengeID: challengeID,
+				// 어느 홉이 묻는지. 점프 체인에서 이것이 없으면 사용자가 누구의 코드인지 모른다.
+				Hop:         sshconn.HopPayload(challenge.Hop),
 				Attempt:     attempt,
 				Name:        challenge.Name,
 				Instruction: challenge.Instruction,
@@ -178,9 +228,14 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 			},
 		})
 
-		responses, ok := <-responseCh
-		if !ok {
-			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled")
+		// 답을 기다린다. 취소(정지·종료)와 **예산**이 함께 걸려 있다.
+		//
+		// ctx 취소는 conn 을 닫아 핸드셰이크를 풀지만 이 채널 대기는 그것과 무관하게 서 있다.
+		// 예산이 없으면 아무도 답하지 않는 프롬프트가 이 연결을 영원히 붙잡는다 — tailnet 을 경유하면
+		// 그 노드의 리스까지 잡은 채라서, 설정의 "연결 종료" 가 계속 거절된다(sshconn.HumanAnswerBudget).
+		responses, waitErr := sshconn.WaitForHumanAnswer(ctx, responseCh)
+		if waitErr != nil {
+			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled: %w", waitErr)
 		}
 
 		s.emit(protocol.Event{
@@ -239,7 +294,14 @@ func (s *Service) Connect(endpointID, requestID string, payload protocol.SFTPCon
 	return nil
 }
 
+// CancelInFlight 는 아직 붙는 중인 연결을 끊는다(forwarding 과 같은 이유).
+func (s *Service) CancelInFlight(endpointID string) {
+	s.starting.Cancel(endpointID)
+}
+
 func (s *Service) Disconnect(endpointID, requestID string) error {
+	// 아직 붙는 중이면 그 작업부터 끊는다.
+	s.starting.Cancel(endpointID)
 	handle, ok := s.removeEndpoint(endpointID)
 	if ok {
 		handle.close()

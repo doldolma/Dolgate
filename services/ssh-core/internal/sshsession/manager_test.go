@@ -44,6 +44,13 @@ type sshTestServer struct {
 	// returning custom stdout/stderr/exit status. Returning handled=false falls
 	// through to the default behaviour (echo shellPath, exit 0).
 	execResponder func(command string) (stdout, stderr string, status uint32, handled bool)
+
+	// keyboardInteractive 가 설정되면 서버가 그 방식을 제시한다. OTP 서버(비밀번호 → 인증 코드로
+	// 여러 라운드를 주는 것)를 흉내내는 데 쓴다.
+	keyboardInteractive func(ssh.ConnMetadata, ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error)
+	// passwordDisabled 는 password 방식을 아예 제시하지 않게 한다. 실제 OTP 서버가 그렇고, 남겨
+	// 두면 클라이언트가 password 로 먼저 붙어 keyboard-interactive 경로를 지나가지 않는다.
+	passwordDisabled bool
 }
 
 func TestManagerPasswordFlow(t *testing.T) {
@@ -428,6 +435,52 @@ func withAgentForwardingAccepted() sshTestServerOption {
 	}
 }
 
+// withOtpKeyboardInteractive 는 OTP 서버를 흉내낸다: 1 라운드 비밀번호, 2 라운드 인증 코드,
+// 3 라운드는 프롬프트 없는 알림(RFC 4256 이 허용한다). password 방식은 제시하지 않는다.
+func withOtpKeyboardInteractive(password, code string, failures chan<- error) sshTestServerOption {
+	return func(server *sshTestServer) {
+		server.passwordDisabled = true
+		server.keyboardInteractive = func(
+			_ ssh.ConnMetadata,
+			challenge ssh.KeyboardInteractiveChallenge,
+		) (*ssh.Permissions, error) {
+			report := func(err error) (*ssh.Permissions, error) {
+				select {
+				case failures <- err:
+				default:
+				}
+				return nil, err
+			}
+
+			answers, err := challenge("", "", []string{"Password:"}, []bool{false})
+			if err != nil {
+				return report(fmt.Errorf("password round: %w", err))
+			}
+			if len(answers) != 1 || answers[0] != password {
+				return report(fmt.Errorf("password round answers = %q", answers))
+			}
+
+			answers, err = challenge("", "", []string{"Verification code:"}, []bool{false})
+			if err != nil {
+				return report(fmt.Errorf("code round: %w", err))
+			}
+			if len(answers) != 1 || answers[0] != code {
+				return report(fmt.Errorf("code round answers = %q", answers))
+			}
+
+			// 프롬프트 0 개. 규격상 빈 응답이 곧바로 와야 한다.
+			answers, err = challenge("", "Access granted.", nil, nil)
+			if err != nil {
+				return report(fmt.Errorf("info round: %w", err))
+			}
+			if len(answers) != 0 {
+				return report(fmt.Errorf("info round answers = %q, want none", answers))
+			}
+			return nil, nil
+		}
+	}
+}
+
 func newFakeUnixAgentSocket(t *testing.T) (string, func()) {
 	t.Helper()
 
@@ -519,6 +572,13 @@ func newSSHTestServer(t *testing.T, options ...sshTestServerOption) (*sshTestSer
 	}
 	for _, option := range options {
 		option(server)
+	}
+	// 옵션이 서버 구조체를 채운 뒤에 인증 설정을 맞춘다.
+	if server.keyboardInteractive != nil {
+		serverConfig.KeyboardInteractiveCallback = server.keyboardInteractive
+	}
+	if server.passwordDisabled {
+		serverConfig.PasswordCallback = nil
 	}
 
 	var wg sync.WaitGroup
@@ -810,3 +870,4 @@ func TestConnectFailsWhenTheTailnetDialerCannotBeBuilt(t *testing.T) {
 		t.Fatalf("Connect() error = %v, want the dialer failure", err)
 	}
 }
+

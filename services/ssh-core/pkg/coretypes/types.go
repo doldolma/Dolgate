@@ -9,14 +9,16 @@ type EventType string
 type StreamType string
 
 const (
-	CommandHealth                      CommandType = "health"
-	CommandConnect                     CommandType = "connect"
-	CommandAWSConnect                  CommandType = "awsConnect"
-	CommandLocalConnect                CommandType = "localConnect"
-	CommandSerialConnect               CommandType = "serialConnect"
-	CommandSerialListPorts             CommandType = "serialListPorts"
-	CommandSerialControl               CommandType = "serialControl"
-	CommandKeyboardInteractiveRespond  CommandType = "keyboardInteractiveRespond"
+	CommandHealth                     CommandType = "health"
+	CommandConnect                    CommandType = "connect"
+	CommandAWSConnect                 CommandType = "awsConnect"
+	CommandLocalConnect               CommandType = "localConnect"
+	CommandSerialConnect              CommandType = "serialConnect"
+	CommandSerialListPorts            CommandType = "serialListPorts"
+	CommandSerialControl              CommandType = "serialControl"
+	CommandKeyboardInteractiveRespond CommandType = "keyboardInteractiveRespond"
+	// CommandHostKeyTrustRespond 는 "이 서버 키를 신뢰(또는 교체)하겠다" 는 사용자의 답이다.
+	CommandHostKeyTrustRespond         CommandType = "hostKeyTrustRespond"
 	CommandControlSignal               CommandType = "controlSignal"
 	CommandResize                      CommandType = "resize"
 	CommandDisconnect                  CommandType = "disconnect"
@@ -88,26 +90,31 @@ const (
 )
 
 const (
-	EventStatus                         EventType = "status"
-	EventConnected                      EventType = "connected"
-	EventData                           EventType = "data"
-	EventError                          EventType = "error"
-	EventClosed                         EventType = "closed"
-	EventLatency                        EventType = "latency"
-	EventConnectionHopProgress          EventType = "connectionHopProgress"
-	EventSerialPortsListed              EventType = "serialPortsListed"
-	EventSerialControlCompleted         EventType = "serialControlCompleted"
-	EventHostKeyProbed                  EventType = "hostKeyProbed"
-	EventCertificateInspected           EventType = "certificateInspected"
-	EventTailnetStatus                  EventType = "tailnetStatus"
-	EventTailnetForgot                  EventType = "tailnetForgot"
-	EventTailnetSnapshot                EventType = "tailnetSnapshot"
-	EventTailnetForwardOpened           EventType = "tailnetForwardOpened"
-	EventPrivateKeyGenerated            EventType = "privateKeyGenerated"
-	EventPrivateKeyInspected            EventType = "privateKeyInspected"
-	EventAuthorizedKeyInstalled         EventType = "authorizedKeyInstalled"
-	EventKeyboardInteractiveChallenge   EventType = "keyboardInteractiveChallenge"
+	EventStatus                       EventType = "status"
+	EventConnected                    EventType = "connected"
+	EventData                         EventType = "data"
+	EventError                        EventType = "error"
+	EventClosed                       EventType = "closed"
+	EventLatency                      EventType = "latency"
+	EventConnectionHopProgress        EventType = "connectionHopProgress"
+	EventSerialPortsListed            EventType = "serialPortsListed"
+	EventSerialControlCompleted       EventType = "serialControlCompleted"
+	EventHostKeyProbed                EventType = "hostKeyProbed"
+	EventCertificateInspected         EventType = "certificateInspected"
+	EventTailnetStatus                EventType = "tailnetStatus"
+	EventTailnetForgot                EventType = "tailnetForgot"
+	EventTailnetSnapshot              EventType = "tailnetSnapshot"
+	EventTailnetForwardOpened         EventType = "tailnetForwardOpened"
+	EventPrivateKeyGenerated          EventType = "privateKeyGenerated"
+	EventPrivateKeyInspected          EventType = "privateKeyInspected"
+	EventAuthorizedKeyInstalled       EventType = "authorizedKeyInstalled"
+	EventKeyboardInteractiveChallenge EventType = "keyboardInteractiveChallenge"
+	// EventHostKeyTrustChallenge 는 연결 도중 처음 보는(또는 바뀐) 서버 키를 만나 사람의 판단을
+	// 기다린다는 뜻이다. 예전에는 별도 연결(프로브)로 키를 먼저 읽었는데, 그러면 OTP 를 요구하는
+	// 점프 호스트에 인증을 두 번 해야 했다 — 30초마다 바뀌는 코드를 두 번 넣을 수는 없다.
+	EventHostKeyTrustChallenge          EventType = "hostKeyTrustChallenge"
 	EventKeyboardInteractiveResolved    EventType = "keyboardInteractiveResolved"
+	EventSSHBanner                      EventType = "sshBanner"
 	EventPortForwardStarted             EventType = "portForwardStarted"
 	EventPortForwardStopped             EventType = "portForwardStopped"
 	EventPortForwardError               EventType = "portForwardError"
@@ -802,6 +809,31 @@ type AuthorizedKeyInstalledPayload struct {
 type KeyboardInteractivePrompt struct {
 	Label string `json:"label"`
 	Echo  bool   `json:"echo"`
+	// AllowStoredPassword 는 이 칸에 "저장된 비밀번호 사용" 을 내밀어도 되는지다.
+	//
+	// 칸마다 다르기 때문에 프롬프트에 붙는다. 챌린지 단위로 두면 인증 코드 칸에도 그 버튼이
+	// 붙어서, 사용자가 코드 자리에 비밀번호를 보낼 수 있게 된다(실기기에서 그렇게 보였다).
+	//
+	// 판정은 코어가 한다. 화면은 이 값을 그릴 뿐이다 — 라벨 판정을 렌더러에도 두면 두 곳의
+	// 기준이 갈린다.
+	//
+	// omitempty 를 쓰지 않는다: false 와 "안 보냄" 이 구분되지 않으면 화면이 어느 쪽으로도
+	// 해석할 수 있고, 그 애매함이 곧 인증 코드 칸에 버튼이 붙는 버그로 돌아온다.
+	AllowStoredPassword bool `json:"allowStoredPassword"`
+	// Masked 는 입력을 가려서 보여줄지다.
+	//
+	// 서버의 echo 플래그를 그대로 쓰지 않는 이유: 일회용 코드도 echo 를 끄고 오는데, 그것을
+	// 가리면 사용자가 여섯 자리를 확인하지 못한 채 눌러야 한다(다른 클라이언트들은 보여준다).
+	// 코드는 한 번 쓰고 버려지므로 가릴 이득이 작고, 비밀번호는 그대로 가린다.
+	Masked bool `json:"masked"`
+}
+
+// KeyboardInteractiveHop 은 프롬프트를 낸 홉이다. 점프 체인에서 "누구의 코드인지" 를 화면이
+// 말할 수 있게 한다 — 없으면 베스천과 최종 대상의 프롬프트가 화면에서 구분되지 않는다.
+type KeyboardInteractiveHop struct {
+	Username string `json:"username,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Port     int    `json:"port,omitempty"`
 }
 
 type KeyboardInteractiveChallengePayload struct {
@@ -810,11 +842,52 @@ type KeyboardInteractiveChallengePayload struct {
 	Name        string                      `json:"name,omitempty"`
 	Instruction string                      `json:"instruction"`
 	Prompts     []KeyboardInteractivePrompt `json:"prompts"`
+	// HasStoredPassword 는 이 연결에 쓸 수 있는 저장된 비밀번호가 있는지다. 화면은 이 값이 참일
+	// 때만 "저장된 비밀번호 사용" 을 내민다 — 값은 절대 올려 보내지 않는다.
+	HasStoredPassword bool `json:"hasStoredPassword,omitempty"`
+	// Hop 은 이 프롬프트를 낸 홉이다. 점프 체인에서 누구의 코드를 묻는지 화면이 말할 수 있게 한다.
+	Hop *KeyboardInteractiveHop `json:"hop,omitempty"`
+}
+
+// SSHBannerPayload 는 서버가 인증 단계에 보낸 배너(RFC 4252 §5.4)를 그대로 나른다.
+//
+// 해석하지 않고 원문을 넘긴다 — 승인 링크인지 회사 경고문인지는 사용자가 읽고 판단한다.
+// 화면은 이것을 터미널에 그대로 찍는다(OpenSSH 가 하는 것과 같다).
+type SSHBannerPayload struct {
+	Text string `json:"text"`
+}
+
+// HostKeyTrustChallengePayload 는 신뢰를 묻는 데 필요한 사실들이다. 화면이 지금 신뢰 대화상자에
+// 그리는 값(주소·알고리즘·지문)과 저장에 필요한 값(키)을 모두 담는다.
+type HostKeyTrustChallengePayload struct {
+	ChallengeID string `json:"challengeId"`
+	// Hop 은 이 키를 내민 서버다. 점프 체인에서 누구의 키인지 이것으로 구분한다.
+	Hop               *KeyboardInteractiveHop `json:"hop,omitempty"`
+	Algorithm         string                  `json:"algorithm"`
+	FingerprintSHA256 string                  `json:"fingerprintSha256"`
+	PublicKeyBase64   string                  `json:"publicKeyBase64"`
+	// Mismatch 는 이 호스트에 이미 저장된 키가 있는데 다른 키가 왔다는 뜻이다. 화면은 이 값으로
+	// "새 키" 와 "바뀐 키" 를 다르게 묻는다(문구·절차는 화면이 정한다).
+	Mismatch bool `json:"mismatch"`
+}
+
+// HostKeyTrustRespondPayload 는 그 답이다. Trust 가 거짓이면 연결은 그 자리에서 끝난다.
+type HostKeyTrustRespondPayload struct {
+	ChallengeID string `json:"challengeId"`
+	Trust       bool   `json:"trust"`
 }
 
 type KeyboardInteractiveRespondPayload struct {
 	ChallengeID string   `json:"challengeId"`
 	Responses   []string `json:"responses"`
+	// StoredPasswordIndexes 는 "이 칸은 저장된 비밀번호로 채워라" 는 표시다.
+	//
+	// 값이 아니라 인덱스만 오는 이유가 두 가지다. 비밀번호를 화면 쪽으로 내보내지 않는 것,
+	// 그리고 **어느 칸이 비밀번호인지 우리가 판단하지 않는 것.** 프롬프트 라벨을 정규식으로
+	// 골라내면 서버가 `Password:` 라고 써 놓고 두 번째 요소를 묻는 경우에 비밀번호를 그 칸으로
+	// 보내게 되고, 우리는 인증 기회가 한 번뿐이라 그걸로 연결이 끝난다. 그 판단은 사용자가
+	// 버튼을 눌러 한다.
+	StoredPasswordIndexes []int `json:"storedPasswordIndexes,omitempty"`
 }
 
 type ControlSignalPayload struct {

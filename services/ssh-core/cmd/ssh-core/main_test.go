@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,11 +23,50 @@ type stubCoreRuntime struct {
 	tailnetTestDone     chan struct{}
 	tailnetForgetID     string
 	tailnetForgetDone   chan struct{}
+	// probeStarted·probeRelease 는 프로브가 사람의 답을 기다리는 상태를 흉내낸다.
+	probeStarted        chan struct{}
+	probeRelease        chan struct{}
+	tailnetSnapshotDone chan struct{}
+
+	// 아래는 라우터 테스트용이다. 라우터는 핸들러를 여러 고루틴에서 부르므로 여기 값들은 mutex 로
+	// 지킨다(기존 테스트는 프레임을 하나씩 동기로 넣으므로 경쟁이 없다).
+	mu sync.Mutex
+	// inputs 는 세션 입력을 받은 순서다 — 같은 세션의 순서 보존을 확인한다.
+	inputs []string
+	// inputGate 가 있으면 첫 입력이 여기서 멈춘다(뒤 프레임이 새치기하는지 보려고).
+	inputGate     chan struct{}
+	inputGateUsed bool
+	// 포워딩 시작이 사람을 기다리는 상태를 흉내낸다.
+	forwardStarted     chan struct{}
+	forwardRelease     chan struct{}
+	forwardReleaseOnce sync.Once
+	// forwardStopped 는 정지 핸들러가 실행됐다는 신호다.
+	forwardStopped chan struct{}
+	// cancelledInFlight 는 라우터가 끊으라고 지목한 대상들이다.
+	cancelledInFlight []string
+	// hostKeyTrustAnswers·hostKeyTrustDone 은 신뢰 응답 프레임이 처리됐다는 기록·신호다.
+	hostKeyTrustAnswers []string
+	hostKeyTrustDone    chan struct{}
+	// respondDone 은 인증 응답 프레임이 처리됐다는 신호다.
+	respondDone chan struct{}
+	// configureRelease 가 있으면 tailnetConfigure 가 그동안 멈춘다(배리어 확인용).
+	configureRelease chan struct{}
+	// connectSawConfig 는 연결 핸들러가 돌 때 tailnet 설정이 이미 적용돼 있었는지다.
+	connectSawConfig bool
+	connectDone      chan struct{}
 }
 
 func (stub *stubCoreRuntime) EmitReady()              {}
 func (stub *stubCoreRuntime) Health(requestID string) {}
 func (stub *stubCoreRuntime) ConnectSSH(sessionID, requestID string, payload protocol.ConnectPayload) error {
+	stub.mu.Lock()
+	stub.connectSawConfig = len(stub.tailnetConfigured) > 0
+	done := stub.connectDone
+	stub.connectDone = nil
+	stub.mu.Unlock()
+	if done != nil {
+		close(done)
+	}
 	return nil
 }
 func (stub *stubCoreRuntime) ConnectAWS(sessionID, requestID string, payload protocol.AWSConnectPayload) error {
@@ -65,8 +105,25 @@ func (stub *stubCoreRuntime) ControlSerial(sessionID string, payload protocol.Se
 	return nil
 }
 func (stub *stubCoreRuntime) SendSessionInput(sessionID string, data []byte) error {
+	stub.mu.Lock()
 	stub.inputSession = sessionID
 	stub.inputPayload = append([]byte(nil), data...)
+	gate := stub.inputGate
+	if gate != nil && !stub.inputGateUsed {
+		stub.inputGateUsed = true
+	} else {
+		gate = nil
+	}
+	stub.mu.Unlock()
+
+	// 첫 입력만 붙잡아 둔다. 순서가 보존되면 뒤의 입력은 이것이 풀린 뒤에야 기록된다.
+	if gate != nil {
+		<-gate
+	}
+
+	stub.mu.Lock()
+	stub.inputs = append(stub.inputs, string(data))
+	stub.mu.Unlock()
 	return nil
 }
 func (stub *stubCoreRuntime) SendControlSignal(sessionID string, payload protocol.ControlSignalPayload) error {
@@ -124,15 +181,31 @@ func (stub *stubCoreRuntime) TailnetForwardClose(_ protocol.TailnetForwardCloseP
 }
 
 func (stub *stubCoreRuntime) TailnetSnapshot(_ string) error {
+	stub.mu.Lock()
 	stub.tailnetSnapshots += 1
+	stub.mu.Unlock()
+	if stub.tailnetSnapshotDone != nil {
+		close(stub.tailnetSnapshotDone)
+	}
 	return nil
 }
 
 func (stub *stubCoreRuntime) TailnetConfigure(payload protocol.TailnetConfigurePayload) error {
+	if stub.configureRelease != nil {
+		<-stub.configureRelease
+	}
+	stub.mu.Lock()
 	stub.tailnetConfigured = payload.Configs
+	stub.mu.Unlock()
 	return nil
 }
 func (stub *stubCoreRuntime) ProbeHostKey(requestID string, payload protocol.HostKeyProbePayload) error {
+	if stub.probeStarted != nil {
+		close(stub.probeStarted)
+	}
+	if stub.probeRelease != nil {
+		<-stub.probeRelease
+	}
 	return nil
 }
 func (stub *stubCoreRuntime) InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error {
@@ -147,7 +220,41 @@ func (stub *stubCoreRuntime) InspectPrivateKey(requestID string, payload protoco
 func (stub *stubCoreRuntime) InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error {
 	return nil
 }
+func (stub *stubCoreRuntime) RespondHostKeyTrust(payload protocol.HostKeyTrustRespondPayload) error {
+	stub.mu.Lock()
+	stub.hostKeyTrustAnswers = append(stub.hostKeyTrustAnswers, payload.ChallengeID)
+	stub.mu.Unlock()
+	if stub.hostKeyTrustDone != nil {
+		close(stub.hostKeyTrustDone)
+	}
+	return nil
+}
+
+func (stub *stubCoreRuntime) CancelInFlight(sessionID, endpointID string) {
+	stub.mu.Lock()
+	if sessionID != "" {
+		stub.cancelledInFlight = append(stub.cancelledInFlight, sessionID)
+	}
+	if endpointID != "" {
+		stub.cancelledInFlight = append(stub.cancelledInFlight, endpointID)
+	}
+	stub.mu.Unlock()
+	// 스텁에서는 "붙는 중" 을 흉내내는 대기를 풀어 준다 — 실제 코어가 ctx 를 취소하는 것과 같은 효과다.
+	stub.releaseForward()
+}
+
+// releaseForward 는 붙는 중인 포워딩을 한 번만 풀어 준다(취소와 테스트 정리가 겹칠 수 있다).
+func (stub *stubCoreRuntime) releaseForward() {
+	if stub.forwardRelease == nil {
+		return
+	}
+	stub.forwardReleaseOnce.Do(func() { close(stub.forwardRelease) })
+}
+
 func (stub *stubCoreRuntime) RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error {
+	if stub.respondDone != nil {
+		close(stub.respondDone)
+	}
 	return nil
 }
 func (stub *stubCoreRuntime) ConnectContainers(endpointID, requestID string, payload protocol.ContainersConnectPayload) error {
@@ -180,9 +287,20 @@ func (stub *stubCoreRuntime) SearchContainerLogs(endpointID, requestID string, p
 	return nil
 }
 func (stub *stubCoreRuntime) StartPortForward(endpointID, requestID string, payload protocol.PortForwardStartPayload) error {
+	if stub.forwardStarted != nil {
+		close(stub.forwardStarted)
+	}
+	if stub.forwardRelease != nil {
+		<-stub.forwardRelease
+	}
 	return nil
 }
-func (stub *stubCoreRuntime) StopPortForward(endpointID, requestID string) error { return nil }
+func (stub *stubCoreRuntime) StopPortForward(endpointID, requestID string) error {
+	if stub.forwardStopped != nil {
+		close(stub.forwardStopped)
+	}
+	return nil
+}
 func (stub *stubCoreRuntime) StartSSMPortForward(endpointID, requestID string, payload protocol.SSMPortForwardStartPayload) error {
 	return nil
 }
@@ -366,4 +484,13 @@ func TestDispatchTailnetConfigureAppliesBeforeReturning(t *testing.T) {
 	if len(core.tailnetConfigured) != 1 || core.tailnetConfigured[0].ID != "corp" {
 		t.Errorf("configured = %#v, want one config for corp", core.tailnetConfigured)
 	}
+}
+
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return encoded
 }

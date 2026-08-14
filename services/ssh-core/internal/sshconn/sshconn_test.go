@@ -67,9 +67,12 @@ func TestStrictHostKeyCallback(t *testing.T) {
 	trustedSigner, _ := generateTestKeyPair(t)
 	untrustedSigner, _ := generateTestKeyPair(t)
 
-	callback, err := strictHostKeyCallback(base64.StdEncoding.EncodeToString(trustedSigner.PublicKey().Marshal()), nil)
+	callback, err := hostKeyCallbackFor(
+		Target{TrustedHostKeyBase64: base64.StdEncoding.EncodeToString(trustedSigner.PublicKey().Marshal())},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("strictHostKeyCallback() error = %v", err)
+		t.Fatalf("hostKeyCallbackFor() error = %v", err)
 	}
 
 	if err := callback("example.com", &net.TCPAddr{}, trustedSigner.PublicKey()); err != nil {
@@ -86,12 +89,15 @@ func TestStrictHostKeyCallbackAllowsAnyTrustedHostKey(t *testing.T) {
 	secondSigner, _ := generateTestKeyPair(t)
 	untrustedSigner, _ := generateTestKeyPair(t)
 
-	callback, err := strictHostKeyCallback("", []string{
-		base64.StdEncoding.EncodeToString(firstSigner.PublicKey().Marshal()),
-		base64.StdEncoding.EncodeToString(secondSigner.PublicKey().Marshal()),
-	})
+	callback, err := hostKeyCallbackFor(
+		Target{TrustedHostKeysBase64: []string{
+			base64.StdEncoding.EncodeToString(firstSigner.PublicKey().Marshal()),
+			base64.StdEncoding.EncodeToString(secondSigner.PublicKey().Marshal()),
+		}},
+		nil,
+	)
 	if err != nil {
-		t.Fatalf("strictHostKeyCallback() error = %v", err)
+		t.Fatalf("hostKeyCallbackFor() error = %v", err)
 	}
 
 	if err := callback("example.com", &net.TCPAddr{}, secondSigner.PublicKey()); err != nil {

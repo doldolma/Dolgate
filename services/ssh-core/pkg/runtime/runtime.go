@@ -14,6 +14,7 @@ import (
 	"dolssh/services/ssh-core/internal/awssession"
 	containersvc "dolssh/services/ssh-core/internal/containers"
 	"dolssh/services/ssh-core/internal/forwarding"
+	"dolssh/services/ssh-core/internal/hostkeytrust"
 	"dolssh/services/ssh-core/internal/localsession"
 	"dolssh/services/ssh-core/internal/moshsession"
 	"dolssh/services/ssh-core/internal/serialsession"
@@ -40,7 +41,10 @@ type sshSessionManager interface {
 	WriteBytes(sessionID string, data []byte) error
 	Resize(sessionID string, cols, rows int) error
 	Disconnect(sessionID string) error
-	RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error
+	// payload 를 통째로 받는다 — 응답 값 외에 "저장된 비밀번호로 채울 칸" 이 함께 오기 때문이다.
+	RespondKeyboardInteractive(sessionID string, payload coretypes.KeyboardInteractiveRespondPayload) error
+	// CancelInFlight 는 아직 붙는 중인 연결을 끊는다(종료 명령이 그 뒤에 줄 서 있어도 되게).
+	CancelInFlight(sessionID string)
 	HasSession(sessionID string) bool
 	CollectAutocomplete(sessionID string, revision int) (autocomplete.Result, error)
 	InstallShellIntegration(sessionID string) error
@@ -104,6 +108,8 @@ type serialSessionManager interface {
 type sftpService interface {
 	Connect(endpointID, requestID string, payload coretypes.SFTPConnectPayload) error
 	Disconnect(endpointID, requestID string) error
+	CancelInFlight(endpointID string)
+	SetHostKeyTrustPrompt(prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc)
 	RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error
 	List(endpointID, requestID string, payload coretypes.SFTPListPayload) error
 	Mkdir(endpointID, requestID string, payload coretypes.SFTPMkdirPayload) error
@@ -124,6 +130,8 @@ type sftpService interface {
 type containersService interface {
 	Connect(endpointID, requestID string, payload coretypes.ContainersConnectPayload) error
 	Disconnect(endpointID, requestID string) error
+	CancelInFlight(endpointID string)
+	SetHostKeyTrustPrompt(prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc)
 	TakeClient(endpointID string) (*ssh.Client, error)
 	RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error
 	List(endpointID, requestID string) error
@@ -140,6 +148,8 @@ type containersService interface {
 
 type forwardingService interface {
 	RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error
+	CancelInFlight(ruleID string)
+	SetHostKeyTrustPrompt(prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc)
 	Start(ruleID, requestID string, payload coretypes.PortForwardStartPayload) error
 	StartWithClient(ruleID, requestID string, payload coretypes.PortForwardStartPayload, client *ssh.Client) error
 	Stop(ruleID, requestID string) error
@@ -152,7 +162,9 @@ type ssmForwardingService interface {
 	Shutdown()
 }
 
-type hostKeyProbeFunc func(payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error)
+// requestID 를 함께 받는 이유: 점프 호스트가 대화형 인증을 요구하면 프로브가 챌린지를 화면으로
+// 올리고 답을 기다려야 하고, 그 대기표를 이 요청에 묶어야 한다.
+type hostKeyProbeFunc func(requestID string, payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error)
 type certificateInspectFunc func(payload coretypes.CertificateInspectPayload) coretypes.CertificateInspectedPayload
 
 type Runtime struct {
@@ -161,16 +173,21 @@ type Runtime struct {
 	ssh        sshSessionManager
 	// tmux 는 control mode 명령(SplitPane/NewWindow/…)을 위해 concrete 타입으로 둔다.
 	// sshSessionManager 인터페이스(HasSession/WriteBytes/…)도 만족하므로 라우팅에 그대로 쓰인다.
-	tmux                      *tmuxsession.Manager
-	mosh                      moshSessionManager
-	aws                       awsSessionManager
-	local                     localSessionManager
-	serial                    serialSessionManager
-	sftp                      sftpService
-	containers                containersService
-	forwarding                forwardingService
-	ssmForwarding             ssmForwardingService
-	probeHostKey              hostKeyProbeFunc
+	tmux          *tmuxsession.Manager
+	mosh          moshSessionManager
+	aws           awsSessionManager
+	local         localSessionManager
+	serial        serialSessionManager
+	sftp          sftpService
+	containers    containersService
+	forwarding    forwardingService
+	ssmForwarding ssmForwardingService
+	probeHostKey  hostKeyProbeFunc
+	// probeChallenges 는 호스트 키 프로브가 낸 대화형 인증 챌린지의 대기표다(hostkey_probe_auth.go).
+	probeChallenges *probeChallenges
+	// hostKeyTrust 는 연결 중 신뢰 질의의 대기표다. 한 곳에 두면 챌린지 ID 가 전역에서 유일해서
+	// 응답을 어느 서비스로 보낼지 고르는 분기가 필요 없다.
+	hostKeyTrust              *hostkeytrust.Registry
 	inspectCertificate        certificateInspectFunc
 	tailnetService            *tailnetservice.Service
 	autocompleteMu            sync.Mutex
@@ -195,8 +212,19 @@ func New(options Options) *Runtime {
 	tailnetDial := func(tailnetID, expectedName string) (sshconn.DialFunc, error) {
 		return instance.tailnetDial(TailnetRoute{ID: tailnetID, ExpectedName: expectedName})
 	}
+	// 연결 중 신뢰 질의의 대기표. 서비스들이 이것으로 사람에게 묻는다 — 키를 미리 읽어 오는 별도
+	// 연결(프로브)이 없으면 OTP 를 요구하는 점프 호스트에 인증을 두 번 하지 않는다.
+	hostKeyTrustRegistry := hostkeytrust.New()
+	hostKeyTrustPrompt := func(
+		ctx context.Context,
+		correlation hostkeytrust.Correlation,
+	) sshconn.HostKeyTrustFunc {
+		return hostKeyTrustRegistry.Prompt(ctx, emitEvent, correlation)
+	}
+
 	sshManager := sshsession.NewManagerWithConfig(emitEvent, emitStream, sshsession.ManagerConfig{
-		TailnetDial: tailnetDial,
+		TailnetDial:        tailnetDial,
+		HostKeyTrustPrompt: hostKeyTrustPrompt,
 	})
 	moshManager := moshsession.NewManagerWithConfig(emitEvent, emitStream, moshsession.ManagerConfig{
 		TailnetDial: tailnetDial,
@@ -208,6 +236,9 @@ func New(options Options) *Runtime {
 	sftpService.SetTailnetDial(tailnetDial)
 	containersService.SetTailnetDial(tailnetDial)
 	forwardingService.SetTailnetDial(tailnetDial)
+	sftpService.SetHostKeyTrustPrompt(hostKeyTrustPrompt)
+	containersService.SetHostKeyTrustPrompt(hostKeyTrustPrompt)
+	forwardingService.SetHostKeyTrustPrompt(hostKeyTrustPrompt)
 
 	instance = newRuntimeWithDeps(
 		emitEvent,
@@ -221,7 +252,7 @@ func New(options Options) *Runtime {
 		containersService,
 		forwardingService,
 		ssmforward.New(emitEvent),
-		func(payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error) {
+		func(requestID string, payload coretypes.HostKeyProbePayload) (coretypes.HostKeyProbedPayload, error) {
 			jump := sshconn.JumpTargetFromCore(payload.Jump)
 			// 프로브도 홉 진행을 방출한다: 점프 체인은 DialClient가, 최종 타깃 홉은 ProbeHostKey가
 			// config.Progress로 보고. 상관 ID는 renderer가 넘긴 sessionId/endpointId를 그대로 사용해
@@ -236,6 +267,9 @@ func New(options Options) *Runtime {
 				return coretypes.HostKeyProbedPayload{}, dialErr
 			}
 			probeConfig.Dial = probeDial
+			// 점프 호스트가 대화형 인증(OTP 등)을 요구하면 사용자에게 물어야 한다. 창구가 없으면
+			// 프로브가 그 자리에서 실패하고, 그 베스천 뒤의 호스트는 신뢰를 시작할 수도 없었다.
+			probeConfig.InteractiveResponder = instance.probeInteractiveResponder(requestID, payload)
 			probeConfig.Progress = sshconn.HopProgress(
 				sshconn.Target{
 					Host:    payload.Host,
@@ -292,6 +326,9 @@ func New(options Options) *Runtime {
 	})
 	// tmux 매니저는 newRuntimeWithDeps 안에서 만들어지므로 여기서 붙인다.
 	instance.tmux.SetTailnetDial(tailnetDial)
+	// 서비스들이 이미 이 대기표로 묻고 있으므로, 런타임의 응답 경로도 같은 것을 봐야 한다
+	// (newRuntimeWithDeps 는 테스트용이라 시그니처를 늘리지 않는다 — tailnetService 와 같은 방식).
+	instance.hostKeyTrust = hostKeyTrustRegistry
 
 	return instance
 }
@@ -325,6 +362,8 @@ func newRuntimeWithDeps(
 		forwarding:                forwarding,
 		ssmForwarding:             ssmForwarding,
 		probeHostKey:              probeHostKey,
+		probeChallenges:           newProbeChallenges(),
+		hostKeyTrust:              hostkeytrust.New(),
 		inspectCertificate:        inspectCertificate,
 		autocompleteRevisions:     make(map[string]int),
 		shellIntegrationInstalled: make(map[string]bool),
@@ -728,7 +767,7 @@ func (runtime *Runtime) collectAutocomplete(sessionID, requestID string) error {
 }
 
 func (runtime *Runtime) ProbeHostKey(requestID string, payload coretypes.HostKeyProbePayload) error {
-	result, err := runtime.probeHostKey(payload)
+	result, err := runtime.probeHostKey(requestID, payload)
 	if err != nil {
 		return err
 	}
@@ -871,7 +910,41 @@ func (runtime *Runtime) InstallAuthorizedKey(requestID string, payload coretypes
 	return nil
 }
 
+// CancelInFlight 는 이 대상으로 진행 중인 연결 작업을 끊는다.
+//
+// 정지·종료 명령은 자기가 끊어야 할 작업과 같은 대상이라 그 뒤에 줄을 선다. 앞의 작업이 오래
+// 기다리는 중이면 정지는 자기 차례를 못 받으므로, 프레임 라우터가 명령을 배차하기 **전에** 이것을
+// 부른다. 어느 서비스의 것인지는 ID 만으로 알 수 없어 해당 계열 전부에 물어본다 — 끊을 것이 없으면
+// 각 서비스에서 아무 일도 일어나지 않는다.
+// RespondHostKeyTrust 는 "이 서버 키를 신뢰(교체)한다/하지 않는다" 는 사용자의 답을 전달한다.
+//
+// 대기표가 하나뿐이라 어느 서비스의 연결인지 고를 필요가 없다 — 챌린지 ID 가 그것을 담고 있다.
+func (runtime *Runtime) RespondHostKeyTrust(payload coretypes.HostKeyTrustRespondPayload) error {
+	return runtime.hostKeyTrust.Respond(payload.ChallengeID, payload.Trust)
+}
+
+func (runtime *Runtime) CancelInFlight(sessionID, endpointID string) {
+	if strings.TrimSpace(sessionID) != "" {
+		runtime.ssh.CancelInFlight(sessionID)
+	}
+	if strings.TrimSpace(endpointID) != "" {
+		runtime.forwarding.CancelInFlight(endpointID)
+		runtime.sftp.CancelInFlight(endpointID)
+		runtime.containers.CancelInFlight(endpointID)
+	}
+}
+
 func (runtime *Runtime) RespondKeyboardInteractive(sessionID, endpointID string, payload coretypes.KeyboardInteractiveRespondPayload) error {
+	// 호스트 키 프로브가 낸 챌린지는 어느 세션 매니저의 것도 아니다.
+	//
+	// 프로브는 상관용으로 연결과 **같은** sessionId·endpointId 를 쓰므로(그래야 화면이 이미 아는
+	// 카드에 붙는다) 그 두 값으로는 구분할 수 없다. 그래서 챌린지 ID 앞자리로 가른다.
+	//
+	// 이 분기가 없으면 답이 세션 매니저로 갔다가 "challenge not found" 로 조용히 버려진다 —
+	// 응답 보내기를 눌러도 아무 일도 없고 코어는 계속 사람을 기다린다. 실기기에서 그랬다.
+	if isProbeChallenge(payload.ChallengeID) {
+		return runtime.probeChallenges.respond(payload.ChallengeID, payload)
+	}
 	if endpointID != "" {
 		if len(endpointID) >= len("containers:") && endpointID[:len("containers:")] == "containers:" {
 			return runtime.containers.RespondKeyboardInteractive(endpointID, payload.ChallengeID, payload.Responses)
@@ -884,7 +957,7 @@ func (runtime *Runtime) RespondKeyboardInteractive(sessionID, endpointID string,
 	// mosh bootstrap도 KI 챌린지를 낼 수 있다. 챌린지는 connect 진행 중 발생해 세션이
 	// 아직 등록 전이라 HasSession으로 구분 못 하므로, ssh→mosh 순으로 시도해 챌린지를
 	// 가진 매니저가 처리하게 한다.
-	if err := runtime.ssh.RespondKeyboardInteractive(sessionID, payload.ChallengeID, payload.Responses); err == nil {
+	if err := runtime.ssh.RespondKeyboardInteractive(sessionID, payload); err == nil {
 		return nil
 	}
 	return runtime.mosh.RespondKeyboardInteractive(sessionID, payload.ChallengeID, payload.Responses)

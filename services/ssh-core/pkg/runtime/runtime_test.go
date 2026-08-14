@@ -1,38 +1,43 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
 
 	"dolssh/services/ssh-core/internal/autocomplete"
+	"dolssh/services/ssh-core/internal/hostkeytrust"
+	"dolssh/services/ssh-core/internal/sshconn"
 	"dolssh/services/ssh-core/pkg/coretypes"
 )
 
 type stubSSHManager struct {
-	hasSession     bool
-	writeSession   string
-	writeData      []byte
-	resizeSession  string
-	resizeCols     int
-	resizeRows     int
-	disconnectID   string
-	challengeID    string
-	responses      []string
-	completionOut  string
-	completionTrun bool
-	completionErr  error
-	installCount   int
-	reinjectCount  int
-	installErr     error
-	runCommand     string
-	runTimeoutMs   int
-	runOut         string
-	runStderr      string
-	runExit        int
-	runTrunc       bool
-	runErr         error
+	cancelledInFlight     []string
+	hasSession            bool
+	writeSession          string
+	writeData             []byte
+	resizeSession         string
+	resizeCols            int
+	resizeRows            int
+	disconnectID          string
+	challengeID           string
+	responses             []string
+	storedPasswordIndexes []int
+	completionOut         string
+	completionTrun        bool
+	completionErr         error
+	installCount          int
+	reinjectCount         int
+	installErr            error
+	runCommand            string
+	runTimeoutMs          int
+	runOut                string
+	runStderr             string
+	runExit               int
+	runTrunc              bool
+	runErr                error
 }
 
 func (stub *stubSSHManager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
@@ -55,9 +60,13 @@ func (stub *stubSSHManager) Disconnect(sessionID string) error {
 	stub.disconnectID = sessionID
 	return nil
 }
-func (stub *stubSSHManager) RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error {
-	stub.challengeID = challengeID
-	stub.responses = append([]string(nil), responses...)
+func (stub *stubSSHManager) RespondKeyboardInteractive(
+	sessionID string,
+	payload coretypes.KeyboardInteractiveRespondPayload,
+) error {
+	stub.challengeID = payload.ChallengeID
+	stub.responses = append([]string(nil), payload.Responses...)
+	stub.storedPasswordIndexes = append([]int(nil), payload.StoredPasswordIndexes...)
 	return nil
 }
 func (stub *stubSSHManager) CollectAutocomplete(string, int) (autocomplete.Result, error) {
@@ -228,9 +237,11 @@ func (stub *stubSerialManager) Disconnect(sessionID string) error {
 }
 
 type stubSFTPService struct {
-	responded    bool
-	connectID    string
-	shutdownCall int
+	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
+	cancelledInFlight  []string
+	responded          bool
+	connectID          string
+	shutdownCall       int
 }
 
 func (stub *stubSFTPService) Connect(endpointID, requestID string, payload coretypes.SFTPConnectPayload) error {
@@ -278,11 +289,13 @@ func (stub *stubSFTPService) ResumeTransfer(jobID string) error { return nil }
 func (stub *stubSFTPService) Shutdown()                         { stub.shutdownCall++ }
 
 type stubContainersService struct {
-	responded        bool
-	startWithClient  bool
-	takeClientCalled string
-	shutdownCall     int
-	client           *ssh.Client
+	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
+	cancelledInFlight  []string
+	responded          bool
+	startWithClient    bool
+	takeClientCalled   string
+	shutdownCall       int
+	client             *ssh.Client
 }
 
 func (stub *stubContainersService) Connect(endpointID, requestID string, payload coretypes.ContainersConnectPayload) error {
@@ -325,12 +338,14 @@ func (stub *stubContainersService) SearchLogs(endpointID, requestID string, payl
 func (stub *stubContainersService) Shutdown() { stub.shutdownCall++ }
 
 type stubForwardingService struct {
-	respondErr    error
-	responded     bool
-	startedRuleID string
-	startedWith   bool
-	stoppedRuleID string
-	shutdownCall  int
+	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
+	cancelledInFlight  []string
+	respondErr         error
+	responded          bool
+	startedRuleID      string
+	startedWith        bool
+	stoppedRuleID      string
+	shutdownCall       int
 }
 
 func (stub *stubForwardingService) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
@@ -711,4 +726,40 @@ func TestRunCompletionQueryNeverEmitsSessionError(t *testing.T) {
 	if results != 1 {
 		t.Fatalf("expected exactly one completion result event, got %d", results)
 	}
+}
+
+// 취소 훅. 라우터가 정지·종료를 배차하기 전에 부르는 것으로, 스텁에서는 호출만 기록한다.
+func (stub *stubSSHManager) CancelInFlight(sessionID string) {
+	stub.cancelledInFlight = append(stub.cancelledInFlight, sessionID)
+}
+
+func (stub *stubSFTPService) CancelInFlight(endpointID string) {
+	stub.cancelledInFlight = append(stub.cancelledInFlight, endpointID)
+}
+
+func (stub *stubContainersService) CancelInFlight(endpointID string) {
+	stub.cancelledInFlight = append(stub.cancelledInFlight, endpointID)
+}
+
+func (stub *stubForwardingService) CancelInFlight(ruleID string) {
+	stub.cancelledInFlight = append(stub.cancelledInFlight, ruleID)
+}
+
+// 연결 중 신뢰 질의 창구 주입. 스텁은 받아 두기만 한다(런타임 배선 확인용).
+func (stub *stubSFTPService) SetHostKeyTrustPrompt(
+	prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc,
+) {
+	stub.hostKeyTrustPrompt = prompt
+}
+
+func (stub *stubContainersService) SetHostKeyTrustPrompt(
+	prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc,
+) {
+	stub.hostKeyTrustPrompt = prompt
+}
+
+func (stub *stubForwardingService) SetHostKeyTrustPrompt(
+	prompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc,
+) {
+	stub.hostKeyTrustPrompt = prompt
 }

@@ -633,7 +633,9 @@ func (r *Registry) Disconnect(ctx context.Context, id string) error {
 	}
 	if existing.refs > 0 {
 		r.mu.Unlock()
-		return fmt.Errorf("%w: %q", ErrNodeInUse, id)
+		// 몇 개가 붙잡고 있는지 함께 남긴다. 이 숫자가 없으면 "하나가 안 놓였다" 와 "여러 개가
+		// 정말 쓰는 중" 을 구분할 수 없어서, 화면도 로그도 사용자에게 할 일을 말해 주지 못한다.
+		return fmt.Errorf("%w: %q (leases=%d)", ErrNodeInUse, id, existing.refs)
 	}
 	if existing.idle != nil {
 		existing.idle.Stop()
@@ -711,7 +713,9 @@ func (r *Registry) Reset(id string) error {
 	}
 	if existing.refs > 0 {
 		r.mu.Unlock()
-		return fmt.Errorf("%w: %q", ErrNodeInUse, id)
+		// 몇 개가 붙잡고 있는지 함께 남긴다. 이 숫자가 없으면 "하나가 안 놓였다" 와 "여러 개가
+		// 정말 쓰는 중" 을 구분할 수 없어서, 화면도 로그도 사용자에게 할 일을 말해 주지 못한다.
+		return fmt.Errorf("%w: %q (leases=%d)", ErrNodeInUse, id, existing.refs)
 	}
 	if existing.idle != nil {
 		existing.idle.Stop()
