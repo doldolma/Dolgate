@@ -1,6 +1,6 @@
 {
   "name": "dolssh",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "engines": {
     "node": ">= 24.15.0",
     "npm": ">= 11.0.0"
