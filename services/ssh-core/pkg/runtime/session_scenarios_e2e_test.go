@@ -232,13 +232,21 @@ func serveSessionChannel(newChannel ssh.NewChannel, options sshdOptions) {
 			if request.WantReply {
 				_ = request.Reply(true, nil)
 			}
+			// execStdout 이 없으면 채널을 계속 쓰는 명령이다(tmux control). 닫지도 읽지도 않고
+			// 흐르게 둔다 — 여기서 끝내면 control 채널이 그 자리에서 죽는다.
+			if options.execStdout == nil {
+				continue
+			}
 			var payload struct{ Command string }
 			_ = ssh.Unmarshal(request.Payload, &payload)
-			output := ""
-			if options.execStdout != nil {
-				output = options.execStdout(payload.Command)
-			}
-			_, _ = io.WriteString(channel, output)
+
+			// **클라이언트의 stdin 을 끝까지 읽고 나서** 답한다. 진짜 sshd 가 하는 일이고,
+			// 안 읽고 닫으면 아직 쓰는 중이던 쪽이 EOF 로 실패한다 — 원격 키 설치가 공개 키를
+			// stdin 으로 보내므로 정확히 그 경합에 걸렸다(실패가 실행마다 달라 플레이키였다).
+			// x/crypto 는 stdin 이 없어도 빈 복사 뒤 CloseWrite 를 하므로 여기서 멈추지 않는다.
+			_, _ = io.Copy(io.Discard, channel)
+
+			_, _ = io.WriteString(channel, options.execStdout(payload.Command))
 			_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 			// **채널을 닫아야** 클라이언트의 Wait 가 끝난다. x/crypto 의 Session.Wait 은 요청
 			// 스트림이 닫힐 때까지 도는데, exit-status 만 보내고 열어 두면 서로를 기다린다.
@@ -810,11 +818,17 @@ func TestInstallAuthorizedKeyThroughTailnetJumpsOtpAndTrust(t *testing.T) {
 	// 설치는 런타임의 dialer 를 쓴다 — 시나리오 하네스의 것으로 바꿔 끼운다.
 	instance.dialer = rig.dialer
 
+	installErr := make(chan error, 1)
 	go func() {
-		_ = instance.InstallAuthorizedKey("req-1", "keyinstall:host-1", coretypes.AuthorizedKeyInstallPayload{
+		installErr <- instance.InstallAuthorizedKey("req-1", "keyinstall:host-1", coretypes.AuthorizedKeyInstallPayload{
 			ConnectPayload: payload,
 			PublicKey:      "ssh-ed25519 AAAATEST installer",
 		})
+	}()
+	go func() {
+		if err := <-installErr; err != nil {
+			t.Errorf("InstallAuthorizedKey() error = %v", err)
+		}
 	}()
 	rig.events.await(t, coretypes.EventAuthorizedKeyInstalled, 20*time.Second)
 }
