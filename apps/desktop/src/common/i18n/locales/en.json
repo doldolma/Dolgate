@@ -1365,7 +1365,9 @@
       "remove": "Remove jump {{index}}",
       "addAria": "Add jump host",
       "addPlaceholder": "Add a jump host…",
-      "description": "Connects through other SSH hosts (bastions). With several, they are traversed top to bottom — the first is reached directly from the client, the last sits right before the target."
+      "description": "Connects through other SSH hosts (bastions). With several, they are traversed top to bottom — the first is reached directly from the client, the last sits right before the target.",
+      "tailnetOverridden": "The Tailscale network picked here is not used — the connection goes through {{tailnet}} on the first hop, {{jump}}.",
+      "tailnetFromEntryHop": "Connects through {{tailnet}} on the first hop, {{jump}}."
     },
     "profile": {
       "select": "Choose a profile",
@@ -3474,5 +3476,11 @@
       "tunnelOpen": "Tunnel open. Reaching {{target}} through it.",
       "handshake": "Negotiating the VNC session with {{target}}."
     }
+  },
+  "connectionOverlay": {
+    "connecting": "Connecting..."
+  },
+  "portForwarding": {
+    "startFailed": "Could not start the forward."
   }
 }

@@ -19,6 +19,8 @@ function createDependencies(): RegisterIpcDependencies {
     } as unknown as RegisterIpcDependencies["tailnets"],
     hosts: {
       list: vi.fn(() => []),
+      getById: vi.fn(() => null),
+      updateSshAuthSecret: vi.fn(),
       updateSecretRef: vi.fn(),
     } as any,
     groups: {
@@ -38,6 +40,9 @@ function createDependencies(): RegisterIpcDependencies {
     } as any,
     knownHosts: {
       list: vi.fn(() => []),
+      // 신뢰된 키가 없어도 설치는 진행된다 — 처음 보는 키는 코어가 연결 안에서 묻는다.
+      listByHostPort: vi.fn(() => []),
+      touch: vi.fn(),
     } as any,
     activityLogs: {
       list: vi.fn(() => []),
@@ -65,6 +70,7 @@ function createDependencies(): RegisterIpcDependencies {
       setSsmPortForwardTokenIssuer: vi.fn(),
       setTerminalStreamHandler: vi.fn(),
       isTmuxSession: vi.fn(() => false),
+      installAuthorizedKey: vi.fn().mockResolvedValue({ status: "installed" }),
     } as any,
     hostsOverrideManager: {
       pruneStaticOverrideStates: vi.fn(),
@@ -128,6 +134,45 @@ describe("createMainIpcContext", () => {
     expect(snapshot.portForwardSnapshot).toEqual({ rules: [], runtimes: [] });
     expect(snapshot.dnsOverrides).toEqual([]);
     expect(deps.hostsOverrideManager.pruneStaticOverrideStates).toHaveBeenCalled();
+  });
+
+  // 감싸는 함수가 인자를 줄이면 타입 검사가 잡아 주지 않는다 — 인자가 적은 함수는 많은 쪽에
+  // 그대로 대입되기 때문이다. 실제로 그 한 줄 때문에 상관 ID 가 사라졌고, 코어는 물을 곳이
+  // 없다고 보고 인증을 시도조차 하지 않았다("responder is not configured").
+  it("공개 키 설치의 상관 ID 를 코어까지 그대로 넘긴다", async () => {
+    const deps = createDependencies();
+    vi.mocked(deps.hosts.getById).mockReturnValue({
+      id: "host-1",
+      kind: "ssh",
+      label: "Prod",
+      hostname: "prod.example.com",
+      port: 22,
+      username: "ubuntu",
+      authType: "password",
+      secretRef: "host-1-secret",
+    } as never);
+    vi.mocked(deps.secretStore.load).mockReturnValue(
+      JSON.stringify({
+        password: "pw",
+        publicKey:
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGX8pbiVYy3HVD1jfhKrzjs3b7ZgoE4BdAvAYMM7Ka8b prod",
+        publicKeyFingerprintSha256: "SHA256:stored",
+        keyAlgorithm: "ssh-ed25519",
+        privateKeyPem: "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----",
+      }) as never,
+    );
+    const ctx = createMainIpcContext(deps);
+
+    await ctx.installSshPublicKey({
+      secretRef: "key-ref",
+      hostIds: ["host-1"],
+      mode: "installOnly",
+    });
+
+    expect(deps.coreManager.installAuthorizedKey).toHaveBeenCalledWith(
+      expect.anything(),
+      "keyinstall:host-1",
+    );
   });
 
   it("persists pending session secrets after the core connection event", async () => {

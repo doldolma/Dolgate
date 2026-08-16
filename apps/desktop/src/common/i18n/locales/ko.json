@@ -1365,7 +1365,9 @@
       "remove": "{{index}}번째 점프 제거",
       "addAria": "점프 호스트 추가",
       "addPlaceholder": "점프 호스트 추가…",
-      "description": "다른 SSH 호스트를 거쳐 연결합니다 (배스천). 여러 개면 위에서부터 순서대로 거칩니다 — 첫 번째가 클라이언트에서 직접 연결, 마지막이 대상 바로 앞입니다."
+      "description": "다른 SSH 호스트를 거쳐 연결합니다 (배스천). 여러 개면 위에서부터 순서대로 거칩니다 — 첫 번째가 클라이언트에서 직접 연결, 마지막이 대상 바로 앞입니다.",
+      "tailnetOverridden": "이 호스트에 고른 Tailscale 은 쓰이지 않습니다 — 첫 홉 {{jump}} 의 {{tailnet}} 으로 연결합니다.",
+      "tailnetFromEntryHop": "첫 홉 {{jump}} 의 {{tailnet}} 을 거쳐 연결합니다."
     },
     "profile": {
       "select": "프로필 선택",
@@ -3474,5 +3476,11 @@
       "tunnelOpen": "터널이 열렸습니다. 이 통로로 {{target}} 에 닿습니다.",
       "handshake": "{{target}} 와 VNC 세션을 협상합니다."
     }
+  },
+  "connectionOverlay": {
+    "connecting": "연결하는 중입니다..."
+  },
+  "portForwarding": {
+    "startFailed": "포워딩을 시작하지 못했습니다."
   }
 }

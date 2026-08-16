@@ -3160,14 +3160,22 @@ export class CoreManager {
     };
   }
 
+  /**
+   * correlationId 는 코어가 인증을 물을 때 그 물음에 달아 올릴 값이다.
+   *
+   * 세션 자리에 싣는 이유가 둘이다. 화면이 그것으로 설치 대화상자를 찾아 입력창을 띄우고,
+   * 코어의 프레임 라우터가 같은 값으로 줄을 갈라서 사람을 기다리는 설치가 다른 요청을 막지 않는다.
+   */
   async installAuthorizedKey(
     payload: ResolvedAuthorizedKeyInstallPayload,
+    correlationId?: string,
   ): Promise<ResolvedAuthorizedKeyInstallResult> {
     await this.start();
     const response = await this.requestResponse<Record<string, unknown>>(
       {
         id: randomUUID(),
         type: "installAuthorizedKey",
+        sessionId: correlationId,
         payload,
       },
       ["authorizedKeyInstalled"],
@@ -4498,6 +4506,8 @@ export class CoreManager {
         // 서버에 나간다. keyboard-interactive 는 방식당 한 번만 시도되므로 그 자리에서 인증이
         // 끝난다("no supported methods remain") — 실기기에서 그렇게 깨졌다.
         storedPasswordIndexes: input.storedPasswordIndexes,
+        // 닫힘을 함께 실어 보낸다. 코어는 이것을 받아야 기다리던 곳을 끊는다.
+        cancelled: input.cancelled,
       },
     });
   }

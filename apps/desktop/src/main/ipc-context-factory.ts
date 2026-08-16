@@ -192,17 +192,18 @@ export function createMainIpcContext(
     hosts,
     persistSecret: secretCoordinator.persistSecret,
     loadSecrets: secretCoordinator.loadSecrets,
-    // 원격 키 설치는 코어가 신뢰를 묻지 못한다(대화형 세션이 아니다) — 신뢰된 키를 요구하는
-    // 쪽을 그대로 쓴다.
-    requireTrustedHostKeys: hostCoordinator.requireTrustedHostKeys,
+    resolveTrustedHostKeys: hostCoordinator.resolveTrustedHostKeys,
+    resolveTailnetRoute: hostCoordinator.resolveTailnetRoute,
     requireConfiguredSshUsername: hostCoordinator.requireConfiguredSshUsername,
     resolveJumpHostTarget: hostCoordinator.resolveJumpHostTarget,
     ensureCertificateAuthReady: secretCoordinator.ensureCertificateAuthReady,
     generatePrivateKey: (payload) => coreManager.generatePrivateKey(payload),
     inspectPrivateKey: (privateKeyPem, passphrase) =>
       coreManager.inspectPrivateKey(privateKeyPem, passphrase),
-    installAuthorizedKey: (payload) =>
-      coreManager.installAuthorizedKey(payload),
+    // 인자를 줄여 감싸지 말 것 — 타입 검사가 못 잡고, 상관 ID 가 사라지면 코어는 인증을
+    // 시도조차 하지 않는다("responder is not configured"). 실제로 그렇게 깨졌다.
+    installAuthorizedKey: (payload, correlationId) =>
+      coreManager.installAuthorizedKey(payload, correlationId),
     queueSync,
   });
 

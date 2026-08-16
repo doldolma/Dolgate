@@ -81,6 +81,47 @@ describe('resolveHostTailnetId', () => {
 
     expect(resolveHostTailnetId(host, [gate, host])).toBe('net-own');
   });
+
+  // 점프 체인에서 실제로 소켓을 여는 것은 첫 홉뿐이다. tailnet 도 그 홉의 것을 타야 한다.
+  //
+  // 대상에서 읽던 시절에는 "tailnet 안의 베스천을 거쳐 사내 LAN 호스트로" 가 불가능했다 —
+  // 대상은 tailnet 에 있지도 않아 설정이 비고, 그러면 베스천을 일반 네트워크로 찾다 실패했다.
+  it('점프가 있으면 첫 홉의 tailnet 을 쓴다', () => {
+    const bastion = sshHost({ id: 'jump-1', label: 'Bastion', tailnetId: 'net-1' });
+    const target = sshHost({
+      id: 'ssh-2',
+      hostname: '10.0.0.9',
+      tailnetId: null,
+      jumpHostIds: ['jump-1'],
+    });
+
+    expect(resolveHostTailnetId(target, [bastion, target])).toBe('net-1');
+  });
+
+  // 예전에는 대상에만 설정하는 것이 유일한 방법이었다 — 그렇게 저장된 호스트를 깨지 않는다.
+  it('첫 홉에 설정이 없으면 대상의 것을 물려받는다', () => {
+    const bastion = sshHost({ id: 'jump-1', label: 'Bastion', tailnetId: null });
+    const target = sshHost({
+      id: 'ssh-2',
+      tailnetId: 'net-2',
+      jumpHostIds: ['jump-1'],
+    });
+
+    expect(resolveHostTailnetId(target, [bastion, target])).toBe('net-2');
+  });
+
+  // 두 홉 이상이어도 올려야 하는 노드는 클라이언트가 직접 붙는 첫 홉이다.
+  it('다단 점프에서도 첫 홉을 본다', () => {
+    const outer = sshHost({ id: 'jump-1', tailnetId: 'net-outer' });
+    const inner = sshHost({ id: 'jump-2', tailnetId: 'net-inner' });
+    const target = sshHost({
+      id: 'ssh-2',
+      tailnetId: null,
+      jumpHostIds: ['jump-1', 'jump-2'],
+    });
+
+    expect(resolveHostTailnetId(target, [outer, inner, target])).toBe('net-outer');
+  });
 });
 
 describe('resolveTailnetTargetAddress', () => {

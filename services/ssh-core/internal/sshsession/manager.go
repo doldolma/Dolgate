@@ -14,10 +14,10 @@ import (
 
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/hostkeytrust"
-	"dolssh/services/ssh-core/internal/inflight"
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/sshdial"
 )
 
 // EventEmitter는 상태 이벤트를 상위 레이어로 흘려보내는 함수 타입이다.
@@ -99,7 +99,17 @@ type ManagerConfig struct {
 	//
 	// 런타임이 대기표를 하나 들고 있고(internal/hostkeytrust), 여기서는 그것을 받아 dial 에 넘긴다.
 	// 없으면 예전대로 신뢰되지 않은 키에서 연결이 끝난다.
+	//
+	// Dialer 를 함께 주면 이 값은 무시된다 — 그때는 dialer 가 이미 자기 창구를 들고 있다.
 	HostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
+	// Dialer 는 세션 계열(SSH·mosh·tmux)과 원격 키 설치가 **함께 쓰는** 연결 경로다.
+	//
+	// 런타임은 하나를 만들어 모두에게 넘긴다. 그래야 대화형 인증 대기표가 한 곳이라 응답을 어느
+	// 매니저로 보낼지 고르는 분기가 없어지고(예전에는 "ssh 에 먼저 넣어 보고 실패하면 mosh" 였다),
+	// 새 기능이 세 경로에 동시에 도착한다.
+	//
+	// nil 이면 위 설정값으로 하나 만들어 이 매니저만 쓴다 — 매니저 하나만 세우는 테스트용이다.
+	Dialer *sshdial.Dialer
 }
 
 var defaultManagerConfig = ManagerConfig{
@@ -128,16 +138,14 @@ const (
 
 type Manager struct {
 	// 여러 SSH 세션을 sessionId 기준으로 관리한다.
-	mu                sync.RWMutex
-	sessions          map[string]*sessionHandle
-	pendingChallenges map[string]chan interactiveResponse
-	emit              EventEmitter
-	emitStream        StreamEmitter
-	config            ManagerConfig
-	// connecting 은 아직 붙는 중인 세션을 들고 있다 — 탭을 닫으면 그 작업을 끊을 수 있게 한다.
-	// 사람의 답을 기다리는 구간은 closeSession 이 대기표를 닫아 풀지만, dial·핸드셰이크처럼 기계를
-	// 기다리는 구간은 ctx 취소만이 끊는다.
-	connecting *inflight.Registry
+	mu         sync.RWMutex
+	sessions   map[string]*sessionHandle
+	emit       EventEmitter
+	emitStream StreamEmitter
+	config     ManagerConfig
+	// dialer 는 연결을 여는 공통 경로다. 대화형 인증 대기표와 "붙는 중" 등록도 그쪽이 든다
+	// (internal/sshdial).
+	dialer *sshdial.Dialer
 }
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
@@ -162,13 +170,27 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 	}
 
 	return &Manager{
-		sessions:          make(map[string]*sessionHandle),
-		pendingChallenges: make(map[string]chan interactiveResponse),
-		connecting:        inflight.New(),
-		emit:              emit,
-		emitStream:        stream,
-		config:            config,
+		sessions:   make(map[string]*sessionHandle),
+		dialer:     resolveDialer(emit, config),
+		emit:       emit,
+		emitStream: stream,
+		config:     config,
 	}
+}
+
+// resolveDialer 는 쓸 연결 경로를 고른다.
+//
+// 런타임이 넘겨준 것이 있으면 그것을 쓴다 — 세 세션 계열이 대기표를 공유해야 응답 라우팅에 분기가
+// 생기지 않는다. 없으면(매니저 하나만 세우는 테스트) 이 설정값으로 하나 만들어 쓴다.
+func resolveDialer(emit EventEmitter, config ManagerConfig) *sshdial.Dialer {
+	if config.Dialer != nil {
+		return config.Dialer
+	}
+	dialer := sshdial.New(emit)
+	dialer.SetTailnetDial(config.TailnetDial)
+	dialer.SetHostKeyTrustPrompt(config.HostKeyTrustPrompt)
+	dialer.SetTimeouts(config.TCPDialTimeout, config.TCPKeepAliveInterval)
+	return dialer
 }
 
 // buildEnvExportFallback는 SetEnv가 거부된 변수들을 대화형 셸에 주입할
@@ -191,130 +213,15 @@ func buildEnvExportFallback(envVars []protocol.EnvVar) string {
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
 	// 붙는 동안 탭을 닫으면 이 ctx 가 취소돼 dial·핸드셰이크가 즉시 끝난다.
-	ctx, release := m.connecting.Begin(sessionID)
+	ctx, release := m.dialer.Begin(sessionID)
 	defer release()
 
-	attempt := 0
-	target := sshconn.Target{
-		Host:                  payload.Host,
-		Port:                  payload.Port,
-		Username:              payload.Username,
-		AuthType:              payload.AuthType,
-		Password:              payload.Password,
-		PrivateKeyPEM:         payload.PrivateKeyPEM,
-		CertificateText:       payload.CertificateText,
-		Passphrase:            payload.Passphrase,
-		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
-		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
-		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-		WSProxy:               payload.WSProxy,
-	}
-	// tailnet 경유면 raw 전송을 그 노드로 바꾼다. 경로가 없으면 dial 이 nil 이라 평소대로다.
-	dial, dialErr := sshconn.ResolveTailnetDial(
-		m.config.TailnetDial,
-		payload.TailnetID,
-		payload.TailnetName,
-	)
-	if dialErr != nil {
-		return dialErr
-	}
-
-	// 다단 ProxyJump 연결 단계 UI: DialClient가 홉마다 보고하는 진행을 공통 헬퍼로 renderer에
-	// 전달한다(세션·SFTP·컨테이너·probe가 전부 동일 방식). SessionID로 해당 터미널 탭에 매핑.
-	client, err := sshconn.DialClient(ctx, target, sshconn.Config{
-		TCPDialTimeout: m.config.TCPDialTimeout,
-		// 처음 보는 서버 키는 이 연결 안에서 묻는다(별도 프로브 연결 없음 → OTP 한 번).
-		HostKeyTrust: m.hostKeyTrust(ctx, hostkeytrust.Correlation{
-			RequestID: requestID,
-			SessionID: sessionID,
-		}),
-		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
-		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
-		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
-		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
-		Dial:                  dial,
-		// 서버가 인증 단계에 보낸 배너를 그대로 올린다. 화면은 이것을 터미널에 찍는다 —
-		// OpenSSH 가 하는 것과 같고, 승인 링크인지 경고문인지는 사용자가 읽고 판단한다.
-		//
-		// 이 콜백이 있으면 DialClient 가 배너 뒤의 침묵을 정지로 보지 않고 기다린다. 그래서
-		// 승인이 필요한 서버(Tailscale SSH 의 check 모드)도 재시도 없이 그 자리에서 끝난다.
-		Banner: func(text string) {
-			m.emit(protocol.Event{
-				Type:      protocol.EventSSHBanner,
-				RequestID: requestID,
-				SessionID: sessionID,
-				Payload:   protocol.SSHBannerPayload{Text: text},
-			})
-		},
-	}, func(challenge sshconn.InteractiveChallenge) ([]string, error) {
-		attempt += 1
-		// 자동 응답(저장된 비밀번호)과 프롬프트 0 개 라운드는 sshconn 이 처리한다 — 홉마다 자기
-		// 비밀번호를 써야 하므로 판정이 거기 있어야 한다. 여기 오는 것은 사람에게 물을 것뿐이다.
-		challengeID := fmt.Sprintf("%s-%d", sessionID, attempt)
-		responseCh := make(chan interactiveResponse, 1)
-		m.mu.Lock()
-		m.pendingChallenges[challengeID] = responseCh
-		m.mu.Unlock()
-		defer func() {
-			m.mu.Lock()
-			delete(m.pendingChallenges, challengeID)
-			m.mu.Unlock()
-		}()
-
-		prompts := make([]protocol.KeyboardInteractivePrompt, 0, len(challenge.Prompts))
-		for _, prompt := range challenge.Prompts {
-			prompts = append(prompts, protocol.KeyboardInteractivePrompt{
-				Label: prompt.Label,
-				Echo:  prompt.Echo,
-				// 판정은 sshconn 이 홉마다 내린다 — 화면은 그대로 그린다.
-				AllowStoredPassword: prompt.AllowStoredPassword,
-				Masked:              prompt.Masked,
-			})
-		}
-
-		m.emit(protocol.Event{
-			Type:      protocol.EventKeyboardInteractiveChallenge,
-			RequestID: requestID,
-			SessionID: sessionID,
-			Payload: protocol.KeyboardInteractiveChallengePayload{
-				ChallengeID: challengeID,
-				// 어느 홉이 묻는지. 점프 체인에서 이것이 없으면 사용자가 누구의 코드인지 모른다.
-				Hop:         sshconn.HopPayload(challenge.Hop),
-				Attempt:     attempt,
-				Name:        challenge.Name,
-				Instruction: challenge.Instruction,
-				Prompts:     prompts,
-				// 화면이 "저장된 비밀번호 사용" 을 내밀 수 있는지만 알려 준다. 값은 안 나간다.
-				HasStoredPassword: payload.Password != "",
-			},
-		})
-
-		// 창구까지 갔다는 기록. 카드가 안 뜨는 경우와 코어가 묻지 않은 경우를 밖에서 구분하려면
-		// 이 줄이 필요하다(프로브 쪽과 같은 이유).
-		sshconn.AuthLogf("session challenge %s sent up (sessionId=%q)", challengeID, sessionID)
-
-		// 답을 기다린다. 취소(정지·종료)와 **예산**이 함께 걸려 있다.
-		//
-		// ctx 취소는 conn 을 닫아 핸드셰이크를 풀지만 이 채널 대기는 그것과 무관하게 서 있다.
-		// 예산이 없으면 아무도 답하지 않는 프롬프트가 이 연결을 영원히 붙잡는다 — tailnet 을 경유하면
-		// 그 노드의 리스까지 잡은 채라서, 설정의 "연결 종료" 가 계속 거절된다(sshconn.HumanAnswerBudget).
-		response, waitErr := sshconn.WaitForHumanAnswer(ctx, responseCh)
-		if waitErr != nil {
-			sshconn.AuthLogf("session challenge %s ended without an answer: %v", challengeID, waitErr)
-			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled: %w", waitErr)
-		}
-		sshconn.AuthLogf("session challenge %s answered", challengeID)
-		responses := applyStoredPassword(
-			response, payload.Password, len(challenge.Prompts))
-		m.emit(protocol.Event{
-			Type:      protocol.EventKeyboardInteractiveResolved,
-			RequestID: requestID,
-			SessionID: sessionID,
-			Payload: map[string]any{
-				"challengeId": challengeID,
-			},
-		})
-		return responses, nil
+	// 연결 조립은 sshdial 한 곳에 있다 — tailnet 경로, 홉 진행 보고, 호스트 키 신뢰 질의, 서버
+	// 배너, 대화형 인증 대기표가 모두 거기서 붙는다(mosh·tmux 도 같은 것을 쓴다).
+	client, _, err := m.dialer.Dial(ctx, sshdial.Request{
+		SessionID: sessionID,
+		RequestID: requestID,
+		Payload:   payload,
 	})
 	if err != nil {
 		return err
@@ -449,53 +356,15 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	return nil
 }
 
-// interactiveResponse 는 화면이 보낸 응답이다. 값과 "저장된 비밀번호로 채울 칸" 이 함께 온다.
-type interactiveResponse struct {
-	Responses             []string
-	StoredPasswordIndexes []int
-}
-
-// applyStoredPassword 는 사용자가 지목한 칸에만 저장된 비밀번호를 넣는다.
+// RespondKeyboardInteractive 는 사용자의 답을 전달한다.
 //
-// **어느 칸인지 우리가 고르지 않는 이유:** 라벨을 정규식으로 판정하면, 서버가 `Password:` 라고 써 놓고
-// 실제로는 두 번째 요소를 묻는 경우에 비밀번호를 그 칸으로 보낸다. 우리는 인증 기회가 한 번뿐이라
-// (x/crypto 는 한 방식을 한 번만 시도한다) 그 한 번을 그렇게 날리면 연결이 끝난다. 그래서 판단은
-// 사용자가 버튼으로 하고, 여기서는 지목받은 자리만 채운다.
-//
-// promptCount 로 자르는 이유: 응답 개수가 프롬프트 수를 넘으면 서버가 규격 위반으로 끊는다.
-func applyStoredPassword(
-	response interactiveResponse,
-	storedPassword string,
-	promptCount int,
-) []string {
-	// 규칙은 sshconn 한 곳에 있다 — 프로브도 같은 것을 쓴다.
-	return sshconn.ApplyStoredPassword(
-		response.Responses,
-		response.StoredPasswordIndexes,
-		storedPassword,
-		promptCount,
-	)
-}
-
-// RespondKeyboardInteractive 는 payload 를 통째로 받는다 — 응답 값 외에 "저장된 비밀번호로 채울 칸"
-// 이 함께 오기 때문이다(다른 서비스의 같은 이름 메서드는 값만 받는다).
+// 대기표는 dialer 가 든다 — 세션·mosh·tmux 가 그것을 공유하므로 어느 매니저의 물음인지 고르는
+// 분기가 없다. sessionID 는 문구에만 쓴다.
 func (m *Manager) RespondKeyboardInteractive(sessionID string, payload protocol.KeyboardInteractiveRespondPayload) error {
-	m.mu.Lock()
-	responseCh, ok := m.pendingChallenges[payload.ChallengeID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("keyboard-interactive challenge %s not found for session %s", payload.ChallengeID, sessionID)
+	if err := m.dialer.RespondKeyboardInteractive(payload); err != nil {
+		return fmt.Errorf("%w (session %s)", err, sessionID)
 	}
-
-	select {
-	case responseCh <- interactiveResponse{
-		Responses:             payload.Responses,
-		StoredPasswordIndexes: payload.StoredPasswordIndexes,
-	}:
-		return nil
-	default:
-		return fmt.Errorf("keyboard-interactive challenge %s already has a pending response", payload.ChallengeID)
-	}
+	return nil
 }
 
 func (m *Manager) HasSession(sessionID string) bool {
@@ -914,19 +783,8 @@ func (m *Manager) Resize(sessionID string, cols, rows int) error {
 }
 
 // CancelInFlight 는 아직 붙는 중인 연결을 끊는다(forwarding 과 같은 이유).
-// hostKeyTrust 는 이 연결의 신뢰 질의 함수를 만든다. 창구가 없으면 nil(예전 동작).
-func (m *Manager) hostKeyTrust(
-	ctx context.Context,
-	correlation hostkeytrust.Correlation,
-) sshconn.HostKeyTrustFunc {
-	if m.config.HostKeyTrustPrompt == nil {
-		return nil
-	}
-	return m.config.HostKeyTrustPrompt(ctx, correlation)
-}
-
 func (m *Manager) CancelInFlight(sessionID string) {
-	m.connecting.Cancel(sessionID)
+	m.dialer.CancelInFlight(sessionID)
 }
 
 func (m *Manager) Disconnect(sessionID string) error {
@@ -1066,8 +924,9 @@ func (m *Manager) sendKeepAliveProbe(session *sessionHandle) (time.Duration, boo
 
 func (m *Manager) closeSession(sessionID string, message string, reason string) {
 	// 아직 붙는 중이면 그 작업부터 끊는다. 이것이 없으면 dial 이 끝날 때까지(타임아웃까지) 종료가
-	// 아무 일도 하지 않는 것처럼 보인다.
-	m.connecting.Cancel(sessionID)
+	// 아무 일도 하지 않는 것처럼 보인다. 사람의 답을 기다리는 물음도 함께 접는다.
+	m.dialer.CancelInFlight(sessionID)
+	m.dialer.CancelChallenges(sessionID)
 
 	// 맵에서 먼저 제거해 중복 종료 요청이 다시 같은 세션을 건드리지 않게 한다.
 	m.mu.Lock()
@@ -1075,22 +934,7 @@ func (m *Manager) closeSession(sessionID string, message string, reason string) 
 	if ok {
 		delete(m.sessions, sessionID)
 	}
-	challengeIDs := make([]string, 0)
-	for challengeID := range m.pendingChallenges {
-		if len(challengeID) >= len(sessionID)+1 && challengeID[:len(sessionID)] == sessionID && challengeID[len(sessionID)] == '-' {
-			challengeIDs = append(challengeIDs, challengeID)
-		}
-	}
-	challenges := make([]chan interactiveResponse, 0, len(challengeIDs))
-	for _, challengeID := range challengeIDs {
-		challenges = append(challenges, m.pendingChallenges[challengeID])
-		delete(m.pendingChallenges, challengeID)
-	}
 	m.mu.Unlock()
-
-	for _, challenge := range challenges {
-		close(challenge)
-	}
 
 	if !ok {
 		return

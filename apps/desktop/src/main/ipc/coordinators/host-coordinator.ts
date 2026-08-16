@@ -146,10 +146,11 @@ export function createHostCoordinator(deps: {
   /**
    * 신뢰된 키를 **요구**한다. 없으면 연결을 시작하지 않는다.
    *
-   * 코어가 물을 수 없는 경로만 이것을 쓴다:
-   *   - 원격 키 설치(대화형 세션이 아니다)
-   *   - AWS SSM(키를 저장하는 이름이 dial 주소와 다르다 — 코어는 자기가 붙은 주소만 안다)
-   * 그 밖의 연결은 resolveTrustedHostKeys 로 통과시키고, 처음 보는 키는 연결 안에서 묻는다.
+   * 이제 이것을 쓰는 곳은 AWS SSM 계열뿐이다 — 키를 저장하는 이름이 dial 주소와 달라서, 코어가
+   * 물어봐야 그 답을 어느 호스트의 것으로 저장할지 알 수 없다(코어는 자기가 붙은 주소만 안다).
+   *
+   * 그 밖의 모든 연결은 resolveTrustedHostKeys 로 통과시키고 처음 보는 키는 연결 안에서 묻는다 —
+   * 세션·SFTP·컨테이너·포워딩·원격 키 설치가 전부 같은 규칙이다.
    */
   const requireTrustedHostKeys = (host: {
     hostname: string;
@@ -161,6 +162,34 @@ export function createHostCoordinator(deps: {
       throw new Error("Host key is not trusted yet.");
     }
     return trusted;
+  };
+
+  /**
+   * 점프 체인 첫 홉에 설정된 tailnet. 체인이 없거나 그 홉에 설정이 없으면 undefined.
+   *
+   * 첫 홉을 찾지 못하면(지워진 점프 호스트 등) 판정하지 않는다 — 없는 것을 근거로 대상의 설정까지
+   * 버리면 멀쩡하던 연결이 끊긴다.
+   */
+  const resolveEntryHopTailnetId = (host: {
+    jumpHostId?: string | null;
+    jumpHostIds?: string[] | null;
+  }): string | undefined => {
+    const chain =
+      Array.isArray(host.jumpHostIds) && host.jumpHostIds.length > 0
+        ? host.jumpHostIds
+        : host.jumpHostId
+          ? [host.jumpHostId]
+          : [];
+    const entryJumpId = chain.find(
+      (id): id is string => typeof id === "string" && id.length > 0,
+    );
+    if (!entryJumpId) {
+      return undefined;
+    }
+    const entryJump = hosts.getById(entryJumpId);
+    return entryJump && isSshHostRecord(entryJump)
+      ? entryJump.tailnetId?.trim() || undefined
+      : undefined;
   };
 
   /**
@@ -179,8 +208,20 @@ export function createHostCoordinator(deps: {
    */
   const resolveTailnetRoute = (host: {
     tailnetId?: string | null;
+    jumpHostId?: string | null;
+    jumpHostIds?: string[] | null;
   }): { tailnetId?: string; tailnetName?: string } => {
-    const tailnetId = host.tailnetId?.trim();
+    // **첫 홉의 설정이 우선이다.**
+    //
+    // 점프 체인에서 실제로 소켓을 여는 것은 첫 홉뿐이고(그 뒤는 그 연결 위의 SSH 채널을 탄다),
+    // 따라서 tailnet 을 타야 하는 것도 그 홉이다. 대상에서 읽으면 "tailnet 안의 베스천을 거쳐
+    // 사내 LAN 호스트로" 가 불가능했다 — 대상은 tailnet 에 있지도 않아 설정이 비고, 그러면
+    // 베스천을 일반 네트워크로 찾다 실패한다.
+    //
+    // 첫 홉에 없으면 대상의 것을 물려받는다: 예전에는 대상에만 설정하는 것이 유일한 방법이라
+    // 그렇게 저장된 호스트가 이미 있고, 그것들을 깨지 않는다.
+    const tailnetId =
+      resolveEntryHopTailnetId(host) ?? (host.tailnetId?.trim() || undefined);
     if (!tailnetId) {
       return {};
     }

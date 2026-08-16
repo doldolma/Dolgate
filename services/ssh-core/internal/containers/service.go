@@ -269,6 +269,29 @@ func (s *Service) TakeClient(endpointID string) (*ssh.Client, error) {
 	return client, nil
 }
 
+// CancelKeyboardInteractive 는 사용자가 닫은 물음을 접는다.
+//
+// 답이 오지 않는 것과 "안 하겠다" 는 다르다. 닫았는데 아무것도 보내지 않으면 이 연결은 예산이
+// 다 될 때까지 기다리고, 그동안 화면은 "연결 중…" 에 앉아 있는다. 채널을 닫는 것이 취소 신호다
+// (sshconn.WaitForHumanAnswer 가 그렇게 해석한다).
+func (s *Service) CancelKeyboardInteractive(endpointID, challengeID string) error {
+	s.mu.Lock()
+	challenge, ok := s.pendingChallenges[challengeID]
+	if ok && challenge.endpointID == endpointID {
+		// 지우고 닫는 것을 같은 잠금 안에서 한다 — 그래야 뒤늦은 응답이 닫힌 채널로 가지 않는다.
+		delete(s.pendingChallenges, challengeID)
+	}
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("keyboard-interactive challenge %s not found for endpoint %s", challengeID, endpointID)
+	}
+	if challenge.endpointID != endpointID {
+		return fmt.Errorf("keyboard-interactive challenge %s does not belong to endpoint %s", challengeID, endpointID)
+	}
+	close(challenge.responses)
+	return nil
+}
+
 func (s *Service) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
 	s.mu.Lock()
 	challenge, ok := s.pendingChallenges[challengeID]

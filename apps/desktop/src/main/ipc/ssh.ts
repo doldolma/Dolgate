@@ -78,7 +78,7 @@ function buildAwsEc2SshOverSsmSignature(host: AwsEc2HostRecord): string {
 // 호스트 키 관련 실패는 SSM 셸로 폴백하지 않는다.
 //
 // 신뢰를 묻는 자리는 두 곳이다: 연결 안에서 코어가 묻거나(hostKeyTrustChallenge), 연결 전에
-// 신뢰된 키를 요구하거나(host-coordinator 의 requireTrustedHostKeys — AWS SSM·원격 키 설치).
+// 신뢰된 키를 요구하거나(host-coordinator 의 requireTrustedHostKeys — AWS SSM 계열).
 // 어느 쪽이든 폴백해 버리면 사용자가 신뢰한 뒤 SSH 로 붙을 기회가 사라진다.
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

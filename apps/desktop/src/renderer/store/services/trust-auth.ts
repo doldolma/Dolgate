@@ -9,7 +9,6 @@ import {
   getAwsEc2HostSshPort,
   isSshHostRecord,
   isWarpgateSshHostRecord,
-  isRdpHostRecord,
 } from "@shared";
 import type { PendingHostKeyPrompt } from "../types";
 import type { SliceDeps } from "./context";
@@ -484,13 +483,22 @@ export function createTrustAuthServices({ api, get }: SliceDeps) {
     return ensureTrustedHostChain(set, input);
   };
 
-  /** tailnet 준비가 필요한 호스트인지. 동기 판정이라 아닌 경우의 타이밍을 건드리지 않는다. */
+  /**
+   * tailnet 준비가 필요한 호스트인지. 동기 판정이라 아닌 경우의 타이밍을 건드리지 않는다.
+   *
+   * **판정은 ensureTailnetReady 와 같은 것을 쓴다.** 여기서 호스트의 tailnetId 만 직접 보던
+   * 시절에는 "점프 호스트에만 tailnet" 구성이 관문을 통째로 건너뛰었다 — 접속은 첫 홉의
+   * tailnet 으로 나가는데 노드를 올려 주는 단계가 없으니, 노드가 내려가 있으면 dial 예산
+   * (10초, sshconn 의 TCPDialTimeout) 안에 기동까지 끝내야 했고 그것을 못 넘겨
+   * `jump host: context deadline exceeded` 로 죽었다. 인증까지 가지도 못하니 OTP 도 안 물었다.
+   */
   const needsTailnetReady = (hostId: string): boolean => {
-    const host = get().hosts.find((item) => item.id === hostId);
+    const hosts = get().hosts;
     return Boolean(
-      host &&
-        (isSshHostRecord(host) || isRdpHostRecord(host)) &&
-        (host as { tailnetId?: string | null }).tailnetId?.trim(),
+      resolveHostTailnetId(
+        hosts.find((item) => item.id === hostId),
+        hosts,
+      ),
     );
   };
 

@@ -58,7 +58,9 @@ type coreRuntime interface {
 	InspectCertificate(requestID string, payload protocol.CertificateInspectPayload) error
 	GeneratePrivateKey(requestID string, payload protocol.PrivateKeyGeneratePayload) error
 	InspectPrivateKey(requestID string, payload protocol.PrivateKeyInspectPayload) error
-	InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error
+	// correlationID 를 함께 받는다 — 호스트가 인증을 물으면 그 물음을 화면의 설치 대화상자에
+	// 붙여야 한다(shared/ipc.ts 의 KEY_INSTALL_CORRELATION_PREFIX).
+	InstallAuthorizedKey(requestID, correlationID string, payload protocol.AuthorizedKeyInstallPayload) error
 	RespondKeyboardInteractive(sessionID, endpointID string, payload protocol.KeyboardInteractiveRespondPayload) error
 	// RespondHostKeyTrust 는 연결 중 신뢰 질의의 답이다(호스트 키를 이 연결 안에서 확인한다).
 	RespondHostKeyTrust(payload protocol.HostKeyTrustRespondPayload) error
@@ -363,7 +365,7 @@ func dispatch(core coreRuntime, writer *eventWriter, request protocol.Request) e
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {
 			return err
 		}
-		return core.InstallAuthorizedKey(request.ID, payload)
+		return core.InstallAuthorizedKey(request.ID, request.SessionID, payload)
 	case protocol.CommandControlSignal:
 		var payload protocol.ControlSignalPayload
 		if err := json.Unmarshal(request.Payload, &payload); err != nil {

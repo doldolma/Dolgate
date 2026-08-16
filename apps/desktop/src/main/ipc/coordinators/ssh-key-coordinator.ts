@@ -1,3 +1,4 @@
+import { keyInstallCorrelationId } from "@shared";
 import type {
   AuthType,
   HostSecretInput,
@@ -67,7 +68,26 @@ export function createSshKeyCoordinator(deps: {
     secrets?: HostSecretInput,
   ) => Promise<string | null>;
   loadSecrets: (secretRef?: string | null) => Promise<HostSecretInput>;
-  requireTrustedHostKeys: (host: { hostname: string; port: number }) => string[];
+  /**
+   * 지금 신뢰 중인 키들(없으면 빈 배열). 없어도 진행한다 — 처음 보는 키는 코어가 연결 안에서
+   * 묻는다(세션·SFTP·컨테이너와 같은 규칙).
+   *
+   * tailnetId 를 함께 넘긴다: 신뢰는 tailnet 범위 안에서만 유효해서, 빼면 다른 tailnet 의
+   * 동명 호스트 키를 신뢰된 것으로 볼 수 있다.
+   */
+  resolveTrustedHostKeys: (host: {
+    hostname: string;
+    port: number;
+    tailnetId?: string | null;
+  }) => string[];
+  /**
+   * 호스트를 어느 tailnet 으로 보낼지. 이것을 payload 에 싣지 않으면 코어가 일반 네트워크로
+   * 나가서, tailnet 안에만 있는 호스트에는 키를 설치할 수 없다.
+   */
+  resolveTailnetRoute: (host: { tailnetId?: string | null }) => {
+    tailnetId?: string;
+    tailnetName?: string;
+  };
   requireConfiguredSshUsername: (host: SshHostRecord) => string;
   resolveJumpHostTarget: (host: SshHostRecord) => Promise<ResolvedAuthorizedKeyInstallPayload["jump"]>;
   ensureCertificateAuthReady: (
@@ -87,6 +107,7 @@ export function createSshKeyCoordinator(deps: {
   ) => Promise<ResolvedPrivateKeyGenerateResult>;
   installAuthorizedKey: (
     payload: ResolvedAuthorizedKeyInstallPayload,
+    correlationId?: string,
   ) => Promise<ResolvedAuthorizedKeyInstallResult>;
   queueSync: () => void;
 }): SshKeyCoordinator {
@@ -94,7 +115,8 @@ export function createSshKeyCoordinator(deps: {
     hosts,
     persistSecret,
     loadSecrets,
-    requireTrustedHostKeys,
+    resolveTrustedHostKeys,
+    resolveTailnetRoute,
     requireConfiguredSshUsername,
     resolveJumpHostTarget,
     ensureCertificateAuthReady,
@@ -192,7 +214,10 @@ export function createSshKeyCoordinator(deps: {
     secrets: HostSecretInput,
     passphraseOverride?: string | null,
   ): Promise<ResolvedAuthorizedKeyInstallPayload> => {
-    const trustedHostKeysBase64 = requireTrustedHostKeys(host);
+    // 세션과 같은 규칙이다 — 처음 보는 키는 **연결 안에서** 묻는다(코어의 hostKeyTrustChallenge).
+    // 여기서 막으면 코어가 물어볼 기회 자체가 없어져서, 한 번도 안 붙어본 호스트에는 키를 올릴
+    // 수 없다. 점프 호스트는 이미 이 규칙이었다(host-coordinator 의 resolveJumpHostTarget).
+    const trustedHostKeysBase64 = resolveTrustedHostKeys(host);
     const passphrase =
       authType === "privateKey" || authType === "certificate"
         ? passphraseOverride?.trim() || secrets.passphrase
@@ -209,6 +234,8 @@ export function createSshKeyCoordinator(deps: {
       trustedHostKeyBase64: trustedHostKeysBase64[0],
       trustedHostKeysBase64,
       jump: await resolveJumpHostTarget(host),
+      // 연결 경로는 세션과 같아야 한다 — 빠뜨리면 tailnet 호스트에 설치가 닿지 않는다.
+      ...resolveTailnetRoute(host),
       cols: 0,
       rows: 0,
       publicKey,
@@ -231,6 +258,8 @@ export function createSshKeyCoordinator(deps: {
         currentSecrets,
         host.secretRef === keyMaterial.secretRef ? passphraseOverride : undefined,
       ),
+      // 이 값으로 코어의 인증 물음이 설치 대화상자에 붙는다(없으면 코어가 묻지 못한다).
+      keyInstallCorrelationId(host.id),
     );
 
     if (mode === "installAndUse") {
@@ -243,6 +272,7 @@ export function createSshKeyCoordinator(deps: {
           keySecrets,
           passphraseOverride,
         ),
+        keyInstallCorrelationId(host.id),
       );
       hosts.updateSshAuthSecret(host.id, "privateKey", keyMaterial.secretRef);
     }

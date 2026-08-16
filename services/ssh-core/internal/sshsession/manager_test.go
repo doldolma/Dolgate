@@ -870,4 +870,3 @@ func TestConnectFailsWhenTheTailnetDialerCannotBeBuilt(t *testing.T) {
 		t.Fatalf("Connect() error = %v, want the dialer failure", err)
 	}
 }
-

@@ -35,6 +35,7 @@ import (
 	"dolssh/services/ssh-core/internal/protocol"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/sshdial"
 )
 
 // EventEmitter는 상태 이벤트를 상위 레이어로 흘려보내는 함수 타입이다.
@@ -93,6 +94,13 @@ type ManagerConfig struct {
 	// HandshakeTimeout 은 첫 SSP 응답을 기다리는 시간이다. 이 안에 아무것도 오지 않으면 연결
 	// 실패로 본다. 테스트가 짧게 줄일 수 있도록 설정으로 둔다.
 	HandshakeTimeout time.Duration
+	// Dialer 는 세션 계열이 함께 쓰는 연결 경로다(internal/sshdial).
+	//
+	// bootstrap SSH 를 여기로 보내면서 mosh 도 호스트 키 신뢰 질의·서버 배너·취소 가능한 ctx 를
+	// 받는다 — 예전에는 그 셋이 다 없어서 처음 보는 호스트에 mosh 로 붙을 방법이 없었다.
+	//
+	// nil 이면 위 설정값으로 하나 만들어 이 매니저만 쓴다(테스트용).
+	Dialer *sshdial.Dialer
 }
 
 var defaultManagerConfig = ManagerConfig{
@@ -114,12 +122,13 @@ type sessionHandle struct {
 
 type Manager struct {
 	// 여러 mosh 세션을 sessionId 기준으로 관리한다.
-	mu                sync.RWMutex
-	sessions          map[string]*sessionHandle
-	pendingChallenges map[string]chan []string
-	emit              EventEmitter
-	emitStream        StreamEmitter
-	config            ManagerConfig
+	mu         sync.RWMutex
+	sessions   map[string]*sessionHandle
+	emit       EventEmitter
+	emitStream StreamEmitter
+	config     ManagerConfig
+	// dialer 는 bootstrap SSH 를 여는 공통 경로다. 대화형 인증 대기표도 그쪽이 든다.
+	dialer *sshdial.Dialer
 }
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
@@ -140,12 +149,26 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config Manage
 		config.HandshakeTimeout = defaultManagerConfig.HandshakeTimeout
 	}
 	return &Manager{
-		sessions:          make(map[string]*sessionHandle),
-		pendingChallenges: make(map[string]chan []string),
-		emit:              emit,
-		emitStream:        stream,
-		config:            config,
+		sessions:   make(map[string]*sessionHandle),
+		dialer:     resolveDialer(emit, config),
+		emit:       emit,
+		emitStream: stream,
+		config:     config,
 	}
+}
+
+// resolveDialer 는 쓸 연결 경로를 고른다(sshsession 과 같은 규칙).
+//
+// 런타임이 넘겨준 것이 있으면 그것을 쓴다 — 세션 계열이 대기표를 공유해야 응답을 어느 매니저로
+// 보낼지 고르는 분기가 없다. 없으면 이 설정값으로 하나 만들어 쓴다(테스트).
+func resolveDialer(emit EventEmitter, config ManagerConfig) *sshdial.Dialer {
+	if config.Dialer != nil {
+		return config.Dialer
+	}
+	dialer := sshdial.New(emit)
+	dialer.SetTailnetDial(config.TailnetDial)
+	dialer.SetTimeouts(config.TCPDialTimeout, config.TCPKeepAliveInterval)
+	return dialer
 }
 
 // dialMosh 는 mosh UDP 세션을 연다. tailnet 경로가 있으면 그 노드를 통해, 없으면 일반
@@ -222,39 +245,19 @@ func moshOCBFromKey(key string) (*mosh.OCB, error) {
 
 func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectPayload) error {
 	// 1) SSH bootstrap — mosh-server를 원격에서 띄우기 위한 1회성 SSH 연결.
-	//    인증/jump/known-host 인프라는 sshsession과 동일하게 sshconn으로 재사용한다.
-	attempt := 0
-	target := sshconn.Target{
-		Host:                  payload.Host,
-		Port:                  payload.Port,
-		Username:              payload.Username,
-		AuthType:              payload.AuthType,
-		Password:              payload.Password,
-		PrivateKeyPEM:         payload.PrivateKeyPEM,
-		CertificateText:       payload.CertificateText,
-		Passphrase:            payload.Passphrase,
-		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
-		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
-		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-	}
-	dial, dialErr := sshconn.ResolveTailnetDial(
-		m.config.TailnetDial,
-		payload.TailnetID,
-		payload.TailnetName,
-	)
-	if dialErr != nil {
-		return dialErr
-	}
+	//
+	// 연결 조립은 sshdial 한 곳에 있다(터미널 세션·tmux 와 같은 것) — tailnet 경로, 홉 진행 보고,
+	// 호스트 키 신뢰 질의, 서버 배너, 대화형 인증이 모두 거기서 붙는다.
+	ctx, release := m.dialer.Begin(sessionID)
+	defer release()
 
-	// bootstrap SSH도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 세션과 동일한 공통 헬퍼.
-	client, err := sshconn.DialClient(context.Background(), target, sshconn.Config{
-		Dial:                  dial,
-		TCPDialTimeout:        m.config.TCPDialTimeout,
-		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
-		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
-		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
-		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
-	}, m.keyboardInteractiveResponder(sessionID, requestID, &attempt))
+	// dial 을 함께 받는다. UDP 세션도 **같은 경로로** 열어야 하는데, 여기서 다시 해석하면 tailnet
+	// 노드를 두 번 잡는다.
+	client, dial, err := m.dialer.Dial(ctx, sshdial.Request{
+		SessionID: sessionID,
+		RequestID: requestID,
+		Payload:   payload,
+	})
 	if err != nil {
 		return err
 	}
@@ -346,75 +349,6 @@ func (m *Manager) Connect(sessionID, requestID string, payload protocol.ConnectP
 	go m.stream(sessionID, handle)
 	go m.monitor(sessionID, handle)
 	return nil
-}
-
-// keyboardInteractiveResponder는 bootstrap SSH의 keyboard-interactive 챌린지를
-// 상위로 emit하고 응답을 기다린다(sshsession과 동일한 메커니즘). 응답은
-// RespondKeyboardInteractive로 들어온다.
-func (m *Manager) keyboardInteractiveResponder(sessionID, requestID string, attempt *int) sshconn.InteractiveResponder {
-	return func(challenge sshconn.InteractiveChallenge) ([]string, error) {
-		*attempt += 1
-		challengeID := fmt.Sprintf("%s-%d", sessionID, *attempt)
-		responseCh := make(chan []string, 1)
-		m.mu.Lock()
-		m.pendingChallenges[challengeID] = responseCh
-		m.mu.Unlock()
-		defer func() {
-			m.mu.Lock()
-			delete(m.pendingChallenges, challengeID)
-			m.mu.Unlock()
-		}()
-
-		prompts := make([]protocol.KeyboardInteractivePrompt, 0, len(challenge.Prompts))
-		for _, prompt := range challenge.Prompts {
-			prompts = append(prompts, protocol.KeyboardInteractivePrompt{
-				Label: prompt.Label,
-				Echo:  prompt.Echo,
-			})
-		}
-		m.emit(protocol.Event{
-			Type:      protocol.EventKeyboardInteractiveChallenge,
-			RequestID: requestID,
-			SessionID: sessionID,
-			Payload: protocol.KeyboardInteractiveChallengePayload{
-				ChallengeID: challengeID,
-				Attempt:     *attempt,
-				Name:        challenge.Name,
-				Instruction: challenge.Instruction,
-				Prompts:     prompts,
-			},
-		})
-
-		responses, ok := <-responseCh
-		if !ok {
-			return nil, fmt.Errorf("keyboard-interactive challenge was cancelled")
-		}
-		m.emit(protocol.Event{
-			Type:      protocol.EventKeyboardInteractiveResolved,
-			RequestID: requestID,
-			SessionID: sessionID,
-			Payload: map[string]any{
-				"challengeId": challengeID,
-			},
-		})
-		return responses, nil
-	}
-}
-
-func (m *Manager) RespondKeyboardInteractive(sessionID, challengeID string, responses []string) error {
-	m.mu.Lock()
-	responseCh, ok := m.pendingChallenges[challengeID]
-	m.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("keyboard-interactive challenge %s not found for session %s", challengeID, sessionID)
-	}
-
-	select {
-	case responseCh <- responses:
-		return nil
-	default:
-		return fmt.Errorf("keyboard-interactive challenge %s already has a pending response", challengeID)
-	}
 }
 
 func (m *Manager) HasSession(sessionID string) bool {
@@ -511,28 +445,17 @@ func (m *Manager) monitor(sessionID string, handle *sessionHandle) {
 }
 
 func (m *Manager) closeSession(sessionID, message, reason string) {
+	// 아직 bootstrap 중이면 그 작업부터 끊고, 기다리던 물음도 접는다(sshsession 과 같다).
+	m.dialer.CancelInFlight(sessionID)
+	m.dialer.CancelChallenges(sessionID)
+
 	// 맵에서 먼저 제거해 중복 종료 요청이 다시 같은 세션을 건드리지 않게 한다.
 	m.mu.Lock()
 	handle, ok := m.sessions[sessionID]
 	if ok {
 		delete(m.sessions, sessionID)
 	}
-	challengeIDs := make([]string, 0)
-	for challengeID := range m.pendingChallenges {
-		if strings.HasPrefix(challengeID, sessionID+"-") {
-			challengeIDs = append(challengeIDs, challengeID)
-		}
-	}
-	challenges := make([]chan []string, 0, len(challengeIDs))
-	for _, challengeID := range challengeIDs {
-		challenges = append(challenges, m.pendingChallenges[challengeID])
-		delete(m.pendingChallenges, challengeID)
-	}
 	m.mu.Unlock()
-
-	for _, challenge := range challenges {
-		close(challenge)
-	}
 
 	if !ok {
 		return

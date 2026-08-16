@@ -61,6 +61,63 @@ describe("tailnet readiness before connecting", () => {
     resolveTest?.({ id: "net-1", state: "running" });
   });
 
+  // tailnet 이 **점프 호스트에만** 걸린 구성도 노드를 올려야 한다.
+  //
+  // 접속은 첫 홉의 tailnet 으로 나가는데(resolveTailnetRoute), 관문 판정만 대상의 tailnetId 를
+  // 보던 시절에는 이 구성이 관문을 통째로 건너뛰었다. 노드가 내려가 있으면 dial 예산(10초) 안에
+  // 기동까지 끝내야 했고, 못 넘기면 `jump host: context deadline exceeded` 로 죽었다 — 인증까지
+  // 가지 못하니 OTP 도 묻지 않고 재연결만 반복했다.
+  it("점프 호스트에만 tailnet 이 걸려 있어도 노드를 올린다", async () => {
+    const api = createMockApi();
+    vi.mocked(api.hosts.list).mockResolvedValue([
+      {
+        id: "jump-1",
+        kind: "ssh",
+        label: "베스천",
+        hostname: "bastion",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        secretRef: "host:jump-1",
+        groupName: null,
+        terminalThemeId: null,
+        tailnetId: "net-1",
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+      {
+        id: "host-1",
+        kind: "ssh",
+        label: "사내 LAN 호스트",
+        hostname: "10.0.0.9",
+        port: 22,
+        username: "ubuntu",
+        authType: "password",
+        secretRef: "host:host-1",
+        groupName: null,
+        terminalThemeId: null,
+        // 대상에는 tailnet 이 없다 — 그 망에서 보이는 주소일 뿐이다.
+        tailnetId: null,
+        jumpHostIds: ["jump-1"],
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      },
+    ] as never);
+    vi.mocked(api.tailnet.list).mockResolvedValue([
+      { id: "net-1", label: "회사망", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" },
+    ] as never);
+
+    const store = createAppStore(api);
+    await store.getState().bootstrap();
+    void store.getState().connectHost("host-1", 120, 32);
+    await flushMicrotasks();
+
+    // 첫 홉의 tailnet 을 올리려 했어야 한다.
+    expect(vi.mocked(api.tailnet.list)).toHaveBeenCalled();
+    const tab = store.getState().tabs.find((item) => item.hostId === "host-1");
+    expect(tab?.connectionProgress?.stage).toBe("tailnet-connecting");
+  });
+
   it("leaves hosts without a tailnet untouched", async () => {
     const api = createMockApi();
     const store = createAppStore(api);

@@ -797,6 +797,35 @@ export interface ResolvedAuthorizedKeyInstallPayload
   publicKey: string;
 }
 
+/**
+ * 공개 키 설치의 상관 ID 접두어. **화면과의 약속이다.**
+ *
+ * 설치는 세션도 엔드포인트도 만들지 않는데, 호스트가 OTP 나 비밀번호를 물으면 코어는 그 답을
+ * 기다려야 한다. 물음을 올릴 자리가 없으면 코어는 아무것도 묻지 못하고 "keyboard-interactive
+ * responder is not configured" 로 끝난다 — 설치 대화상자에는 붉은 글씨만 남는다.
+ *
+ * 그래서 설치마다 이 접두어로 상관 ID 를 만들어 세션 자리에 실어 보낸다. 코어는 그것을 그대로
+ * 물음에 달아 올리고, 화면은 접두어에서 호스트를 되꺼내 그 대화상자 안에 입력창을 띄운다.
+ * 형식을 바꾸면 양쪽을 같이 바꿔야 한다(VNC 터널의 `vnc:<sessionId>` 와 같은 규약이다).
+ *
+ * 프레임 라우터가 이 값으로 줄을 가르는 효과도 있다 — 사람을 기다리는 설치가 다른 요청을 막지 않는다.
+ */
+export const KEY_INSTALL_CORRELATION_PREFIX = "keyinstall:";
+
+export function keyInstallCorrelationId(hostId: string): string {
+  return `${KEY_INSTALL_CORRELATION_PREFIX}${hostId}`;
+}
+
+/** 상관 ID 에서 호스트를 되꺼낸다. 설치의 것이 아니면 null. */
+export function hostIdFromKeyInstallCorrelation(
+  correlationId: string | null | undefined,
+): string | null {
+  if (!correlationId?.startsWith(KEY_INSTALL_CORRELATION_PREFIX)) {
+    return null;
+  }
+  return correlationId.slice(KEY_INSTALL_CORRELATION_PREFIX.length) || null;
+}
+
 export interface ResolvedAuthorizedKeyInstallResult {
   status: "installed" | "already-present";
 }
@@ -870,6 +899,14 @@ export interface KeyboardInteractiveRespondInput {
    * 인증 기회가 한 번뿐이라 그걸로 연결이 끝난다. 그 판단은 사용자가 버튼으로 한다.
    */
   storedPasswordIndexes?: number[];
+  /**
+   * 사용자가 이 물음을 **닫았다**는 표시. 답을 기다리던 쪽이 즉시 실패로 끝난다.
+   *
+   * 이것 없이 화면에서 카드만 지우면 코어는 계속 기다린다 — 진행 카드가 "연결 중…"에 앉은 채로
+   * 남고, tailnet 을 경유하면 그 노드의 리스까지 붙잡은 채라서 "연결 종료"도 거절된다. 사람을
+   * 기다리는 구간은 코어의 정지 감시가 일부러 꺼져 있어 그쪽이 대신 끊어 주지도 않는다.
+   */
+  cancelled?: boolean;
 }
 
 export interface ControlSignalPayload {

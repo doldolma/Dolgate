@@ -58,7 +58,8 @@ function createCoordinator(options: {
     loadSecrets: vi.fn(async (secretRef?: string | null) =>
       secretRef ? (secretsByRef[secretRef] ?? {}) : {},
     ),
-    requireTrustedHostKeys: vi.fn(() => ["trusted-host-key"]),
+    resolveTrustedHostKeys: vi.fn(() => ["trusted-host-key"]),
+    resolveTailnetRoute: vi.fn(() => ({})),
     requireConfiguredSshUsername: vi.fn((host: SshHostRecord) => host.username),
     resolveJumpHostTarget: vi.fn().mockResolvedValue(null),
     ensureCertificateAuthReady: vi.fn().mockResolvedValue(null),
@@ -212,6 +213,8 @@ describe("ssh key coordinator", () => {
         password: "current-password",
         publicKey: STORED_PUBLIC_KEY,
       }),
+      // 상관 ID 가 없으면 코어가 인증을 물을 곳이 없어 그냥 실패시킨다.
+      "keyinstall:host-1",
     );
     expect(deps.installAuthorizedKey).toHaveBeenNthCalledWith(
       2,
@@ -221,6 +224,7 @@ describe("ssh key coordinator", () => {
         passphrase: "transient",
         publicKey: STORED_PUBLIC_KEY,
       }),
+      "keyinstall:host-1",
     );
     expect(deps.hosts.updateSshAuthSecret).toHaveBeenCalledWith(
       "host-1",
@@ -321,6 +325,64 @@ describe("ssh key coordinator", () => {
 
     expect(deps.installAuthorizedKey).toHaveBeenCalledWith(
       expect.objectContaining({ publicKey: ecdsaKey.publicKey }),
+      "keyinstall:host-1",
+    );
+  });
+
+  // tailnet 안에만 있는 호스트에도 키가 설치돼야 한다.
+  //
+  // 경로를 안 실으면 코어는 일반 네트워크로 나가고, 그 호스트에는 닿지 않는다 — 사용자에게는
+  // "다른 건 다 되는데 키 설치만 안 됨"으로 보인다. 세션·SFTP 는 같은 값을 이미 싣고 있었다.
+  it("연결 경로에 tailnet 을 실어 tailnet 호스트에도 설치한다", async () => {
+    const { deps, coordinator } = createCoordinator({
+      hostsById: { "host-1": createHost("host-1", { tailnetId: "net-1" }) },
+    });
+    deps.resolveTailnetRoute.mockReturnValue({
+      tailnetId: "net-1",
+      tailnetName: "example.ts.net",
+    });
+
+    await coordinator.installSshPublicKey({
+      secretRef: "key-ref",
+      hostIds: ["host-1"],
+      mode: "installOnly",
+    });
+
+    expect(deps.installAuthorizedKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tailnetId: "net-1",
+        tailnetName: "example.ts.net",
+      }),
+      "keyinstall:host-1",
+    );
+  });
+
+  // 한 번도 안 붙어본 호스트에도 키를 설치할 수 있어야 한다.
+  //
+  // 예전에는 여기서 "Host key is not trusted yet." 로 막았다. 그 시절에는 연결 전에 키를 미리
+  // 읽어 왔으니 단정할 수 있었지만, 지금은 코어가 **연결 안에서** 묻는다 — 여기서 막으면 물어볼
+  // 기회 자체가 없어진다. 세션·SFTP·컨테이너·포워딩이 이미 같은 규칙이고, 점프 호스트도 그랬다.
+  it("신뢰된 키가 아직 없어도 설치를 시작한다", async () => {
+    const { deps, coordinator } = createCoordinator();
+    deps.resolveTrustedHostKeys.mockReturnValue([]);
+
+    await expect(
+      coordinator.installSshPublicKey({
+        secretRef: "key-ref",
+        hostIds: ["host-1"],
+        mode: "installOnly",
+      }),
+    ).resolves.toMatchObject({
+      results: [{ hostId: "host-1", status: "installed" }],
+    });
+
+    // 신뢰 중인 키가 없으면 빈 목록으로 나간다. 코어가 그 자리에서 사용자에게 묻는다.
+    expect(deps.installAuthorizedKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trustedHostKeyBase64: undefined,
+        trustedHostKeysBase64: [],
+      }),
+      "keyinstall:host-1",
     );
   });
 
@@ -385,6 +447,7 @@ describe("ssh key coordinator", () => {
         passphrase: "saved-passphrase",
         publicKey: key.publicKey,
       }),
+      "keyinstall:host-1",
     );
     expect(deps.hosts.updateSshAuthSecret).toHaveBeenCalledWith(
       "host-1",

@@ -48,10 +48,10 @@ func TestDisconnectEndsAConnectThatIsStillDialing(t *testing.T) {
 		})
 	}()
 
-	for attempt := 0; attempt < 200 && !manager.connecting.Has("session-1"); attempt += 1 {
+	for attempt := 0; attempt < 200 && !manager.dialer.IsConnecting("session-1"); attempt += 1 {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if !manager.connecting.Has("session-1") {
+	if !manager.dialer.IsConnecting("session-1") {
 		t.Fatal("연결이 시작되지 않았다")
 	}
 	if err := manager.Disconnect("session-1"); err != nil {

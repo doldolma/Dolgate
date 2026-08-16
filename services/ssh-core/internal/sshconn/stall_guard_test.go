@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -134,4 +135,36 @@ func TestDialClientAllowsSlowInteractiveAnswer(t *testing.T) {
 		t.Fatalf("느린 사람 응답을 정지로 오판했다: %v", err)
 	}
 	defer client.Close()
+}
+
+// 점프 뒤의 홉에는 정지 감시가 걸리지 않는다는 사실을 고정한다.
+//
+// x/crypto 의 SSH 채널 conn 은 데드라인을 지원하지 않는다(언제나 "deadline not supported").
+// 감시자는 그 오류를 삼키므로 밖에서는 "걸린 것처럼" 보인다 — 이 테스트가 그 착각을 막는다.
+// x/crypto 가 언젠가 데드라인을 지원하면 여기서 실패하고, 그때 stall_guard.go 의 문단을 지우면 된다.
+func TestStallGuardDoesNotApplyToConnsWithoutDeadlines(t *testing.T) {
+	guard := newStallGuard(10 * time.Millisecond)
+	conn := &noDeadlineConn{}
+	guard.Wrap(conn)
+	guard.arm(conn)
+
+	if conn.deadlineCalls == 0 {
+		t.Fatal("감시자가 데드라인을 걸어 보지도 않았다")
+	}
+	if !conn.refused {
+		t.Fatal("이 테스트의 conn 은 데드라인을 거부해야 한다")
+	}
+}
+
+// noDeadlineConn 은 SSH 채널 conn 처럼 데드라인을 거부한다.
+type noDeadlineConn struct {
+	net.Conn
+	deadlineCalls int
+	refused       bool
+}
+
+func (c *noDeadlineConn) SetDeadline(time.Time) error {
+	c.deadlineCalls += 1
+	c.refused = true
+	return errors.New("ssh: tcpChan: deadline not supported")
 }

@@ -438,10 +438,16 @@ func TestProbeHostKeyRejectsBothWsProxyAndTailnetDialer(t *testing.T) {
 //
 // 노드를 올리는 것은 앞 단계(관문)가 끝냈고, 여기부터는 대상까지 가는 raw 연결일 뿐이라 일반 TCP
 // 와 다를 이유가 없다. 따로 짧게 두었을 때 실기기에서 5 초에 걸려 붙던 호스트가 안 붙었다.
-func TestTailnetDialUsesTheSameBudgetAsPlainTCP(t *testing.T) {
-	// 호출자가 준 ctx 로 dial 하고, 예산은 TCPDialTimeout 하나만 쓴다. 그 값이 사라지면
-	// tailnet dial 이 아무 한도 없이 매달린다.
+func TestDialBudgetsAreBounded(t *testing.T) {
+	// 두 예산 모두 살아 있어야 한다. 어느 쪽이든 사라지면 그 경로의 dial 이 아무 한도 없이
+	// 매달리고, 화면에는 이유 없이 멈춘 연결만 남는다.
+	//
+	// tailnet 은 일반 TCP 와 **다른** 값을 쓴다(TailnetDialTimeout) — 노드가 깨어나고 경로를
+	// 찾는 시간이 그 구간에 섞이기 때문이다.
 	if DefaultConfig.TCPDialTimeout <= 0 {
 		t.Fatalf("TCPDialTimeout = %v, want a positive budget", DefaultConfig.TCPDialTimeout)
+	}
+	if DefaultConfig.TailnetDialTimeout <= 0 {
+		t.Fatalf("TailnetDialTimeout = %v, want a positive budget", DefaultConfig.TailnetDialTimeout)
 	}
 }

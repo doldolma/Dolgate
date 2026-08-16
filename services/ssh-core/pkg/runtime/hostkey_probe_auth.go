@@ -92,6 +92,22 @@ func (p *probeChallenges) respond(
 	}
 }
 
+// cancel 은 사용자가 닫은 물음을 접는다. 채널을 닫는 것이 취소 신호다.
+func (p *probeChallenges) cancel(challengeID string) error {
+	p.mu.Lock()
+	waiter, ok := p.pending[challengeID]
+	if ok {
+		// 지우고 닫는 것을 같은 잠금 안에서 한다 — 뒤늦은 응답이 닫힌 채널로 가지 않게.
+		delete(p.pending, challengeID)
+	}
+	p.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("host key probe challenge %s not found", challengeID)
+	}
+	close(waiter.responses)
+	return nil
+}
+
 // isProbeChallenge 는 이 응답이 프로브의 것인지다.
 func isProbeChallenge(challengeID string) bool {
 	return strings.HasPrefix(challengeID, probeChallengePrefix)
@@ -111,15 +127,15 @@ func (runtime *Runtime) probeInteractiveResponder(
 	if strings.TrimSpace(payload.SessionID) == "" && strings.TrimSpace(payload.EndpointID) == "" {
 		return nil
 	}
-	// 프로브가 인증하는 상대는 점프 호스트다 — 저장된 비밀번호도 그쪽 것이다.
-	storedPassword := ""
-	if payload.Jump != nil {
-		storedPassword = payload.Jump.Password
-	}
 	return func(challenge sshconn.InteractiveChallenge) ([]string, error) {
+		// 저장된 비밀번호는 **묻는 홉의** 것을 쓴다(sshconn 이 챌린지에 실어 준다).
+		//
+		// payload.Jump.Password 로 세우면 점프가 여러 단일 때 첫 점프의 값을 모든 홉에 쓴다 —
+		// 두 번째 점프가 묻는 라운드에 엉뚱한 비밀번호가 나가고, keyboard-interactive 는 방식당
+		// 한 번뿐이라 그 자리에서 프로브가 끝난다.
 		challengeID, waiter := runtime.probeChallenges.begin(
 			requestID,
-			storedPassword,
+			challenge.StoredPassword,
 			len(challenge.Prompts),
 		)
 		defer runtime.probeChallenges.end(challengeID)
@@ -164,7 +180,13 @@ func (runtime *Runtime) probeInteractiveResponder(
 		)
 
 		select {
-		case responses := <-waiter:
+		case responses, ok := <-waiter:
+			// 채널이 닫혔으면 사용자가 물음을 닫은 것이다. 두 값으로 받지 않으면 그것이 nil 응답이
+			// 되어, 서버에 빈 답을 보내고 그 시도로 인증이 끝난다(방식당 한 번뿐이다).
+			if !ok {
+				sshconn.AuthLogf("probe challenge %s was closed by the user", challengeID)
+				return nil, fmt.Errorf("host key probe: challenge %s was cancelled", challengeID)
+			}
 			sshconn.AuthLogf("probe challenge %s answered", challengeID)
 			runtime.emitEvent(coretypes.Event{
 				Type:       coretypes.EventKeyboardInteractiveResolved,

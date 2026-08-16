@@ -240,6 +240,8 @@ type stubSFTPService struct {
 	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
 	cancelledInFlight  []string
 	responded          bool
+	cancelled          bool
+	cancelErr          error
 	connectID          string
 	shutdownCall       int
 }
@@ -252,6 +254,10 @@ func (stub *stubSFTPService) Disconnect(endpointID, requestID string) error { re
 func (stub *stubSFTPService) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
 	stub.responded = true
 	return nil
+}
+func (stub *stubSFTPService) CancelKeyboardInteractive(endpointID, challengeID string) error {
+	stub.cancelled = true
+	return stub.cancelErr
 }
 func (stub *stubSFTPService) List(endpointID, requestID string, payload coretypes.SFTPListPayload) error {
 	return nil
@@ -292,6 +298,7 @@ type stubContainersService struct {
 	hostKeyTrustPrompt func(ctx context.Context, correlation hostkeytrust.Correlation) sshconn.HostKeyTrustFunc
 	cancelledInFlight  []string
 	responded          bool
+	cancelled          bool
 	startWithClient    bool
 	takeClientCalled   string
 	shutdownCall       int
@@ -308,6 +315,10 @@ func (stub *stubContainersService) TakeClient(endpointID string) (*ssh.Client, e
 }
 func (stub *stubContainersService) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
 	stub.responded = true
+	return nil
+}
+func (stub *stubContainersService) CancelKeyboardInteractive(endpointID, challengeID string) error {
+	stub.cancelled = true
 	return nil
 }
 func (stub *stubContainersService) List(endpointID, requestID string) error { return nil }
@@ -342,6 +353,8 @@ type stubForwardingService struct {
 	cancelledInFlight  []string
 	respondErr         error
 	responded          bool
+	cancelled          bool
+	cancelErr          error
 	startedRuleID      string
 	startedWith        bool
 	stoppedRuleID      string
@@ -351,6 +364,10 @@ type stubForwardingService struct {
 func (stub *stubForwardingService) RespondKeyboardInteractive(endpointID, challengeID string, responses []string) error {
 	stub.responded = true
 	return stub.respondErr
+}
+func (stub *stubForwardingService) CancelKeyboardInteractive(endpointID, challengeID string) error {
+	stub.cancelled = true
+	return stub.cancelErr
 }
 func (stub *stubForwardingService) Start(ruleID, requestID string, payload coretypes.PortForwardStartPayload) error {
 	stub.startedRuleID = ruleID
@@ -598,6 +615,31 @@ func TestRuntimeRoutesKeyboardInteractivePortForwardAndShutdown(t *testing.T) {
 	}
 	if !forwarding.responded || !sftp.responded {
 		t.Fatalf("expected forwarding fallback then sftp response, got forwarding=%v sftp=%v", forwarding.responded, sftp.responded)
+	}
+
+	// 사용자가 카드를 닫으면 답이 아니라 취소가 간다. 라우팅은 응답과 같은 규칙이다.
+	//
+	// 이것이 없으면 화면에서만 카드가 사라지고 코어는 예산이 다 될 때까지 기다린다 — 진행 카드가
+	// "연결 중…" 에 앉은 채 남고, tailnet 을 경유하면 그 노드의 리스까지 붙잡는다.
+	if err := runtime.RespondKeyboardInteractive("", "containers:endpoint", coretypes.KeyboardInteractiveRespondPayload{
+		ChallengeID: "challenge-1",
+		Cancelled:   true,
+	}); err != nil {
+		t.Fatalf("containers keyboard-interactive cancel error = %v", err)
+	}
+	if !containers.cancelled {
+		t.Fatal("닫기가 컨테이너 쪽 물음을 접지 않았다")
+	}
+
+	forwarding.cancelErr = errors.New("not a forwarding endpoint")
+	if err := runtime.RespondKeyboardInteractive("", "sftp:endpoint", coretypes.KeyboardInteractiveRespondPayload{
+		ChallengeID: "challenge-2",
+		Cancelled:   true,
+	}); err != nil {
+		t.Fatalf("sftp keyboard-interactive cancel error = %v", err)
+	}
+	if !forwarding.cancelled || !sftp.cancelled {
+		t.Fatalf("expected forwarding fallback then sftp cancel, got forwarding=%v sftp=%v", forwarding.cancelled, sftp.cancelled)
 	}
 
 	if err := runtime.StartPortForward("rule-1", "req-1", coretypes.PortForwardStartPayload{

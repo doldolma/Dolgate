@@ -35,6 +35,14 @@ const HandshakeApprovalTimeout = 5 * time.Minute
 //
 // 핸드셰이크가 성공하면 Release 로 감시를 끈다. 끄지 않으면 세션의 평소 읽기가 10초마다 끊긴다 —
 // 세션 유지는 keepalive 가 담당한다.
+//
+// **점프 뒤의 홉에는 걸리지 않는다.** 그 홉의 conn 은 점프 연결 위의 SSH 채널이고, x/crypto 의
+// chanConn.SetReadDeadline 은 언제나 "deadline not supported" 를 돌려준다. 그래서 아래 SetDeadline
+// 은 조용히 실패하고 감시는 사실상 꺼진 상태가 된다 — 첫 홉(진짜 소켓, tailnet 포함)만 보호된다.
+//
+// 방치하는 이유: 그 구간이 멈춰도 사용자는 탭을 닫아 끊을 수 있고(ctx 취소가 conn 을 닫는다),
+// 타이머로 대신 재면 멀쩡한 연결을 우리가 끊는 새 위험이 생긴다. 자동 실패가 없을 뿐 막다른 곳은
+// 아니다. 바꾸려면 이 문단부터 지우면 된다.
 type stallGuard struct {
 	timeout time.Duration
 

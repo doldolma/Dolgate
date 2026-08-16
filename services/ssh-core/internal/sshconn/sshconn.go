@@ -101,6 +101,9 @@ type Config struct {
 	// HandshakeApprovalTimeout 은 서버가 배너로 사람에게 할 일을 알린 뒤 기다려 주는 시간이다.
 	// Banner 가 설정돼 있을 때만 쓴다 — 보여줄 수 없는 안내를 기다리는 건 그냥 정지다.
 	HandshakeApprovalTimeout time.Duration
+	// TailnetDialTimeout 은 tailnet 을 거쳐 raw 연결을 여는 데 주는 시간이다(Dial 이 있을 때만).
+	// 0 이면 기본값(TailnetDialTimeout)을 쓴다.
+	TailnetDialTimeout time.Duration
 	// HostKeyTrust 는 처음 보는 서버 키를 이 연결 **안에서** 신뢰할지 묻는다.
 	//
 	// 없으면 예전대로 "trusted host key is required" 로 끝난다(프로브·호스트 편집 경로). 있으면
@@ -231,6 +234,16 @@ type InteractiveChallenge struct {
 	// 대상이 각각 OTP 를 물으면 화면에는 똑같은 "Verification code:" 만 두 번 뜬다. 엉뚱한 쪽의
 	// 코드를 넣으면 그 시도로 연결이 끝난다(keyboard-interactive 는 방식당 한 번뿐이다).
 	Hop InteractiveHop
+	// StoredPassword 는 **이 홉에** 설정된 비밀번호다(없으면 빈 문자열).
+	//
+	// 사용자가 "저장된 비밀번호 사용" 으로 지목한 칸을 채울 때 쓴다. 홉마다 다르기 때문에 여기
+	// 실린다 — 호출부(세션·프로브)가 자기 payload 의 비밀번호를 쓰면 점프 체인에서 **엉뚱한 홉의
+	// 값**을 보낸다. 점프 챌린지가 먼저 오므로 하필 그 라운드에 최종 대상의 비밀번호가 나가고,
+	// keyboard-interactive 는 방식당 한 번뿐이라 그 자리에서 연결이 끝난다.
+	//
+	// **이 값은 절대 와이어로 나가지 않는다.** 화면에는 칸마다의 AllowStoredPassword 만 보내고
+	// (값이 아니라 "그 버튼을 내밀어도 되는지"), 대입은 코어 안에서 한다.
+	StoredPassword string
 }
 
 // InteractiveHop 은 프롬프트를 낸 홉의 신원이다.
@@ -242,11 +255,41 @@ type InteractiveHop struct {
 
 type InteractiveResponder func(challenge InteractiveChallenge) ([]string, error)
 
+// TailnetDialTimeout 은 tailnet 경유 raw 연결의 기본 예산이다.
+//
+// 일반 TCP(10초)보다 긴 이유: 이 구간에는 노드가 깨어나 경로를 찾는 시간이 섞인다. 직결이 안 되면
+// 릴레이로 붙는데 그 협상이 10초를 넘는 경우가 있고, 그때 잘라 버리면 사용자에게는 "왜인지 모르게
+// 실패하고 계속 재시도하는" 상태로만 보인다.
+//
+// 무한이 아닌 이유는 그대로다 — 정말 닿지 않는 대상을 영원히 붙들면 그것도 설명 없는 정지다.
+const TailnetDialTimeout = 30 * time.Second
+
 var DefaultConfig = Config{
 	TCPDialTimeout:           10 * time.Second,
 	HandshakeStallTimeout:    HandshakeStallTimeout,
 	HandshakeApprovalTimeout: HandshakeApprovalTimeout,
+	TailnetDialTimeout:       TailnetDialTimeout,
 	TCPKeepAliveInterval:     30 * time.Second,
+}
+
+// annotateTailnetDialFailure 는 tailnet 구간의 실패에 **무엇이 늦었는지**를 붙인다.
+//
+// 그냥 두면 `context deadline exceeded` 한 줄이 전부라, 사용자도 지원도 어느 계층이 문제인지 알 수
+// 없다. 호출자가 취소한 경우(탭 닫기)는 그대로 둔다 — 그건 실패가 아니라 사용자의 결정이다.
+func annotateTailnetDialFailure(err error, ctx context.Context, budget time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return err
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf(
+			"tailnet 경유 연결이 %s 안에 열리지 않았습니다(노드가 깨어나는 중이거나 대상까지 경로가 없습니다): %w",
+			budget, err,
+		)
+	}
+	return fmt.Errorf("tailnet 경유 연결 실패: %w", err)
 }
 
 // HopProgress builds a Config.Progress callback that emits EventConnectionHopProgress for
@@ -424,16 +467,24 @@ func DialClient(
 		// tailnet 경유. 노드가 아직 안 올라와 있으면 여기서 올라오기를 기다린다 — 최초
 		// 등록이면 브라우저 로그인 시간이 이 안에 들어간다.
 		reportProgress(ProgressConnecting)
-		// 예산은 일반 TCP dial 과 같다 — tailnet 을 거친다고 짧게 줄 근거가 없다. 노드를 올리는
-		// 것은 이미 앞 단계(관문)가 끝냈고, 여기부터는 대상까지 가는 raw 연결일 뿐이다.
+		// **일반 TCP 보다 넉넉히 준다.**
+		//
+		// 화면이 앞서 노드를 올려 주지만(관문), 그것만으로 끝나지 않는 구간이 남는다 — 노드가
+		// 막 깨어난 직후이거나 릴레이(DERP)를 거치면 첫 연결이 10초를 넘길 수 있다. 그때 일반
+		// TCP 예산으로 자르면 `context deadline exceeded` 만 남고, 무엇이 늦었는지는 드러나지
+		// 않은 채 재연결만 반복된다 — 실기기에서 그 상태를 겪었다.
 		//
 		// 호출자의 ctx 를 그대로 받는다. 더 이른 데드라인이나 취소가 있으면 그것이 이긴다.
-		dialCtx, cancel := context.WithTimeout(ctx, config.TCPDialTimeout)
+		budget := config.TailnetDialTimeout
+		if budget <= 0 {
+			budget = DefaultConfig.TailnetDialTimeout
+		}
+		dialCtx, cancel := context.WithTimeout(ctx, budget)
 		defer cancel()
 		rawConn, err = config.Dial(dialCtx, "tcp", addr)
 		if err != nil {
 			reportProgress(ProgressFailed)
-			return nil, err
+			return nil, annotateTailnetDialFailure(err, ctx, budget)
 		}
 	} else {
 		reportProgress(ProgressConnecting)
@@ -751,14 +802,18 @@ func certificateUnixTime(value uint64) *time.Time {
 //
 // storedPassword 는 이 홉에 설정된 비밀번호다(없으면 빈 문자열). notify 는 프롬프트가 없는 알림
 // 라운드의 문구를 보낼 곳이고(대개 터미널), nil 이면 버린다.
+//
+// passwordTried 는 "이 홉에서 password 방식이 이미 그 비밀번호로 시도됐는가" 를 돌려준다(없으면
+// nil). autoPasswordResponse 가 이것을 본다.
 func resolveKeyboardInteractiveAuthMethod(
 	responder InteractiveResponder,
 	storedPassword string,
 	notify func(string),
 	hop InteractiveHop,
+	passwordTried func() bool,
 ) ssh.AuthMethod {
 	return ssh.KeyboardInteractive(
-		newKeyboardInteractiveHandler(responder, storedPassword, notify, hop),
+		newKeyboardInteractiveHandler(responder, storedPassword, notify, hop, passwordTried),
 	)
 }
 
@@ -771,6 +826,7 @@ func newKeyboardInteractiveHandler(
 	storedPassword string,
 	notify func(string),
 	hop InteractiveHop,
+	passwordTried func() bool,
 ) func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 	attempt := 0
 	return func(user, instruction string, questions []string, echos []bool) ([]string, error) {
@@ -809,13 +865,21 @@ func newKeyboardInteractiveHandler(
 			Instruction: instruction,
 			Prompts:     prompts,
 			Hop:         hop,
+			// 이 홉의 값이다. 호출부가 자기 payload 에서 고르면 점프 체인에서 어긋난다.
+			StoredPassword: storedPassword,
 		}
 		// 이 세 줄이 진단의 핵심이다: 라운드마다 무엇을 물었고, 그것을 저장된 비밀번호로 답했는지
 		// 사람에게 물었는지가 남는다. 인증이 거절됐을 때 어느 쪽이 틀렸는지 이것으로 갈린다.
 		where := fmt.Sprintf("%s round %d %s", describeHop(hop), attempt, describePrompts(questions))
-		if answers, ok := autoPasswordResponse(attempt, challenge, storedPassword); ok {
+		alreadyRejected := passwordTried != nil && passwordTried()
+		if answers, ok := autoPasswordResponse(attempt, challenge, storedPassword, alreadyRejected); ok {
 			AuthLogf("%s: answered with the saved password", where)
 			return answers, nil
+		}
+		if alreadyRejected {
+			// 같은 값을 두 번 보내지 않는다는 사실을 남긴다. 이 줄이 없으면 "왜 저장된 비밀번호를
+			// 안 썼지" 로 보인다.
+			AuthLogf("%s: the saved password was already refused, asking instead", where)
 		}
 		if responder == nil {
 			AuthLogf("%s: nowhere to ask (no responder), stored=%t", where, storedPassword != "")
@@ -841,11 +905,23 @@ func newKeyboardInteractiveHandler(
 // keyboard-interactive 는 방식당 한 번만 시도된다. 잘못 채우면 그 연결은 그 자리에서 끝나고 다시
 // 물어볼 기회가 없다. 그래서 1 라운드 + 프롬프트가 정확히 하나 + 에코 없음 + 라벨이 비밀번호 계열일
 // 때만 답한다.
+//
+// **passwordRejected 면 답하지 않는다.** 서버가 password 와 keyboard-interactive 를 둘 다 제시하면
+// (PAM 을 쓰면 흔하다) x/crypto 는 password 를 먼저 시도한다. 저장된 값이 서버에서 바뀐 뒤라면 그
+// 시도가 거절되고, 여기서 **같은 값을 한 번 더** 보내면 남은 방식까지 소진돼 연결이 끝난다 — 앱에
+// 물어볼 창이 있는데도 사용자는 아무것도 못 보고 실패만 받는다. 그때는 사람에게 묻는 것이 맞다.
+//
+// 반대로 서버가 keyboard-interactive 만 제시하면 password 방식은 시도조차 되지 않으므로, 그때의
+// 자동 응답은 저장된 값의 첫 사용이고 이 기능이 노린 그대로다.
 func autoPasswordResponse(
 	attempt int,
 	challenge InteractiveChallenge,
 	storedPassword string,
+	passwordRejected bool,
 ) ([]string, bool) {
+	if passwordRejected {
+		return nil, false
+	}
 	if attempt != 1 || storedPassword == "" || len(challenge.Prompts) != 1 {
 		return nil, false
 	}
@@ -918,13 +994,26 @@ func looksLikePasswordPrompt(label string) bool {
 // 사용자에게 비밀번호를 물어 2차 요소를 충족시킨다. keyboard-interactive와 동일한
 // responder(인터랙티브 오버레이) 경로를 쓰며, 서버가 password를 요구할 때만 호출된다.
 func resolvePasswordPromptAuthMethod(responder InteractiveResponder, hop InteractiveHop) ssh.AuthMethod {
-	return ssh.PasswordCallback(func() (string, error) {
+	return ssh.PasswordCallback(newPasswordPromptCallback(responder, hop))
+}
+
+// newPasswordPromptCallback 은 위 인증 방식이 쓰는 콜백을 만든다.
+//
+// 따로 떼어 둔 이유는 검증이다(newKeyboardInteractiveHandler 와 같다) — ssh.AuthMethod 로 감싸면
+// 콜백을 다시 꺼낼 수 없어서 프롬프트 모양을 테스트할 방법이 없다.
+func newPasswordPromptCallback(responder InteractiveResponder, hop InteractiveHop) func() (string, error) {
+	return func() (string, error) {
 		if responder == nil {
 			return "", fmt.Errorf("password responder is not configured")
 		}
 		responses, err := responder(InteractiveChallenge{
+			// 어느 홉이 묻는지. 이 프롬프트는 우리가 만들기 때문에 홉을 여기서 실어야 한다 —
+			// 없으면 점프 체인에서 베스천과 최종 대상의 비밀번호 칸이 똑같이 보인다.
+			Hop: hop,
 			Prompts: []InteractivePrompt{
-				{Label: "Password", Echo: false},
+				// 비밀번호 칸이므로 가린다. 서버가 낸 프롬프트가 아니라 우리가 만든 것이라
+				// 라벨 판정을 거치지 않으니, 여기서 직접 세우지 않으면 평문으로 보인다.
+				{Label: "Password", Echo: false, Masked: true},
 			},
 		})
 		if err != nil {
@@ -934,7 +1023,7 @@ func resolvePasswordPromptAuthMethod(responder InteractiveResponder, hop Interac
 			return "", fmt.Errorf("no password provided")
 		}
 		return responses[0], nil
-	})
+	}
 }
 
 // hopOf 는 이 홉의 신원이다. 챌린지에 실어 화면이 "누구의 프롬프트인지" 를 말할 수 있게 한다.
@@ -949,9 +1038,22 @@ func resolveAuthMethods(target Target, config Config, responder InteractiveRespo
 		if target.Password == "" {
 			return nil, noop, fmt.Errorf("password auth requires a password")
 		}
+		// password 방식이 실제로 시도됐는지 기록한다.
+		//
+		// ssh.Password 대신 콜백을 쓰는 이유가 이것뿐이다(동작은 같다 — 전자가 후자로 구현돼 있다).
+		// 서버가 그 방식을 제시하지 않으면 콜백은 불리지 않으므로, 이 값이 곧 "저장된 비밀번호가
+		// 이미 거절당했는가" 다. 인증은 핸드셰이크 중 한 고루틴에서 순차로 도니 잠금이 필요 없고,
+		// 점프 체인은 홉마다 이 함수가 따로 불려서 플래그도 홉별로 생긴다.
+		passwordTried := false
 		return []ssh.AuthMethod{
-			ssh.Password(target.Password),
-			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target)),
+			ssh.PasswordCallback(func() (string, error) {
+				passwordTried = true
+				return target.Password, nil
+			}),
+			resolveKeyboardInteractiveAuthMethod(
+				responder, target.Password, config.Banner, hopOf(target),
+				func() bool { return passwordTried },
+			),
 		}, noop, nil
 	case "privateKey":
 		signer, err := resolvePrivateKeySigner(target)
@@ -963,7 +1065,7 @@ func resolveAuthMethods(target Target, config Config, responder InteractiveRespo
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 			resolvePasswordPromptAuthMethod(responder, hopOf(target)),
-			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target)),
+			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target), nil),
 		}, noop, nil
 	case "certificate":
 		signer, err := resolvePrivateKeySigner(target)
@@ -981,7 +1083,7 @@ func resolveAuthMethods(target Target, config Config, responder InteractiveRespo
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(certSigner),
 			resolvePasswordPromptAuthMethod(responder, hopOf(target)),
-			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target)),
+			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target), nil),
 		}, noop, nil
 	case "agent":
 		// 로컬 ssh-agent(1Password/gpg-agent/기본 agent)에 연결해 서명을 위임한다. agent 연결은
@@ -1002,10 +1104,10 @@ func resolveAuthMethods(target Target, config Config, responder InteractiveRespo
 		return []ssh.AuthMethod{
 			ssh.PublicKeys(signers...),
 			resolvePasswordPromptAuthMethod(responder, hopOf(target)),
-			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target)),
+			resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target), nil),
 		}, func() { _ = closer.Close() }, nil
 	case "keyboardInteractive":
-		return []ssh.AuthMethod{resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target))}, noop, nil
+		return []ssh.AuthMethod{resolveKeyboardInteractiveAuthMethod(responder, target.Password, config.Banner, hopOf(target), nil)}, noop, nil
 	default:
 		return nil, noop, fmt.Errorf("unsupported auth type: %s", target.AuthType)
 	}

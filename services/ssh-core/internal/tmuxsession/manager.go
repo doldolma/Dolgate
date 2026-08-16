@@ -1,7 +1,6 @@
 package tmuxsession
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"dolssh/services/ssh-core/internal/autocomplete"
 	"dolssh/services/ssh-core/internal/sshcmd"
 	"dolssh/services/ssh-core/internal/sshconn"
+	"dolssh/services/ssh-core/internal/sshdial"
 	"dolssh/services/ssh-core/internal/sshsession"
 	"dolssh/services/ssh-core/pkg/coretypes"
 
@@ -32,6 +32,12 @@ type Manager struct {
 	emit       EventEmitter
 	emitStream StreamEmitter
 	config     sshsession.ManagerConfig
+	// dialer 는 연결을 여는 공통 경로다(internal/sshdial).
+	//
+	// 이것을 쓰면서 tmux 도 대화형 인증을 받는다 — 예전에는 그 자리에서 "not supported" 로
+	// 끊어서, OTP 를 요구하는 호스트에는 tmux 로 붙을 수 없었다. 호스트 키 신뢰 질의·서버
+	// 배너·취소 가능한 ctx 도 함께 온다.
+	dialer *sshdial.Dialer
 
 	mu       sync.RWMutex
 	controls map[string]*controlHandle // controlSessionID -> handle
@@ -141,8 +147,10 @@ const defaultControlCommand = "if tmux list-sessions >/dev/null 2>&1; then exec 
 // 쓴다. 다른 서비스들(sftp·containers·forwarding)과 같은 방식이다.
 func (m *Manager) SetTailnetDial(resolve sshconn.TailnetDialResolver) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.config.TailnetDial = resolve
+	m.mu.Unlock()
+	// 실제로 dial 하는 것은 dialer 다. 여기만 세우면 tailnet 경로가 반영되지 않는다.
+	m.dialer.SetTailnetDial(resolve)
 }
 
 func NewManager(emit EventEmitter, stream StreamEmitter) *Manager {
@@ -172,8 +180,21 @@ func NewManagerWithConfig(emit EventEmitter, stream StreamEmitter, config sshses
 		emit:       emit,
 		emitStream: stream,
 		config:     config,
+		dialer:     resolveDialer(emit, config),
 		controls:   make(map[string]*controlHandle),
 	}
+}
+
+// resolveDialer 는 쓸 연결 경로를 고른다(sshsession 과 같은 규칙).
+func resolveDialer(emit EventEmitter, config sshsession.ManagerConfig) *sshdial.Dialer {
+	if config.Dialer != nil {
+		return config.Dialer
+	}
+	dialer := sshdial.New(emit)
+	dialer.SetTailnetDial(config.TailnetDial)
+	dialer.SetHostKeyTrustPrompt(config.HostKeyTrustPrompt)
+	dialer.SetTimeouts(config.TCPDialTimeout, config.TCPKeepAliveInterval)
+	return dialer
 }
 
 // paneSessionID 는 control 세션과 tmux pane id("%N")로 가상 sessionId 를 만든다.
@@ -196,42 +217,16 @@ func parsePaneSessionID(sessionID string) (controlID, paneID string, ok bool) {
 
 // Connect 는 tmux -CC control 채널을 연다. sessionID 는 control 세션 id 다.
 func (m *Manager) Connect(sessionID, requestID string, payload coretypes.ConnectPayload) error {
-	target := sshconn.Target{
-		Host:                  payload.Host,
-		Port:                  payload.Port,
-		Username:              payload.Username,
-		AuthType:              payload.AuthType,
-		Password:              payload.Password,
-		PrivateKeyPEM:         payload.PrivateKeyPEM,
-		CertificateText:       payload.CertificateText,
-		Passphrase:            payload.Passphrase,
-		TrustedHostKeyBase64:  payload.TrustedHostKeyBase64,
-		TrustedHostKeysBase64: payload.TrustedHostKeysBase64,
-		Jump:                  sshconn.JumpTargetFromCore(payload.Jump),
-		WSProxy:               payload.WSProxy,
-	}
-	m.mu.RLock()
-	resolveTailnet := m.config.TailnetDial
-	m.mu.RUnlock()
-	dial, dialErr := sshconn.ResolveTailnetDial(
-		resolveTailnet,
-		payload.TailnetID,
-		payload.TailnetName,
-	)
-	if dialErr != nil {
-		return dialErr
-	}
+	// 붙는 동안 탭을 닫으면 이 ctx 가 취소돼 dial·핸드셰이크가 즉시 끝난다.
+	ctx, release := m.dialer.Begin(sessionID)
+	defer release()
 
-	// tmux control 진입도 홉 진행을 방출(SessionID로 해당 탭에 매핑) — 공통 헬퍼 재사용.
-	client, err := sshconn.DialClient(context.Background(), target, sshconn.Config{
-		Dial:                  dial,
-		TCPDialTimeout:        m.config.TCPDialTimeout,
-		TCPKeepAliveInterval:  m.config.TCPKeepAliveInterval,
-		Progress:              sshconn.HopProgress(target, sessionID, "", m.emit),
-		AuthAgentEndpointKind: payload.AuthAgentEndpointKind,
-		AuthAgentEndpoint:     payload.AuthAgentEndpoint,
-	}, func(sshconn.InteractiveChallenge) ([]string, error) {
-		return nil, fmt.Errorf("keyboard-interactive not supported for tmux control mode")
+	// 연결 조립은 sshdial 한 곳에 있다(터미널 세션·mosh 와 같은 것) — tailnet 경로, 홉 진행 보고,
+	// 호스트 키 신뢰 질의, 서버 배너, 대화형 인증이 모두 거기서 붙는다.
+	client, _, err := m.dialer.Dial(ctx, sshdial.Request{
+		SessionID: sessionID,
+		RequestID: requestID,
+		Payload:   payload,
 	})
 	if err != nil {
 		return err
@@ -760,6 +755,14 @@ func (m *Manager) detachControl(controlID string) *controlHandle {
 }
 
 func (m *Manager) closeSession(controlID, message, reason string) {
+	// 아직 붙는 중이면 그 작업부터 끊고, 기다리던 물음도 접는다.
+	//
+	// 아래 detachControl 은 **핸들이 등록된 뒤에만** 뭔가를 한다. 붙는 중에는 핸들이 없어서
+	// 예전에는 여기서 그냥 돌아갔고, 그동안 dial 은 계속 돌았다 — 탭을 닫아도 연결이 백그라운드에
+	// 남는 그 상태다(sshsession 과 같은 이유).
+	m.dialer.CancelInFlight(controlID)
+	m.dialer.CancelChallenges(controlID)
+
 	if m.detachControl(controlID) == nil {
 		return
 	}

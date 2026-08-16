@@ -217,7 +217,7 @@ func (stub *stubCoreRuntime) GeneratePrivateKey(requestID string, payload protoc
 func (stub *stubCoreRuntime) InspectPrivateKey(requestID string, payload protocol.PrivateKeyInspectPayload) error {
 	return nil
 }
-func (stub *stubCoreRuntime) InstallAuthorizedKey(requestID string, payload protocol.AuthorizedKeyInstallPayload) error {
+func (stub *stubCoreRuntime) InstallAuthorizedKey(requestID, correlationID string, payload protocol.AuthorizedKeyInstallPayload) error {
 	return nil
 }
 func (stub *stubCoreRuntime) RespondHostKeyTrust(payload protocol.HostKeyTrustRespondPayload) error {

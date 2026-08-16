@@ -888,6 +888,13 @@ type KeyboardInteractiveRespondPayload struct {
 	// 보내게 되고, 우리는 인증 기회가 한 번뿐이라 그걸로 연결이 끝난다. 그 판단은 사용자가
 	// 버튼을 눌러 한다.
 	StoredPasswordIndexes []int `json:"storedPasswordIndexes,omitempty"`
+	// Cancelled 는 "사용자가 이 물음을 닫았다" 는 뜻이다. 답을 기다리던 쪽은 즉시 실패로 끝난다.
+	//
+	// 이것이 없으면 카드를 닫아도 코어는 계속 기다린다 — 화면에는 진행 카드가 "연결 중…" 에 앉은
+	// 채로 남고, 그동안 그 연결이 tailnet 노드의 리스를 붙잡는다. 사람의 답을 기다리는 구간은
+	// 정지 감시(stall guard)가 일부러 꺼져 있어서 그쪽이 대신 끊어 주지도 않는다. 결국 예산
+	// 5분이 지나야 풀렸다 — 사용자에게는 그냥 멈춘 앱이다.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 type ControlSignalPayload struct {
