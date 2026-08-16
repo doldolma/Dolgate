@@ -50,7 +50,7 @@ export function AppModals({
   return (
     <>
       <KnownHostPromptDialog
-        pending={modalViewModel.pendingHostKeyPrompt}
+        pending={modalViewModel.unownedHostKeyPrompt}
         onAccept={modalViewModel.acceptPendingHostKeyPrompt}
         onCancel={modalViewModel.dismissPendingHostKeyPrompt}
         onOpenSecuritySettings={() => {

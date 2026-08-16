@@ -136,7 +136,8 @@ import {
   getPane,
   updatePaneState,
   toTrustInput,
-  shiftHostKeyPrompt,
+  findHostKeyPromptForSession,
+  removeHostKeyPrompt,
   clearConnectionView,
 } from "../utils";
 import { cancelReconnect } from "../services/reconnect-orchestrator";
@@ -404,8 +405,12 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               hosts: state.hosts.map((host) => (host.id === next.id ? next : host)),
             }));
           },
-    acceptPendingHostKeyPrompt: async (mode) => {
-            const pending = get().pendingHostKeyPrompt;
+    acceptPendingHostKeyPrompt: async (mode, sessionId) => {
+            // 어느 물음에 답하는지 지목받는다. 판마다 자기 것에 답하므로 "지금 보여 주는 것" 이
+            // 답한 대상이라는 보장이 없다.
+            const pending = sessionId
+              ? findHostKeyPromptForSession(get(), sessionId)
+              : get().pendingHostKeyPrompt;
             if (!pending) {
               return;
             }
@@ -414,7 +419,7 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             } else {
               await api.knownHosts.trust(toTrustInput(pending.probe));
             }
-            set((state) => shiftHostKeyPrompt(state));
+            set((state) => removeHostKeyPrompt(state, pending));
             await syncOperationalData(set);
             // 연결이 이 답을 기다리는 중이면 여기서 끝난다 — 다시 연결하지 않는다. 그것이 이 흐름의
             // 요점이다(다시 연결하면 OTP 를 한 번 더 물어야 한다).
@@ -484,22 +489,26 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
             }
             await startTrustedPortForward(set, get, pending.action.ruleId);
           },
-    dismissPendingHostKeyPrompt: () => {
+    dismissPendingHostKeyPrompt: (sessionId) => {
+            const pending = sessionId
+              ? findHostKeyPromptForSession(get(), sessionId)
+              : get().pendingHostKeyPrompt;
             // 살아 있는 질의는 거절을 코어에 알려야 그 연결이 끝난다(안 알리면 계속 기다린다).
-            const pendingLive = get().pendingHostKeyPrompt?.liveChallengeId;
-            if (pendingLive) {
+            if (pending?.liveChallengeId) {
               void api.ssh
-                .respondHostKeyTrust({ challengeId: pendingLive, trust: false })
+                .respondHostKeyTrust({
+                  challengeId: pending.liveChallengeId,
+                  trust: false,
+                })
                 .catch(() => undefined);
             }
-            const pending = get().pendingHostKeyPrompt;
             if (pending?.action.kind === "containerShell" && pending.sessionId) {
               const message = t('networkSlice.hostKeyCancelled', { label: pending.probe.hostLabel });
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });
               clearContainerTabConnectionOverlay(set, pending.action.hostId);
-              set((state) => shiftHostKeyPrompt(state));
+              set((state) => removeHostKeyPrompt(state, pending));
               return;
             }
             if (pending?.sessionId) {
@@ -507,10 +516,10 @@ export function createNetworkSlice(deps: SliceDeps): NetworkSlice {
               markSessionError(set, pending.sessionId, message, {
                 progress: resolveErrorProgress(message),
               });
-              set((state) => shiftHostKeyPrompt(state));
+              set((state) => removeHostKeyPrompt(state, pending));
               return;
             }
-            set((state) => shiftHostKeyPrompt(state));
+            set((state) => removeHostKeyPrompt(state, pending));
           }
   };
 

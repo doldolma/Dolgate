@@ -58,6 +58,81 @@ export function shiftHostKeyPrompt(
 }
 
 /**
+ * 이 세션이 기다리는 물음. 보여 주는 것과 줄에 선 것을 함께 본다.
+ *
+ * 세션이 있는 물음은 **그 탭 안에서** 답한다(인증 카드와 같은 자리). 그래서 "지금 보여 주는 것"
+ * 하나만 볼 수 없다 — 탭 세 개가 동시에 물으면 셋 다 자기 판에서 기다려야 한다.
+ */
+export function findHostKeyPromptForSession(
+  state: HostKeyPromptQueueState,
+  sessionId: string | null | undefined,
+): PendingHostKeyPrompt | null {
+  if (!sessionId) {
+    return null;
+  }
+  return (
+    listHostKeyPrompts(state).find((prompt) => prompt.sessionId === sessionId) ??
+    null
+  );
+}
+
+/**
+ * 탭이 받아 주지 않는 물음. 전역 대화상자가 이것만 그린다.
+ *
+ * 세션이 없는 연결(포워딩·SFTP·컨테이너·공개 키 설치)이거나, 세션은 있는데 그 탭이 이미 사라진
+ * 경우다. 후자를 빠뜨리면 아무도 그리지 않는 물음이 생겨 그 연결이 예산까지 멈춘다.
+ */
+export function findUnownedHostKeyPrompt(
+  state: HostKeyPromptQueueState,
+  hasTabFor: (sessionId: string) => boolean,
+): PendingHostKeyPrompt | null {
+  return (
+    listHostKeyPrompts(state).find(
+      (prompt) => !prompt.sessionId || !hasTabFor(prompt.sessionId),
+    ) ?? null
+  );
+}
+
+/**
+ * 보여 주는 것과 줄에 선 것을 한 목록으로.
+ *
+ * 줄이 없는 상태도 받아 준다. 이 함수는 화면이 그릴 때마다 불리는 읽기 전용 조회라, 아직 이
+ * 필드를 갖추지 않은 상태(옛 스냅샷·테스트 더블)에서 터지면 앱 전체가 죽는다.
+ */
+export function listHostKeyPrompts(
+  state: HostKeyPromptQueueState,
+): PendingHostKeyPrompt[] {
+  const queued = state.queuedHostKeyPrompts ?? [];
+  return state.pendingHostKeyPrompt
+    ? [state.pendingHostKeyPrompt, ...queued]
+    : [...queued];
+}
+
+/**
+ * 답이 끝난 물음 하나를 목록에서 뺀다.
+ *
+ * 지목해서 빼는 이유: 판마다 자기 물음에 답하므로 "지금 보여 주는 것" 이 답한 대상이라는 보장이
+ * 없다. 그냥 앞의 것을 버리면 남의 물음이 사라진다.
+ */
+export function removeHostKeyPrompt(
+  state: HostKeyPromptQueueState,
+  target: PendingHostKeyPrompt | null,
+): HostKeyPromptQueueState {
+  if (!target) {
+    return state;
+  }
+  if (state.pendingHostKeyPrompt === target) {
+    return shiftHostKeyPrompt(state);
+  }
+  return {
+    pendingHostKeyPrompt: state.pendingHostKeyPrompt,
+    queuedHostKeyPrompts: state.queuedHostKeyPrompts.filter(
+      (prompt) => prompt !== target,
+    ),
+  };
+}
+
+/**
  * 사라진 세션의 물음을 버린다. 보여 주던 것을 버렸으면 다음을 올린다.
  *
  * 줄에 선 것을 남겨 두면 이미 없는 세션을 가리킨 채 나중에 올라온다 — 사용자는 어느 연결을

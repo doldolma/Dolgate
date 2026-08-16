@@ -123,43 +123,10 @@ export function AppShell({
   // tmux 조작은 tmux 표준 프리픽스(Ctrl-b, useTerminalSessionViewController)와
   // 윈도우 바/pane 분할 버튼으로 한다. 혼란을 주던 전역 Cmd-T/Cmd-D 단축키는 제거했다.
 
-  useEffect(() => {
-    if (modalViewModel.pendingHostKeyPrompt?.sessionId) {
-      const owningWorkspace = sessionViewModel.workspaces.find((workspace) =>
-        workspaceContainsSession(
-          workspace,
-          modalViewModel.pendingHostKeyPrompt?.sessionId as string,
-        ),
-      );
-      if (owningWorkspace) {
-        if (
-          homeViewModel.activeWorkspaceTab === `workspace:${owningWorkspace.id}` &&
-          owningWorkspace.activeSessionId ===
-            modalViewModel.pendingHostKeyPrompt.sessionId
-        ) {
-          return;
-        }
-        sessionViewModel.focusWorkspaceSession(
-          owningWorkspace.id,
-          modalViewModel.pendingHostKeyPrompt.sessionId,
-        );
-        return;
-      }
-      if (
-        homeViewModel.activeWorkspaceTab ===
-        `session:${modalViewModel.pendingHostKeyPrompt.sessionId}`
-      ) {
-        return;
-      }
-      sessionViewModel.activateSession(
-        modalViewModel.pendingHostKeyPrompt.sessionId,
-      );
-    }
-  }, [
-    homeViewModel.activeWorkspaceTab,
-    modalViewModel.pendingHostKeyPrompt?.sessionId,
-    sessionViewModel,
-  ]);
+  // 신뢰 물음이 떠도 탭을 옮기지 않는다.
+  //
+  // 그 물음은 이제 자기 판 안에서 뜬다(TerminalHostKeyTrustCard). 여기서 화면을 끌고 가면
+  // 연결을 여러 개 걸었을 때 탭이 계속 튕긴다 — 사용자가 보던 것을 빼앗는다.
 
   useEffect(() => {
     if (modalViewModel.pendingCredentialRetry?.sessionId) {

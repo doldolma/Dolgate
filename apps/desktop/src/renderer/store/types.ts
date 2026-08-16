@@ -1083,8 +1083,17 @@ interface AppStateParts {
   getCodexUsage: () => Promise<CodexUsage>;
   listCodexModels: () => Promise<CodexModel[]>;
   openExternalUrl: (url: string) => Promise<void>;
-  acceptPendingHostKeyPrompt: (mode: "trust" | "replace") => Promise<void>;
-  dismissPendingHostKeyPrompt: () => void;
+  /**
+   * 신뢰 물음에 답한다. sessionId 를 주면 그 탭의 물음을, 없으면 지금 보여 주는 것을 대상으로 한다.
+   *
+   * 지목이 필요한 이유: 세션이 있는 물음은 각자 자기 판에서 답하므로, 탭 세 개가 동시에 물으면
+   * "지금 보여 주는 것" 이 답한 대상이라는 보장이 없다.
+   */
+  acceptPendingHostKeyPrompt: (
+    mode: "trust" | "replace",
+    sessionId?: string,
+  ) => Promise<void>;
+  dismissPendingHostKeyPrompt: (sessionId?: string) => void;
   dismissPendingCredentialRetry: () => void;
   submitCredentialRetry: (input: CredentialRetryInput) => Promise<void>;
   dismissPendingAwsSftpConfigRetry: () => void;

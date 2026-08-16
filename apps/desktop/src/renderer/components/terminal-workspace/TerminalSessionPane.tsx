@@ -25,6 +25,7 @@ import { TerminalMoshStatusBar } from './TerminalMoshStatusBar';
 import { TerminalTmuxStatusBar } from './TerminalTmuxStatusBar';
 import { statusBarStack } from './terminalStatusBarChrome';
 import { useHostMetrics } from '../../controllers/useHostMetrics';
+import { TerminalHostKeyTrustCard } from './TerminalHostKeyTrustCard';
 import { TerminalInteractiveAuthOverlay } from './TerminalInteractiveAuthOverlay';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SerialSessionActions } from './SerialSessionActions';
@@ -32,7 +33,7 @@ import { TerminalSearchOverlay } from './TerminalSearchOverlay';
 import { TerminalSharePopover } from './TerminalSharePopover';
 import type { TerminalSessionPaneProps } from './types';
 import { Button, NoticeCard } from '../../ui';
-import { resolveConnectionFailurePresentation } from '../../store/utils';
+import { findHostKeyPromptForSession, resolveConnectionFailurePresentation } from '../../store/utils';
 import {
   resolveTailnetFailureGuidance,
   resolveTailnetLoginRejectedGuidance,
@@ -427,6 +428,16 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         : null;
 
   const pendingHostKeyPrompt = useAppStore((state) => state.pendingHostKeyPrompt);
+  // 이 판이 기다리는 신뢰 물음. 전역 슬롯 하나만 보면 다른 탭의 물음이 이 판에 뜬다.
+  const hostKeyPromptForPane = useAppStore((state) =>
+    findHostKeyPromptForSession(state, sessionId),
+  );
+  const acceptPendingHostKeyPrompt = useAppStore(
+    (state) => state.acceptPendingHostKeyPrompt,
+  );
+  const dismissPendingHostKeyPrompt = useAppStore(
+    (state) => state.dismissPendingHostKeyPrompt,
+  );
 
   /**
    * 이 연결이 거치는 단계들. 오버레이가 이것을 그린다.
@@ -703,6 +714,19 @@ export function TerminalSessionPane(props: TerminalSessionPaneProps) {
         <NoticeCard tone="danger" className="mx-[0.55rem] mt-[0.55rem]" role="alert">
           {controller.terminalInitError}
         </NoticeCard>
+      ) : null}
+
+      {/* 신뢰 물음은 인증보다 앞이다 — 키를 받아들이기 전에는 인증을 시작하지도 않는다. */}
+      {hostKeyPromptForPane ? (
+        <TerminalHostKeyTrustCard
+          pending={hostKeyPromptForPane}
+          onAccept={(mode) => {
+            void acceptPendingHostKeyPrompt(mode, sessionId);
+          }}
+          onCancel={() => {
+            dismissPendingHostKeyPrompt(sessionId);
+          }}
+        />
       ) : null}
 
       {interactiveAuth ? (

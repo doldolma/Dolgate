@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { PendingHostKeyPrompt } from "../types";
 import {
   dropHostKeyPromptsForSession,
+  findHostKeyPromptForSession,
+  findUnownedHostKeyPrompt,
+  removeHostKeyPrompt,
   enqueueHostKeyPrompt,
   remapHostKeyPromptSessionId,
   shiftHostKeyPrompt,
@@ -78,6 +81,58 @@ describe("호스트 키 신뢰 물음 큐", () => {
   });
 
   // 세션이 사라지면 그 물음은 답할 대상이 없다. 줄에 남겨 두면 나중에 엉뚱하게 올라온다.
+  // 연결을 여러 개 걸면 각 탭이 **자기** 물음을 받아야 한다.
+  //
+  // 전역 슬롯 하나만 보던 시절에는 보고 있던 탭 위로 남의 물음이 올라왔고, 화면까지 그 탭으로
+  // 끌려갔다 — 탭이 계속 튕겼다.
+  it("판은 자기 세션의 물음만 고른다", () => {
+    const state = enqueueHostKeyPrompt(
+      enqueueHostKeyPrompt(empty, createPrompt("a", { sessionId: "session-1" })),
+      createPrompt("b", { sessionId: "session-2" }),
+    );
+
+    expect(findHostKeyPromptForSession(state, "session-1")?.liveChallengeId).toBe("a");
+    // 줄에 서 있어도 그 탭에서는 보여야 한다 — 앞의 답을 기다릴 이유가 없다.
+    expect(findHostKeyPromptForSession(state, "session-2")?.liveChallengeId).toBe("b");
+    expect(findHostKeyPromptForSession(state, "session-3")).toBeNull();
+    expect(findHostKeyPromptForSession(state, null)).toBeNull();
+  });
+
+  // 탭이 없는 연결(포워딩·SFTP·컨테이너·공개 키 설치)은 전역 대화상자가 받는다.
+  it("전역 대화상자는 탭이 없는 물음만 받는다", () => {
+    const state = enqueueHostKeyPrompt(
+      enqueueHostKeyPrompt(empty, createPrompt("a", { sessionId: "session-1" })),
+      createPrompt("b", { sessionId: null }),
+    );
+
+    const unowned = findUnownedHostKeyPrompt(state, (id) => id === "session-1");
+    expect(unowned?.liveChallengeId).toBe("b");
+  });
+
+  // 탭이 사라진 세션의 물음은 아무도 안 그리면 그 연결이 예산까지 멈춘다.
+  it("탭이 사라진 세션의 물음은 전역이 받는다", () => {
+    const state = enqueueHostKeyPrompt(
+      empty,
+      createPrompt("a", { sessionId: "gone" }),
+    );
+
+    expect(findUnownedHostKeyPrompt(state, () => false)?.liveChallengeId).toBe("a");
+  });
+
+  // 판마다 자기 것에 답하므로, 답한 대상이 "지금 보여 주는 것" 이라는 보장이 없다.
+  it("지목한 물음만 목록에서 뺀다", () => {
+    const state = enqueueHostKeyPrompt(
+      enqueueHostKeyPrompt(empty, createPrompt("a", { sessionId: "session-1" })),
+      createPrompt("b", { sessionId: "session-2" }),
+    );
+    const target = findHostKeyPromptForSession(state, "session-2");
+
+    const after = removeHostKeyPrompt(state, target);
+
+    expect(after.pendingHostKeyPrompt?.liveChallengeId).toBe("a");
+    expect(after.queuedHostKeyPrompts).toEqual([]);
+  });
+
   it("사라진 세션의 물음은 줄에서도 걷어낸다", () => {
     const state = enqueueHostKeyPrompt(
       enqueueHostKeyPrompt(empty, createPrompt("a", { sessionId: "session-1" })),
